@@ -3,6 +3,7 @@ package pages
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
@@ -17,13 +18,13 @@ func getProjectID(project *models.Project, projects []models.Project) string {
 	return ""
 }
 
-templ Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
+templ Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
 	@layout.Base("Tasks", projects, getProjectID(project, projects)) {
 		@TasksContent(project, tasks, agents, agentDefs, backlogSort, completedSort, menuStates...)
 	}
 }
 
-templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
+templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
 	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
 		@layout.PageTitle("Tasks")
 		<div class="flex items-center justify-between mb-6 flex-shrink-0">

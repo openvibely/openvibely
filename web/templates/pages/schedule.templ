@@ -409,11 +409,11 @@ func buildWeekData(tasks []repository.TaskWithSchedule, weekOffset int) WeekData
 	}
 }
 
-func schedulePrimaryAgentSelectable(agent models.Agent) bool {
+func schedulePrimaryAgentSelectable(agent repository.AgentTaskUIOption) bool {
 	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
 }
 
-func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []models.Agent) bool {
+func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []repository.AgentTaskUIOption) bool {
 	if selected == nil || *selected == "" {
 		return true
 	}
@@ -425,7 +425,7 @@ func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []models.
 	return false
 }
 
-templ SchedulePrimaryAgentSelector(selected *string, agentDefs []models.Agent, selectClass string) {
+templ SchedulePrimaryAgentSelector(selected *string, agentDefs []repository.AgentTaskUIOption, selectClass string) {
 	<input type="hidden" name="schedule_agent_definition_present" value="1"/>
 	<select name="agent_definition_id" class={ selectClass }>
 		<option

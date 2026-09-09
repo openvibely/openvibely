@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
 func findModelByID(models []models.LLMConfig, agentID *string) *models.LLMConfig {
@@ -40,7 +41,7 @@ func getModelDisplayName(model *models.LLMConfig) string {
 	return model.Name
 }
 
-func findAgentDefinitionByID(agentDefs []models.Agent, agentDefinitionID *string) *models.Agent {
+func findAgentDefinitionByID(agentDefs []repository.AgentTaskUIOption, agentDefinitionID *string) *repository.AgentTaskUIOption {
 	if agentDefinitionID == nil {
 		return nil
 	}
@@ -327,7 +328,7 @@ func taskCardStateIcon(task models.Task) templ.Component {
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Key)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 292, Col: 29}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 293, Col: 29}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
@@ -353,7 +354,7 @@ func taskCardStateIcon(task models.Task) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 294, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 295, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -366,7 +367,7 @@ func taskCardStateIcon(task models.Task) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue("Task state: " + state.Label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 296, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 297, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -516,7 +517,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 			var templ_7745c5c3_Var8 templ.SafeURL
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(state.PullRequest.PRURL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 420, Col: 53}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 421, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -529,7 +530,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", state.PullRequest.PRNumber))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 420, Col: 154}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 421, Col: 154}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
@@ -557,7 +558,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 428, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 429, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
@@ -570,7 +571,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 429, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 430, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
@@ -583,7 +584,7 @@ func TaskCardMergeSubmenus(task *models.Task, projectID string, state TaskCardMe
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(targetBranch)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 430, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 431, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -638,7 +639,7 @@ func TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, re
 	})
 }
 
-func TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
+func TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -666,7 +667,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("task-%s", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 455, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 456, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -679,7 +680,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 457, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 458, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
@@ -692,7 +693,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 458, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 459, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -705,7 +706,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Category))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 459, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 460, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
@@ -718,7 +719,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", task.DisplayOrder))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 460, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 461, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
@@ -731,7 +732,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue("task-" + task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 465, Col: 117}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 466, Col: 117}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
@@ -744,7 +745,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue("More actions for " + task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 466, Col: 258}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 467, Col: 258}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -762,7 +763,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/run", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 476, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 477, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
@@ -785,7 +786,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/cancel", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 489, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 490, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 			if templ_7745c5c3_Err != nil {
@@ -808,7 +809,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var24 templ.SafeURL
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=details&from=tasks", task.ID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 502, Col: 85}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 503, Col: 85}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
@@ -821,7 +822,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?tab=details&from=tasks", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 503, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 504, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 			if templ_7745c5c3_Err != nil {
@@ -843,7 +844,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 519, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 520, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
@@ -856,7 +857,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var27 templ.SafeURL
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 531, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 532, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -869,7 +870,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?from=tasks", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 532, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 533, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 		if templ_7745c5c3_Err != nil {
@@ -882,7 +883,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?from=tasks", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 535, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 536, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
@@ -895,7 +896,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 537, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 538, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 		if templ_7745c5c3_Err != nil {
@@ -916,7 +917,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 		var templ_7745c5c3_Var31 string
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 540, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 541, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -934,7 +935,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 543, Col: 95}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 544, Col: 95}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
@@ -985,7 +986,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Model: %s", getModelDisplayName(findModelByID(llmModels, task.AgentID))))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 570, Col: 143}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 571, Col: 143}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
@@ -998,7 +999,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(getModelDisplayName(findModelByID(llmModels, task.AgentID)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 571, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 572, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -1017,7 +1018,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Assigned agent: %s", ad.Name))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 575, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 576, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
@@ -1030,7 +1031,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 576, Col: 17}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 577, Col: 17}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -1067,7 +1068,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(TagLabel(task.Tag))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 580, Col: 110}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 581, Col: 110}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -1086,7 +1087,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(PriorityLabel(task.Priority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 583, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 584, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -1109,7 +1110,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(swarmSummary(task))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 591, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 592, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -1190,7 +1191,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 				var templ_7745c5c3_Var46 templ.SafeURL
 				templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", child.ID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 614, Col: 81}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 615, Col: 81}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 				if templ_7745c5c3_Err != nil {
@@ -1203,7 +1204,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 				var templ_7745c5c3_Var47 string
 				templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?from=tasks", child.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 614, Col: 138}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 615, Col: 138}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 				if templ_7745c5c3_Err != nil {
@@ -1216,7 +1217,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 				var templ_7745c5c3_Var48 string
 				templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(child.Title)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 614, Col: 328}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 615, Col: 328}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 				if templ_7745c5c3_Err != nil {
@@ -1229,7 +1230,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 				var templ_7745c5c3_Var49 string
 				templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(swarmChildDisplayTitle(child))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 614, Col: 362}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 615, Col: 362}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 				if templ_7745c5c3_Err != nil {
@@ -1247,7 +1248,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 					var templ_7745c5c3_Var50 templ.SafeURL
 					templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 617, Col: 95}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 618, Col: 95}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 					if templ_7745c5c3_Err != nil {
@@ -1260,7 +1261,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 					var templ_7745c5c3_Var51 string
 					templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?tab=changes&from=tasks", child.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 617, Col: 164}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 618, Col: 164}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 					if templ_7745c5c3_Err != nil {
@@ -1273,7 +1274,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 					var templ_7745c5c3_Var52 templ.SafeURL
 					templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=thread&from=tasks", child.ID)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 618, Col: 94}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 619, Col: 94}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 					if templ_7745c5c3_Err != nil {
@@ -1286,7 +1287,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 					var templ_7745c5c3_Var53 string
 					templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?tab=thread&from=tasks", child.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 618, Col: 162}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 619, Col: 162}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var53)
 					if templ_7745c5c3_Err != nil {
@@ -1304,7 +1305,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 					var templ_7745c5c3_Var54 string
 					templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(swarmStatusText(child.Status, child.Category))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 620, Col: 95}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 621, Col: 95}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 					if templ_7745c5c3_Err != nil {

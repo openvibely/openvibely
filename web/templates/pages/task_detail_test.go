@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
 func stringPtr(s string) *string { return &s }
@@ -343,7 +344,7 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 	}
 
 	modelsList := []models.LLMConfig{{ID: "model-1", Name: "Model One"}}
-	agentsList := []models.Agent{{ID: "agent-1", Name: "Agent One", Enabled: true, SelectableAsPrimary: true}}
+	agentsList := []repository.AgentTaskUIOption{{ID: "agent-1", Name: "Agent One", Enabled: true, SelectableAsPrimary: true}}
 
 	var buf bytes.Buffer
 	err := TaskDetailContent(task, goal, nil, nil, modelsList, agentsList, nil, "details", nil).Render(context.Background(), &buf)
@@ -915,7 +916,7 @@ func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 }
 func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
 	task := &models.Task{ID: "task1", ProjectID: "project1", Title: "Task", Status: models.StatusPending, Category: models.CategoryActive}
-	agentDefs := []models.Agent{{ID: "agent1", Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}}
+	agentDefs := []repository.AgentTaskUIOption{{ID: "agent1", Name: "Reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}}
 
 	var buf bytes.Buffer
 	if err := TaskDetailContent(task, nil, nil, nil, nil, agentDefs, nil, "details", nil).Render(context.Background(), &buf); err != nil {
@@ -956,7 +957,7 @@ func TestTaskDetailContent_ScheduleAgentSelectorsHydratePersistedAssignment(t *t
 		RepeatInterval: 1,
 		Enabled:        true,
 	}}
-	agentDefs := []models.Agent{
+	agentDefs := []repository.AgentTaskUIOption{
 		{ID: selectedID, Name: "Selected Runner", Model: "inherit", Scope: models.AgentScopeProject, ProjectID: task.ProjectID, Enabled: true, SelectableAsPrimary: true},
 		{ID: "protected", Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false},
 	}
@@ -994,7 +995,7 @@ func TestTaskDetailContent_ScheduleAgentSelectorsSupportNoAgent(t *testing.T) {
 	task := &models.Task{ID: "task-no-agent", ProjectID: "project-1", Title: "No Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled}
 	runAt := time.Now().Add(time.Hour).UTC()
 	schedules := []models.Schedule{{ID: "schedule-no-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}}
-	agentDefs := []models.Agent{{ID: "runner", Name: "Runner", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true}}
+	agentDefs := []repository.AgentTaskUIOption{{ID: "runner", Name: "Runner", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true}}
 
 	var buf bytes.Buffer
 	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
@@ -1017,7 +1018,7 @@ func TestTaskDetailContent_ScheduleEditDoesNotOfferOrClearProtectedAgent(t *test
 	task := &models.Task{ID: "task-protected-agent", ProjectID: "project-1", Title: "Protected Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled, AgentDefinitionID: &protectedID}
 	runAt := time.Now().Add(time.Hour).UTC()
 	schedules := []models.Schedule{{ID: "schedule-protected-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}}
-	agentDefs := []models.Agent{{ID: protectedID, Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false}}
+	agentDefs := []repository.AgentTaskUIOption{{ID: protectedID, Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false}}
 
 	var buf bytes.Buffer
 	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {

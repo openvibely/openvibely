@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -25,7 +26,7 @@ templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComment
 	</div>
 }
 
-templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
+templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
 	@layout.Base(task.Title, projects, task.ProjectID) {
 		@TaskDetailContent(task, goal, metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments)
 	}
@@ -42,7 +43,7 @@ script removeEditAttachment(attID string) {
 	}
 }
 
-templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
+templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
 	<div id="task-detail-content" class="h-full flex flex-col">
 		@layout.PageTitle(task.Title)
 		<!-- Breadcrumb navigation -->
@@ -2685,7 +2686,7 @@ func taskAgentLabel(task *models.Task, agentName string) string {
 	return "Unknown agent"
 }
 
-func taskAgentLabelFromDefinitions(task *models.Task, agentDefs []models.Agent) string {
+func taskAgentLabelFromDefinitions(task *models.Task, agentDefs []repository.AgentTaskUIOption) string {
 	if task == nil || task.AgentDefinitionID == nil || *task.AgentDefinitionID == "" {
 		return ""
 	}

@@ -774,10 +774,13 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	for i := range agents {
 		require.NoError(t, agentRepo.Create(ctx, &agents[i]))
 	}
+	_, err := tc.db.ExecContext(ctx, `UPDATE agents SET archived_at = ? WHERE id = ?`, archivedAt, agents[6].ID)
+	require.NoError(t, err)
 
-	selected := selectableTaskAgentDefinitions(agents)
+	agentDefs := tc.handler.listAgentDefinitions(ctx)
+	selected := selectableTaskAgentDefinitions(agentDefs)
 	require.Len(t, selected, 3)
-	forProject := selectableTaskAgentDefinitionsForProject(agents, project.ID)
+	forProject := selectableTaskAgentDefinitionsForProject(agentDefs, project.ID)
 	require.Len(t, forProject, 2)
 	currentOther := agents[2].ID
 	formAgents := tc.handler.listTaskFormAgentDefinitions(ctx, project.ID, &currentOther)
@@ -808,7 +811,7 @@ func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
 	require.False(t, isValidCompletedSort("created_desc"))
 }
 
-func agentIDs(agents []models.Agent) []string {
+func agentIDs(agents []repository.AgentTaskUIOption) []string {
 	ids := make([]string, 0, len(agents))
 	for _, agent := range agents {
 		ids = append(ids, agent.ID)

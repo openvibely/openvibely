@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"strings"
 )
 
@@ -150,7 +151,7 @@ func isSortActive(sortBy, option string) string {
 	return "whitespace-nowrap"
 }
 
-templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
+templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) {
 	<div id="kanban-board" class="grid grid-cols-1 gap-4 h-full overflow-x-hidden overflow-y-auto md:grid-cols-2 lg:grid-cols-3 lg:overflow-y-hidden">
 		for _, cat := range models.AllCategories {
 			if cat == models.CategoryActive {
@@ -162,7 +163,7 @@ templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, com
 	</div>
 }
 
-templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
+templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) {
 	<div class="kanban-column w-full min-w-0 bg-base-300 rounded-lg p-3 flex flex-col h-[60dvh] min-h-[24rem] lg:h-full lg:min-h-0">
 		<div class="flex items-center justify-between mb-3 flex-shrink-0">
 			<div class="flex items-center gap-2">
@@ -445,7 +446,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 	</div>
 }
 
-templ activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []models.Agent, menuStates ...map[string]TaskCardMergeMenuState) {
+templ activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) {
 	<!-- In Progress -->
 	<div class="mb-4 flex-1 flex flex-col min-h-0">
 		<h4 class="text-sm font-semibold mb-2 text-primary flex-shrink-0">In Progress</h4>
