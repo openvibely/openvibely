@@ -341,11 +341,20 @@ func (s *TaskService) cancelActiveTaskWork(ctx context.Context, id string) error
 	return nil
 }
 
-func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID string, taskIDs []string, status models.TaskStatus) error {
+func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []repository.ActiveLaneTaskMove, status models.TaskStatus) error {
 	if s.workerSvc == nil {
 		return errors.New("worker service unavailable")
 	}
-	moved, err := s.repo.MoveTasksToActiveLane(ctx, projectID, taskIDs, status)
+	moved, err := s.repo.MoveTasksToActiveLane(ctx, projectID, moves, status)
+	if errors.Is(err, repository.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
+		// Lifecycle-owned tasks must use the established activation path so queued
+		// task-thread inputs, failed follow-up retries, and swarm planners retain
+		// their durable ownership. They cannot safely participate in an atomic group.
+		if moves[0].ExpectedCategory == models.CategoryActive {
+			return s.RunTask(ctx, moves[0].ID)
+		}
+		return s.UpdateCategory(ctx, moves[0].ID, models.CategoryActive)
+	}
 	if err != nil {
 		return err
 	}

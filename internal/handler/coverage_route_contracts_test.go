@@ -246,19 +246,53 @@ func TestBatchUpdateTaskCategoryPreservesSameProjectHTMXAndActiveSubmission(t *t
 	require.Equal(t, models.StatusRunning, movedLane.Status)
 	require.Equal(t, models.CategoryActive, loaded.Category)
 	require.Equal(t, models.StatusRunning, loaded.Status)
-	require.Greater(t, movedLane.DisplayOrder, existingTail.DisplayOrder)
-	require.Greater(t, loaded.DisplayOrder, movedLane.DisplayOrder)
+	require.Less(t, movedLane.DisplayOrder, existingTail.DisplayOrder, "already-running destination card must keep its existing rank")
+	require.Greater(t, loaded.DisplayOrder, existingTail.DisplayOrder)
 	require.Less(t, strings.Index(activated.Body.String(), `id="task-`+laneMove.ID+`"`), strings.Index(activated.Body.String(), `id="task-`+active.ID+`"`))
-	submittedIDs := map[string]bool{}
-	for range 2 {
-		select {
-		case submitted := <-tc.handler.workerSvc.Submitted():
-			submittedIDs[submitted.ID] = true
-		case <-time.After(time.Second):
-			t.Fatal("active batch tasks were not submitted to the worker")
-		}
+	select {
+	case submitted := <-tc.handler.workerSvc.Submitted():
+		require.Equal(t, active.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("newly activated batch task was not submitted to the worker")
 	}
-	require.Equal(t, map[string]bool{laneMove.ID: true, active.ID: true}, submittedIDs)
+	select {
+	case submitted := <-tc.handler.workerSvc.Submitted():
+		t.Fatalf("already-running destination card was resubmitted: %s", submitted.ID)
+	default:
+	}
+}
+
+func TestBatchUpdateTaskCategoryActiveLaneRejectsStaleBrowserStateAtomically(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Stale Active lane project").Build()
+	tc.CreateLLMConfig().WithName("Stale lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
+	first := tc.CreateTask(project.ID).WithTitle("Stale lane first").WithCategory(models.CategoryBacklog).Build()
+	second := tc.CreateTask(project.ID).WithTitle("Stale lane second").WithCategory(models.CategoryBacklog).Build()
+	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, second.ID, models.StatusCompleted))
+	expected, err := json.Marshal([]repository.ActiveLaneTaskMove{
+		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	})
+	require.NoError(t, err)
+
+	response := tc.HTMX().Patch("/tasks/batch-category").WithForm(url.Values{
+		"project_id":      {project.ID},
+		"task_ids":        {first.ID + "," + second.ID},
+		"category":        {string(models.CategoryActive)},
+		"target_status":   {string(models.StatusRunning)},
+		"expected_states": {string(expected)},
+	}).Execute()
+	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	loaded, loadErr := tc.taskRepo.GetByID(ctx, first.ID)
+	require.NoError(t, loadErr)
+	require.Equal(t, models.CategoryBacklog, loaded.Category)
+	require.Equal(t, models.StatusPending, loaded.Status)
+	select {
+	case submitted := <-tc.handler.workerSvc.Submitted():
+		t.Fatalf("stale batch submitted task before rejection: %s", submitted.ID)
+	default:
+	}
 }
 
 func TestBatchUpdateTaskCategoryActiveLaneRollsBackLaterWriteFailure(t *testing.T) {
