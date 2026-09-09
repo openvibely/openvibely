@@ -730,6 +730,101 @@ func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOrigin
 	}
 }
 
+func TestTaskService_MoveTasksToActiveLaneRoutesSingleQueuedFollowupThroughLifecycleOwner(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadRepo := repository.NewThreadInputRepo(db)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	task := &models.Task{ProjectID: "default", Title: "Queued followup lane move", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "original prompt"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued followup"}
+	require.NoError(t, threadRepo.CreateQueued(ctx, input))
+	called := 0
+	svc.SetQueuedTaskThreadFollowupHook(func(ctx context.Context, taskID string) (bool, error) {
+		called++
+		require.Equal(t, task.ID, taskID)
+		require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
+		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
+		return true, nil
+	})
+
+	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	require.NoError(t, err)
+	require.Equal(t, 1, called)
+	loaded, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, loaded.Category)
+	require.Equal(t, models.StatusQueued, loaded.Status)
+	select {
+	case submitted := <-worker.Submitted():
+		t.Fatalf("original task prompt was submitted instead of queued followup: %s", submitted.ID)
+	default:
+	}
+}
+
+func TestTaskService_MoveTasksToActiveLaneRoutesSingleFailedFollowupThroughRetryOwner(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	task := &models.Task{ProjectID: "default", Title: "Failed followup lane move", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "original prompt"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: task.ID, Status: models.ExecFailed, PromptSent: "failed followup", IsFollowup: true}))
+	called := 0
+	svc.SetFailedTaskThreadFollowupRetryHook(func(ctx context.Context, taskID string) (bool, error) {
+		called++
+		require.Equal(t, task.ID, taskID)
+		require.NoError(t, taskRepo.UpdateCategory(ctx, taskID, models.CategoryActive))
+		require.NoError(t, taskRepo.UpdateStatus(ctx, taskID, models.StatusQueued))
+		return true, nil
+	})
+
+	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusFailed}}, models.StatusRunning)
+	require.NoError(t, err)
+	require.Equal(t, 1, called)
+	loaded, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusQueued, loaded.Status)
+	select {
+	case submitted := <-worker.Submitted():
+		t.Fatalf("original task prompt was submitted instead of failed followup retry: %s", submitted.ID)
+	default:
+	}
+}
+
+func TestTaskService_MoveTasksToActiveLaneRejectsLifecycleOwnedGroupBeforeSubmission(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadRepo := repository.NewThreadInputRepo(db)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	ordinary := &models.Task{ProjectID: "default", Title: "Ordinary lifecycle group card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	owned := &models.Task{ProjectID: "default", Title: "Owned lifecycle group card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	for _, task := range []*models.Task{ordinary, owned} {
+		require.NoError(t, taskRepo.Create(ctx, task))
+	}
+	require.NoError(t, threadRepo.CreateQueued(ctx, &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: owned.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}))
+
+	err := svc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{
+		{ID: ordinary.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: owned.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
+	require.ErrorIs(t, err, repository.ErrActiveLaneLifecycleOwned)
+	loaded, loadErr := taskRepo.GetByID(ctx, ordinary.ID)
+	require.NoError(t, loadErr)
+	require.Equal(t, models.CategoryBacklog, loaded.Category)
+	select {
+	case submitted := <-worker.Submitted():
+		t.Fatalf("batch submitted before lifecycle-owned rejection: %s", submitted.ID)
+	default:
+	}
+}
+
 func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadFails(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -3432,6 +3527,34 @@ func TestWorkerService_ProjectConcurrency_MultipleProjects(t *testing.T) {
 	}
 }
 
+func TestWorkerService_SubmitPreclaimedDoesNotMarkAlreadyExecutingTask(t *testing.T) {
+	ws := NewWorkerService(nil, 1, nil)
+	task := models.Task{ID: "already-executing", ProjectID: "default", Category: models.CategoryActive, Status: models.StatusRunning}
+	ws.pending[task.ID] = true
+
+	ws.SubmitPreclaimed(task)
+
+	ws.mu.Lock()
+	if ws.preclaimed[task.ID] {
+		ws.mu.Unlock()
+		t.Fatal("already-executing task acquired a stale preclaimed marker")
+	}
+	if len(ws.queue) != 0 {
+		ws.mu.Unlock()
+		t.Fatalf("already-executing task was requeued: %#v", ws.queue)
+	}
+	delete(ws.pending, task.ID) // simulate execution completion
+	ws.mu.Unlock()
+
+	task.Status = models.StatusPending
+	ws.Submit(task)
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	if ws.preclaimed[task.ID] || !ws.pending[task.ID] || len(ws.queue) != 1 {
+		t.Fatalf("later ordinary rerun was corrupted: preclaimed=%v pending=%v queue=%#v", ws.preclaimed[task.ID], ws.pending[task.ID], ws.queue)
+	}
+}
+
 func TestWorkerService_DispatchPrunesNonPendingTasks(t *testing.T) {
 	// When dispatchNext scans the queue, tasks whose status changed to
 	// completed should be pruned from the queue instead of being dispatched.
@@ -3539,6 +3662,23 @@ func TestWorkerService_DispatchPrunesNonActiveCategoryTasks(t *testing.T) {
 		t.Errorf("expected empty queue after pruning, got %d", queueLen)
 	}
 }
+func TestTaskService_MoveTasksToActiveLaneStartsSingleSwarmPlanner(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+	ctx := context.Background()
+	startImmediately := false
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Lane move swarm", Prompt: "plan later", Category: models.CategoryBacklog, MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true, StartImmediately: &startImmediately})
+	require.NoError(t, err)
+
+	err = taskSvc.MoveTasksToActiveLane(ctx, "default", []repository.ActiveLaneTaskMove{{ID: parent.ID, ExpectedCategory: parent.Category, ExpectedStatus: parent.Status}}, models.StatusRunning)
+	require.NoError(t, err)
+	assertPlannerSubmittedForParent(t, taskRepo, workerSvc, parent.ID)
+}
+
 func TestTaskService_ActivateAllBacklogStartsSwarmPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

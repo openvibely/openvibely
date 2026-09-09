@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -2164,6 +2165,37 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
 
+func (h *Handler) activeLaneTaskMoves(ctx context.Context, taskIDs []string, encoded string) ([]repository.ActiveLaneTaskMove, error) {
+	moves := make([]repository.ActiveLaneTaskMove, 0, len(taskIDs))
+	if strings.TrimSpace(encoded) != "" {
+		if err := json.Unmarshal([]byte(encoded), &moves); err != nil {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid Active lane task state")
+		}
+		if len(moves) != len(taskIDs) {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid Active lane task state")
+		}
+		for i, move := range moves {
+			if move.ID != taskIDs[i] || move.ExpectedCategory == "" || move.ExpectedStatus == "" {
+				return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid Active lane task state")
+			}
+		}
+		return moves, nil
+	}
+	// Non-browser callers may omit the optimistic snapshot. Preserve their API
+	// behavior while browser drag/drop always supplies a stale-state fence.
+	for _, taskID := range taskIDs {
+		task, err := h.taskSvc.GetByID(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task == nil {
+			return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		moves = append(moves, repository.ActiveLaneTaskMove{ID: taskID, ExpectedCategory: task.Category, ExpectedStatus: task.Status})
+	}
+	return moves, nil
+}
+
 func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 	taskID := c.Param("taskId")
 	category := models.TaskCategory(c.FormValue("category"))
@@ -2205,8 +2237,15 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 		if task == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "task not found")
 		}
-		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), task.ProjectID, []string{taskID}, targetStatus); err != nil {
+		moves, err := h.activeLaneTaskMoves(c.Request().Context(), []string{taskID}, c.FormValue("expected_states"))
+		if err != nil {
+			return err
+		}
+		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), task.ProjectID, moves, targetStatus); err != nil {
 			applog.Infof("[handler] UpdateTaskCategory active lane error: %v", err)
+			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) {
+				return echo.NewHTTPError(http.StatusConflict, "task lifecycle changed before the move completed")
+			}
 			return err
 		}
 	} else if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, category); err != nil {
@@ -2329,8 +2368,15 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 	}
 
 	if category == models.CategoryActive && targetStatus != "" {
-		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), projectID, taskIDs, targetStatus); err != nil {
+		moves, err := h.activeLaneTaskMoves(c.Request().Context(), taskIDs, c.FormValue("expected_states"))
+		if err != nil {
+			return err
+		}
+		if err := h.taskSvc.MoveTasksToActiveLane(c.Request().Context(), projectID, moves, targetStatus); err != nil {
 			applog.Infof("[handler] BatchUpdateTaskCategory active lane error: %v", err)
+			if errors.Is(err, repository.ErrActiveLaneTaskChanged) || errors.Is(err, repository.ErrActiveLaneLifecycleOwned) {
+				return echo.NewHTTPError(http.StatusConflict, "one or more selected tasks changed before the move completed")
+			}
 			return err
 		}
 	} else {

@@ -527,6 +527,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	var requests []string
 	var groupedTaskOrders []string
 	var groupedTargetStatuses []string
+	var groupedExpectedStates []string
 	var dragOnlyMode bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestMu.Lock()
@@ -622,6 +623,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			requestMu.Lock()
 			groupedTaskOrders = append(groupedTaskOrders, r.FormValue("task_ids"))
 			groupedTargetStatuses = append(groupedTargetStatuses, r.FormValue("target_status"))
+			groupedExpectedStates = append(groupedExpectedStates, r.FormValue("expected_states"))
 			ids := strings.Split(r.FormValue("task_ids"), ",")
 			category := models.TaskCategory(r.FormValue("category"))
 			targetStatus := models.TaskStatus(r.FormValue("target_status"))
@@ -725,6 +727,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	requestList := strings.Join(requests, "\n")
 	gotGroupedTaskOrders := append([]string(nil), groupedTaskOrders...)
 	gotGroupedTargetStatuses := append([]string(nil), groupedTargetStatuses...)
+	gotGroupedExpectedStates := append([]string(nil), groupedExpectedStates...)
 	requestMu.Unlock()
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
@@ -749,6 +752,16 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	if len(gotGroupedTargetStatuses) != 2 || gotGroupedTargetStatuses[0] != "" || gotGroupedTargetStatuses[1] != string(models.StatusRunning) {
 		t.Fatalf("grouped Active drop target statuses = %v, want category-only then running", gotGroupedTargetStatuses)
+	}
+	if len(gotGroupedExpectedStates) != 2 || gotGroupedExpectedStates[0] != "" {
+		t.Fatalf("grouped expected-state payloads = %v", gotGroupedExpectedStates)
+	}
+	var expectedMoves []repository.ActiveLaneTaskMove
+	if err := json.Unmarshal([]byte(gotGroupedExpectedStates[1]), &expectedMoves); err != nil {
+		t.Fatalf("decode grouped Active expected states: %v", err)
+	}
+	if len(expectedMoves) != 2 || expectedMoves[0].ID != "task-drag-cursor" || expectedMoves[0].ExpectedCategory != models.CategoryCompleted || expectedMoves[1].ID != "task-active-status-drag" || expectedMoves[1].ExpectedCategory != models.CategoryCompleted {
+		t.Fatalf("grouped Active expected states did not preserve pre-move DOM state: %#v", expectedMoves)
 	}
 }
 

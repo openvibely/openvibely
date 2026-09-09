@@ -3417,9 +3417,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 
 					function beginKanbanMove(taskIDs, destination, method, path, values, failureMessage) {
-						const ids = orderKanbanTaskIDs(taskIDs, document.getElementById('kanban-board'));
+						const board = document.getElementById('kanban-board');
+						const ids = orderKanbanTaskIDs(taskIDs, board);
 						if (!ids.length || ids.some(function(taskID) { return pendingKanbanMoves.has(taskID); })) return false;
 						if (values && Object.prototype.hasOwnProperty.call(values, 'task_ids')) values.task_ids = ids.join(',');
+						if (values && destination.category === 'active') {
+							values.expected_states = JSON.stringify(ids.map(function(taskID) {
+								const card = board && board.querySelector('#task-' + (window.CSS && CSS.escape ? CSS.escape(taskID) : taskID));
+								return {id: taskID, category: card ? card.getAttribute('data-task-category') : '', status: card ? card.getAttribute('data-task-status') : ''};
+							}));
+						}
 						const generation = ++kanbanMoveGeneration;
 						const transaction = {generation: generation, taskIDs: ids.slice(), path: path, failureMessage: failureMessage};
 						kanbanMoveTransactions.set(generation, transaction);

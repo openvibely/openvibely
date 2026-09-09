@@ -302,14 +302,24 @@ func (w *WorkerService) SubmitPreclaimed(task models.Task) {
 	}
 	w.mu.Lock()
 	if w.pending[task.ID] {
-		w.preclaimed[task.ID] = true
+		// Only upgrade an entry that is still waiting in the queue. An executing
+		// task also remains in pending for deduplication, but must never acquire a
+		// preclaimed marker that can leak into a later rerun.
+		queued := false
 		for i := range w.queue {
 			if w.queue[i].ID == task.ID {
 				w.queue[i] = task
+				queued = true
+				break
 			}
 		}
+		if queued {
+			w.preclaimed[task.ID] = true
+		}
 		w.mu.Unlock()
-		w.dispatchNext()
+		if queued {
+			w.dispatchNext()
+		}
 		return
 	}
 	w.pending[task.ID] = true
@@ -621,7 +631,49 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			capacityAcquired = true
 		}
 	}
-	if w.taskRepo != nil && !isPrepared && !ordinaryPreclaimed {
+	if w.taskRepo != nil && ordinaryPreclaimed {
+		dispatchClaim, admitted, claimErr := w.taskRepo.LoadPreclaimedTaskForDispatch(taskCtx, task.ID)
+		if claimErr != nil {
+			applog.Infof("[worker] preclaimed task=%s validation failed: %v", task.ID, claimErr)
+			claimed = false
+			completionAttempted = false
+			logOutcome = false
+			return
+		}
+		if !admitted {
+			applog.Infof("[worker] preclaimed task=%s no longer runnable, skipping", task.ID)
+			claimed = false
+			completionAttempted = false
+			logOutcome = false
+			return
+		}
+		claimed = true
+		completionAttempted = true
+		startsNewContext := task.StartsNewContext
+		task = dispatchClaim.Task
+		task.StartsNewContext = startsNewContext
+		if len(dispatchClaim.AutomationContext.Bindings) > 0 || dispatchClaim.AutomationContext.OriginTask {
+			taskCtx = WithAutomationContext(taskCtx, dispatchClaim.AutomationContext)
+		}
+		claimedAgentConfigID := w.resolveAgentConfigID(taskCtx, task)
+		if claimedAgentConfigID != agentConfigID {
+			w.releaseProjectSlot(task.ProjectID)
+			w.releaseModelSlot(agentConfigID)
+			capacityAcquired = false
+			agentConfigID = ""
+			w.dispatchNext()
+			if err := w.acquireWorkerSlots(taskCtx, task.ProjectID, claimedAgentConfigID, false); err != nil {
+				executionErr = fmt.Errorf("acquiring preclaimed task capacity: %w", err)
+				if updateErr := w.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusFailed); updateErr != nil {
+					applog.Infof("[worker] task=%s failed status update after preclaimed capacity error: %v", task.ID, updateErr)
+				}
+				return
+			}
+			agentConfigID = claimedAgentConfigID
+			capacityAcquired = true
+		}
+		taskCtx = withTaskPreClaimed(taskCtx)
+	} else if w.taskRepo != nil && !isPrepared {
 		if w.beforeOrdinaryTaskClaim != nil {
 			w.beforeOrdinaryTaskClaim(task)
 		}
@@ -671,8 +723,6 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		}
 		// Tag the context so executeTaskWithAgent knows the task has
 		// already been claimed and won't skip it as "already running".
-		taskCtx = withTaskPreClaimed(taskCtx)
-	} else if ordinaryPreclaimed {
 		taskCtx = withTaskPreClaimed(taskCtx)
 	} else if isPrepared {
 		task.Status = models.StatusRunning

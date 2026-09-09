@@ -573,40 +573,77 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	return nil
 }
 
-func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, taskIDs []string, status models.TaskStatus) ([]models.Task, error) {
+var ErrActiveLaneTaskChanged = errors.New("active lane task changed")
+var ErrActiveLaneLifecycleOwned = errors.New("active lane task requires lifecycle-owned activation")
+
+type ActiveLaneTaskMove struct {
+	ID               string              `json:"id"`
+	ExpectedCategory models.TaskCategory `json:"category"`
+	ExpectedStatus   models.TaskStatus   `json:"status"`
+}
+
+func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, moves []ActiveLaneTaskMove, status models.TaskStatus) ([]models.Task, error) {
 	if status != models.StatusPending && status != models.StatusRunning {
 		return nil, fmt.Errorf("invalid active lane status: %s", status)
 	}
-	moved := make([]models.Task, 0, len(taskIDs))
+	moved := make([]models.Task, 0, len(moves))
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
-		seen := make(map[string]struct{}, len(taskIDs))
+		seen := make(map[string]struct{}, len(moves))
+		candidates := make([]models.Task, 0, len(moves))
+		for _, move := range moves {
+			if _, duplicate := seen[move.ID]; duplicate {
+				return fmt.Errorf("duplicate task in active lane move: %s", move.ID)
+			}
+			seen[move.ID] = struct{}{}
+			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND project_id = ?`, move.ID, projectID)
+			if err != nil {
+				return fmt.Errorf("loading active lane task %s: %w", move.ID, err)
+			}
+			if task == nil {
+				return fmt.Errorf("task not found in project: %s", move.ID)
+			}
+			if task.Category != move.ExpectedCategory || task.Status != move.ExpectedStatus {
+				return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, move.ID)
+			}
+			if task.Category == models.CategoryActive && task.Status == status {
+				continue
+			}
+			var lifecycleOwned int
+			if err := exec.QueryRowContext(ctx, `SELECT EXISTS (
+				SELECT 1 FROM thread_inputs i
+				WHERE i.scope = 'task_thread' AND i.task_id = ? AND i.input_status = 'pending'
+				UNION ALL SELECT 1 FROM executions e
+				WHERE e.rowid = (SELECT latest.rowid FROM executions latest WHERE latest.task_id = ? ORDER BY latest.started_at DESC, latest.rowid DESC LIMIT 1)
+				  AND e.is_followup = 1 AND e.status = 'failed' AND TRIM(e.prompt_sent) <> ''
+				UNION ALL SELECT 1 FROM executions e
+				WHERE e.task_id = ? AND e.status IN ('queued','running')
+				UNION ALL SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = ?
+			)`, task.ID, task.ID, task.ID, task.ID).Scan(&lifecycleOwned); err != nil {
+				return fmt.Errorf("checking active lane lifecycle ownership for %s: %w", task.ID, err)
+			}
+			if task.SwarmRole == models.SwarmRoleParent || lifecycleOwned != 0 || task.Status == models.StatusQueued || task.Status == models.StatusRunning {
+				return fmt.Errorf("%w: %s", ErrActiveLaneLifecycleOwned, task.ID)
+			}
+			candidates = append(candidates, *task)
+		}
+		if len(candidates) == 0 {
+			return nil
+		}
 		var nextOrder int
 		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
 			return fmt.Errorf("getting active tail order: %w", err)
 		}
-		for _, id := range taskIDs {
-			if _, duplicate := seen[id]; duplicate {
-				return fmt.Errorf("duplicate task in active lane move: %s", id)
-			}
-			seen[id] = struct{}{}
-			task, err := getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ? AND project_id = ?`, id, projectID)
-			if err != nil {
-				return fmt.Errorf("loading active lane task %s: %w", id, err)
-			}
-			if task == nil {
-				return fmt.Errorf("task not found in project: %s", id)
-			}
+		for i := range candidates {
 			if _, err := exec.ExecContext(ctx, `UPDATE tasks
 				SET category = 'active', status = ?, display_order = ?, completed_at = NULL, updated_at = datetime('now')
-				WHERE id = ? AND project_id = ?`, status, nextOrder, id, projectID); err != nil {
-				return fmt.Errorf("moving task %s to active lane: %w", id, err)
+				WHERE id = ? AND project_id = ?`, status, nextOrder+i, candidates[i].ID, projectID); err != nil {
+				return fmt.Errorf("moving task %s to active lane: %w", candidates[i].ID, err)
 			}
-			task.Category = models.CategoryActive
-			task.Status = status
-			task.DisplayOrder = nextOrder
-			task.CompletedAt = nil
-			moved = append(moved, *task)
-			nextOrder++
+			candidates[i].Category = models.CategoryActive
+			candidates[i].Status = status
+			candidates[i].DisplayOrder = nextOrder + i
+			candidates[i].CompletedAt = nil
+			moved = append(moved, candidates[i])
 		}
 		return nil
 	})
@@ -1027,6 +1064,97 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: task.ID, TaskName: task.Title,
 			ProjectID: task.ProjectID, Status: string(models.StatusRunning), OldStatus: string(models.StatusPending),
 			Category: string(task.Category)})
+	}
+	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
+}
+
+// LoadPreclaimedTaskForDispatch validates a board move that already persisted
+// running status and loads the same authoritative Task/Automation projection used
+// by ordinary dispatch claims. It never promotes a pending task.
+func (r *TaskRepo) LoadPreclaimedTaskForDispatch(ctx context.Context, id string) (*TaskDispatchClaim, bool, error) {
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
+	if err != nil {
+		return nil, false, err
+	}
+	defer finishImmediate()
+	task, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading preclaimed task for dispatch: %w", err)
+	}
+	if task == nil {
+		return nil, false, fmt.Errorf("task not found: %s", id)
+	}
+	var blocked int
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = ?
+		UNION ALL SELECT 1 FROM executions e WHERE e.task_id = ? AND e.status IN ('queued','running')
+		UNION ALL SELECT 1 FROM thread_inputs i WHERE i.scope = 'task_thread' AND i.task_id = ? AND i.input_status = 'pending'
+	)`, id, id, id).Scan(&blocked); err != nil {
+		return nil, false, fmt.Errorf("validating preclaimed task admission: %w", err)
+	}
+	if task.Status != models.StatusRunning || task.Category != models.CategoryActive || blocked != 0 {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		return &TaskDispatchClaim{Task: *task}, false, nil
+	}
+	automationContext, err := contextForTaskWithExecutor(ctx, conn, task.ProjectID, task.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading preclaimed task Automation context: %w", err)
+	}
+	if IsAutomationTaskCreatedVia(task.CreatedVia) {
+		automationContext.ProjectID = task.ProjectID
+		automationContext.OriginTask = true
+	}
+	checkedBindings := map[string]bool{}
+	for _, binding := range automationContext.Bindings {
+		bindingKey := binding.AutomationID + "\x00" + binding.VersionID
+		if checkedBindings[bindingKey] {
+			continue
+		}
+		checkedBindings[bindingKey] = true
+		var lifecycle models.AutomationLifecycleState
+		err := conn.QueryRowContext(ctx, `SELECT lifecycle_state FROM automations
+			WHERE project_id = ? AND id = ? AND published_version_id = ?`, task.ProjectID, binding.AutomationID, binding.VersionID).Scan(&lifecycle)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, false, fmt.Errorf("loading preclaimed Automation lifecycle: %w", err)
+		}
+		if lifecycle == models.AutomationActive {
+			continue
+		}
+		if lifecycle == models.AutomationPaused {
+			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_paused_task_admissions
+				(task_id, project_id, automation_id, version_id)
+				SELECT ?, ?, ?, ? WHERE EXISTS (
+					SELECT 1 FROM automation_activity_resources resource
+					JOIN automation_activities activity ON activity.id = resource.activity_id
+					WHERE resource.resource_type = 'task' AND resource.resource_id = ? AND resource.relation = 'child'
+						AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+						AND activity.activity_type = 'create_task')
+				ON CONFLICT(task_id) DO NOTHING`, task.ID, task.ProjectID, binding.AutomationID, binding.VersionID,
+				task.ID, task.ProjectID, binding.AutomationID, binding.VersionID); err != nil {
+				return nil, false, fmt.Errorf("preserving paused preclaimed Automation admission: %w", err)
+			}
+		} else if lifecycle == models.AutomationArchived {
+			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_paused_task_admissions WHERE task_id = ?`, task.ID); err != nil {
+				return nil, false, fmt.Errorf("removing archived preclaimed Automation admission: %w", err)
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = 'backlog', updated_at = datetime('now') WHERE id = ? AND status = 'running'`, task.ID); err != nil {
+			return nil, false, err
+		}
+		task.Status = models.StatusPending
+		task.Category = models.CategoryBacklog
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, false, err
 	}
 	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }

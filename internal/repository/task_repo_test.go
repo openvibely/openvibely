@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -626,6 +627,93 @@ func TestTaskRepo_ListByCategory_WithChainConfig(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_MoveTasksToActiveLaneRejectsStaleLifecycleState(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	first := &models.Task{ProjectID: "default", Title: "Stale first card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	second := &models.Task{ProjectID: "default", Title: "Stale second card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	for _, task := range []*models.Task{first, second} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.UpdateStatus(ctx, second.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
+	if !errors.Is(err, ErrActiveLaneTaskChanged) {
+		t.Fatalf("MoveTasksToActiveLane error = %v, want ErrActiveLaneTaskChanged", err)
+	}
+	loaded, loadErr := repo.GetByID(ctx, first.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if loaded.Category != models.CategoryBacklog || loaded.Status != models.StatusPending {
+		t.Fatalf("first task changed despite stale second task: %#v", loaded)
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneRejectsGroupedLifecycleOwnedTask(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ordinary := &models.Task{ProjectID: "default", Title: "Ordinary grouped card", Category: models.CategoryBacklog, Status: models.StatusPending}
+	parent := &models.Task{ProjectID: "default", Title: "Swarm parent grouped card", Category: models.CategoryBacklog, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent}
+	for _, task := range []*models.Task{ordinary, parent} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: ordinary.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: parent.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
+	if !errors.Is(err, ErrActiveLaneLifecycleOwned) {
+		t.Fatalf("MoveTasksToActiveLane error = %v, want ErrActiveLaneLifecycleOwned", err)
+	}
+	loaded, loadErr := repo.GetByID(ctx, ordinary.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if loaded.Category != models.CategoryBacklog || loaded.Status != models.StatusPending {
+		t.Fatalf("ordinary task changed despite lifecycle-owned group member: %#v", loaded)
+	}
+}
+
+func TestTaskRepo_MoveTasksToActiveLaneRunningDestinationNoOp(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "Already running destination card", Category: models.CategoryActive, Status: models.StatusRunning, DisplayOrder: 4}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execBoundSQLite(ctx, db, `UPDATE tasks SET display_order = 4 WHERE id = ?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryActive, ExpectedStatus: models.StatusRunning}}, models.StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(moved) != 0 {
+		t.Fatalf("already-running destination card returned as newly moved: %#v", moved)
+	}
+	loaded, loadErr := repo.GetByID(ctx, task.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if loaded.DisplayOrder != 4 {
+		t.Fatalf("already-running destination card reordered to %d", loaded.DisplayOrder)
+	}
+}
+
 func TestTaskRepo_MoveTasksToActiveLaneRollsBackLaterFailure(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -653,7 +741,10 @@ func TestTaskRepo_MoveTasksToActiveLaneRollsBackLaterFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := repo.MoveTasksToActiveLane(ctx, "default", []string{first.ID, second.ID}, models.StatusRunning)
+	_, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
 	if err == nil || !strings.Contains(err.Error(), "forced later move failure") {
 		t.Fatalf("MoveTasksToActiveLane error = %v", err)
 	}
@@ -681,7 +772,10 @@ func TestTaskRepo_MoveTasksToActiveLaneAppendsSubmittedOrder(t *testing.T) {
 		}
 	}
 
-	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []string{second.ID, first.ID}, models.StatusRunning)
+	moved, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{
+		{ID: second.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+		{ID: first.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending},
+	}, models.StatusRunning)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,6 +25,7 @@ func TestBaseKanbanMoveTransactionsPreventVisibleRollback(t *testing.T) {
 		"orderKanbanTaskIDs",
 		"compareDocumentPosition",
 		"values.task_ids = ids.join(',')",
+		"values.expected_states = JSON.stringify",
 		"target_status: targetStatus",
 		"{ category: 'active', target_status: targetStatus }",
 		"applyPendingKanbanMoves",
