@@ -269,12 +269,13 @@ type CreateAgentRuntimeInput struct {
 }
 
 type CreateAgentRuntimeOptions struct {
-	ProjectID     string
-	Input         CreateAgentRuntimeInput
-	AgentRepo     *repository.AgentRepo
-	LLMConfigRepo *repository.LLMConfigRepo
-	ProjectRepo   *repository.ProjectRepo
-	Materialize   func(context.Context, *models.Agent) error
+	ProjectID              string
+	Input                  CreateAgentRuntimeInput
+	AgentRepo              *repository.AgentRepo
+	LLMConfigRepo          *repository.LLMConfigRepo
+	ProjectRepo            *repository.ProjectRepo
+	Materialize            func(context.Context, *models.Agent) error
+	CleanupMaterialization func(context.Context, *models.Agent) error
 }
 
 type createAgentRuntimeResponse struct {
@@ -1954,8 +1955,17 @@ func ExecuteCreateAgentRuntime(ctx context.Context, opts CreateAgentRuntimeOptio
 	}
 	if opts.Materialize != nil {
 		if err := opts.Materialize(ctx, agent); err != nil {
+			var rollbackErrs []error
+			if opts.CleanupMaterialization != nil {
+				if cleanupErr := opts.CleanupMaterialization(ctx, agent); cleanupErr != nil {
+					rollbackErrs = append(rollbackErrs, cleanupErr)
+				}
+			}
 			if rollbackErr := opts.AgentRepo.Delete(ctx, agent.ID); rollbackErr != nil {
-				return fail(fmt.Sprintf("%v; failed to roll back agent: %v", err, rollbackErr))
+				rollbackErrs = append(rollbackErrs, rollbackErr)
+			}
+			if len(rollbackErrs) > 0 {
+				return fail(fmt.Sprintf("%v; failed to roll back agent: %v", err, errors.Join(rollbackErrs...)))
 			}
 			return fail(err.Error())
 		}
