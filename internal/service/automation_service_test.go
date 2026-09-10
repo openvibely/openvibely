@@ -1097,6 +1097,44 @@ func TestAutomationGraphServiceHistoryAndResourceWrappers(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestAutomationAgentReferenceValidationMatchesCapabilityAndFallback(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Agent validation parity")
+	agentRepo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	global := automationValidationFixtureAgent("Global Agent", "global-agent")
+	require.NoError(t, agentRepo.Create(ctx, global))
+	projectAgent := automationValidationFixtureAgent("Project Agent", "project-agent")
+	projectAgent.Scope = models.AgentScopeProject
+	projectAgent.ProjectID = project.ID
+	require.NoError(t, agentRepo.Create(ctx, projectAgent))
+
+	candidate := automationValidationReferenceCandidate([]string{
+		"  " + global.Key + "\t", projectAgent.Key, "missing-agent", " \t ", "missing-agent-two", global.Key,
+	})
+	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, nil, nil)
+	snapshot, err := capabilities.BuildForValidation(ctx, project.ID, true)
+	require.NoError(t, err)
+	capabilityIssues := NewAutomationDraftService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry()).ValidateCandidateWithCapabilities(candidate, snapshot)
+
+	validator := NewAutomationSaveValidator(NewAutomationAdapterRegistry(), NewAutomationDraftService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry()))
+	validator.SetAgentRepository(agentRepo)
+	fallbackIssues, err := validator.agentIssues(ctx, project.ID, candidate)
+	require.NoError(t, err)
+
+	expected := []models.AutomationValidationIssue{
+		{NodeKey: "agent-02", Code: "agent_ref", Message: "Agent selection is unavailable in this project."},
+		{NodeKey: "agent-04", Code: "agent_ref", Message: "Agent selection is unavailable in this project."},
+	}
+	require.Equal(t, expected, capabilityIssues)
+	require.Equal(t, expected, fallbackIssues)
+}
+
 func TestAutomationSaveValidatorAgentIssuesBatchesSelectableAgentReferences(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
