@@ -116,25 +116,36 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		assertHTTPError(t, crud.createUser(c, "project-1", func(context.Context) error { return nil }), http.StatusInternalServerError, "Failed to load authorized users")
 	})
 
-	t.Run("delete falls back to loaded project then reloads", func(t *testing.T) {
+	t.Run("delete requires selected project ownership then reloads", func(t *testing.T) {
 		c, rec := newContext()
 		deleted := false
 		crud := newCRUD(func(_ context.Context, projectID string) ([]string, error) {
 			if projectID != "record-project" {
-				t.Fatalf("expected record project fallback, got %q", projectID)
+				t.Fatalf("expected selected project reload, got %q", projectID)
 			}
 			if !deleted {
 				t.Fatal("list called before delete")
 			}
 			return nil, nil
 		})
-		err := crud.deleteUser(c, "user-1", "", func(_ context.Context, id string) (string, bool, error) {
+		lookup := func(_ context.Context, id string) (string, bool, error) {
+			if id != "user-1" {
+				t.Fatalf("expected lookup id user-1, got %q", id)
+			}
 			return "record-project", true, nil
-		}, func(_ context.Context, id string) error {
+		}
+		deleteUser := func(_ context.Context, projectID, id string) error {
+			if projectID != "record-project" || id != "user-1" {
+				t.Fatalf("unexpected scoped delete project=%q id=%q", projectID, id)
+			}
 			deleted = true
 			return nil
-		})
-		if err != nil {
+		}
+		assertHTTPError(t, crud.deleteUser(c, "user-1", "", lookup, deleteUser), http.StatusBadRequest, "project_id is required")
+		if deleted {
+			t.Fatal("missing project deleted a user")
+		}
+		if err := crud.deleteUser(c, "user-1", "record-project", lookup, deleteUser); err != nil {
 			t.Fatalf("deleteUser failed: %v", err)
 		}
 		if rec.Code != http.StatusOK || rec.Body.String() != "record-project:" {
@@ -142,23 +153,29 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		}
 	})
 
-	t.Run("delete maps lookup not found mutation and reload failures", func(t *testing.T) {
+	t.Run("delete maps missing, foreign, mutation, and reload failures", func(t *testing.T) {
 		c, _ := newContext()
 		crud := newCRUD(func(context.Context, string) ([]string, error) { return nil, nil })
 		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
 			return "", false, errors.New("lookup failed")
-		}, func(context.Context, string) error { return nil }), http.StatusInternalServerError, "Failed to find user")
+		}, func(context.Context, string, string) error { return nil }), http.StatusInternalServerError, "Failed to find user")
 		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
 			return "", false, nil
-		}, func(context.Context, string) error { return nil }), http.StatusNotFound, "User not found")
+		}, func(context.Context, string, string) error { return nil }), http.StatusNotFound, "User not found")
 		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
-			return "record-project", true, nil
-		}, func(context.Context, string) error { return errors.New("delete failed") }), http.StatusInternalServerError, "Failed to remove user: delete failed")
+			return "foreign-project", true, nil
+		}, func(context.Context, string, string) error {
+			t.Fatal("foreign user reached delete")
+			return nil
+		}), http.StatusNotFound, "User not found")
+		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
+			return "project-1", true, nil
+		}, func(context.Context, string, string) error { return errors.New("delete failed") }), http.StatusInternalServerError, "Failed to remove user: delete failed")
 
 		crud = newCRUD(func(context.Context, string) ([]string, error) { return nil, errors.New("reload failed") })
 		assertHTTPError(t, crud.deleteUser(c, "user-1", "project-1", func(context.Context, string) (string, bool, error) {
-			return "record-project", true, nil
-		}, func(context.Context, string) error { return nil }), http.StatusInternalServerError, "Failed to load authorized users")
+			return "project-1", true, nil
+		}, func(context.Context, string, string) error { return nil }), http.StatusInternalServerError, "Failed to load authorized users")
 	})
 
 	t.Run("adapter guard returns channel not configured message", func(t *testing.T) {
@@ -221,18 +238,18 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		}
 	})
 
-	t.Run("adapter wires delete lookup and fallback project", func(t *testing.T) {
+	t.Run("adapter wires selected-project owner-checked deletion", func(t *testing.T) {
 		type authRecord struct{ ProjectID string }
 		e := echo.New()
 		rec := httptest.NewRecorder()
-		c := e.NewContext(httptest.NewRequest(http.MethodDelete, "/authorized/user-1", nil), rec)
+		c := e.NewContext(httptest.NewRequest(http.MethodDelete, "/authorized/user-1?project_id=record-project", nil), rec)
 		c.SetParamNames("id")
 		c.SetParamValues("user-1")
 		deleted := false
 		crud := authorizedUserCRUD[authRecord]{
 			list: func(_ context.Context, projectID string) ([]authRecord, error) {
 				if projectID != "record-project" {
-					t.Fatalf("expected record project fallback, got %q", projectID)
+					t.Fatalf("expected selected project, got %q", projectID)
 				}
 				if !deleted {
 					t.Fatal("list called before delete")
@@ -248,9 +265,9 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 				}
 				return &authRecord{ProjectID: "record-project"}, nil
 			},
-			delete: func(_ context.Context, id string) error {
-				if id != "user-1" {
-					t.Fatalf("expected delete id user-1, got %q", id)
+			delete: func(_ context.Context, projectID, id string) error {
+				if projectID != "record-project" || id != "user-1" {
+					t.Fatalf("unexpected scoped delete project=%q id=%q", projectID, id)
 				}
 				deleted = true
 				return nil

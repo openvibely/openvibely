@@ -200,7 +200,14 @@ func TestRemoveTelegramAuthorizedUser(t *testing.T) {
 		t.Fatalf("failed to create other user: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/channels/telegram/authorized-users/"+user.ID, nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/channels/telegram/authorized-users?project_id="+projectID, nil)
+	listRec := httptest.NewRecorder()
+	e.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK || !strings.Contains(listRec.Body.String(), `data-project-id="`+projectID+`"`) || strings.Contains(listRec.Body.String(), "Other Telegram User") {
+		t.Fatalf("selected-project list did not expose only owned rows: %d %q", listRec.Code, listRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/channels/telegram/authorized-users/"+user.ID+"?project_id="+projectID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -208,16 +215,13 @@ func TestRemoveTelegramAuthorizedUser(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 
-	// Verify the response reload keeps the deleted record's project context.
+	// The selected project fragment must not render another project's user.
 	body := rec.Body.String()
 	if strings.Contains(body, "To Remove") {
 		t.Errorf("expected removed user to disappear from response, got %q", body)
 	}
-	if !strings.Contains(body, "Other Telegram User") {
-		t.Errorf("expected other system-level user to remain visible, got %q", body)
-	}
-	if !strings.Contains(body, `name="project_id" value="`+projectID+`"`) {
-		t.Errorf("expected omitted project_id delete to reload with record project %q, got %q", projectID, body)
+	if strings.Contains(body, "Other Telegram User") {
+		t.Errorf("foreign user appeared in selected-project response, got %q", body)
 	}
 
 	// Verify in DB
@@ -235,12 +239,26 @@ func TestRemoveTelegramAuthorizedUser(t *testing.T) {
 	if remaining == nil {
 		t.Fatal("expected other project user to remain")
 	}
+
+	foreignReq := httptest.NewRequest(http.MethodDelete, "/channels/telegram/authorized-users/"+otherUser.ID+"?project_id="+projectID, nil)
+	foreignRec := httptest.NewRecorder()
+	e.ServeHTTP(foreignRec, foreignReq)
+	if foreignRec.Code != http.StatusNotFound {
+		t.Errorf("expected foreign delete to return 404, got %d", foreignRec.Code)
+	}
+	remaining, err = telegramAuthRepo.GetByID(ctx, otherUser.ID)
+	if err != nil {
+		t.Fatalf("GetByID foreign user after rejected delete failed: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("foreign delete removed another project's user")
+	}
 }
 
 func TestRemoveTelegramAuthorizedUser_NotFound(t *testing.T) {
-	_, e, _, _ := setupTelegramAuthHandler(t)
+	_, e, _, projectID := setupTelegramAuthHandler(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/channels/telegram/authorized-users/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/channels/telegram/authorized-users/nonexistent?project_id="+projectID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 

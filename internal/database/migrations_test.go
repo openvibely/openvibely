@@ -1694,7 +1694,7 @@ func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("failed to seed duplicate auth rows: %v", err)
 	}
-	if err := goose.Up(db, "."); err != nil {
+	if err := goose.UpTo(db, ".", 108); err != nil {
 		t.Fatalf("failed to run migration 108: %v", err)
 	}
 	assertSingleAuthRow := func(table, where string) {
@@ -1714,6 +1714,18 @@ func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	assertSingleAuthRow("telegram_authorized_users", `lower(telegram_username) = 'aliceuser'`)
 	if _, err := db.Exec(`INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-username-three', 'project-two', 0, 'ALICEUSER', 'Three')`); err == nil {
 		t.Fatal("expected global Telegram username uniqueness to reject mixed-case duplicate")
+	}
+	if err := goose.UpTo(db, ".", 179); err != nil {
+		t.Fatalf("failed to restore project-scoped authorization migration: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO slack_authorized_users (id, project_id, slack_user_id, display_name) VALUES ('slack-project-two', 'project-two', 'U123', 'Two Again');
+		INSERT INTO discord_authorized_users (id, project_id, discord_user_id, display_name) VALUES ('discord-project-two', 'project-two', '123456789012345678', 'Two Again');
+		INSERT INTO email_authorized_senders (id, project_id, email_address, display_name) VALUES ('email-project-two', 'project-two', 'sender@example.com', 'Two Again');
+		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-project-two', 'project-two', 999, '', 'Two Again');
+		INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-username-project-two', 'project-two', 0, 'ALICEUSER', 'Two Again');
+	`); err != nil {
+		t.Fatalf("project-scoped authorization migration must permit same identities in another project: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO channel_targets (id, project_id, platform, name, target_id) VALUES ('target-one', 'project-one', 'email', '', 'one@example.com')`); err != nil {
 		t.Fatalf("channel_targets must remain project-scoped and insertable after auth migration: %v", err)
