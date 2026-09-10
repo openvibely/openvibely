@@ -141,7 +141,7 @@ func renderDiscordSettingsContent(t *testing.T, status service.DiscordConnection
 	return buf.String()
 }
 
-func TestSettingsContent_RendersSystemLevelInboundAuthorizationCopy(t *testing.T) {
+func TestSettingsContent_RendersProjectScopedInboundAuthorizationCopy(t *testing.T) {
 	var buf bytes.Buffer
 	view := defaultChannelsSettingsView("project-1")
 	view.TelegramToken = "telegram-token"
@@ -156,10 +156,10 @@ func TestSettingsContent_RendersSystemLevelInboundAuthorizationCopy(t *testing.T
 
 	out := buf.String()
 	for _, expected := range []string{
-		"Authorized Telegram users are system-level for this channel and can use Telegram across projects.",
-		"Authorized Slack users are system-level for this channel and can use Slack across projects.",
-		"Authorized Discord users are system-level for this channel and can use Discord across projects.",
-		"Authorized email senders are system-level for this channel and can use Email across projects.",
+		"Authorized Telegram users are scoped to this project.",
+		"Authorized Slack users are scoped to this project.",
+		"Authorized Discord users are scoped to this project.",
+		"Authorized email senders are scoped to this project.",
 	} {
 		if !strings.Contains(out, expected) {
 			t.Fatalf("expected rendered settings to contain %q", expected)
@@ -167,13 +167,14 @@ func TestSettingsContent_RendersSystemLevelInboundAuthorizationCopy(t *testing.T
 	}
 
 	for _, stale := range []string{
-		"Telegram users for this project",
-		"Slack access to specific users for this project",
-		"Discord access to specific users for this project",
-		"Email access to specific senders for this project",
+		"system-level for this channel",
+		"can use Telegram across projects",
+		"can use Slack across projects",
+		"can use Discord across projects",
+		"can use Email across projects",
 	} {
 		if strings.Contains(out, stale) {
-			t.Fatalf("did not expect project-scoped inbound authorization copy %q", stale)
+			t.Fatalf("did not expect global inbound authorization copy %q", stale)
 		}
 	}
 }

@@ -1617,7 +1617,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if view.CurrentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Telegram users are system-level for this channel and can use Telegram across projects. If no users are added, the bot is open to everyone. Outbound Message Targets remain project-specific.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Telegram users are scoped to this project. If no users are added, the bot is open to everyone. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1921,7 +1921,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if view.CurrentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Slack users are system-level for this channel and can use Slack across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 185, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Slack users are scoped to this project. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1961,7 +1961,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if view.CurrentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2\">Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Discord users are system-level for this channel and can use Discord across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 190, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2\">Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Discord users are scoped to this project. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2192,7 +2192,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if view.CurrentProjectID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\">Authorized Senders</h4><p class=\"text-xs opacity-50 mb-3\">Authorized email senders are system-level for this channel and can use Email across projects. If no senders are configured, access is denied until authorized senders are added. Outbound Message Targets remain project-specific.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\">Authorized Senders</h4><p class=\"text-xs opacity-50 mb-3\">Authorized email senders are scoped to this project. If no senders are configured, access is denied until authorized senders are added. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

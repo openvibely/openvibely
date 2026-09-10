@@ -51,7 +51,7 @@ func (h *Handler) emailAuthorizedUserCRUD() authorizedUserCRUD[models.EmailAutho
 	if h.emailAuthRepo != nil {
 		crud.list = h.emailAuthRepo.ListByProject
 		crud.getByID = h.emailAuthRepo.GetByID
-		crud.delete = h.emailAuthRepo.Delete
+		crud.delete = h.emailAuthRepo.DeleteForProject
 		crud.projectID = func(sender *models.EmailAuthorizedSender) string { return sender.ProjectID }
 	}
 	return crud

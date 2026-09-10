@@ -11,7 +11,7 @@ templ SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID str
 	@channelAuthorizationList(
 		channelAuthorizationListConfig{
 			ContainerID: "slack-authorized-users",
-			Description: "Authorized Slack users are system-level for this channel and can use Slack across projects. Outbound Message Targets remain project-specific.",
+			Description: "Authorized Slack users are scoped to this project. Outbound Message Targets remain project-specific.",
 			EmptyState: "No authorized users configured.",
 			RemoveConfirmation: "Remove this authorized user?",
 		},
@@ -31,7 +31,8 @@ func slackAuthorizationRows(users []models.SlackAuthorizedUser, projectID string
 	for _, user := range users {
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       slackAuthorizedUserIdentity(user),
-			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s?project_id=%s", user.ID, projectID),
+			ProjectID:      user.ProjectID,
+			DeleteEndpoint: fmt.Sprintf("/channels/slack/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
 		})
 	}
 	return rows
