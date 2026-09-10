@@ -261,13 +261,13 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 	}
 	switch filter.Sort {
 	case "name_asc":
-		query += ` ORDER BY name ASC, id ASC`
+		query += ` ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC`
 	case "name_desc":
-		query += ` ORDER BY name DESC, id DESC`
+		query += ` ORDER BY name COLLATE NOCASE DESC, name DESC, id DESC`
 	case "provider":
-		query += ` ORDER BY provider ASC, name ASC, id ASC`
+		query += ` ORDER BY provider COLLATE NOCASE ASC, provider ASC, name COLLATE NOCASE ASC, name ASC, id ASC`
 	default:
-		query += ` ORDER BY name ASC, id ASC`
+		query += ` ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC`
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)

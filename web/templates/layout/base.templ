@@ -5386,6 +5386,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return incomingList;
 						}
 
+						function sortLoadedCardsByName(state) {
+							if (!state.root.hasAttribute('data-card-loaded-name-sort')) return;
+							var cards = Array.prototype.slice.call(state.list.querySelectorAll('[data-card-sort-name]'));
+							if (cards.length < 2) return;
+							var parent = cards[0].parentElement;
+							if (!parent || cards.some(function(card) { return card.parentElement !== parent; })) return;
+							var sortControl = state.root.querySelector('[data-card-sort]');
+							var descending = sortControl && sortControl.value === 'name_desc';
+							cards.sort(function(left, right) {
+								var leftName = (left.getAttribute('data-card-sort-name') || '').toLocaleLowerCase();
+								var rightName = (right.getAttribute('data-card-sort-name') || '').toLocaleLowerCase();
+								var result = leftName < rightName ? -1 : (leftName > rightName ? 1 : 0);
+								if (!result) {
+									var leftOriginal = left.getAttribute('data-card-sort-name') || '';
+									var rightOriginal = right.getAttribute('data-card-sort-name') || '';
+									result = leftOriginal < rightOriginal ? -1 : (leftOriginal > rightOriginal ? 1 : 0);
+								}
+								return descending ? -result : result;
+							});
+							cards.forEach(function(card) { parent.appendChild(card); });
+						}
+
 						function appendCards(state, incomingList) {
 							var incomingCards = cardsFor(incomingList, state.root);
 							var currentCards = cardsFor(state.list, state.root);
@@ -5395,6 +5417,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									state.list.innerHTML = incomingList.innerHTML;
 									rememberCards(state, cardsFor(state.list, state.root), true);
 									if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(state.list);
+									sortLoadedCardsByName(state);
 									return incomingCards.length;
 								}
 								var appended = [];
@@ -5409,6 +5432,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (window.htmx && typeof window.htmx.process === 'function') {
 									for (var j = 0; j < appended.length; j++) window.htmx.process(appended[j]);
 								}
+								sortLoadedCardsByName(state);
 								return incomingCards.length;						}
 
 						function requestPage(state, page, replace) {
@@ -5472,6 +5496,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 										state.list.innerHTML = incomingList.innerHTML;
 										rememberCards(state, cardsFor(state.list, state.root), true);
 										if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(state.list);
+										sortLoadedCardsByName(state);
 									} else {
 										appendCards(state, incomingList);
 									}
@@ -5561,6 +5586,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (!state) {
 									state = createState(root, list, replacementSnapshot ? term : '');
 									root._openVibelyCardPaginationState = state;
+									sortLoadedCardsByName(state);
 								}							bindSearch(state);
 							setStatus(state, 'idle');
 							if (state.resetPending) return;

@@ -484,13 +484,13 @@ func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, fil
 	}
 	switch filter.Sort {
 	case "name_desc":
-		query += ` ORDER BY name DESC, id DESC`
+		query += ` ORDER BY name COLLATE NOCASE DESC, name DESC, id DESC`
 	case "updated_desc":
 		query += ` ORDER BY updated_at DESC, id DESC`
 	case "created_desc":
 		query += ` ORDER BY created_at DESC, id DESC`
 	default:
-		query += ` ORDER BY name ASC, id ASC`
+		query += ` ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC`
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)

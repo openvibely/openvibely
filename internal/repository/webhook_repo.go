@@ -186,9 +186,9 @@ func (r *WebhookRepo) ListCardsByProjectPageFiltered(ctx context.Context, projec
 		args = append(args, *filter.Enabled)
 	}
 	if filter.Sort == "name_desc" {
-		query += ` ORDER BY name DESC, id DESC`
+		query += ` ORDER BY name COLLATE NOCASE DESC, name DESC, id DESC`
 	} else {
-		query += ` ORDER BY name ASC, id ASC`
+		query += ` ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC`
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)

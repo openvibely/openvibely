@@ -198,9 +198,9 @@ func (r *CustomPersonalityRepo) listPageFiltered(ctx context.Context, limit, off
 		args = append(args, strings.ToLower(search))
 	}
 	if filter.Sort == "name_desc" {
-		query += ` ORDER BY name DESC, id DESC`
+		query += ` ORDER BY name COLLATE NOCASE DESC, name DESC, id DESC`
 	} else {
-		query += ` ORDER BY name ASC, id ASC`
+		query += ` ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC`
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)

@@ -207,11 +207,136 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 	}
 }
 
+func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser regression in short mode")
+	}
+	chrome := findChromeForBrowserTest(t)
+	if chrome == "" {
+		t.Skip("Chrome/Chromium executable not found")
+	}
+
+	view := pages.ChannelsSettingsView{
+		CurrentProjectID: "project-channels-browser",
+		HasGitHubChannel: true,
+		HasSlackChannel:  true,
+		HasXChannel:      true,
+		HasEmailChannel:  true,
+		Sort:             "name_desc",
+		WebhooksHasMore:  true,
+		ChannelTargets: []models.ChannelTarget{
+			{ID: "outbound-target", Name: "Team destination", Platform: "slack", TargetID: "channel-1"},
+		},
+	}
+	for i := 0; i < 20; i++ {
+		view.Webhooks = append(view.Webhooks, models.WebhookEndpoint{
+			ID: fmt.Sprintf("webhook-%02d", i), Name: fmt.Sprintf("Webhook %02d", 19-i), Enabled: true,
+		})
+	}
+	nextView := view
+	nextView.Webhooks = []models.WebhookEndpoint{{ID: "mix-hook", Name: "mix webhook", Enabled: true}}
+	nextView.WebhooksHasMore = false
+	var nextContent bytes.Buffer
+	if err := pages.SettingsContent(nextView).Render(context.Background(), &nextContent); err != nil {
+		t.Fatalf("render next Channels page: %v", err)
+	}
+	var content bytes.Buffer
+	if err := pages.SettingsContent(view).Render(context.Background(), &content); err != nil {
+		t.Fatalf("render Channels content: %v", err)
+	}
+	var base bytes.Buffer
+	if err := layout.Base("Channels sort browser", nil, view.CurrentProjectID).Render(context.Background(), &base); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	var local []string
+	for _, line := range strings.Split(base.String(), "\n") {
+		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
+			continue
+		}
+		local = append(local, line)
+	}
+	page := strings.Replace(strings.Join(local, "\n"), "</main>", content.String()+"</main>", 1)
+	runner := `<script>
+	(function() {
+		function finish(status, message) {
+			var result = document.createElement('div');
+			result.id = 'browser-result';
+			result.setAttribute('data-status', status);
+			result.textContent = message;
+			document.body.appendChild(result);
+		}
+		function run() {
+			var root = document.getElementById('channels-container');
+			if (!root || !root._openVibelyCardPaginationState) {
+				setTimeout(run, 25);
+				return;
+			}
+			var webhookCount = root.querySelectorAll('[data-webhook-id]').length;
+			if (webhookCount < 21) {
+				window._channelsLoadAttempts = (window._channelsLoadAttempts || 0) + 1;
+				if (window._channelsLoadAttempts > 80) {
+					finish('fail', 'timed out loading Channels window; webhooks=' + webhookCount);
+					return;
+				}
+				window.scrollTo(0, document.documentElement.scrollHeight);
+				window.dispatchEvent(new Event('scroll'));
+				setTimeout(run, 25);
+				return;
+			}
+			var names = Array.prototype.map.call(
+				document.querySelectorAll('#channel-card-list [data-card-sort-name]'),
+				function(card) { return card.getAttribute('data-card-sort-name'); }
+			);
+			var sorted = names.every(function(name, index) {
+				if (!index) return true;
+				return names[index - 1].toLocaleLowerCase() >= name.toLocaleLowerCase();
+			});
+			var complete = names.length === 26 && names.indexOf('mix webhook') !== -1 && names.indexOf('X (formerly Twitter)') !== -1 && names.indexOf('Outbound Message Targets') !== -1;
+			finish(sorted && complete ? 'pass' : 'fail', names.join('|'));
+		}
+		setTimeout(run, 50);
+	})();
+	</script>`
+	page = strings.Replace(page, "</body>", runner+"</body>", 1)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/channels" {
+			w.Header().Set(cardPageHasMoreHeader, "false")
+			_, _ = w.Write(nextContent.Bytes())
+			return
+		}
+		_, _ = w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, chrome,
+		"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check", "--no-first-run",
+		"--virtual-time-budget=3000", "--dump-dom", srv.URL,
+	)
+	out, runErr := cmd.CombinedOutput()
+	dom := string(out)
+	if runErr != nil {
+		t.Fatalf("chrome failed: %v\n%s", runErr, out)
+	}
+	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
+		idx := strings.Index(dom, `id="browser-result"`)
+		if idx >= 0 {
+			end := min(idx+700, len(dom))
+			t.Fatalf("browser regression failed: %s", html.UnescapeString(dom[idx:end]))
+		}
+		t.Fatalf("browser regression did not report a result; DOM length=%d", len(dom))
+	}
+}
+
 func geometryToolbarFixture(t *testing.T) string {
 	t.Helper()
 	var buf bytes.Buffer
 	for _, config := range []pages.CardListToolbarConfig{
-		{PageKey: "channels-geometry", Sort: "name_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Webhooks A–Z"}, {Value: "name_desc", Label: "Webhooks Z–A"}}},
+		{PageKey: "channels-geometry", Sort: "name_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "name_desc", Label: "Name Z–A"}}},
 		{PageKey: "automations-geometry", Sort: "updated_asc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "updated_asc", Label: "Least recently updated"}}},
 		{PageKey: "personality-geometry", Sort: "name_desc", SortOptions: []pages.CardListOption{{Value: "name_asc", Label: "Name A–Z"}, {Value: "name_desc", Label: "Name Z–A"}}},
 	} {

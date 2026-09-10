@@ -1927,7 +1927,7 @@ func assertCompactModelsRefreshQuery(t *testing.T, statements []string) {
 	var refreshStatements []string
 	for _, statement := range statements {
 		normalized := strings.Join(strings.Fields(statement), " ")
-		if strings.Contains(normalized, "FROM agent_configs WHERE 1=1 ORDER BY name ASC, id ASC") {
+		if strings.Contains(normalized, "FROM agent_configs WHERE 1=1 ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC") {
 			refreshStatements = append(refreshStatements, normalized)
 		}
 	}

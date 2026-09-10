@@ -198,11 +198,12 @@ templ settingsContent(view ChannelsSettingsView) {
 			data-search-container
 			data-card-pagination-root
 			data-card-pagination-url={ CardListURL("channels", channelCardListState(view)) }
-			data-card-pagination-list="#webhook-card-list"
+			data-card-pagination-list="#channel-card-list"
 			data-card-pagination-card-selector="[data-webhook-id]"
 			data-card-pagination-replacement-card-selector="[data-channel-type]"
 			data-card-pagination-replacement-scope="root"
 			data-card-pagination-key="data-webhook-id"
+			data-card-loaded-name-sort
 				data-card-pagination-page-size="20"
 				data-card-pagination-has-more={ cardPaginationHasMoreAttribute(view.WebhooksHasMore) }			hx-get={ CardListURL("channels", channelCardListState(view)) }		hx-trigger="channels-refresh from:body"
 		hx-target="this"
@@ -269,12 +270,12 @@ templ settingsContent(view ChannelsSettingsView) {
 		@CardListToolbar(collectionToolbarConfigWithState("channels", channelCardListState(view)))
 
 			<!-- Active Channels -->
-			<div class="grid gap-4 mb-8">
-				if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0, "Outbound Message Targets send_message Slack Telegram Email Discord X") {
+			<div id="channel-card-list" data-card-pagination-list>
+				<div class="grid gap-4">				if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0, "Outbound Message Targets send_message Slack Telegram Email Discord X") {
 					@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 				}
 				if view.HasXChannel {
-					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-card-select-id="channel:x" data-card-select-eligible="true" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected, "X formerly Twitter mentions posts") }>
+					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-card-sort-name="X (formerly Twitter)" data-card-select-id="channel:x" data-card-select-eligible="true" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected, "X formerly Twitter mentions posts") }>
 						<div class="card-body p-5">
 							<div class="flex items-start justify-between gap-3">
 								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
@@ -304,6 +305,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="github"
+					data-card-sort-name="GitHub"
 					data-card-select-id="channel:github"
 					data-card-select-eligible="true"
 					hidden?={ !channelCardMatchesFilters(view, "github", view.GitHubStatus.Configured, view.GitHubStatus.Connected, "GitHub "+githubConnectionBadge(view.GitHubStatus).Label) }
@@ -381,6 +383,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="slack"
+					data-card-sort-name="Slack"
 					data-card-select-id="channel:slack"
 					data-card-select-eligible="true"
 					hidden?={ !channelCardMatchesFilters(view, "slack", view.SlackStatus.Configured, view.SlackStatus.Connected, "Slack "+slackConnectionBadge(view.SlackStatus).Label) }
@@ -461,6 +464,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="telegram"
+					data-card-sort-name="Telegram Bot"
 					data-card-select-id="channel:telegram"
 					data-card-select-eligible="true"
 					hidden?={ !channelCardMatchesFilters(view, "telegram", strings.TrimSpace(view.TelegramToken) != "", view.IsBotRunning, "Telegram Bot "+telegramChannelStatusText(view.IsBotRunning)) }
@@ -537,6 +541,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="discord"
+						data-card-sort-name="Discord"
 						data-card-select-id="channel:discord"
 						data-card-select-eligible="true"
 						hidden?={ !channelCardMatchesFilters(view, "discord", view.DiscordStatus.Configured, view.DiscordStatus.Running, "Discord "+discordConnectionBadge(view.DiscordStatus).Label) }
@@ -603,6 +608,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="email"
+						data-card-sort-name="Email"
 						data-card-select-id="channel:email"
 						data-card-select-eligible="true"
 						hidden?={ !channelCardMatchesFilters(view, "email", view.EmailStatus.Configured, view.EmailStatus.Running, "Email "+view.EmailStatus.Address) }
@@ -644,13 +650,12 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 				}
-				<div id="webhook-card-list" data-card-pagination-list>
-					<div class="grid gap-4">
 					for _, wh := range view.Webhooks {
-					<!-- Webhook Card -->
+						<!-- Webhook Card -->
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="webhook"
+						data-card-sort-name={ wh.Name }
 						data-search-card
 						data-search-text={ "Webhook " + wh.Name }
 						data-webhook-id={ wh.ID }
@@ -737,8 +742,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 				}
-			</div>
-					@OutboundTargetsModal(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
+			@OutboundTargetsModal(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 			<dialog id="delete_channel_confirm_modal" class="modal">
 				<div class="modal-box">
 					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDeleteChannelConfirm()" aria-label="Close delete confirmation" title="Close delete confirmation">
@@ -2351,6 +2355,7 @@ templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarge
 		id="outbound-targets-card"
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 		data-channel-type="outbound-targets"
+		data-card-sort-name="Outbound Message Targets"
 		data-search-card
 		data-search-text="Outbound Message Targets send_message Slack Telegram Email Discord X"
 		hx-get={ "/channels/outbound-targets/card?project_id=" + currentProjectID }

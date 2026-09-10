@@ -159,7 +159,7 @@ func collectionToolbarConfig(pageKey, projectID, search string) CardListToolbarC
 	case "channels":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/channels", "Search channels...", "channels", "/channels/bulk"
 		config.Filters = []CardListFilter{{Key: "type", Label: "Type", Options: cardListOptions("github", "GitHub", "slack", "Slack", "telegram", "Telegram", "discord", "Discord", "x", "X", "email", "Email", "webhook", "Webhook", "outbound_targets", "Outbound targets")}, {Key: "connection_state", Label: "Connection", Options: cardListOptions("connected", "Connected", "configured", "Configured", "disconnected", "Disconnected")}, {Key: "webhook_enabled", Label: "Webhook", Options: cardListOptions("true", "Enabled", "false", "Disabled")}}
-		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Webhooks A–Z", "name_desc", "Webhooks Z–A")
+		config.Sort, config.SortOptions = "name_asc", cardListOptions("name_asc", "Name A–Z", "name_desc", "Name Z–A")
 	case "personality":
 		config.Action, config.Placeholder, config.EntityType, config.BulkDeleteURL = "/personality", "Search personalities...", "personalities", "/personality/custom/bulk"
 		config.Filters = []CardListFilter{{Key: "kind", Label: "Kind", Options: cardListOptions("base", "Base", "built_in", "Built-in", "custom", "Custom", "override", "Override")}, {Key: "active", Label: "Status", Options: cardListOptions("true", "Active", "false", "Inactive")}}
