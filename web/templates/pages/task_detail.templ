@@ -165,7 +165,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								@WorktreeInfoPanel(task, nil)
 							</div>
 						}
-						@TaskDetailActions(task)
+						@TaskDetailActions(taskDetailActionMetadata(task))
 						<!-- Delete Confirmation Modal -->
 						<dialog id="delete-task-modal" class="modal">
 							<div class="modal-box">
@@ -2464,10 +2464,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 	</div>
 }
 
+func taskDetailActionMetadata(task *models.Task) *models.TaskDetailActionMetadata {
+	return &models.TaskDetailActionMetadata{ID: task.ID, Status: task.Status}
+}
+
 // TaskDetailActions renders the action buttons (Run Now / Edit / Delete) for the details tab.
 // This fragment is independently refreshable via GET /tasks/:taskId/detail-actions so that
 // action button state (disabled Run Now, hidden Edit) updates in real time when a task finishes.
-templ TaskDetailActions(task *models.Task) {
+templ TaskDetailActions(task *models.TaskDetailActionMetadata) {
 	<div id="task-detail-actions" class="flex gap-2">
 		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 			<button

@@ -205,6 +205,10 @@ func (s *TaskService) GetThreadRenderMetadata(ctx context.Context, id string) (*
 	return s.repo.GetThreadRenderMetadata(ctx, id)
 }
 
+func (s *TaskService) GetDetailActionMetadata(ctx context.Context, id string) (*models.TaskDetailActionMetadata, error) {
+	return s.repo.GetDetailActionMetadata(ctx, id)
+}
+
 func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
 	return s.CreateWithGoal(ctx, t, "")
 }

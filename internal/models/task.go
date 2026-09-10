@@ -226,6 +226,14 @@ type Task struct {
 	CompletedAt              *time.Time   `json:"completed_at,omitempty"`
 }
 
+// TaskDetailActionMetadata is the read-only task state used to render the
+// Task Detail action buttons. It must not be used for task mutation or other
+// workflows that require the full task record.
+type TaskDetailActionMetadata struct {
+	ID     string
+	Status TaskStatus
+}
+
 // IsTerminalStatus returns true if the task status is terminal (completed/failed/cancelled).
 func IsTerminalStatus(s TaskStatus) bool {
 	return s == StatusCompleted || s == StatusFailed || s == StatusCancelled

@@ -791,12 +791,9 @@ func TestTaskDetailContent_TaskEventHandler_PreservesPendingAttachmentOnStatusCh
 }
 
 func TestTaskDetailActions_RunButtonLoadsThreadThroughRaceSafeLoader(t *testing.T) {
-	task := &models.Task{
-		ID:        "task-run-button",
-		Title:     "Task",
-		ProjectID: "project-1",
-		Status:    models.StatusCompleted,
-		Category:  models.CategoryCompleted,
+	task := &models.TaskDetailActionMetadata{
+		ID:     "task-run-button",
+		Status: models.StatusCompleted,
 	}
 
 	var buf bytes.Buffer

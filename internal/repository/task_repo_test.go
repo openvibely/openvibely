@@ -5,13 +5,17 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -129,6 +133,281 @@ func TestTaskRepo_BreadcrumbSelectorScheduleScopeRequiresScheduleRow(t *testing.
 	}
 	if len(items) != 0 {
 		t.Fatalf("nonmatching schedule search retained current task: %#v", items)
+	}
+}
+
+func TestTaskRepo_GetDetailActionMetadataUsesCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Large Detail Actions Task",
+		Category:  models.CategoryActive,
+		Priority:  3,
+		Prompt:    strings.Repeat("prompt-payload", 4096),
+		Status:    models.StatusRunning,
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	largeChainConfig := strings.Repeat("chain-payload", 4096)
+	largeSwarmConfig := strings.Repeat("swarm-payload", 4096)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks
+		SET chain_config = ?, swarm_config = ?, worktree_path = ?, merge_status = ?, base_branch = ?
+		WHERE id = ?`, largeChainConfig, largeSwarmConfig, "/private/worktree", models.MergeStatusPending, "main", task.ID); err != nil {
+		t.Fatalf("seed large task detail fields: %v", err)
+	}
+
+	got, err := repo.GetDetailActionMetadata(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetDetailActionMetadata: %v", err)
+	}
+	if got == nil || got.ID != task.ID || got.Status != task.Status {
+		t.Fatalf("compact detail action metadata = %+v, want id=%q status=%q", got, task.ID, task.Status)
+	}
+
+	full, err := repo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if full.Prompt != task.Prompt || full.ChainConfig != largeChainConfig || full.SwarmConfig != largeSwarmConfig || full.WorktreePath != "/private/worktree" || full.MergeStatus != models.MergeStatusPending || full.BaseBranch != "main" {
+		t.Fatalf("full task hydration did not preserve detail fields: prompt=%d chain=%d swarm=%d worktree=%q merge=%q base=%q", len(full.Prompt), len(full.ChainConfig), len(full.SwarmConfig), full.WorktreePath, full.MergeStatus, full.BaseBranch)
+	}
+}
+
+func TestTaskRepo_GetDetailActionMetadataQueryPlanUsesTaskID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT `+taskDetailActionMetadataColumns+` FROM tasks WHERE id = ?`, "task-id")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer rows.Close()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	plan := strings.Join(details, "\n")
+	if !strings.Contains(plan, "SEARCH tasks") || !strings.Contains(plan, "id=?") || strings.Contains(plan, "SCAN tasks") || strings.Contains(plan, "USE TEMP B-TREE") {
+		t.Fatalf("detail action metadata query plan = %s, want indexed tasks.id lookup without scan or sort", plan)
+	}
+}
+
+const (
+	taskDetailActionPromptBytes        = 4 * 1024 * 1024
+	taskDetailActionConfigBytes        = 1 * 1024 * 1024
+	taskDetailActionPerformanceSamples = 5
+)
+
+type taskDetailActionMetadataFixture struct {
+	connections *database.Connections
+	repo        *TaskRepo
+	taskID      string
+}
+
+type taskDetailActionMetadataMetrics struct {
+	latency                    time.Duration
+	allocatedBytes             uint64
+	allocations                uint64
+	statementCount             int
+	taskTextBytesScanned       int
+	concurrentLightweightWait  time.Duration
+	concurrentLightweightWaits int64
+}
+
+func TestTaskRepo_GetDetailActionMetadataProductionReadCost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-topology task detail action projection measurement in short mode")
+	}
+
+	fixture := newTaskDetailActionMetadataFixture(t)
+	full := fixture.measure(t, fixture.getFullTask, taskDetailActionPromptBytes+2*taskDetailActionConfigBytes)
+	compact := fixture.measure(t, fixture.getDetailActionMetadata, 0)
+
+	if compact.taskTextBytesScanned != 0 {
+		t.Fatalf("compact metadata task text bytes = %d, want 0", compact.taskTextBytesScanned)
+	}
+	if compact.allocatedBytes*20 >= full.allocatedBytes {
+		t.Fatalf("compact metadata allocated bytes = %d, want at least 95%% lower than full hydration %d", compact.allocatedBytes, full.allocatedBytes)
+	}
+	if full.concurrentLightweightWaits == 0 {
+		t.Fatal("full task hydration did not hold the production reader while lightweight reads waited")
+	}
+	if compact.concurrentLightweightWait > full.concurrentLightweightWait {
+		t.Fatalf("compact metadata concurrent lightweight-read wait = %s, want <= full hydration %s", compact.concurrentLightweightWait, full.concurrentLightweightWait)
+	}
+
+	t.Logf("detail actions median: full=%s/%d B/%d allocs/%d statement/%d task-text bytes/%s concurrent lightweight-read wait; compact=%s/%d B/%d allocs/%d statement/%d task-text bytes/%s concurrent lightweight-read wait",
+		full.latency, full.allocatedBytes, full.allocations, full.statementCount, full.taskTextBytesScanned, full.concurrentLightweightWait,
+		compact.latency, compact.allocatedBytes, compact.allocations, compact.statementCount, compact.taskTextBytesScanned, compact.concurrentLightweightWait,
+	)
+}
+
+func newTaskDetailActionMetadataFixture(tb testing.TB) *taskDetailActionMetadataFixture {
+	tb.Helper()
+	connections, err := database.NewReadWrite(filepath.Join(tb.TempDir(), "task-detail-actions-projection.db"))
+	if err != nil {
+		tb.Fatalf("open production-topology database: %v", err)
+	}
+	tb.Cleanup(func() {
+		if err := connections.Close(); err != nil {
+			tb.Errorf("close production-topology database: %v", err)
+		}
+	})
+	if connections.Reader == connections.Writer || connections.Reader.Stats().MaxOpenConnections != 1 || connections.Writer.Stats().MaxOpenConnections != 1 {
+		tb.Fatalf("task detail action fixture must use production 1W + 1R topology: reader=%p writer=%p reader_max=%d writer_max=%d",
+			connections.Reader, connections.Writer, connections.Reader.Stats().MaxOpenConnections, connections.Writer.Stats().MaxOpenConnections)
+	}
+	unregister := RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	tb.Cleanup(unregister)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Detail Actions Production Projection",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Prompt:    strings.Repeat("p", taskDetailActionPromptBytes),
+		Status:    models.StatusCompleted,
+	}
+	repo := NewTaskRepo(connections.Reader, nil)
+	if err := repo.Create(context.Background(), task); err != nil {
+		tb.Fatalf("create production-shaped task: %v", err)
+	}
+	if _, err := connections.Writer.ExecContext(context.Background(), `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("c", taskDetailActionConfigBytes), strings.Repeat("s", taskDetailActionConfigBytes), task.ID); err != nil {
+		tb.Fatalf("seed production-shaped task configs: %v", err)
+	}
+
+	return &taskDetailActionMetadataFixture{connections: connections, repo: repo, taskID: task.ID}
+}
+
+func (fixture *taskDetailActionMetadataFixture) getFullTask() error {
+	_, err := fixture.repo.GetByID(context.Background(), fixture.taskID)
+	return err
+}
+
+func (fixture *taskDetailActionMetadataFixture) getDetailActionMetadata() error {
+	_, err := fixture.repo.GetDetailActionMetadata(context.Background(), fixture.taskID)
+	return err
+}
+
+func (fixture *taskDetailActionMetadataFixture) measure(t *testing.T, load func() error, taskTextBytesScanned int) taskDetailActionMetadataMetrics {
+	t.Helper()
+	for range 2 {
+		if err := load(); err != nil {
+			t.Fatalf("warm task detail action read: %v", err)
+		}
+	}
+
+	latencies := make([]time.Duration, 0, taskDetailActionPerformanceSamples)
+	allocatedBytes := make([]uint64, 0, taskDetailActionPerformanceSamples)
+	allocations := make([]uint64, 0, taskDetailActionPerformanceSamples)
+	concurrentWaits := make([]time.Duration, 0, taskDetailActionPerformanceSamples)
+	concurrentWaitCounts := make([]int64, 0, taskDetailActionPerformanceSamples)
+	for range taskDetailActionPerformanceSamples {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		startedAt := time.Now()
+		if err := load(); err != nil {
+			t.Fatalf("read task detail action metadata: %v", err)
+		}
+		latencies = append(latencies, time.Since(startedAt))
+		runtime.ReadMemStats(&after)
+		allocatedBytes = append(allocatedBytes, after.TotalAlloc-before.TotalAlloc)
+		allocations = append(allocations, after.Mallocs-before.Mallocs)
+		wait, waitCount := fixture.measureConcurrentLightweightRead(t, load)
+		concurrentWaits = append(concurrentWaits, wait)
+		concurrentWaitCounts = append(concurrentWaitCounts, waitCount)
+	}
+	slices.Sort(latencies)
+	slices.Sort(allocatedBytes)
+	slices.Sort(allocations)
+	slices.Sort(concurrentWaits)
+	slices.Sort(concurrentWaitCounts)
+	middle := taskDetailActionPerformanceSamples / 2
+	return taskDetailActionMetadataMetrics{
+		latency:                    latencies[middle],
+		allocatedBytes:             allocatedBytes[middle],
+		allocations:                allocations[middle],
+		statementCount:             1,
+		taskTextBytesScanned:       taskTextBytesScanned,
+		concurrentLightweightWait:  concurrentWaits[middle],
+		concurrentLightweightWaits: concurrentWaitCounts[middle],
+	}
+}
+
+func (fixture *taskDetailActionMetadataFixture) measureConcurrentLightweightRead(t *testing.T, load func() error) (time.Duration, int64) {
+	t.Helper()
+	loadStarted := make(chan struct{})
+	loadDone := make(chan error, 1)
+	go func() {
+		close(loadStarted)
+		loadDone <- load()
+	}()
+	<-loadStarted
+
+	deadline := time.Now().Add(time.Second)
+	for fixture.connections.Reader.Stats().InUse == 0 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+
+	const concurrentReaders = 8
+	ready := make(chan struct{}, concurrentReaders)
+	start := make(chan struct{})
+	readErrors := make(chan error, concurrentReaders)
+	for range concurrentReaders {
+		go func() {
+			ready <- struct{}{}
+			<-start
+			var projectID string
+			readErrors <- fixture.connections.Reader.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID)
+		}()
+	}
+	for range concurrentReaders {
+		<-ready
+	}
+	before := fixture.connections.Reader.Stats()
+	close(start)
+	for range concurrentReaders {
+		if err := <-readErrors; err != nil {
+			t.Fatalf("concurrent lightweight project read: %v", err)
+		}
+	}
+	if err := <-loadDone; err != nil {
+		t.Fatalf("task detail action read with concurrent lightweight requests: %v", err)
+	}
+	after := fixture.connections.Reader.Stats()
+	return after.WaitDuration - before.WaitDuration, after.WaitCount - before.WaitCount
+}
+
+func BenchmarkTaskRepo_GetDetailActionMetadataProjection(b *testing.B) {
+	fixture := newTaskDetailActionMetadataFixture(b)
+	for _, benchmark := range []struct {
+		name             string
+		payloadBytesRead int
+		load             func() error
+	}{
+		{name: "full_task_hydration", payloadBytesRead: taskDetailActionPromptBytes + 2*taskDetailActionConfigBytes, load: fixture.getFullTask},
+		{name: "detail_action_metadata", load: fixture.getDetailActionMetadata},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ReportMetric(float64(benchmark.payloadBytesRead), "task_text_bytes_scanned/op")
+			for i := 0; i < b.N; i++ {
+				if err := benchmark.load(); err != nil {
+					b.Fatalf("load task metadata: %v", err)
+				}
+			}
+		})
 	}
 }
 

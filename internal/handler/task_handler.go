@@ -1188,7 +1188,7 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 func (h *Handler) GetTaskDetailActions(c echo.Context) error {
 	taskID := c.Param("taskId")
 
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	task, err := h.taskSvc.GetDetailActionMetadata(c.Request().Context(), taskID)
 	if err != nil {
 		return err
 	}
