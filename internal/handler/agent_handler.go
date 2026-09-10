@@ -1610,6 +1610,47 @@ func agentNameValidationHTTPError(err error) error {
 	return nil
 }
 
+func rollbackCreatedAgent(c echo.Context, agent *models.Agent, projectRoot string, agentRepo *repository.AgentRepo, agentSkillRoot string) error {
+	if agent == nil || agentRepo == nil {
+		return errors.New("agent rollback is not configured")
+	}
+
+	var cleanupErrs []error
+	if err := agentRepo.Delete(contextFromEcho(c), agent.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	key := strings.TrimSpace(agent.Key)
+	if key == "" || agentSkillRoot == "" {
+		return errors.Join(cleanupErrs...)
+	}
+
+	scope := string(agent.Scope)
+	if scope != string(models.AgentScopeProject) {
+		scope = string(models.AgentScopeGlobal)
+	}
+	root := agentSkillRoot
+	if scope == string(models.AgentScopeProject) {
+		root = projectRoot
+	}
+	if root == "" {
+		return errors.Join(cleanupErrs...)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "agents", key)); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if _, err := agentlibrary.RemoveAgentIndexEntry(filepath.Join(root, "agents", "AGENTS.md"), key); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return errors.Join(cleanupErrs...)
+}
+
+func (h *Handler) rollbackCreatedAgent(c echo.Context, agent *models.Agent, projectRoot string, cause error) error {
+	if rollbackErr := rollbackCreatedAgent(c, agent, projectRoot, h.agentRepo, h.agentSkillRoot); rollbackErr != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("%v; failed to roll back created agent: %v", cause, rollbackErr))
+	}
+	return cause
+}
+
 func (h *Handler) CreateAgent(c echo.Context) error {
 	agent := models.Agent{}
 	if err := h.applyAgentDialogFormFields(c, &agent, agentDialogFormOptions{operation: "CreateAgent", defaultMissingCollections: true}); err != nil {
@@ -1626,15 +1667,18 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if err := h.saveAgentLifecycleHooksFromForm(c, agent.ID); err != nil {
-		return err
-	}
 	projectRoot := h.projectRootForAgentMaterialization(c, &agent)
+	rollback := func(cause error) error {
+		return h.rollbackCreatedAgent(c, &agent, projectRoot, cause)
+	}
+	if err := h.saveAgentLifecycleHooksFromForm(c, agent.ID); err != nil {
+		return rollback(err)
+	}
 	if err := h.materializeAgentToDisk(c, &agent, projectRoot); err != nil {
-		return err
+		return rollback(err)
 	}
 	if err := h.migrateLegacyAgentSkills(c, &agent, projectRoot); err != nil {
-		return err
+		return rollback(err)
 	}
 
 	return h.ListAgents(c)

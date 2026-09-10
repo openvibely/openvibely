@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 type llmCallerFunc func(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error)
@@ -2665,6 +2666,52 @@ func agentNameValidationForm(name string) url.Values {
 	form.Set("enabled", "true")
 	form.Set("selectable_as_primary", "true")
 	return form
+}
+
+func TestHandler_CreateAgent_RollsBackWhenMaterializationFails(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	root := filepath.Join(t.TempDir(), "unwritable-agent-root")
+	require.NoError(t, os.WriteFile(root, []byte("not a directory"), 0o600))
+	h.SetAgentSkillRoot(root)
+
+	form := agentNameValidationForm("Retryable Browser Agent")
+	form.Set("key", "retryable_browser_agent")
+	form.Set("scope", "global")
+	form.Set("lifecycle_hooks_json", `[{"when":"before_run","skill_key":"load_context","enabled":true}]`)
+
+	var hookCountBefore int
+	require.NoError(t, db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_lifecycle_hooks`).Scan(&hookCountBefore))
+
+	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", form)
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+
+	matches, err := agentRepo.ListByName(t.Context(), "Retryable Browser Agent")
+	require.NoError(t, err)
+	require.Empty(t, matches)
+	var hookCount int
+	require.NoError(t, db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM agent_lifecycle_hooks`).Scan(&hookCount))
+	require.Equal(t, hookCountBefore, hookCount)
+
+	require.NoError(t, os.Remove(root))
+	require.NoError(t, os.Mkdir(root, 0o755))
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", form)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	matches, err = agentRepo.ListByName(t.Context(), "Retryable Browser Agent")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Equal(t, "retryable_browser_agent", matches[0].Key)
+	hooks, err := lifecycleRepo.HooksByAgent(t.Context(), matches[0].ID)
+	require.NoError(t, err)
+	require.Len(t, hooks, 1)
+	declaration, err := os.ReadFile(filepath.Join(root, "agents", "retryable_browser_agent", "SKILLS.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(declaration), "key: retryable_browser_agent")
 }
 
 func TestHandler_CreateAgent_RejectsBlankAndDuplicateSelectableNames(t *testing.T) {
