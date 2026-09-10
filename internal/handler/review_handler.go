@@ -199,7 +199,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	// Build system context and spawn LLM processing
 	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
-	priorExecs, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(c.Request().Context(), taskID, taskThreadHistoryLimit)
 	priorHistory := filterChatHistory(priorExecs, exec.ID)
 	agentDef := h.resolveTaskAgentDefinitionForTask(c.Request().Context(), taskID, nil)
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(c.Request().Context(), task.ID, agentDef))
