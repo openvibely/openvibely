@@ -1610,18 +1610,13 @@ func agentNameValidationHTTPError(err error) error {
 	return nil
 }
 
-func rollbackCreatedAgent(c echo.Context, agent *models.Agent, projectRoot string, agentRepo *repository.AgentRepo, agentSkillRoot string) error {
-	if agent == nil || agentRepo == nil {
-		return errors.New("agent rollback is not configured")
-	}
-
-	var cleanupErrs []error
-	if err := agentRepo.Delete(contextFromEcho(c), agent.ID); err != nil {
-		cleanupErrs = append(cleanupErrs, err)
+func cleanupCreatedAgentMaterialization(agent *models.Agent, projectRoot, agentSkillRoot string) error {
+	if agent == nil {
+		return errors.New("agent cleanup is not configured")
 	}
 	key := strings.TrimSpace(agent.Key)
 	if key == "" || agentSkillRoot == "" {
-		return errors.Join(cleanupErrs...)
+		return nil
 	}
 
 	scope := string(agent.Scope)
@@ -1633,12 +1628,29 @@ func rollbackCreatedAgent(c echo.Context, agent *models.Agent, projectRoot strin
 		root = projectRoot
 	}
 	if root == "" {
-		return errors.Join(cleanupErrs...)
+		return nil
 	}
+
+	var cleanupErrs []error
 	if err := os.RemoveAll(filepath.Join(root, "agents", key)); err != nil {
 		cleanupErrs = append(cleanupErrs, err)
 	}
 	if _, err := agentlibrary.RemoveAgentIndexEntry(filepath.Join(root, "agents", "AGENTS.md"), key); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	return errors.Join(cleanupErrs...)
+}
+
+func rollbackCreatedAgent(c echo.Context, agent *models.Agent, projectRoot string, agentRepo *repository.AgentRepo, agentSkillRoot string) error {
+	if agent == nil || agentRepo == nil {
+		return errors.New("agent rollback is not configured")
+	}
+
+	var cleanupErrs []error
+	if err := agentRepo.Delete(contextFromEcho(c), agent.ID); err != nil {
+		cleanupErrs = append(cleanupErrs, err)
+	}
+	if err := cleanupCreatedAgentMaterialization(agent, projectRoot, agentSkillRoot); err != nil {
 		cleanupErrs = append(cleanupErrs, err)
 	}
 	return errors.Join(cleanupErrs...)

@@ -299,6 +299,17 @@ func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *
 	return chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers)
 }
 
+func (h *Handler) runtimeAgentMaterializationProjectRoot(ctx context.Context, projectID string, agent *models.Agent) string {
+	pid := strings.TrimSpace(projectID)
+	if agent != nil && strings.TrimSpace(agent.ProjectID) != "" {
+		pid = strings.TrimSpace(agent.ProjectID)
+	}
+	if agent != nil && agent.Scope == models.AgentScopeProject && pid != "" && h.projectRepo != nil {
+		return service.ProjectSkillRootForResolver(ctx, h.projectRepo, pid)
+	}
+	return ""
+}
+
 func (h *Handler) materializeRuntimeAgentFromChat(ctx context.Context, projectID string, agent *models.Agent) error {
 	if h == nil || agent == nil || h.agentSkillRoot == "" {
 		return nil
@@ -307,10 +318,7 @@ func (h *Handler) materializeRuntimeAgentFromChat(ctx context.Context, projectID
 	if strings.TrimSpace(agent.ProjectID) != "" {
 		pid = strings.TrimSpace(agent.ProjectID)
 	}
-	projectRoot := ""
-	if agent.Scope == models.AgentScopeProject && pid != "" && h.projectRepo != nil {
-		projectRoot = service.ProjectSkillRootForResolver(ctx, h.projectRepo, pid)
-	}
+	projectRoot := h.runtimeAgentMaterializationProjectRoot(ctx, projectID, agent)
 	target := "/agents"
 	if pid != "" {
 		target += "?project_id=" + url.QueryEscape(pid)
@@ -319,6 +327,13 @@ func (h *Handler) materializeRuntimeAgentFromChat(ctx context.Context, projectID
 	rec := httptest.NewRecorder()
 	c := echo.New().NewContext(req, rec)
 	return h.materializeAgentToDisk(c, agent, projectRoot)
+}
+
+func (h *Handler) cleanupRuntimeAgentMaterializationFromChat(ctx context.Context, projectID string, agent *models.Agent) error {
+	if h == nil || agent == nil || h.agentSkillRoot == "" {
+		return nil
+	}
+	return cleanupCreatedAgentMaterialization(agent, h.runtimeAgentMaterializationProjectRoot(ctx, projectID, agent), h.agentSkillRoot)
 }
 
 func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) map[string]chatcontrol.RuntimeActionHandler {
@@ -578,6 +593,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 				ProjectRepo:   h.projectRepo,
 				Materialize: func(ctx context.Context, agent *models.Agent) error {
 					return h.materializeRuntimeAgentFromChat(ctx, params.ProjectID, agent)
+				},
+				CleanupMaterialization: func(ctx context.Context, agent *models.Agent) error {
+					return h.cleanupRuntimeAgentMaterializationFromChat(ctx, params.ProjectID, agent)
 				},
 			})
 			return out, err

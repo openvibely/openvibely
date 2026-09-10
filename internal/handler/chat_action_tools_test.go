@@ -2849,6 +2849,50 @@ func TestCreateAgentRuntimeTool_WebAPIRollsBackFailedMaterialization(t *testing.
 	require.Contains(t, string(declaration), "Chat Retryable Agent")
 }
 
+func TestCreateAgentRuntimeTool_WebAPIRollsBackPostWriteMaterializationFailure(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetAgentSkillRoot(t.TempDir())
+	project := createProject(t, h, "Runtime Agent Post-Write Rollback Project")
+	project.RepoPath = t.TempDir()
+	require.NoError(t, h.projectSvc.Update(ctx, project))
+
+	catalogRoot := filepath.Join(project.RepoPath, ".openvibely")
+	agentsRoot := filepath.Join(catalogRoot, "agents")
+	require.NoError(t, os.MkdirAll(agentsRoot, 0o755))
+	// A directory at the index path allows SKILLS.md to be written before the
+	// subsequent index operation fails.
+	require.NoError(t, os.Mkdir(filepath.Join(agentsRoot, "AGENTS.md"), 0o755))
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["create_agent"]
+	require.NotNil(t, handler)
+	input := json.RawMessage(`{"name":"Chat Post-Write Retryable Agent","system_prompt":"Work safely.","scope":"project"}`)
+
+	out, err := handler(ctx, input)
+	require.Error(t, err)
+	require.Contains(t, out, `"ok":false`)
+	matches, err := agentRepo.ListByName(ctx, "Chat Post-Write Retryable Agent")
+	require.NoError(t, err)
+	require.Empty(t, matches)
+	entries, err := os.ReadDir(agentsRoot)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, "AGENTS.md", entries[0].Name())
+
+	require.NoError(t, os.RemoveAll(filepath.Join(agentsRoot, "AGENTS.md")))
+	out, err = handler(ctx, input)
+	require.NoError(t, err, out)
+	require.Contains(t, out, `"ok":true`)
+	matches, err = agentRepo.ListByName(ctx, "Chat Post-Write Retryable Agent")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	declaration, err := os.ReadFile(filepath.Join(agentsRoot, matches[0].Key, "SKILLS.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(declaration), "Chat Post-Write Retryable Agent")
+}
+
 func TestCreateAgentRuntimeTool_WebAPICreatesProjectScopedAgentAndMaterializes(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
