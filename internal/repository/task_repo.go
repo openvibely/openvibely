@@ -24,6 +24,8 @@ const activeTaskAdmissionSelectColumns = `id, project_id, title, category, prior
 
 const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent_id, agent_definition_id`
 
+const taskDetailActionMetadataColumns = `id, status`
+
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status`
 
 const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
@@ -361,6 +363,23 @@ func (r *TaskRepo) GetThreadRenderMetadata(ctx context.Context, id string) (*mod
 		return nil, fmt.Errorf("getting task thread render metadata: %w", err)
 	}
 	return &t, nil
+}
+
+// GetDetailActionMetadata returns the compact, read-only task state needed to
+// render Task Detail action buttons. Full task hydration remains on GetByID.
+func (r *TaskRepo) GetDetailActionMetadata(ctx context.Context, id string) (*models.TaskDetailActionMetadata, error) {
+	var metadata models.TaskDetailActionMetadata
+	err := r.db.QueryRowContext(ctx,
+		`SELECT `+taskDetailActionMetadataColumns+`
+			 FROM tasks WHERE id = ?`, id).
+		Scan(&metadata.ID, &metadata.Status)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting task detail action metadata: %w", err)
+	}
+	return &metadata, nil
 }
 
 // FilterNonChatTaskIDs returns the referenced task IDs that exist and are not

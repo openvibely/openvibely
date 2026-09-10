@@ -1030,7 +1030,7 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 		t.Fatalf("render Automation actions: %v", err)
 	}
 	var taskActions bytes.Buffer
-	task := models.Task{ID: "secondary-action-task", Status: models.StatusPending}
+	task := models.TaskDetailActionMetadata{ID: "secondary-action-task", Status: models.StatusPending}
 	if err := TaskDetailActions(&task).Render(context.Background(), &taskActions); err != nil {
 		t.Fatalf("render Task actions: %v", err)
 	}
