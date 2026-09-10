@@ -1,0 +1,28 @@
+Exact-HEAD validation evidence
+
+Commit: 2c95f379b6d5a7d54b6d3efffaa4724900ae82c1
+Integration: task/4651c877-model-edit-contract-integration is directly descended from backend main 408307c89c451c6e861358a6f48873622d43c4d6 and contains the required default_max_tokens and redacted custom API-key edit-details contracts.
+
+Passed focused regressions:
+  go test ./internal/handler ./internal/llm/customauth -run 'TestHandler_GetModelEditDetails|TestRedactedConfigRemovesRefreshParameters' -count=1
+
+Passed required validation:
+  go build ./...
+  go vet ./...
+  go test ./... -count=1
+  gofmt -l \internal/client/model_edit_test.go
+internal/client/resources.go
+internal/terminal/cli.go
+internal/terminal/cli_test.go
+internal/terminal/command_test.go
+internal/terminal/dispatch_test.go
+internal/terminal/model.go
+internal/terminal/model_edit_test.go
+internal/terminal/registry.go
+internal/terminal/render_test.go
+internal/terminal/selector_test.go
+internal/terminal/view.go  # zero output
+  git diff --check                 # zero output
+  git diff --check main...HEAD     # zero output
+
+The repository-wide gofmt check lists eleven pre-existing files outside this integration diff; none were changed. Before validation and after all checks: HEAD remained 2c95f379b6d5a7d54b6d3efffaa4724900ae82c1 and git status --porcelain was empty.
