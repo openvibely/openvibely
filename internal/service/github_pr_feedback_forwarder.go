@@ -50,6 +50,12 @@ func NewGitHubPRFeedbackForwarder(github GitHubPRFeedbackProvider, prRepo *repos
 }
 
 func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Context, projectID string, repo *GitHubRepoRef) (*GitHubPRFeedbackForwardResult, error) {
+	return f.forwardAuthorizedFeedback(ctx, projectID, repo, make(map[string]bool))
+}
+
+// forwardAuthorizedFeedback accepts a nil decision map only so performance
+// coverage can measure the pre-cache behavior against the public cached path.
+func (f *GitHubPRFeedbackForwarder) forwardAuthorizedFeedback(ctx context.Context, projectID string, repo *GitHubRepoRef, authorizationDecisions map[string]bool) (*GitHubPRFeedbackForwardResult, error) {
 	if f == nil || f.github == nil {
 		return nil, fmt.Errorf("github feedback provider unavailable")
 	}
@@ -76,7 +82,6 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 		return nil, err
 	}
 	result := &GitHubPRFeedbackForwardResult{OK: true, ScannedPullRequests: len(prs)}
-	authorizationDecisions := make(map[string]bool)
 	for _, pr := range prs {
 		if pr.PRNumber <= 0 || strings.TrimSpace(pr.TaskID) == "" || strings.TrimSpace(pr.ID) == "" {
 			continue
@@ -112,7 +117,9 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 				if err != nil {
 					return nil, err
 				}
-				authorizationDecisions[author] = authorized
+				if authorizationDecisions != nil {
+					authorizationDecisions[author] = authorized
+				}
 			}
 			if !authorized {
 				result.SkippedUnauthorized++
