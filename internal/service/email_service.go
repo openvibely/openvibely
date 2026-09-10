@@ -830,8 +830,8 @@ func readEmailParts(mr *messagemail.Reader, skipAttachments bool) (string, []Ema
 			contentType, _, _ := h.ContentType()
 			fileName := emailPartFilename(h)
 			b, _ := io.ReadAll(part.Body)
-			// Inline parts with a filename (e.g. inline images) are attachments.
-			if fileName != "" && !strings.HasPrefix(contentType, "text/") {
+			// Inline parts with a filename (e.g. inline images or text files) are attachments.
+			if fileName != "" {
 				if !skipAttachments && len(attachments) < emailMaxAttachments {
 					attachments = appendEmailAttachment(attachments, fileName, contentType, b)
 				}

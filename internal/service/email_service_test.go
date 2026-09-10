@@ -2925,6 +2925,28 @@ func buildEmailMultipartFixture(t *testing.T, png []byte, withAttachment bool) [
 	return []byte(b.String())
 }
 
+func buildInlineTextEmailFixture(t *testing.T, withBody bool) []byte {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("From: Alice <alice@example.com>\r\n")
+	b.WriteString("Subject: Notes\r\n")
+	b.WriteString("Message-ID: <notes@example.com>\r\n")
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: multipart/mixed; boundary=\"BOUND\"\r\n\r\n")
+	if withBody {
+		b.WriteString("--BOUND\r\n")
+		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+		b.WriteString("Message body\r\n")
+	}
+	b.WriteString("--BOUND\r\n")
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	b.WriteString("Content-Disposition: inline; filename=\"notes.txt\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+	b.WriteString(base64.StdEncoding.EncodeToString([]byte("confidential notes")) + "\r\n")
+	b.WriteString("--BOUND--\r\n")
+	return []byte(b.String())
+}
+
 func TestReadEmailParts_ExtractsDecodedAttachmentAndBody(t *testing.T) {
 	raw := buildEmailMultipartFixture(t, slackTestPNGBytes, true)
 	mr, err := messagemail.CreateReader(bytes.NewReader(raw))
@@ -2944,6 +2966,75 @@ func TestReadEmailParts_SkipAttachmentsDropsAttachmentParts(t *testing.T) {
 	body, attachments := readEmailParts(mr, true)
 	require.Equal(t, "Here is a photo", body)
 	require.Empty(t, attachments, "attachments must be dropped when skipAttachments is true")
+}
+
+func TestReadEmailParts_ExtractsInlineTextAttachmentWithoutReplacingBody(t *testing.T) {
+	mr, err := messagemail.CreateReader(bytes.NewReader(buildInlineTextEmailFixture(t, true)))
+	require.NoError(t, err)
+
+	body, attachments := readEmailParts(mr, false)
+
+	require.Equal(t, "Message body", body)
+	require.Len(t, attachments, 1)
+	require.Equal(t, "notes.txt", attachments[0].FileName)
+	require.Equal(t, "text/plain", attachments[0].ContentType)
+	require.Equal(t, []byte("confidential notes"), attachments[0].Data)
+}
+
+func TestReadEmailParts_SkipAttachmentsDropsInlineTextAttachment(t *testing.T) {
+	mr, err := messagemail.CreateReader(bytes.NewReader(buildInlineTextEmailFixture(t, false)))
+	require.NoError(t, err)
+
+	body, attachments := readEmailParts(mr, true)
+
+	require.Empty(t, body, "skipped inline text attachments must not become the email body")
+	require.Empty(t, attachments)
+}
+
+func TestEmailService_InboundInlineTextAttachmentHonorsSkipSetting(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("skipped attachment-only message creates no execution", func(t *testing.T) {
+		mr, err := messagemail.CreateReader(bytes.NewReader(buildInlineTextEmailFixture(t, false)))
+		require.NoError(t, err)
+		body, attachments := readEmailParts(mr, true)
+		require.Empty(t, body)
+		require.Empty(t, attachments)
+
+		svc, _, _, project, _, _ := newEmailAttachmentTestService(t)
+		called := false
+		svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) { called = true })
+		svc.ProcessIncoming(ctx, EmailInboundMessage{FromAddress: "alice@example.com", Subject: "Notes", MessageID: "<notes-skipped@example.com>", Body: body, Attachments: attachments})
+		require.False(t, called, "skipped attachment-only email must not reach the inbound execution path")
+		tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, "")
+		require.NoError(t, err)
+		require.Empty(t, tasks, "skipped attachment-only email must not create a task")
+		executions, err := svc.execRepo.ListByProject(ctx, project.ID, 10)
+		require.NoError(t, err)
+		require.Empty(t, executions, "skipped attachment-only email must not create an execution")
+	})
+
+	t.Run("enabled attachment-only message is linked to the execution", func(t *testing.T) {
+		mr, err := messagemail.CreateReader(bytes.NewReader(buildInlineTextEmailFixture(t, false)))
+		require.NoError(t, err)
+		body, attachments := readEmailParts(mr, false)
+		require.Empty(t, body)
+		require.Len(t, attachments, 1)
+
+		svc, chatAttachmentRepo, _, _, _, _ := newEmailAttachmentTestService(t)
+		var runReq ChannelChatRunRequest
+		svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { runReq = req })
+		svc.ProcessIncoming(ctx, EmailInboundMessage{FromAddress: "alice@example.com", Subject: "Notes", MessageID: "<notes-enabled@example.com>", Body: body, Attachments: attachments})
+		require.NotEmpty(t, runReq.ExecID)
+
+		linked, err := chatAttachmentRepo.ListByExecution(ctx, runReq.ExecID)
+		require.NoError(t, err)
+		require.Len(t, linked, 1)
+		require.Equal(t, "notes.txt", linked[0].FileName)
+		data, err := os.ReadFile(linked[0].FilePath)
+		require.NoError(t, err)
+		require.Equal(t, []byte("confidential notes"), data)
+	})
 }
 
 func newEmailAttachmentTestService(t *testing.T) (*EmailService, *repository.ChatAttachmentRepo, *repository.ThreadInputRepo, *models.Project, *models.LLMConfig, *models.LLMConfig) {
