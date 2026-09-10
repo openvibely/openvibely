@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,8 +22,11 @@ import (
 )
 
 func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewCommentRepo, *repository.ExecutionRepo, *testutil.MockLLMCaller, string) {
+	return setupReviewHandlerForDB(t, testutil.NewTestDB(t))
+}
+
+func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, *repository.ReviewCommentRepo, *repository.ExecutionRepo, *testutil.MockLLMCaller, string) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
 
 	broadcaster := events.NewBroadcaster()
 	projectRepo := repository.NewProjectRepo(db)
@@ -289,6 +294,77 @@ func TestSubmitReview_NoComments(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 when no comments, got %d", rec.Code)
 	}
+}
+
+func TestSubmitReview_UsesBoundedChronologicalHistory(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, reviewRepo, execRepo, mockLLM, taskID := setupReviewHandlerForDB(t, db)
+	ctx := context.Background()
+
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, err)
+	require.NotNil(t, task.AgentID)
+	for i := 1; i <= 25; i++ {
+		exec := &models.Execution{
+			ID:               fmt.Sprintf("review-history-%02d", i),
+			TaskID:           taskID,
+			AgentConfigID:    *task.AgentID,
+			Status:           models.ExecCompleted,
+			PromptSent:       fmt.Sprintf("prior-%02d", i),
+			StartsNewContext: i == 16,
+		}
+		require.NoError(t, execRepo.Create(ctx, exec))
+		_, err = db.ExecContext(ctx, `UPDATE executions
+			SET output = ?, error_message = ?, started_at = datetime('2026-01-01 00:00:00', ?), completed_at = datetime('2026-01-01 00:00:00', ?)
+			WHERE id = ?`,
+			fmt.Sprintf("output-%02d", i), strings.Repeat("history-error-", 64), fmt.Sprintf("+%d seconds", i), fmt.Sprintf("+%d seconds", i), exec.ID)
+		require.NoError(t, err)
+	}
+	require.NoError(t, reviewRepo.Create(ctx, &models.ReviewComment{
+		TaskID: taskID, FilePath: "main.go", LineNumber: 42, LineType: "new", CommentText: "address the review",
+	}))
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+taskID+"/reviews/submit", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	var historyQueries []string
+	for _, statement := range counter.Statements() {
+		if strings.Contains(statement, "FROM executions WHERE task_id = ?") && strings.Contains(statement, "prompt_sent") && strings.Contains(statement, "output") {
+			historyQueries = append(historyQueries, statement)
+		}
+	}
+	require.Len(t, historyQueries, 1, "expected one direct review history query")
+	require.Contains(t, historyQueries[0], "ORDER BY started_at DESC, rowid DESC LIMIT ?")
+	require.NotContains(t, historyQueries[0], "ORDER BY started_at ASC, rowid ASC")
+
+	require.Eventually(t, func() bool { return mockLLM.CallCount() > 0 }, time.Second, 10*time.Millisecond)
+	history := mockLLM.LastAgentRequest().ChatHistory
+	require.Len(t, history, 10, "history should start at the recent context boundary")
+	for i, execution := range history {
+		want := fmt.Sprintf("review-history-%02d", i+16)
+		require.Equal(t, want, execution.ID)
+		require.Equal(t, models.ExecCompleted, execution.Status)
+	}
+
+	comments, err := reviewRepo.CountByTask(ctx, taskID)
+	require.NoError(t, err)
+	require.Zero(t, comments, "direct admission should clear submitted review comments")
+	allHistory, err := execRepo.ListByTaskChronological(ctx, taskID)
+	require.NoError(t, err)
+	var oldest *models.Execution
+	for i := range allHistory {
+		if allHistory[i].ID == "review-history-01" {
+			oldest = &allHistory[i]
+			break
+		}
+	}
+	require.NotNil(t, oldest, "full execution history must retain rows outside the follow-up window")
+	require.Equal(t, "output-01", oldest.Output)
 }
 
 func TestAddMultipleComments_SameFile(t *testing.T) {
