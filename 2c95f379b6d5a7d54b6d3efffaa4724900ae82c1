@@ -10,18 +10,7 @@ Passed required validation:
   go build ./...
   go vet ./...
   go test ./... -count=1
-  gofmt -l \internal/client/model_edit_test.go
-internal/client/resources.go
-internal/terminal/cli.go
-internal/terminal/cli_test.go
-internal/terminal/command_test.go
-internal/terminal/dispatch_test.go
-internal/terminal/model.go
-internal/terminal/model_edit_test.go
-internal/terminal/registry.go
-internal/terminal/render_test.go
-internal/terminal/selector_test.go
-internal/terminal/view.go  # zero output
+  gofmt -l $(git diff --name-only main...HEAD -- '*.go')  # zero output
   git diff --check                 # zero output
   git diff --check main...HEAD     # zero output
 
