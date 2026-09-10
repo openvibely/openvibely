@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 		provider models.LLMProvider
 	}{
 		{"Zulu Anthropic", models.ProviderAnthropic}, {"Alpha OpenAI", models.ProviderOpenAI}, {"Beta Anthropic", models.ProviderAnthropic},
+		{"mix", models.ProviderTest}, {"Sol xhigh", models.ProviderTest},
 	} {
 		require.NoError(t, modelsRepo.Create(ctx, &models.LLMConfig{Name: item.name, Provider: item.provider, Model: strings.ToLower(strings.ReplaceAll(item.name, " ", "-"))}))
 	}
@@ -81,6 +83,25 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page, 1)
 	require.Equal(t, "Zulu Anthropic", page[0].Name)
+	modelNames := func(configs []models.LLMConfig) []string {
+		names := make([]string, len(configs))
+		for i := range configs {
+			names[i] = configs[i].Name
+		}
+		return names
+	}
+	alphabeticalModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, ModelCardListFilter{Sort: "name_asc"})
+	require.NoError(t, err)
+	alphabeticalNames := modelNames(alphabeticalModels)
+	require.Contains(t, alphabeticalNames, "mix")
+	require.Contains(t, alphabeticalNames, "Sol xhigh")
+	require.Less(t, slices.Index(alphabeticalNames, "mix"), slices.Index(alphabeticalNames, "Sol xhigh"), alphabeticalNames)
+	reverseModels, err := modelsRepo.ListCardsPageFiltered(ctx, 10, 0, ModelCardListFilter{Sort: "name_desc"})
+	require.NoError(t, err)
+	reverseNames := modelNames(reverseModels)
+	require.Contains(t, reverseNames, "mix")
+	require.Contains(t, reverseNames, "Sol xhigh")
+	require.Less(t, slices.Index(reverseNames, "Sol xhigh"), slices.Index(reverseNames, "mix"), reverseNames)
 
 	projectRepo := NewProjectRepo(db)
 	project := &models.Project{Name: "Filtered hooks"}
@@ -89,20 +110,24 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	enabled := true
 	for _, agent := range []*models.Agent{
 		{Name: "A disabled agent", Model: "inherit", Enabled: false},
-		{Name: "B enabled agent", Model: "inherit", Enabled: true},
+		{Name: "b enabled agent", Model: "inherit", Enabled: true},
 		{Name: "C enabled agent", Model: "inherit", Enabled: true},
 	} {
 		require.NoError(t, agentsRepo.Create(ctx, agent))
 	}
-	agentsPage, err := agentsRepo.ListPageFiltered(ctx, 1, 1, AgentPageFilter{Enabled: &enabled, Sort: "name_asc"})
+	agentsPage, err := agentsRepo.ListPageFiltered(ctx, 1, 1, AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_asc"})
 	require.NoError(t, err)
 	require.Len(t, agentsPage, 1)
 	require.Equal(t, "C enabled agent", agentsPage[0].Name)
+	descendingAgents, err := agentsRepo.ListPageFiltered(ctx, 2, 0, AgentPageFilter{Enabled: &enabled, Search: "enabled agent", Sort: "name_desc"})
+	require.NoError(t, err)
+	require.Len(t, descendingAgents, 2)
+	require.Equal(t, []string{"C enabled agent", "b enabled agent"}, []string{descendingAgents[0].Name, descendingAgents[1].Name})
 
 	automationsRepo := NewAutomationRepo(db)
 	for _, item := range []struct{ key, name, lifecycle string }{
 		{"alpha-paused", "Alpha paused", "paused"},
-		{"beta-active", "Beta active", "active"},
+		{"beta-active", "beta active", "active"},
 		{"zulu-paused", "Zulu paused", "paused"},
 	} {
 		automationID, versionID := NewID(), NewID()
@@ -120,7 +145,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 
 	automationsDefault, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 10, 0, AutomationCardListFilter{})
 	require.NoError(t, err)
-	require.Equal(t, []string{"Alpha paused", "Beta active", "Zulu paused"}, []string{
+	require.Equal(t, []string{"Alpha paused", "beta active", "Zulu paused"}, []string{
 		automationsDefault[0].Automation.Name,
 		automationsDefault[1].Automation.Name,
 		automationsDefault[2].Automation.Name,
@@ -128,7 +153,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 
 	updatedAtByName := map[string]time.Time{
 		"Alpha paused": time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
-		"Beta active":  time.Date(2026, time.January, 3, 0, 0, 0, 0, time.UTC),
+		"beta active":  time.Date(2026, time.January, 3, 0, 0, 0, 0, time.UTC),
 		"Zulu paused":  time.Date(2026, time.January, 2, 0, 0, 0, 0, time.UTC),
 	}
 	for name, updatedAt := range updatedAtByName {
@@ -138,7 +163,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	automationsRecentlyUpdated, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 2, 0, AutomationCardListFilter{Sort: "updated_desc"})
 	require.NoError(t, err)
 	require.Len(t, automationsRecentlyUpdated, 2)
-	require.Equal(t, []string{"Beta active", "Zulu paused"}, []string{
+	require.Equal(t, []string{"beta active", "Zulu paused"}, []string{
 		automationsRecentlyUpdated[0].Automation.Name,
 		automationsRecentlyUpdated[1].Automation.Name,
 	})
@@ -148,7 +173,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.Equal(t, "Alpha paused", automationsRecentlyUpdatedNextPage[0].Automation.Name)
 
 	webhookRepo := NewWebhookRepo(db)
-	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "B enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
+	for _, endpoint := range []*models.WebhookEndpoint{{ProjectID: project.ID, Name: "A disabled", Enabled: false}, {ProjectID: project.ID, Name: "b enabled", Enabled: true}, {ProjectID: project.ID, Name: "C enabled", Enabled: true}} {
 		require.NoError(t, webhookRepo.Create(ctx, endpoint))
 	}
 	hooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 1, 1, WebhookCardFilter{Enabled: &enabled})
@@ -157,7 +182,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.Equal(t, "C enabled", hooks[0].Name)
 	descendingHooks, err := webhookRepo.ListCardsByProjectPageFiltered(ctx, project.ID, 2, 0, WebhookCardFilter{Enabled: &enabled, Sort: "name_desc"})
 	require.NoError(t, err)
-	require.Equal(t, []string{"C enabled", "B enabled"}, []string{descendingHooks[0].Name, descendingHooks[1].Name})
+	require.Equal(t, []string{"C enabled", "b enabled"}, []string{descendingHooks[0].Name, descendingHooks[1].Name})
 }
 
 func TestModelAuthStatusFilterMatchesOAuthValidityRule(t *testing.T) {

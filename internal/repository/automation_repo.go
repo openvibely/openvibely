@@ -172,11 +172,11 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 	case "updated_asc":
 		query += ` ORDER BY a.updated_at ASC, a.id ASC`
 	case "name_asc":
-		query += ` ORDER BY a.name ASC, a.id ASC`
+		query += ` ORDER BY a.name COLLATE NOCASE ASC, a.name ASC, a.id ASC`
 	case "name_desc":
-		query += ` ORDER BY a.name DESC, a.id DESC`
+		query += ` ORDER BY a.name COLLATE NOCASE DESC, a.name DESC, a.id DESC`
 	default:
-		query += ` ORDER BY a.name ASC, a.id ASC`
+		query += ` ORDER BY a.name COLLATE NOCASE ASC, a.name ASC, a.id ASC`
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)

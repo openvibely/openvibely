@@ -82,7 +82,7 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 	warmDeclarationMetricsAfter := maintenance.DeclarationSyncMetrics()
 	statementCounter.SetEnabled(false)
 	warmStatements := statementCounter.Statements()
-	warmAgentLists := countSQLStatements(warmStatements, "SELECT ", " FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC, id ASC LIMIT ? OFFSET ?")
+	warmAgentLists := countSQLStatements(warmStatements, "SELECT ", " FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC LIMIT ? OFFSET ?")
 	warmWrites := countSQLStatements(warmStatements, "INSERT ", "") + countSQLStatements(warmStatements, "UPDATE ", "") + countSQLStatements(warmStatements, "DELETE ", "")
 	warmAgentHookWrites := countSQLStatements(warmStatements, "INSERT ", "agents") + countSQLStatements(warmStatements, "UPDATE ", "agents") + countSQLStatements(warmStatements, "DELETE ", "agents") +
 		countSQLStatements(warmStatements, "INSERT ", "agent_lifecycle_hooks") + countSQLStatements(warmStatements, "UPDATE ", "agent_lifecycle_hooks") + countSQLStatements(warmStatements, "DELETE ", "agent_lifecycle_hooks")
