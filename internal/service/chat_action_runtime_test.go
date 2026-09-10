@@ -2904,6 +2904,61 @@ func TestBuildChannelProjectActionHandlersCreateProjectUsesOuterWorkerService(t 
 	}
 }
 
+func TestCreateAgentRuntimeRollsBackWhenMaterializationFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime Agent Rollback Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	input := CreateAgentRuntimeInput{
+		Name:         "Retryable Agent",
+		SystemPrompt: "Work safely.",
+		Scope:        "project",
+	}
+	var failedAgentID string
+	out, created, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input:         input,
+		Materialize: func(_ context.Context, agent *models.Agent) error {
+			failedAgentID = agent.ID
+			return fmt.Errorf("declaration storage is unavailable")
+		},
+	})
+	require.Error(t, err)
+	require.Nil(t, created)
+	require.Contains(t, out, `"ok":false`)
+	require.Contains(t, err.Error(), "declaration storage is unavailable")
+	require.NotEmpty(t, failedAgentID)
+
+	matches, err := agentRepo.ListByName(ctx, input.Name)
+	require.NoError(t, err)
+	require.Empty(t, matches)
+	stored, err := agentRepo.GetByID(ctx, failedAgentID)
+	require.NoError(t, err)
+	require.Nil(t, stored)
+
+	out, created, err = ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input:         input,
+		Materialize:   func(context.Context, *models.Agent) error { return nil },
+	})
+	require.NoError(t, err, out)
+	require.NotNil(t, created)
+	matches, err = agentRepo.ListByName(ctx, input.Name)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Equal(t, created.ID, matches[0].ID)
+}
+
 func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

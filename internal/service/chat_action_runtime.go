@@ -1954,6 +1954,9 @@ func ExecuteCreateAgentRuntime(ctx context.Context, opts CreateAgentRuntimeOptio
 	}
 	if opts.Materialize != nil {
 		if err := opts.Materialize(ctx, agent); err != nil {
+			if rollbackErr := opts.AgentRepo.Delete(ctx, agent.ID); rollbackErr != nil {
+				return fail(fmt.Sprintf("%v; failed to roll back agent: %v", err, rollbackErr))
+			}
 			return fail(err.Error())
 		}
 	}
