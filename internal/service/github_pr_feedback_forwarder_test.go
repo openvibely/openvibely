@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,7 @@ type prFeedbackCall struct {
 type fakePRFeedbackProvider struct {
 	authenticatedUser *GitHubAuthenticatedUser
 	items             []GitHubPullRequestFeedback
+	itemsFn           func() []GitHubPullRequestFeedback
 	itemsByCall       map[prFeedbackCall][]GitHubPullRequestFeedback
 	calls             []prFeedbackCall
 }
@@ -43,6 +45,9 @@ func (f *fakePRFeedbackProvider) ListPullRequestFeedback(ctx context.Context, re
 	f.calls = append(f.calls, call)
 	if f.itemsByCall != nil {
 		return f.itemsByCall[call], nil
+	}
+	if f.itemsFn != nil {
+		return f.itemsFn(), nil
 	}
 	return f.items, nil
 }
@@ -532,4 +537,230 @@ func TestGitHubPRFeedbackForwarderUsesPersistedRepositoryForEachPR(t *testing.T)
 			t.Fatalf("invalid PR URL for %s queued feedback: %#v", taskName, pending)
 		}
 	}
+}
+
+type githubPRFeedbackForwarderFixture struct {
+	project         *models.Project
+	task            *models.Task
+	forwarder       *GitHubPRFeedbackForwarder
+	provider        *fakePRFeedbackProvider
+	counter         *testutil.SQLStatementCounter
+	threadInputRepo *repository.ThreadInputRepo
+}
+
+func TestGitHubPRFeedbackForwarderCachesAuthorizationDecisionsPerPass(t *testing.T) {
+	cases := []struct {
+		name              string
+		itemCount         int
+		authors           []string
+		authorizedLogins  []string
+		wantAuthorization int
+		wantForwarded     int
+		wantSkippedUnauth int
+		verifySecondPass  bool
+	}{
+		{name: "one authorized feedback item", itemCount: 1, authors: []string{"Alice"}, authorizedLogins: []string{"alice"}, wantAuthorization: 1, wantForwarded: 1},
+		{name: "ten mixed case authorized feedback items", itemCount: 10, authors: []string{"Alice", "alice"}, authorizedLogins: []string{"alice"}, wantAuthorization: 1, wantForwarded: 10, verifySecondPass: true},
+		{name: "one hundred mixed case authorized feedback items", itemCount: 100, authors: []string{"Alice", "alice"}, authorizedLogins: []string{"alice"}, wantAuthorization: 1, wantForwarded: 100},
+		{name: "one hundred feedback items from five authorized reviewers", itemCount: 100, authors: []string{"Alice", "BOB", "carol", "DAVE", "eve"}, authorizedLogins: []string{"alice", "bob", "carol", "dave", "eve"}, wantAuthorization: 5, wantForwarded: 100},
+		{name: "one hundred unauthorized feedback items", itemCount: 100, authors: []string{"Mallory", "mallory"}, wantAuthorization: 1, wantSkippedUnauth: 100},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newGitHubPRFeedbackForwarderFixture(t, tc.authorizedLogins, realisticGitHubPRFeedbackItems(tc.itemCount, tc.authors, "feedback"))
+
+			fixture.counter.Reset()
+			fixture.counter.SetEnabled(true)
+			result, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo())
+			fixture.counter.SetEnabled(false)
+			if err != nil {
+				t.Fatalf("forward feedback: %v", err)
+			}
+			statements := fixture.counter.Statements()
+			if got := countGitHubAuthorizationLookups(statements); got != tc.wantAuthorization {
+				t.Fatalf("authorization lookups = %d, want %d; statements: %q", got, tc.wantAuthorization, statements)
+			}
+			if len(statements) < tc.wantAuthorization {
+				t.Fatalf("total SQL statements = %d, want at least %d", len(statements), tc.wantAuthorization)
+			}
+			if got := len(result.Forwarded); got != tc.wantForwarded || result.SkippedUnauthorized != tc.wantSkippedUnauth {
+				t.Fatalf("forward result = %#v, want forwarded=%d skipped_unauthorized=%d", result, tc.wantForwarded, tc.wantSkippedUnauth)
+			}
+			pending, err := fixture.threadInputRepo.ListPendingForTask(context.Background(), fixture.task.ID)
+			if err != nil {
+				t.Fatalf("list pending feedback: %v", err)
+			}
+			if got := len(pending); got != tc.wantForwarded {
+				t.Fatalf("queued feedback = %d, want %d", got, tc.wantForwarded)
+			}
+
+			if !tc.verifySecondPass {
+				return
+			}
+			fixture.counter.Reset()
+			fixture.counter.SetEnabled(true)
+			second, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo())
+			fixture.counter.SetEnabled(false)
+			if err != nil {
+				t.Fatalf("forward feedback second pass: %v", err)
+			}
+			if got := countGitHubAuthorizationLookups(fixture.counter.Statements()); got != tc.wantAuthorization {
+				t.Fatalf("second-pass authorization lookups = %d, want %d", got, tc.wantAuthorization)
+			}
+			if len(second.Forwarded) != 0 || second.SkippedDuplicate != tc.itemCount {
+				t.Fatalf("second forward result = %#v, want %d duplicate skips", second, tc.itemCount)
+			}
+		})
+	}
+}
+
+func TestGitHubPRFeedbackForwarderKeepsAuthorizationFilteringAndErrorsFailClosed(t *testing.T) {
+	t.Run("self and bot feedback skip authorization", func(t *testing.T) {
+		fixture := newGitHubPRFeedbackForwarderFixture(t, nil, []GitHubPullRequestFeedback{
+			{Kind: "issue_comment", ID: "self", AuthorLogin: "openvibely", AuthorType: "User", Body: "Self-authored feedback."},
+			{Kind: "review_comment", ID: "bot", AuthorLogin: "ci-bot", AuthorType: "Bot", Body: "Bot-authored feedback."},
+		})
+
+		fixture.counter.Reset()
+		fixture.counter.SetEnabled(true)
+		result, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo())
+		fixture.counter.SetEnabled(false)
+		if err != nil {
+			t.Fatalf("forward feedback: %v", err)
+		}
+		if result.SkippedSelfOrBot != 2 || len(result.Forwarded) != 0 {
+			t.Fatalf("forward result = %#v", result)
+		}
+		if got := countGitHubAuthorizationLookups(fixture.counter.Statements()); got != 0 {
+			t.Fatalf("self/bot feedback authorization lookups = %d, want 0", got)
+		}
+	})
+
+	t.Run("authorization lookup error aborts forwarding", func(t *testing.T) {
+		fixture := newGitHubPRFeedbackForwarderFixture(t, []string{"alice"}, realisticGitHubPRFeedbackItems(1, []string{"alice"}, "auth-error"))
+		authDB := testutil.NewTestDB(t)
+		fixture.forwarder.authRepo = repository.NewGitHubAuthRepo(authDB)
+		if err := authDB.Close(); err != nil {
+			t.Fatalf("close authorization database: %v", err)
+		}
+
+		result, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo())
+		if err == nil || result != nil {
+			t.Fatalf("forward result = %#v, error = %v; want authorization failure", result, err)
+		}
+		pending, listErr := fixture.threadInputRepo.ListPendingForTask(context.Background(), fixture.task.ID)
+		if listErr != nil {
+			t.Fatalf("list pending feedback: %v", listErr)
+		}
+		if len(pending) != 0 {
+			t.Fatalf("authorization failure queued feedback: %#v", pending)
+		}
+	})
+}
+
+func BenchmarkGitHubPRFeedbackForwarderAuthorizationCache(b *testing.B) {
+	for _, itemCount := range []int{1, 10, 100} {
+		b.Run(fmt.Sprintf("feedback_items=%d", itemCount), func(b *testing.B) {
+			var batch int
+			fixture := newGitHubPRFeedbackForwarderFixture(b, []string{"alice"}, nil)
+			fixture.provider.itemsFn = func() []GitHubPullRequestFeedback {
+				batch++
+				return realisticGitHubPRFeedbackItems(itemCount, []string{"Alice", "alice"}, fmt.Sprintf("benchmark-%d", batch))
+			}
+
+			fixture.counter.Reset()
+			fixture.counter.SetEnabled(true)
+			if _, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo()); err != nil {
+				b.Fatalf("warm forward feedback: %v", err)
+			}
+			fixture.counter.SetEnabled(false)
+			statements := fixture.counter.Statements()
+			authorizationLookups := countGitHubAuthorizationLookups(statements)
+			if authorizationLookups != 1 {
+				b.Fatalf("warm authorization lookups = %d, want 1; statements: %q", authorizationLookups, statements)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo()); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(len(statements)), "sqlite-statements/op")
+			b.ReportMetric(float64(authorizationLookups), "authorization-selects/op")
+		})
+	}
+}
+
+func newGitHubPRFeedbackForwarderFixture(tb testing.TB, authorizedLogins []string, items []GitHubPullRequestFeedback) githubPRFeedbackForwarderFixture {
+	tb.Helper()
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	authRepo := repository.NewGitHubAuthRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "PR feedback authorization cache", RepoPath: tb.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		tb.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Implement feedback", Category: models.CategoryActive, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		tb.Fatalf("create task: %v", err)
+	}
+	for _, login := range authorizedLogins {
+		if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: login, Permission: "triage", AddedBy: "test"}); err != nil {
+			tb.Fatalf("authorize actor %q: %v", login, err)
+		}
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/openvibely/openvibely/pull/42", PRState: "open"}); err != nil {
+		tb.Fatalf("upsert pull request: %v", err)
+	}
+	provider := &fakePRFeedbackProvider{items: items}
+	return githubPRFeedbackForwarderFixture{
+		project:         project,
+		task:            task,
+		forwarder:       NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo),
+		provider:        provider,
+		counter:         counter,
+		threadInputRepo: threadInputRepo,
+	}
+}
+
+func realisticGitHubPRFeedbackItems(count int, authors []string, idPrefix string) []GitHubPullRequestFeedback {
+	items := make([]GitHubPullRequestFeedback, count)
+	for i := range items {
+		items[i] = GitHubPullRequestFeedback{
+			Kind:        "review_comment",
+			ID:          fmt.Sprintf("%s-%03d", idPrefix, i),
+			AuthorLogin: authors[i%len(authors)],
+			AuthorType:  "User",
+			Body:        fmt.Sprintf("Please make the authorization lookup efficient for feedback item %d.", i+1),
+			Path:        "internal/service/github_pr_feedback_forwarder.go",
+			Line:        i + 1,
+			URL:         fmt.Sprintf("https://github.com/openvibely/openvibely/pull/42#discussion_r%d", i+1),
+			CreatedAt:   time.Date(2026, 9, 12, 12, 0, i%60, 0, time.UTC),
+		}
+	}
+	return items
+}
+
+func githubPRFeedbackTestRepo() *GitHubRepoRef {
+	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}
+}
+
+func countGitHubAuthorizationLookups(statements []string) int {
+	const authorizationQuery = "SELECT COUNT(*) FROM GITHUB_AUTHORIZED_ACTORS WHERE LOWER(GITHUB_LOGIN) = ?"
+	count := 0
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(strings.ToUpper(statement)), " ")
+		if normalized == authorizationQuery {
+			count++
+		}
+	}
+	return count
 }
