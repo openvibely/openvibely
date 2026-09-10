@@ -68,23 +68,33 @@ func TestDiscordAuthRepo_CreateRefreshesDuplicateUser(t *testing.T) {
 
 	refresh := &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: "12345", DisplayName: "Alice Updated", AddedBy: "second"}
 	require.NoError(t, repo.Create(ctx, refresh))
-	require.Equal(t, original.ID, refresh.ID)
+	require.NotEqual(t, original.ID, refresh.ID)
+
 	users, err := repo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
+	assert.Equal(t, original.ID, users[0].ID)
+	assert.Equal(t, "Alice", users[0].DisplayName)
+	assert.Equal(t, "first", users[0].AddedBy)
+
+	users, err = repo.ListByProject(ctx, otherProject.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, refresh.ID, users[0].ID)
 	assert.Equal(t, "Alice Updated", users[0].DisplayName)
 	assert.Equal(t, "second", users[0].AddedBy)
 
 	emptyRefresh := &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: " 12345 ", DisplayName: "", AddedBy: "third"}
 	require.NoError(t, repo.Create(ctx, emptyRefresh))
-	users, err = repo.ListByProject(ctx, project.ID)
+	require.Equal(t, refresh.ID, emptyRefresh.ID)
+	users, err = repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
 	assert.Equal(t, "Alice Updated", users[0].DisplayName)
 	assert.Equal(t, "third", users[0].AddedBy)
 }
 
-func TestDiscordAuthRepo_DeleteByProjectClearsSystemAllowlist(t *testing.T) {
+func TestDiscordAuthRepo_DeleteByProjectPreservesOtherProjectAllowlist(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewDiscordAuthRepo(db)
 	projectRepo := NewProjectRepo(db)
@@ -106,7 +116,9 @@ func TestDiscordAuthRepo_DeleteByProjectClearsSystemAllowlist(t *testing.T) {
 	assert.Len(t, users, 0)
 	otherUsers, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
-	assert.Len(t, otherUsers, 0)
+	assert.Len(t, otherUsers, 1)
+	assert.Equal(t, otherProject.ID, otherUsers[0].ProjectID)
+	assert.Equal(t, "333", otherUsers[0].DiscordUserID)
 }
 
 func TestDiscordAuthRepo_AuthorizationChecks(t *testing.T) {
@@ -191,8 +203,10 @@ func TestDiscordAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	require.True(t, authorized)
 	projectScoped, err := repo.IsAuthorizedForProject(ctx, otherProject.ID, "123456789012345678")
 	require.NoError(t, err)
-	require.False(t, projectScoped)
+	require.True(t, projectScoped)
 	users, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
+	assert.Equal(t, otherProject.ID, users[0].ProjectID)
+	assert.Equal(t, "Duplicate", users[0].DisplayName)
 }

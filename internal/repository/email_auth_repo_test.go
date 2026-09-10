@@ -76,17 +76,27 @@ func TestEmailAuthRepo_CreateRefreshesDuplicateSender(t *testing.T) {
 
 	refresh := &models.EmailAuthorizedSender{ProjectID: otherProject.ID, EmailAddress: "ALICE@example.com", DisplayName: "Alice Updated", AddedBy: "second"}
 	require.NoError(t, repo.Create(ctx, refresh))
-	require.Equal(t, original.ID, refresh.ID)
+	require.NotEqual(t, original.ID, refresh.ID)
+
 	senders, err := repo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, senders, 1)
+	assert.Equal(t, original.ID, senders[0].ID)
 	assert.Equal(t, "alice@example.com", senders[0].EmailAddress)
+	assert.Equal(t, "Alice", senders[0].DisplayName)
+	assert.Equal(t, "first", senders[0].AddedBy)
+
+	senders, err = repo.ListByProject(ctx, otherProject.ID)
+	require.NoError(t, err)
+	require.Len(t, senders, 1)
+	assert.Equal(t, refresh.ID, senders[0].ID)
 	assert.Equal(t, "Alice Updated", senders[0].DisplayName)
 	assert.Equal(t, "second", senders[0].AddedBy)
 
 	emptyRefresh := &models.EmailAuthorizedSender{ProjectID: otherProject.ID, EmailAddress: "alice@example.com", DisplayName: "", AddedBy: "third"}
 	require.NoError(t, repo.Create(ctx, emptyRefresh))
-	senders, err = repo.ListByProject(ctx, project.ID)
+	require.Equal(t, refresh.ID, emptyRefresh.ID)
+	senders, err = repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
 	require.Len(t, senders, 1)
 	assert.Equal(t, "Alice Updated", senders[0].DisplayName)
@@ -111,8 +121,9 @@ func TestEmailAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	require.True(t, ok)
 	projectScoped, err := repo.IsAuthorizedForProject(ctx, otherProject.ID, "a@example.com")
 	require.NoError(t, err)
-	require.False(t, projectScoped)
+	require.True(t, projectScoped)
 	senders, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
 	require.Len(t, senders, 1)
+	assert.Equal(t, otherProject.ID, senders[0].ProjectID)
 }
