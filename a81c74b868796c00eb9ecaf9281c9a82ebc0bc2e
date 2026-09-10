@@ -1,0 +1,15 @@
+Exact-HEAD validation evidence
+
+Commit: a81c74b868796c00eb9ecaf9281c9a82ebc0bc2e
+
+Passed focused regression:
+  go test ./internal/handler -run '^TestHandler_GetModelEditDetails_PreservesProviderSpecificFields$' -count=1
+
+Passed required validation:
+  go build ./...
+  go vet ./...
+  go test ./... -count=1
+  gofmt -l internal/handler/model_handler.go internal/handler/handler_test.go  # zero output
+  git diff --check                 # zero output
+
+The repository-wide gofmt check listed eleven pre-existing files; none were changed by this commit, so they were intentionally left untouched. Before validation and after all checks: HEAD remained a81c74b868796c00eb9ecaf9281c9a82ebc0bc2e and git status --porcelain was empty.
