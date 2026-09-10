@@ -1520,6 +1520,21 @@ func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []mod
 	return issues
 }
 
+func validateAutomationCandidateAgentReferences(candidate models.AutomationDraftCandidate, available map[string]bool) []models.AutomationValidationIssue {
+	var issues []models.AutomationValidationIssue
+	for _, node := range candidate.Nodes {
+		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
+			continue
+		}
+		agentRef, _ := node.Config["agent_ref"].(string)
+		agentRef = strings.TrimSpace(agentRef)
+		if agentRef != "" && !available[agentRef] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
+		}
+	}
+	return issues
+}
+
 func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate models.AutomationDraftCandidate, snapshot models.AutomationCapabilitySnapshot) []models.AutomationValidationIssue {
 	issues := s.ValidateCandidate(candidate)
 	if automationUsesGitHub(candidate) {
@@ -1536,16 +1551,12 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 	for _, model := range snapshot.Models {
 		modelsByID[model.ID] = true
 	}
+	issues = append(issues, validateAutomationCandidateAgentReferences(candidate, agents)...)
 	for _, node := range candidate.Nodes {
 		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
 			continue
 		}
-		agentRef, _ := node.Config["agent_ref"].(string)
-		agentRef = strings.TrimSpace(agentRef)
 		modelConfigID := automationExplicitModelConfigID(node.Config["model_config_id"])
-		if agentRef != "" && !agents[agentRef] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
-		}
 		if modelConfigID != "" && !modelsByID[modelConfigID] {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "model_config_id", Message: "Model selection is unavailable in this project."})
 		}
