@@ -2813,6 +2813,42 @@ func TestWebChatCreateProjectRuntimePlanModeBlocked(t *testing.T) {
 	require.Contains(t, out, "not available")
 }
 
+func TestCreateAgentRuntimeTool_WebAPIRollsBackFailedMaterialization(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetAgentSkillRoot(t.TempDir())
+	project := createProject(t, h, "Runtime Agent Rollback Project")
+	projectRoot := filepath.Join(t.TempDir(), "unavailable-project-root")
+	require.NoError(t, os.WriteFile(projectRoot, []byte("not a directory"), 0o600))
+	project.RepoPath = projectRoot
+	require.NoError(t, h.projectSvc.Update(ctx, project))
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["create_agent"]
+	require.NotNil(t, handler)
+	input := json.RawMessage(`{"name":"Chat Retryable Agent","system_prompt":"Work safely.","scope":"project"}`)
+
+	out, err := handler(ctx, input)
+	require.Error(t, err)
+	require.Contains(t, out, `"ok":false`)
+	matches, err := agentRepo.ListByName(ctx, "Chat Retryable Agent")
+	require.NoError(t, err)
+	require.Empty(t, matches)
+
+	require.NoError(t, os.Remove(projectRoot))
+	require.NoError(t, os.Mkdir(projectRoot, 0o755))
+	out, err = handler(ctx, input)
+	require.NoError(t, err, out)
+	require.Contains(t, out, `"ok":true`)
+	matches, err = agentRepo.ListByName(ctx, "Chat Retryable Agent")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	declaration, err := os.ReadFile(filepath.Join(projectRoot, ".openvibely", "agents", matches[0].Key, "SKILLS.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(declaration), "Chat Retryable Agent")
+}
+
 func TestCreateAgentRuntimeTool_WebAPICreatesProjectScopedAgentAndMaterializes(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
