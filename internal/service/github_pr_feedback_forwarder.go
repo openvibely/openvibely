@@ -76,6 +76,7 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 		return nil, err
 	}
 	result := &GitHubPRFeedbackForwardResult{OK: true, ScannedPullRequests: len(prs)}
+	authorizationDecisions := make(map[string]bool)
 	for _, pr := range prs {
 		if pr.PRNumber <= 0 || strings.TrimSpace(pr.TaskID) == "" || strings.TrimSpace(pr.ID) == "" {
 			continue
@@ -105,9 +106,13 @@ func (f *GitHubPRFeedbackForwarder) ForwardAuthorizedFeedback(ctx context.Contex
 				result.SkippedSelfOrBot++
 				continue
 			}
-			authorized, err := f.authRepo.IsActorAuthorized(ctx, author)
-			if err != nil {
-				return nil, err
+			authorized, known := authorizationDecisions[author]
+			if !known {
+				authorized, err = f.authRepo.IsActorAuthorized(ctx, author)
+				if err != nil {
+					return nil, err
+				}
+				authorizationDecisions[author] = authorized
 			}
 			if !authorized {
 				result.SkippedUnauthorized++
