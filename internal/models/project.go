@@ -14,3 +14,12 @@ type Project struct {
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
 }
+
+// ProjectWorkerCapacity is the identity and configured worker limit needed to
+// render Workers capacity rows. It intentionally excludes project metadata
+// used only by management, detail, and repository configuration paths.
+type ProjectWorkerCapacity struct {
+	ID         string
+	Name       string
+	MaxWorkers *int
+}

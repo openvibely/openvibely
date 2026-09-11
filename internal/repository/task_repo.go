@@ -630,6 +630,15 @@ func ActiveLaneExpectedState(ctx context.Context, taskID string) (ActiveLaneTask
 	return activeLaneExpectedState(ctx, taskID)
 }
 
+const activeBoardTailOrderQuery = `SELECT COALESCE(MAX(display_order), -1) + 1
+	FROM tasks
+	WHERE project_id = ? AND (category = 'active' OR (category = 'scheduled' AND status = 'running'))`
+
+const activeBoardTailOrderExpression = `(SELECT COALESCE(MAX(peer.display_order), -1) + 1
+	FROM tasks peer
+	WHERE peer.project_id = tasks.project_id
+	  AND (peer.category = 'active' OR (peer.category = 'scheduled' AND peer.status = 'running')))`
+
 type ActiveLaneTaskAdmission struct {
 	Task        models.Task
 	ExecutionID string
@@ -683,7 +692,7 @@ func (r *TaskRepo) MoveTasksToActiveLane(ctx context.Context, projectID string, 
 			return nil
 		}
 		var nextOrder int
-		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+		if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, projectID).Scan(&nextOrder); err != nil {
 			return fmt.Errorf("getting active tail order: %w", err)
 		}
 		for i := range candidates {
@@ -740,7 +749,11 @@ func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category model
 		}
 
 		var displayOrder int
-		if err := exec.QueryRowContext(ctx,
+		if category == models.CategoryActive {
+			if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, task.ProjectID).Scan(&displayOrder); err != nil {
+				return fmt.Errorf("getting next display_order: %w", err)
+			}
+		} else if err := exec.QueryRowContext(ctx,
 			`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = ?`,
 			task.ProjectID, category).Scan(&displayOrder); err != nil {
 			return fmt.Errorf("getting next display_order: %w", err)
@@ -811,10 +824,9 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 		}
 
 		displayOrder := task.DisplayOrder
-		if task.Category == models.CategoryActive && isActiveBoardStatus(status) {
-			if err := exec.QueryRowContext(ctx,
-				`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`,
-				task.ProjectID).Scan(&displayOrder); err != nil {
+		if (task.Category == models.CategoryActive && isActiveBoardStatus(status)) ||
+			(task.Category == models.CategoryScheduled && status == models.StatusRunning) {
+			if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, task.ProjectID).Scan(&displayOrder); err != nil {
 				return fmt.Errorf("getting next active display_order: %w", err)
 			}
 		}
@@ -873,8 +885,7 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueued(ctx context.Context, id string
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET
 			status = 'pending',
-			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN
-				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN `+activeBoardTailOrderExpression+`
 				ELSE display_order END,
 			updated_at = datetime('now')
 		 WHERE id = ? AND status NOT IN ('running', 'queued')`,
@@ -920,8 +931,7 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx context.
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET
 			status = 'pending',
-			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN
-				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+			display_order = CASE WHEN category = 'active' AND status <> 'pending' THEN `+activeBoardTailOrderExpression+`
 				ELSE display_order END,
 			updated_at = datetime('now')
 			 WHERE id = ? AND status NOT IN ('running', 'queued')
@@ -982,8 +992,7 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	result, err := tx.ExecContext(ctx,
 		`UPDATE tasks SET
 			status = 'running',
-			display_order = CASE WHEN category = 'active' THEN
-				(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+			display_order = CASE WHEN category IN ('active', 'scheduled') THEN `+activeBoardTailOrderExpression+`
 				ELSE display_order END,
 			updated_at = datetime('now')
 		 WHERE id = ? AND status = 'pending'
@@ -1109,8 +1118,7 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 	}
 	result, err := conn.ExecContext(ctx, `UPDATE tasks SET
 		status = 'running',
-		display_order = CASE WHEN category = 'active' THEN
-			(SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active')
+		display_order = CASE WHEN category IN ('active', 'scheduled') THEN `+activeBoardTailOrderExpression+`
 			ELSE display_order END,
 		updated_at = datetime('now')
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
@@ -2186,8 +2194,7 @@ func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (in
 		}
 
 		var nextOrder int
-		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks
-			WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+		if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, projectID).Scan(&nextOrder); err != nil {
 			return fmt.Errorf("getting active tail order: %w", err)
 		}
 		for i := range activated {
@@ -2240,7 +2247,7 @@ func (r *TaskRepo) PrepareSwarmParentForActiveLane(ctx context.Context, id strin
 			return fmt.Errorf("%w: %s", ErrActiveLaneTaskChanged, id)
 		}
 		var displayOrder int
-		if err := exec.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'active'`, task.ProjectID).Scan(&displayOrder); err != nil {
+		if err := exec.QueryRowContext(ctx, activeBoardTailOrderQuery, task.ProjectID).Scan(&displayOrder); err != nil {
 			return err
 		}
 		if _, err := exec.ExecContext(ctx, `UPDATE tasks SET category = 'active', status = 'blocked', display_order = ?, completed_at = NULL, updated_at = datetime('now') WHERE id = ?`, displayOrder, id); err != nil {
