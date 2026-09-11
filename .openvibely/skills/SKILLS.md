@@ -307,3 +307,7 @@ always_use:
 ## openvibely_project_deletion_workflow
 
 [OpenVibely Project Deletion Workflow](openvibely_project_deletion_workflow/SKILL.md) — Investigate and implement safe, atomic OpenVibely project deletion across relational data, runtime cleanup, migrations, and UI confirmation.
+
+## openvibely_interactive_user_input_workflow
+
+[OpenVibely Interactive User Input Workflow](openvibely_interactive_user_input_workflow/SKILL.md) — Implement provider-agnostic Chat tools that pause for validated user choices and resume the same model run safely.

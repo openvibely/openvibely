@@ -4,7 +4,7 @@ type: project
 created: 2026-05-09
 updated: 2026-12-30
 source: after_complete
-source_id: 971a051430a94b5885133ebe2e16f121:320d0f250c60b910
+source_id: ad38bf9ee50adcf679fe48077907ad76:78805123a2756cd6
 confidence: high
 title: Worktree and Lineage
 ---
@@ -48,4 +48,4 @@ Commits, lineage, and publication:
 Known gaps:
 - Task-detail Worktree rendering repeats repository/recovery and Git ancestry work before file stats (`#915`). Task Detail and Changes independently load optional repository guards and review comments (`#945`). Consolidate only shared loading while retaining route-specific behavior.
 - `task_commit_stats` is not shown as per-task evidence across Task Detail (`#723`). Changes parsing must preserve rename/copy paths, unusual filenames, deterministic order, live untracked files, and state fallback.
-- Open bug `#1086`: ordinary Git `--numstat` quotePath output for unusual filenames (for example, tab characters) is persisted as its literal quoted/escaped display representation. This corrupts task change-summary file-type labels, such as rendering `.go\"` rather than `.go`; the parser needs to decode Git paths before deriving extensions or storing display paths.
+- Issue #1086, in which ordinary Git `--numstat` quotePath output for unusual filenames was persisted as its literal quoted/escaped display representation and corrupted task change-summary file-type labels, is resolved by NUL-delimited numstat parsing for both task commit collection and the GitHub publication fallback.
