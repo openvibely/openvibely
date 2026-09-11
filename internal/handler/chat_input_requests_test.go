@@ -87,6 +87,31 @@ func TestRequestUserInputToolPublishesSSEAndReturnsAnswer(t *testing.T) {
 	}
 }
 
+func TestRequestUserInputRuntimeRejectsTaskThreadFollowupEvenWhenProviderCallsHiddenTool(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Thread boundary").Build()
+	cb := events.NewChatBroadcaster()
+	tc.handler.SetChatBroadcaster(cb)
+	sub, err := cb.SubscribeProject(project.ID)
+	require.NoError(t, err)
+	defer cb.Unsubscribe(sub)
+
+	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
+	rt := &llmcontracts.RuntimeTools{Definitions: defs, Executor: tc.handler.chatActionExecutor(streamingResponseParams{ProjectID: project.ID, ExecID: "exec-thread", ChatMode: models.ChatModeOrchestrate, Surface: chatcontrol.SurfaceWeb, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)}
+	out, handled, isError, err := rt.Executor(context.Background(), "request_user_input", json.RawMessage(`{"questions":[{"id":"create","question":"Create it?","options":[{"label":"Yes","description":"Create it"},{"label":"No","description":"Do not create it"}]}]}`))
+	require.Error(t, err)
+	require.Empty(t, out)
+	require.True(t, handled)
+	require.True(t, isError)
+	require.Contains(t, err.Error(), "not task thread follow-ups")
+	require.Empty(t, tc.handler.chatInputRequests.requests)
+	select {
+	case evt := <-sub:
+		require.NotEqual(t, events.ChatUserInputRequested, evt.Type)
+	default:
+	}
+}
+
 func TestRequestUserInputAnswerResumesProviderToolLoopAndAllowsAffirmativeCreateTask(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	h, e, _ := setupTestHandler(t)
