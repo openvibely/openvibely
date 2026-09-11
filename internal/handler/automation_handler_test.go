@@ -2631,20 +2631,74 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 	cards, err := tc.handler.automationGraphSvc.List(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
+	var graphNodeCount int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ?`, project.ID, automationID).Scan(&graphNodeCount))
+	require.Positive(t, graphNodeCount)
+	var runningNodeID string
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ? ORDER BY id LIMIT 1`, project.ID, automationID, cards[0].Version.ID).Scan(&runningNodeID))
+	_, _, err = repository.NewAutomationRepo(tc.db).RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context:        models.AutomationContext{ProjectID: project.ID},
+		Binding:        models.AutomationBinding{AutomationID: automationID, VersionID: cards[0].Version.ID, NodeID: runningNodeID},
+		WorkItemKey:    "chat-read:running",
+		ActivityKey:    "chat-read:running",
+		ActivityType:   "test",
+		ActivityStatus: models.AutomationActivityRunning,
+	})
+	require.NoError(t, err)
+	cards, err = tc.handler.automationGraphSvc.List(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, cards, 1)
 	expectedJSON, err := json.Marshal(service.AutomationCardSummary(cards[0]))
 	require.NoError(t, err)
 	var expected map[string]any
 	require.NoError(t, json.Unmarshal(expectedJSON, &expected))
+	require.Equal(t, float64(graphNodeCount), expected["graph_node_count"])
+	require.NotContains(t, expected, "node_count")
+	expectedCounts, _ := expected["counts"].(map[string]any)
+	require.Equal(t, float64(1), expectedCounts["running"])
+	require.NotEqual(t, expected["graph_node_count"], expectedCounts["running"])
 
 	listed := execute("list_automations", nil)
 	automations, _ := listed["automations"].([]any)
 	require.Len(t, automations, 1)
 	listedAutomation, _ := automations[0].(map[string]any)
 	require.Equal(t, expected, listedAutomation)
+	listedSameProject := execute("list_automations", json.RawMessage(fmt.Sprintf(`{"project_id":%q}`, project.ID)))
+	require.Equal(t, listed, listedSameProject)
 
 	got := execute("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	gotAutomation, _ := got["automation"].(map[string]any)
 	require.Equal(t, expected, gotAutomation)
+	gotSameProject := execute("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q,"project_id":%q}`, automationID, project.ID)))
+	require.Equal(t, got, gotSameProject)
+
+	foreign := tc.CreateProject().WithName("Foreign Automation Chat reads").Build()
+	foreignRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(streamingResponseParams{ProjectID: foreign.ID, PrincipalID: "alice"}, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	foreignOutput, handled, isError, err := foreignRuntime.Executor(ctx, "save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError, foreignOutput)
+	var foreignSaved map[string]any
+	require.NoError(t, json.Unmarshal([]byte(foreignOutput), &foreignSaved))
+	foreignAutomationID, _ := foreignSaved["automation_id"].(string)
+	require.NotEmpty(t, foreignAutomationID)
+	var foreignGraphNodeCount int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ?`, foreign.ID, foreignAutomationID).Scan(&foreignGraphNodeCount))
+	require.Positive(t, foreignGraphNodeCount)
+
+	for _, request := range []struct {
+		tool  string
+		input json.RawMessage
+	}{
+		{tool: "list_automations", input: json.RawMessage(fmt.Sprintf(`{"project_id":%q}`, foreign.ID))},
+		{tool: "get_automation", input: json.RawMessage(fmt.Sprintf(`{"automation_id":%q,"project_id":%q}`, foreignAutomationID, foreign.ID))},
+	} {
+		output, handled, isError, err := runtime.Executor(ctx, request.tool, request.input)
+		require.True(t, handled)
+		require.True(t, isError)
+		require.Empty(t, output)
+		require.ErrorContains(t, err, fmt.Sprintf("project_id %q is outside the caller's authorized project context", foreign.ID))
+	}
 }
 
 func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testing.T) {

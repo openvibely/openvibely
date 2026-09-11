@@ -1201,6 +1201,16 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	automationID := saved.Definition.Automation.ID
 	currentRevision := CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC)
 	require.Positive(t, currentRevision)
+	runningNode := saved.Definition.Nodes[0]
+	_, _, err = automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context:        models.AutomationContext{ProjectID: project.ID},
+		Binding:        models.AutomationBinding{AutomationID: automationID, VersionID: saved.Definition.Version.ID, NodeID: runningNode.ID},
+		WorkItemKey:    "channel-summary:running",
+		ActivityKey:    "channel-summary:running",
+		ActivityType:   "test",
+		ActivityStatus: models.AutomationActivityRunning,
+	})
+	require.NoError(t, err)
 	_, err = db.Exec(`UPDATE automations SET template_revision = 0 WHERE id = ? AND project_id = ?`, automationID, project.ID)
 	require.NoError(t, err)
 
@@ -1219,6 +1229,11 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 		require.NoError(t, err)
 		var expected map[string]any
 		require.NoError(t, json.Unmarshal(expectedJSON, &expected))
+
+		var graphNodeCount int
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ?`, project.ID, cards[0].Automation.ID, cards[0].Version.ID).Scan(&graphNodeCount))
+		require.Equal(t, float64(graphNodeCount), expected["graph_node_count"])
+		require.NotContains(t, expected, "node_count")
 
 		var response map[string]any
 		require.NoError(t, json.Unmarshal([]byte(output), &response))
@@ -1247,6 +1262,14 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.NoError(t, err)
 	require.Contains(t, listOut, `"template_update_available":true`)
 	require.Contains(t, listOut, fmt.Sprintf(`"current_template_revision":%d`, currentRevision))
+	var listed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(listOut), &listed))
+	listedAutomations, _ := listed["automations"].([]any)
+	require.Len(t, listedAutomations, 1)
+	listedSummary, _ := listedAutomations[0].(map[string]any)
+	listedCounts, _ := listedSummary["counts"].(map[string]any)
+	require.Equal(t, float64(1), listedCounts["running"])
+	require.NotEqual(t, listedSummary["graph_node_count"], listedCounts["running"])
 	assertAutomationSummary(listOut, "automations")
 	getOut, err := handlers["get_automation"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	require.NoError(t, err)
@@ -3339,6 +3362,7 @@ func TestAutomationCardSummaryPreservesPromptSafeContract(t *testing.T) {
 	card := models.AutomationCard{
 		Automation:              models.Automation{ID: "auto-1", Name: "Nightly", LifecycleState: models.AutomationActive, TemplateRevision: &templateRevision},
 		Version:                 models.AutomationVersion{AdapterKey: AutomationAdapterNativeSDLC},
+		GraphNodeCount:          6,
 		Counts:                  models.AutomationNodeCounts{Running: 2, Waiting: 3, Blocked: 1, Failed: 4, CompletedRecently: 5},
 		TemplateUpdateAvailable: true,
 		NextRun:                 &nextRun,
@@ -3352,7 +3376,11 @@ func TestAutomationCardSummaryPreservesPromptSafeContract(t *testing.T) {
 	require.False(t, summary["paused"].(bool))
 	require.Equal(t, AutomationAdapterNativeSDLC, summary["adapter_key"])
 	require.True(t, summary["template_update_available"].(bool))
-	require.Equal(t, 15, summary["node_count"])
+	require.Equal(t, 6, summary["graph_node_count"])
+	require.NotContains(t, summary, "node_count")
+	require.NotContains(t, summary, "nodes")
+	require.NotContains(t, summary, "automation_yaml")
+	require.NotContains(t, summary, "config")
 	require.Equal(t, map[string]int{
 		"running":            2,
 		"waiting":            3,
@@ -3419,17 +3447,19 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 	nextRun := time.Date(2026, 8, 22, 12, 30, 0, 0, time.FixedZone("offset", -5*3600))
 	lastRun := nextRun.Add(-time.Hour)
 	card := models.AutomationCard{
-		Automation: models.Automation{ID: "auto-1", Name: "Nightly", LifecycleState: models.AutomationPaused},
-		Version:    models.AutomationVersion{AdapterKey: "native"},
-		Counts:     models.AutomationNodeCounts{Running: 2, Waiting: 3, Blocked: 1, Failed: 4, CompletedRecently: 5},
-		NextRun:    &nextRun,
-		LastRun:    &lastRun,
+		Automation:     models.Automation{ID: "auto-1", Name: "Nightly", LifecycleState: models.AutomationPaused},
+		Version:        models.AutomationVersion{AdapterKey: "native"},
+		GraphNodeCount: 6,
+		Counts:         models.AutomationNodeCounts{Running: 2, Waiting: 3, Blocked: 1, Failed: 4, CompletedRecently: 5},
+		NextRun:        &nextRun,
+		LastRun:        &lastRun,
 	}
 	cardSummary := AutomationCardSummary(card)
 	require.Equal(t, "auto-1", cardSummary["id"])
 	require.Equal(t, true, cardSummary["paused"])
 	require.Equal(t, "native", cardSummary["adapter_key"])
-	require.Equal(t, 15, cardSummary["node_count"])
+	require.Equal(t, 6, cardSummary["graph_node_count"])
+	require.NotContains(t, cardSummary, "node_count")
 	require.Equal(t, "2026-08-22T17:30:00Z", cardSummary["next_run"])
 	require.Equal(t, "2026-08-22T16:30:00Z", cardSummary["last_run"])
 
