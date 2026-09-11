@@ -258,7 +258,12 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 	if err != nil {
 		return nil, err
 	}
+	portfolioCounts, err := s.repo.PortfolioOperationalCounts(ctx, projectID, time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
 	for i := range cards {
+		cards[i].Counts = portfolioCounts[cards[i].Automation.ID]
 		currentTemplateRevision := CurrentAutomationTemplateRevision(cards[i].Version.AdapterKey)
 		cards[i].TemplateUpdateAvailable = currentTemplateRevision > 0 &&
 			(cards[i].Automation.TemplateRevision == nil || *cards[i].Automation.TemplateRevision < currentTemplateRevision)

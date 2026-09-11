@@ -919,7 +919,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional project ID override."}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional project ID equality assertion."}},"additionalProperties":false}`),
 	},
 	{
 		Name:         "get_automation",
@@ -929,7 +929,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string","description":"ID of the Automation to retrieve."},"project_id":{"type":"string","description":"Optional project ID override."}},"required":["automation_id"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string","description":"ID of the Automation to retrieve."},"project_id":{"type":"string","description":"Optional project ID equality assertion."}},"required":["automation_id"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "preview_automation_description",
