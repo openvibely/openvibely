@@ -933,7 +933,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						function renderBufferedOutput(force) {
 						if (!window.renderStreamingContent) {
 							contentDiv.textContent = textBuffer;
-							return;
+							return Promise.resolve(true);
 						}
 							if (!force && renderScheduled) return;
 							var runRender = function() {
@@ -942,7 +942,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var renderText = textBuffer;
 								if (!force && sourceLength === lastRenderedLength) {
 									renderScheduled = false;
-									return;
+									return Promise.resolve(false);
 								}
 								var generation = ++renderGeneration;
 								renderScheduled = true;
@@ -963,19 +963,22 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								}
 								var renderPromise = liveRenderer(contentDiv, renderText);
 								if (renderPromise && typeof renderPromise.then === 'function') {
-									renderPromise.then(finishRender).catch(function() {
-										if (generation !== renderGeneration) return;
+									return renderPromise.then(function(committed) {
+										finishRender(committed);
+										return committed;
+									}).catch(function() {
+										if (generation !== renderGeneration) return false;
 										contentDiv.textContent = renderText;
 										finishRender(true);
+										return true;
 									});
-									return;
 								}
 								finishRender(true);
+								return Promise.resolve(true);
 							};
 							if (force) {
 								if (renderFrame !== null) cancelAnimationFrame(renderFrame);
-								runRender();
-								return;
+								return runRender();
 							}
 							renderScheduled = true;
 							renderFrame = requestAnimationFrame(runRender);
@@ -1065,7 +1068,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
 								}
 								persistLiveStreamState(false);
-								renderBufferedOutput(true);
+								var failedRender = renderBufferedOutput(true);
 								thinking.classList.add('hidden');
 								dots.classList.add('hidden');
 								contentDiv.classList.remove('hidden');
@@ -1075,19 +1078,24 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									failedPair.setAttribute('data-exec-status', 'failed');
 									failedPair.setAttribute('hx-preserve', 'true');
 								}
-								if (event.data && window.showChatTerminalError) window.showChatTerminalError(contentDiv, event.data);
-								if (shouldScrollTerminalError && chatMessages) {
-									chatMessages.scrollTop = chatMessages.scrollHeight;
-									requestAnimationFrame(function() {
-										if (chatMessages && chatMessages.isConnected) chatMessages.scrollTop = chatMessages.scrollHeight;
-									});
+								function revealTerminalError() {
+									if (event.data && window.showChatTerminalError) window.showChatTerminalError(contentDiv, event.data);
+									if (shouldScrollTerminalError && chatMessages) {
+										chatMessages.scrollTop = chatMessages.scrollHeight;
+										requestAnimationFrame(function() {
+											if (chatMessages && chatMessages.isConnected) chatMessages.scrollTop = chatMessages.scrollHeight;
+										});
+									}
+									window.syncChatTranscriptRevision(execId);
+									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 								}
-								// Clear streaming flag, synchronize the authoritative failed snapshot,
-								// and re-evaluate plan prompt on error.
+								if (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);
+								else revealTerminalError();
+								// Clear streaming state and refresh the composer immediately; the
+								// terminal alert and authoritative transcript sync wait for the
+								// final Markdown render to settle.
 								window._chatStreamInProgress = false;
 								if (window.refreshChatComposerAction) window.refreshChatComposerAction();
-								window.syncChatTranscriptRevision(execId);
-								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 							});
 
 							eventSource.onerror = function() {

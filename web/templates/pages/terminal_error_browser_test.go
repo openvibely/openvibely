@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,6 +66,31 @@ return 'ready';
 })()`)
 	if got != "ready" {
 		browser.t.Fatalf("install terminal browser renderer: %s", got)
+	}
+}
+
+func installDelayedTerminalBrowserRenderer(browser *composerFocusCDP, delayMilliseconds int) {
+	browser.t.Helper()
+	got := browser.evaluate(`(function(){
+var productionRenderer=window.renderLiveChatContent||window.renderStreamingContent;
+if(typeof productionRenderer!=='function')return 'missing';
+window.__terminalRenderStarted=0;
+window.__terminalRenderSettled=0;
+window.__terminalSyncCalls=0;
+var productionSync=window.syncChatTranscriptRevision;
+window.syncChatTranscriptRevision=function(execID){window.__terminalSyncCalls++;return productionSync(execID);};
+window.renderLiveChatContent=function(el,text,yieldLarge){
+  window.__terminalRenderStarted++;
+  return new Promise(function(resolve,reject){
+    setTimeout(function(){
+      Promise.resolve(productionRenderer(el,text,yieldLarge)).then(function(value){window.__terminalRenderSettled++;resolve(value);},reject);
+    },` + fmt.Sprintf("%d", delayMilliseconds) + `);
+  });
+};
+return 'ready';
+})()`)
+	if got != "ready" {
+		browser.t.Fatalf("install delayed production terminal browser renderer: %s", got)
 	}
 }
 
@@ -235,7 +261,7 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 	longOutputJS := string(longOutputJSON)
 	runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "chat-live-created-terminal-wiring", func(browser *composerFocusCDP) {
 		browser.waitFor("production Chat page", `Boolean(document.getElementById('chat-page-root'))+':'+Boolean(document.getElementById('chat-messages'))`, "true:true")
-		installTerminalBrowserRenderer(browser)
+		installDelayedTerminalBrowserRenderer(browser, 350)
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'live Chat failure',source:'api'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch production Chat live event: %s", got)
 		}
@@ -244,14 +270,18 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 			t.Fatalf("stream page-level Chat partial output: %s", got)
 		}
 		browser.waitFor("long page-level Chat output render", `document.getElementById('streaming-message-`+execID+`').getAttribute('data-raw-content')===`+longOutputJS+`?'ready':'waiting'`, "ready")
+		browser.waitFor("long page-level Chat output render scheduled", `window.__terminalRenderStarted>=1?'ready':'waiting'`, "ready")
 		if got := browser.evaluate(`(function(){var messages=document.getElementById('chat-messages');messages.scrollTop=messages.scrollHeight;return 'pinned';})()`); got != "pinned" {
 			t.Fatalf("pin live Chat turn: %s", got)
 		}
 		phase.Store(1)
-		if got := browser.evaluate(`(function(){window.__terminalStreamFor('` + execID + `').emit('error','live Chat terminal <unsafe>');return 'failed';})()`); got != "failed" {
+		if got := browser.evaluate(`(function(){window.__terminalSettledBeforeFailure=window.__terminalRenderSettled;window.__terminalSyncBeforeFailure=window.__terminalSyncCalls;window.__terminalStreamFor('` + execID + `').emit('error','live Chat terminal <unsafe>');return 'failed';})()`); got != "failed" {
 			t.Fatalf("fail page-level Chat stream: %s", got)
 		}
-		browser.waitFor("page-level Chat terminal alert behavior", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+execID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: live Chat terminal <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
+		if got := browser.evaluate(`(function(){var pair=document.getElementById('chat-execution-` + execID + `');return String(window.__terminalRenderSettled===window.__terminalSettledBeforeFailure)+':'+String(!!(pair&&pair.querySelector('[data-terminal-error="true"]')))+':'+String(window.__terminalSyncCalls===window.__terminalSyncBeforeFailure);})()`); got != "true:false:true" {
+			t.Fatalf("terminal alert and sync must wait for pending final production render, got %s", got)
+		}
+		browser.waitFor("page-level Chat terminal alert behavior after delayed production render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+execID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>=2&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: live Chat terminal <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 	})
 	if chatRequests.Load() < 2 {
 		t.Fatalf("production Chat requests = %d, want initial page plus authoritative terminal sync", chatRequests.Load())
