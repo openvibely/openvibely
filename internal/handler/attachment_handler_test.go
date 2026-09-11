@@ -960,6 +960,252 @@ func assertDirEmpty(t *testing.T, dir string) {
 		t.Fatalf("expected %s to be empty, found %d entries", dir, len(entries))
 	}
 }
+func uploadTaskAttachmentFilesForTest(t *testing.T, tc *TestContext, method, target string, fields map[string]string, files []taskAttachmentTestFile) *httptest.ResponseRecorder {
+	t.Helper()
+	req := newTaskAttachmentMultipartRequestWithFiles(t, method, target, fields, files)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(rec, req)
+	return rec
+}
+
+func assertIndependentTaskAttachments(t *testing.T, tc *TestContext, taskID string, wantContents map[string][]byte) []models.Attachment {
+	t.Helper()
+	attachments, err := tc.attachmentRepo.ListByTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("list attachments: %v", err)
+	}
+	if len(attachments) != len(wantContents) {
+		t.Fatalf("expected %d attachments, got %d: %+v", len(wantContents), len(attachments), attachments)
+	}
+	seenPaths := make(map[string]bool, len(attachments))
+	for _, attachment := range attachments {
+		if seenPaths[attachment.FilePath] {
+			t.Fatalf("attachments share path: %+v", attachments)
+		}
+		seenPaths[attachment.FilePath] = true
+		want, ok := wantContents[attachment.FileName]
+		if !ok {
+			t.Fatalf("unexpected attachment filename %q: %+v", attachment.FileName, attachments)
+		}
+		got, err := os.ReadFile(attachment.FilePath)
+		if err != nil {
+			t.Fatalf("read %s: %v", attachment.FilePath, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("attachment %s content=%q want=%q", attachment.FileName, got, want)
+		}
+	}
+	return attachments
+}
+
+func TestTaskAttachmentDuplicateNamesPersistIndependentlyAcrossSurfaces(t *testing.T) {
+	cases := []struct {
+		name      string
+		setup     func(t *testing.T, tc *TestContext, projectID string) (taskID, method, target string, fields map[string]string)
+		getTaskID func(t *testing.T, tc *TestContext, projectID string) string
+	}{
+		{
+			name: "task creation",
+			setup: func(t *testing.T, _ *TestContext, projectID string) (string, string, string, map[string]string) {
+				t.Helper()
+				return "", http.MethodPost, "/tasks?project_id=" + projectID, map[string]string{
+					"title":    "duplicate attachment create",
+					"category": "backlog",
+					"priority": "2",
+					"prompt":   "created with duplicate attachments",
+				}
+			},
+			getTaskID: func(t *testing.T, tc *TestContext, projectID string) string {
+				t.Helper()
+				task, err := tc.taskRepo.GetByProjectAndTitle(context.Background(), projectID, "duplicate attachment create")
+				if err != nil || task == nil {
+					t.Fatalf("get created task: task=%+v err=%v", task, err)
+				}
+				return task.ID
+			},
+		},
+		{
+			name: "task editing",
+			setup: func(t *testing.T, tc *TestContext, projectID string) (string, string, string, map[string]string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).WithTitle("duplicate attachment edit").WithCategory(models.CategoryBacklog).Build()
+				return task.ID, http.MethodPut, "/tasks/" + task.ID, map[string]string{
+					"title":    task.Title,
+					"category": "backlog",
+					"priority": "2",
+					"prompt":   task.Prompt,
+				}
+			},
+		},
+		{
+			name: "dedicated attachment endpoint",
+			setup: func(t *testing.T, tc *TestContext, projectID string) (string, string, string, map[string]string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).WithTitle("duplicate attachment endpoint").WithCategory(models.CategoryBacklog).Build()
+				return task.ID, http.MethodPost, "/tasks/" + task.ID + "/attachments", nil
+			},
+		},
+	}
+
+	for _, tcCase := range cases {
+		t.Run(tcCase.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			withTaskAttachmentUploadsDir(t)
+			taskID, method, target, fields := tcCase.setup(t, tc, project.ID)
+			rec := uploadTaskAttachmentFilesForTest(t, tc, method, target, fields, []taskAttachmentTestFile{
+				{name: "same.txt", contentType: "text/plain", content: []byte("content A")},
+				{name: "same.txt", contentType: "text/plain", content: []byte("content B")},
+			})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if taskID == "" {
+				taskID = tcCase.getTaskID(t, tc, project.ID)
+			}
+			assertIndependentTaskAttachments(t, tc, taskID, map[string][]byte{
+				"same.txt":   []byte("content A"),
+				"same-1.txt": []byte("content B"),
+			})
+		})
+	}
+}
+
+func TestUploadAttachment_DuplicateNameAcrossRequestsPreservesBothFiles(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
+	withTaskAttachmentUploadsDir(t)
+
+	for _, content := range [][]byte{[]byte("content A"), []byte("content B")} {
+		rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{{name: "same.txt", contentType: "text/plain", content: content}})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("upload status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	assertIndependentTaskAttachments(t, tc, task.ID, map[string][]byte{
+		"same.txt":   []byte("content A"),
+		"same-1.txt": []byte("content B"),
+	})
+}
+
+func TestTaskAttachmentDuplicateDeletionPreservesSurvivorForExecutionReconciliation(t *testing.T) {
+	for _, deleteIndex := range []int{0, 1} {
+		t.Run(fmt.Sprintf("delete-%d", deleteIndex), func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
+			withTaskAttachmentUploadsDir(t)
+			rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{
+				{name: "same.txt", contentType: "text/plain", content: []byte("content A")},
+				{name: "same.txt", contentType: "text/plain", content: []byte("content B")},
+			})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("upload status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			attachments := assertIndependentTaskAttachments(t, tc, task.ID, map[string][]byte{
+				"same.txt":   []byte("content A"),
+				"same-1.txt": []byte("content B"),
+			})
+			deleted := attachments[deleteIndex]
+			if rec := tc.HTTP().Delete("/attachments/" + deleted.ID + "?project_id=" + url.QueryEscape(project.ID)).Execute(); rec.Code != http.StatusOK {
+				t.Fatalf("delete status=%d body=%s", rec.Code, rec.Body.String())
+			}
+
+			remaining, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+			if err != nil {
+				t.Fatalf("list remaining attachments: %v", err)
+			}
+			if len(remaining) != 1 {
+				t.Fatalf("expected one remaining attachment, got %+v", remaining)
+			}
+			want := []byte("content A")
+			if remaining[0].FileName == "same-1.txt" {
+				want = []byte("content B")
+			}
+			stored, err := os.ReadFile(remaining[0].FilePath)
+			if err != nil {
+				t.Fatalf("read remaining attachment: %v", err)
+			}
+			if !bytes.Equal(stored, want) {
+				t.Fatalf("remaining content=%q want=%q", stored, want)
+			}
+
+			// The surviving row and bytes remain available to the execution attachment loader.
+			if _, err := os.Stat(remaining[0].FilePath); err != nil {
+				t.Fatalf("survivor unavailable to execution attachment loader: %v", err)
+			}
+		})
+	}
+}
+
+func TestTaskAttachmentCollidingRepositoryFailurePreservesExistingPublication(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
+	uploadsRoot := withTaskAttachmentUploadsDir(t)
+	if rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{{name: "same.txt", content: []byte("original")}}); rec.Code != http.StatusOK {
+		t.Fatalf("initial upload status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := tc.db.ExecContext(context.Background(), `
+		CREATE TRIGGER fail_duplicate_task_attachment_insert
+		BEFORE INSERT ON task_attachments
+		BEGIN
+			SELECT RAISE(ABORT, 'forced duplicate attachment insert failure');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{{name: "same.txt", content: []byte("replacement")}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("colliding failure status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	attachments := assertIndependentTaskAttachments(t, tc, task.ID, map[string][]byte{"same.txt": []byte("original")})
+	if len(attachments) != 1 {
+		t.Fatalf("expected only original metadata row, got %+v", attachments)
+	}
+	entries, err := os.ReadDir(filepath.Join(uploadsRoot, task.ID))
+	if err != nil {
+		t.Fatalf("read task attachment directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "same.txt" {
+		t.Fatalf("unexpected files after metadata failure: %+v", entries)
+	}
+}
+
+func TestTaskAttachmentCollidingCopyFailurePreservesExistingPublication(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
+	uploadsRoot := withTaskAttachmentUploadsDir(t)
+	if rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{{name: "same.txt", content: []byte("original")}}); rec.Code != http.StatusOK {
+		t.Fatalf("initial upload status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	originalCopy := taskAttachmentCopy
+	taskAttachmentCopy = func(dst io.Writer, src io.Reader) (int64, error) {
+		if _, err := dst.Write([]byte("partial replacement")); err != nil {
+			return 0, err
+		}
+		return 0, errors.New("forced colliding copy failure")
+	}
+	t.Cleanup(func() { taskAttachmentCopy = originalCopy })
+
+	rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{{name: "same.txt", content: []byte("replacement")}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("colliding failure status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	assertIndependentTaskAttachments(t, tc, task.ID, map[string][]byte{"same.txt": []byte("original")})
+	entries, err := os.ReadDir(filepath.Join(uploadsRoot, task.ID))
+	if err != nil {
+		t.Fatalf("read task attachment directory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "same.txt" {
+		t.Fatalf("unexpected files after copy failure: %+v", entries)
+	}
+}
 
 func TestDeleteAttachment_NotFound(t *testing.T) {
 	tc := NewTestContext(t)

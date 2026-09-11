@@ -1936,7 +1936,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 				applog.Infof("[handler] UpdateTask error deleting attachment %s: %v", attID, err)
 				continue
 			}
-			os.Remove(att.FilePath)
+			h.removeTaskAttachmentFileIfUnreferenced(c.Request().Context(), taskID, att.FilePath, "UpdateTask")
 			applog.Infof("[handler] UpdateTask removed attachment %s from task %s", attID, taskID)
 		}
 	}

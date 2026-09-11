@@ -347,6 +347,16 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 		return result
 	}
 
+	usedNames := make(map[string]bool, len(files))
+	if existing, err := h.attachmentRepo.ListByTask(ctx, taskID); err != nil {
+		applog.Infof("[handler] %s error listing existing attachments for task=%s: %v", logScope, taskID, err)
+	} else {
+		for _, attachment := range existing {
+			usedNames[attachment.FileName] = true
+			usedNames[filepath.Base(attachment.FilePath)] = true
+		}
+	}
+
 	for _, file := range files {
 		if file.Size > maxUploadSize {
 			applog.Infof("[handler] %s file %s too large (%d bytes)", logScope, file.Filename, file.Size)
@@ -359,7 +369,7 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 			continue
 		}
 
-		filename := filepath.Base(file.Filename)
+		filename := uniqueAttachmentName(taskDir, filepath.Base(file.Filename), usedNames)
 		destPath := filepath.Join(taskDir, filename)
 		dest, err := taskAttachmentCreate(destPath)
 		if err != nil {
@@ -407,6 +417,23 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 	return result
 }
 
+func (h *Handler) removeTaskAttachmentFileIfUnreferenced(ctx context.Context, taskID, filePath, logScope string) {
+	attachments, err := h.attachmentRepo.ListByTask(ctx, taskID)
+	if err != nil {
+		applog.Infof("[handler] %s preserving attachment file=%s because references could not be checked: %v", logScope, filePath, err)
+		return
+	}
+	for _, attachment := range attachments {
+		if attachment.FilePath == filePath {
+			applog.Infof("[handler] %s preserving shared attachment file=%s", logScope, filePath)
+			return
+		}
+	}
+	if err := taskAttachmentRemove(filePath); err != nil {
+		applog.Infof("[handler] %s error deleting file=%s: %v (continuing)", logScope, filePath, err)
+	}
+}
+
 func (h *Handler) DeleteAttachment(c echo.Context) error {
 	attachmentID := c.Param("id")
 	applog.Infof("[handler] DeleteAttachment id=%s", attachmentID)
@@ -445,10 +472,8 @@ func (h *Handler) DeleteAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete attachment")
 	}
 
-	// Delete file from disk
-	if err := os.Remove(attachment.FilePath); err != nil {
-		applog.Infof("[handler] DeleteAttachment error deleting file: %v (continuing)", err)
-	}
+	// Delete the file only when no remaining metadata row references it.
+	h.removeTaskAttachmentFileIfUnreferenced(ctx, attachment.TaskID, attachment.FilePath, "DeleteAttachment")
 
 	applog.Infof("[handler] DeleteAttachment success id=%s", attachmentID)
 
