@@ -229,12 +229,20 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 		},
 	}
 	for i := 0; i < 20; i++ {
-		view.Webhooks = append(view.Webhooks, models.WebhookEndpoint{
+		webhook := models.WebhookEndpoint{
 			ID: fmt.Sprintf("webhook-%02d", i), Name: fmt.Sprintf("Webhook %02d", 19-i), Enabled: true,
-		})
+		}
+		if i == 0 {
+			webhook.ID = "alpha-github-hook"
+			webhook.Name = "GitHub"
+		}
+		view.Webhooks = append(view.Webhooks, webhook)
 	}
 	nextView := view
-	nextView.Webhooks = []models.WebhookEndpoint{{ID: "mix-hook", Name: "mix webhook", Enabled: true}}
+	nextView.Webhooks = []models.WebhookEndpoint{
+		{ID: "zulu-github-hook", Name: "GitHub", Enabled: true},
+		{ID: "mix-hook", Name: "mix webhook", Enabled: true},
+	}
 	nextView.WebhooksHasMore = false
 	var nextContent bytes.Buffer
 	if err := pages.SettingsContent(nextView).Render(context.Background(), &nextContent); err != nil {
@@ -291,8 +299,14 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 				if (!index) return true;
 				return names[index - 1].toLocaleLowerCase() >= name.toLocaleLowerCase();
 			});
-			var complete = names.length === 26 && names.indexOf('mix webhook') !== -1 && names.indexOf('X (formerly Twitter)') !== -1 && names.indexOf('Outbound Message Targets') !== -1;
-			finish(sorted && complete ? 'pass' : 'fail', names.join('|'));
+			var fixedGitHub = root.querySelector('[data-channel-type="github"]');
+			var initialGitHubWebhook = root.querySelector('[data-webhook-id="alpha-github-hook"]');
+			var appendedGitHubWebhook = root.querySelector('[data-webhook-id="zulu-github-hook"]');
+			var equalNameOrder = !!(appendedGitHubWebhook && initialGitHubWebhook && fixedGitHub &&
+				(appendedGitHubWebhook.compareDocumentPosition(initialGitHubWebhook) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+				(initialGitHubWebhook.compareDocumentPosition(fixedGitHub) & Node.DOCUMENT_POSITION_FOLLOWING));
+			var complete = names.length === 27 && names.indexOf('mix webhook') !== -1 && names.indexOf('X (formerly Twitter)') !== -1 && names.indexOf('Outbound Message Targets') !== -1;
+			finish(sorted && equalNameOrder && complete ? 'pass' : 'fail', names.join('|') + '; equalNameOrder=' + equalNameOrder);
 		}
 		setTimeout(run, 50);
 	})();
