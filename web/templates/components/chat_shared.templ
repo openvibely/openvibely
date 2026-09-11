@@ -211,6 +211,13 @@ templ ChatBubble(role, content string) {
 	</div>
 }
 
+// ChatTerminalError renders the final actionable error after any partial assistant output.
+templ ChatTerminalError(errorMsg string) {
+	if errorMsg != "" {
+		<div class="mt-3 pt-3 border-t border-error/30 text-error/80 text-sm font-medium break-words" data-terminal-error="true" role="alert">{ "Error: " + errorMsg }</div>
+	}
+}
+
 // ChatBubbleError renders an assistant error message bubble.
 templ ChatBubbleError(role, errorMsg, output string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
@@ -218,12 +225,10 @@ templ ChatBubbleError(role, errorMsg, output string) {
 			{ role }
 		</div>
 		<div class="chat-bubble-inner">
-			if errorMsg != "" {
-				<div class="text-error/80 text-sm font-medium mb-2">{ "Error: " + errorMsg }</div>
-			}
 			if output != "" {
 				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
 			}
+			@ChatTerminalError(errorMsg)
 		</div>
 	</div>
 }
@@ -695,17 +700,34 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 							if (streamTerminalHandled) return;
 							streamTerminalHandled = true;
+							var terminalMessages = document.getElementById(messagesId);
+							var shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								textBuffer = String(container._authoritativeTerminalContent || '');
 							}
-							flushBufferedOutput();
+							var failedRender = flushBufferedOutput();
 							// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
 					container.classList.remove('hidden');
-						if (event.data) {
-							container.appendChild(document.createTextNode('\n\nError: ' + event.data));
+						function revealTerminalError() {
+							if (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);
+							if (shouldScrollTerminalError) {
+								var failedMessages = document.getElementById(messagesId);
+								if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
+								requestAnimationFrame(function() {
+									failedMessages = document.getElementById(messagesId);
+									if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
+								});
+							}
+							if (isThread) {
+								if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+							} else if (window.syncChatTranscriptRevision) {
+								window.syncChatTranscriptRevision(execId);
+							}
 						}
+						if (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);
+						else revealTerminalError();
 							window._taskThreadStreamingActive = false;
 							var failedPair = container.closest('[data-execution-pair="true"]');
 							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
@@ -715,15 +737,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 							if (isThread) {
 								showThreadTerminalStatus('failed');
-								if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
 							} else {
 								// Clear streaming flag and re-evaluate plan prompt on error.
 								// The evaluator scans DOM for latest completed bubble; an error
 								// bubble without <proposed_plan> correctly hides the prompt.
-									window._chatStreamInProgress = false;
-									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
-									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-									if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
+								window._chatStreamInProgress = false;
+								if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 							}
 						});
 
@@ -1163,16 +1183,35 @@ templ ChatStreamingResumeInitScript() {
 							}
 							if (streamTerminalHandled) return;
 						streamTerminalHandled = true;
+							var terminalMessages = document.getElementById(messagesId);
+							var shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								cumulativeContent = String(container._authoritativeTerminalContent || '');
 							}
 							persistResumeStreamState(false);
-							flushCumulativeContent();
+							var failedRender = flushCumulativeContent();
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 				container.classList.remove('hidden');
-					if (event.data) container.appendChild(document.createTextNode('\n\nError: ' + event.data));
-					window._taskThreadStreamingActive = false;
+				function revealTerminalError() {
+					if (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);
+					if (shouldScrollTerminalError) {
+						var failedMessages = document.getElementById(messagesId);
+						if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
+						requestAnimationFrame(function() {
+							failedMessages = document.getElementById(messagesId);
+							if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
+						});
+					}
+					if (pauseTarget) {
+						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+					} else if (window.syncChatTranscriptRevision) {
+						window.syncChatTranscriptRevision(execId);
+					}
+				}
+				if (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);
+				else revealTerminalError();
+				window._taskThreadStreamingActive = false;
 					var failedPair = container.closest('[data-execution-pair="true"]');
 					if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
 					else if (failedPair) {
@@ -1181,12 +1220,10 @@ templ ChatStreamingResumeInitScript() {
 					}
 					if (pauseTarget) {
 						showThreadTerminalStatus('failed');
-						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
 					} else {
 						window._chatStreamInProgress = false;
 						if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-						if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 					}
 				});
 
@@ -4226,6 +4263,21 @@ templ ChatAutoScrollScript() {
 				return capacity;
 			}
 			if (typeof window._chatRawRevisionCounter !== 'number') window._chatRawRevisionCounter = 0;
+			window.showChatTerminalError = function(outputContainer, errorMessage) {
+				if (!outputContainer) return null;
+				var bubbleInner = outputContainer.closest('.chat-bubble-inner');
+				if (!bubbleInner) return null;
+				var terminalError = bubbleInner.querySelector(':scope > [data-terminal-error="true"]');
+				if (!terminalError) {
+					terminalError = document.createElement('div');
+					terminalError.className = 'mt-3 pt-3 border-t border-error/30 text-error/80 text-sm font-medium break-words';
+					terminalError.setAttribute('data-terminal-error', 'true');
+					terminalError.setAttribute('role', 'alert');
+					bubbleInner.appendChild(terminalError);
+				}
+				terminalError.textContent = 'Error: ' + String(errorMessage || 'Failure details unavailable');
+				return terminalError;
+			};
 			window.setChatRawContent = function(container, raw) {
 				raw = raw || '';
 				var currentRaw = container.getAttribute('data-raw-content');
@@ -4258,6 +4310,11 @@ templ ChatAutoScrollScript() {
 					var currentOutput = currentPair.querySelector('[data-raw-content]');
 					var nextOutput = nextPair.querySelector('[data-raw-content]');
 					if ((currentOutput ? currentOutput.getAttribute('data-raw-content') || '' : '') !== (nextOutput ? nextOutput.getAttribute('data-raw-content') || '' : '')) return false;
+					if ((currentPair.getAttribute('data-exec-status') || '') === 'failed') {
+						var currentError = currentPair.querySelector('[data-terminal-error="true"]');
+						var nextError = nextPair.querySelector('[data-terminal-error="true"]');
+						if ((currentError ? currentError.textContent || '' : '') !== (nextError ? nextError.textContent || '' : '')) return false;
+					}
 				}
 				return true;
 			};

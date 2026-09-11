@@ -107,6 +107,9 @@ func TestChatAutoScrollScript(t *testing.T) {
 		"document.getElementById('streaming-message-' + data.exec_id)",
 		"progress.textContent = message",
 		"window.hideMixtureProgress = function(execId)",
+		"window.showChatTerminalError = function(outputContainer, errorMessage)",
+		"terminalError.textContent = 'Error: ' + String(errorMessage || 'Failure details unavailable')",
+		"var currentError = currentPair.querySelector('[data-terminal-error=\"true\"]')",
 	} {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("missing mixture progress helper snippet: %s", snippet)
@@ -472,7 +475,8 @@ global.window = {
   normalizeTranscriptMarkers: text => text.replace(/alias/g, 'normalized-alias'),
   renderStreamingContent(container, text) { renders++; container.rendered = text; },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
-  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {}
+  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {},
+  showChatTerminalError(container, message) { container.appendChild({ textContent: 'Error: ' + message }); }
 };
 `
 	assertions := `
@@ -537,7 +541,8 @@ global.EventSource = FakeEventSource;
 global.window = {
   renderStreamingContent() {},
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
-  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {}
+  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {},
+  showChatTerminalError(container, message) { container.appendChild({ textContent: 'Error: ' + message }); }
 };
 `
 	assertions := `
@@ -603,7 +608,8 @@ global.window = {
   normalizeTranscriptMarkers() { throw new Error('normalizer must not run in fallback'); },
   renderStreamingContent() { renders++; return Promise.reject(new Error('renderer failed')); },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
-  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {}
+  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {},
+  showChatTerminalError(container, message) { container.appendChild({ textContent: 'Error: ' + message }); }
 };
 `
 	assertions := `
@@ -786,6 +792,14 @@ func TestCompletedErrorBubbleUsesSharedHydratorWithoutInlineScript(t *testing.T)
 	if !strings.Contains(content, `Error: failed`) || !strings.Contains(content, `class="chat-stream-content"`) || !strings.Contains(content, `data-raw-content="partial output"`) {
 		t.Fatalf("error assistant bubble must keep label and compact raw partial output markup:\n%s", content)
 	}
+	outputIndex := strings.Index(content, `class="chat-stream-content"`)
+	errorIndex := strings.Index(content, `data-terminal-error="true"`)
+	if errorIndex < 0 || errorIndex < outputIndex {
+		t.Fatalf("terminal error must render once after partial output: output=%d error=%d\n%s", outputIndex, errorIndex, content)
+	}
+	if strings.Count(content, `data-terminal-error="true"`) != 1 || !strings.Contains(content, `role="alert"`) {
+		t.Fatalf("terminal error must be a single accessible alert:\n%s", content)
+	}
 }
 
 func TestCompletedBubbleSharedHydrationInChrome(t *testing.T) {
@@ -877,6 +891,142 @@ func TestCompletedBubbleSharedHydrationInChrome(t *testing.T) {
 		state := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
 		stderr, _ := os.ReadFile(stderrPath)
 		t.Fatalf("completed-bubble browser hydration fixture failed: %s\nDOM: %s\nChrome stderr: %s", state, result, stderr)
+	}
+}
+
+func TestFailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	longOutput := strings.Repeat("partial generated line\n", 120)
+	var initial, liveBottom, liveReader, chatScript bytes.Buffer
+	if err := ChatBubbleError("Assistant", "initial terminal failure", longOutput).Render(context.Background(), &initial); err != nil {
+		t.Fatalf("render initial failed bubble: %v", err)
+	}
+	if err := ChatBubbleStreaming("Assistant", "live-bottom", "live-bottom-messages", "", false).Render(context.Background(), &liveBottom); err != nil {
+		t.Fatalf("render bottom live bubble: %v", err)
+	}
+	if err := ChatBubbleStreaming("Assistant", "live-reader", "live-reader-messages", "", false).Render(context.Background(), &liveReader); err != nil {
+		t.Fatalf("render reader live bubble: %v", err)
+	}
+	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
+	}
+
+	html := `<!doctype html><html><head><meta charset="utf-8"><style>
+	.pane { height: 220px; overflow-y: auto; border: 1px solid; }
+	.chat-bubble-inner { white-space: normal; }
+	</style><script>
+	window.__eventSources = [];
+	window.EventSource = function(url) { this.url = url; this.listeners = {}; window.__eventSources.push(this); };
+	window.EventSource.prototype.addEventListener = function(type, callback) { this.listeners[type] = callback; };
+	window.EventSource.prototype.close = function() {};
+	window.renderChatMarkdown = function(text) { return '<div class="chat-markdown">' + String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</div>'; };
+	window.addCodeCopyButtons = function() {};
+	window.renderChatMarkdownLargeFallback = function(text) { var node = document.createElement('div'); node.innerHTML = window.renderChatMarkdown(text); return node; };
+	window.refreshChatComposerAction = function() {};
+	window.evaluatePlanCompletionPrompt = function() {};
+	window.syncChatTranscriptRevision = function() {};
+	window.registerChatStreamEventSource = function() {};
+	window.unregisterChatStreamEventSource = function() {};
+	</script>` + chatScript.String() + `</head><body><main id="fixture-root">
+	<div id="initial-messages" class="pane">` + initial.String() + `</div>
+	<div id="live-bottom-messages" class="pane"><div data-execution-pair="true" data-exec-status="running">` + liveBottom.String() + `</div></div>
+	<div id="live-reader-messages" class="pane"><div data-execution-pair="true" data-exec-status="running">` + liveReader.String() + `</div></div>
+	</main><script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  var root = document.getElementById('fixture-root');
+		  function fail(message) { root.setAttribute('data-test-result', 'fail'); root.setAttribute('data-test-error', message); }
+		  function waitFor(predicate, callback, remaining) {
+		    if (predicate()) return callback();
+		    if (remaining <= 0) return fail('browser fixture readiness timed out');
+		    setTimeout(function() { waitFor(predicate, callback, remaining - 1); }, 25);
+		  }
+		  Promise.resolve(window.cleanAssistantMessages(document.getElementById('initial-messages'))).then(function() {
+	    var initialPane = document.getElementById('initial-messages');
+	    initialPane.scrollTop = initialPane.scrollHeight;
+	    var initialOutput = initialPane.querySelector('[data-raw-content]');
+	    var initialError = initialPane.querySelector('[data-terminal-error="true"]');
+	    if (!initialOutput || !initialError || !(initialOutput.compareDocumentPosition(initialError) & Node.DOCUMENT_POSITION_FOLLOWING)) return fail('initial terminal error was not after partial output');
+	    if (initialError.getBoundingClientRect().bottom > initialPane.getBoundingClientRect().bottom + 1) return fail('initial terminal error was not visible at bottom');
+	    var sourceBottom = window.__eventSources.find(function(source) { return source.url.indexOf('live-bottom') !== -1; });
+	    var sourceReader = window.__eventSources.find(function(source) { return source.url.indexOf('live-reader') !== -1; });
+	    if (!sourceBottom || !sourceReader) return fail('live streams were not attached');
+	    var partial = Array(121).join('live partial output line\n');
+	    sourceBottom.onmessage({data: partial});
+	    sourceReader.onmessage({data: partial});
+		    waitFor(function() {
+		      var bottomOutput = document.getElementById('streaming-message-live-bottom');
+		      var readerOutput = document.getElementById('streaming-message-live-reader');
+		      return bottomOutput && readerOutput && bottomOutput.getAttribute('data-raw-content') === partial && readerOutput.getAttribute('data-raw-content') === partial;
+		    }, function() {
+		      var bottomPane = document.getElementById('live-bottom-messages');
+		      var readerPane = document.getElementById('live-reader-messages');
+		      bottomPane.scrollTop = bottomPane.scrollHeight;
+		      var bottomTracker = window['scrollTracker_live-bottom-messages'];
+		      if (!bottomTracker) return fail('bottom tracker was not installed');
+		      bottomTracker.userScrolledUp = false;
+		      sourceBottom.listeners.error({data: 'live terminal failure <unsafe>'});
+		      waitFor(function() { return !!bottomPane.querySelector('[data-terminal-error="true"]'); }, function() {
+		        var output = bottomPane.querySelector('[data-raw-content]');
+		        var terminalError = bottomPane.querySelector('[data-terminal-error="true"]');
+		        if (!output || !terminalError || !(output.compareDocumentPosition(terminalError) & Node.DOCUMENT_POSITION_FOLLOWING)) return fail('live terminal error was not after partial output');
+		        if (bottomPane.scrollHeight - bottomPane.scrollTop - bottomPane.clientHeight > 2) return fail('near-bottom live reader was not kept at terminal error: height=' + bottomPane.scrollHeight + ' top=' + bottomPane.scrollTop + ' client=' + bottomPane.clientHeight);
+		        if (terminalError.textContent !== 'Error: live terminal failure <unsafe>' || terminalError.innerHTML.indexOf('<unsafe>') !== -1) return fail('live terminal error was not safely escaped');
+		        if (bottomPane.querySelectorAll('[data-terminal-error="true"]').length !== 1 || terminalError.getAttribute('role') !== 'alert') return fail('live terminal error was duplicated or inaccessible');
+		        readerPane.dispatchEvent(new WheelEvent('wheel', {deltaY: -100, bubbles: true}));
+		        readerPane.scrollTop = 0;
+		        readerPane.dispatchEvent(new Event('scroll'));
+		        var readerTracker = window['scrollTracker_live-reader-messages'];
+		        if (!readerTracker) return fail('older-reader tracker was not installed');
+		        readerTracker.userScrolledUp = true;
+		        sourceReader.listeners.error({data: 'reader terminal failure'});
+		        waitFor(function() { return !!readerPane.querySelector('[data-terminal-error="true"]'); }, function() {
+		          if (readerPane.scrollTop > 2) return fail('older-content reader position was stolen: height=' + readerPane.scrollHeight + ' top=' + readerPane.scrollTop + ' client=' + readerPane.clientHeight + ' tracker=' + readerTracker.userScrolledUp);
+		          root.setAttribute('data-test-result', 'pass');
+		        }, 80);
+		      }, 80);
+		    }, 80);
+	  }).catch(function(error) { fail(String(error && error.stack || error)); });
+	});
+	</script></body></html>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	stdoutPath := filepath.Join(t.TempDir(), "chrome-terminal-error.html")
+	stderrPath := filepath.Join(t.TempDir(), "chrome-terminal-error.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create Chrome stdout: %v", err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-terminal-error-profile"), "--virtual-time-budget=6000", "--dump-dom", server.URL)
+	cmd.Stdout, cmd.Stderr = stdoutFile, stderrFile
+	configureTestBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome terminal-error fixture: %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	var result string
+	for time.Now().Before(deadline) {
+		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			result = string(output)
+			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stopTestBrowserProcess(cmd)
+	if !strings.Contains(result, `data-test-result="pass"`) {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("terminal-error browser fixture failed:\nDOM: %s\nChrome stderr: %s", result, stderr)
 	}
 }
 
@@ -4612,7 +4762,11 @@ func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) 
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errBody := content[errIdx:min(len(content), errIdx+2000)]
+	errEnd := strings.Index(content[errIdx:], "eventSource.onerror = function")
+	if errEnd == -1 {
+		t.Fatal("ChatBubbleStreaming must delimit its error event listener before onerror")
+	}
+	errBody := content[errIdx : errIdx+errEnd]
 
 	// Thread error should do the HTMX refresh but NOT clear _chatStreamInProgress
 	// for plan prompt evaluation (plan mode is chat-only)
