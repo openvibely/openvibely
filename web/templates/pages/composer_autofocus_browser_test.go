@@ -130,6 +130,23 @@ func (c *composerFocusCDP) click(selector string) {
 	}
 }
 
+func (c *composerFocusCDP) wheel(selector string, deltaY float64) {
+	c.t.Helper()
+	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';var r=el.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()`, selector))
+	if coordinates == "missing" {
+		c.t.Fatalf("native wheel target %s is missing", selector)
+	}
+	var point struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	if err := json.Unmarshal([]byte(coordinates), &point); err != nil {
+		c.t.Fatalf("decode wheel coordinates for %s: %v", selector, err)
+	}
+	c.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+	c.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseWheel", "x": point.X, "y": point.Y, "deltaX": 0, "deltaY": deltaY}, nil)
+}
+
 func (c *composerFocusCDP) typeText(text string) {
 	c.t.Helper()
 	for _, char := range text {
