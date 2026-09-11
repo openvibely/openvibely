@@ -1048,42 +1048,47 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							window.syncChatTranscriptRevision(execId);
 						});
 
-						eventSource.addEventListener('error', function(event) {
-							var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
-							if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
-						eventSource.close();
-						if (window.unregisterChatStreamEventSource) {
-							window.unregisterChatStreamEventSource(execId, eventSource);
-						}
-							if (retryableEarlyError) {
-								streamRetryCount++;
-								setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
-								return;
-							}
+							eventSource.addEventListener('error', function(event) {
+								var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+								if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
+								eventSource.close();
+								if (window.unregisterChatStreamEventSource) {
+									window.unregisterChatStreamEventSource(execId, eventSource);
+								}
+								if (retryableEarlyError) {
+									streamRetryCount++;
+									setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
+									return;
+								}
+								var shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (chatMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(chatMessages));
 								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
 									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
-									renderBufferedOutput(true);
 								}
 								persistLiveStreamState(false);
+								renderBufferedOutput(true);
 								thinking.classList.add('hidden');
-							dots.classList.add('hidden');
-							contentDiv.classList.remove('hidden');
-							var failedPair = bubble.closest('[data-execution-pair="true"]');
-							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
-							else if (failedPair) {
-								failedPair.setAttribute('data-exec-status', 'failed');
-								failedPair.setAttribute('hx-preserve', 'true');
-							}
-							if (event.data) {
-								contentDiv.textContent += '\n\nError: ' + event.data;
-							}
-							// Clear streaming flag, synchronize the authoritative failed snapshot,
-							// and re-evaluate plan prompt on error.
-							window._chatStreamInProgress = false;
-							if (window.refreshChatComposerAction) window.refreshChatComposerAction();
-							window.syncChatTranscriptRevision(execId);
-							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-						});
+								dots.classList.add('hidden');
+								contentDiv.classList.remove('hidden');
+								var failedPair = bubble.closest('[data-execution-pair="true"]');
+								if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
+								else if (failedPair) {
+									failedPair.setAttribute('data-exec-status', 'failed');
+									failedPair.setAttribute('hx-preserve', 'true');
+								}
+								if (event.data && window.showChatTerminalError) window.showChatTerminalError(contentDiv, event.data);
+								if (shouldScrollTerminalError && chatMessages) {
+									chatMessages.scrollTop = chatMessages.scrollHeight;
+									requestAnimationFrame(function() {
+										if (chatMessages && chatMessages.isConnected) chatMessages.scrollTop = chatMessages.scrollHeight;
+									});
+								}
+								// Clear streaming flag, synchronize the authoritative failed snapshot,
+								// and re-evaluate plan prompt on error.
+								window._chatStreamInProgress = false;
+								if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+								window.syncChatTranscriptRevision(execId);
+								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+							});
 
 							eventSource.onerror = function() {
 								eventSource.close();

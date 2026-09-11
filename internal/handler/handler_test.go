@@ -1591,7 +1591,7 @@ func TestHandler_GetTask_StatusIndicator(t *testing.T) {
 		wantAbsent []string
 	}{
 		{"completed_shows_success", models.StatusCompleted, models.CategoryCompleted, models.ExecCompleted, "Done!", "", true, []string{"Task completed", "text-success"}, nil},
-		{"failed_shows_error", models.StatusFailed, models.CategoryCompleted, models.ExecFailed, "", "something went wrong", true, []string{"Task failed", "text-error"}, nil},
+		{"failed_shows_error", models.StatusFailed, models.CategoryCompleted, models.ExecFailed, strings.Repeat("partial generated output\n", 80), "something went wrong", true, []string{"Task failed", "text-error"}, nil},
 		{"running_no_indicator", models.StatusRunning, models.CategoryActive, models.ExecRunning, "", "", false, nil, []string{"Task completed", "Task failed"}},
 	}
 
@@ -1637,6 +1637,16 @@ func TestHandler_GetTask_StatusIndicator(t *testing.T) {
 			for _, absent := range tc.wantAbsent {
 				if strings.Contains(body, absent) {
 					t.Errorf("did not expect %q in response", absent)
+				}
+			}
+			if tc.execStatus == models.ExecFailed {
+				outputIndex := strings.Index(body, `partial generated output`)
+				errorIndex := strings.Index(body, `role="alert">Error: something went wrong`)
+				if outputIndex < 0 || errorIndex < outputIndex {
+					t.Fatalf("failed task thread must render its terminal error after partial output: output=%d error=%d", outputIndex, errorIndex)
+				}
+				if strings.Count(body, `role="alert">Error: something went wrong`) != 1 {
+					t.Fatalf("failed task thread rendered duplicate terminal errors: %d", strings.Count(body, `role="alert">Error: something went wrong`))
 				}
 			}
 		})
@@ -8062,6 +8072,39 @@ func TestHandler_GetTaskThreadExecutionFragment(t *testing.T) {
 	assertContains(t, rec, "queued follow-up now running")
 	assertContains(t, rec, `data-exec-id="`+exec.ID+`"`)
 	assertContains(t, rec, "new EventSource")
+}
+
+func TestHandler_GetTaskThreadFailedAuthoritativeFragmentOrdersTerminalErrorLast(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Failed Thread Fragment Project")
+	task := createTask(t, h, project.ID, "Failed Thread Fragment Task", func(tk *models.Task) {
+		tk.Status = models.StatusFailed
+		tk.Category = models.CategoryCompleted
+		tk.AgentID = &agent.ID
+	})
+	partial := strings.Repeat("partial terminal output\n", 80)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "long failed follow-up"
+		ex.Output = partial
+		ex.ErrorMessage = "terminal failure <unsafe>"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, exec.ID, models.ExecFailed, partial, exec.ErrorMessage, 100, 500))
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread?limit=5")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	outputIndex := strings.Index(body, `partial terminal output`)
+	errorIndex := strings.Index(body, `role="alert">Error: terminal failure &lt;unsafe&gt;`)
+	require.GreaterOrEqual(t, outputIndex, 0)
+	require.Greater(t, errorIndex, outputIndex)
+	require.Equal(t, 1, strings.Count(body, `role="alert">Error: terminal failure &lt;unsafe&gt;`))
+	require.Contains(t, body, `data-terminal-error="true"`)
+	require.Contains(t, body, "terminal failure &lt;unsafe&gt;")
+	require.NotContains(t, body, "terminal failure <unsafe>")
 }
 
 func TestHandler_GetTaskThreadExecutionFragmentRejectsWrongTask(t *testing.T) {
