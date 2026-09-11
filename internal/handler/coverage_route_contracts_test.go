@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -300,6 +301,22 @@ func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Lifecycle routed Active lane project").Build()
 	model := tc.CreateLLMConfig().WithName("Lifecycle routed lane model").WithProvider(models.ProviderTest).WithModel("test-model").AsDefault().Build()
+	modelCallStarted := make(chan struct{}, 1)
+	modelCallRelease := make(chan struct{})
+	var releaseModelCallOnce sync.Once
+	releaseModelCall := func() { releaseModelCallOnce.Do(func() { close(modelCallRelease) }) }
+	t.Cleanup(releaseModelCall)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "routed follow-up complete"
+	mock.TextOnly = mock.Response
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		modelCallStarted <- struct{}{}
+		select {
+		case <-modelCallRelease:
+		case <-callCtx.Done():
+		}
+	}
+	tc.handler.llmSvc.SetLLMCaller(mock)
 	task := tc.CreateTask(project.ID).WithTitle("Lifecycle routed lane task").WithCategory(models.CategoryBacklog).Build()
 	task.AgentID = &model.ID
 	require.NoError(t, tc.taskRepo.Update(ctx, task))
@@ -314,10 +331,15 @@ func TestUpdateTaskCategoryRunningLaneRoutesQueuedFollowupAndReturnsConflict(t *
 		"expected_states": {string(expected)},
 	}).Execute()
 	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	select {
+	case <-modelCallStarted:
+	case <-time.After(time.Second):
+		t.Fatal("routed follow-up did not reach the model call")
+	}
 	loaded, err := tc.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, loaded.Category)
-	require.Equal(t, models.StatusQueued, loaded.Status)
+	require.Equal(t, models.StatusRunning, loaded.Status)
 	executions, err := tc.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, executions, 1)
