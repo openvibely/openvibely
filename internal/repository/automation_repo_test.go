@@ -81,8 +81,12 @@ func TestAutomationRepoPublishRegisteredAndQuerySurfaces(t *testing.T) {
 		t.Fatalf("ListSavedByProject = %#v, %v", saved, err)
 	}
 	cards, err := repo.ListPortfolioCards(ctx, projectID)
-	if err != nil || len(cards) != 1 || cards[0].Version.ID != definition.Version.ID {
+	if err != nil || len(cards) != 1 || cards[0].Version.ID != definition.Version.ID || cards[0].GraphNodeCount != len(definition.Nodes) {
 		t.Fatalf("ListPortfolioCards = %#v, %v", cards, err)
+	}
+	pagedCards, err := repo.ListPortfolioCardsPage(ctx, projectID, 20, 0, "")
+	if err != nil || len(pagedCards) != 1 || pagedCards[0].GraphNodeCount != len(definition.Nodes) {
+		t.Fatalf("ListPortfolioCardsPage = %#v, %v", pagedCards, err)
 	}
 	byKey, err := repo.GetByStableKey(ctx, projectID, publication.StableKey)
 	if err != nil || byKey == nil || byKey.ID != definition.Automation.ID {
