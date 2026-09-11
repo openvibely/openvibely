@@ -342,6 +342,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 	})
 	goalHandlers := h.taskGoalActionHandlers(params)
 	handlers := map[string]chatcontrol.RuntimeActionHandler{
+		"request_user_input": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeRequestUserInputTool(ctx, params, input)
+		},
 		"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeListAutomationsTool(ctx, params, input)
 		},

@@ -16,24 +16,44 @@ const (
 	ChatThreadInputApplied ChatEventType = "chat_thread_input_applied"
 	// ChatThreadInputCancelled is sent when a pending queued/steering row is cancelled.
 	ChatThreadInputCancelled ChatEventType = "chat_thread_input_cancelled"
+	// ChatUserInputRequested is sent when a runtime tool call is waiting for a Chat-page answer.
+	ChatUserInputRequested ChatEventType = "chat_user_input_requested"
 )
 
 // ChatEvent represents a chat event for real-time updates
 type ChatEvent struct {
-	Type            ChatEventType `json:"type"`
-	ProjectID       string        `json:"project_id"`
-	ExecID          string        `json:"exec_id"`
-	TaskID          string        `json:"task_id,omitempty"`
-	Message         string        `json:"message,omitempty"`
-	Source          string        `json:"source,omitempty"` // "telegram", "web", "api"
-	AgentName       string        `json:"agent_name,omitempty"`
-	CompletedOutput string        `json:"completed_output,omitempty"` // Final assistant output for ChatResponseDone; enables plan-completion prompt without DOM scan
-	Status          string        `json:"status,omitempty"`           // Authoritative terminal execution status for ChatResponseDone
-	Queued          bool          `json:"queued,omitempty"`
-	Steering        bool          `json:"steering,omitempty"`
-	HasAttachments  bool          `json:"has_attachments,omitempty"`
-	PendingInputID  string        `json:"pending_input_id,omitempty"`
-	IsTaskFollowup  bool          `json:"is_task_followup,omitempty"`
+	Type            ChatEventType          `json:"type"`
+	ProjectID       string                 `json:"project_id"`
+	ExecID          string                 `json:"exec_id"`
+	TaskID          string                 `json:"task_id,omitempty"`
+	Message         string                 `json:"message,omitempty"`
+	Source          string                 `json:"source,omitempty"` // "telegram", "web", "api"
+	AgentName       string                 `json:"agent_name,omitempty"`
+	CompletedOutput string                 `json:"completed_output,omitempty"` // Final assistant output for ChatResponseDone; enables plan-completion prompt without DOM scan
+	Status          string                 `json:"status,omitempty"`           // Authoritative terminal execution status for ChatResponseDone
+	Queued          bool                   `json:"queued,omitempty"`
+	Steering        bool                   `json:"steering,omitempty"`
+	HasAttachments  bool                   `json:"has_attachments,omitempty"`
+	PendingInputID  string                 `json:"pending_input_id,omitempty"`
+	IsTaskFollowup  bool                   `json:"is_task_followup,omitempty"`
+	InputRequest    *ChatInputRequestEvent `json:"input_request,omitempty"`
+}
+
+type ChatInputRequestEvent struct {
+	ID        string                     `json:"id"`
+	ExpiresAt string                     `json:"expires_at,omitempty"`
+	Questions []ChatInputRequestQuestion `json:"questions"`
+}
+
+type ChatInputRequestQuestion struct {
+	ID       string                   `json:"id"`
+	Question string                   `json:"question"`
+	Options  []ChatInputRequestOption `json:"options"`
+}
+
+type ChatInputRequestOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
 }
 
 // ToSSE converts a ChatEvent to SSE format

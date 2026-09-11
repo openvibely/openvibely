@@ -58,6 +58,7 @@ type Handler struct {
 	usageAnalyticsSvc          *service.UsageAnalyticsService
 	broadcaster                *events.Broadcaster
 	chatBroadcaster            *events.ChatBroadcaster
+	chatInputRequests          *chatInputRequestBroker
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	liveSSEWriteObserver       func(int) // test seam invoked after a live SSE event is written
@@ -279,29 +280,29 @@ func New(
 	}
 
 	h = &Handler{
-		projectSvc:          projectSvc,
-		taskSvc:             taskSvc,
-		swarmSvc:            swarmSvc,
-		llmSvc:              llmSvc,
-		workerSvc:           workerSvc,
-		schedulerSvc:        schedulerSvc,
-		alertSvc:            alertSvc,
-		upcomingSvc:         upcomingSvc,
-		insightsSvc:         insightsSvc,
-		llmConfigRepo:       llmConfigRepo,
-		taskRepo:            taskRepo,
-		scheduleRepo:        scheduleRepo,
-		execRepo:            execRepo,
-		threadInputRepo:     threadInputRepo,
-		usageRepo:           usageRepo,
-		skillAnalyticsRepo:  skillAnalyticsRepo,
-		taskCommitStatRepo:  taskCommitStatRepo,
-		usageAnalyticsSvc:   usageAnalyticsSvc,
-		workerRepo:          workerRepo,
-		attachmentRepo:      attachmentRepo,
-		chatAttachmentRepo:  chatAttachmentRepo,
-		projectRepo:         projectRepo,
-		settingsRepo:        settingsRepo,
+		projectSvc:         projectSvc,
+		taskSvc:            taskSvc,
+		swarmSvc:           swarmSvc,
+		llmSvc:             llmSvc,
+		workerSvc:          workerSvc,
+		schedulerSvc:       schedulerSvc,
+		alertSvc:           alertSvc,
+		upcomingSvc:        upcomingSvc,
+		insightsSvc:        insightsSvc,
+		llmConfigRepo:      llmConfigRepo,
+		taskRepo:           taskRepo,
+		scheduleRepo:       scheduleRepo,
+		execRepo:           execRepo,
+		threadInputRepo:    threadInputRepo,
+		usageRepo:          usageRepo,
+		skillAnalyticsRepo: skillAnalyticsRepo,
+		taskCommitStatRepo: taskCommitStatRepo,
+		usageAnalyticsSvc:  usageAnalyticsSvc,
+		workerRepo:         workerRepo,
+		attachmentRepo:     attachmentRepo,
+		chatAttachmentRepo: chatAttachmentRepo,
+		chatInputRequests:  newChatInputRequestBroker(),
+		projectRepo:        projectRepo, settingsRepo: settingsRepo,
 		broadcaster:         broadcaster,
 		telegramService:     telegramSvc,
 		projectFolderPicker: pickProjectFolderNative,
@@ -760,6 +761,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/automations/bulk", h.DeleteAutomationsBulk)
 	e.POST("/automations/:automationId/delete", h.DeleteAutomation)
 	e.GET("/automations/:automationId", h.GetAutomationLive)
+
+	// Chat input requests (project-scoped by submitted project_id)
+	e.POST("/chat/input-requests/:id/answer", h.ChatInputRequestAnswer)
 
 	// Tasks (project-scoped via ?project_id= query param)
 	e.GET("/tasks", h.ListTasks)
