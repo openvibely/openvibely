@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -474,6 +476,91 @@ func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	}
 	if record == nil || record.PRNumber != 77 || record.PublishedHeadSHA != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || record.IssueNumber == nil || *record.IssueNumber != 99 || record.IssueURL == "" {
 		t.Fatalf("unexpected persisted PR record: %#v", record)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskFallbackRoundTripsGitSpecialPaths(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-special-paths"); err != nil {
+		t.Fatalf("checkout task branch: %v\n%s", err, out)
+	}
+	wantPaths := []string{
+		"reports/odd\tname.go",
+		"reports/line\nname.go",
+		"reports/quote\"name.go",
+		"reports/back\\name.go",
+	}
+	for _, path := range wantPaths {
+		fullPath := filepath.Join(repoDir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("mkdir for %q: %v", path, err)
+		}
+		if err := os.WriteFile(fullPath, []byte("package published\n\nfunc Added() {}\n"), 0644); err != nil {
+			t.Fatalf("write %q: %v", path, err)
+		}
+	}
+	if err := CommitWorktreeChanges(repoDir, "Add special publication paths"); err != nil {
+		t.Fatalf("commit special publication paths: %v", err)
+	}
+
+	project := &models.Project{Name: "Published Special Paths", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Publish special paths", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: repoDir, WorktreeBranch: "task/publish-special-paths", MergeTargetBranch: "main"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	publishedSHA := strings.Repeat("e", 40)
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			if req.BaseBranch != "main" || req.Branch != task.WorktreeBranch || req.WorktreePath != repoDir {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return &GitHubPublishBranchResult{HeadSHA: publishedSHA, CreatedCommit: true}, nil
+		},
+		createPRFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 89, URL: "https://github.com/openvibely/openvibely/pull/89", State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedSHA}, nil
+		},
+	}, prRepo).SetTaskCommitStatRepo(statRepo)
+
+	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{CommitMessage: "Publish special paths"}); err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	var gotPaths []string
+	if err := json.Unmarshal([]byte(stats[0].ChangedFilesJSON), &gotPaths); err != nil {
+		t.Fatalf("decode changed files: %v", err)
+	}
+	gotSet := make(map[string]bool, len(gotPaths))
+	for _, path := range gotPaths {
+		gotSet[path] = true
+	}
+	wantSet := make(map[string]bool, len(wantPaths))
+	for _, path := range wantPaths {
+		wantSet[path] = true
+	}
+	if !reflect.DeepEqual(gotSet, wantSet) || len(gotPaths) != len(wantPaths) {
+		t.Fatalf("changed files = %#v, want exact paths %#v", gotPaths, wantPaths)
+	}
+	if stats[0].Insertions != len(wantPaths)*3 || stats[0].FilesChanged != len(wantPaths) {
+		t.Fatalf("fallback totals = insertions=%d files=%d, want %d/%d", stats[0].Insertions, stats[0].FilesChanged, len(wantPaths)*3, len(wantPaths))
+	}
+	if fileTypes := fileTypeCountsFromFiles(gotPaths); !reflect.DeepEqual(fileTypes, []models.FileTypeCount{{Extension: ".go", Count: len(wantPaths)}}) {
+		t.Fatalf("fallback file types = %#v, want all .go", fileTypes)
 	}
 }
 
