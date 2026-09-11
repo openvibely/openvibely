@@ -1090,7 +1090,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</div><script type=\"text/javascript\">\n\t\t\t\t(function() {\n\t\t\t\t\tvar streamingDots = document.currentScript.previousElementSibling;\n\t\t\t\t\tvar container = streamingDots.previousElementSibling;\n\t\t\t\t\tvar execId = container.getAttribute('data-exec-id');\n\t\t\t\t\tvar thinkingIndicator = document.getElementById('streaming-thinking-' + execId);\n\t\t\t\t\tvar messagesId = container.getAttribute('data-messages-container');\n\t\t\t\t\tvar pauseTarget = container.getAttribute('data-pause-polling-target');\n\t\t\t\t\tvar isThread = container.getAttribute('data-is-thread') === 'true';\n\t\t\t\t\t// Pause HTMX polling if requested (prevents morph:outerHTML from destroying the EventSource)\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\twindow._taskThreadStreamingActive = true;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\t\tif (pollingEl) {\n\t\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-trigger')) {\n\t\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-trigger', pollingEl.getAttribute('hx-trigger') || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-get')) {\n\t\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-get', pollingEl.getAttribute('hx-get') || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\t\thtmx.process(pollingEl);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction stopThreadPolling() {\n\t\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\t\tif (!pollingEl) return;\n\t\t\t\t\t\t\tpollingEl.setAttribute('data-task-active', 'false');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction restoreThreadPollingFallback() {\n\t\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\t\tif (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;\n\t\t\t\t\t\t\tvar pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');\n\t\t\t\t\t\t\tvar pausedGet = pollingEl.getAttribute('data-paused-hx-get');\n\t\t\t\t\t\t\tif (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);\n\t\t\t\t\t\t\tif (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction refreshThreadComposerAction() {\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;\n\t\t\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\tvar taskId = view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction showThreadTerminalStatus(status) {\n\t\t\t\t\t\t\tstopThreadPolling();\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tif (form) {\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar messages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tif (!messages || document.getElementById('task-thread-terminal-status')) return;\n\t\t\t\t\t\tvar wrap = document.createElement('div');\n\t\t\t\t\t\twrap.id = 'task-thread-terminal-status';\n\t\t\t\t\t\twrap.className = 'flex items-center justify-center gap-2 py-2';\n\t\t\t\t\t\t\tvar inner = document.createElement('div');\n\t\t\t\t\t\t\t\tvar statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');\n\t\t\t\t\t\t\t\tinner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;\n\t\t\t\t\t\t\t\tvar icon = document.createElement('span');\n\t\t\t\t\t\t\t\ticon.setAttribute('aria-hidden', 'true');\n\t\t\t\t\t\t\t\ticon.textContent = status === 'failed' ? '✕' : (status === 'cancelled' ? '■' : '✓');\n\t\t\t\t\t\t\t\tvar text = document.createElement('span');\n\t\t\t\t\t\t\t\ttext.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));\n\t\t\t\t\t\t\tinner.appendChild(icon);\n\t\t\t\t\t\t\tinner.appendChild(text);\n\t\t\t\t\t\twrap.appendChild(inner);\n\t\t\t\t\t\t\tmessages.appendChild(wrap);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t// Get or create page-level tracker for this chat container.\n\t\t\t\t\t// resolveScrollTracker handles stale/replaced elements (morph swaps),\n\t\t\t\t\t// which is what previously caused smart scrolling to \"freeze\" in\n\t\t\t\t\t// long-lived conversations until a full page refresh.\n\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\tvar tracker = null;\n\t\t\t\tvar trackerKey = 'scrollTracker_' + messagesId;\n\n\t\t\t\tif (chatMessages) {\n\t\t\t\t\tif (window.resolveScrollTracker) {\n\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, chatMessages);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tif (!window[trackerKey]) {\n\t\t\t\t\t\t\twindow[trackerKey] = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\ttracker = window[trackerKey];\n\t\t\t\t\t}\n\t\t\t\t\t// The shared composer commits deliberate-send pin intent only after\n\t\t\t\t\t// the server accepts the message. Stream discovery alone must preserve\n\t\t\t\t\t// upward-reading intent from this or another browser surface.\n\t\t\t\t}\n\t\t\t\t\t\t// Buffer for accumulating streaming content\n\t\t\t\t\t\tvar textBuffer = '';\n\t\t\t\t\t\tvar streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;\n\t\t\t\t\t\tfunction utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }\n\t\t\t\t\t\t\tvar renderScheduled = false;\n\t\t\t\t\t\t\tvar renderDelayTimer = null;\n\t\t\t\t\t\t\tvar lastRenderFinishedAt = 0;\n\t\t\t\t\t\t\tvar lastRenderedSourceLength = 0;\n\t\t\t\t\t\t\tvar largeStreamRenderThreshold = 100 * 1024;\n\t\t\t\t\t\t\tvar largeStreamRenderInterval = 250;\n\t\t\t\t\t\t\tfunction renderBufferedOutput(force, yieldLarge) {\n\t\t\t\t\t\t\tif (!window.renderStreamingContent) {\n\t\t\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\t\t\t\tcontainer.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!force && renderScheduled) return;\n\t\t\t\t\t\t\tvar runRender = function() {\n\t\t\t\t\t\t\tvar sourceLength = textBuffer.length;\n\t\t\t\t\t\t\tvar renderText = textBuffer;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\trenderText = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\ttextBuffer = renderText;\n\t\t\t\t\t\t\t\tsourceLength = renderText.length;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!force && sourceLength === lastRenderedSourceLength) return;\n\t\t\t\t\t\t// Refresh tracker against the live messages element. If a morph\n\t\t\t\t\t\t// swap replaced the container mid-stream, the old tracker would\n\t\t\t\t\t\t// be holding a detached element and isNearBottom() would always\n\t\t\t\t\t\t// be true — causing endless auto-scroll until page refresh.\n\t\t\t\t\t\tvar liveMessages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (liveMessages && window.resolveScrollTracker) {\n\t\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, liveMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar shouldScroll = !tracker || tracker.shouldAutoScroll();\n\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\t\t\tfunction finishScheduledRender(committed) {\n\t\t\t\t\t\t\t\tif (committed === false) {\n\t\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\t\tif (textBuffer.length !== sourceLength) renderBufferedOutput(false);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {\n\t\t\t\t\t\t\t\t\ttextBuffer = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\t\trenderBufferedOutput(true, false);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\t\t\t\t// Auto-scroll only if the viewport was pinned before this render grew the DOM.\n\t\t\t\t\t\t\t\tif (shouldScroll) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (textBuffer.length !== sourceLength) renderBufferedOutput(false);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;\n\t\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\t\tvar renderPromise = liveRenderer(container, renderText, shouldYield);\n\t\t\t\t\t\t\tif (renderPromise && typeof renderPromise.then === 'function') {\n\t\t\t\t\treturn renderPromise.then(finishScheduledRender).catch(function(err) {\n\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\tconsole.error('[chat] streaming render failed:', err);\n\t\t\t\t\t\t// Preserve the complete response even if the styled renderer fails.\n\t\t\t\t\t\t\tcontainer.textContent = renderText;\n\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, renderText);\n\t\t\t\t\t\t\telse container.setAttribute('data-raw-content', renderText);\n\t\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\t\tif (textBuffer.length !== sourceLength) renderBufferedOutput(false);\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfinishScheduledRender(true);\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\tif (force) {\n\t\t\t\t\t\t\t\tif (renderDelayTimer !== null) {\n\t\t\t\t\t\t\t\t\tclearTimeout(renderDelayTimer);\n\t\t\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\treturn runRender();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\trenderScheduled = true;\n\t\t\t\t\t\t\tif (textBuffer.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {\n\t\t\t\t\t\t\t\tvar delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));\n\t\t\t\t\t\t\t\trenderDelayTimer = setTimeout(function() {\n\t\t\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t\t\t\t}, delay);\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction flushBufferedOutput() {\n\t\t\t\t\t\t\tif (renderScheduled || lastRenderedSourceLength !== textBuffer.length) {\n\t\t\t\t\t\t\t\treturn renderBufferedOutput(true, false);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction finalizeEmptyTerminalBubble(status) {\n\t\t\t\t\t\t\tif (textBuffer !== '') return;\n\t\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\tif (status === 'cancelled') {\n\t\t\t\t\t\t\t\tcontainer.classList.add('text-error/80', 'font-medium');\n\t\t\t\t\t\t\t\tcontainer.textContent = 'Error: Cancelled';\n\t\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');\n\t\t\t\t\t\t\t\telse container.setAttribute('data-raw-content', 'Error: Cancelled');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar streamRetryCount = 0;\n\t\t\t\t\t\tvar streamRetryScheduled = false;\n\t\t\t\t\t\tvar streamTerminalHandled = false;\n\t\t\t\t\t\tvar eventSource = null;\n\t\t\t\tfunction scheduleExecutionStreamRetry() {\n\t\t\t\t\tif (streamRetryScheduled) return true;\n\t\t\t\t\tif (streamRetryCount >= 5) return false;\n\t\t\t\t\tstreamRetryScheduled = true;\n\t\t\t\t\tstreamRetryCount++;\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\tstreamRetryScheduled = false;\n\t\t\t\t\t\tconnectExecutionStream();\n\t\t\t\t\t}, 150 * streamRetryCount);\n\t\t\t\t\treturn true;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction connectExecutionStream() {\n\t\t\t\t\t\t\tvar streamOffset = utf8ByteLength(textBuffer);\n\t\t\t\t\t\t\teventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));\n\t\t\t\t\t\tif (!isThread && window.registerChatStreamEventSource) {\n\t\t\t\t\t\t\twindow.registerChatStreamEventSource(execId, eventSource);\n\t\t\t\t\t\t}\n\t\t\t\t\tfunction removeThreadEventSource(es) {\n\t\t\t\t\t\tif (!window._threadEventSources || !es) return;\n\t\t\t\t\t\tvar idx = window._threadEventSources.indexOf(es);\n\t\t\t\t\t\tif (idx >= 0) window._threadEventSources.splice(idx, 1);\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeChatEventSource(execId, es) {\n\t\t\t\t\t\tif (!window.unregisterChatStreamEventSource) return;\n\t\t\t\t\t\twindow.unregisterChatStreamEventSource(execId, es);\n\t\t\t\t\t}\n\t\t\t\t\t// Track thread stream EventSource so navigation cleanup can close it.\n\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\tif (!window._threadEventSources) window._threadEventSources = [];\n\t\t\t\t\t\twindow._threadEventSources.push(eventSource);\n\t\t\t\t\t}\n\n\t\t\t\t\t\teventSource.onmessage = function(event) {\n\t\t\t\t\t\t\t// Hide thinking/progress indicators and show content on first aggregator token\n\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tif (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {\n\t\t\t\t\t\t\t\tthinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\t\tstreamingDots.classList.remove('hidden');\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Append to buffer and re-render\n\t\t\t\t\t\ttextBuffer += event.data;\n\t\t\t\t\t\trenderBufferedOutput(false);\n\t\t\t\t\t};\n\n\t\t\t\t\t\t\teventSource.addEventListener('done', function(event) {\n\t\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\t\ttextBuffer = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tvar terminalStatus = event && event.data ? event.data : 'completed';\n\t\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tfunction finishTerminalRender() {\n\t\t\t\t\t\t\t\tfinalizeEmptyTerminalBubble(terminalStatus);\n\t\t\t\t\t\t\t\t\tvar completedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);\n\t\t\t\t\t\t\t\t\telse if (completedPair) {\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('data-exec-status', terminalStatus);\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t// Hide streaming dots\n\t\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t\tshowThreadTerminalStatus(terminalStatus);\n\t\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\t\t\t\tif (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);\n\t\t\t\t\t\t\t\t\t// Always evaluate plan-completion first so prompt visibility updates\n\t\t\t\t\t\t\t\t\t// even if post-render transforms throw.\n\t\t\t\t\t\t\tif (window.handlePlanModeCompletion) {\n\t\t\t\t\t\t\t\twindow.handlePlanModeCompletion(textBuffer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Convert task-result metadata before cleaning transcript controls\n\t\t\t\t\t\t\tvar bubble = container.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskEditLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.cleanBubbleContent) {\n\t\t\t\t\t\t\t\t\twindow.cleanBubbleContent(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\t\tconsole.error('[chat] post-stream transform failed:', err);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Final scroll if tracker allows it\n\t\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tvar finalRender = renderBufferedOutput(true, true);\n\t\t\t\t\t\t\t\tif (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);\n\t\t\t\t\t\t\t\telse finishTerminalRender();\n\t\t\t\t\t});\n\n\t\t\t\t\t\teventSource.addEventListener('error', function(event) {\n\t\t\t\t\tvar retryableEarlyError = textBuffer === '' && event.data === 'execution not found';\n\t\t\t\t\t\t\tif (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\t\t\tif (retryableEarlyError && scheduleExecutionStreamRetry()) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\tvar terminalMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tvar shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\ttextBuffer = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar failedRender = flushBufferedOutput();\n\t\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\tfunction revealTerminalError() {\n\t\t\t\t\t\t\tif (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);\n\t\t\t\t\t\t\tif (shouldScrollTerminalError) {\n\t\t\t\t\t\t\t\tvar failedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\tif (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tfailedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t\t\t} else if (window.syncChatTranscriptRevision) {\n\t\t\t\t\t\t\t\twindow.syncChatTranscriptRevision(execId);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);\n\t\t\t\t\t\telse revealTerminalError();\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\tvar failedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');\n\t\t\t\t\t\t\telse if (failedPair) {\n\t\t\t\t\t\t\t\tfailedPair.setAttribute('data-exec-status', 'failed');\n\t\t\t\t\t\t\t\tfailedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t\tshowThreadTerminalStatus('failed');\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t// Clear streaming flag and re-evaluate plan prompt on error.\n\t\t\t\t\t\t\t\t// The evaluator scans DOM for latest completed bubble; an error\n\t\t\t\t\t\t\t\t// bubble without <proposed_plan> correctly hides the prompt.\n\t\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\teventSource.onerror = function(error) {\n\t\t\t\t\t\t\tconsole.error('EventSource failed:', error);\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\tif (textBuffer === '' && scheduleExecutionStreamRetry()) {\n\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\tflushBufferedOutput();\n\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\trestoreThreadPollingFallback();\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\t}\n\t\t\t\t\tconnectExecutionStream();\n\t\t\t\t})();\n\t\t\t</script></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</div><script type=\"text/javascript\">\n\t\t\t\t(function() {\n\t\t\t\t\tvar streamingDots = document.currentScript.previousElementSibling;\n\t\t\t\t\tvar container = streamingDots.previousElementSibling;\n\t\t\t\t\tvar execId = container.getAttribute('data-exec-id');\n\t\t\t\t\tvar thinkingIndicator = document.getElementById('streaming-thinking-' + execId);\n\t\t\t\t\tvar messagesId = container.getAttribute('data-messages-container');\n\t\t\t\t\tvar pauseTarget = container.getAttribute('data-pause-polling-target');\n\t\t\t\t\tvar isThread = container.getAttribute('data-is-thread') === 'true';\n\t\t\t\t\t// Pause HTMX polling if requested (prevents morph:outerHTML from destroying the EventSource)\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\twindow._taskThreadStreamingActive = true;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\t\tif (pollingEl) {\n\t\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-trigger')) {\n\t\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-trigger', pollingEl.getAttribute('hx-trigger') || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-get')) {\n\t\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-get', pollingEl.getAttribute('hx-get') || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\t\thtmx.process(pollingEl);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction stopThreadPolling() {\n\t\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\t\tif (!pollingEl) return;\n\t\t\t\t\t\t\tpollingEl.setAttribute('data-task-active', 'false');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction restoreThreadPollingFallback() {\n\t\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\t\tif (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;\n\t\t\t\t\t\t\tvar pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');\n\t\t\t\t\t\t\tvar pausedGet = pollingEl.getAttribute('data-paused-hx-get');\n\t\t\t\t\t\t\tif (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);\n\t\t\t\t\t\t\tif (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction refreshThreadComposerAction() {\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;\n\t\t\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\tvar taskId = view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction showThreadTerminalStatus(status) {\n\t\t\t\t\t\t\tstopThreadPolling();\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tif (form) {\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar messages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tif (!messages || document.getElementById('task-thread-terminal-status')) return;\n\t\t\t\t\t\tvar wrap = document.createElement('div');\n\t\t\t\t\t\twrap.id = 'task-thread-terminal-status';\n\t\t\t\t\t\twrap.className = 'flex items-center justify-center gap-2 py-2';\n\t\t\t\t\t\t\tvar inner = document.createElement('div');\n\t\t\t\t\t\t\t\tvar statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');\n\t\t\t\t\t\t\t\tinner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;\n\t\t\t\t\t\t\t\tvar icon = document.createElement('span');\n\t\t\t\t\t\t\t\ticon.setAttribute('aria-hidden', 'true');\n\t\t\t\t\t\t\t\ticon.textContent = status === 'failed' ? '✕' : (status === 'cancelled' ? '■' : '✓');\n\t\t\t\t\t\t\t\tvar text = document.createElement('span');\n\t\t\t\t\t\t\t\ttext.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));\n\t\t\t\t\t\t\tinner.appendChild(icon);\n\t\t\t\t\t\t\tinner.appendChild(text);\n\t\t\t\t\t\twrap.appendChild(inner);\n\t\t\t\t\t\t\tmessages.appendChild(wrap);\n\t\t\t\t\t\t}\n\n\t\t\t\t\t// Get or create page-level tracker for this chat container.\n\t\t\t\t\t// resolveScrollTracker handles stale/replaced elements (morph swaps),\n\t\t\t\t\t// which is what previously caused smart scrolling to \"freeze\" in\n\t\t\t\t\t// long-lived conversations until a full page refresh.\n\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\tvar tracker = null;\n\t\t\t\tvar trackerKey = 'scrollTracker_' + messagesId;\n\n\t\t\t\tif (chatMessages) {\n\t\t\t\t\tif (window.resolveScrollTracker) {\n\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, chatMessages);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tif (!window[trackerKey]) {\n\t\t\t\t\t\t\twindow[trackerKey] = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\ttracker = window[trackerKey];\n\t\t\t\t\t}\n\t\t\t\t\t// The shared composer commits deliberate-send pin intent only after\n\t\t\t\t\t// the server accepts the message. Stream discovery alone must preserve\n\t\t\t\t\t// upward-reading intent from this or another browser surface.\n\t\t\t\t}\n\t\t\t\t\t\t// Buffer for accumulating streaming content\n\t\t\t\t\t\tvar textBuffer = '';\n\t\t\t\t\t\tvar streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;\n\t\t\t\t\t\tfunction utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }\n\t\t\t\t\t\t\tvar renderScheduled = false;\n\t\t\t\t\t\t\tvar renderDelayTimer = null;\n\t\t\t\t\t\t\tvar lastRenderFinishedAt = 0;\n\t\t\t\t\t\t\tvar lastRenderedSourceLength = 0;\n\t\t\t\t\t\t\tvar largeStreamRenderThreshold = 100 * 1024;\n\t\t\t\t\t\t\tvar largeStreamRenderInterval = 250;\n\t\t\t\t\t\t\tfunction renderBufferedOutput(force, yieldLarge) {\n\t\t\t\t\t\t\tif (!window.renderStreamingContent) {\n\t\t\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\t\t\t\tcontainer.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!force && renderScheduled) return;\n\t\t\t\t\t\t\tvar runRender = function() {\n\t\t\t\t\t\t\tvar sourceLength = textBuffer.length;\n\t\t\t\t\t\t\tvar renderText = textBuffer;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\trenderText = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\ttextBuffer = renderText;\n\t\t\t\t\t\t\t\tsourceLength = renderText.length;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!force && sourceLength === lastRenderedSourceLength) return;\n\t\t\t\t\t\t// Refresh tracker against the live messages element. If a morph\n\t\t\t\t\t\t// swap replaced the container mid-stream, the old tracker would\n\t\t\t\t\t\t// be holding a detached element and isNearBottom() would always\n\t\t\t\t\t\t// be true — causing endless auto-scroll until page refresh.\n\t\t\t\t\t\tvar liveMessages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (liveMessages && window.resolveScrollTracker) {\n\t\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, liveMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\tvar shouldScroll = !tracker || tracker.shouldAutoScroll();\n\t\t\t\t\tvar renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;\n\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\tfunction finishScheduledRender(committed) {\n\t\t\t\t\t\t\t\tif (committed === false) {\n\t\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\t\tif (textBuffer.length !== sourceLength) renderBufferedOutput(false);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {\n\t\t\t\t\t\t\t\t\ttextBuffer = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\t\trenderBufferedOutput(true, false);\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\t\t\t\t// Auto-scroll only if the viewport was pinned before this render grew the DOM\n\t\t\t\t\t\t\t\t// and reader intent did not change while asynchronous rendering was pending.\n\t\t\t\t\t\t\t\tvar renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;\n\t\t\t\t\t\t\t\tif (shouldScroll && renderIntentUnchanged) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\tif ((!tracker || (tracker.intentRevision || 0) === renderIntentRevision) && chatMessages) {\n\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (textBuffer.length !== sourceLength) renderBufferedOutput(false);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;\n\t\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\t\tvar renderPromise = liveRenderer(container, renderText, shouldYield);\n\t\t\t\t\t\t\tif (renderPromise && typeof renderPromise.then === 'function') {\n\t\t\t\t\treturn renderPromise.then(finishScheduledRender).catch(function(err) {\n\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\tconsole.error('[chat] streaming render failed:', err);\n\t\t\t\t\t\t// Preserve the complete response even if the styled renderer fails.\n\t\t\t\t\t\t\tcontainer.textContent = renderText;\n\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, renderText);\n\t\t\t\t\t\t\telse container.setAttribute('data-raw-content', renderText);\n\t\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\t\tif (textBuffer.length !== sourceLength) renderBufferedOutput(false);\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tfinishScheduledRender(true);\n\t\t\t\t\t\t\t};\n\t\t\t\t\t\t\tif (force) {\n\t\t\t\t\t\t\t\tif (renderDelayTimer !== null) {\n\t\t\t\t\t\t\t\t\tclearTimeout(renderDelayTimer);\n\t\t\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\treturn runRender();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\trenderScheduled = true;\n\t\t\t\t\t\t\tif (textBuffer.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {\n\t\t\t\t\t\t\t\tvar delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));\n\t\t\t\t\t\t\t\trenderDelayTimer = setTimeout(function() {\n\t\t\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t\t\t\t}, delay);\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t\tfunction flushBufferedOutput() {\n\t\t\t\t\t\t\tif (renderScheduled || lastRenderedSourceLength !== textBuffer.length) {\n\t\t\t\t\t\t\t\treturn renderBufferedOutput(true, false);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction finalizeEmptyTerminalBubble(status) {\n\t\t\t\t\t\t\tif (textBuffer !== '') return;\n\t\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\tif (status === 'cancelled') {\n\t\t\t\t\t\t\t\tcontainer.classList.add('text-error/80', 'font-medium');\n\t\t\t\t\t\t\t\tcontainer.textContent = 'Error: Cancelled';\n\t\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');\n\t\t\t\t\t\t\t\telse container.setAttribute('data-raw-content', 'Error: Cancelled');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tvar streamRetryCount = 0;\n\t\t\t\t\t\tvar streamRetryScheduled = false;\n\t\t\t\t\t\tvar streamTerminalHandled = false;\n\t\t\t\t\t\tvar eventSource = null;\n\t\t\t\tfunction scheduleExecutionStreamRetry() {\n\t\t\t\t\tif (streamRetryScheduled) return true;\n\t\t\t\t\tif (streamRetryCount >= 5) return false;\n\t\t\t\t\tstreamRetryScheduled = true;\n\t\t\t\t\tstreamRetryCount++;\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\tstreamRetryScheduled = false;\n\t\t\t\t\t\tconnectExecutionStream();\n\t\t\t\t\t}, 150 * streamRetryCount);\n\t\t\t\t\treturn true;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfunction connectExecutionStream() {\n\t\t\t\t\t\t\tvar streamOffset = utf8ByteLength(textBuffer);\n\t\t\t\t\t\t\teventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));\n\t\t\t\t\t\tif (!isThread && window.registerChatStreamEventSource) {\n\t\t\t\t\t\t\twindow.registerChatStreamEventSource(execId, eventSource);\n\t\t\t\t\t\t}\n\t\t\t\t\tfunction removeThreadEventSource(es) {\n\t\t\t\t\t\tif (!window._threadEventSources || !es) return;\n\t\t\t\t\t\tvar idx = window._threadEventSources.indexOf(es);\n\t\t\t\t\t\tif (idx >= 0) window._threadEventSources.splice(idx, 1);\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeChatEventSource(execId, es) {\n\t\t\t\t\t\tif (!window.unregisterChatStreamEventSource) return;\n\t\t\t\t\t\twindow.unregisterChatStreamEventSource(execId, es);\n\t\t\t\t\t}\n\t\t\t\t\t// Track thread stream EventSource so navigation cleanup can close it.\n\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\tif (!window._threadEventSources) window._threadEventSources = [];\n\t\t\t\t\t\twindow._threadEventSources.push(eventSource);\n\t\t\t\t\t}\n\n\t\t\t\t\t\teventSource.onmessage = function(event) {\n\t\t\t\t\t\t\t// Hide thinking/progress indicators and show content on first aggregator token\n\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tif (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {\n\t\t\t\t\t\t\t\tthinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\t\tstreamingDots.classList.remove('hidden');\n\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t// Append to buffer and re-render\n\t\t\t\t\t\ttextBuffer += event.data;\n\t\t\t\t\t\trenderBufferedOutput(false);\n\t\t\t\t\t};\n\n\t\t\t\t\t\t\teventSource.addEventListener('done', function(event) {\n\t\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\t\ttextBuffer = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tvar terminalStatus = event && event.data ? event.data : 'completed';\n\t\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tfunction finishTerminalRender() {\n\t\t\t\t\t\t\t\tfinalizeEmptyTerminalBubble(terminalStatus);\n\t\t\t\t\t\t\t\t\tvar completedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);\n\t\t\t\t\t\t\t\t\telse if (completedPair) {\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('data-exec-status', terminalStatus);\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t// Hide streaming dots\n\t\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t\tshowThreadTerminalStatus(terminalStatus);\n\t\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\t\t\t\tif (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);\n\t\t\t\t\t\t\t\t\t// Always evaluate plan-completion first so prompt visibility updates\n\t\t\t\t\t\t\t\t\t// even if post-render transforms throw.\n\t\t\t\t\t\t\tif (window.handlePlanModeCompletion) {\n\t\t\t\t\t\t\t\twindow.handlePlanModeCompletion(textBuffer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Convert task-result metadata before cleaning transcript controls\n\t\t\t\t\t\t\tvar bubble = container.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskEditLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.cleanBubbleContent) {\n\t\t\t\t\t\t\t\t\twindow.cleanBubbleContent(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\t\tconsole.error('[chat] post-stream transform failed:', err);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Final scroll if tracker allows it\n\t\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tvar finalRender = renderBufferedOutput(true, true);\n\t\t\t\t\t\t\t\tif (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);\n\t\t\t\t\t\t\t\telse finishTerminalRender();\n\t\t\t\t\t});\n\n\t\t\t\t\t\teventSource.addEventListener('error', function(event) {\n\t\t\t\t\tvar retryableEarlyError = textBuffer === '' && event.data === 'execution not found';\n\t\t\t\t\t\t\tif (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\t\t\tif (retryableEarlyError && scheduleExecutionStreamRetry()) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\tvar terminalMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tvar shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));\n\t\t\t\t\t\t\tvar terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\ttextBuffer = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar failedRender = flushBufferedOutput();\n\t\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\tfunction revealTerminalError() {\n\t\t\t\t\t\t\tif (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);\n\t\t\t\t\t\t\tvar terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;\n\t\t\t\t\t\t\tif (shouldScrollTerminalError && terminalIntentUnchanged) {\n\t\t\t\t\t\t\t\tvar failedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\tif (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tfailedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && failedMessages) {\n\t\t\t\t\t\t\t\t\t\tfailedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t\t\t} else if (window.syncChatTranscriptRevision) {\n\t\t\t\t\t\t\t\twindow.syncChatTranscriptRevision(execId);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);\n\t\t\t\t\t\telse revealTerminalError();\n\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\tvar failedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');\n\t\t\t\t\t\t\telse if (failedPair) {\n\t\t\t\t\t\t\t\tfailedPair.setAttribute('data-exec-status', 'failed');\n\t\t\t\t\t\t\t\tfailedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t\tshowThreadTerminalStatus('failed');\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t// Clear streaming flag and re-evaluate plan prompt on error.\n\t\t\t\t\t\t\t\t// The evaluator scans DOM for latest completed bubble; an error\n\t\t\t\t\t\t\t\t// bubble without <proposed_plan> correctly hides the prompt.\n\t\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\teventSource.onerror = function(error) {\n\t\t\t\t\t\t\tconsole.error('EventSource failed:', error);\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\tif (textBuffer === '' && scheduleExecutionStreamRetry()) {\n\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\tflushBufferedOutput();\n\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\trestoreThreadPollingFallback();\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t\t}\n\t\t\t\t\tconnectExecutionStream();\n\t\t\t\t})();\n\t\t\t</script></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1150,7 +1150,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var58 string
 		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 791, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 798, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 		if templ_7745c5c3_Err != nil {
@@ -1168,7 +1168,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var59 string
 			templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.ResolveAttributeValue("streaming-thinking-resume-" + execID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 795, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 802, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var59)
 			if templ_7745c5c3_Err != nil {
@@ -1194,7 +1194,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var60 string
 		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.ResolveAttributeValue("mixture-progress-" + execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 800, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 807, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var60)
 		if templ_7745c5c3_Err != nil {
@@ -1207,7 +1207,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var61 string
 		templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.ResolveAttributeValue(execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 800, Col: 121}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 807, Col: 121}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var61)
 		if templ_7745c5c3_Err != nil {
@@ -1229,7 +1229,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var63 string
 		templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.ResolveAttributeValue("streaming-message-" + execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 801, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 808, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var63)
 		if templ_7745c5c3_Err != nil {
@@ -1255,7 +1255,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var65 string
 		templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 801, Col: 144}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 808, Col: 144}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 		if templ_7745c5c3_Err != nil {
@@ -1268,7 +1268,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var66 string
 		templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", len(partialContent)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 801, Col: 212}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 808, Col: 212}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 		if templ_7745c5c3_Err != nil {
@@ -1281,7 +1281,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var67 string
 		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(messagesContainerID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 801, Col: 260}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 808, Col: 260}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 		if templ_7745c5c3_Err != nil {
@@ -1294,7 +1294,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var68 string
 		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(pausePollingTargetID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 801, Col: 311}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 808, Col: 311}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 		if templ_7745c5c3_Err != nil {
@@ -1307,7 +1307,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var69 string
 		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatContentRevision(partialContent))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 801, Col: 398}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 808, Col: 398}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 		if templ_7745c5c3_Err != nil {
@@ -1320,7 +1320,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var70 string
 		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(NormalizeDisplayMarkers(partialContent))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 801, Col: 459}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 808, Col: 459}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 		if templ_7745c5c3_Err != nil {
@@ -1342,7 +1342,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var72 string
 		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue("streaming-dots-resume-" + execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 839, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 846, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72)
 		if templ_7745c5c3_Err != nil {
@@ -1402,7 +1402,7 @@ func ChatStreamingResumeInitScript() templ.Component {
 			templ_7745c5c3_Var74 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "<script type=\"text/javascript\">\n\t\twindow._initThreadStreaming = function() {\n\t\t\tvar containers = document.querySelectorAll('[data-streaming-resume=\"true\"]');\n\t\t\tcontainers.forEach(function(container) {\n\t\t\t\t// Skip if already connected\n\t\t\t\tif (container._sseConnected) return;\n\t\t\t\tcontainer._sseConnected = true;\n\n\t\t\t\t\tvar execId = container.getAttribute('data-exec-id');\n\t\t\t\t\tvar messagesId = container.getAttribute('data-messages-container');\n\t\t\t\t\tvar pauseTarget = container.getAttribute('data-pause-polling-target');\n\t\t\t\t\tvar cumulativeContent = container.getAttribute('data-raw-content') || '';\n\t\t\t\t\tvar streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;\n\t\t\t\t\tvar streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;\n\t\t\t\t\tfunction utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }\n\t\t\t\t\tfunction persistResumeStreamState(active) {\n\t\t\t\t\t\tcontainer.setAttribute('data-raw-content', cumulativeContent);\n\t\t\t\t\t\tcontainer.setAttribute('data-initial-byte-length', String(streamOffset));\n\t\t\t\t\t\tif (active) container.setAttribute('data-streaming-resume', 'true');\n\t\t\t\t\t\telse {\n\t\t\t\t\t\t\tcontainer.removeAttribute('data-streaming-resume');\n\t\t\t\t\t\t\tdelete container._sseConnected;\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t// Find streaming dots by ID (reliable across morph swaps and inline script siblings)\n\t\t\t\tvar streamingDots = document.getElementById('streaming-dots-resume-' + execId);\n\t\t\t\t// Content is in data-raw-content attribute (not textContent)\n\t\t\t\tvar hasContent = !!container.getAttribute('data-raw-content');\n\t\t\t\tvar thinkingIndicator = !hasContent ? document.getElementById('streaming-thinking-resume-' + execId) : null;\n\n\t\t\t\t// Pause HTMX polling if requested\n\t\t\t\tif (pauseTarget) {\n\t\t\t\t\twindow._taskThreadStreamingActive = true;\n\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (pollingEl) {\n\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-trigger')) {\n\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-trigger', pollingEl.getAttribute('hx-trigger') || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-get')) {\n\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-get', pollingEl.getAttribute('hx-get') || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction stopThreadPolling() {\n\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (!pollingEl) return;\n\t\t\t\t\t\tpollingEl.setAttribute('data-task-active', 'false');\n\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction restoreThreadPollingFallback() {\n\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;\n\t\t\t\t\t\tvar pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');\n\t\t\t\t\t\tvar pausedGet = pollingEl.getAttribute('data-paused-hx-get');\n\t\t\t\t\t\tif (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);\n\t\t\t\t\t\tif (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction refreshThreadComposerAction() {\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;\n\t\t\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\tvar taskId = view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction showThreadTerminalStatus(status) {\n\t\t\t\t\t\t\tstopThreadPolling();\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tif (form) {\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar messages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (!messages || document.getElementById('task-thread-terminal-status')) return;\n\t\t\t\t\tvar wrap = document.createElement('div');\n\t\t\t\t\twrap.id = 'task-thread-terminal-status';\n\t\t\t\t\twrap.className = 'flex items-center justify-center gap-2 py-2';\n\t\t\t\t\t\tvar inner = document.createElement('div');\n\t\t\t\t\t\t\t\tvar statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');\n\t\t\t\t\t\t\t\tinner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;\n\t\t\t\t\t\t\t\tvar icon = document.createElement('span');\n\t\t\t\t\t\t\t\ticon.setAttribute('aria-hidden', 'true');\n\t\t\t\t\t\t\t\ticon.textContent = status === 'failed' ? '✕' : (status === 'cancelled' ? '■' : '✓');\n\t\t\t\t\t\t\t\tvar text = document.createElement('span');\n\t\t\t\t\t\t\t\ttext.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));\n\t\t\t\t\t\tinner.appendChild(icon);\n\t\t\t\t\t\tinner.appendChild(text);\n\t\t\t\t\twrap.appendChild(inner);\n\t\t\t\t\t\tmessages.appendChild(wrap);\n\t\t\t\t\t}\n\n\t\t\t\t\t// Get or reuse page-level tracker. Use resolveScrollTracker so a\n\t\t\t\t\t// morph swap of #task-thread-messages mid-stream rebinds the tracker\n\t\t\t\t\t// instead of leaving it pointing at a detached element (which would\n\t\t\t\t\t// make isNearBottom always true and pull the user back down forever).\n\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\tvar tracker = null;\n\t\t\t\tvar trackerKey = 'scrollTracker_' + messagesId;\n\t\t\t\tif (chatMessages) {\n\t\t\t\t\tif (window.resolveScrollTracker) {\n\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, chatMessages);\n\t\t\t\t\t} else if (window.ChatScrollTracker) {\n\t\t\t\t\t\tif (!window[trackerKey]) {\n\t\t\t\t\t\t\twindow[trackerKey] = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\ttracker = window[trackerKey];\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t\tvar eventSource = null;\n\t\t\t\t\t\tvar streamRetryCount = 0;\n\t\t\t\t\t\tvar streamRetryScheduled = false;\n\t\t\t\t\tvar renderScheduled = false;\n\t\t\t\t\tvar renderDelayTimer = null;\n\t\t\t\t\tvar lastRenderFinishedAt = Date.now();\n\t\t\t\t\tvar lastRenderedSourceLength = cumulativeContent.length;\n\t\t\t\t\tvar largeStreamRenderThreshold = 100 * 1024;\n\t\t\t\t\tvar largeStreamRenderInterval = 250;\n\t\t\t\t\tfunction renderCumulativeContent(force, yieldLarge) {\n\t\t\t\t\tif (!window.renderStreamingContent) {\n\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\t\tcontainer.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!force && renderScheduled) return;\n\t\t\t\t\t\tvar runRender = function() {\n\t\t\t\t\t\t\tvar sourceLength = cumulativeContent.length;\n\t\t\t\t\t\t\tvar renderText = cumulativeContent;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\trenderText = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\tcumulativeContent = renderText;\n\t\t\t\t\t\t\t\tsourceLength = renderText.length;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!force && sourceLength === lastRenderedSourceLength) return;\n\t\t\t\t\t\t// Refresh tracker against the live messages element in case a\n\t\t\t\t\t\t// morph swap replaced the container while streaming.\n\t\t\t\t\t\tvar liveMessages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (liveMessages && window.resolveScrollTracker) {\n\t\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, liveMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar shouldScroll = !tracker || tracker.shouldAutoScroll();\n\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\t\tfunction finishScheduledRender(committed) {\n\t\t\t\t\t\t\tif (committed === false) {\n\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\tif (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {\n\t\t\t\t\t\t\t\tcumulativeContent = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\trenderCumulativeContent(true, false);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\t\t\tif (shouldScroll) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tvar cm = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\tif (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;\n\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\tvar renderPromise = liveRenderer(container, renderText, shouldYield);\n\t\t\t\t\t\tif (renderPromise && typeof renderPromise.then === 'function') {\n\t\t\t\treturn renderPromise.then(finishScheduledRender).catch(function(err) {\n\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\tconsole.error('[thread] streaming render failed:', err);\n\t\t\t\t\t\tcontainer.textContent = renderText;\n\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, renderText);\n\t\t\t\t\t\telse container.setAttribute('data-raw-content', renderText);\n\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\tif (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);\n\t\t\t\t\treturn true;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfinishScheduledRender(true);\n\t\t\t\t\t};\n\t\t\t\t\tif (force) {\n\t\t\t\t\t\tif (renderDelayTimer !== null) {\n\t\t\t\t\t\t\tclearTimeout(renderDelayTimer);\n\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\treturn runRender();\n\t\t\t\t\t}\n\t\t\t\t\trenderScheduled = true;\n\t\t\t\t\tif (cumulativeContent.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {\n\t\t\t\t\t\tvar delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));\n\t\t\t\t\t\trenderDelayTimer = setTimeout(function() {\n\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t\t}, delay);\n\t\t\t\t\t} else {\n\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t\tfunction flushCumulativeContent() {\n\t\t\t\t\t\tif (renderScheduled || lastRenderedSourceLength !== cumulativeContent.length) {\n\t\t\t\t\t\t\treturn renderCumulativeContent(true, false);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tfunction finalizeEmptyTerminalBubble(status) {\n\t\t\t\t\t\tif (cumulativeContent !== '') return;\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\tif (status === 'cancelled') {\n\t\t\t\t\t\t\tcontainer.classList.add('text-error/80', 'font-medium');\n\t\t\t\t\t\t\tcontainer.textContent = 'Error: Cancelled';\n\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');\n\t\t\t\t\t\t\telse container.setAttribute('data-raw-content', 'Error: Cancelled');\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeThreadEventSource(es) {\n\t\t\t\t\t\tif (!window._threadEventSources || !es) return;\n\t\t\t\t\t\tvar idx = window._threadEventSources.indexOf(es);\n\t\t\t\t\t\tif (idx >= 0) window._threadEventSources.splice(idx, 1);\n\t\t\t\t\t}\n\t\t\t\t\tfunction registerResumeEventSource(es) {\n\t\t\t\t\t\tif (!es) return;\n\t\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\t\tif (!window._threadEventSources) window._threadEventSources = [];\n\t\t\t\t\t\t\twindow._threadEventSources.push(es);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._chatStreamInProgress = true;\n\t\t\t\t\t\t\tif (window.registerChatStreamEventSource) window.registerChatStreamEventSource(execId, es);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeResumeEventSource(es) {\n\t\t\t\t\t\tif (pauseTarget) removeThreadEventSource(es);\n\t\t\t\t\t\telse if (window.unregisterChatStreamEventSource) window.unregisterChatStreamEventSource(execId, es);\n\t\t\t\t\t}\n\t\t\t\t\tfunction scheduleResumeExecutionStreamRetry() {\n\t\t\t\t\t\tif (streamRetryScheduled) return true;\n\t\t\t\t\t\tif (streamRetryCount >= 5) return false;\n\t\t\t\t\t\tstreamRetryScheduled = true;\n\t\t\t\t\t\tstreamRetryCount++;\n\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\tstreamRetryScheduled = false;\n\t\t\t\t\t\t\tconnectResumeExecutionStream();\n\t\t\t\t\t\t}, 150 * streamRetryCount);\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}\n\n\t\t\t\t\tvar streamTerminalHandled = false;\n\t\t\t\t\tfunction connectResumeExecutionStream() {\n\t\t\t\t\t\t\teventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));\n\t\t\t\t\t\t\tregisterResumeEventSource(eventSource);\n\n\t\t\t\t\t\t\teventSource.onmessage = function(event) {\n\t\t\t\t\t\t\t\tcumulativeContent += event.data;\n\t\t\t\t\t\t\t\tstreamOffset += utf8ByteLength(event.data);\n\t\t\t\t\t\t\t\tpersistResumeStreamState(true);\n\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tif (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {\n\t\t\t\t\t\t\t\tthinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\t\tif (streamingDots) streamingDots.classList.remove('hidden');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\trenderCumulativeContent(false);\n\t\t\t\t\t};\n\n\t\t\t\t\t\t\teventSource.addEventListener('done', function(event) {\n\t\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\t\tcumulativeContent = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tpersistResumeStreamState(false);\n\t\t\t\t\t\t\t\tvar terminalStatus = event && event.data ? event.data : 'completed';\n\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tfunction finishTerminalRender() {\n\t\t\t\t\t\t\t\tfinalizeEmptyTerminalBubble(terminalStatus);\n\t\t\t\t\t\t\t\t\tvar completedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);\n\t\t\t\t\t\t\t\t\telse if (completedPair) {\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('data-exec-status', terminalStatus);\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\t\t\tremoveResumeEventSource(eventSource);\n\t\t\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\t\tshowThreadTerminalStatus(terminalStatus);\n\t\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tvar bubble = container.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\tif (bubble && window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\tif (bubble && window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\tif (bubble && window.cleanBubbleContent) window.cleanBubbleContent(bubble);\n\t\t\t\t\t\tif (window.handlePlanModeCompletion) window.handlePlanModeCompletion(cumulativeContent);\n\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\tif (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);\n\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tvar cm = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\tif (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, true);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tvar finalRender = renderCumulativeContent(true, true);\n\t\t\t\t\t\t\tif (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);\n\t\t\t\t\t\t\telse finishTerminalRender();\n\t\t\t\t});\n\n\t\t\t\t\teventSource.addEventListener('error', function(event) {\n\t\t\t\t\tvar retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found';\n\t\t\t\t\t\tif (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\tremoveResumeEventSource(eventSource);\n\t\t\t\t\t\t\tif (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\tvar terminalMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tvar shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\tcumulativeContent = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tpersistResumeStreamState(false);\n\t\t\t\t\t\t\tvar failedRender = flushCumulativeContent();\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\tfunction revealTerminalError() {\n\t\t\t\t\tif (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);\n\t\t\t\t\tif (shouldScrollTerminalError) {\n\t\t\t\t\t\tvar failedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\tfailedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tif (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t} else if (window.syncChatTranscriptRevision) {\n\t\t\t\t\t\twindow.syncChatTranscriptRevision(execId);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);\n\t\t\t\telse revealTerminalError();\n\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\tvar failedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');\n\t\t\t\t\telse if (failedPair) {\n\t\t\t\t\t\tfailedPair.setAttribute('data-exec-status', 'failed');\n\t\t\t\t\t\tfailedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t}\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\tshowThreadTerminalStatus('failed');\n\t\t\t\t\t} else {\n\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\t\teventSource.onerror = function(error) {\n\t\t\t\t\t\tconsole.error('EventSource failed:', error);\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\tremoveResumeEventSource(eventSource);\n\t\t\t\t\t\t\tif (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\tflushCumulativeContent();\n\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\trestoreThreadPollingFallback();\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t\t}\n\t\t\t\tconnectResumeExecutionStream();\n\t\t\t});\n\t\t};\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 90, "<script type=\"text/javascript\">\n\t\twindow._initThreadStreaming = function() {\n\t\t\tvar containers = document.querySelectorAll('[data-streaming-resume=\"true\"]');\n\t\t\tcontainers.forEach(function(container) {\n\t\t\t\t// Skip if already connected\n\t\t\t\tif (container._sseConnected) return;\n\t\t\t\tcontainer._sseConnected = true;\n\n\t\t\t\t\tvar execId = container.getAttribute('data-exec-id');\n\t\t\t\t\tvar messagesId = container.getAttribute('data-messages-container');\n\t\t\t\t\tvar pauseTarget = container.getAttribute('data-pause-polling-target');\n\t\t\t\t\tvar cumulativeContent = container.getAttribute('data-raw-content') || '';\n\t\t\t\t\tvar streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;\n\t\t\t\t\tvar streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;\n\t\t\t\t\tfunction utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }\n\t\t\t\t\tfunction persistResumeStreamState(active) {\n\t\t\t\t\t\tcontainer.setAttribute('data-raw-content', cumulativeContent);\n\t\t\t\t\t\tcontainer.setAttribute('data-initial-byte-length', String(streamOffset));\n\t\t\t\t\t\tif (active) container.setAttribute('data-streaming-resume', 'true');\n\t\t\t\t\t\telse {\n\t\t\t\t\t\t\tcontainer.removeAttribute('data-streaming-resume');\n\t\t\t\t\t\t\tdelete container._sseConnected;\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t// Find streaming dots by ID (reliable across morph swaps and inline script siblings)\n\t\t\t\tvar streamingDots = document.getElementById('streaming-dots-resume-' + execId);\n\t\t\t\t// Content is in data-raw-content attribute (not textContent)\n\t\t\t\tvar hasContent = !!container.getAttribute('data-raw-content');\n\t\t\t\tvar thinkingIndicator = !hasContent ? document.getElementById('streaming-thinking-resume-' + execId) : null;\n\n\t\t\t\t// Pause HTMX polling if requested\n\t\t\t\tif (pauseTarget) {\n\t\t\t\t\twindow._taskThreadStreamingActive = true;\n\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (pollingEl) {\n\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-trigger')) {\n\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-trigger', pollingEl.getAttribute('hx-trigger') || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!pollingEl.hasAttribute('data-paused-hx-get')) {\n\t\t\t\t\t\t\t\tpollingEl.setAttribute('data-paused-hx-get', pollingEl.getAttribute('hx-get') || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction stopThreadPolling() {\n\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (!pollingEl) return;\n\t\t\t\t\t\tpollingEl.setAttribute('data-task-active', 'false');\n\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction restoreThreadPollingFallback() {\n\t\t\t\t\t\tif (!pauseTarget) return;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (!pollingEl || pollingEl.getAttribute('data-task-active') === 'false') return;\n\t\t\t\t\t\tvar pausedTrigger = pollingEl.getAttribute('data-paused-hx-trigger');\n\t\t\t\t\t\tvar pausedGet = pollingEl.getAttribute('data-paused-hx-get');\n\t\t\t\t\t\tif (pausedTrigger) pollingEl.setAttribute('hx-trigger', pausedTrigger);\n\t\t\t\t\t\tif (pausedGet) pollingEl.setAttribute('hx-get', pausedGet);\n\t\t\t\t\t\tif (typeof htmx !== 'undefined') htmx.process(pollingEl);\n\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction refreshThreadComposerAction() {\n\t\t\t\t\t\t\tif (typeof htmx === 'undefined' || !document.getElementById('task-thread-form-primary-action')) return;\n\t\t\t\t\t\t\tvar view = document.getElementById('task-thread-view');\n\t\t\t\t\t\t\tvar taskId = view ? (view.getAttribute('data-task-id') || '') : '';\n\t\t\t\t\t\t\tif (!taskId) return;\n\t\t\t\t\t\t\thtmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action', {target: '#task-thread-form-primary-action', swap: 'outerHTML'});\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tfunction showThreadTerminalStatus(status) {\n\t\t\t\t\t\t\tstopThreadPolling();\n\t\t\t\t\t\t\tvar form = document.getElementById('task-thread-form');\n\t\t\t\t\t\t\tif (form) {\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);\n\t\t\t\t\t\t\t\trefreshThreadComposerAction();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar messages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (!messages || document.getElementById('task-thread-terminal-status')) return;\n\t\t\t\t\tvar wrap = document.createElement('div');\n\t\t\t\t\twrap.id = 'task-thread-terminal-status';\n\t\t\t\t\twrap.className = 'flex items-center justify-center gap-2 py-2';\n\t\t\t\t\t\tvar inner = document.createElement('div');\n\t\t\t\t\t\t\t\tvar statusClass = status === 'failed' ? 'text-error' : (status === 'cancelled' ? 'text-warning' : 'text-success');\n\t\t\t\t\t\t\t\tinner.className = 'flex items-center gap-2 text-sm opacity-70 ' + statusClass;\n\t\t\t\t\t\t\t\tvar icon = document.createElement('span');\n\t\t\t\t\t\t\t\ticon.setAttribute('aria-hidden', 'true');\n\t\t\t\t\t\t\t\ticon.textContent = status === 'failed' ? '✕' : (status === 'cancelled' ? '■' : '✓');\n\t\t\t\t\t\t\t\tvar text = document.createElement('span');\n\t\t\t\t\t\t\t\ttext.textContent = 'Task ' + (status === 'failed' ? 'failed' : (status === 'cancelled' ? 'cancelled' : 'completed'));\n\t\t\t\t\t\tinner.appendChild(icon);\n\t\t\t\t\t\tinner.appendChild(text);\n\t\t\t\t\twrap.appendChild(inner);\n\t\t\t\t\t\tmessages.appendChild(wrap);\n\t\t\t\t\t}\n\n\t\t\t\t\t// Get or reuse page-level tracker. Use resolveScrollTracker so a\n\t\t\t\t\t// morph swap of #task-thread-messages mid-stream rebinds the tracker\n\t\t\t\t\t// instead of leaving it pointing at a detached element (which would\n\t\t\t\t\t// make isNearBottom always true and pull the user back down forever).\n\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\tvar tracker = null;\n\t\t\t\tvar trackerKey = 'scrollTracker_' + messagesId;\n\t\t\t\tif (chatMessages) {\n\t\t\t\t\tif (window.resolveScrollTracker) {\n\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, chatMessages);\n\t\t\t\t\t} else if (window.ChatScrollTracker) {\n\t\t\t\t\t\tif (!window[trackerKey]) {\n\t\t\t\t\t\t\twindow[trackerKey] = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\ttracker = window[trackerKey];\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t\tvar eventSource = null;\n\t\t\t\t\t\tvar streamRetryCount = 0;\n\t\t\t\t\t\tvar streamRetryScheduled = false;\n\t\t\t\t\tvar renderScheduled = false;\n\t\t\t\t\tvar renderDelayTimer = null;\n\t\t\t\t\tvar lastRenderFinishedAt = Date.now();\n\t\t\t\t\tvar lastRenderedSourceLength = cumulativeContent.length;\n\t\t\t\t\tvar largeStreamRenderThreshold = 100 * 1024;\n\t\t\t\t\tvar largeStreamRenderInterval = 250;\n\t\t\t\t\tfunction renderCumulativeContent(force, yieldLarge) {\n\t\t\t\t\tif (!window.renderStreamingContent) {\n\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\t\tcontainer.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!force && renderScheduled) return;\n\t\t\t\t\t\tvar runRender = function() {\n\t\t\t\t\t\t\tvar sourceLength = cumulativeContent.length;\n\t\t\t\t\t\t\tvar renderText = cumulativeContent;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\trenderText = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\tcumulativeContent = renderText;\n\t\t\t\t\t\t\t\tsourceLength = renderText.length;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (!force && sourceLength === lastRenderedSourceLength) return;\n\t\t\t\t\t\t// Refresh tracker against the live messages element in case a\n\t\t\t\t\t\t// morph swap replaced the container while streaming.\n\t\t\t\t\t\tvar liveMessages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (liveMessages && window.resolveScrollTracker) {\n\t\t\t\t\t\t\ttracker = window.resolveScrollTracker(trackerKey, liveMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar shouldScroll = !tracker || tracker.shouldAutoScroll();\n\t\t\t\t\t\tvar renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;\n\t\t\t\t\tcontainer.classList.remove('text-error/80', 'font-medium');\n\t\t\t\t\t\tfunction finishScheduledRender(committed) {\n\t\t\t\t\t\t\tif (committed === false) {\n\t\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\t\tif (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {\n\t\t\t\t\t\t\t\tcumulativeContent = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\trenderCumulativeContent(true, false);\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\t\t\tvar renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;\n\t\t\t\t\t\t\tif (shouldScroll && renderIntentUnchanged) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tvar cm = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif ((!tracker || (tracker.intentRevision || 0) === renderIntentRevision) && cm && window.chatAutoScroll) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(cm, false);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;\n\t\t\t\t\t\tvar liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;\n\t\t\t\t\t\tvar renderPromise = liveRenderer(container, renderText, shouldYield);\n\t\t\t\t\t\tif (renderPromise && typeof renderPromise.then === 'function') {\n\t\t\t\treturn renderPromise.then(finishScheduledRender).catch(function(err) {\n\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\tconsole.error('[thread] streaming render failed:', err);\n\t\t\t\t\t\tcontainer.textContent = renderText;\n\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, renderText);\n\t\t\t\t\t\telse container.setAttribute('data-raw-content', renderText);\n\t\t\t\t\tlastRenderedSourceLength = sourceLength;\n\t\t\t\t\tlastRenderFinishedAt = Date.now();\n\t\t\t\t\tif (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);\n\t\t\t\t\treturn true;\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfinishScheduledRender(true);\n\t\t\t\t\t};\n\t\t\t\t\tif (force) {\n\t\t\t\t\t\tif (renderDelayTimer !== null) {\n\t\t\t\t\t\t\tclearTimeout(renderDelayTimer);\n\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\treturn runRender();\n\t\t\t\t\t}\n\t\t\t\t\trenderScheduled = true;\n\t\t\t\t\tif (cumulativeContent.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {\n\t\t\t\t\t\tvar delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));\n\t\t\t\t\t\trenderDelayTimer = setTimeout(function() {\n\t\t\t\t\t\t\trenderDelayTimer = null;\n\t\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t\t}, delay);\n\t\t\t\t\t} else {\n\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t\tfunction flushCumulativeContent() {\n\t\t\t\t\t\tif (renderScheduled || lastRenderedSourceLength !== cumulativeContent.length) {\n\t\t\t\t\t\t\treturn renderCumulativeContent(true, false);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tfunction finalizeEmptyTerminalBubble(status) {\n\t\t\t\t\t\tif (cumulativeContent !== '') return;\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\tif (status === 'cancelled') {\n\t\t\t\t\t\t\tcontainer.classList.add('text-error/80', 'font-medium');\n\t\t\t\t\t\t\tcontainer.textContent = 'Error: Cancelled';\n\t\t\t\t\t\t\tif (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');\n\t\t\t\t\t\t\telse container.setAttribute('data-raw-content', 'Error: Cancelled');\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeThreadEventSource(es) {\n\t\t\t\t\t\tif (!window._threadEventSources || !es) return;\n\t\t\t\t\t\tvar idx = window._threadEventSources.indexOf(es);\n\t\t\t\t\t\tif (idx >= 0) window._threadEventSources.splice(idx, 1);\n\t\t\t\t\t}\n\t\t\t\t\tfunction registerResumeEventSource(es) {\n\t\t\t\t\t\tif (!es) return;\n\t\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\t\tif (!window._threadEventSources) window._threadEventSources = [];\n\t\t\t\t\t\t\twindow._threadEventSources.push(es);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._chatStreamInProgress = true;\n\t\t\t\t\t\t\tif (window.registerChatStreamEventSource) window.registerChatStreamEventSource(execId, es);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeResumeEventSource(es) {\n\t\t\t\t\t\tif (pauseTarget) removeThreadEventSource(es);\n\t\t\t\t\t\telse if (window.unregisterChatStreamEventSource) window.unregisterChatStreamEventSource(execId, es);\n\t\t\t\t\t}\n\t\t\t\t\tfunction scheduleResumeExecutionStreamRetry() {\n\t\t\t\t\t\tif (streamRetryScheduled) return true;\n\t\t\t\t\t\tif (streamRetryCount >= 5) return false;\n\t\t\t\t\t\tstreamRetryScheduled = true;\n\t\t\t\t\t\tstreamRetryCount++;\n\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\tstreamRetryScheduled = false;\n\t\t\t\t\t\t\tconnectResumeExecutionStream();\n\t\t\t\t\t\t}, 150 * streamRetryCount);\n\t\t\t\t\t\treturn true;\n\t\t\t\t\t}\n\n\t\t\t\t\tvar streamTerminalHandled = false;\n\t\t\t\t\tfunction connectResumeExecutionStream() {\n\t\t\t\t\t\t\teventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));\n\t\t\t\t\t\t\tregisterResumeEventSource(eventSource);\n\n\t\t\t\t\t\t\teventSource.onmessage = function(event) {\n\t\t\t\t\t\t\t\tcumulativeContent += event.data;\n\t\t\t\t\t\t\t\tstreamOffset += utf8ByteLength(event.data);\n\t\t\t\t\t\t\t\tpersistResumeStreamState(true);\n\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tif (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {\n\t\t\t\t\t\t\t\tthinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\t\tif (streamingDots) streamingDots.classList.remove('hidden');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\trenderCumulativeContent(false);\n\t\t\t\t\t};\n\n\t\t\t\t\t\t\teventSource.addEventListener('done', function(event) {\n\t\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\t\tcumulativeContent = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tpersistResumeStreamState(false);\n\t\t\t\t\t\t\t\tvar terminalStatus = event && event.data ? event.data : 'completed';\n\t\t\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\tfunction finishTerminalRender() {\n\t\t\t\t\t\t\t\tfinalizeEmptyTerminalBubble(terminalStatus);\n\t\t\t\t\t\t\t\t\tvar completedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);\n\t\t\t\t\t\t\t\t\telse if (completedPair) {\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('data-exec-status', terminalStatus);\n\t\t\t\t\t\t\t\t\t\tcompletedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\t\t\tremoveResumeEventSource(eventSource);\n\t\t\t\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\t\tshowThreadTerminalStatus(terminalStatus);\n\t\t\t\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t} else {\n\t\t\t\t\t\tvar bubble = container.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\tif (bubble && window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\tif (bubble && window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\tif (bubble && window.cleanBubbleContent) window.cleanBubbleContent(bubble);\n\t\t\t\t\t\tif (window.handlePlanModeCompletion) window.handlePlanModeCompletion(cumulativeContent);\n\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\tif (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);\n\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tvar cm = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\tif (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, true);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tvar finalRender = renderCumulativeContent(true, true);\n\t\t\t\t\t\t\tif (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);\n\t\t\t\t\t\t\telse finishTerminalRender();\n\t\t\t\t});\n\n\t\t\t\t\teventSource.addEventListener('error', function(event) {\n\t\t\t\t\tvar retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found';\n\t\t\t\t\t\tif (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\tremoveResumeEventSource(eventSource);\n\t\t\t\t\t\t\tif (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\t\t\tvar terminalMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tvar shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));\n\t\t\t\t\t\t\tvar terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;\n\t\t\t\t\t\t\tif (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {\n\t\t\t\t\t\t\t\tcumulativeContent = String(container._authoritativeTerminalContent || '');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tpersistResumeStreamState(false);\n\t\t\t\t\t\t\tvar failedRender = flushCumulativeContent();\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\tfunction revealTerminalError() {\n\t\t\t\t\tif (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);\n\t\t\t\t\tvar terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;\n\t\t\t\t\tif (shouldScrollTerminalError && terminalIntentUnchanged) {\n\t\t\t\t\t\tvar failedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\tif (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\tfailedMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\tif ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && failedMessages) {\n\t\t\t\t\t\t\t\tfailedMessages.scrollTop = failedMessages.scrollHeight;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\t\t\t\t\t}\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\tif (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);\n\t\t\t\t\t} else if (window.syncChatTranscriptRevision) {\n\t\t\t\t\t\twindow.syncChatTranscriptRevision(execId);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);\n\t\t\t\telse revealTerminalError();\n\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\tvar failedPair = container.closest('[data-execution-pair=\"true\"]');\n\t\t\t\t\tif (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');\n\t\t\t\t\telse if (failedPair) {\n\t\t\t\t\t\tfailedPair.setAttribute('data-exec-status', 'failed');\n\t\t\t\t\t\tfailedPair.setAttribute('hx-preserve', 'true');\n\t\t\t\t\t}\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\tshowThreadTerminalStatus('failed');\n\t\t\t\t\t} else {\n\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\tif (window.refreshChatComposerAction) window.refreshChatComposerAction();\n\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\t\teventSource.onerror = function(error) {\n\t\t\t\t\t\tconsole.error('EventSource failed:', error);\n\t\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\t\tremoveResumeEventSource(eventSource);\n\t\t\t\t\t\t\tif (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {\n\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t}\n\t\t\t\t\tif (streamTerminalHandled) return;\n\t\t\t\t\tstreamTerminalHandled = true;\n\t\t\t\t\tflushCumulativeContent();\n\t\t\t\t\tif (window.hideMixtureProgress) window.hideMixtureProgress(execId);\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\trestoreThreadPollingFallback();\n\t\t\t\t\t}\n\t\t\t\t};\n\t\t\t\t}\n\t\t\t\tconnectResumeExecutionStream();\n\t\t\t});\n\t\t};\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1467,7 +1467,7 @@ func pendingAttachmentBadge(label, title string) templ.Component {
 		var templ_7745c5c3_Var77 string
 		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1261, Col: 77}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1276, Col: 77}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 		if templ_7745c5c3_Err != nil {
@@ -1480,7 +1480,7 @@ func pendingAttachmentBadge(label, title string) templ.Component {
 		var templ_7745c5c3_Var78 string
 		templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue(title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1261, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1276, Col: 98}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 		if templ_7745c5c3_Err != nil {
@@ -1493,7 +1493,7 @@ func pendingAttachmentBadge(label, title string) templ.Component {
 		var templ_7745c5c3_Var79 string
 		templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1265, Col: 15}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1280, Col: 15}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 		if templ_7745c5c3_Err != nil {
@@ -1535,7 +1535,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var81 string
 		templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.ResolveAttributeValue("thread-input-" + inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1270, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1285, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var81)
 		if templ_7745c5c3_Err != nil {
@@ -1548,7 +1548,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var82 string
 		templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.ResolveAttributeValue(inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1270, Col: 193}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1285, Col: 193}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var82)
 		if templ_7745c5c3_Err != nil {
@@ -1561,7 +1561,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var83 string
 		templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1270, Col: 217}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1285, Col: 217}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var83)
 		if templ_7745c5c3_Err != nil {
@@ -1574,7 +1574,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var84 string
 		templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1271, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1286, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 		if templ_7745c5c3_Err != nil {
@@ -1597,7 +1597,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var85 string
 		templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.ResolveAttributeValue(steerEndpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1276, Col: 125}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1291, Col: 125}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var85)
 		if templ_7745c5c3_Err != nil {
@@ -1610,7 +1610,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var86 string
 		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.ResolveAttributeValue("#thread-input-" + inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1276, Col: 166}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1291, Col: 166}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var86)
 		if templ_7745c5c3_Err != nil {
@@ -1623,7 +1623,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var87 string
 		templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.ResolveAttributeValue("/thread-inputs/" + inputID + "/cancel")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1277, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1292, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var87)
 		if templ_7745c5c3_Err != nil {
@@ -1636,7 +1636,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 		var templ_7745c5c3_Var88 string
 		templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue("#thread-input-" + inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1277, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1292, Col: 191}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 		if templ_7745c5c3_Err != nil {
@@ -1707,7 +1707,7 @@ func ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAtt
 		var templ_7745c5c3_Var91 string
 		templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1291, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1306, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
 		if templ_7745c5c3_Err != nil {
@@ -1720,7 +1720,7 @@ func ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAtt
 		var templ_7745c5c3_Var92 string
 		templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.ResolveAttributeValue(pendingInputsOOBTarget(taskID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1291, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1306, Col: 101}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
 		if templ_7745c5c3_Err != nil {
@@ -1799,7 +1799,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var95 string
 		templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.ResolveAttributeValue("thread-input-" + inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1301, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1316, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var95)
 		if templ_7745c5c3_Err != nil {
@@ -1812,7 +1812,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var96 string
 		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue(inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1301, Col: 195}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1316, Col: 195}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
 		if templ_7745c5c3_Err != nil {
@@ -1825,7 +1825,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var97 string
 		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1301, Col: 219}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1316, Col: 219}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 		if templ_7745c5c3_Err != nil {
@@ -1838,7 +1838,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var98 string
 		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1304, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1319, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 		if templ_7745c5c3_Err != nil {
@@ -1861,7 +1861,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var99 string
 		templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue("/thread-inputs/" + inputID + "/cancel")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1311, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1326, Col: 150}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
 		if templ_7745c5c3_Err != nil {
@@ -1874,7 +1874,7 @@ func ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, t
 		var templ_7745c5c3_Var100 string
 		templ_7745c5c3_Var100, templ_7745c5c3_Err = templ.ResolveAttributeValue("#thread-input-" + inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1311, Col: 191}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1326, Col: 191}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var100)
 		if templ_7745c5c3_Err != nil {
@@ -1945,7 +1945,7 @@ func ChatComposerQueuedInputRowsForTask(inputs []models.ThreadInput, steerEndpoi
 		var templ_7745c5c3_Var103 string
 		templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1325, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1340, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 		if templ_7745c5c3_Err != nil {
@@ -2029,7 +2029,7 @@ func ChatInputCancelledRow(inputID string) templ.Component {
 		var templ_7745c5c3_Var106 string
 		templ_7745c5c3_Var106, templ_7745c5c3_Err = templ.ResolveAttributeValue("thread-input-" + inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1340, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1355, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var106)
 		if templ_7745c5c3_Err != nil {
@@ -2042,7 +2042,7 @@ func ChatInputCancelledRow(inputID string) templ.Component {
 		var templ_7745c5c3_Var107 string
 		templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.ResolveAttributeValue(inputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1340, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1355, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var107)
 		if templ_7745c5c3_Err != nil {
@@ -2084,7 +2084,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var109 string
 		templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.ResolveAttributeValue(containerID + "-earlier-loader")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1345, Col: 38}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1360, Col: 38}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var109)
 		if templ_7745c5c3_Err != nil {
@@ -2097,7 +2097,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var110 string
 		templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.ResolveAttributeValue(containerID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1348, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1363, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var110)
 		if templ_7745c5c3_Err != nil {
@@ -2110,7 +2110,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var111 string
 		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", limit))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1349, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1364, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var111)
 		if templ_7745c5c3_Err != nil {
@@ -2123,7 +2123,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var112 string
 		templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.ResolveAttributeValue(url)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1350, Col: 14}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1365, Col: 14}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var112)
 		if templ_7745c5c3_Err != nil {
@@ -2136,7 +2136,7 @@ func ChatEarlierMessagesLoader(containerID, url string, limit int) templ.Compone
 		var templ_7745c5c3_Var113 string
 		templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.ResolveAttributeValue("#" + containerID + "-earlier-loader")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1352, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1367, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var113)
 		if templ_7745c5c3_Err != nil {
@@ -2250,7 +2250,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var116 string
 			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.ResolveAttributeValue("chat-execution-" + exec.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1390, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1405, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var116)
 			if templ_7745c5c3_Err != nil {
@@ -2263,7 +2263,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var117 string
 			templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1390, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1405, Col: 129}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var117)
 			if templ_7745c5c3_Err != nil {
@@ -2276,7 +2276,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var118 string
 			templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(exec.Status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1390, Col: 170}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1405, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var118)
 			if templ_7745c5c3_Err != nil {
@@ -2289,7 +2289,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var119 string
 			templ_7745c5c3_Var119, templ_7745c5c3_Err = templ.ResolveAttributeValue(ChatExecutionRevision(exec))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1390, Col: 226}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1405, Col: 226}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var119)
 			if templ_7745c5c3_Err != nil {
@@ -2302,7 +2302,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var120 string
 			templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.StartedAt.Format(time.RFC3339Nano))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1390, Col: 286}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1405, Col: 286}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var120)
 			if templ_7745c5c3_Err != nil {
@@ -2328,7 +2328,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var121 string
 			templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.ResolveAttributeValue("chat-execution-" + exec.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1394, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1409, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var121)
 			if templ_7745c5c3_Err != nil {
@@ -2341,7 +2341,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var122 string
 			templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1394, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1409, Col: 129}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var122)
 			if templ_7745c5c3_Err != nil {
@@ -2354,7 +2354,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var123 string
 			templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(exec.Status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1394, Col: 170}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1409, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var123)
 			if templ_7745c5c3_Err != nil {
@@ -2367,7 +2367,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var124 string
 			templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.ResolveAttributeValue(ChatExecutionRevision(exec))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1394, Col: 226}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1409, Col: 226}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var124)
 			if templ_7745c5c3_Err != nil {
@@ -2380,7 +2380,7 @@ func ChatExecutionPair(exec models.Execution, task *models.Task, executions []mo
 			var templ_7745c5c3_Var125 string
 			templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.StartedAt.Format(time.RFC3339Nano))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1394, Col: 286}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1409, Col: 286}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var125)
 			if templ_7745c5c3_Err != nil {
@@ -2432,7 +2432,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var127 string
 			templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.ResolveAttributeValue("chat-execution-" + exec.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1402, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1417, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var127)
 			if templ_7745c5c3_Err != nil {
@@ -2445,7 +2445,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var128 string
 			templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1402, Col: 129}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1417, Col: 129}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 			if templ_7745c5c3_Err != nil {
@@ -2458,7 +2458,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var129 string
 			templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(exec.Status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1402, Col: 170}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1417, Col: 170}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var129)
 			if templ_7745c5c3_Err != nil {
@@ -2471,7 +2471,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var130 string
 			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.ResolveAttributeValue(ChatExecutionRevision(exec))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1402, Col: 226}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1417, Col: 226}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var130)
 			if templ_7745c5c3_Err != nil {
@@ -2484,7 +2484,7 @@ func ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions 
 			var templ_7745c5c3_Var131 string
 			templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.ResolveAttributeValue(exec.StartedAt.Format(time.RFC3339Nano))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1402, Col: 286}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1417, Col: 286}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var131)
 			if templ_7745c5c3_Err != nil {
@@ -2534,7 +2534,7 @@ func ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTarg
 		var templ_7745c5c3_Var133 string
 		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.ResolveAttributeValue("chat-execution-" + execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1411, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1426, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var133)
 		if templ_7745c5c3_Err != nil {
@@ -2547,7 +2547,7 @@ func ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTarg
 		var templ_7745c5c3_Var134 string
 		templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.ResolveAttributeValue(execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1411, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1426, Col: 126}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var134)
 		if templ_7745c5c3_Err != nil {
@@ -2675,7 +2675,7 @@ func ChatEmptyState(message string) templ.Component {
 		var templ_7745c5c3_Var138 string
 		templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1443, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1458, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
 		if templ_7745c5c3_Err != nil {
@@ -2717,7 +2717,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 		var templ_7745c5c3_Var140 string
 		templ_7745c5c3_Var140, templ_7745c5c3_Err = templ.ResolveAttributeValue(targetID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1449, Col: 15}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1464, Col: 15}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var140)
 		if templ_7745c5c3_Err != nil {
@@ -2730,7 +2730,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 		var templ_7745c5c3_Var141 string
 		templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolStr(isRunning))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1450, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1465, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var141)
 		if templ_7745c5c3_Err != nil {
@@ -2743,7 +2743,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 		var templ_7745c5c3_Var142 string
 		templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.ResolveAttributeValue(activeTurnID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1451, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1466, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var142)
 		if templ_7745c5c3_Err != nil {
@@ -2761,7 +2761,7 @@ func ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, 
 			var templ_7745c5c3_Var143 string
 			templ_7745c5c3_Var143, templ_7745c5c3_Err = templ.ResolveAttributeValue(stopEndpoint)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1453, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1468, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var143)
 			if templ_7745c5c3_Err != nil {
@@ -2817,7 +2817,7 @@ func chatComposerActionButton(stopEndpoint string, isRunning bool) templ.Compone
 			var templ_7745c5c3_Var145 string
 			templ_7745c5c3_Var145, templ_7745c5c3_Err = templ.ResolveAttributeValue(stopEndpoint)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1466, Col: 25}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1481, Col: 25}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var145)
 			if templ_7745c5c3_Err != nil {
@@ -2866,7 +2866,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var147 string
 		templ_7745c5c3_Var147, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1491, Col: 21}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1506, Col: 21}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var147)
 		if templ_7745c5c3_Err != nil {
@@ -2879,7 +2879,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var148 string
 		templ_7745c5c3_Var148, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.PostEndpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1493, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1508, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var148)
 		if templ_7745c5c3_Err != nil {
@@ -2892,7 +2892,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var149 string
 		templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.ResolveAttributeValue("#" + config.TargetID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1494, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1509, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var149)
 		if templ_7745c5c3_Err != nil {
@@ -2905,7 +2905,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var150 string
 		templ_7745c5c3_Var150, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.InputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1496, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1511, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var150)
 		if templ_7745c5c3_Err != nil {
@@ -2918,7 +2918,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var151 string
 		templ_7745c5c3_Var151, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "ClearAttachments")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1497, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1512, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var151)
 		if templ_7745c5c3_Err != nil {
@@ -2931,7 +2931,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var152 string
 		templ_7745c5c3_Var152, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatMessageHistoryStorageKey(config))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1498, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1513, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var152)
 		if templ_7745c5c3_Err != nil {
@@ -2944,7 +2944,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var153 string
 		templ_7745c5c3_Var153, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatAttachmentStateKey(config))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1499, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1514, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var153)
 		if templ_7745c5c3_Err != nil {
@@ -2957,7 +2957,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var154 string
 		templ_7745c5c3_Var154, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.SteerEndpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1500, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1515, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var154)
 		if templ_7745c5c3_Err != nil {
@@ -2975,7 +2975,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var155 string
 			templ_7745c5c3_Var155, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.TaskID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1503, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1518, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var155)
 			if templ_7745c5c3_Err != nil {
@@ -2988,7 +2988,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var156 string
 			templ_7745c5c3_Var156, templ_7745c5c3_Err = templ.ResolveAttributeValue("/tasks/" + config.TaskID + "/thread/model")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1504, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1519, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var156)
 			if templ_7745c5c3_Err != nil {
@@ -3011,7 +3011,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var157 string
 			templ_7745c5c3_Var157, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1508, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1523, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var157)
 			if templ_7745c5c3_Err != nil {
@@ -3029,7 +3029,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var158 string
 		templ_7745c5c3_Var158, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatDropOverlayID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1513, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1528, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var158)
 		if templ_7745c5c3_Err != nil {
@@ -3047,7 +3047,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var159 string
 			templ_7745c5c3_Var159, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-agent-id")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1522, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1537, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var159)
 			if templ_7745c5c3_Err != nil {
@@ -3060,7 +3060,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var160 string
 			templ_7745c5c3_Var160, templ_7745c5c3_Err = templ.ResolveAttributeValue(selectedAgentOrAuto(config.SelectedAgentID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1522, Col: 127}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1537, Col: 127}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var160)
 			if templ_7745c5c3_Err != nil {
@@ -3079,7 +3079,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var161 string
 			templ_7745c5c3_Var161, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-chat-mode")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1525, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1540, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var161)
 			if templ_7745c5c3_Err != nil {
@@ -3092,7 +3092,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var162 string
 			templ_7745c5c3_Var162, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatModeOrDefault(config.ChatMode))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1525, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1540, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var162)
 			if templ_7745c5c3_Err != nil {
@@ -3111,7 +3111,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var163 string
 			templ_7745c5c3_Var163, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-project-id")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1528, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1543, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var163)
 			if templ_7745c5c3_Err != nil {
@@ -3124,7 +3124,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var164 string
 			templ_7745c5c3_Var164, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1528, Col: 105}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1543, Col: 105}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var164)
 			if templ_7745c5c3_Err != nil {
@@ -3142,7 +3142,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var165 string
 		templ_7745c5c3_Var165, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatSessionInputID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1530, Col: 62}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1545, Col: 62}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var165)
 		if templ_7745c5c3_Err != nil {
@@ -3160,7 +3160,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var166 string
 			templ_7745c5c3_Var166, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ActiveTurnID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1532, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1547, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var166)
 			if templ_7745c5c3_Err != nil {
@@ -3178,7 +3178,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var167 string
 		templ_7745c5c3_Var167, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatAttachmentPreviewID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1535, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1550, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var167)
 		if templ_7745c5c3_Err != nil {
@@ -3191,7 +3191,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var168 string
 		templ_7745c5c3_Var168, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "ClearAttachments")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1538, Col: 116}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1553, Col: 116}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var168)
 		if templ_7745c5c3_Err != nil {
@@ -3204,7 +3204,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var169 string
 		templ_7745c5c3_Var169, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatAttachmentListID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1540, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1555, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var169)
 		if templ_7745c5c3_Err != nil {
@@ -3225,7 +3225,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var170 string
 		templ_7745c5c3_Var170, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.InputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1546, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1561, Col: 24}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var170)
 		if templ_7745c5c3_Err != nil {
@@ -3243,7 +3243,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var171 string
 			templ_7745c5c3_Var171, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-agent-select")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1565, Col: 44}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1580, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var171)
 			if templ_7745c5c3_Err != nil {
@@ -3256,7 +3256,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var172 string
 			templ_7745c5c3_Var172, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-agent-id")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1567, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1582, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var172)
 			if templ_7745c5c3_Err != nil {
@@ -3269,7 +3269,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var173 string
 			templ_7745c5c3_Var173, templ_7745c5c3_Err = templ.ResolveAttributeValue(selectedAgentOrAuto(config.SelectedAgentID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1568, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1583, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var173)
 			if templ_7745c5c3_Err != nil {
@@ -3282,7 +3282,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var174 string
 			templ_7745c5c3_Var174, templ_7745c5c3_Err = templ.JoinStringErrs(selectedAgentLabel(config.SelectedAgentID, config.Agents))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1571, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1586, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var174))
 			if templ_7745c5c3_Err != nil {
@@ -3300,7 +3300,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var175 string
 				templ_7745c5c3_Var175, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1576, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1591, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var175)
 				if templ_7745c5c3_Err != nil {
@@ -3313,7 +3313,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var176 string
 				templ_7745c5c3_Var176, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1576, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1591, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var176))
 				if templ_7745c5c3_Err != nil {
@@ -3326,7 +3326,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var177 string
 				templ_7745c5c3_Var177, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1576, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1591, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var177))
 				if templ_7745c5c3_Err != nil {
@@ -3350,7 +3350,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var178 string
 			templ_7745c5c3_Var178, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-mode-select")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1587, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1602, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var178)
 			if templ_7745c5c3_Err != nil {
@@ -3363,7 +3363,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var179 string
 			templ_7745c5c3_Var179, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-chat-mode")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1589, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1604, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var179)
 			if templ_7745c5c3_Err != nil {
@@ -3376,7 +3376,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var180 string
 			templ_7745c5c3_Var180, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatModeOrDefault(config.ChatMode))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1590, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1605, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var180)
 			if templ_7745c5c3_Err != nil {
@@ -3394,7 +3394,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var181 string
 		templ_7745c5c3_Var181, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-action-cluster")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1601, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1616, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var181)
 		if templ_7745c5c3_Err != nil {
@@ -3407,7 +3407,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var182 string
 		templ_7745c5c3_Var182, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatFileInputID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1603, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1618, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var182)
 		if templ_7745c5c3_Err != nil {
@@ -3420,7 +3420,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var183 string
 		templ_7745c5c3_Var183, templ_7745c5c3_Err = templ.ResolveAttributeValue(chatFileInputID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1608, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1623, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var183)
 		if templ_7745c5c3_Err != nil {
@@ -3433,7 +3433,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var184 string
 		templ_7745c5c3_Var184, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-mic-btn")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1610, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1625, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var184)
 		if templ_7745c5c3_Err != nil {
@@ -3446,7 +3446,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var185 string
 		templ_7745c5c3_Var185, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.FormID + "-primary-action")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1621, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1636, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var185)
 		if templ_7745c5c3_Err != nil {
@@ -3459,7 +3459,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var186 string
 		templ_7745c5c3_Var186, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolStr(config.IsRunning))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1622, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1637, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var186)
 		if templ_7745c5c3_Err != nil {
@@ -3472,7 +3472,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var187 string
 		templ_7745c5c3_Var187, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.ActiveTurnID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1623, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1638, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var187)
 		if templ_7745c5c3_Err != nil {
@@ -3490,7 +3490,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var188 string
 			templ_7745c5c3_Var188, templ_7745c5c3_Err = templ.ResolveAttributeValue(config.StopEndpoint)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1625, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 1640, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var188)
 			if templ_7745c5c3_Err != nil {

@@ -492,9 +492,10 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						if (liveMessages && window.resolveScrollTracker) {
 							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
 						}
-						var shouldScroll = !tracker || tracker.shouldAutoScroll();
+					var shouldScroll = !tracker || tracker.shouldAutoScroll();
+					var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;
 					container.classList.remove('text-error/80', 'font-medium');
-							function finishScheduledRender(committed) {
+					function finishScheduledRender(committed) {
 								if (committed === false) {
 									renderScheduled = false;
 									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
@@ -508,11 +509,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								}
 								lastRenderedSourceLength = sourceLength;
 								lastRenderFinishedAt = Date.now();
-								// Auto-scroll only if the viewport was pinned before this render grew the DOM.
-								if (shouldScroll) {
+								// Auto-scroll only if the viewport was pinned before this render grew the DOM
+								// and reader intent did not change while asynchronous rendering was pending.
+								var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
+								if (shouldScroll && renderIntentUnchanged) {
 							requestAnimationFrame(function() {
 								var chatMessages = document.getElementById(messagesId);
-								if (chatMessages) {
+								if ((!tracker || (tracker.intentRevision || 0) === renderIntentRevision) && chatMessages) {
 									window.chatAutoScroll.scrollToBottom(chatMessages, false);
 								}
 							});
@@ -702,6 +705,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							streamTerminalHandled = true;
 							var terminalMessages = document.getElementById(messagesId);
 							var shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));
+							var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								textBuffer = String(container._authoritativeTerminalContent || '');
 							}
@@ -712,12 +716,15 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					container.classList.remove('hidden');
 						function revealTerminalError() {
 							if (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);
-							if (shouldScrollTerminalError) {
+							var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;
+							if (shouldScrollTerminalError && terminalIntentUnchanged) {
 								var failedMessages = document.getElementById(messagesId);
 								if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
 								requestAnimationFrame(function() {
 									failedMessages = document.getElementById(messagesId);
-									if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
+									if ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && failedMessages) {
+										failedMessages.scrollTop = failedMessages.scrollHeight;
+									}
 								});
 							}
 							if (isThread) {
@@ -1002,6 +1009,7 @@ templ ChatStreamingResumeInitScript() {
 							tracker = window.resolveScrollTracker(trackerKey, liveMessages);
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
+						var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;
 					container.classList.remove('text-error/80', 'font-medium');
 						function finishScheduledRender(committed) {
 							if (committed === false) {
@@ -1017,11 +1025,14 @@ templ ChatStreamingResumeInitScript() {
 							}
 							lastRenderedSourceLength = sourceLength;
 							lastRenderFinishedAt = Date.now();
-							if (shouldScroll) {
-							requestAnimationFrame(function() {
-								var cm = document.getElementById(messagesId);
-								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);
-							});
+							var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
+							if (shouldScroll && renderIntentUnchanged) {
+								requestAnimationFrame(function() {
+									var cm = document.getElementById(messagesId);
+									if ((!tracker || (tracker.intentRevision || 0) === renderIntentRevision) && cm && window.chatAutoScroll) {
+										window.chatAutoScroll.scrollToBottom(cm, false);
+									}
+								});
 							}
 							if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
 						}
@@ -1185,6 +1196,7 @@ templ ChatStreamingResumeInitScript() {
 						streamTerminalHandled = true;
 							var terminalMessages = document.getElementById(messagesId);
 							var shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (terminalMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(terminalMessages));
+							var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;
 							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 								cumulativeContent = String(container._authoritativeTerminalContent || '');
 							}
@@ -1195,12 +1207,15 @@ templ ChatStreamingResumeInitScript() {
 				container.classList.remove('hidden');
 				function revealTerminalError() {
 					if (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);
-					if (shouldScrollTerminalError) {
+					var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;
+					if (shouldScrollTerminalError && terminalIntentUnchanged) {
 						var failedMessages = document.getElementById(messagesId);
 						if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
 						requestAnimationFrame(function() {
 							failedMessages = document.getElementById(messagesId);
-							if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
+							if ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && failedMessages) {
+								failedMessages.scrollTop = failedMessages.scrollHeight;
+							}
 						});
 					}
 					if (pauseTarget) {
