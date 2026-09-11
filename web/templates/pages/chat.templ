@@ -947,15 +947,19 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var generation = ++renderGeneration;
 								renderScheduled = true;
 								var shouldScroll = !tracker || tracker.shouldAutoScroll();
+								var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;
 								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
 								function finishRender(committed) {
 									if (generation !== renderGeneration) return;
 									renderScheduled = false;
 									if (committed !== false) {
 										lastRenderedLength = sourceLength;
-										if (shouldScroll) {
+										var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
+										if (shouldScroll && renderIntentUnchanged) {
 											requestAnimationFrame(function() {
-												if (chatMessages && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+												if (!tracker || (tracker.intentRevision || 0) === renderIntentRevision) {
+													if (chatMessages && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+												}
 											});
 										}
 									}
@@ -1064,6 +1068,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									return;
 								}
 								var shouldScrollTerminalError = (!tracker || tracker.shouldAutoScroll()) || (chatMessages && window.chatAutoScroll && window.chatAutoScroll.isNearBottom(chatMessages));
+								var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;
 								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
 									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
 								}
@@ -1078,17 +1083,20 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									failedPair.setAttribute('data-exec-status', 'failed');
 									failedPair.setAttribute('hx-preserve', 'true');
 								}
-								function revealTerminalError() {
-									if (event.data && window.showChatTerminalError) window.showChatTerminalError(contentDiv, event.data);
-									if (shouldScrollTerminalError && chatMessages) {
-										chatMessages.scrollTop = chatMessages.scrollHeight;
-										requestAnimationFrame(function() {
-											if (chatMessages && chatMessages.isConnected) chatMessages.scrollTop = chatMessages.scrollHeight;
-										});
-									}
-									window.syncChatTranscriptRevision(execId);
-									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+							function revealTerminalError() {
+								if (event.data && window.showChatTerminalError) window.showChatTerminalError(contentDiv, event.data);
+								var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;
+								if (shouldScrollTerminalError && terminalIntentUnchanged && chatMessages) {
+									chatMessages.scrollTop = chatMessages.scrollHeight;
+									requestAnimationFrame(function() {
+										if ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && chatMessages && chatMessages.isConnected) {
+											chatMessages.scrollTop = chatMessages.scrollHeight;
+										}
+									});
 								}
+								window.syncChatTranscriptRevision(execId);
+								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+							}
 								if (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);
 								else revealTerminalError();
 								// Clear streaming state and refresh the composer immediately; the
