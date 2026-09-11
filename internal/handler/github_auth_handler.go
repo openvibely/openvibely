@@ -10,6 +10,16 @@ import (
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
+func (h *Handler) githubRuntimeSettingsPreflight(projectID string) (*repository.GitHubAuthRepo, error) {
+	if h.githubAuthRepo == nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")
+	}
+	if strings.TrimSpace(projectID) == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+	return h.githubAuthRepo, nil
+}
+
 func (h *Handler) renderGitHubRuntimeSettings(c echo.Context, projectID string) error {
 	if h.githubAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")
@@ -39,12 +49,10 @@ func (h *Handler) GitHubRuntimeSettingsFragment(c echo.Context) error {
 
 // AddGitHubAuthorizedActor adds or updates a system-level GitHub authorized actor.
 func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
-	if h.githubAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")
-	}
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
-	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
+	if err != nil {
+		return err
 	}
 	githubLogin := repository.NormalizeGitHubLogin(c.FormValue("github_login"))
 	if githubLogin == "" {
@@ -66,7 +74,7 @@ func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
 		Permission:  permission,
 		AddedBy:     "web",
 	}
-	if err := h.githubAuthRepo.UpsertAuthorizedActor(c.Request().Context(), actor); err != nil {
+	if err := authRepo.UpsertAuthorizedActor(c.Request().Context(), actor); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to add GitHub authorized actor: "+err.Error())
 	}
 	return h.renderGitHubRuntimeSettings(c, projectID)
@@ -74,14 +82,12 @@ func (h *Handler) AddGitHubAuthorizedActor(c echo.Context) error {
 
 // RemoveGitHubAuthorizedActor removes a system-level GitHub authorized actor.
 func (h *Handler) RemoveGitHubAuthorizedActor(c echo.Context) error {
-	if h.githubAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")
-	}
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
-	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
+	if err != nil {
+		return err
 	}
-	if err := h.githubAuthRepo.DeleteAuthorizedActor(c.Request().Context(), c.Param("id")); err != nil {
+	if err := authRepo.DeleteAuthorizedActor(c.Request().Context(), c.Param("id")); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to remove GitHub authorized actor: "+err.Error())
 	}
 	return h.renderGitHubRuntimeSettings(c, projectID)
@@ -89,22 +95,20 @@ func (h *Handler) RemoveGitHubAuthorizedActor(c echo.Context) error {
 
 // SaveGitHubProjectInbox stores the project-scoped authorized GitHub inbox assignee for runtime prompts/tools.
 func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
-	if h.githubAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "GitHub auth not configured")
-	}
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
-	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	authRepo, err := h.githubRuntimeSettingsPreflight(projectID)
+	if err != nil {
+		return err
 	}
 	githubLogin := repository.NormalizeGitHubLogin(c.FormValue("github_login"))
 	if githubLogin == "" {
-		existing, err := h.githubAuthRepo.GetProjectInbox(c.Request().Context(), projectID)
+		existing, err := authRepo.GetProjectInbox(c.Request().Context(), projectID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load GitHub project inbox: "+err.Error())
 		}
 		if existing != nil {
 			existing.Enabled = false
-			if err := h.githubAuthRepo.UpsertProjectInbox(c.Request().Context(), existing); err != nil {
+			if err := authRepo.UpsertProjectInbox(c.Request().Context(), existing); err != nil {
 				return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
 			}
 		}
@@ -115,7 +119,7 @@ func (h *Handler) SaveGitHubProjectInbox(c echo.Context) error {
 		GitHubLogin: githubLogin,
 		Enabled:     c.FormValue("enabled") == "true",
 	}
-	if err := h.githubAuthRepo.UpsertProjectInbox(c.Request().Context(), inbox); err != nil {
+	if err := authRepo.UpsertProjectInbox(c.Request().Context(), inbox); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save GitHub project inbox: "+err.Error())
 	}
 	return h.renderGitHubRuntimeSettings(c, projectID)
