@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-09-06
+updated: 2026-12-30
 source: after_complete
-source_id: bfbfa775d28bee31e8fa9e1a35c1d7db:36bbc425eeb505cc
+source_id: a78ccb1402f09da37f81a9afb50c0ee0:15e79d41a1f1845a
 confidence: high
 title: Provider Architecture
 ---
@@ -38,7 +38,7 @@ Mixtures and OAuth:
 
 Tools, retries, and streaming:
 - Provider-native web search/fetch is provider-executed (`web_search`, versioned Anthropic raw-tool types), not local web tooling. Runtime tools are request-scoped and provider-generic with read/write classification. Tool-capable transports are OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key Chat Completions; unsupported paths receive neither unusable definitions nor marker fallbacks.
-- Shared runtime policy owns plan mode, orchestration chat, task follow-ups, defaults/filters, and `SkipDefaultTools`; adapters retain provider schema/naming and local read-only grants. Memory tools are request/tool-profile decisions, not global adapter defaults. Anthropic wire aliases canonical `skills_list` to avoid collisions with `skill_view`/`skill_manage`.
+- Shared runtime policy owns plan mode, orchestration chat, task follow-ups, defaults/filters, and `SkipDefaultTools`; adapters retain provider schema/naming and local read-only grants. Agent-definition built-in-tool grants also apply at both advertised-definition and execution boundaries: OpenAI, Anthropic, and OpenAI-compatible map local wire tools to Agent permissions, and combine Agent/default suppression with runtime policy without suppressing independently authorized runtime tools. Memory tools are request/tool-profile decisions, not global adapter defaults. Anthropic wire aliases canonical `skills_list` to avoid collisions with `skill_view`/`skill_manage`.
 - Optional runtime-tool parameters should use standard schema semantics: include them in `properties`, exclude them from `required`, provide no `default`, and preserve their absence unless the model explicitly sends them. Provider adapters should pass raw JSON arguments through rather than synthesize zero values, strip schema-specific sentinels, or perform string replacement for booleans. Handler omission remains the no-filter/default path, explicit non-null values retain their meaning, and provider-bound tests should prove that a truly omitted field reaches the handler absent instead of fabricating responses that contain zero values.
 - A request-scoped guard turns an identical exhausted-empty `list_tasks` retry into a `duplicate_noop` response with guidance; different parameters, mutations, errors, nonempty, or pageable results clear it. `read_file` returns `decimalLineNumber<TAB><source bytes>` so indentation remains exact. Scoped file tools select the longest configured scope prefix and preserve fallback, permissions, traversal, and symlink containment.
 - Provider-local file/shell execution is centralized in `pkg/agenttools`; provider packages retain schemas and thin wrappers. Bash timeout policy is explicit: Anthropic defaults to ten minutes only without a positive timeout; OpenAI passes its configured policy.
