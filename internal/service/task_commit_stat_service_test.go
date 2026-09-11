@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -108,6 +110,170 @@ func TestApplyNumstatLinesPreservesDirectCommitFileDuplicates(t *testing.T) {
 	}
 	if !reflect.DeepEqual(files, []string{"duplicate.go", "duplicate.go"}) {
 		t.Fatalf("files = %#v, want duplicate.go twice", files)
+	}
+}
+
+func TestParseNumstatLinesNULDelimitedPathsAndRenameCopyRecords(t *testing.T) {
+	oldPath := "reports/old\tname.go"
+	newPath := "reports/new\nname.go"
+	quotePath := "reports/quote\"name.go"
+	backslashPath := "reports/back\\name.go"
+	output := "1\t2\t" + oldPath + "\x00" +
+		"0\t0\t\x00" + oldPath + "\x00" + newPath + "\x00" +
+		"-\t-\t" + quotePath + "\x00" +
+		"3\t4\t" + backslashPath + "\x00"
+
+	got, err := parseNumstatLines(output)
+	if err != nil {
+		t.Fatalf("parseNumstatLines: %v", err)
+	}
+	want := []parsedNumstatLine{
+		{insertions: 1, deletions: 2, path: oldPath},
+		{path: oldPath + " => " + newPath},
+		{path: quotePath},
+		{insertions: 3, deletions: 4, path: backslashPath},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parsed NUL numstat = %#v, want %#v", got, want)
+	}
+}
+
+func TestCollectProducedCommitStatRoundTripsGitSpecialPaths(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Special Commit Paths", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Record special paths", Category: models.CategoryActive, Status: models.StatusRunning, WorktreePath: repoDir}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	execModel := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "change special paths"}
+	if err := execRepo.Create(ctx, execModel); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	wantPaths := []string{
+		"reports/odd\tname.go",
+		"reports/line\nname.go",
+		"reports/quote\"name.go",
+		"reports/back\\name.go",
+	}
+	for _, path := range wantPaths {
+		fullPath := filepath.Join(repoDir, path)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatalf("mkdir for %q: %v", path, err)
+		}
+		if err := os.WriteFile(fullPath, []byte("package special\n\nfunc Added() {}\n"), 0644); err != nil {
+			t.Fatalf("write %q: %v", path, err)
+		}
+	}
+
+	llmSvc := &LLMService{taskCommitStatRepo: statRepo}
+	if err := llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, repoDir, "Add special path files"); err != nil {
+		t.Fatalf("CommitTaskWorktreeChanges: %v", err)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	var gotPaths []string
+	if err := json.Unmarshal([]byte(stats[0].ChangedFilesJSON), &gotPaths); err != nil {
+		t.Fatalf("decode changed files: %v", err)
+	}
+	gotSet := make(map[string]bool, len(gotPaths))
+	for _, path := range gotPaths {
+		gotSet[path] = true
+	}
+	wantSet := make(map[string]bool, len(wantPaths))
+	for _, path := range wantPaths {
+		wantSet[path] = true
+	}
+	if !reflect.DeepEqual(gotSet, wantSet) || len(gotPaths) != len(wantPaths) {
+		t.Fatalf("changed files = %#v, want exact paths %#v", gotPaths, wantPaths)
+	}
+	if stats[0].FilesChanged != len(wantPaths) {
+		t.Fatalf("files changed = %d, want %d", stats[0].FilesChanged, len(wantPaths))
+	}
+	upcomingSvc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	upcomingSvc.SetTaskCommitStatRepo(statRepo)
+	projectChanges, _, err := upcomingSvc.buildProjectChangesFromTaskCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("build project changes: %v", err)
+	}
+	if projectChanges == nil || projectChanges.FilesChanged != len(wantPaths) || !reflect.DeepEqual(projectChanges.FileTypes, []models.FileTypeCount{{Extension: ".go", Count: len(wantPaths)}}) {
+		t.Fatalf("project changes = %#v, want all special paths classified as .go", projectChanges)
+	}
+}
+
+func TestCollectProducedCommitStatPreservesSpecialRenameAndCopyRecords(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	oldPath := "reports/old\tname.go"
+	newPath := "reports/new\nname.go"
+	oldFullPath := filepath.Join(repoDir, oldPath)
+	if err := os.MkdirAll(filepath.Dir(oldFullPath), 0755); err != nil {
+		t.Fatalf("mkdir rename source: %v", err)
+	}
+	if err := os.WriteFile(oldFullPath, []byte("package renamed\n\nfunc Same() {}\n"), 0644); err != nil {
+		t.Fatalf("write rename source: %v", err)
+	}
+	if err := CommitWorktreeChanges(repoDir, "Add rename source"); err != nil {
+		t.Fatalf("commit rename source: %v", err)
+	}
+	if err := os.Rename(oldFullPath, filepath.Join(repoDir, newPath)); err != nil {
+		t.Fatalf("rename special path: %v", err)
+	}
+	if err := CommitWorktreeChanges(repoDir, "Rename special path"); err != nil {
+		t.Fatalf("commit rename: %v", err)
+	}
+	renameSHA, err := gitCommitSHA(repoDir, "HEAD")
+	if err != nil {
+		t.Fatalf("rename SHA: %v", err)
+	}
+	stat, err := collectProducedCommitStat(repoDir, renameSHA)
+	if err != nil {
+		t.Fatalf("collect rename stat: %v", err)
+	}
+	if stat.Insertions != 0 || stat.Deletions != 0 || stat.FilesChanged != 1 {
+		t.Fatalf("rename totals = %d/%d files=%d, want 0/0/1", stat.Insertions, stat.Deletions, stat.FilesChanged)
+	}
+	var renamePaths []string
+	if err := json.Unmarshal([]byte(stat.ChangedFilesJSON), &renamePaths); err != nil {
+		t.Fatalf("decode rename changed files: %v", err)
+	}
+	if !reflect.DeepEqual(renamePaths, []string{oldPath + " => " + newPath}) {
+		t.Fatalf("rename paths = %#v, want one raw rename path", renamePaths)
+	}
+
+	copyPath := "reports/copy\"name.go"
+	if err := os.WriteFile(filepath.Join(repoDir, copyPath), []byte("package renamed\n\nfunc Same() {}\n"), 0644); err != nil {
+		t.Fatalf("write copy path: %v", err)
+	}
+	if err := CommitWorktreeChanges(repoDir, "Copy special path"); err != nil {
+		t.Fatalf("commit copy: %v", err)
+	}
+	cmd := exec.Command("git", "diff", "--find-copies-harder", "--numstat", "-z", "HEAD^", "HEAD")
+	cmd.Dir = repoDir
+	copyOutput, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("read copy numstat: %v", err)
+	}
+	copyLines, err := parseNumstatLines(string(copyOutput))
+	if err != nil {
+		t.Fatalf("parse copy numstat: %v", err)
+	}
+	if !reflect.DeepEqual(copyLines, []parsedNumstatLine{{path: newPath + " => " + copyPath}}) {
+		t.Fatalf("copy numstat = %#v, want raw rename/copy path", copyLines)
 	}
 }
 
