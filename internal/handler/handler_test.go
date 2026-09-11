@@ -8071,7 +8071,8 @@ func TestHandler_GetTaskThreadExecutionFragment(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "queued follow-up now running")
 	assertContains(t, rec, `data-exec-id="`+exec.ID+`"`)
-	assertContains(t, rec, "new EventSource")
+	assertContains(t, rec, `data-streaming-resume="true"`)
+	assertContains(t, rec, `data-raw-content=""`)
 }
 
 func TestHandler_GetTaskThreadFailedAuthoritativeFragmentOrdersTerminalErrorLast(t *testing.T) {
@@ -8094,7 +8095,7 @@ func TestHandler_GetTaskThreadFailedAuthoritativeFragmentOrdersTerminalErrorLast
 	})
 	require.NoError(t, h.execRepo.Complete(ctx, exec.ID, models.ExecFailed, partial, exec.ErrorMessage, 100, 500))
 
-	rec := htmxGet(e, "/tasks/"+task.ID+"/thread?limit=5")
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread/executions/"+exec.ID+"/fragment")
 	assertCode(t, rec, http.StatusOK)
 	body := rec.Body.String()
 	outputIndex := strings.Index(body, `partial terminal output`)

@@ -3137,5 +3137,16 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 			attachments = byExec[execID]
 		}
 	}
-	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(exec.PromptSent, exec.ID, attachments, task.ProjectID))
+	attachmentsByExecution := map[string][]models.ChatAttachment{exec.ID: attachments}
+	return render(c, http.StatusOK, components.ChatExecutionPair(
+		*exec,
+		task,
+		[]models.Execution{*exec},
+		0,
+		true,
+		attachmentsByExecution,
+		"task-thread-messages",
+		"task-thread-view",
+		task.ProjectID,
+	))
 }
