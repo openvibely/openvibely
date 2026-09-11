@@ -90,6 +90,20 @@ func parseBoundedMultipartForm(c echo.Context, maxFileSize int64, maxFiles int) 
 	return req.MultipartForm, nil
 }
 
+func parseTaskAttachmentForm(c echo.Context, logScope string) (*multipart.Form, error) {
+	form, err := parseBoundedMultipartForm(c, maxUploadSize, maxTaskAttachmentFilesPerRequest)
+	if err == nil {
+		return form, nil
+	}
+
+	applog.Infof("[handler] %s error parsing form: %v", logScope, err)
+	var httpErr *echo.HTTPError
+	if errors.As(err, &httpErr) {
+		return nil, httpErr
+	}
+	return nil, echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
+}
+
 type multipartFileLimitReadCloser struct {
 	src         io.ReadCloser
 	boundary    []byte
@@ -288,13 +302,9 @@ func (h *Handler) UploadAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	form, err := parseBoundedMultipartForm(c, maxUploadSize, maxTaskAttachmentFilesPerRequest)
+	form, err := parseTaskAttachmentForm(c, "UploadAttachment")
 	if err != nil {
-		applog.Infof("[handler] UploadAttachment error parsing form: %v", err)
-		if httpErr, ok := err.(*echo.HTTPError); ok {
-			return httpErr
-		}
-		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
+		return err
 	}
 
 	if form == nil {

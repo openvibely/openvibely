@@ -1014,6 +1014,14 @@ func (h *Handler) executeGetCurrentProject(ctx context.Context, projectID string
 }
 
 func (h *Handler) executeSwitchProject(ctx context.Context, currentProjectID string, input json.RawMessage) string {
+	return h.executeSwitchProjectWithList(ctx, currentProjectID, input, h.projectRepo.ListSelectorOptions)
+}
+
+// executeSwitchProjectWithList contains the shared informational switch response
+// logic. The production handler uses the compact selector projection; the list
+// function parameter keeps the benchmark able to compare it with the historical
+// full-row lookup without duplicating the actual switch path.
+func (h *Handler) executeSwitchProjectWithList(ctx context.Context, currentProjectID string, input json.RawMessage, list func(context.Context) ([]models.Project, error)) string {
 	var req struct {
 		Project string `json:"project"`
 	}
@@ -1025,7 +1033,7 @@ func (h *Handler) executeSwitchProject(ctx context.Context, currentProjectID str
 		return "switch_project requires a project name or ID."
 	}
 
-	projects, err := h.projectRepo.List(ctx)
+	projects, err := list(ctx)
 	if err != nil {
 		return "Error loading projects: " + err.Error()
 	}
