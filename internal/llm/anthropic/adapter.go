@@ -711,9 +711,8 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthr
 
 // buildClientHistory converts chat execution history to anthropicclient.Message slices.
 func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Message {
-	history := llmprompt.LimitChatHistory(chatHistory)
 	var messages []anthropicclient.Message
-	for _, exec := range history {
+	for _, exec := range chatHistory {
 		if exec.PromptSent != "" {
 			messages = appendMergedMessage(messages, "user", exec.PromptSent)
 		}

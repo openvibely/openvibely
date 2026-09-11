@@ -857,9 +857,8 @@ func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string 
 }
 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
-	history := llmprompt.LimitChatHistory(chatHistory)
 	var messages []openaiclient.Message
-	for _, exec := range history {
+	for _, exec := range chatHistory {
 		if exec.PromptSent != "" {
 			messages = append(messages, openaiclient.Message{Role: "user", Content: exec.PromptSent})
 		}
