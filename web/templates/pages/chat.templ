@@ -955,9 +955,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (committed !== false) {
 										lastRenderedLength = sourceLength;
 										var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
-										if (shouldScroll && renderIntentUnchanged) {
+										var shouldScrollAfterRender = renderIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll());
+										if (shouldScrollAfterRender) {
 											requestAnimationFrame(function() {
-												if (!tracker || (tracker.intentRevision || 0) === renderIntentRevision) {
+												var frameIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
+												if (frameIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll())) {
 													if (chatMessages && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
 												}
 											});
@@ -1085,11 +1087,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								}
 							function revealTerminalError() {
 								if (event.data && window.showChatTerminalError) window.showChatTerminalError(contentDiv, event.data);
-								var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;
-								if (shouldScrollTerminalError && terminalIntentUnchanged && chatMessages) {
+								function shouldScrollTerminalNow() {
+									if (!tracker) return true;
+									if ((tracker.intentRevision || 0) !== terminalIntentRevision) return tracker.shouldAutoScroll();
+									return shouldScrollTerminalError;
+								}
+								if (shouldScrollTerminalNow() && chatMessages) {
 									chatMessages.scrollTop = chatMessages.scrollHeight;
 									requestAnimationFrame(function() {
-										if ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && chatMessages && chatMessages.isConnected) {
+										if (shouldScrollTerminalNow() && chatMessages && chatMessages.isConnected) {
 											chatMessages.scrollTop = chatMessages.scrollHeight;
 										}
 									});

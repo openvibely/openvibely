@@ -509,13 +509,15 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								}
 								lastRenderedSourceLength = sourceLength;
 								lastRenderFinishedAt = Date.now();
-								// Auto-scroll only if the viewport was pinned before this render grew the DOM
-								// and reader intent did not change while asynchronous rendering was pending.
+								// Auto-scroll according to the latest reader intent. If intent did not
+								// change, retain the render-start eligibility decision.
 								var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
-								if (shouldScroll && renderIntentUnchanged) {
+								var shouldScrollAfterRender = renderIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll());
+								if (shouldScrollAfterRender) {
 							requestAnimationFrame(function() {
 								var chatMessages = document.getElementById(messagesId);
-								if ((!tracker || (tracker.intentRevision || 0) === renderIntentRevision) && chatMessages) {
+								var frameIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
+								if ((frameIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll())) && chatMessages) {
 									window.chatAutoScroll.scrollToBottom(chatMessages, false);
 								}
 							});
@@ -716,13 +718,17 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					container.classList.remove('hidden');
 						function revealTerminalError() {
 							if (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);
-							var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;
-							if (shouldScrollTerminalError && terminalIntentUnchanged) {
+							function shouldScrollTerminalNow() {
+								if (!tracker) return true;
+								if ((tracker.intentRevision || 0) !== terminalIntentRevision) return tracker.shouldAutoScroll();
+								return shouldScrollTerminalError;
+							}
+							if (shouldScrollTerminalNow()) {
 								var failedMessages = document.getElementById(messagesId);
 								if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
 								requestAnimationFrame(function() {
 									failedMessages = document.getElementById(messagesId);
-									if ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && failedMessages) {
+									if (shouldScrollTerminalNow() && failedMessages) {
 										failedMessages.scrollTop = failedMessages.scrollHeight;
 									}
 								});
@@ -1026,10 +1032,12 @@ templ ChatStreamingResumeInitScript() {
 							lastRenderedSourceLength = sourceLength;
 							lastRenderFinishedAt = Date.now();
 							var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
-							if (shouldScroll && renderIntentUnchanged) {
+							var shouldScrollAfterRender = renderIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll());
+							if (shouldScrollAfterRender) {
 								requestAnimationFrame(function() {
 									var cm = document.getElementById(messagesId);
-									if ((!tracker || (tracker.intentRevision || 0) === renderIntentRevision) && cm && window.chatAutoScroll) {
+									var frameIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;
+									if ((frameIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll())) && cm && window.chatAutoScroll) {
 										window.chatAutoScroll.scrollToBottom(cm, false);
 									}
 								});
@@ -1207,13 +1215,17 @@ templ ChatStreamingResumeInitScript() {
 				container.classList.remove('hidden');
 				function revealTerminalError() {
 					if (event.data && window.showChatTerminalError) window.showChatTerminalError(container, event.data);
-					var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;
-					if (shouldScrollTerminalError && terminalIntentUnchanged) {
+					function shouldScrollTerminalNow() {
+						if (!tracker) return true;
+						if ((tracker.intentRevision || 0) !== terminalIntentRevision) return tracker.shouldAutoScroll();
+						return shouldScrollTerminalError;
+					}
+					if (shouldScrollTerminalNow()) {
 						var failedMessages = document.getElementById(messagesId);
 						if (failedMessages) failedMessages.scrollTop = failedMessages.scrollHeight;
 						requestAnimationFrame(function() {
 							failedMessages = document.getElementById(messagesId);
-							if ((!tracker || (tracker.intentRevision || 0) === terminalIntentRevision) && failedMessages) {
+							if (shouldScrollTerminalNow() && failedMessages) {
 								failedMessages.scrollTop = failedMessages.scrollHeight;
 							}
 						});

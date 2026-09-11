@@ -299,9 +299,11 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 		!strings.Contains(bubbleSection, "if (generation !== renderGeneration) return false;") ||
 		!strings.Contains(bubbleSection, "var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;") ||
 		!strings.Contains(bubbleSection, "var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;") ||
+		!strings.Contains(bubbleSection, "var shouldScrollAfterRender = renderIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll());") ||
 		!strings.Contains(bubbleSection, "var failedRender = renderBufferedOutput(true);") ||
 		!strings.Contains(bubbleSection, "var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;") ||
-		!strings.Contains(bubbleSection, "var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;") ||
+		!strings.Contains(bubbleSection, "function shouldScrollTerminalNow()") ||
+		!strings.Contains(bubbleSection, "if ((tracker.intentRevision || 0) !== terminalIntentRevision) return tracker.shouldAutoScroll();") ||
 		!strings.Contains(bubbleSection, "failedRender.then(revealTerminalError, revealTerminalError)") {
 		t.Fatal("live-created assistant bubble must keep render backpressure, fence deferred scrolling by reader intent, and defer terminal presentation until the owned async render settles")
 	}
