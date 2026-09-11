@@ -249,7 +249,11 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 			(taskCategory != models.CategoryActive && taskCategory != models.CategoryScheduled) {
 			return nil, ErrAutomationTaskBusy
 		}
-		result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = CURRENT_TIMESTAMP
+		result, err := conn.ExecContext(ctx, `UPDATE tasks SET
+			status = 'running',
+			display_order = CASE WHEN category IN ('active', 'scheduled') THEN `+activeBoardTailOrderExpression+`
+				ELSE display_order END,
+			updated_at = CURRENT_TIMESTAMP
 			WHERE id = ? AND project_id = ? AND status = 'pending'`, taskID, projectID)
 		if err != nil {
 			return nil, fmt.Errorf("claiming automation task: %w", err)
