@@ -305,9 +305,10 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	defer srv.Close()
 
 	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{
-			Name: "create_task", Description: "create a task", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite,
-		}},
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "request_user_input", Description: "ask the user", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite},
+			{Name: "create_task", Description: "create a task", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite},
+		},
 	})
 	adapter := New(nil, nil)
 	_, err := adapter.Call(ctx, llmcontracts.AgentRequest{
@@ -327,8 +328,12 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	require.Equal(t, "system", system["role"])
 	content, _ := system["content"].(string)
 	require.Contains(t, content, llmprompt.ChatActionToolModeInstructions)
-	require.Contains(t, content, "Available action tools: create_task")
+	require.Contains(t, content, "Available action tools: request_user_input, create_task")
+	require.Contains(t, content, "call request_user_input and wait for the answer")
 	require.NotContains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
+	tools := gotBody["tools"]
+	require.Contains(t, strings.ToLower(fmt.Sprint(tools)), "request_user_input")
+	require.Contains(t, strings.ToLower(fmt.Sprint(tools)), "create_task")
 }
 
 func TestAdapterChatWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.T) {

@@ -154,6 +154,7 @@ const cancelTaskParams = `{"type":"object","properties":{"task_id":{"type":"stri
 const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_config_id":{"type":"string","description":"Alias for agent_id; selects the LLM model config only."},"agent_definition_id":{"type":"string","description":"Primary Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page. Use this when only the Agent name is known."},"clear_agent_definition":{"type":"boolean","description":"Clear the primary Agent assignment without clearing or changing the model config."},"chain":` + chainSchemaProperties + `,"auto_merge":{"type":"boolean","description":"Set the successful-completion auto-merge option."},"auto_merge_on_goal_achieved":{"type":"boolean","description":"Set the goal-achievement auto-merge option."},"merge_target_branch":{"type":"string","description":"Set or clear the local automatic-merge target branch."},"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
 
 const sendMessageParams = `{"type":"object","properties":{"action":{"type":"string","enum":["send","list"],"description":"send delivers a message. list returns configured outbound targets including their target_kind."},"target":{"type":"string","description":"Delivery target. Format: platform, platform:#target-name, platform:target_id, or platform:target_id:thread_id. Saved outbound targets and home targets are preferred first. Authorized channel users/senders can be used as direct recipients, including email:person@example.com for an authorized Email sender, telegram:123456789 for an authorized Telegram numeric user ID, and slack:user:U123... or discord:user:1518288288572641398 for direct messages. Arbitrary unsaved explicit targets require the project policy. For Discord channel sends use discord:channel:<channel_id> or discord:channel:<channel_id>:<thread_id>. Prefer saved/named targets; call action=list to see configured targets."},"message":{"type":"string","description":"Text to send."},"subject":{"type":"string","description":"Optional subject for email targets. Ignored by chat platforms."}},"additionalProperties":false}`
+const requestUserInputParams = `{"type":"object","properties":{"questions":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","properties":{"id":{"type":"string","description":"Stable question id used in the answer result."},"question":{"type":"string","description":"Plain-text question to show to the user."},"options":{"type":"array","minItems":2,"maxItems":3,"items":{"type":"object","properties":{"label":{"type":"string","description":"Clickable option label returned exactly when selected."},"description":{"type":"string","description":"Short plain-text explanation shown under the label."}},"required":["label","description"],"additionalProperties":false}}},"required":["id","question","options"],"additionalProperties":false}}},"required":["questions"],"additionalProperties":false}`
 
 const githubRepoURLProperty = `"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}`
 const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}},` + githubRepoURLProperty + `},"required":["title"],"additionalProperties":false}`
@@ -173,6 +174,19 @@ const automationLifecycleParams = `{"type":"object","properties":{"automation_id
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
 var registry = []ActionDef{
+	// --- Chat domain (RW in orchestrate) ---
+	{
+		Name:               "request_user_input",
+		Description:        "Ask the web Chat user 1 to 3 plain-text questions with 2 to 3 clickable options each, then wait for their selected answers before continuing this same model run. Use this before helpful actions such as create_task when the user has not clearly authorized the action; do not call create_task until the answer is affirmative.",
+		Domain:             DomainChat,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           []Surface{SurfaceWeb},
+		IncludeThreadTools: false,
+		Parameters:         json.RawMessage(requestUserInputParams),
+	},
+
 	// --- Tasks domain (RW in orchestrate) ---
 	{
 		Name:               "create_task",
