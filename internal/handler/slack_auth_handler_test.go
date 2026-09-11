@@ -72,14 +72,18 @@ func TestRemoveSlackAuthorizedUser(t *testing.T) {
 		t.Fatalf("failed to create other slack auth user: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/channels/slack/authorized-users/"+user.ID, nil)
+	listRec := htmxGet(e, "/channels/slack/authorized-users?project_id="+projectID)
+	assertCode(t, listRec, http.StatusOK)
+	assertContains(t, listRec, `data-project-id="`+projectID+`"`)
+	assertNotContains(t, listRec, "Other Slack User")
+
+	req := httptest.NewRequest(http.MethodDelete, "/channels/slack/authorized-users/"+user.ID+"?project_id="+projectID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	assertCode(t, rec, http.StatusOK)
 	assertNotContains(t, rec, "To Remove")
-	assertContains(t, rec, "Other Slack User")
-	assertContains(t, rec, `name="project_id" value="`+projectID+`"`)
+	assertNotContains(t, rec, "Other Slack User")
 
 	deleted, err := repo.GetByID(context.Background(), user.ID)
 	if err != nil {
@@ -94,6 +98,18 @@ func TestRemoveSlackAuthorizedUser(t *testing.T) {
 	}
 	if remaining == nil {
 		t.Fatal("expected other project user to remain")
+	}
+
+	foreignReq := httptest.NewRequest(http.MethodDelete, "/channels/slack/authorized-users/"+otherUser.ID+"?project_id="+projectID, nil)
+	foreignRec := httptest.NewRecorder()
+	e.ServeHTTP(foreignRec, foreignReq)
+	assertCode(t, foreignRec, http.StatusNotFound)
+	remaining, err = repo.GetByID(context.Background(), otherUser.ID)
+	if err != nil {
+		t.Fatalf("get foreign slack auth user after rejected delete failed: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("foreign delete removed another project's user")
 	}
 }
 

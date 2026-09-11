@@ -20,7 +20,7 @@ func NewEmailAuthRepo(db *sql.DB) *EmailAuthRepo {
 		db:                          db,
 		table:                       "email_authorized_senders",
 		identityColumn:              "email_address",
-		conflictTarget:              "lower(email_address)",
+		conflictTarget:              "project_id, lower(email_address)",
 		matchClause:                 `lower(email_address) = lower(?)`,
 		listErrLabel:                "email authorized senders",
 		scanErrLabel:                "email authorized sender",
@@ -51,16 +51,14 @@ func NormalizeEmailAddress(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
-// ListByProject returns all system-level authorized email senders.
-// projectID is accepted for UI compatibility but does not scope inbound authorization.
+// ListByProject returns the authorized email senders managed by one project.
 func (r *EmailAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.EmailAuthorizedSender, error) {
-	return r.allowlist.List(ctx)
+	return r.allowlist.ListByProject(ctx, projectID)
 }
 
-// CountByProject returns the system-level email authorized-sender count.
-// projectID is accepted for UI/status compatibility but does not scope inbound authorization.
+// CountByProject returns the authorized email-sender count for one project.
 func (r *EmailAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
-	return r.allowlist.Count(ctx)
+	return countRowsByProject(ctx, r.allowlist.db, "email_authorized_senders", "email authorized senders", projectID)
 }
 
 // IsAuthorized checks whether an email address is authorized at the system channel level.
@@ -105,6 +103,11 @@ func (r *EmailAuthRepo) Create(ctx context.Context, s *models.EmailAuthorizedSen
 // Delete removes an authorized email sender by ID.
 func (r *EmailAuthRepo) Delete(ctx context.Context, id string) error {
 	return r.allowlist.Delete(ctx, id)
+}
+
+// DeleteForProject removes an authorized email sender only from its owning project.
+func (r *EmailAuthRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
+	return r.allowlist.DeleteForProject(ctx, projectID, id)
 }
 
 // GetByID returns a single authorized email sender by ID.

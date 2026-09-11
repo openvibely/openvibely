@@ -18,7 +18,7 @@ func NewSlackAuthRepo(db *sql.DB) *SlackAuthRepo {
 		db:                          db,
 		table:                       "slack_authorized_users",
 		identityColumn:              "slack_user_id",
-		conflictTarget:              "slack_user_id",
+		conflictTarget:              "project_id, slack_user_id",
 		matchClause:                 `slack_user_id = ?`,
 		listErrLabel:                "slack auth users",
 		scanErrLabel:                "slack auth user",
@@ -36,16 +36,14 @@ func NewSlackAuthRepo(db *sql.DB) *SlackAuthRepo {
 	}}
 }
 
-// ListByProject returns all system-level authorized Slack users.
-// projectID is accepted for UI compatibility but does not scope inbound authorization.
+// ListByProject returns the authorized Slack users managed by one project.
 func (r *SlackAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.SlackAuthorizedUser, error) {
-	return r.allowlist.List(ctx)
+	return r.allowlist.ListByProject(ctx, projectID)
 }
 
-// CountByProject returns the system-level Slack authorized-user count.
-// projectID is accepted for UI/status compatibility but does not scope inbound authorization.
+// CountByProject returns the authorized Slack-user count for one project.
 func (r *SlackAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
-	return r.allowlist.Count(ctx)
+	return countRowsByProject(ctx, r.allowlist.db, "slack_authorized_users", "slack auth users", projectID)
 }
 
 // IsAuthorized checks whether a Slack user is authorized at the system channel level.
@@ -90,6 +88,11 @@ func (r *SlackAuthRepo) Create(ctx context.Context, u *models.SlackAuthorizedUse
 // Delete removes an authorized Slack user by ID.
 func (r *SlackAuthRepo) Delete(ctx context.Context, id string) error {
 	return r.allowlist.Delete(ctx, id)
+}
+
+// DeleteForProject removes an authorized Slack user only from its owning project.
+func (r *SlackAuthRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
+	return r.allowlist.DeleteForProject(ctx, projectID, id)
 }
 
 // GetByID returns a single authorized Slack user by ID.

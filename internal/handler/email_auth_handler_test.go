@@ -40,6 +40,11 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 		t.Fatalf("seed other email sender: %v", err)
 	}
 
+	listRec := htmxGet(e, "/channels/email/authorized-senders?project_id="+project.ID)
+	if listRec.Code != http.StatusOK || !strings.Contains(listRec.Body.String(), `data-project-id="`+project.ID+`"`) || strings.Contains(listRec.Body.String(), "Other Email Sender") {
+		t.Fatalf("selected-project list did not expose only owned rows: %d %q", listRec.Code, listRec.Body.String())
+	}
+
 	senders, err := h.emailAuthRepo.ListByProject(httptest.NewRequest(http.MethodGet, "/", nil).Context(), project.ID)
 	if err != nil {
 		t.Fatalf("list senders: %v", err)
@@ -54,7 +59,7 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	if sender == nil {
 		t.Fatalf("expected normalized authorized sender in %#v", senders)
 	}
-	req := httptest.NewRequest(http.MethodDelete, "/channels/email/authorized-senders/"+sender.ID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/channels/email/authorized-senders/"+sender.ID+"?project_id="+project.ID, nil)
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -63,11 +68,8 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "alice@example.com") {
 		t.Fatalf("expected removed sender to disappear from response, got %q", rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "Other Email Sender") {
-		t.Fatalf("expected other system-level sender to remain visible, got %q", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `name="project_id" value="`+project.ID+`"`) {
-		t.Fatalf("expected omitted project_id delete to reload with record project %q, got %q", project.ID, rec.Body.String())
+	if strings.Contains(rec.Body.String(), "Other Email Sender") {
+		t.Fatalf("foreign sender appeared in selected-project response, got %q", rec.Body.String())
 	}
 	deleted, err := h.emailAuthRepo.GetByID(context.Background(), sender.ID)
 	if err != nil {
@@ -82,6 +84,20 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	}
 	if remaining == nil {
 		t.Fatal("expected other project sender to remain")
+	}
+
+	foreignReq := httptest.NewRequest(http.MethodDelete, "/channels/email/authorized-senders/"+otherSender.ID+"?project_id="+project.ID, nil)
+	foreignRec := httptest.NewRecorder()
+	e.ServeHTTP(foreignRec, foreignReq)
+	if foreignRec.Code != http.StatusNotFound {
+		t.Fatalf("expected foreign delete status 404, got %d %q", foreignRec.Code, foreignRec.Body.String())
+	}
+	remaining, err = h.emailAuthRepo.GetByID(context.Background(), otherSender.ID)
+	if err != nil {
+		t.Fatalf("get foreign email sender after rejected delete: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("foreign delete removed another project's sender")
 	}
 }
 

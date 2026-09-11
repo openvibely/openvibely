@@ -39,7 +39,7 @@ func DiscordAuthorizedUsersList(users []models.DiscordAuthorizedUser, projectID 
 		templ_7745c5c3_Err = channelAuthorizationList(
 			channelAuthorizationListConfig{
 				ContainerID:        "discord-authorized-users",
-				Description:        "Authorized Discord users are system-level for this channel and can use Discord across projects. Outbound Message Targets remain project-specific.",
+				Description:        "Authorized Discord users are scoped to this project. Outbound Message Targets remain project-specific.",
 				EmptyState:         "No authorized users configured. Access is denied until authorized users are added.",
 				RemoveConfirmation: "Remove this authorized user?",
 				AddHelp:            "Use the numeric Discord user ID from Developer Mode, not the username or display name.",
@@ -65,7 +65,8 @@ func discordAuthorizationRows(users []models.DiscordAuthorizedUser, projectID st
 	for _, user := range users {
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       discordAuthorizedUserIdentity(user),
-			DeleteEndpoint: fmt.Sprintf("/channels/discord/authorized-users/%s?project_id=%s", user.ID, projectID),
+			ProjectID:      user.ProjectID,
+			DeleteEndpoint: fmt.Sprintf("/channels/discord/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
 		})
 	}
 	return rows
@@ -99,7 +100,7 @@ func discordAuthorizedUserIdentity(user models.DiscordAuthorizedUser) templ.Comp
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(user.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/discord_auth.templ`, Line: 46, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/discord_auth.templ`, Line: 47, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -112,7 +113,7 @@ func discordAuthorizedUserIdentity(user models.DiscordAuthorizedUser) templ.Comp
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("ID: %s", user.DiscordUserID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/discord_auth.templ`, Line: 47, Col: 78}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/discord_auth.templ`, Line: 48, Col: 78}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {

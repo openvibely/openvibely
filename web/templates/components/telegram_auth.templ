@@ -11,7 +11,7 @@ templ TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, project
 	@channelAuthorizationList(
 		channelAuthorizationListConfig{
 			ContainerID: "telegram-authorized-users",
-			Description: "Authorized Telegram users are system-level for this channel and can use Telegram across projects. Outbound Message Targets remain project-specific.",
+			Description: "Authorized Telegram users are scoped to this project. Outbound Message Targets remain project-specific.",
 			EmptyState: "No authorized users configured. Access is denied until authorized users are added.",
 			RemoveConfirmation: "Remove this authorized user?",
 		},
@@ -31,7 +31,8 @@ func telegramAuthorizationRows(users []models.TelegramAuthorizedUser, projectID 
 	for _, user := range users {
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       telegramAuthorizedUserIdentity(user),
-			DeleteEndpoint: fmt.Sprintf("/channels/telegram/authorized-users/%s?project_id=%s", user.ID, projectID),
+			ProjectID:      user.ProjectID,
+			DeleteEndpoint: fmt.Sprintf("/channels/telegram/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
 		})
 	}
 	return rows

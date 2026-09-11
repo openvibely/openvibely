@@ -2,9 +2,9 @@
 name: automation_graphs
 type: project
 created: 2026-07-18
-updated: 2026-09-07
+updated: 2026-12-31
 source: after_complete
-source_id: be70c5e1fb360fd18e12dd7d5e07e8ea:cf22c3db73ec6568
+source_id: be6fe6c9a19dbec1f60e179863f3977e:2d233bd44ffc2114
 confidence: high
 title: Automation Graphs
 ---
@@ -36,7 +36,7 @@ Runtime and handoff:
 - Duplicate prevention is existing-work-first: list artifacts, hydrate likely matches, skip covered findings, continue searching, create at most one new finding per run, and report no finding rather than weak duplicates. Model-authored unstable keys/title hashes are not an authority; direct-caller idempotency is separate.
 - Approval authorizes only configured implementation handoff. Native handoff uses atomic lease claim, Backlog task creation/linkage, exact linked-task execution, and completion after execution starts. Automation-owned scheduled tasks remain ordinary generic tasks with shared tools; excessive authority is service-layer policy. Loop Auditors, where encountered in old graphs, are inspect/report-only.
 - `Run now` dispatches schedule-owned entry tasks with persisted prompt/Agent/model/tools without changing timing, skips queued/running/reserved entries, and rejects Paused/Archived Automations. Occurrence idempotency uses owned schedule plus scheduled time; repeating schedules advance beyond terminal past invocations.
-- Claims/failures are crash-consistent across execution/task/activity/invocation/outbox/reservation; cancellation wins. Eligible failed/completed work may be re-admitted, stale completion metadata is cleared, and committed transitions publish project-scoped `task_board_updated` through shared SSE.
+- Claims/failures are crash-consistent across execution/task/activity/invocation/outbox/reservation; cancellation wins. Eligible failed/completed work may be re-admitted, stale completion metadata is cleared, and committed transitions publish project-scoped `task_board_updated` through shared SSE. On resume, definition-backed and activity-backed pending Backlog admissions are deduplicated, normalized to source board order, and atomically assigned consecutive ranks after the existing Active tail before their committed task projections are returned.
 - Automation Live ranks current `node + work_item` projections as `failed > blocked > running > waiting_human > recently_completed`; nonterminal activity does not mask completed work. A current Run-now invocation supersedes only the prior terminal projection with the same project, graph version, node, owned schedule, and task identity. Hidden Native inbox work may show Running without an ordinary Active card; a running node with no backing work is likely stale.
 
 GitHub, notifications, and Chat:
@@ -49,6 +49,10 @@ GitHub, notifications, and Chat:
 Current constraints and gaps:
 - External refresh should use project-scoped identity-only `AutomationRepo.Exists` without hydrating graph versions/nodes/edges/resources; background refresh should remain zero-hydration and contention-aware.
 - Maintained-template update UX (`#919`) still replaces destructively without a non-persisting node/YAML/resource diff; candidate/preview encoders are building blocks for a reviewable diff.
+- Scheduled runs persist and apply a `clear_context_on_start` policy, and Chat can expose it, but calendar cards omit the policy in both enabled and disabled states. Calendar visibility should make the next run's context-reset behavior clear (`#1054`).
+- GitHub SDLC records trusted, project-scoped canonical source-issue provenance for implementation tasks (`github:owner/repo:issue:N`), but Task Details does not expose the issue number or a link. Suggestion `#1066` calls for a read-only source link only when that association is valid, unambiguous, same-project, and GitHub-derived; malformed, ambiguous, cross-project, and non-GitHub records must remain hidden.
+- Capability-backed and fallback validation share candidate `agent_task`/`trigger` reference filtering, trimming, availability lookup, and unavailable-reference reporting. Each path retains its own availability-catalog acquisition, including the fallback's zero-query no-reference guard; `model_config_id` validation and save-time Agent-definition materialization remain separate.
+- `AutomationGraphService` owns shared project-scoped Automation-card ID/name selection: normalization, ID precedence and conflict rejection, case-insensitive name matching, deterministic ambiguous-ID reporting, and exact-ID refresh. Lifecycle Chat actions and maintained-template updates retain their action-local mutation, authorization, and response contracts while using this selection logic.
 - Automation Live lacks true external GitHub freshness/error state and manual refresh (`#895`); projection compaction remains `#490`. Its YAML rendering path also reloads and capability-validates the full graph a second time after `GetAutomationLive` already loaded it; performance issue `#985` tracks reuse of the first graph/validation state to avoid 9 extra SQL statements and growing allocations without changing the Live response.
 - Save-during-run must retain active task-backed executions while removing stale graph projection, and stale-origin repair must remove queued-input bindings/dependent child work before stale parents. Native inbox ownership is stable across delete/recreate, so alert decision/processing state must be checked before calling `waiting_human` stale.
 - Authoring should not rely on weak per-Automation `skills` or `source_files` hints. Prompts identify sources and Skill Curator routes skills; Vision Suggestions must verify/read root `VISION.md`. Custom child activation recompiles from the saved graph so downstream handoff edges remain in prompts without extra resources.
