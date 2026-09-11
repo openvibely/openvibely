@@ -38,7 +38,6 @@ func NormalizeRequest(req contracts.AgentRequest) (contracts.AgentRequest, error
 	}
 
 	if n.ChatHistory != nil {
-		n.ChatHistory = prompt.LimitChatHistory(n.ChatHistory)
 		for i := range n.ChatHistory {
 			n.ChatHistory[i].Output = NormalizeReplayOutputText(n.ChatHistory[i].Output)
 		}

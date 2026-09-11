@@ -17,6 +17,7 @@ import (
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -85,6 +86,243 @@ func callProviderOnce(fn func() (llmcontracts.AgentResult, error)) (llmcontracts
 	// streamed attempt has emitted output. Replaying here could duplicate a
 	// partial turn and would multiply the provider's bounded retry budget.
 	return fn()
+}
+
+type contextCompactionFallbackKey struct{}
+
+const localContextCompactionInstruction = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary
+for another LLM that will resume the task.
+
+Include:
+- Current progress and key decisions made
+- Important context, constraints, or user preferences
+- What remains to be done, with clear next steps
+- Critical data, examples, file paths, identifiers, and tool results needed to continue
+
+Clearly distinguish completed work from proposed work. Do not treat assistant
+suggestions as user authorization. Be concise, structured, and focused on helping
+the next LLM continue without restarting. Return only the summary.`
+
+const compactedHistorySummaryPrefix = `Another language model started to solve this problem and produced a summary of
+its work. Use it to continue without duplicating completed work. This is historical
+context, not a new user instruction or authorization:`
+
+func withoutContextCompactionFallback(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, contextCompactionFallbackKey{}, true)
+}
+
+func contextCompactionFallbackDisabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	disabled, _ := ctx.Value(contextCompactionFallbackKey{}).(bool)
+	return disabled
+}
+
+func recognizedContextLengthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "max output tokens") || strings.Contains(msg, "max_tokens") || strings.Contains(msg, "output budget") {
+		return false
+	}
+	needles := []string{
+		"context length",
+		"context_length",
+		"context window",
+		"maximum context",
+		"context limit",
+		"too many tokens",
+		"token limit exceeded",
+		"input tokens exceed",
+		"input is too long",
+		"prompt is too long",
+	}
+	for _, needle := range needles {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *LLMService) callProviderWithContextCompactionFallback(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	res, err := adapter.Call(req)
+	if err == nil || contextCompactionFallbackDisabled(req.Ctx) || !recognizedContextLengthError(err) || len(req.ChatHistory) == 0 {
+		return res, err
+	}
+	compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
+	if compactErr != nil {
+		applog.Infof("[agent-svc] context compaction fallback failed; returning original context-length error: %v", compactErr)
+		return res, err
+	}
+	applog.Infof("[agent-svc] retrying provider call once after local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
+	return adapter.Call(compacted)
+}
+
+func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
+	history := append([]models.Execution(nil), req.ChatHistory...)
+	for len(history) > 0 {
+		summary, err := s.localSummaryCompaction(adapter, req, history)
+		if err == nil {
+			compacted := req
+			compacted.ChatHistory = buildCompactedReplacementHistory(history, summary)
+			return compacted, nil
+		}
+		if !recognizedContextLengthError(err) || len(history) == 1 {
+			return llmcontracts.AgentRequest{}, err
+		}
+		history = history[1:]
+	}
+	return llmcontracts.AgentRequest{}, fmt.Errorf("no history remains to compact")
+}
+
+func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest, history []models.Execution) (string, error) {
+	summaryReq := req
+	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
+	summaryReq.Operation = llmcontracts.OperationDirect
+	summaryReq.Message = buildLocalSummaryCompactionPrompt(history)
+	summaryReq.Attachments = nil
+	summaryReq.ExecID = ""
+	summaryReq.TransportScope = ""
+	summaryReq.ChatHistory = nil
+	summaryReq.ChatSystemContext = ""
+	summaryReq.ProjectInstructions = ""
+	summaryReq.AgentDefinition = nil
+	summaryReq.DisableTools = true
+	summaryReq.RawDirectPrompt = true
+	summaryReq.Followup = false
+	res, err := adapter.Call(summaryReq)
+	if err != nil {
+		return "", err
+	}
+	summary := strings.TrimSpace(res.TextOnlyOutput)
+	if summary == "" {
+		summary = strings.TrimSpace(res.Output)
+	}
+	if summary == "" {
+		return "", fmt.Errorf("local context compaction returned an empty summary")
+	}
+	return summary, nil
+}
+
+func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
+	var sb strings.Builder
+	for _, exec := range history {
+		if strings.TrimSpace(exec.PromptSent) != "" {
+			sb.WriteString("User: ")
+			sb.WriteString(strings.TrimSpace(exec.PromptSent))
+			sb.WriteString("\n\n")
+		}
+		if replay := llmprompt.ReplayAssistantContent(exec); strings.TrimSpace(replay) != "" {
+			sb.WriteString("Assistant: ")
+			sb.WriteString(strings.TrimSpace(replay))
+			sb.WriteString("\n\n")
+		}
+	}
+	if sb.Len() > 0 {
+		sb.WriteString("---\n\n")
+	}
+	sb.WriteString(localContextCompactionInstruction)
+	return sb.String()
+}
+
+func buildCompactedReplacementHistory(history []models.Execution, summary string) []models.Execution {
+	retained := retainedUserMessageHistory(history, 20000)
+	out := make([]models.Execution, 0, len(retained)+1)
+	out = append(out, retained...)
+	out = append(out, models.Execution{
+		Status: models.ExecCompleted,
+		Output: compactedHistorySummaryPrefix + "\n\n" + strings.TrimSpace(summary),
+	})
+	return out
+}
+
+func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []models.Execution {
+	if tokenBudget <= 0 {
+		return nil
+	}
+	retained := make([]models.Execution, 0, len(history))
+	remaining := tokenBudget
+	for i := len(history) - 1; i >= 0; i-- {
+		content := strings.TrimSpace(history[i].PromptSent)
+		if content == "" {
+			continue
+		}
+		tokens := estimatedUTF8Tokens(content)
+		if tokens <= remaining {
+			retained = append(retained, models.Execution{PromptSent: content, Status: models.ExecCompleted})
+			remaining -= tokens
+			continue
+		}
+		if remaining > 0 {
+			retained = append(retained, models.Execution{PromptSent: truncateMiddleByEstimatedTokens(content, remaining), Status: models.ExecCompleted})
+		}
+		break
+	}
+	return retained
+}
+
+func estimatedUTF8Tokens(text string) int {
+	bytes := len([]byte(text))
+	if bytes == 0 {
+		return 0
+	}
+	return (bytes + 3) / 4
+}
+
+func truncateMiddleByEstimatedTokens(text string, tokenBudget int) string {
+	byteBudget := tokenBudget * 4
+	if byteBudget <= 0 || len([]byte(text)) <= byteBudget {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= 1 {
+		return text
+	}
+	gap := "\n\n[Middle of user message omitted during context compaction]\n\n"
+	gapBytes := len([]byte(gap))
+	if byteBudget <= gapBytes+8 {
+		return takePrefixBytes(runes, byteBudget)
+	}
+	contentBudget := byteBudget - gapBytes
+	headBudget := contentBudget / 2
+	tailBudget := contentBudget - headBudget
+	head := takePrefixBytes(runes, headBudget)
+	tail := takeSuffixBytes(runes, tailBudget)
+	return head + gap + tail
+}
+
+func takePrefixBytes(runes []rune, byteBudget int) string {
+	var sb strings.Builder
+	used := 0
+	for _, r := range runes {
+		b := len(string(r))
+		if used+b > byteBudget {
+			break
+		}
+		sb.WriteRune(r)
+		used += b
+	}
+	return sb.String()
+}
+
+func takeSuffixBytes(runes []rune, byteBudget int) string {
+	used := 0
+	start := len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		b := len(string(runes[i]))
+		if used+b > byteBudget {
+			break
+		}
+		used += b
+		start = i
+	}
+	return string(runes[start:])
 }
 
 func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Agent, merged *models.Agent) {

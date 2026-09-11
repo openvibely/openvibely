@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -183,6 +184,149 @@ func TestRequestUsesChatStreamingTreatsFirstTurnChatAsChat(t *testing.T) {
 	}
 	if requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming}) {
 		t.Fatal("streaming task without explicit chat mode/history/context must not use chat streaming")
+	}
+}
+
+func TestProviderContextCompactionFallback_RetriesStreamingRequestOnceForSupportedProviders(t *testing.T) {
+	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
+	for _, provider := range providers {
+		t.Run(string(provider), func(t *testing.T) {
+			svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+			var requests []llmcontracts.AgentRequest
+			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				requests = append(requests, req)
+				switch len(requests) {
+				case 1:
+					return llmcontracts.AgentResult{}, fmt.Errorf("context length exceeded: too many tokens")
+				case 2:
+					if req.Operation != llmcontracts.OperationDirect || !req.DisableTools || !req.RawDirectPrompt {
+						t.Fatalf("summary request did not use raw no-tools direct semantics: %#v", req)
+					}
+					if llmcontracts.RuntimeToolsFromContext(req.Ctx) != nil {
+						t.Fatal("summary request inherited runtime tools")
+					}
+					if !strings.Contains(req.Message, localContextCompactionInstruction) {
+						t.Fatalf("summary request missing exact compaction instruction: %q", req.Message)
+					}
+					return llmcontracts.AgentResult{Output: "completed: old work\nremaining: next step"}, nil
+				case 3:
+					return llmcontracts.AgentResult{Output: "final", TextOnlyOutput: "final"}, nil
+				default:
+					t.Fatalf("unexpected provider call %d", len(requests))
+					return llmcontracts.AgentResult{}, nil
+				}
+			})
+			svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{provider: adapter}
+			svc.routing = newAgentRoutingStrategy(svc)
+
+			rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file", Access: llmcontracts.RuntimeToolAccessWrite}}}
+			ctx := llmcontracts.WithRuntimeTools(context.Background(), rt)
+			history := []models.Execution{
+				{PromptSent: "old user", Output: "old assistant", Status: models.ExecCompleted},
+				{PromptSent: "new user", Output: "new assistant", Status: models.ExecCompleted},
+			}
+			res, err := svc.CallAgentDirectStreamingDetailed(ctx, " pending user ", nil, models.LLMConfig{Provider: provider, Model: "model"}, "exec-1", history, "system context", "/tmp/work", nil)
+			if err != nil {
+				t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
+			}
+			if res.Output != "final" {
+				t.Fatalf("output = %q, want final", res.Output)
+			}
+			if len(requests) != 3 {
+				t.Fatalf("provider calls = %d, want 3", len(requests))
+			}
+			original, retry := requests[0], requests[2]
+			if retry.Message != original.Message || retry.Operation != original.Operation || retry.ChatMode != original.ChatMode || retry.ChatSystemContext != original.ChatSystemContext || retry.ExecID != original.ExecID || retry.WorkDir != original.WorkDir {
+				t.Fatalf("retry did not preserve request semantics\noriginal=%#v\nretry=%#v", original, retry)
+			}
+			if llmcontracts.RuntimeToolsFromContext(retry.Ctx) == nil {
+				t.Fatal("retry dropped runtime tools")
+			}
+			if len(retry.ChatHistory) != 3 {
+				t.Fatalf("compacted history length = %d, want retained users plus summary", len(retry.ChatHistory))
+			}
+			if retry.ChatHistory[0].PromptSent != "new user" || retry.ChatHistory[1].PromptSent != "old user" {
+				t.Fatalf("retained user messages should be newest first, got %#v", retry.ChatHistory)
+			}
+			if got := retry.ChatHistory[2].Output; !strings.Contains(got, compactedHistorySummaryPrefix) || !strings.Contains(got, "completed: old work") {
+				t.Fatalf("retry history missing protected summary prefix/content: %q", got)
+			}
+		})
+	}
+}
+
+func TestProviderContextCompactionFallback_DoesNotRetryCompactedRequestTwice(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	calls := 0
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		if req.Operation == llmcontracts.OperationDirect {
+			return llmcontracts.AgentResult{Output: "summary"}, nil
+		}
+		return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
+	})
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAICompatible: adapter}
+	svc.routing = newAgentRoutingStrategy(svc)
+
+	_, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "current", nil, models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "model"}, "exec-1", []models.Execution{{PromptSent: "old", Output: "out", Status: models.ExecCompleted}}, "", "/tmp/work", nil)
+	if err == nil || !strings.Contains(err.Error(), "maximum context") {
+		t.Fatalf("error = %v, want retry context error", err)
+	}
+	if calls != 3 {
+		t.Fatalf("provider calls = %d, want original + summary + exactly one retry", calls)
+	}
+}
+
+func TestProviderContextCompactionFallback_SummaryOverflowDropsOldestAndRetries(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	var summaryPrompts []string
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		if req.Operation == llmcontracts.OperationDirect {
+			summaryPrompts = append(summaryPrompts, req.Message)
+			if len(summaryPrompts) == 1 {
+				return llmcontracts.AgentResult{}, fmt.Errorf("prompt is too long for context window")
+			}
+			return llmcontracts.AgentResult{Output: "summary"}, nil
+		}
+		if len(summaryPrompts) == 0 {
+			return llmcontracts.AgentResult{}, fmt.Errorf("context length exceeded")
+		}
+		return llmcontracts.AgentResult{Output: "ok", TextOnlyOutput: "ok"}, nil
+	})
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAICompatible: adapter}
+	svc.routing = newAgentRoutingStrategy(svc)
+
+	history := []models.Execution{{PromptSent: "drop me", Output: "old", Status: models.ExecCompleted}, {PromptSent: "keep me", Output: "new", Status: models.ExecCompleted}}
+	if _, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "current", nil, models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "model"}, "exec-1", history, "", "/tmp/work", nil); err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
+	}
+	if len(summaryPrompts) != 2 {
+		t.Fatalf("summary attempts = %d, want 2", len(summaryPrompts))
+	}
+	if !strings.Contains(summaryPrompts[0], "drop me") || strings.Contains(summaryPrompts[1], "drop me") || !strings.Contains(summaryPrompts[1], "keep me") {
+		t.Fatalf("summary overflow retry did not drop only oldest history: %#v", summaryPrompts)
+	}
+}
+
+func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t *testing.T) {
+	if got := estimatedUTF8Tokens("éé"); got != 1 {
+		t.Fatalf("estimated UTF-8 tokens = %d, want ceil(4 bytes / 4)=1", got)
+	}
+	oversized := "prefix-" + strings.Repeat("x", 200) + "-suffix"
+	history := []models.Execution{
+		{PromptSent: "too old"},
+		{PromptSent: oversized},
+		{PromptSent: "tail"},
+	}
+	retained := retainedUserMessageHistory(history, 20)
+	if len(retained) != 2 {
+		t.Fatalf("retained = %#v, want boundary plus newest", retained)
+	}
+	if retained[0].PromptSent != "tail" {
+		t.Fatalf("newest retained first = %#v", retained)
+	}
+	if got := retained[1].PromptSent; !strings.Contains(got, "[Middle of user message omitted") || !strings.HasPrefix(got, "prefix-") || !strings.HasSuffix(got, "-suffix") {
+		t.Fatalf("boundary message was not middle-truncated with prefix/suffix preserved: %q", got)
 	}
 }
 
