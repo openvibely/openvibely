@@ -127,6 +127,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		case r.URL.Path == "/tasks/"+task.ID:
 			document := renderTerminalBrowserComponent(t, TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil))
 			_, _ = w.Write([]byte(installTerminalBrowserPrelude(document)))
+		case r.URL.Path == "/tasks/"+task.ID+"/thread" && r.Method == http.MethodPost:
+			_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, components.TaskThreadFollowupResponse("fresh live turn", "thread-live-fresh", nil, project.ID))))
 		case r.URL.Path == "/tasks/"+task.ID+"/thread":
 			lazyRequests.Add(1)
 			viewTask := *task
@@ -165,7 +167,7 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/"+task.ID+"?tab=chat", "task-thread-terminal-wiring", func(browser *composerFocusCDP) {
 		browser.waitFor("real lazy Thread load", `Boolean(document.getElementById('task-thread-messages'))+':'+Boolean(document.getElementById('task-thread-view'))`, "true:true")
 		browser.waitFor("lazy Thread HTMX settle", `(function(){var el=document.getElementById('thread-content');return el.dataset.loaded+':'+el.dataset.loading})()`, "true:false")
-		installTerminalBrowserRenderer(browser)
+		installDelayedTerminalBrowserRenderer(browser, 350)
 
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_thread_execution_started',task_id:'` + task.ID + `',exec_id:'` + runningOne.ID + `'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch first task-thread live event: %s", got)
@@ -191,20 +193,36 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){window.__terminalStreamFor('` + runningTwo.ID + `').emit('message',` + longOutputJS + `);return 'streamed';})()`); got != "streamed" {
 			t.Fatalf("stream second task-thread partial output: %s", got)
 		}
-		browser.waitFor("second long task-thread output render", `document.getElementById('streaming-message-`+runningTwo.ID+`').getAttribute('data-raw-content')===`+longOutputJS+`?'ready':'waiting'`, "ready")
-		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages');messages.scrollTop=messages.scrollHeight;return 'pinned';})()`); got != "pinned" {
-			t.Fatalf("pin second task-thread turn: %s", got)
+		browser.waitFor("second task-thread output persisted before terminal render", `document.getElementById('streaming-message-`+runningTwo.ID+`').getAttribute('data-raw-content')===`+longOutputJS+`?'ready':'waiting'`, "ready")
+		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages');messages.scrollTop=messages.scrollHeight;window.__threadSettledBeforeFailure=window.__terminalRenderSettled;window.__terminalStreamFor('` + runningTwo.ID + `').emit('error','second terminal failure');return String(!document.getElementById('chat-execution-` + runningTwo.ID + `').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
+			t.Fatalf("resumed task-thread terminal alert must wait for pending render: %s", got)
 		}
 		browser.wheel("#task-thread-messages", -650)
-		browser.waitFor("native upward task-thread reading intent", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
+		browser.waitFor("native upward task-thread reading intent during resumed terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
+		browser.waitFor("stable resumed task-thread native scroll position", `(function(){var top=document.getElementById('task-thread-messages').scrollTop;if(window.__resumedThreadLastTop===top)window.__resumedThreadStable=(window.__resumedThreadStable||0)+1;else{window.__resumedThreadLastTop=top;window.__resumedThreadStable=0;}return String(window.__resumedThreadStable>=3);})()`, "true")
 		if got := browser.evaluate(`(function(){window.__taskThreadReaderTop=document.getElementById('task-thread-messages').scrollTop;return 'saved';})()`); got != "saved" {
-			t.Fatalf("save older-reader position: %s", got)
+			t.Fatalf("save resumed older-reader position: %s", got)
 		}
 		phase.Store(2)
-		if got := browser.evaluate(`(function(){window.__terminalStreamFor('` + runningTwo.ID + `').emit('error','second terminal failure');return 'failed';})()`); got != "failed" {
-			t.Fatalf("fail second task-thread stream: %s", got)
+		browser.waitFor("older task-thread reader preserved after resumed terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-`+runningTwo.ID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__threadSettledBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&Math.abs(messages.scrollTop-window.__taskThreadReaderTop)<=2));})()`, "true")
+
+		if got := browser.evaluate(`(function(){htmx.ajax('POST','/tasks/` + task.ID + `/thread',{target:'#task-thread-messages',swap:'beforeend',values:{message:'fresh live turn'}});return 'sent';})()`); got != "sent" {
+			t.Fatalf("submit fresh task-thread follow-up: %s", got)
 		}
-		browser.waitFor("older task-thread reader preserved after terminal alert", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-`+runningTwo.ID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&Math.abs(messages.scrollTop-window.__taskThreadReaderTop)<=2));})()`, "true")
+		browser.waitFor("fresh task-thread HTMX response and stream", `Boolean(document.getElementById('chat-execution-thread-live-fresh'))+':'+Boolean(window.__terminalStreamFor('thread-live-fresh'))`, "true:true")
+		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages');messages.scrollTop=messages.scrollHeight;window.__terminalStreamFor('thread-live-fresh').emit('message',` + longOutputJS + `);window.__freshSettledBeforeFailure=window.__terminalRenderSettled;window.__terminalStreamFor('thread-live-fresh').emit('error','fresh terminal failure');return String(!document.getElementById('chat-execution-thread-live-fresh').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
+			t.Fatalf("fresh task-thread terminal alert must wait for pending render: %s", got)
+		}
+		browser.wheel("#task-thread-messages", -650)
+		browser.waitFor("native upward task-thread reading intent during fresh terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
+		browser.waitFor("stable fresh task-thread native scroll position", `(function(){var top=document.getElementById('task-thread-messages').scrollTop;if(window.__freshThreadLastTop===top)window.__freshThreadStable=(window.__freshThreadStable||0)+1;else{window.__freshThreadLastTop=top;window.__freshThreadStable=0;}return String(window.__freshThreadStable>=3);})()`, "true")
+		if got := browser.evaluate(`(function(){window.__freshTaskThreadReaderTop=document.getElementById('task-thread-messages').scrollTop;return 'saved';})()`); got != "saved" {
+			t.Fatalf("save fresh older-reader position: %s", got)
+		}
+		browser.waitFor("fresh task-thread terminal render settles", `(function(){var pair=document.getElementById('chat-execution-thread-live-fresh');return String(!!(window.__terminalRenderSettled>window.__freshSettledBeforeFailure&&pair&&pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
+		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-thread-live-fresh'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&Math.abs(messages.scrollTop-window.__freshTaskThreadReaderTop)<=2));})()`); got != "true" {
+			t.Fatalf("older task-thread reader was not preserved after fresh terminal render: %s", got)
+		}
 	})
 
 	if lazyRequests.Load() < 1 {

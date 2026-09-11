@@ -359,6 +359,16 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	if strings.Count(content, "flushCumulativeContent();") != 2 {
 		t.Error("both resume-stream error paths must flush and cancel pending delayed output")
 	}
+	for _, snippet := range []string{
+		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
+		"var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;",
+		"var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
+		"var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;",
+	} {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("resume streaming must fence deferred scrolling by current reader intent; missing %q", snippet)
+		}
+	}
 }
 
 // TestChatBubbleStreamingScrollBehavior verifies streaming bubble has correct scroll behavior
@@ -401,6 +411,16 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	}
 	if strings.Count(content, "flushBufferedOutput();") != 2 {
 		t.Error("both fresh-stream error paths must flush and cancel pending delayed output")
+	}
+	for _, snippet := range []string{
+		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
+		"var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;",
+		"var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
+		"var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;",
+	} {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("fresh streaming must fence deferred scrolling by current reader intent; missing %q", snippet)
+		}
 	}
 
 	// Verify that the onmessage handler uses the scroll tracker
