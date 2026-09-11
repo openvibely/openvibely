@@ -274,7 +274,7 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 	form.Set("project_id", "default")
 	form.Set("github_login", " @Alice ")
 	form.Set("display_name", "Alice")
-	form.Set("permission", "approve")
+	form.Set("permission", "")
 
 	rec := htmxPost(e, "/channels/github/authorized-actors", form)
 	if rec.Code != http.StatusOK {
@@ -309,6 +309,9 @@ func TestGitHubRuntimeSettingsRoutesAuthorizeActors(t *testing.T) {
 	}
 	if len(actors) != 1 {
 		t.Fatalf("expected one actor, got %d", len(actors))
+	}
+	if actors[0].Permission != "triage" {
+		t.Fatalf("expected empty permission to default to triage, got %q", actors[0].Permission)
 	}
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/channels/github/authorized-actors/"+actors[0].ID+"?project_id=default", nil)
 	deleteReq.Header.Set("HX-Request", "true")
@@ -374,6 +377,79 @@ func TestGitHubProjectInboxRouteStoresProjectScopedNormalizedLogin(t *testing.T)
 	if inbox != nil {
 		t.Fatalf("expected disabled inbox to be hidden from enabled lookup, got %#v", inbox)
 	}
+}
+
+func TestGitHubRuntimeSettingsRoutesPreflightErrors(t *testing.T) {
+	t.Run("missing project id", func(t *testing.T) {
+		_, e, _ := setupTestHandler(t)
+		cases := []struct {
+			name    string
+			request func() *httptest.ResponseRecorder
+		}{
+			{
+				name: "add authorized actor",
+				request: func() *httptest.ResponseRecorder {
+					return htmxPost(e, "/channels/github/authorized-actors", url.Values{"github_login": {"alice"}})
+				},
+			},
+			{
+				name: "remove authorized actor",
+				request: func() *httptest.ResponseRecorder {
+					return htmxDelete(e, "/channels/github/authorized-actors/actor-id")
+				},
+			},
+			{
+				name: "save project inbox",
+				request: func() *httptest.ResponseRecorder {
+					return htmxPost(e, "/channels/github/project-inbox", url.Values{"github_login": {"alice"}})
+				},
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				rec := tc.request()
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "project_id is required") {
+					t.Fatalf("expected controlled missing-project error, got %d (%s)", rec.Code, rec.Body.String())
+				}
+			})
+		}
+	})
+
+	t.Run("unavailable GitHub authorization dependency", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		h.SetGitHubAuthRepo(nil)
+		cases := []struct {
+			name    string
+			request func() *httptest.ResponseRecorder
+		}{
+			{
+				name: "add authorized actor",
+				request: func() *httptest.ResponseRecorder {
+					return htmxPost(e, "/channels/github/authorized-actors", url.Values{"project_id": {"default"}, "github_login": {"alice"}})
+				},
+			},
+			{
+				name: "remove authorized actor",
+				request: func() *httptest.ResponseRecorder {
+					return htmxDelete(e, "/channels/github/authorized-actors/actor-id?project_id=default")
+				},
+			},
+			{
+				name: "save project inbox",
+				request: func() *httptest.ResponseRecorder {
+					return htmxPost(e, "/channels/github/project-inbox", url.Values{"project_id": {"default"}, "github_login": {"alice"}})
+				},
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				rec := tc.request()
+				if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "GitHub auth not configured") {
+					t.Fatalf("expected controlled unavailable-dependency error, got %d (%s)", rec.Code, rec.Body.String())
+				}
+			})
+		}
+	})
 }
 
 func TestChannelsPageRendersGitHubRuntimeSettingsLazyHook(t *testing.T) {
