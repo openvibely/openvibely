@@ -162,6 +162,123 @@ func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 	}
 }
 
+func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
+	tc := NewTestContext(t)
+	projectA := tc.CreateProject().WithName("Outbound Fragment A").Build()
+	projectB := tc.CreateProject().WithName("Outbound Fragment B").Build()
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+
+	targetA := models.ChannelTarget{
+		ID:         repository.NewID(),
+		ProjectID:  projectA.ID,
+		Platform:   "slack",
+		TargetKind: "channel",
+		TargetID:   "C-FRAGMENT-A",
+	}
+	targetB := models.ChannelTarget{
+		ID:         repository.NewID(),
+		ProjectID:  projectB.ID,
+		Platform:   "email",
+		TargetKind: "email",
+		TargetID:   "fragment-b@example.com",
+	}
+	for _, target := range []models.ChannelTarget{targetA, targetB} {
+		if err := targetRepo.Upsert(context.Background(), target); err != nil {
+			t.Fatalf("upsert target %+v: %v", target, err)
+		}
+	}
+	if err := tc.settingsRepo.Set(context.Background(), service.SendMessageAllowExplicitTargetsSetting+":"+projectA.ID, "true"); err != nil {
+		t.Fatalf("set project A explicit-target policy: %v", err)
+	}
+	if err := tc.settingsRepo.Set(context.Background(), service.SendMessageAllowExplicitTargetsSetting+":"+projectB.ID, "false"); err != nil {
+		t.Fatalf("set project B explicit-target policy: %v", err)
+	}
+
+	requestFragment := func(path string) string {
+		t.Helper()
+		response := tc.HTTP().Get(path).Execute()
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", path, response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	assertProjectTargets := func(projectID, modalPath, cardPath, targetID, otherTargetID, summary, policy string, explicitAllowed bool) {
+		t.Helper()
+		modalBody := requestFragment(modalPath)
+		cardBody := requestFragment(cardPath)
+		if !strings.Contains(modalBody, `data-project-id="`+projectID+`"`) {
+			t.Fatalf("modal response for %s did not resolve project context: %s", projectID, modalBody)
+		}
+		if !strings.Contains(modalBody, targetID) || strings.Contains(modalBody, otherTargetID) {
+			t.Fatalf("modal response for %s has incorrect target context: %s", projectID, modalBody)
+		}
+		if !strings.Contains(cardBody, summary) || strings.Contains(cardBody, otherTargetID) {
+			t.Fatalf("card response for %s has incorrect target summary: %s", projectID, cardBody)
+		}
+		if !strings.Contains(cardBody, policy) {
+			t.Fatalf("card response for %s must share policy state %q: %s", projectID, policy, cardBody)
+		}
+		policyToggle := `name="enabled" value="true" class="toggle toggle-primary toggle-sm"`
+		modalHasEnabledPolicy := strings.Contains(modalBody, policyToggle+` checked`)
+		if modalHasEnabledPolicy != explicitAllowed {
+			t.Fatalf("modal response for %s rendered explicit-target policy=%v, want %v: %s", projectID, modalHasEnabledPolicy, explicitAllowed, modalBody)
+		}
+	}
+
+	assertProjectTargets(
+		projectA.ID,
+		"/channels/outbound-targets?project_id="+url.QueryEscape(projectA.ID),
+		"/channels/outbound-targets/card?project_id="+url.QueryEscape(projectA.ID),
+		targetA.TargetID,
+		targetB.TargetID,
+		"slack: 1",
+		"Explicit targets allowed",
+		true,
+	)
+
+	if err := tc.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, projectB.ID); err != nil {
+		t.Fatalf("set selected project: %v", err)
+	}
+	assertProjectTargets(
+		projectB.ID,
+		"/channels/outbound-targets",
+		"/channels/outbound-targets/card",
+		targetB.TargetID,
+		targetA.TargetID,
+		"email: 1",
+		"Saved targets only",
+		false,
+	)
+
+	if _, err := tc.db.ExecContext(context.Background(), "DELETE FROM projects"); err != nil {
+		t.Fatalf("clear projects for empty-context regression: %v", err)
+	}
+	modalBody := requestFragment("/channels/outbound-targets")
+	cardBody := requestFragment("/channels/outbound-targets/card")
+	for name, body := range map[string]string{"modal": modalBody, "card": cardBody} {
+		if !strings.Contains(body, "No saved outbound targets") && name == "card" {
+			t.Fatalf("empty %s response should preserve the no-target card summary: %s", name, body)
+		}
+		if name == "modal" && !strings.Contains(body, "No outbound targets saved yet.") {
+			t.Fatalf("empty %s response should preserve the empty target row: %s", name, body)
+		}
+		if !strings.Contains(body, `data-project-id=""`) && name == "modal" {
+			t.Fatalf("empty modal response should preserve an empty project context: %s", body)
+		}
+		if strings.Contains(body, targetA.TargetID) || strings.Contains(body, targetB.TargetID) {
+			t.Fatalf("empty %s response rendered saved target state: %s", name, body)
+		}
+	}
+	if !strings.Contains(cardBody, "Saved targets only") {
+		t.Fatalf("empty card response should preserve the disabled policy state: %s", cardBody)
+	}
+	policyToggle := `name="enabled" value="true" class="toggle toggle-primary toggle-sm"`
+	if strings.Contains(modalBody, policyToggle+` checked`) {
+		t.Fatalf("empty modal response should preserve the disabled policy state: %s", modalBody)
+	}
+}
+
 func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Staged Outbound Targets").Build()

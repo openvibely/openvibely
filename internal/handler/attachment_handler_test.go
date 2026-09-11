@@ -44,6 +44,55 @@ func TestUploadAttachment_NoFiles(t *testing.T) {
 	}
 }
 
+func TestTaskAttachmentMultipartAdmissionRejectsMalformedFormAcrossSurfaces(t *testing.T) {
+	for _, tcCase := range []struct {
+		name  string
+		setup func(t *testing.T, tc *TestContext, projectID string) (method, target string)
+	}{
+		{
+			name: "task creation",
+			setup: func(t *testing.T, _ *TestContext, projectID string) (string, string) {
+				t.Helper()
+				return http.MethodPost, "/tasks?project_id=" + projectID
+			},
+		},
+		{
+			name: "task edit",
+			setup: func(t *testing.T, tc *TestContext, projectID string) (string, string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).WithCategory(models.CategoryBacklog).Build()
+				return http.MethodPut, "/tasks/" + task.ID
+			},
+		},
+		{
+			name: "attachment endpoint",
+			setup: func(t *testing.T, tc *TestContext, projectID string) (string, string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).Build()
+				return http.MethodPost, "/tasks/" + task.ID + "/attachments"
+			},
+		},
+	} {
+		t.Run(tcCase.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			method, target := tcCase.setup(t, tc, project.ID)
+			req := httptest.NewRequest(method, target, strings.NewReader("malformed multipart body"))
+			req.Header.Set("Content-Type", "multipart/form-data; boundary")
+			rec := httptest.NewRecorder()
+
+			tc.echo.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d; body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "failed to parse form") {
+				t.Fatalf("expected generic parse error, body=%s", rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestUploadAttachment_Success(t *testing.T) {
 	tc := NewTestContext(t)
 	p := tc.CreateProject().Build()
