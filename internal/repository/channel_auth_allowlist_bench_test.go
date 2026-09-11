@@ -156,7 +156,7 @@ func TestChannelAuthAllowlistListQueriesUseCoveringOrderIndexes(t *testing.T) {
 	assertAuthAllowlistRepositoryResults(t, db, 1500)
 }
 
-func TestChannelAuthCountByProjectRemainsSystemLevel(t *testing.T) {
+func TestChannelAuthCountByProjectIsScoped(t *testing.T) {
 	db := newAuthAllowlistBenchDB(t)
 	ctx := context.Background()
 	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('auth-count-project-a', 'A', '', ''), ('auth-count-project-b', 'B', '', '')`); err != nil {
@@ -175,18 +175,22 @@ func TestChannelAuthCountByProjectRemainsSystemLevel(t *testing.T) {
 	}
 
 	for _, projectID := range []string{"auth-count-project-a", "auth-count-project-b", "unrelated-project"} {
+		want := 1
+		if projectID == "unrelated-project" {
+			want = 0
+		}
 		got, err := slack.CountByProject(ctx, projectID)
 		require.NoError(t, err)
-		require.Equal(t, 2, got, "slack count must remain system-level for %s", projectID)
+		require.Equal(t, want, got, "slack count must be scoped to %s", projectID)
 		got, err = discord.CountByProject(ctx, projectID)
 		require.NoError(t, err)
-		require.Equal(t, 2, got, "discord count must remain system-level for %s", projectID)
+		require.Equal(t, want, got, "discord count must be scoped to %s", projectID)
 		got, err = email.CountByProject(ctx, projectID)
 		require.NoError(t, err)
-		require.Equal(t, 2, got, "email count must remain system-level for %s", projectID)
+		require.Equal(t, want, got, "email count must be scoped to %s", projectID)
 		got, err = telegram.CountByProject(ctx, projectID)
 		require.NoError(t, err)
-		require.Equal(t, 2, got, "telegram count must remain system-level for %s", projectID)
+		require.Equal(t, want, got, "telegram count must be scoped to %s", projectID)
 	}
 }
 

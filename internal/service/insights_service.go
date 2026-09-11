@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,6 +19,8 @@ import (
 var (
 	ErrInsightNotFound   = repository.ErrInsightNotFound
 	ErrKnowledgeNotFound = repository.ErrKnowledgeNotFound
+
+	errDirectAnalysisDefaultAgentUnavailable = errors.New("direct analysis default agent unavailable")
 )
 
 type InsightsService struct {
@@ -660,21 +663,33 @@ Respond with ONLY the JSON array, no markdown fences or extra text.`, project.Na
 	return insights, nil
 }
 
+// resolveDirectAnalysisContext loads the project and default Agent required for a direct Insights analysis.
+func (s *InsightsService) resolveDirectAnalysisContext(ctx context.Context, projectID string) (*models.Project, *models.LLMConfig, error) {
+	project, err := s.projectRepo.GetByID(ctx, projectID)
+	if err != nil || project == nil {
+		return nil, nil, fmt.Errorf("get project: %w", err)
+	}
+
+	agent, err := s.llmConfigRepo.GetDefault(ctx)
+	if err != nil || agent == nil {
+		return nil, nil, errDirectAnalysisDefaultAgentUnavailable
+	}
+
+	return project, agent, nil
+}
+
 // ExtractKnowledge analyzes task completions and extracts knowledge entries
 func (s *InsightsService) ExtractKnowledge(ctx context.Context, projectID string) ([]models.KnowledgeEntry, error) {
 	if s.llmSvc == nil {
 		return nil, nil
 	}
 
-	// Get recent completed tasks with their execution output
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return nil, fmt.Errorf("get project: %w", err)
-	}
-
-	agent, err := s.llmConfigRepo.GetDefault(ctx)
-	if err != nil || agent == nil {
-		return nil, fmt.Errorf("no default agent")
+	project, agent, err := s.resolveDirectAnalysisContext(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, errDirectAnalysisDefaultAgentUnavailable) {
+			return nil, fmt.Errorf("no default agent")
+		}
+		return nil, err
 	}
 
 	// Get recent completed tasks
@@ -780,14 +795,12 @@ func (s *InsightsService) RunHealthCheck(ctx context.Context, projectID string) 
 		return nil, fmt.Errorf("LLM service not available")
 	}
 
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return nil, fmt.Errorf("get project: %w", err)
-	}
-
-	agent, err := s.llmConfigRepo.GetDefault(ctx)
-	if err != nil || agent == nil {
-		return nil, fmt.Errorf("no default agent configured")
+	project, agent, err := s.resolveDirectAnalysisContext(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, errDirectAnalysisDefaultAgentUnavailable) {
+			return nil, fmt.Errorf("no default agent configured")
+		}
+		return nil, err
 	}
 
 	// Gather project metrics
@@ -968,14 +981,12 @@ func (s *InsightsService) GradeIdeas(ctx context.Context, projectID string) (*mo
 		return nil, fmt.Errorf("LLM service not available")
 	}
 
-	project, err := s.projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return nil, fmt.Errorf("get project: %w", err)
-	}
-
-	agent, err := s.llmConfigRepo.GetDefault(ctx)
-	if err != nil || agent == nil {
-		return nil, fmt.Errorf("no default agent configured")
+	project, agent, err := s.resolveDirectAnalysisContext(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, errDirectAnalysisDefaultAgentUnavailable) {
+			return nil, fmt.Errorf("no default agent configured")
+		}
+		return nil, err
 	}
 
 	// Gather all tasks for analysis

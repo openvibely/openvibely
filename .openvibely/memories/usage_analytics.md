@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-09-08
-source: consolidation
-source_id: memory_consolidation_2026-09-08
+updated: 2026-09-09
+source: after_complete
+source_id: fd37f46bb8f14052236f06e2550dd109:7d40f220efc96fc1
 confidence: high
 title: Usage Analytics
 ---
@@ -31,7 +31,8 @@ Surfaces and isolation:
 - Dashboard labels are `Token Usage`, `Model Breakdown by Tokens`, and `Model Breakdown by Executions`. Skill chart `Skill Activity Over Time` has `Used` (selected+loaded+viewed), `Created`, and `Edited` lines; filters default to all/hidden and least-active enabled skills remain visible.
 
 Known gaps and ownership:
-- Issue `#1025` / PR `#1033` covers authoritative project context for Agent generation/repair, lifecycle, Insights, Pulse/Reflection, memory, and task-worktree commit-summary direct calls. Work-directory fallback uses an unordered compact `id`/`repo_path` projection backed by `(repo_path, id)` and preserves exact roots, nested directories, `.worktrees/<task>`, longest nested-root precedence, Windows separators, sibling boundaries, deleted/empty repositories, and provider-failure attribution. Explicit project context must remain query-free; fallback performance evidence uses the real public direct-call path at representative project counts and asserts one compact lookup rather than full project hydration. Completion remains gated on exact-head hosted checks and live publication evidence.
+- `view_usage_analytics` treats its registered numeric bounds as runtime-enforced contract, not schema-only guidance: omitted `top_limit` and `recent_bucket_limit` default to five and eight respectively; explicitly supplied `top_limit` must be 1 through 10, while `recent_bucket_limit` must be 0 through 24 and valid zero omits recent buckets. Presence-aware decoding and pre-query validation apply through the common service action used by Web/API and channel runtimes; invalid declared arguments return input errors rather than being silently defaulted or clamped.
+- Authoritative project context for Agent generation/repair, lifecycle, Insights, Pulse/Reflection, memory, and task-worktree commit-summary direct calls must be explicit and query-free. Work-directory fallback uses a compact unordered `id`/`repo_path` projection backed by `(repo_path, id)`, preserves exact/nested/worktree/Windows path semantics and sibling boundaries, and attributes provider failures correctly. Preserve representative public-path performance coverage without retaining task-specific publication state.
 - Project memory recall effectiveness/follow-through is not yet shown beside skill analytics (`#85`). Task-result analytics lack project-scoped links to task details (`#841`).
-- Failed-task patterns and Insights should share latest-error query/projection semantics. Insights list methods duplicate projection/query/scan assembly (`#913`); status/delete/link behavior remains project-scoped and preserves `resolved_at`.
+- Failed-task patterns and Insights should share latest-error query/projection semantics. Insights list methods duplicate projection/query/scan assembly (`#913`); status/delete/link behavior remains project-scoped and preserves `resolved_at`. Insights direct analyses also repeat project/default-Agent preparation across `ExtractKnowledge`, `RunHealthCheck`, and `GradeIdeas` (`#1079`); consolidate only that shared preflight while preserving each analysis's prompt, parsing, persistence, and unavailable-LLM behavior.
 - Chat does not expose compact OAuth connected/expired/not-connected status shown on model cards (`#695`). Account cards must never expose account IDs, emails, tokens, JWTs, auth headers, fingerprints, or provider identity fields.

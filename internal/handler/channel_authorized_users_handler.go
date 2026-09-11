@@ -12,7 +12,7 @@ type authorizedUserCRUD[T any] struct {
 	list                 func(context.Context, string) ([]T, error)
 	render               func([]T, string) templ.Component
 	getByID              func(context.Context, string) (*T, error)
-	delete               func(context.Context, string) error
+	delete               func(context.Context, string, string) error
 	projectID            func(*T) string
 	notConfiguredMessage string
 	configured           bool
@@ -93,19 +93,19 @@ func (crud authorizedUserCRUD[T]) deleteUser(
 	id string,
 	projectID string,
 	loadProjectID func(context.Context, string) (string, bool, error),
-	deleteUser func(context.Context, string) error,
+	deleteUser func(context.Context, string, string) error,
 ) error {
-	fallbackProjectID, found, err := loadProjectID(c.Request().Context(), id)
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+	ownerProjectID, found, err := loadProjectID(c.Request().Context(), id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to find user")
 	}
-	if !found {
+	if !found || ownerProjectID != projectID {
 		return echo.NewHTTPError(http.StatusNotFound, "User not found")
 	}
-	if projectID == "" {
-		projectID = fallbackProjectID
-	}
-	if err := deleteUser(c.Request().Context(), id); err != nil {
+	if err := deleteUser(c.Request().Context(), projectID, id); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to remove user: "+err.Error())
 	}
 	return crud.reload(c, projectID)

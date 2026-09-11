@@ -51,7 +51,7 @@ func (h *Handler) slackAuthorizedUserCRUD() authorizedUserCRUD[models.SlackAutho
 	if h.slackAuthRepo != nil {
 		crud.list = h.slackAuthRepo.ListByProject
 		crud.getByID = h.slackAuthRepo.GetByID
-		crud.delete = h.slackAuthRepo.Delete
+		crud.delete = h.slackAuthRepo.DeleteForProject
 		crud.projectID = func(user *models.SlackAuthorizedUser) string { return user.ProjectID }
 	}
 	return crud

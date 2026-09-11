@@ -96,8 +96,8 @@ func TestChannelsSlackConfigure(t *testing.T) {
 		t.Fatalf("expected channels page 200, got %d", viewRec.Code)
 	}
 	body := viewRec.Body.String()
-	if !strings.Contains(body, "Authorized Slack users are system-level for this channel and can use Slack across projects") {
-		t.Fatalf("expected slack modal to describe system-level Slack authorized users")
+	if !strings.Contains(body, "Authorized Slack users are scoped to this project") {
+		t.Fatalf("expected slack modal to describe project-scoped Slack authorized users")
 	}
 	if !strings.Contains(body, "If no users are configured, access is denied until authorized users are added") {
 		t.Fatalf("expected deny-by-default helper copy in slack modal")
