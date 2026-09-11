@@ -13,12 +13,13 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-func (h *Handler) outboundTargetsData(c echo.Context) ([]models.ChannelTarget, bool) {
+func (h *Handler) outboundTargetsData(c echo.Context) (string, []models.ChannelTarget, bool) {
 	projectID := c.QueryParam("project_id")
 	if projectID == "" {
 		projectID, _ = h.getCurrentProjectID(c)
 	}
-	return h.outboundTargetsDataForProject(c, projectID)
+	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	return projectID, targets, explicitAllowed
 }
 
 func (h *Handler) outboundTargetsDataForProject(c echo.Context, projectID string) ([]models.ChannelTarget, bool) {
@@ -35,20 +36,12 @@ func (h *Handler) outboundTargetsDataForProject(c echo.Context, projectID string
 }
 
 func (h *Handler) handleOutboundTargetsFragment(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	if projectID == "" {
-		projectID, _ = h.getCurrentProjectID(c)
-	}
-	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	projectID, targets, explicitAllowed := h.outboundTargetsData(c)
 	return render(c, http.StatusOK, pages.OutboundTargetsFragment(projectID, targets, explicitAllowed, ""))
 }
 
 func (h *Handler) handleOutboundTargetsCardFragment(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	if projectID == "" {
-		projectID, _ = h.getCurrentProjectID(c)
-	}
-	targets, explicitAllowed := h.outboundTargetsDataForProject(c, projectID)
+	projectID, targets, explicitAllowed := h.outboundTargetsData(c)
 	return render(c, http.StatusOK, pages.OutboundTargetsCardFragment(projectID, targets, explicitAllowed))
 }
 
