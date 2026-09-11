@@ -1,0 +1,17 @@
+Exact-HEAD validation evidence
+
+Commit: a65cd5c745278cad897dc8443bcfc3e4b330edbd
+Integration: task/4651c877-model-edit-contract-integration is directly descended from backend main 408307c89c451c6e861358a6f48873622d43c4d6. It delivers default_max_tokens plus a secret-free custom API-key edit-details contract: the backend preserves omitted custom authentication settings server-side.
+
+Passed focused regressions:
+  go test ./internal/handler ./internal/llm/customauth -run 'TestHandler_GetModelEditDetails|TestRedactedConfigRemovesRefreshParameters' -count=1
+
+Passed required validation:
+  go build ./...
+  go vet ./...
+  go test ./... -count=1
+  gofmt -l $(git diff --name-only main...HEAD -- '*.go')  # zero output
+  git diff --check                 # zero output
+  git diff --check main...HEAD     # zero output
+
+The repository-wide gofmt check lists eleven pre-existing files outside this integration diff; none were changed. Before validation and after all checks: HEAD remained a65cd5c745278cad897dc8443bcfc3e4b330edbd and git status --porcelain was empty.
