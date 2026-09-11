@@ -295,9 +295,11 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	}
 	if !strings.Contains(bubbleSection, "var renderGeneration = 0;") ||
 		!strings.Contains(bubbleSection, "var renderPromise = liveRenderer(contentDiv, renderText);") ||
-		!strings.Contains(bubbleSection, "renderPromise.then(finishRender)") ||
-		!strings.Contains(bubbleSection, "if (generation !== renderGeneration) return;") {
-		t.Fatal("live-created assistant bubble must keep render backpressure until the owned async render settles")
+		!strings.Contains(bubbleSection, "return renderPromise.then(function(committed)") ||
+		!strings.Contains(bubbleSection, "if (generation !== renderGeneration) return false;") ||
+		!strings.Contains(bubbleSection, "var failedRender = renderBufferedOutput(true);") ||
+		!strings.Contains(bubbleSection, "failedRender.then(revealTerminalError, revealTerminalError)") {
+		t.Fatal("live-created assistant bubble must keep render backpressure and defer terminal presentation until the owned async render settles")
 	}
 }
 
