@@ -158,7 +158,7 @@ func collectProducedCommitStat(worktreePath, sha string) (*models.TaskCommitStat
 		Subject:   parts[3],
 	}
 
-	numstatCmd := exec.Command("git", "show", "--numstat", "--format=", sha)
+	numstatCmd := exec.Command("git", "show", "--numstat", "--format=", "-z", sha)
 	numstatCmd.Dir = worktreePath
 	numstatOut, err := numstatCmd.Output()
 	if err != nil {
@@ -188,7 +188,7 @@ func addNumstatFromGitDiff(worktreePath, baseRef string, stat *models.TaskCommit
 	seenFiles := map[string]bool{}
 	var files []string
 
-	diffCmd := exec.Command("git", "diff", "--numstat", baseRef)
+	diffCmd := exec.Command("git", "diff", "--numstat", "-z", baseRef)
 	diffCmd.Dir = worktreePath
 	diffOut, err := diffCmd.Output()
 	if err != nil {
@@ -248,6 +248,10 @@ type parsedNumstatLine struct {
 }
 
 func parseNumstatLines(output string) ([]parsedNumstatLine, error) {
+	if strings.Contains(output, "\x00") {
+		return parseNULNumstatLines(output), nil
+	}
+
 	var numstatLines []parsedNumstatLine
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
@@ -272,6 +276,39 @@ func parseNumstatLines(output string) ([]parsedNumstatLine, error) {
 		return nil, err
 	}
 	return numstatLines, nil
+}
+
+func parseNULNumstatLines(output string) []parsedNumstatLine {
+	records := strings.Split(output, "\x00")
+	numstatLines := make([]parsedNumstatLine, 0, len(records))
+	for i := 0; i < len(records); i++ {
+		record := records[i]
+		if record == "" {
+			continue
+		}
+		fields := strings.SplitN(record, "\t", 3)
+		if len(fields) < 3 {
+			continue
+		}
+		parsed := parsedNumstatLine{}
+		if n, err := strconv.Atoi(fields[0]); err == nil {
+			parsed.insertions = n
+		}
+		if n, err := strconv.Atoi(fields[1]); err == nil {
+			parsed.deletions = n
+		}
+		if fields[2] == "" {
+			if i+2 >= len(records) || records[i+1] == "" || records[i+2] == "" {
+				continue
+			}
+			parsed.path = records[i+1] + " => " + records[i+2]
+			i += 2
+		} else {
+			parsed.path = fields[2]
+		}
+		numstatLines = append(numstatLines, parsed)
+	}
+	return numstatLines
 }
 
 func applyNumstatLines(stat *models.TaskCommitStat, numstatLines []parsedNumstatLine, seenFiles map[string]bool, files *[]string) {
