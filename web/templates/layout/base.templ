@@ -5386,6 +5386,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return incomingList;
 						}
 
+						function loadedCardSortIdentity(card) {
+							var kind = card.getAttribute('data-channel-type') || '';
+							if (kind === 'outbound-targets') kind = 'outbound_targets';
+							return kind + (card.getAttribute('data-webhook-id') || '');
+						}
+
 						function sortLoadedCardsByName(state) {
 							if (!state.root.hasAttribute('data-card-loaded-name-sort')) return;
 							var cards = Array.prototype.slice.call(state.list.querySelectorAll('[data-card-sort-name]'));
@@ -5402,6 +5408,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 									var leftOriginal = left.getAttribute('data-card-sort-name') || '';
 									var rightOriginal = right.getAttribute('data-card-sort-name') || '';
 									result = leftOriginal < rightOriginal ? -1 : (leftOriginal > rightOriginal ? 1 : 0);
+								}
+								if (!result) {
+									var leftIdentity = loadedCardSortIdentity(left);
+									var rightIdentity = loadedCardSortIdentity(right);
+									result = leftIdentity < rightIdentity ? -1 : (leftIdentity > rightIdentity ? 1 : 0);
 								}
 								return descending ? -result : result;
 							});
