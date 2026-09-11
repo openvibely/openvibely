@@ -1574,7 +1574,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					name="message"
 					class="w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left"
 					placeholder="Enter sends or queues"
-					title="Enter sends or queues"
+					aria-label="Message"
 					rows="3"
 					enterkeyhint="send"
 					required
@@ -2010,7 +2010,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						window.refreshChatComposerShortcutHint = function(textarea) {
 							if (!textarea) return;
 							textarea.setAttribute('placeholder', shortcutHint());
-							textarea.setAttribute('title', shortcutHint());
 						};
 						window.refreshChatComposerShortcutHint(messageInput);
 								function currentSubmitButton() {
