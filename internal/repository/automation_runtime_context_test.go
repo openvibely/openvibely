@@ -620,6 +620,68 @@ func TestAutomationRepoFailedCompletedCustomTaskCanBeClaimedAgain(t *testing.T) 
 	}
 }
 
+func TestClaimAutomationDispatchAppendsNewRunningTaskToActiveLaneTail(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	automationRepo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	oldestRunning := &models.Task{ProjectID: fixture.ProjectID, Title: "Oldest running", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "oldest"}
+	if err := taskRepo.Create(ctx, oldestRunning); err != nil {
+		t.Fatalf("create oldest running task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = 'running', display_order = 10 WHERE id = ?`, oldestRunning.ID); err != nil {
+		t.Fatalf("seed oldest running task: %v", err)
+	}
+
+	claimedTask := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Automation claim")
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, claimedTask.ID, fixture.Nodes["trigger"], now.Add(-time.Minute))
+	_, dispatch, err := automationRepo.ClaimScheduledOccurrence(ctx, schedule, now, nil)
+	if err != nil {
+		t.Fatalf("claim scheduled occurrence: %v", err)
+	}
+
+	laterRunning := &models.Task{ProjectID: fixture.ProjectID, Title: "Later running", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "later"}
+	if err := taskRepo.Create(ctx, laterRunning); err != nil {
+		t.Fatalf("create later running task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = 'running', display_order = 30 WHERE id = ?`, laterRunning.ID); err != nil {
+		t.Fatalf("seed later running task: %v", err)
+	}
+
+	leased, err := automationRepo.LeaseNextDispatch(ctx, "active-tail-owner", now.Add(time.Second), time.Minute)
+	if err != nil || leased == nil || leased.ID != dispatch.ID {
+		t.Fatalf("lease dispatch = %#v, %v", leased, err)
+	}
+	if _, err := taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "active-tail-owner"); err != nil {
+		t.Fatalf("claim automation dispatch: %v", err)
+	}
+
+	stored, err := taskRepo.GetByID(ctx, claimedTask.ID)
+	if err != nil {
+		t.Fatalf("reload claimed task: %v", err)
+	}
+	if stored == nil || stored.Category != models.CategoryScheduled || stored.Status != models.StatusRunning || stored.DisplayOrder != 31 {
+		t.Fatalf("claimed task = %#v, want scheduled/running at In Progress tail order 31", stored)
+	}
+	board, err := taskRepo.ListBoardByProjectWithCategorySorts(ctx, fixture.ProjectID, "", "", "")
+	if err != nil {
+		t.Fatalf("reload active board: %v", err)
+	}
+	var runningIDs []string
+	for _, task := range board {
+		if task.Status == models.StatusRunning {
+			runningIDs = append(runningIDs, task.ID)
+		}
+	}
+	want := []string{oldestRunning.ID, laterRunning.ID, claimedTask.ID}
+	if !reflect.DeepEqual(runningIDs, want) {
+		t.Fatalf("running board order = %v, want %v", runningIDs, want)
+	}
+}
+
 func TestAutomationRepoTerminalExecutionBearingDispatchFailureConvergesAndAllowsLaterOccurrence(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
