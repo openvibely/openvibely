@@ -77,6 +77,61 @@ func TestChatRenderingPathsUseBaseSafeMarkdownRenderer(t *testing.T) {
 	}
 }
 
+func TestChatInputForm_ComposerHintHasNoTooltipAndKeepsAccessibleName(t *testing.T) {
+	surfaces := []struct {
+		name   string
+		config ChatInputFormConfig
+	}{
+		{
+			name: "global chat",
+			config: ChatInputFormConfig{
+				FormID:       "chat-form",
+				InputID:      "chat-message-input",
+				PostEndpoint: "/chat/send",
+				TargetID:     "chat-messages",
+			},
+		},
+		{
+			name: "task thread",
+			config: ChatInputFormConfig{
+				FormID:       "task-thread-form",
+				InputID:      "task-thread-message-input",
+				PostEndpoint: "/tasks/task-1/thread",
+				TargetID:     "task-thread-messages",
+				TaskID:       "task-1",
+			},
+		},
+	}
+
+	for _, surface := range surfaces {
+		t.Run(surface.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := ChatInputForm(surface.config).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render composer: %v", err)
+			}
+			body := buf.String()
+			textareaStart := strings.Index(body, "<textarea")
+			if textareaStart == -1 {
+				t.Fatal("composer textarea is missing")
+			}
+			textareaEnd := strings.Index(body[textareaStart:], ">")
+			if textareaEnd == -1 {
+				t.Fatal("composer textarea opening tag is incomplete")
+			}
+			textarea := body[textareaStart : textareaStart+textareaEnd+1]
+			if strings.Contains(textarea, `title=`) {
+				t.Fatalf("composer textarea must not have a tooltip: %s", textarea)
+			}
+			if !strings.Contains(textarea, `aria-label="Message"`) {
+				t.Fatalf("composer textarea must retain an accessible name: %s", textarea)
+			}
+			if !strings.Contains(textarea, `placeholder="Enter sends or queues"`) {
+				t.Fatalf("composer textarea must retain its visible keyboard hint: %s", textarea)
+			}
+		})
+	}
+}
+
 // TestChatAutoScrollScript verifies the auto-scroll JavaScript is correctly generated
 func TestChatAutoScrollScript(t *testing.T) {
 	var buf bytes.Buffer

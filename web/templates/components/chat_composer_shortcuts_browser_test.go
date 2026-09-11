@@ -76,6 +76,8 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   var expectedHint = apple ? '⏎ sends or queues · ⌘+⏎ steers' : 'Enter sends or queues · Ctrl+Enter steers';
   if (idleInput.placeholder !== expectedHint || activeInput.placeholder !== expectedHint) fail('shortcut copy was not concise or platform appropriate');
   if (idleInput.placeholder.includes('click') || idleInput.placeholder.includes('Shift+Enter')) fail('shortcut copy advertised extra shortcuts');
+  if (idleInput.getAttribute('title') !== null || activeInput.getAttribute('title') !== null) fail('composer shortcut tooltip is redundant and should be absent');
+  if (idleInput.getAttribute('aria-label') !== 'Message' || activeInput.getAttribute('aria-label') !== 'Message') fail('composer accessible name is missing');
 
   idleInput.value = 'composing'; key(idleInput, {isComposing:true});
   activeInput.value = 'newline'; key(activeInput, {shiftKey:true});
@@ -357,7 +359,9 @@ window.htmx = {
     var form = document.getElementById('chat-form');
     var input = document.getElementById('message-input');
     var expectedHint = '⏎ sends or queues · ⌘+⏎ steers';
-    if (input.placeholder !== expectedHint || input.title !== expectedHint) fail('iOS did not receive Apple shortcut hint');
+    if (input.placeholder !== expectedHint) fail('iOS did not receive Apple shortcut hint');
+    if (input.getAttribute('title') !== null) fail('iOS composer shortcut tooltip is redundant and should be absent');
+    if (input.getAttribute('aria-label') !== 'Message') fail('iOS composer accessible name is missing');
     form.addEventListener('submit', function(event) {
       event.preventDefault();
       window.__iosComposerRequests.push({ path: form.getAttribute('hx-post'), message: new FormData(form).get('message') });
