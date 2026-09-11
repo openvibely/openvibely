@@ -1599,7 +1599,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			// Shared, swap-safe composer focus lifecycle for Chat and task Threads.
 			if (!window._openVibelyComposerFocusReady) {
 				window._openVibelyComposerFocusReady = true;
-				window._openVibelyComposerFocusState = { token: 0, timer: 0, historyTimer: 0, interaction: 0 };
+				window._openVibelyComposerFocusState = { token: 0, timer: 0, historyTimer: 0, interaction: 0, navigationTrigger: null };
 				var _composerFocusState = window._openVibelyComposerFocusState;
 
 				function _cancelComposerFocus() {
@@ -1611,6 +1611,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				}
 
 				function _composerFocusInteraction() {
+					_composerFocusState.navigationTrigger = null;
 					_composerFocusState.interaction++;
 					_cancelComposerFocus();
 				}
@@ -1646,6 +1647,17 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					}
 				}
 
+				function _composerFocusNavigationTrigger(event) {
+					var target = event && event.detail && (event.detail.target || event.detail.elt);
+					var active = document.activeElement;
+					if (!target || target.id !== 'main-content' || !active || !active.matches || !active.matches('[data-nav-base]')) return null;
+					return active.getAttribute('data-nav-base') === window.location.pathname ? active : null;
+				}
+
+				function _rememberComposerFocusNavigationTrigger(event) {
+					_composerFocusState.navigationTrigger = _composerFocusNavigationTrigger(event);
+				}
+
 				window.openVibelyCancelComposerFocus = _cancelComposerFocus;
 				window.openVibelyRequestComposerFocus = function(options) {
 					options = options || {};
@@ -1672,7 +1684,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							if (liveForm !== form || liveTextarea !== textarea || !_composerFocusVisible(liveTextarea)) return;
 							if (_composerFocusOverlayActive()) return;
 							var active = document.activeElement;
-							if (_composerFocusMeaningful(active) && active !== liveTextarea && active !== trigger) return;
+							var allowedTrigger = trigger || _composerFocusState.navigationTrigger;
+							_composerFocusState.navigationTrigger = null;
+							if (_composerFocusMeaningful(active) && active !== liveTextarea && active !== allowedTrigger) return;
 							liveTextarea.focus({ preventScroll: true });
 						}, 0);
 					}, 0);
@@ -1686,10 +1700,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					_composerFocusInteraction();
 				}, true);
 				document.addEventListener('htmx:beforeSwap', _cancelComposerFocusForSwap);
+				document.addEventListener('htmx:afterSwap', _rememberComposerFocusNavigationTrigger);
 				document.addEventListener('htmx:beforeHistorySave', _cancelComposerFocus);
 				document.addEventListener('htmx:afterSettle', function(event) {
 					var target = event.detail && (event.detail.target || event.detail.elt);
-					window.openVibelyRequestComposerFocus({ root: target || document, reason: 'htmx-settle' });
+					window.openVibelyRequestComposerFocus({ root: target || document, reason: 'htmx-settle', trigger: _composerFocusNavigationTrigger(event) });
 				});
 				document.addEventListener('htmx:historyRestore', function(event) {
 					_cancelComposerFocus();

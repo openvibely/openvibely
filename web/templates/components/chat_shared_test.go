@@ -1161,6 +1161,14 @@ func TestChatInputForm_AutoFocusUsesSharedLifecycleContract(t *testing.T) {
 		`historyTimer: 0`,
 		`if (_composerFocusState.historyTimer) window.clearTimeout(_composerFocusState.historyTimer)`,
 		`if (token !== _composerFocusState.token || interaction !== _composerFocusState.interaction) return`,
+		`function _composerFocusNavigationTrigger(event)`,
+		`active.matches('[data-nav-base]')`,
+		`active.getAttribute('data-nav-base') === window.location.pathname`,
+		`function _rememberComposerFocusNavigationTrigger(event)`,
+		`_composerFocusState.navigationTrigger = _composerFocusNavigationTrigger(event)`,
+		`var allowedTrigger = trigger || _composerFocusState.navigationTrigger`,
+		`_composerFocusState.navigationTrigger = null`,
+		`trigger: _composerFocusNavigationTrigger(event)`,
 		`focus({ preventScroll: true })`,
 	} {
 		if !strings.Contains(content, want) {
