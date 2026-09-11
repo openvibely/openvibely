@@ -329,7 +329,7 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	content, _ := system["content"].(string)
 	require.Contains(t, content, llmprompt.ChatActionToolModeInstructions)
 	require.Contains(t, content, "Available action tools: request_user_input, create_task")
-	require.Contains(t, content, "call request_user_input and wait for the answer")
+	require.Contains(t, content, "replace that response with a request_user_input tool call")
 	require.NotContains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
 	tools := gotBody["tools"]
 	require.Contains(t, strings.ToLower(fmt.Sprint(tools)), "request_user_input")

@@ -432,8 +432,8 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {
@@ -618,8 +618,8 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 
 	oaAttachments, err := convertAttachments(attachments)
 	if err != nil {

@@ -204,6 +204,11 @@ func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testin
 	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
 		t.Fatalf("tool-capable follow-up prompt missing concrete runtime guidance: %q", capable)
 	}
+	oauthThenActions := appendToolModeSystemPrompt(applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}), rt, models.ChatModeOrchestrate)
+	oauthIndex := strings.Index(oauthThenActions, "Working with the user")
+	if oauthIndex < 0 || strings.LastIndex(oauthThenActions, llmprompt.ChatActionToolModeInstructions) < oauthIndex {
+		t.Fatalf("runtime action instructions must follow OAuth working guidance: %q", oauthThenActions)
+	}
 
 	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan)
 	if plan != "base" {
