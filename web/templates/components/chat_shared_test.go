@@ -362,8 +362,10 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	for _, snippet := range []string{
 		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
 		"var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;",
+		"var shouldScrollAfterRender = renderIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll());",
 		"var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
-		"var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;",
+		"function shouldScrollTerminalNow()",
+		"if ((tracker.intentRevision || 0) !== terminalIntentRevision) return tracker.shouldAutoScroll();",
 	} {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("resume streaming must fence deferred scrolling by current reader intent; missing %q", snippet)
@@ -415,8 +417,10 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	for _, snippet := range []string{
 		"var renderIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
 		"var renderIntentUnchanged = !tracker || (tracker.intentRevision || 0) === renderIntentRevision;",
+		"var shouldScrollAfterRender = renderIntentUnchanged ? shouldScroll : (!tracker || tracker.shouldAutoScroll());",
 		"var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;",
-		"var terminalIntentUnchanged = !tracker || (tracker.intentRevision || 0) === terminalIntentRevision;",
+		"function shouldScrollTerminalNow()",
+		"if ((tracker.intentRevision || 0) !== terminalIntentRevision) return tracker.shouldAutoScroll();",
 	} {
 		if !strings.Contains(content, snippet) {
 			t.Errorf("fresh streaming must fence deferred scrolling by current reader intent; missing %q", snippet)

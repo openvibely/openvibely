@@ -104,8 +104,10 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	project := models.Project{ID: "project-terminal-thread", Name: "Terminal thread project"}
 	task := &models.Task{ID: "task-terminal-thread", ProjectID: project.ID, Title: "Terminal thread task", Status: models.StatusRunning, Category: models.CategoryActive}
 	longOutput := strings.Repeat("long partial task-thread output line\n", 160)
+	returnOutput := longOutput + "terminal task-thread tail\n"
 	runningOne := models.Execution{ID: "thread-live-one", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "first live turn", IsFollowup: true}
 	runningTwo := models.Execution{ID: "thread-live-two", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "second live turn", IsFollowup: true}
+	runningThree := models.Execution{ID: "thread-live-three", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "third live turn", IsFollowup: true}
 	failedOne := runningOne
 	failedOne.Status = models.ExecFailed
 	failedOne.Output = longOutput
@@ -114,8 +116,13 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	failedTwo.Status = models.ExecFailed
 	failedTwo.Output = longOutput
 	failedTwo.ErrorMessage = "second terminal failure"
+	failedThree := runningThree
+	failedThree.Status = models.ExecFailed
+	failedThree.Output = returnOutput
+	failedThree.ErrorMessage = "third terminal failure"
 
 	var phase atomic.Int32
+	var postRequests atomic.Int32
 	var lazyRequests atomic.Int32
 	var fragmentRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +135,11 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 			document := renderTerminalBrowserComponent(t, TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil))
 			_, _ = w.Write([]byte(installTerminalBrowserPrelude(document)))
 		case r.URL.Path == "/tasks/"+task.ID+"/thread" && r.Method == http.MethodPost:
-			_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, components.TaskThreadFollowupResponse("fresh live turn", "thread-live-fresh", nil, project.ID))))
+			freshExecID := "thread-live-fresh"
+			if postRequests.Add(1) > 1 {
+				freshExecID = "thread-live-fresh-return"
+			}
+			_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, components.TaskThreadFollowupResponse("fresh live turn", freshExecID, nil, project.ID))))
 		case r.URL.Path == "/tasks/"+task.ID+"/thread":
 			lazyRequests.Add(1)
 			viewTask := *task
@@ -138,6 +149,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 				executions = []models.Execution{failedOne}
 			case 2:
 				executions = []models.Execution{failedOne, failedTwo}
+			case 3:
+				executions = []models.Execution{failedOne, failedTwo, failedThree}
 			}
 			if phase.Load() > 0 {
 				viewTask.Status = models.StatusFailed
@@ -149,6 +162,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 			exec := runningOne
 			if strings.Contains(r.URL.Path, runningTwo.ID) {
 				exec = runningTwo
+			} else if strings.Contains(r.URL.Path, runningThree.ID) {
+				exec = runningThree
 			}
 			_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, components.ChatExecutionPair(exec, task, []models.Execution{exec}, 0, true, nil, "task-thread-messages", "task-thread-view", project.ID))))
 		case strings.Contains(r.URL.Path, "composer-action") || r.URL.Path == "/auth/me":
@@ -164,10 +179,15 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		t.Fatalf("marshal long task-thread output: %v", err)
 	}
 	longOutputJS := string(longOutputJSON)
+	returnTailJSON, err := json.Marshal("terminal task-thread tail\n")
+	if err != nil {
+		t.Fatalf("marshal task-thread terminal tail: %v", err)
+	}
+	returnTailJS := string(returnTailJSON)
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/"+task.ID+"?tab=chat", "task-thread-terminal-wiring", func(browser *composerFocusCDP) {
 		browser.waitFor("real lazy Thread load", `Boolean(document.getElementById('task-thread-messages'))+':'+Boolean(document.getElementById('task-thread-view'))`, "true:true")
 		browser.waitFor("lazy Thread HTMX settle", `(function(){var el=document.getElementById('thread-content');return el.dataset.loaded+':'+el.dataset.loading})()`, "true:false")
-		installDelayedTerminalBrowserRenderer(browser, 350)
+		installDelayedTerminalBrowserRenderer(browser, 2500)
 
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_thread_execution_started',task_id:'` + task.ID + `',exec_id:'` + runningOne.ID + `'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch first task-thread live event: %s", got)
@@ -206,6 +226,24 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		phase.Store(2)
 		browser.waitFor("older task-thread reader preserved after resumed terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-`+runningTwo.ID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__threadSettledBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&Math.abs(messages.scrollTop-window.__taskThreadReaderTop)<=2));})()`, "true")
 
+		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_thread_execution_started',task_id:'` + task.ID + `',exec_id:'` + runningThree.ID + `'}}));return 'sent';})()`); got != "sent" {
+			t.Fatalf("dispatch third task-thread live event: %s", got)
+		}
+		browser.waitFor("third real HTMX execution fragment append", `Boolean(document.getElementById('chat-execution-`+runningThree.ID+`'))+':'+Boolean(window.__terminalStreamFor('`+runningThree.ID+`'))`, "true:true")
+		if got := browser.evaluate(`(function(){window.__thirdInitialSettled=window.__terminalRenderSettled;window.__terminalStreamFor('` + runningThree.ID + `').emit('message',` + longOutputJS + `);return 'streamed';})()`); got != "streamed" {
+			t.Fatalf("stream third task-thread partial output: %s", got)
+		}
+		browser.waitFor("third task-thread initial render settled", `window.__terminalRenderSettled>window.__thirdInitialSettled?'ready':'waiting'`, "ready")
+		phase.Store(3)
+		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages');messages.style.overflowAnchor='none';if(messages._chatTranscriptMutationObserver)messages._chatTranscriptMutationObserver.disconnect();if(messages._chatTranscriptResizeObserver)messages._chatTranscriptResizeObserver.disconnect();messages.scrollTop=messages.scrollHeight;window.__thirdSettledBeforeFailure=window.__terminalRenderSettled;var stream=window.__terminalStreamFor('` + runningThree.ID + `');stream.emit('message',` + returnTailJS + `);stream.emit('error','third terminal failure');return String(!document.getElementById('chat-execution-` + runningThree.ID + `').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
+			t.Fatalf("returning resumed task-thread terminal alert must wait for pending render: %s", got)
+		}
+		browser.wheel("#task-thread-messages", -650)
+		browser.waitFor("resumed task-thread reader scrolls up during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
+		browser.wheel("#task-thread-messages", 12000)
+		browser.waitFor("resumed task-thread reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker,pair=document.getElementById('chat-execution-`+runningThree.ID+`');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
+		browser.waitFor("returning resumed task-thread reader pinned after terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-`+runningThree.ID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__thirdSettledBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
+
 		if got := browser.evaluate(`(function(){htmx.ajax('POST','/tasks/` + task.ID + `/thread',{target:'#task-thread-messages',swap:'beforeend',values:{message:'fresh live turn'}});return 'sent';})()`); got != "sent" {
 			t.Fatalf("submit fresh task-thread follow-up: %s", got)
 		}
@@ -223,13 +261,30 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-thread-live-fresh'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&Math.abs(messages.scrollTop-window.__freshTaskThreadReaderTop)<=2));})()`); got != "true" {
 			t.Fatalf("older task-thread reader was not preserved after fresh terminal render: %s", got)
 		}
+
+		if got := browser.evaluate(`(function(){htmx.ajax('POST','/tasks/` + task.ID + `/thread',{target:'#task-thread-messages',swap:'beforeend',values:{message:'fresh live return turn'}});return 'sent';})()`); got != "sent" {
+			t.Fatalf("submit returning fresh task-thread follow-up: %s", got)
+		}
+		browser.waitFor("returning fresh task-thread HTMX response and stream", `Boolean(document.getElementById('chat-execution-thread-live-fresh-return'))+':'+Boolean(window.__terminalStreamFor('thread-live-fresh-return'))`, "true:true")
+		if got := browser.evaluate(`(function(){window.__freshReturnInitialSettled=window.__terminalRenderSettled;window.__terminalStreamFor('thread-live-fresh-return').emit('message',` + longOutputJS + `);return 'streamed';})()`); got != "streamed" {
+			t.Fatalf("stream returning fresh task-thread partial output: %s", got)
+		}
+		browser.waitFor("returning fresh task-thread initial render settled", `window.__terminalRenderSettled>window.__freshReturnInitialSettled?'ready':'waiting'`, "ready")
+		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages');messages.style.overflowAnchor='none';if(messages._chatTranscriptMutationObserver)messages._chatTranscriptMutationObserver.disconnect();if(messages._chatTranscriptResizeObserver)messages._chatTranscriptResizeObserver.disconnect();messages.scrollTop=messages.scrollHeight;window.__freshReturnSettledBeforeFailure=window.__terminalRenderSettled;var stream=window.__terminalStreamFor('thread-live-fresh-return');stream.emit('message',` + returnTailJS + `);stream.emit('error','fresh return terminal failure');return String(!document.getElementById('chat-execution-thread-live-fresh-return').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
+			t.Fatalf("returning fresh task-thread terminal alert must wait for pending render: %s", got)
+		}
+		browser.wheel("#task-thread-messages", -650)
+		browser.waitFor("fresh task-thread reader scrolls up during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
+		browser.wheel("#task-thread-messages", 12000)
+		browser.waitFor("fresh task-thread reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker,pair=document.getElementById('chat-execution-thread-live-fresh-return');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
+		browser.waitFor("returning fresh task-thread reader pinned after terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-thread-live-fresh-return'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__freshReturnSettledBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 	})
 
 	if lazyRequests.Load() < 1 {
 		t.Fatalf("real lazy task-thread requests = %d, want at least 1", lazyRequests.Load())
 	}
-	if fragmentRequests.Load() != 2 {
-		t.Fatalf("real task-thread execution fragment requests = %d, want 2", fragmentRequests.Load())
+	if fragmentRequests.Load() != 3 {
+		t.Fatalf("real task-thread execution fragment requests = %d, want 3", fragmentRequests.Load())
 	}
 }
 
@@ -242,8 +297,11 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 
 	project := models.Project{ID: "project-terminal-chat", Name: "Terminal Chat project"}
 	execID := "chat-live-created-failure"
+	returnExecID := "chat-live-created-return-failure"
 	longOutput := strings.Repeat("long partial live Chat output line\n", 160)
+	returnOutput := longOutput + "terminal live Chat tail\n"
 	terminal := models.Execution{ID: execID, Status: models.ExecFailed, PromptSent: "live Chat failure", Output: longOutput, ErrorMessage: "live Chat terminal <unsafe>"}
+	returnTerminal := models.Execution{ID: returnExecID, Status: models.ExecFailed, PromptSent: "live Chat return failure", Output: returnOutput, ErrorMessage: "live Chat return terminal"}
 	var phase atomic.Int32
 	var chatRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -255,8 +313,11 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		case "/chat":
 			chatRequests.Add(1)
 			var executions []models.Execution
-			if phase.Load() == 1 {
+			if phase.Load() >= 1 {
 				executions = []models.Execution{terminal}
+			}
+			if phase.Load() >= 2 {
+				executions = append(executions, returnTerminal)
 			}
 			if r.Header.Get("HX-Request") == "true" {
 				_, _ = w.Write([]byte(renderTerminalBrowserComponent(t, ChatContent(nil, executions, project.ID, nil, nil, false, false, 30))))
@@ -277,9 +338,14 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		t.Fatalf("marshal long Chat output: %v", err)
 	}
 	longOutputJS := string(longOutputJSON)
+	returnTailJSON, err := json.Marshal("terminal live Chat tail\n")
+	if err != nil {
+		t.Fatalf("marshal live Chat terminal tail: %v", err)
+	}
+	returnTailJS := string(returnTailJSON)
 	runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "chat-live-created-terminal-wiring", func(browser *composerFocusCDP) {
 		browser.waitFor("production Chat page", `Boolean(document.getElementById('chat-page-root'))+':'+Boolean(document.getElementById('chat-messages'))`, "true:true")
-		installDelayedTerminalBrowserRenderer(browser, 350)
+		installDelayedTerminalBrowserRenderer(browser, 2500)
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'live Chat failure',source:'api'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch production Chat live event: %s", got)
 		}
@@ -305,8 +371,26 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 			t.Fatalf("save live Chat older-reader position: %s", got)
 		}
 		browser.waitFor("page-level Chat terminal alert behavior after delayed production render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+execID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>=window.__terminalSettledBeforeFailure+1&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: live Chat terminal <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1&&Math.abs(messages.scrollTop-window.__terminalReaderTop)<=2));})()`, "true")
+
+		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + returnExecID + `',message:'live Chat return failure',source:'api'}}));return 'sent';})()`); got != "sent" {
+			t.Fatalf("dispatch returning production Chat live event: %s", got)
+		}
+		browser.waitFor("returning page-level createStreamingBubble path", `Boolean(document.getElementById('chat-execution-`+returnExecID+`'))+':'+Boolean(window.__terminalStreamFor('`+returnExecID+`'))`, "true:true")
+		if got := browser.evaluate(`(function(){window.__returnInitialSettled=window.__terminalRenderSettled;window.__terminalStreamFor('` + returnExecID + `').emit('message',` + longOutputJS + `);return 'streamed';})()`); got != "streamed" {
+			t.Fatalf("stream returning page-level Chat partial output: %s", got)
+		}
+		browser.waitFor("returning page-level Chat initial render settled", `window.__terminalRenderSettled>window.__returnInitialSettled?'ready':'waiting'`, "ready")
+		phase.Store(2)
+		if got := browser.evaluate(`(function(){var messages=document.getElementById('chat-messages');messages.style.overflowAnchor='none';if(messages._chatTranscriptMutationObserver)messages._chatTranscriptMutationObserver.disconnect();if(messages._chatTranscriptResizeObserver)messages._chatTranscriptResizeObserver.disconnect();messages.scrollTop=messages.scrollHeight;window.__returnSettledBeforeFailure=window.__terminalRenderSettled;window.__returnSyncBeforeFailure=window.__terminalSyncCalls;var stream=window.__terminalStreamFor('` + returnExecID + `');stream.emit('message',` + returnTailJS + `);stream.emit('error','live Chat return terminal');return String(!document.getElementById('chat-execution-` + returnExecID + `').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
+			t.Fatalf("returning Chat terminal alert must wait for pending render: %s", got)
+		}
+		browser.wheel("#chat-messages", -650)
+		browser.waitFor("page-level Chat reader scrolls up during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
+		browser.wheel("#chat-messages", 12000)
+		browser.waitFor("page-level Chat reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker,pair=document.getElementById('chat-execution-`+returnExecID+`');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
+		browser.waitFor("returning page-level Chat reader pinned after terminal render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+returnExecID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__returnSettledBeforeFailure&&window.__terminalSyncCalls>window.__returnSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 	})
-	if chatRequests.Load() < 2 {
-		t.Fatalf("production Chat requests = %d, want initial page plus authoritative terminal sync", chatRequests.Load())
+	if chatRequests.Load() < 3 {
+		t.Fatalf("production Chat requests = %d, want initial page plus two authoritative terminal syncs", chatRequests.Load())
 	}
 }
