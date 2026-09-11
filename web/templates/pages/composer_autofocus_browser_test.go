@@ -325,8 +325,8 @@ func TestComposerAutoFocusProductionNavigationInChrome(t *testing.T) {
 		browser.typeText("lazy thread")
 		browser.waitFor("native Thread typing", `document.getElementById('task-message-input').value`, "lazy thread")
 
-		browser.click("#to-chat")
-		browser.waitFor("HTMX return to Chat focus", `location.pathname+':'+(document.activeElement&&document.activeElement.id)`, "/chat:message-input")
+		browser.click(`[data-nav-base="/chat"]`)
+		browser.waitFor("sidebar HTMX return to Chat focus", `location.pathname+':'+(document.activeElement&&document.activeElement.id)`, "/chat:message-input")
 		browser.typeText("return chat")
 		browser.waitFor("native returned Chat typing with restored draft", `document.getElementById('message-input').value`, "direct chatreturn chat")
 
