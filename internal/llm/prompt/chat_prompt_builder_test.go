@@ -73,6 +73,9 @@ func TestApplyChatActionToolModeRequiresStructuredClarificationForProposedWork(t
 		"not authorization to create or run a task",
 		"explicit task-creation choice",
 		"MUST call request_user_input instead of writing the questions as ordinary assistant prose",
+		"This rule still applies after memory, file, search, or other read-only tool calls",
+		"replace that response with a request_user_input tool call",
+		`Never write "Should I create a task?"`,
 		"latest instruction explicitly requests task creation",
 	} {
 		if !strings.Contains(prompt, want) {

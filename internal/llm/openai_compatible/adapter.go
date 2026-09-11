@@ -375,10 +375,10 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	client.SetCompletionsHistory(history)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
+	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 	if req.ChatMode == models.ChatModeOrchestrate {
 		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
 	}
-	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 
 	attachments, err := convertAttachments(req.Attachments)
 	if err != nil {
