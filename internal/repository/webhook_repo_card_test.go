@@ -75,6 +75,42 @@ func TestWebhookRepo_ListCardsByProjectUsesCompactOrderedIndex(t *testing.T) {
 	}
 }
 
+func TestWebhookRepo_ListCardsByProjectUsesSQLiteNoCaseOrderingForUnicodeNames(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewWebhookRepo(db)
+	project := createWebhookTestProject(t, NewProjectRepo(db))
+	for _, name := range []string{"Zulu webhook", "Äz webhook", "äa webhook", "Alpha webhook"} {
+		if err := repo.Create(context.Background(), &models.WebhookEndpoint{ProjectID: project.ID, Name: name, Enabled: true, DefaultPriority: 1}); err != nil {
+			t.Fatalf("create webhook %q: %v", name, err)
+		}
+	}
+
+	for _, test := range []struct {
+		name string
+		sort string
+		want []string
+	}{
+		{name: "ascending", sort: "name_asc", want: []string{"Alpha webhook", "Zulu webhook", "Äz webhook", "äa webhook"}},
+		{name: "descending", sort: "name_desc", want: []string{"äa webhook", "Äz webhook", "Zulu webhook", "Alpha webhook"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var got []string
+			for offset := 0; offset < 4; offset += 2 {
+				cards, err := repo.ListCardsByProjectPageFiltered(context.Background(), project.ID, 2, offset, WebhookCardFilter{Sort: test.sort})
+				if err != nil {
+					t.Fatalf("ListCardsByProjectPageFiltered offset %d: %v", offset, err)
+				}
+				for _, card := range cards {
+					got = append(got, card.Name)
+				}
+			}
+			if fmt.Sprint(got) != fmt.Sprint(test.want) {
+				t.Fatalf("names = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func BenchmarkWebhookSettingsListCards200(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewWebhookRepo(db)

@@ -5392,6 +5392,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							return kind + (card.getAttribute('data-webhook-id') || '');
 						}
 
+						function foldASCIICardSortName(value) {
+							return (value || '').replace(/[A-Z]/g, function(char) {
+								return String.fromCharCode(char.charCodeAt(0) + 32);
+							});
+						}
+
+						function compareCardSortText(left, right) {
+							if (left === right) return 0;
+							var leftIndex = 0;
+							var rightIndex = 0;
+							while (leftIndex < left.length && rightIndex < right.length) {
+								var leftPoint = left.codePointAt(leftIndex);
+								var rightPoint = right.codePointAt(rightIndex);
+								if (leftPoint !== rightPoint) return leftPoint < rightPoint ? -1 : 1;
+								leftIndex += leftPoint > 0xffff ? 2 : 1;
+								rightIndex += rightPoint > 0xffff ? 2 : 1;
+							}
+							return leftIndex < left.length ? 1 : -1;
+						}
+
 						function sortLoadedCardsByName(state) {
 							if (!state.root.hasAttribute('data-card-loaded-name-sort')) return;
 							var cards = Array.prototype.slice.call(state.list.querySelectorAll('[data-card-sort-name]'));
@@ -5401,18 +5421,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var sortControl = state.root.querySelector('[data-card-sort]');
 							var descending = sortControl && sortControl.value === 'name_desc';
 							cards.sort(function(left, right) {
-								var leftName = (left.getAttribute('data-card-sort-name') || '').toLocaleLowerCase();
-								var rightName = (right.getAttribute('data-card-sort-name') || '').toLocaleLowerCase();
-								var result = leftName < rightName ? -1 : (leftName > rightName ? 1 : 0);
-								if (!result) {
-									var leftOriginal = left.getAttribute('data-card-sort-name') || '';
-									var rightOriginal = right.getAttribute('data-card-sort-name') || '';
-									result = leftOriginal < rightOriginal ? -1 : (leftOriginal > rightOriginal ? 1 : 0);
-								}
+								var leftOriginal = left.getAttribute('data-card-sort-name') || '';
+								var rightOriginal = right.getAttribute('data-card-sort-name') || '';
+								var result = compareCardSortText(foldASCIICardSortName(leftOriginal), foldASCIICardSortName(rightOriginal));
+								if (!result) result = compareCardSortText(leftOriginal, rightOriginal);
 								if (!result) {
 									var leftIdentity = loadedCardSortIdentity(left);
 									var rightIdentity = loadedCardSortIdentity(right);
-									result = leftIdentity < rightIdentity ? -1 : (leftIdentity > rightIdentity ? 1 : 0);
+									result = compareCardSortText(leftIdentity, rightIdentity);
 								}
 								return descending ? -result : result;
 							});
