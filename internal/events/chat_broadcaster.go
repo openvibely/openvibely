@@ -18,6 +18,8 @@ const (
 	ChatThreadInputCancelled ChatEventType = "chat_thread_input_cancelled"
 	// ChatUserInputRequested is sent when a runtime tool call is waiting for a Chat-page answer.
 	ChatUserInputRequested ChatEventType = "chat_user_input_requested"
+	// ChatUserInputResolved is sent when a Chat-page answer resolves a runtime tool call.
+	ChatUserInputResolved ChatEventType = "chat_user_input_resolved"
 )
 
 // ChatEvent represents a chat event for real-time updates
@@ -41,8 +43,16 @@ type ChatEvent struct {
 
 type ChatInputRequestEvent struct {
 	ID        string                     `json:"id"`
+	ExecID    string                     `json:"exec_id,omitempty"`
 	ExpiresAt string                     `json:"expires_at,omitempty"`
 	Questions []ChatInputRequestQuestion `json:"questions"`
+	Answers   []ChatInputRequestAnswer   `json:"answers,omitempty"`
+	Completed bool                       `json:"completed"`
+}
+
+type ChatInputRequestAnswer struct {
+	QuestionID string `json:"question_id"`
+	Label      string `json:"label"`
 }
 
 type ChatInputRequestQuestion struct {

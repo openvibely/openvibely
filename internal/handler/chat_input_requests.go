@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -33,8 +34,9 @@ type requestUserInputToolInput struct {
 }
 
 type chatInputRequestAnswer struct {
-	QuestionID string `json:"question_id"`
-	Label      string `json:"label"`
+	QuestionID   string `json:"question_id"`
+	Label        string `json:"label,omitempty"`
+	CustomAnswer string `json:"custom_answer,omitempty"`
 }
 
 type chatInputRequestAnswerPayload struct {
@@ -53,6 +55,8 @@ type chatInputRequest struct {
 	ProjectID string
 	ExecID    string
 	Questions []chatInputRequestQuestion
+	Answers   []chatInputRequestAnswer
+	CreatedAt time.Time
 	ExpiresAt time.Time
 	answerCh  chan []chatInputRequestAnswer
 	resolved  bool
@@ -70,16 +74,18 @@ func (b *chatInputRequestBroker) create(projectID, execID string, questions []ch
 	if id == "" {
 		return nil, fmt.Errorf("failed to generate input request id")
 	}
+	now := b.now()
 	req := &chatInputRequest{
 		ID:        id,
 		ProjectID: strings.TrimSpace(projectID),
 		ExecID:    strings.TrimSpace(execID),
 		Questions: cloneChatInputQuestions(questions),
-		ExpiresAt: b.now().Add(chatInputRequestTTL),
+		CreatedAt: now,
+		ExpiresAt: now.Add(chatInputRequestTTL),
 		answerCh:  make(chan []chatInputRequestAnswer, 1),
 	}
 	b.mu.Lock()
-	b.cleanupLocked(b.now())
+	b.cleanupLocked(now)
 	b.requests[id] = req
 	b.mu.Unlock()
 	return req, nil
@@ -107,31 +113,48 @@ func (b *chatInputRequestBroker) wait(ctx context.Context, id string) ([]chatInp
 	}
 }
 
-func (b *chatInputRequestBroker) resolve(id, projectID string, answers []chatInputRequestAnswer) error {
+func (b *chatInputRequestBroker) resolve(id, projectID string, answers []chatInputRequestAnswer) (*chatInputRequest, error) {
 	if b == nil {
-		return echo.NewHTTPError(http.StatusGone, "input request broker unavailable")
+		return nil, echo.NewHTTPError(http.StatusGone, "input request broker unavailable")
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.cleanupLocked(b.now())
 	req := b.requests[strings.TrimSpace(id)]
 	if req == nil {
-		return echo.NewHTTPError(http.StatusGone, "input request is missing, expired, or already resolved")
+		return nil, echo.NewHTTPError(http.StatusGone, "input request is missing, expired, or already resolved")
 	}
 	if req.resolved {
-		return echo.NewHTTPError(http.StatusConflict, "input request already resolved")
+		return nil, echo.NewHTTPError(http.StatusConflict, "input request already resolved")
 	}
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(projectID) != req.ProjectID {
-		return echo.NewHTTPError(http.StatusForbidden, "input request does not belong to this project")
+		return nil, echo.NewHTTPError(http.StatusForbidden, "input request does not belong to this project")
 	}
 	if err := validateChatInputAnswers(req.Questions, answers); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	req.resolved = true
-	delete(b.requests, req.ID)
-	req.answerCh <- cloneChatInputAnswers(answers)
+	req.Answers = cloneChatInputAnswers(answers)
+	req.answerCh <- cloneChatInputAnswers(req.Answers)
 	close(req.answerCh)
-	return nil
+	return cloneChatInputRequest(req), nil
+}
+
+func (b *chatInputRequestBroker) listProject(projectID string) []*chatInputRequest {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.cleanupLocked(b.now())
+	requests := make([]*chatInputRequest, 0)
+	for _, req := range b.requests {
+		if req != nil && req.ProjectID == strings.TrimSpace(projectID) {
+			requests = append(requests, cloneChatInputRequest(req))
+		}
+	}
+	sort.Slice(requests, func(i, j int) bool { return requests[i].CreatedAt.Before(requests[j].CreatedAt) })
+	return requests
 }
 
 func (b *chatInputRequestBroker) expire(id string) {
@@ -146,7 +169,7 @@ func (b *chatInputRequestBroker) expire(id string) {
 
 func (b *chatInputRequestBroker) cleanupLocked(now time.Time) {
 	for id, req := range b.requests {
-		if req == nil || req.resolved || !now.Before(req.ExpiresAt) {
+		if req == nil || !now.Before(req.ExpiresAt) {
 			delete(b.requests, id)
 		}
 	}
@@ -187,6 +210,7 @@ func (h *Handler) executeRequestUserInputTool(ctx context.Context, params stream
 		ExecID:    params.ExecID,
 		InputRequest: &events.ChatInputRequestEvent{
 			ID:        pending.ID,
+			ExecID:    pending.ExecID,
 			ExpiresAt: pending.ExpiresAt.UTC().Format(time.RFC3339),
 			Questions: chatInputQuestionsForEvent(pending.Questions),
 		},
@@ -211,7 +235,7 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 		}
 	} else {
 		payload.ProjectID = c.FormValue("project_id")
-		payload.Answers = []chatInputRequestAnswer{{QuestionID: c.FormValue("question_id"), Label: c.FormValue("label")}}
+		payload.Answers = []chatInputRequestAnswer{{QuestionID: c.FormValue("question_id"), Label: c.FormValue("label"), CustomAnswer: c.FormValue("custom_answer")}}
 	}
 	if h.projectRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "project repository unavailable")
@@ -224,10 +248,66 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 	if project == nil {
 		return echo.NewHTTPError(http.StatusForbidden, "project not found")
 	}
-	if err := h.chatInputRequests.resolve(id, projectID, payload.Answers); err != nil {
+	resolved, err := h.chatInputRequests.resolve(id, projectID, payload.Answers)
+	if err != nil {
 		return err
 	}
+	if h.chatBroadcaster != nil {
+		h.chatBroadcaster.Publish(events.ChatEvent{
+			Type:         events.ChatUserInputResolved,
+			ProjectID:    projectID,
+			ExecID:       resolved.ExecID,
+			InputRequest: chatInputRequestForEvent(resolved),
+		})
+	}
 	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) ChatInputRequests(c echo.Context) error {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+	if h.projectRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "project repository unavailable")
+	}
+	project, err := h.projectRepo.GetByID(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return echo.NewHTTPError(http.StatusForbidden, "project not found")
+	}
+	requests := h.chatInputRequests.listProject(projectID)
+	items := make([]*events.ChatInputRequestEvent, 0, len(requests))
+	for _, req := range requests {
+		items = append(items, chatInputRequestForEvent(req))
+	}
+	return c.JSON(http.StatusOK, map[string]any{"input_requests": items})
+}
+
+func chatInputRequestForEvent(req *chatInputRequest) *events.ChatInputRequestEvent {
+	if req == nil {
+		return nil
+	}
+	answers := make([]events.ChatInputRequestAnswer, 0, len(req.Answers))
+	for _, answer := range req.Answers {
+		answers = append(answers, events.ChatInputRequestAnswer{QuestionID: answer.QuestionID, Label: answer.Label})
+	}
+	return &events.ChatInputRequestEvent{
+		ID: req.ID, ExecID: req.ExecID, ExpiresAt: req.ExpiresAt.UTC().Format(time.RFC3339),
+		Questions: chatInputQuestionsForEvent(req.Questions), Answers: answers, Completed: req.resolved,
+	}
+}
+
+func cloneChatInputRequest(req *chatInputRequest) *chatInputRequest {
+	if req == nil {
+		return nil
+	}
+	clone := *req
+	clone.Questions = cloneChatInputQuestions(req.Questions)
+	clone.Answers = cloneChatInputAnswers(req.Answers)
+	return &clone
 }
 
 func validateChatInputQuestions(questions []chatInputRequestQuestion) error {
@@ -284,8 +364,15 @@ func validateChatInputAnswers(questions []chatInputRequestQuestion, answers []ch
 	for _, ans := range answers {
 		qid := strings.TrimSpace(ans.QuestionID)
 		label := strings.TrimSpace(ans.Label)
-		if qid == "" || label == "" {
-			return fmt.Errorf("answer question_id and label are required")
+		customAnswer := strings.TrimSpace(ans.CustomAnswer)
+		if qid == "" || (label == "" && customAnswer == "") {
+			return fmt.Errorf("answer question_id and either label or custom_answer are required")
+		}
+		if label != "" && customAnswer != "" {
+			return fmt.Errorf("answer for question %q must use either label or custom_answer, not both", qid)
+		}
+		if len(customAnswer) > 2000 {
+			return fmt.Errorf("custom answer for question %q is too long", qid)
 		}
 		labels := allowed[qid]
 		if labels == nil {
@@ -295,7 +382,7 @@ func validateChatInputAnswers(questions []chatInputRequestQuestion, answers []ch
 			return fmt.Errorf("duplicate answer for question %q", qid)
 		}
 		seen[qid] = true
-		if !labels[label] {
+		if customAnswer == "" && !labels[label] {
 			return fmt.Errorf("invalid option %q for question %q", label, qid)
 		}
 	}
@@ -317,7 +404,11 @@ func cloneChatInputQuestions(in []chatInputRequestQuestion) []chatInputRequestQu
 func cloneChatInputAnswers(in []chatInputRequestAnswer) []chatInputRequestAnswer {
 	out := make([]chatInputRequestAnswer, len(in))
 	for i, ans := range in {
-		out[i] = chatInputRequestAnswer{QuestionID: strings.TrimSpace(ans.QuestionID), Label: strings.TrimSpace(ans.Label)}
+		label := strings.TrimSpace(ans.Label)
+		if customAnswer := strings.TrimSpace(ans.CustomAnswer); customAnswer != "" {
+			label = customAnswer
+		}
+		out[i] = chatInputRequestAnswer{QuestionID: strings.TrimSpace(ans.QuestionID), Label: label}
 	}
 	return out
 }

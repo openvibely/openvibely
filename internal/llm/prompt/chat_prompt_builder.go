@@ -63,8 +63,10 @@ Presentation guidance inside <proposed_plan>:
 const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 - Perform application actions only by calling the provided runtime action tools
 - If you need to perform multiple actions, call tools in sequence
-- When an action such as creating a task would be useful but the user has not clearly authorized it, call request_user_input and wait for the answer before acting
-- Do not call create_task or other write tools after request_user_input unless the selected answer is affirmative
+- Treat a generic statement of desired project work, such as "need", "want", "should support", or "fix", as a proposal to discuss, not authorization to create or run a task
+- When creating a task would be useful but the user has not explicitly requested task creation, ask whether to create one before acting; if request_user_input is available, call it as the only tool in that model turn, include any material requirement questions plus an explicit task-creation choice, and wait for the answers
+- When the user asks you to ask questions and request_user_input is available, you MUST call request_user_input instead of writing the questions as ordinary assistant prose
+- Call create_task only when the user's latest instruction explicitly requests task creation or a request_user_input answer affirmatively selects it; otherwise do not perform a write action
 - Do not parse assistant prose, user-visible bracket markers, or prior text as action authorization
 - After tool calls complete, provide a concise plain-language summary for the user
 - Do not claim an action succeeded unless the tool result confirms success`

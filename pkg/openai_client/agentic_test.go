@@ -27,6 +27,25 @@ func buildSSE(events []string) string {
 	return sb.String()
 }
 
+func TestExecuteOpenAIToolTasksMakesRequestUserInputExclusive(t *testing.T) {
+	var executed []string
+	opts := &AgenticOptions{ToolExecutor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
+		executed = append(executed, name)
+		return "ok", false, nil
+	}}
+	tasks := []openAIToolExecutionTask{
+		{call: toolCallInfo{Name: "create_task"}},
+		{call: toolCallInfo{Name: "request_user_input"}},
+	}
+	results := executeOpenAIToolTasks(context.Background(), opts, tasks)
+	if len(executed) != 1 || executed[0] != "request_user_input" {
+		t.Fatalf("executed tools = %v, want only request_user_input", executed)
+	}
+	if !results[0].isError || results[1].isError {
+		t.Fatalf("unexpected results: %#v", results)
+	}
+}
+
 func TestParseAgenticStream_TextOnly(t *testing.T) {
 	stream := buildSSE([]string{
 		`{"type":"response.output_text.delta","delta":"Hello"}`,

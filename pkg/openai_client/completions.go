@@ -256,8 +256,11 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			break
 		}
 
+		// request_user_input must be the only executable call in a model turn. Its
+		// answer cannot authorize calls whose arguments were produced before it.
+		requestInputIndex := exclusiveCompletionsRequestUserInput(turnResult.toolCalls)
 		// Execute tools and add results
-		for _, tc := range turnResult.toolCalls {
+		for toolIndex, tc := range turnResult.toolCalls {
 			inputJSON := json.RawMessage(tc.Function.Arguments)
 			if opts.OnToolUse != nil {
 				opts.OnToolUse(tc.Function.Name, inputJSON)
@@ -267,7 +270,10 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			output := ""
 			isError := false
 			var err error
-			if opts.ToolFilter != nil && !opts.ToolFilter(tc.Function.Name) {
+			if requestInputIndex >= 0 && toolIndex != requestInputIndex {
+				isError = true
+				output = "tool call rejected: request_user_input must complete in its own model turn"
+			} else if opts.ToolFilter != nil && !opts.ToolFilter(tc.Function.Name) {
 				isError = true
 				output = fmt.Sprintf("tool %s is not allowed by this agent", tc.Function.Name)
 			} else if opts.ToolExecutor != nil {
@@ -322,6 +328,18 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	c.lastCompletionsTranscript = cloneCompletionsHistory(currentTranscript)
 
 	return result, nil
+}
+
+func exclusiveCompletionsRequestUserInput(calls []CompletionsToolCall) int {
+	if len(calls) < 2 {
+		return -1
+	}
+	for i, call := range calls {
+		if call.Function.Name == "request_user_input" {
+			return i
+		}
+	}
+	return -1
 }
 
 func mergeCompletionsExtraBody(payload map[string]interface{}, extra map[string]interface{}) {

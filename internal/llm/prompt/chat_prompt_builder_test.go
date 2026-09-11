@@ -66,6 +66,21 @@ func TestApplyChatActionToolModeReportsConcreteCapability(t *testing.T) {
 	}
 }
 
+func TestApplyChatActionToolModeRequiresStructuredClarificationForProposedWork(t *testing.T) {
+	prompt := ApplyChatActionToolMode("Chat assistant", []string{"request_user_input", "create_task"})
+	for _, want := range []string{
+		"generic statement of desired project work",
+		"not authorization to create or run a task",
+		"explicit task-creation choice",
+		"MUST call request_user_input instead of writing the questions as ordinary assistant prose",
+		"latest instruction explicitly requests task creation",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("chat action prompt missing proposed-work clarification rule %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildChatSystemPromptModes(t *testing.T) {
 	followup := BuildChatSystemPrompt(true, models.ChatModeOrchestrate, "selected context", false)
 	if strings.Contains(followup, "task management assistant") || !strings.Contains(followup, "coding agent") || !strings.Contains(followup, "selected context") {

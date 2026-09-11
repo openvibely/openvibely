@@ -177,7 +177,7 @@ var registry = []ActionDef{
 	// --- Chat domain (RW in orchestrate) ---
 	{
 		Name:               "request_user_input",
-		Description:        "Ask the web Chat user 1 to 3 plain-text questions with 2 to 3 clickable options each, then wait for their selected answers before continuing this same model run. Use this before helpful actions such as create_task when the user has not clearly authorized the action; do not call create_task until the answer is affirmative.",
+		Description:        "Ask the web Chat user 1 to 3 plain-text questions with 2 to 3 clickable options each, then wait for their selected answers before continuing this same model run. This must be the only tool call in the current model turn. When the user asks to be asked questions, use this tool instead of ordinary assistant prose. When generic wording such as need, want, should support, or fix describes work that would benefit from a task but does not explicitly request task creation, use this tool to ask material requirement questions and whether to create the task; do not call create_task until the answer is affirmative.",
 		Domain:             DomainChat,
 		Access:             AccessWrite,
 		Sensitivity:        SensitivityNormal,

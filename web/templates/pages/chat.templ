@@ -1216,6 +1216,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var chatContainer = document.getElementById('chat-page-root');
 							if (!chatContainer) return;
 							var pid = chatContainer.getAttribute('data-project-id');
+							refreshChatInputRequests();
 							// Pending rows have their own authoritative compact fragment and never
 							// require remounting transcript bubbles or the composer.
 							if (pid && document.getElementById('pending-thread-inputs') && typeof htmx !== 'undefined') {
@@ -1275,7 +1276,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						function renderChatInputRequest(data) {
 							var request = data.input_request || {};
 							var requestId = request.id || '';
-							if (!requestId || document.getElementById('chat-input-request-' + requestId)) return;
+							if (!requestId) return;
+							var existing = document.getElementById('chat-input-request-' + requestId);
+							if (existing) {
+								if (request.completed) completeChatInputRequest(existing, request);
+								return;
+							}
 							var questions = Array.isArray(request.questions) ? request.questions : [];
 							if (!questions.length) return;
 							var chatMessages = document.getElementById('chat-messages');
@@ -1295,7 +1301,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							title.textContent = 'Input requested';
 							var hint = document.createElement('p');
 							hint.className = 'text-sm opacity-70';
-							hint.textContent = 'Choose an option to continue this assistant response. In-memory requests expire after restart or timeout.';
+							hint.textContent = 'Answer each question, then submit to continue this assistant response.';
 							var status = document.createElement('div');
 							status.className = 'text-sm font-medium hidden';
 							status.setAttribute('role', 'status');
@@ -1306,23 +1312,28 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var qid = question && question.id ? String(question.id) : '';
 								if (!qid) return;
 								var fieldset = document.createElement('fieldset');
-								fieldset.className = 'space-y-2';
+								fieldset.className = index === 0 ? 'space-y-2' : 'space-y-2 hidden';
 								fieldset.setAttribute('data-chat-input-question-id', qid);
+								fieldset.setAttribute('data-chat-input-question-index', String(index));
 								var legend = document.createElement('legend');
 								legend.className = 'font-semibold text-sm';
 								legend.textContent = question.question || ('Question ' + (index + 1));
 								fieldset.appendChild(legend);
 								var options = Array.isArray(question.options) ? question.options : [];
-								options.forEach(function(option) {
+								options.forEach(function(option, optionIndex) {
 									var label = option && option.label ? String(option.label) : '';
 									if (!label) return;
 									var button = document.createElement('button');
 									button.type = 'button';
-									button.className = 'btn btn-outline justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+									button.className = 'btn ' + (optionIndex === 0 ? 'btn-primary' : 'btn-outline') + ' justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
 									button.setAttribute('data-option-label', label);
-									button.setAttribute('aria-pressed', 'false');
+									button.setAttribute('aria-pressed', optionIndex === 0 ? 'true' : 'false');
+									if (optionIndex === 0) {
+										fieldset.setAttribute('data-selected-kind', 'option');
+										fieldset.setAttribute('data-selected-label', label);
+									}
 									var wrap = document.createElement('span');
 									wrap.className = 'flex min-w-0 flex-col items-start';
 									var labelSpan = document.createElement('span');
@@ -1336,59 +1347,243 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									button.appendChild(wrap);
 									fieldset.appendChild(button);
 								});
+								var customButton = document.createElement('button');
+								customButton.type = 'button';
+								customButton.className = 'btn btn-outline justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+								customButton.setAttribute('data-chat-input-option', 'true');
+								customButton.setAttribute('data-chat-input-custom-option', 'true');
+								customButton.setAttribute('data-question-id', qid);
+								customButton.setAttribute('aria-pressed', 'false');
+								customButton.textContent = 'Something else';
+								var customWrap = document.createElement('div');
+								customWrap.className = 'hidden space-y-2 rounded-lg border border-base-300/70 p-3';
+								customWrap.setAttribute('data-chat-input-custom-wrap', 'true');
+								var customInput = document.createElement('textarea');
+								customInput.className = 'textarea textarea-bordered min-h-20 w-full';
+								customInput.maxLength = 2000;
+								customInput.placeholder = 'Type your answer';
+								customInput.setAttribute('data-chat-input-custom-answer', 'true');
+								customInput.setAttribute('aria-label', 'Custom answer');
+								customWrap.appendChild(customInput);
+								fieldset.appendChild(customButton);
+								fieldset.appendChild(customWrap);
 								body.appendChild(fieldset);
 							});
+							var navigation = document.createElement('div');
+							navigation.className = 'flex items-center justify-between gap-3 text-sm text-base-content/60';
+							navigation.setAttribute('data-chat-input-navigation', 'true');
+							var previous = document.createElement('button');
+							previous.type = 'button';
+							previous.className = 'btn btn-ghost btn-sm';
+							previous.setAttribute('data-chat-input-nav', 'previous');
+							previous.setAttribute('aria-label', 'Previous question');
+							previous.textContent = 'Previous';
+							var position = document.createElement('span');
+							position.setAttribute('data-chat-input-position', 'true');
+							var next = document.createElement('button');
+							next.type = 'button';
+							next.className = 'btn btn-primary btn-sm';
+							next.setAttribute('data-chat-input-nav', 'next');
+							next.setAttribute('aria-label', 'Next question');
+							navigation.appendChild(previous);
+							navigation.appendChild(position);
+							navigation.appendChild(next);
+							body.appendChild(navigation);
 							body.appendChild(status);
 							card.appendChild(body);
-							chatMessages.appendChild(card);
+							var execId = data.exec_id || request.exec_id || '';
+							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
+							(executionPair || chatMessages).appendChild(card);
+							showChatInputQuestion(card, 0);
+							if (request.completed) completeChatInputRequest(card, request);
 							var tracker = window._chatPageTracker;
 							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) window.chatAutoScroll.scrollToBottom(chatMessages, true);
 						}
+
+						function showChatInputQuestion(card, index) {
+							if (!card) return;
+							var groups = Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-question-index]'));
+							if (!groups.length) return;
+							var nextIndex = Math.max(0, Math.min(Number(index) || 0, groups.length - 1));
+							groups.forEach(function(group, groupIndex) {
+								group.classList.toggle('hidden', groupIndex !== nextIndex);
+							});
+							card.setAttribute('data-current-question-index', String(nextIndex));
+							var position = card.querySelector('[data-chat-input-position]');
+							if (position) position.textContent = (nextIndex + 1) + ' of ' + groups.length;
+							var previous = card.querySelector('[data-chat-input-nav="previous"]');
+							var next = card.querySelector('[data-chat-input-nav="next"], [data-chat-input-nav="submit"]');
+							if (previous) {
+								previous.disabled = nextIndex === 0;
+								previous.classList.toggle('invisible', groups.length === 1);
+							}
+							if (next) {
+								var isLast = nextIndex === groups.length - 1;
+								next.textContent = isLast ? 'Submit' : 'Next';
+								next.setAttribute('data-chat-input-nav', isLast ? 'submit' : 'next');
+								next.setAttribute('aria-label', isLast ? 'Submit answers' : 'Next question');
+									next.disabled = isLast ? !chatInputRequestIsComplete(card) : false;
+							}
+							var legend = groups[nextIndex].querySelector('legend');
+							if (legend) legend.focus && legend.focus();
+						}
+
+						function navigateChatInputRequest(button) {
+							var card = button ? button.closest('[data-chat-input-request-id]') : null;
+							if (!card || card.getAttribute('data-completed') === 'true') return;
+							var action = button.getAttribute('data-chat-input-nav') || '';
+							if (action === 'submit') {
+								submitChatInputRequest(button);
+								return;
+							}
+							var current = Number(card.getAttribute('data-current-question-index') || 0);
+							showChatInputQuestion(card, current + (action === 'previous' ? -1 : 1));
+						}
+
+						function chatInputQuestionAnswer(group) {
+							if (!group) return null;
+							var questionID = group.getAttribute('data-chat-input-question-id') || '';
+							if (!questionID) return null;
+							if (group.getAttribute('data-selected-kind') === 'custom') {
+								var input = group.querySelector('[data-chat-input-custom-answer]');
+								var customAnswer = input ? String(input.value || '').trim() : '';
+								return customAnswer ? {question_id: questionID, custom_answer: customAnswer} : null;
+							}
+							var label = group.getAttribute('data-selected-label') || '';
+							return label ? {question_id: questionID, label: label} : null;
+						}
+
+						function chatInputRequestAnswers(card) {
+							var answers = [];
+							card.querySelectorAll('[data-chat-input-question-id]').forEach(function(group) {
+								var answer = chatInputQuestionAnswer(group);
+								if (answer) answers.push(answer);
+							});
+							return answers;
+						}
+
+						function chatInputRequestIsComplete(card) {
+							return chatInputRequestAnswers(card).length === card.querySelectorAll('[data-chat-input-question-id]').length;
+						}
+
+						function selectChatInputOption(button) {
+							if (!button || button.disabled) return;
+							var card = button.closest('[data-chat-input-request-id]');
+							var fieldset = button.closest('[data-chat-input-question-id]');
+							if (!card || !fieldset || card.getAttribute('data-completed') === 'true') return;
+							var isCustom = button.hasAttribute('data-chat-input-custom-option');
+							fieldset.setAttribute('data-selected-kind', isCustom ? 'custom' : 'option');
+							fieldset.setAttribute('data-selected-label', isCustom ? '' : (button.getAttribute('data-option-label') || ''));
+							fieldset.querySelectorAll('button[data-chat-input-option]').forEach(function(btn) {
+								var selected = btn === button;
+								btn.classList.toggle('btn-outline', !selected);
+								btn.classList.toggle('btn-primary', selected);
+								btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+							});
+							var customWrap = fieldset.querySelector('[data-chat-input-custom-wrap]');
+							if (customWrap) customWrap.classList.toggle('hidden', !isCustom);
+							var status = card.querySelector('[role="status"]');
+							if (status) status.classList.add('hidden');
+							showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
+							if (isCustom) {
+								var customInput = fieldset.querySelector('[data-chat-input-custom-answer]');
+								if (customInput) customInput.focus();
+							} else {
+								var currentIndex = Number(card.getAttribute('data-current-question-index') || 0);
+								var questionCount = card.querySelectorAll('[data-chat-input-question-index]').length;
+								if (currentIndex < questionCount - 1) {
+									window.setTimeout(function() {
+										if (card.getAttribute('data-current-question-index') === String(currentIndex)) showChatInputQuestion(card, currentIndex + 1);
+									}, 300);
+								}
+							}
+						}
+
+						function completeChatInputRequest(card, request) {
+							if (!card || card.getAttribute('data-completed') === 'true') return;
+							var questions = Array.isArray(request.questions) ? request.questions : [];
+							var answers = Array.isArray(request.answers) ? request.answers : [];
+							var answerByQuestion = {};
+							answers.forEach(function(answer) {
+								if (answer && answer.question_id) answerByQuestion[String(answer.question_id)] = String(answer.label || answer.custom_answer || '');
+							});
+							var details = document.createElement('details');
+							details.className = 'rounded-lg border border-base-300/70 bg-base-100 px-3 py-2 text-sm';
+							var summary = document.createElement('summary');
+							summary.className = 'cursor-pointer select-none text-base-content/70';
+							summary.textContent = 'Asked ' + questions.length + (questions.length === 1 ? ' question' : ' questions');
+							details.appendChild(summary);
+							var answerList = document.createElement('div');
+							answerList.className = 'mt-3 space-y-3';
+							questions.forEach(function(question) {
+								var item = document.createElement('div');
+								item.className = 'space-y-1';
+								var questionText = document.createElement('div');
+								questionText.className = 'font-medium whitespace-pre-wrap';
+								questionText.textContent = question.question || '';
+								var answerText = document.createElement('div');
+								answerText.className = 'text-base-content/60 whitespace-pre-wrap';
+								answerText.textContent = answerByQuestion[String(question.id || '')] || 'No answer provided';
+								item.appendChild(questionText);
+								item.appendChild(answerText);
+								answerList.appendChild(item);
+							});
+							details.appendChild(answerList);
+							card.className = 'chat-input-request-card';
+							card.setAttribute('data-completed', 'true');
+							card.removeAttribute('data-submitted');
+							card.removeAttribute('aria-labelledby');
+							card.replaceChildren(details);
+						}
+
+						function refreshChatInputRequests() {
+							var root = document.getElementById('chat-page-root');
+							var pid = root ? root.getAttribute('data-project-id') : projectId;
+							if (!pid || typeof fetch === 'undefined') return Promise.resolve();
+							return fetch('/chat/input-requests?project_id=' + encodeURIComponent(pid), {headers: {'Accept': 'application/json'}}).then(function(resp) {
+								if (!resp.ok) throw new Error('HTTP ' + resp.status);
+								return resp.json();
+							}).then(function(payload) {
+								var requests = Array.isArray(payload.input_requests) ? payload.input_requests : [];
+								var activeRequestIDs = {};
+								requests.forEach(function(request) {
+									if (request && request.id) activeRequestIDs[String(request.id)] = true;
+									renderChatInputRequest({input_request: request});
+								});
+								document.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
+									var id = card.getAttribute('data-chat-input-request-id') || '';
+									if (card.getAttribute('data-completed') !== 'true' && !activeRequestIDs[id]) card.remove();
+								});
+							}).catch(function(err) {
+								console.error('[chat] input request reconciliation failed:', err);
+							});
+						}
+						window.refreshChatInputRequests = refreshChatInputRequests;
 
 						function submitChatInputRequest(button) {
 							if (!button || button.disabled) return;
 							var card = button.closest('[data-chat-input-request-id]');
 							if (!card || card.getAttribute('data-submitted') === 'true') return;
-							var qid = button.getAttribute('data-question-id') || '';
-							var label = button.getAttribute('data-option-label') || '';
-							var fieldset = button.closest('[data-chat-input-question-id]');
-							if (!fieldset) return;
-							fieldset.setAttribute('data-selected-label', label);
-							fieldset.querySelectorAll('button[data-chat-input-option]').forEach(function(btn) {
-								btn.classList.add('btn-outline');
-								btn.classList.remove('btn-primary');
-								btn.setAttribute('aria-pressed', 'false');
-							});
-							button.classList.remove('btn-outline');
-							button.classList.add('btn-primary');
-							button.setAttribute('aria-pressed', 'true');
 							var status = card.querySelector('[role="status"]');
-							var answers = [];
-							var complete = true;
-							card.querySelectorAll('[data-chat-input-question-id]').forEach(function(group) {
-								var selected = group.getAttribute('data-selected-label') || '';
-								var questionID = group.getAttribute('data-chat-input-question-id') || '';
-								if (!selected || !questionID) {
-									complete = false;
-									return;
-								}
-								answers.push({question_id: questionID, label: selected});
-							});
-							if (!complete) {
+							var answers = chatInputRequestAnswers(card);
+							if (!chatInputRequestIsComplete(card)) {
 								if (status) {
 									status.classList.remove('hidden', 'text-error');
-									status.textContent = 'Selected: ' + label + '. Answer the remaining question to continue.';
+									status.textContent = 'Answer every question before submitting.';
 								}
+								var groups = Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-question-index]'));
+								var nextUnanswered = groups.findIndex(function(group) { return !chatInputQuestionAnswer(group); });
+								if (nextUnanswered >= 0) showChatInputQuestion(card, nextUnanswered);
 								return;
 							}
 							var requestId = card.getAttribute('data-chat-input-request-id') || '';
 							var root = document.getElementById('chat-page-root');
 							var projectID = root ? root.getAttribute('data-project-id') : projectId;
 							card.setAttribute('data-submitted', 'true');
-							card.querySelectorAll('button[data-chat-input-option]').forEach(function(btn) { btn.disabled = true; });
+							card.querySelectorAll('button, textarea').forEach(function(control) { control.disabled = true; });
 							if (status) {
 								status.classList.remove('hidden', 'text-error');
-								status.textContent = 'Selected: ' + answers.map(function(ans) { return ans.label; }).join(', ');
+								status.textContent = 'Submitting answers…';
 							}
 							fetch('/chat/input-requests/' + encodeURIComponent(requestId) + '/answer', {
 								method: 'POST',
@@ -1396,9 +1591,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								body: JSON.stringify({project_id: projectID || '', answers: answers})
 							}).then(function(resp) {
 								if (!resp.ok) throw new Error('Unable to submit answer');
+								completeChatInputRequest(card, {questions: Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-question-id]')).map(function(group) {
+									return {id: group.getAttribute('data-chat-input-question-id') || '', question: (group.querySelector('legend') || {}).textContent || ''};
+								}), answers: answers});
 							}).catch(function(err) {
 								card.removeAttribute('data-submitted');
-								card.querySelectorAll('button[data-chat-input-option]').forEach(function(btn) { btn.disabled = false; });
+								card.querySelectorAll('button, textarea').forEach(function(control) { control.disabled = false; });
+								showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
 								if (status) {
 									status.classList.remove('hidden');
 									status.classList.add('text-error');
@@ -1419,6 +1618,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									}
 
 									if (eventType === 'chat_user_input_requested') {
+										renderChatInputRequest(data);
+										return;
+									}
+
+									if (eventType === 'chat_user_input_resolved') {
 										renderChatInputRequest(data);
 										return;
 									}
@@ -1653,6 +1857,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						swapTarget.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
+						refreshChatInputRequests();
 					}
 					if (swapTarget && swapTarget.id === 'main-content' && !swapTarget.querySelector('#chat-page-root')) {
 						window.removeEventListener('sse-chat-live-event', handleSharedChatLiveEvent);
@@ -1686,23 +1891,36 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 						if (!window._chatInputRequestClickBound) {
 							window._chatInputRequestClickBound = true;
-							document.body.addEventListener('click', function(event) {
-								var button = event.target && event.target.closest ? event.target.closest('button[data-chat-input-option]') : null;
-								if (!button) return;
-								event.preventDefault();
-								submitChatInputRequest(button);
+								document.body.addEventListener('click', function(event) {
+									var navigationButton = event.target && event.target.closest ? event.target.closest('button[data-chat-input-nav]') : null;
+									if (navigationButton) {
+										event.preventDefault();
+										navigateChatInputRequest(navigationButton);
+										return;
+									}
+									var button = event.target && event.target.closest ? event.target.closest('button[data-chat-input-option]') : null;
+									if (!button) return;
+									event.preventDefault();
+									selectChatInputOption(button);
+							});
+							document.body.addEventListener('input', function(event) {
+								var input = event.target && event.target.closest ? event.target.closest('[data-chat-input-custom-answer]') : null;
+								if (!input) return;
+								var card = input.closest('[data-chat-input-request-id]');
+								if (card) showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
 							});
 						}
 
 						window.addEventListener('sse-chat-live-event', handleSharedChatLiveEvent);
 						window.addEventListener('sse-live-connected', handleSharedLiveConnected);				document.body.addEventListener('htmx:afterSwap', handleChatAfterSwap);
 				document.body.addEventListener('htmx:beforeSwap', handleChatBeforeSwap);
-				window._chatLiveEventHandlers = {
+					window._chatLiveEventHandlers = {
 					chatEvent: handleSharedChatLiveEvent,
 					connected: handleSharedLiveConnected,
 					afterSwap: handleChatAfterSwap,
 					beforeSwap: handleChatBeforeSwap
-				};
+					};
+					refreshChatInputRequests();
 				window.restoreChatLiveEventHandlers = function() {
 					var handlers = window._chatLiveEventHandlers;
 					if (!handlers) return;
