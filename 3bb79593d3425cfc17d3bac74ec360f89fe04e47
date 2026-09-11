@@ -1,0 +1,11 @@
+Exact-HEAD validation evidence
+Commit: 3bb79593d3425cfc17d3bac74ec360f89fe04e47
+Delivery: non-force fast-forward published to upstream/main.
+Migration integration: project-scoped channel authorization migration is version 180 because upstream/main owns version 179.
+Focused: go test ./internal/handler ./internal/repository ./internal/database ./web/templates/components -run 'Test(ChannelAuthorized|TelegramAuth|SlackAuth|DiscordAuth|EmailAuth|Migration108|Migration180|ChannelAuth)' -count=1 (passed)
+Build: go build ./... (passed; macOS desktop linker emitted compatibility warnings only)
+Vet: go vet ./... (passed)
+Full tests: go test ./... -count=1 (passed)
+Formatting: gofmt -l across Go files changed by the two delivery commits (zero output)
+Diff: git diff --check HEAD^^ HEAD (passed)
+Assertions: HEAD unchanged at 3bb79593d3425cfc17d3bac74ec360f89fe04e47; worktree clean before and after validation; upstream/main resolved to the same commit after the fast-forward.
