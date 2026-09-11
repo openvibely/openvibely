@@ -203,11 +203,11 @@ func (h *Handler) executeListAutomationsTool(ctx context.Context, params streami
 		return "", err
 	}
 	projectID := strings.TrimSpace(params.ProjectID)
-	if override := strings.TrimSpace(req.ProjectID); override != "" {
-		projectID = override
-	}
 	if projectID == "" {
 		return "", fmt.Errorf("list_automations: no current project")
+	}
+	if requestedProjectID := strings.TrimSpace(req.ProjectID); requestedProjectID != "" && requestedProjectID != projectID {
+		return "", fmt.Errorf("project_id %q is outside the caller's authorized project context", requestedProjectID)
 	}
 	cards, err := h.automationGraphSvc.List(ctx, projectID)
 	if err != nil {
@@ -233,11 +233,11 @@ func (h *Handler) executeGetAutomationTool(ctx context.Context, params streaming
 		return "", fmt.Errorf("get_automation: automation_id is required")
 	}
 	projectID := strings.TrimSpace(params.ProjectID)
-	if override := strings.TrimSpace(req.ProjectID); override != "" {
-		projectID = override
-	}
 	if projectID == "" {
 		return "", fmt.Errorf("get_automation: no current project")
+	}
+	if requestedProjectID := strings.TrimSpace(req.ProjectID); requestedProjectID != "" && requestedProjectID != projectID {
+		return "", fmt.Errorf("project_id %q is outside the caller's authorized project context", requestedProjectID)
 	}
 	cards, err := h.automationGraphSvc.List(ctx, projectID)
 	if err != nil {

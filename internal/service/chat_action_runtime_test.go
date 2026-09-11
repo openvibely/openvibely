@@ -1201,6 +1201,16 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	automationID := saved.Definition.Automation.ID
 	currentRevision := CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC)
 	require.Positive(t, currentRevision)
+	runningNode := saved.Definition.Nodes[0]
+	_, _, err = automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context:        models.AutomationContext{ProjectID: project.ID},
+		Binding:        models.AutomationBinding{AutomationID: automationID, VersionID: saved.Definition.Version.ID, NodeID: runningNode.ID},
+		WorkItemKey:    "channel-summary:running",
+		ActivityKey:    "channel-summary:running",
+		ActivityType:   "test",
+		ActivityStatus: models.AutomationActivityRunning,
+	})
+	require.NoError(t, err)
 	_, err = db.Exec(`UPDATE automations SET template_revision = 0 WHERE id = ? AND project_id = ?`, automationID, project.ID)
 	require.NoError(t, err)
 
@@ -1252,6 +1262,14 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	require.NoError(t, err)
 	require.Contains(t, listOut, `"template_update_available":true`)
 	require.Contains(t, listOut, fmt.Sprintf(`"current_template_revision":%d`, currentRevision))
+	var listed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(listOut), &listed))
+	listedAutomations, _ := listed["automations"].([]any)
+	require.Len(t, listedAutomations, 1)
+	listedSummary, _ := listedAutomations[0].(map[string]any)
+	listedCounts, _ := listedSummary["counts"].(map[string]any)
+	require.Equal(t, float64(1), listedCounts["running"])
+	require.NotEqual(t, listedSummary["graph_node_count"], listedCounts["running"])
 	assertAutomationSummary(listOut, "automations")
 	getOut, err := handlers["get_automation"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
 	require.NoError(t, err)
