@@ -73,6 +73,12 @@ func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
 	return s.repo.List(ctx)
 }
 
+// ListWorkerCapacityProjects returns the compact project projection used to
+// construct Workers capacity rows. Full project callers must use List or GetByID.
+func (s *ProjectService) ListWorkerCapacityProjects(ctx context.Context) ([]models.ProjectWorkerCapacity, error) {
+	return s.repo.ListWorkerCapacityProjects(ctx)
+}
+
 // ListSelectorOptions returns a compact project projection (id, name,
 // is_default) for shared page-shell selector rendering and current-project
 // fallback. Callers that need full project records must use List or GetByID.

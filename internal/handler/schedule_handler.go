@@ -429,6 +429,32 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/")
 }
 
+func (h *Handler) buildProjectWorkerStats(ctx context.Context) []pages.ProjectWorkerStats {
+	projects, err := h.projectSvc.ListWorkerCapacityProjects(ctx)
+	if err != nil {
+		applog.Infof("[handler] project worker stats error listing worker capacity projects: %v", err)
+		return nil
+	}
+
+	pendingCounts, err := h.taskRepo.CountPendingByProject(ctx)
+	if err != nil {
+		applog.Infof("[handler] project worker stats error counting pending tasks: %v", err)
+		pendingCounts = make(map[string]int)
+	}
+
+	projectStats := make([]pages.ProjectWorkerStats, len(projects))
+	for i, p := range projects {
+		projectStats[i] = pages.ProjectWorkerStats{
+			ID:         p.ID,
+			Name:       p.Name,
+			Running:    h.workerSvc.ProjectRunning(p.ID),
+			QueueSize:  pendingCounts[p.ID],
+			MaxWorkers: p.MaxWorkers,
+		}
+	}
+	return projectStats
+}
+
 // buildModelWorkerStatsList returns per-model worker stats for configured model worker pools.
 func (h *Handler) buildModelWorkerStatsList(ctx context.Context) []pages.ModelWorkerStats {
 	agents, err := h.llmConfigRepo.ListWorkerCapacities(ctx)
@@ -451,35 +477,21 @@ func (h *Handler) buildModelWorkerStatsList(ctx context.Context) []pages.ModelWo
 
 func (h *Handler) WorkerSettings(c echo.Context) error {
 	isHTMX := isHTMX(c)
+	ctx := c.Request().Context()
 	applog.Infof("[handler] WorkerSettings requested htmx=%v", isHTMX)
-	maxWorkers, _ := h.workerRepo.GetMaxWorkers(c.Request().Context())
+	maxWorkers, _ := h.workerRepo.GetMaxWorkers(ctx)
 	queueSize := h.workerSvc.QueueSize()
 	runningWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 
-	projects, _ := h.projectSvc.List(c.Request().Context())
-
-	// Get pending task counts by project
-	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
-	if err != nil {
-		applog.Infof("[handler] WorkerSettings error counting pending tasks: %v", err)
-		pendingCounts = make(map[string]int) // fallback to empty map
+	var projects []models.Project
+	if !isHTMX {
+		projects, _ = h.projectSvc.ListSelectorOptions(ctx)
 	}
-
-	// Build per-project utilization
-	projectStats := make([]pages.ProjectWorkerStats, len(projects))
-	for i, p := range projects {
-		projectStats[i] = pages.ProjectWorkerStats{
-			ID:         p.ID,
-			Name:       p.Name,
-			Running:    h.workerSvc.ProjectRunning(p.ID),
-			QueueSize:  pendingCounts[p.ID],
-			MaxWorkers: p.MaxWorkers,
-		}
-	}
+	projectStats := h.buildProjectWorkerStats(ctx)
 
 	// Build per-model utilization
-	modelStats := h.buildModelWorkerStatsList(c.Request().Context())
+	modelStats := h.buildModelWorkerStatsList(ctx)
 
 	applog.Infof("[handler] WorkerSettings max_workers=%d running_workers=%d total_running=%d queue_size=%d",
 		maxWorkers, runningWorkers, totalRunning, queueSize)
@@ -518,23 +530,7 @@ func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	if isHTMX {
 		queueSize := h.workerSvc.QueueSize()
-
-		projects, _ := h.projectSvc.List(c.Request().Context())
-		pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
-		if err != nil {
-			applog.Infof("[handler] UpdateWorkerSettings error counting pending tasks: %v", err)
-			pendingCounts = make(map[string]int)
-		}
-		projectStats := make([]pages.ProjectWorkerStats, len(projects))
-		for i, p := range projects {
-			projectStats[i] = pages.ProjectWorkerStats{
-				ID:         p.ID,
-				Name:       p.Name,
-				Running:    h.workerSvc.ProjectRunning(p.ID),
-				QueueSize:  pendingCounts[p.ID],
-				MaxWorkers: p.MaxWorkers,
-			}
-		}
+		projectStats := h.buildProjectWorkerStats(c.Request().Context())
 
 		modelStats := h.buildModelWorkerStatsList(c.Request().Context())
 		return render(c, http.StatusOK, pages.WorkerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats))
@@ -554,26 +550,7 @@ func (h *Handler) GlobalWorkerStats(c echo.Context) error {
 
 // ProjectWorkerStats returns just the project stats table body for polling
 func (h *Handler) ProjectWorkerStats(c echo.Context) error {
-	projects, _ := h.projectSvc.List(c.Request().Context())
-
-	// Get pending task counts by project
-	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
-	if err != nil {
-		applog.Infof("[handler] ProjectWorkerStats error counting pending tasks: %v", err)
-		pendingCounts = make(map[string]int)
-	}
-
-	// Build per-project utilization
-	projectStats := make([]pages.ProjectWorkerStats, len(projects))
-	for i, p := range projects {
-		projectStats[i] = pages.ProjectWorkerStats{
-			ID:         p.ID,
-			Name:       p.Name,
-			Running:    h.workerSvc.ProjectRunning(p.ID),
-			QueueSize:  pendingCounts[p.ID],
-			MaxWorkers: p.MaxWorkers,
-		}
-	}
+	projectStats := h.buildProjectWorkerStats(c.Request().Context())
 
 	maxWorkers, _ := h.workerRepo.GetMaxWorkers(c.Request().Context())
 	runningWorkers := h.workerSvc.NumWorkers()
@@ -811,23 +788,7 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 	runningWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 
-	projects, _ := h.projectSvc.List(c.Request().Context())
-	pendingCounts, err := h.taskRepo.CountPendingByProject(c.Request().Context())
-	if err != nil {
-		applog.Infof("[handler] UpdateProjectWorkerLimit error counting pending tasks: %v", err)
-		pendingCounts = make(map[string]int)
-	}
-
-	projectStats := make([]pages.ProjectWorkerStats, len(projects))
-	for i, p := range projects {
-		projectStats[i] = pages.ProjectWorkerStats{
-			ID:         p.ID,
-			Name:       p.Name,
-			Running:    h.workerSvc.ProjectRunning(p.ID),
-			QueueSize:  pendingCounts[p.ID],
-			MaxWorkers: p.MaxWorkers,
-		}
-	}
+	projectStats := h.buildProjectWorkerStats(c.Request().Context())
 
 	modelStats := h.buildModelWorkerStatsList(c.Request().Context())
 	return render(c, http.StatusOK, pages.WorkerSettingsContent(maxGlobalWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats))
