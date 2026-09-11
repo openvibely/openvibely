@@ -258,7 +258,12 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 	if err != nil {
 		return nil, err
 	}
+	portfolioCounts, err := s.repo.PortfolioOperationalCounts(ctx, projectID, time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
 	for i := range cards {
+		cards[i].Counts = portfolioCounts[cards[i].Automation.ID]
 		currentTemplateRevision := CurrentAutomationTemplateRevision(cards[i].Version.AdapterKey)
 		cards[i].TemplateUpdateAvailable = currentTemplateRevision > 0 &&
 			(cards[i].Automation.TemplateRevision == nil || *cards[i].Automation.TemplateRevision < currentTemplateRevision)
@@ -342,8 +347,7 @@ func AutomationCardSummary(card models.AutomationCard) map[string]any {
 		"paused":                    paused,
 		"adapter_key":               card.Version.AdapterKey,
 		"template_update_available": card.TemplateUpdateAvailable,
-		"node_count": card.Counts.Running + card.Counts.Waiting +
-			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
+		"graph_node_count":          card.GraphNodeCount,
 		"counts": map[string]int{
 			"running":            card.Counts.Running,
 			"waiting":            card.Counts.Waiting,

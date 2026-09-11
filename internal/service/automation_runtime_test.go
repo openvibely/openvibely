@@ -4099,7 +4099,7 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	require.Zero(t, cards[0].Counts, "portfolio cards must not load hidden operational counts; Live remains the counts surface")
+	require.Equal(t, models.AutomationNodeCounts{CompletedRecently: 1}, cards[0].Counts, "portfolio cards must expose current operational state separately from graph topology")
 }
 
 func TestAutomationLiveWorkItemSuccessReplacesEarlierFailedActivityState(t *testing.T) {
@@ -4144,7 +4144,7 @@ func TestAutomationLiveWorkItemSuccessReplacesEarlierFailedActivityState(t *test
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	require.Zero(t, cards[0].Counts, "portfolio cards must not load hidden operational counts; Live remains the counts surface")
+	require.Equal(t, models.AutomationNodeCounts{CompletedRecently: 1}, cards[0].Counts, "portfolio cards must expose current operational state separately from graph topology")
 }
 
 func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T) {
@@ -4197,7 +4197,7 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	require.Zero(t, cards[0].Counts, "portfolio cards must not load hidden operational counts; Live remains the counts surface")
+	require.Equal(t, models.AutomationNodeCounts{Running: 2, Waiting: 1, Blocked: 1, Failed: 2, CompletedRecently: 1}, cards[0].Counts, "portfolio cards must expose current operational state separately from graph topology")
 }
 
 func TestAutomationLiveDisplayStateShowsRunningWhenMixedWithWaiting(t *testing.T) {

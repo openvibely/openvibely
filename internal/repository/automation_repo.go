@@ -103,7 +103,9 @@ func (r *AutomationRepo) ListPortfolioCards(ctx context.Context, projectID strin
 		a.id, a.project_id, a.stable_key, a.name, a.description, a.automation_type,
 		a.lifecycle_state, a.health_state, a.health_reason, a.health_evaluated_at, a.published_version_id, a.template_revision,
 		a.created_via, a.created_at, a.updated_at, a.archived_at,
-		v.id, v.project_id, v.automation_id, v.version, v.state, v.source, v.adapter_key, v.schema_version, v.created_at, v.published_at
+		v.id, v.project_id, v.automation_id, v.version, v.state, v.source, v.adapter_key, v.schema_version, v.created_at, v.published_at,
+		(SELECT COUNT(*) FROM automation_nodes n
+			WHERE n.project_id = a.project_id AND n.automation_id = a.id AND n.version_id = v.id)
 		FROM automations a
 		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
 		WHERE a.project_id = ? AND v.state = 'published'
@@ -119,7 +121,7 @@ func (r *AutomationRepo) ListPortfolioCards(ctx context.Context, projectID strin
 			&card.Automation.LifecycleState, &card.Automation.HealthState, &card.Automation.HealthReason, &card.Automation.HealthEvaluatedAt, &card.Automation.PublishedVersionID, &card.Automation.TemplateRevision,
 			&card.Automation.CreatedVia, &card.Automation.CreatedAt, &card.Automation.UpdatedAt, &card.Automation.ArchivedAt,
 			&card.Version.ID, &card.Version.ProjectID, &card.Version.AutomationID, &card.Version.Version, &card.Version.State, &card.Version.Source,
-			&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt); err != nil {
+			&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt, &card.GraphNodeCount); err != nil {
 			return nil, err
 		}
 		out = append(out, card)
@@ -148,7 +150,9 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 		a.id, a.project_id, a.stable_key, a.name, a.description, a.automation_type,
 		a.lifecycle_state, a.health_state, a.health_reason, a.health_evaluated_at, a.published_version_id, a.template_revision,
 		a.created_via, a.created_at, a.updated_at, a.archived_at,
-		v.id, v.project_id, v.automation_id, v.version, v.state, v.source, v.adapter_key, v.schema_version, v.created_at, v.published_at
+		v.id, v.project_id, v.automation_id, v.version, v.state, v.source, v.adapter_key, v.schema_version, v.created_at, v.published_at,
+		(SELECT COUNT(*) FROM automation_nodes n
+			WHERE n.project_id = a.project_id AND n.automation_id = a.id AND n.version_id = v.id)
 		FROM automations a
 		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
 		WHERE a.project_id = ? AND v.state = 'published'`
@@ -192,7 +196,7 @@ func (r *AutomationRepo) ListPortfolioCardsPageFiltered(ctx context.Context, pro
 			&card.Automation.LifecycleState, &card.Automation.HealthState, &card.Automation.HealthReason, &card.Automation.HealthEvaluatedAt, &card.Automation.PublishedVersionID, &card.Automation.TemplateRevision,
 			&card.Automation.CreatedVia, &card.Automation.CreatedAt, &card.Automation.UpdatedAt, &card.Automation.ArchivedAt,
 			&card.Version.ID, &card.Version.ProjectID, &card.Version.AutomationID, &card.Version.Version, &card.Version.State, &card.Version.Source,
-			&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt); err != nil {
+			&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt, &card.GraphNodeCount); err != nil {
 			return nil, fmt.Errorf("scanning automation portfolio card page: %w", err)
 		}
 		out = append(out, card)
