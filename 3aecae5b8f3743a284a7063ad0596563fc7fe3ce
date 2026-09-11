@@ -1,0 +1,10 @@
+Exact-HEAD validation evidence
+Commit: 3aecae5b8f3743a284a7063ad0596563fc7fe3ce
+Delivery: rebased scoped channel-authorization contract onto backend target commit b5b94e0e07f5494172f042b0ae10a70ec025b151 in branch task/549b1565-channel-access-delivery.
+Focused: go test ./internal/handler ./internal/repository ./internal/database ./web/templates/components -run 'Test(ChannelAuthorized|TelegramAuth|SlackAuth|DiscordAuth|EmailAuth|Migration108|Migration179|ChannelAuth)' -count=1 (passed)
+Build: go build ./... (passed; macOS desktop linker emitted compatibility warnings only)
+Vet: go vet ./... (passed)
+Full tests: go test ./... -count=1 (passed)
+Formatting: gofmt -l for all Go files changed by this commit (zero output)
+Diff: git diff --check HEAD^ (passed)
+Assertions: HEAD unchanged at 3aecae5b8f3743a284a7063ad0596563fc7fe3ce; git status --porcelain empty before and after validation.
