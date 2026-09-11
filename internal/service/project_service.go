@@ -73,6 +73,12 @@ func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
 	return s.repo.List(ctx)
 }
 
+// ListAPIProjects returns the compact project projection used by GET
+// /api/projects. Full project callers must continue using List or GetByID.
+func (s *ProjectService) ListAPIProjects(ctx context.Context) ([]models.ProjectAPIItem, error) {
+	return s.repo.ListAPIProjects(ctx)
+}
+
 // ListWorkerCapacityProjects returns the compact project projection used to
 // construct Workers capacity rows. Full project callers must use List or GetByID.
 func (s *ProjectService) ListWorkerCapacityProjects(ctx context.Context) ([]models.ProjectWorkerCapacity, error) {

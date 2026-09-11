@@ -27,7 +27,7 @@ func NewProjectRepo(db *sql.DB) *ProjectRepo {
 func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers, created_at, updated_at
-		 FROM projects ORDER BY is_default DESC, name ASC`)
+			 FROM projects ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing projects: %w", err)
 	}
@@ -38,6 +38,30 @@ func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 		var p models.Project
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.RepoURL, &p.IsDefault, &p.DefaultAgentConfigID, &p.MaxWorkers, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning project: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
+const projectAPIProjectsQuery = `SELECT id, name, repo_path, created_at
+	FROM projects ORDER BY is_default DESC, name ASC`
+
+// ListAPIProjects returns the compact project projection required by
+// GET /api/projects. Keep this separate from List because management, detail,
+// repository configuration, and runtime callers need the complete project row.
+func (r *ProjectRepo) ListAPIProjects(ctx context.Context) ([]models.ProjectAPIItem, error) {
+	rows, err := r.db.QueryContext(ctx, projectAPIProjectsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("listing API projects: %w", err)
+	}
+	defer rows.Close()
+
+	var projects []models.ProjectAPIItem
+	for rows.Next() {
+		var p models.ProjectAPIItem
+		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &p.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning API project: %w", err)
 		}
 		projects = append(projects, p)
 	}
