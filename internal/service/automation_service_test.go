@@ -472,7 +472,8 @@ func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T)
 	require.Len(t, cards, 4)
 	require.Len(t, counter.Statements(), 1, "portfolio card rendering should be one compact statement, not 2 + 5N + S enrichment statements")
 	statements := strings.ToLower(strings.Join(counter.Statements(), "\n"))
-	for _, hidden := range []string{"portfoliooperationalcounts", "automation_nodes", "automation_edges", "automation_definition_resources", "schedules", "automation_activities", "automation_work_items", "config_json", "condition_json"} {
+	require.Contains(t, statements, "select count(*) from automation_nodes", "portfolio cards retain only the saved graph cardinality")
+	for _, hidden := range []string{"portfoliooperationalcounts", "automation_edges", "automation_definition_resources", "schedules", "automation_activities", "automation_work_items", "config_json", "condition_json"} {
 		require.NotContains(t, statements, hidden)
 	}
 
@@ -481,6 +482,7 @@ func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T)
 	require.Equal(t, models.AutomationVersionPublished, first.Version.State)
 	require.Equal(t, "template", first.Version.Source)
 	require.Equal(t, AutomationAdapterNativeSDLC, first.Version.AdapterKey)
+	require.Equal(t, 2, first.GraphNodeCount)
 	require.Empty(t, first.Resources)
 	require.Nil(t, first.NextRun)
 	require.Nil(t, first.LastRun)
