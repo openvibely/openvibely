@@ -44,26 +44,41 @@ func (h *Handler) PromoteQueuedTaskThreadInput(taskID string) {
 	}, "")
 }
 
+func recoverQueuedInputIDs(
+	ctx context.Context,
+	load func(context.Context, string, int) ([]string, error),
+	promote func(string),
+) error {
+	const batchSize = 100
+	afterID := ""
+	for {
+		ids, err := load(ctx, afterID, batchSize)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			promote(id)
+		}
+		if len(ids) < batchSize {
+			return nil
+		}
+		afterID = ids[len(ids)-1]
+	}
+}
+
 func (h *Handler) RecoverQueuedInputs(ctx context.Context) {
 	if h.threadInputRepo == nil {
 		return
 	}
-	const batchSize = 100
-	afterProjectID := ""
-	for {
-		ids, err := h.threadInputRepo.ListRecoverableQueuedChatProjectIDsAfter(ctx, afterProjectID, batchSize)
-		if err != nil {
-			applog.Infof("[handler] RecoverQueuedInputs chat list error: %v", err)
-			break
-		}
-		for _, projectID := range ids {
+	if err := recoverQueuedInputIDs(
+		ctx,
+		h.threadInputRepo.ListRecoverableQueuedChatProjectIDsAfter,
+		func(projectID string) {
 			applog.Infof("[handler] RecoverQueuedInputs promoting stranded queued Chat input project=%s", projectID)
 			h.PromoteQueuedChatInput(projectID)
-		}
-		if len(ids) < batchSize {
-			break
-		}
-		afterProjectID = ids[len(ids)-1]
+		},
+	); err != nil {
+		applog.Infof("[handler] RecoverQueuedInputs chat list error: %v", err)
 	}
 	h.RecoverQueuedTaskThreadInputs(ctx)
 }
@@ -72,21 +87,14 @@ func (h *Handler) RecoverQueuedTaskThreadInputs(ctx context.Context) {
 	if h.threadInputRepo == nil {
 		return
 	}
-	const batchSize = 100
-	afterTaskID := ""
-	for {
-		ids, err := h.threadInputRepo.ListRecoverableQueuedTaskIDsAfter(ctx, afterTaskID, batchSize)
-		if err != nil {
-			applog.Infof("[handler] RecoverQueuedTaskThreadInputs list error: %v", err)
-			return
-		}
-		for _, taskID := range ids {
+	if err := recoverQueuedInputIDs(
+		ctx,
+		h.threadInputRepo.ListRecoverableQueuedTaskIDsAfter,
+		func(taskID string) {
 			applog.Infof("[handler] RecoverQueuedTaskThreadInputs promoting stranded queued input task=%s", taskID)
 			h.PromoteQueuedTaskThreadInput(taskID)
-		}
-		if len(ids) < batchSize {
-			return
-		}
-		afterTaskID = ids[len(ids)-1]
+		},
+	); err != nil {
+		applog.Infof("[handler] RecoverQueuedTaskThreadInputs list error: %v", err)
 	}
 }

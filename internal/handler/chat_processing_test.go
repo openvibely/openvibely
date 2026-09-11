@@ -2236,6 +2236,41 @@ func TestHandler_RecoverQueuedInputsPromotesChatAfterDrain(t *testing.T) {
 	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
 }
 
+func TestHandler_RecoverQueuedInputsDrainsMoreThanOneChatBatch(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	const projectCount = 101
+	inputs := make([]*models.ThreadInput, 0, projectCount)
+	for i := 0; i < projectCount; i++ {
+		project := createProject(t, h, fmt.Sprintf("Recover Batched Chat Queue Project %03d", i))
+		input := &models.ThreadInput{
+			Scope:         models.ThreadInputScopeChat,
+			ProjectID:     project.ID,
+			AgentConfigID: agent.ID,
+			InputMode:     models.ThreadInputModeQueued,
+			Content:       fmt.Sprintf("recover chat %03d", i),
+			ChatMode:      models.ChatModeOrchestrate,
+		}
+		require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+		inputs = append(inputs, input)
+	}
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "recovered"
+	mock.TextOnly = "recovered"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedInputs(ctx)
+
+	require.Eventually(t, func() bool { return mock.CallCount() == projectCount }, 5*time.Second, 25*time.Millisecond)
+	for i, input := range inputs {
+		stored, err := h.threadInputRepo.GetByID(ctx, input.ID)
+		require.NoError(t, err)
+		require.Equalf(t, models.ThreadInputApplied, stored.InputStatus, "Chat input %d was stranded beyond the recovery batch", i)
+	}
+}
+
 func TestHandler_RecoverQueuedTaskThreadInputsDrainsMoreThanOneBatch(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
