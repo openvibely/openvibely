@@ -251,6 +251,25 @@ func TestChatInputRequestsListsPendingAndCompletedRequests(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"label":"Yes"`)
 }
 
+func TestChatInputRequestProjectPreflightPreservesBlankAndUnknownResponses(t *testing.T) {
+	tc := NewTestContext(t)
+
+	answer := postInputRequestJSON(t, tc, "/chat/input-requests/missing-request/answer", `{"project_id":"missing-project","answers":[]}`, http.StatusForbidden)
+	require.Contains(t, answer.Body.String(), "project not found")
+
+	missing := tc.HTTP().Get("/chat/input-requests?project_id=missing-project").Execute()
+	require.Equal(t, http.StatusForbidden, missing.Code)
+	require.Contains(t, missing.Body.String(), "project not found")
+
+	omitted := tc.HTTP().Get("/chat/input-requests").Execute()
+	require.Equal(t, http.StatusBadRequest, omitted.Code)
+	require.Contains(t, omitted.Body.String(), "project_id is required")
+
+	blank := tc.HTTP().Get("/chat/input-requests?project_id=%20%20").Execute()
+	require.Equal(t, http.StatusBadRequest, blank.Code)
+	require.Contains(t, blank.Body.String(), "project_id is required")
+}
+
 func TestRequestUserInputCancellationAndTimeout(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Cancelled").Build()

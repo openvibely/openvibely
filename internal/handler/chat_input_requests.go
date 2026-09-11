@@ -223,6 +223,20 @@ func (h *Handler) executeRequestUserInputTool(ctx context.Context, params stream
 	return string(out), err
 }
 
+func (h *Handler) requireChatInputProject(ctx context.Context, projectID string) error {
+	if h.projectRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "project repository unavailable")
+	}
+	project, err := h.projectRepo.GetByID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return echo.NewHTTPError(http.StatusForbidden, "project not found")
+	}
+	return nil
+}
+
 func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -237,16 +251,9 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 		payload.ProjectID = c.FormValue("project_id")
 		payload.Answers = []chatInputRequestAnswer{{QuestionID: c.FormValue("question_id"), Label: c.FormValue("label"), CustomAnswer: c.FormValue("custom_answer")}}
 	}
-	if h.projectRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "project repository unavailable")
-	}
 	projectID := strings.TrimSpace(payload.ProjectID)
-	project, err := h.projectRepo.GetByID(c.Request().Context(), projectID)
-	if err != nil {
+	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
 		return err
-	}
-	if project == nil {
-		return echo.NewHTTPError(http.StatusForbidden, "project not found")
 	}
 	resolved, err := h.chatInputRequests.resolve(id, projectID, payload.Answers)
 	if err != nil {
@@ -268,15 +275,8 @@ func (h *Handler) ChatInputRequests(c echo.Context) error {
 	if projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
-	if h.projectRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "project repository unavailable")
-	}
-	project, err := h.projectRepo.GetByID(c.Request().Context(), projectID)
-	if err != nil {
+	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
 		return err
-	}
-	if project == nil {
-		return echo.NewHTTPError(http.StatusForbidden, "project not found")
 	}
 	requests := h.chatInputRequests.listProject(projectID)
 	items := make([]*events.ChatInputRequestEvent, 0, len(requests))
