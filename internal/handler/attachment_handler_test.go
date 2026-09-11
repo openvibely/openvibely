@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestUploadAttachment_TaskNotFound(t *testing.T) {
@@ -1132,9 +1133,29 @@ func TestTaskAttachmentDuplicateDeletionPreservesSurvivorForExecutionReconciliat
 				t.Fatalf("remaining content=%q want=%q", stored, want)
 			}
 
-			// The surviving row and bytes remain available to the execution attachment loader.
-			if _, err := os.Stat(remaining[0].FilePath); err != nil {
-				t.Fatalf("survivor unavailable to execution attachment loader: %v", err)
+			// Execute the real task path so runtime reconciliation and the model-bound
+			// attachment set prove that the surviving row remains usable.
+			agent := createAgent(t, tc.llmConfigRepo)
+			mock := testutil.NewMockLLMCaller()
+			mock.Response = "done"
+			mock.TextOnly = "done"
+			tc.handler.llmSvc.SetLLMCaller(mock)
+			if _, err := tc.handler.llmSvc.ExecuteTaskWithAgent(context.Background(), *task, *agent); err != nil {
+				t.Fatalf("execute task with surviving attachment: %v", err)
+			}
+			call := mock.LastCall()
+			if len(call.Attachments) != 1 {
+				t.Fatalf("expected one model-bound attachment, got %+v", call.Attachments)
+			}
+			if call.Attachments[0].ID != remaining[0].ID || call.Attachments[0].FilePath != remaining[0].FilePath {
+				t.Fatalf("model-bound attachment=%+v want surviving row=%+v", call.Attachments[0], remaining[0])
+			}
+			boundContent, err := os.ReadFile(call.Attachments[0].FilePath)
+			if err != nil {
+				t.Fatalf("read model-bound attachment: %v", err)
+			}
+			if !bytes.Equal(boundContent, want) {
+				t.Fatalf("model-bound content=%q want=%q", boundContent, want)
 			}
 		})
 	}
@@ -1172,6 +1193,58 @@ func TestTaskAttachmentCollidingRepositoryFailurePreservesExistingPublication(t 
 	}
 	if len(entries) != 1 || entries[0].Name() != "same.txt" {
 		t.Fatalf("unexpected files after metadata failure: %+v", entries)
+	}
+}
+
+func TestUploadAttachment_ListFailureDoesNotAllocateCollidingDestination(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
+	uploadsRoot := withTaskAttachmentUploadsDir(t)
+	stalePath := filepath.Join(uploadsRoot, task.ID, "same.txt")
+	if err := os.MkdirAll(filepath.Dir(stalePath), 0755); err != nil {
+		t.Fatalf("create task attachment directory: %v", err)
+	}
+	if err := os.WriteFile(stalePath, []byte("stale bytes"), 0644); err != nil {
+		t.Fatalf("write stale attachment: %v", err)
+	}
+	stale := &models.Attachment{
+		TaskID:    task.ID,
+		FileName:  "same.txt",
+		FilePath:  stalePath,
+		MediaType: "text/plain",
+		FileSize:  int64(len("stale bytes")),
+	}
+	if err := tc.attachmentRepo.Create(context.Background(), stale); err != nil {
+		t.Fatalf("create stale attachment row: %v", err)
+	}
+	if err := os.Remove(stalePath); err != nil {
+		t.Fatalf("remove stale attachment file: %v", err)
+	}
+
+	originalList := taskAttachmentListByTask
+	taskAttachmentListByTask = func(context.Context, taskAttachmentLister, string) ([]models.Attachment, error) {
+		return nil, errors.New("forced attachment list failure")
+	}
+	t.Cleanup(func() { taskAttachmentListByTask = originalList })
+
+	rec := uploadTaskAttachmentFilesForTest(t, tc, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, []taskAttachmentTestFile{{name: "same.txt", content: []byte("replacement")}})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("list failure status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("list attachments after failure: %v", err)
+	}
+	if len(attachments) != 1 || attachments[0].ID != stale.ID || attachments[0].FilePath != stalePath {
+		t.Fatalf("unexpected attachment rows after list failure: %+v", attachments)
+	}
+	entries, err := os.ReadDir(filepath.Join(uploadsRoot, task.ID))
+	if err != nil {
+		t.Fatalf("read task attachment directory: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected no destination files after list failure, found %+v", entries)
 	}
 }
 
