@@ -52,6 +52,16 @@ type channelSettingsCard struct {
 	Webhook models.WebhookEndpoint
 }
 
+func asciiFoldCardSortName(value string) string {
+	folded := []byte(value)
+	for i, char := range folded {
+		if char >= 'A' && char <= 'Z' {
+			folded[i] = char + ('a' - 'A')
+		}
+	}
+	return string(folded)
+}
+
 func channelSettingsCards(view ChannelsSettingsView) []channelSettingsCard {
 	cards := make([]channelSettingsCard, 0, 7+len(view.Webhooks))
 	if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0, "Outbound Message Targets send_message Slack Telegram Email Discord X") {
@@ -77,7 +87,7 @@ func channelSettingsCards(view ChannelsSettingsView) []channelSettingsCard {
 		cards = append(cards, channelSettingsCard{Kind: "webhook", Name: webhook.Name, Webhook: webhook})
 	}
 	sort.SliceStable(cards, func(i, j int) bool {
-		left, right := strings.ToLower(cards[i].Name), strings.ToLower(cards[j].Name)
+		left, right := asciiFoldCardSortName(cards[i].Name), asciiFoldCardSortName(cards[j].Name)
 		if left == right {
 			left, right = cards[i].Name, cards[j].Name
 		}

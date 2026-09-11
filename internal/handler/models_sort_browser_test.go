@@ -235,6 +235,9 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 		if i == 0 {
 			webhook.ID = "alpha-github-hook"
 			webhook.Name = "GitHub"
+		} else if i == 1 {
+			webhook.ID = "upper-accent-hook"
+			webhook.Name = "Äz webhook"
 		}
 		view.Webhooks = append(view.Webhooks, webhook)
 	}
@@ -242,6 +245,7 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 	nextView.Webhooks = []models.WebhookEndpoint{
 		{ID: "zulu-github-hook", Name: "GitHub", Enabled: true},
 		{ID: "mix-hook", Name: "mix webhook", Enabled: true},
+		{ID: "lower-accent-hook", Name: "äa webhook", Enabled: true},
 	}
 	nextView.WebhooksHasMore = false
 	var nextContent bytes.Buffer
@@ -295,9 +299,20 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 				document.querySelectorAll('#channel-card-list [data-card-sort-name]'),
 				function(card) { return card.getAttribute('data-card-sort-name'); }
 			);
+			function foldASCII(value) {
+				return value.replace(/[A-Z]/g, function(char) { return String.fromCharCode(char.charCodeAt(0) + 32); });
+			}
+			function compareCodePoints(left, right) {
+				var leftPoints = Array.from(left), rightPoints = Array.from(right);
+				for (var i = 0; i < Math.min(leftPoints.length, rightPoints.length); i++) {
+					var leftPoint = leftPoints[i].codePointAt(0), rightPoint = rightPoints[i].codePointAt(0);
+					if (leftPoint !== rightPoint) return leftPoint < rightPoint ? -1 : 1;
+				}
+				return leftPoints.length < rightPoints.length ? -1 : (leftPoints.length > rightPoints.length ? 1 : 0);
+			}
 			var sorted = names.every(function(name, index) {
 				if (!index) return true;
-				return names[index - 1].toLocaleLowerCase() >= name.toLocaleLowerCase();
+				return compareCodePoints(foldASCII(names[index - 1]), foldASCII(name)) >= 0;
 			});
 			var fixedGitHub = root.querySelector('[data-channel-type="github"]');
 			var initialGitHubWebhook = root.querySelector('[data-webhook-id="alpha-github-hook"]');
@@ -305,8 +320,12 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 			var equalNameOrder = !!(appendedGitHubWebhook && initialGitHubWebhook && fixedGitHub &&
 				(appendedGitHubWebhook.compareDocumentPosition(initialGitHubWebhook) & Node.DOCUMENT_POSITION_FOLLOWING) &&
 				(initialGitHubWebhook.compareDocumentPosition(fixedGitHub) & Node.DOCUMENT_POSITION_FOLLOWING));
-			var complete = names.length === 27 && names.indexOf('mix webhook') !== -1 && names.indexOf('X (formerly Twitter)') !== -1 && names.indexOf('Outbound Message Targets') !== -1;
-			finish(sorted && equalNameOrder && complete ? 'pass' : 'fail', names.join('|') + '; equalNameOrder=' + equalNameOrder);
+			var upperAccent = root.querySelector('[data-webhook-id="upper-accent-hook"]');
+			var lowerAccent = root.querySelector('[data-webhook-id="lower-accent-hook"]');
+			var nonASCIIOrder = !!(upperAccent && lowerAccent &&
+				(lowerAccent.compareDocumentPosition(upperAccent) & Node.DOCUMENT_POSITION_FOLLOWING));
+			var complete = names.length === 28 && names.indexOf('mix webhook') !== -1 && names.indexOf('X (formerly Twitter)') !== -1 && names.indexOf('Outbound Message Targets') !== -1;
+			finish(sorted && equalNameOrder && nonASCIIOrder && complete ? 'pass' : 'fail', names.join('|') + '; equalNameOrder=' + equalNameOrder + '; nonASCIIOrder=' + nonASCIIOrder);
 		}
 		setTimeout(run, 50);
 	})();

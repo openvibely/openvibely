@@ -486,6 +486,8 @@ func TestChannelsSortContractOrdersMixedVisibleCardsByName(t *testing.T) {
 		Webhooks: []models.WebhookEndpoint{
 			{ID: "zulu-hook", Name: "Zulu webhook", Enabled: true},
 			{ID: "alpha-hook", Name: "Alpha webhook", Enabled: true},
+			{ID: "upper-accent-hook", Name: "Äz webhook", Enabled: true},
+			{ID: "lower-accent-hook", Name: "äa webhook", Enabled: true},
 		},
 	}
 	for _, test := range []struct {
@@ -493,8 +495,8 @@ func TestChannelsSortContractOrdersMixedVisibleCardsByName(t *testing.T) {
 		sort     string
 		expected []string
 	}{
-		{name: "ascending", sort: "name_asc", expected: []string{"Alpha webhook", "Email", "GitHub", "Outbound Message Targets", "Slack", "X (formerly Twitter)", "Zulu webhook"}},
-		{name: "descending", sort: "name_desc", expected: []string{"Zulu webhook", "X (formerly Twitter)", "Slack", "Outbound Message Targets", "GitHub", "Email", "Alpha webhook"}},
+		{name: "ascending", sort: "name_asc", expected: []string{"Alpha webhook", "Email", "GitHub", "Outbound Message Targets", "Slack", "X (formerly Twitter)", "Zulu webhook", "Äz webhook", "äa webhook"}},
+		{name: "descending", sort: "name_desc", expected: []string{"äa webhook", "Äz webhook", "Zulu webhook", "X (formerly Twitter)", "Slack", "Outbound Message Targets", "GitHub", "Email", "Alpha webhook"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			view := baseView
