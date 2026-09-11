@@ -142,6 +142,13 @@ func TestSlackService_HandleOAuthCallback(t *testing.T) {
 	settingsRepo := repository.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientID, "cid"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingClientSecret, "secret"))
+	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotToken, "xoxb-old-oauth"))
+	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotTokenOverride, "xoxb-manual"))
+	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotTokenSource, SlackBotTokenSourceManual))
+	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingBotUserID, "U-old"))
+	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingTeamID, "T-old"))
+	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingTeamName, "Old Workspace"))
+	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingConnectedAt, "2024-01-02T03:04:05Z"))
 	require.NoError(t, settingsRepo.Set(context.Background(), SlackSettingOAuthState, "state-123"))
 
 	oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -160,11 +167,133 @@ func TestSlackService_HandleOAuthCallback(t *testing.T) {
 	require.NoError(t, err)
 
 	botToken, _ := settingsRepo.Get(context.Background(), SlackSettingBotToken)
+	tokenSource, _ := settingsRepo.Get(context.Background(), SlackSettingBotTokenSource)
+	botUserID, _ := settingsRepo.Get(context.Background(), SlackSettingBotUserID)
 	teamID, _ := settingsRepo.Get(context.Background(), SlackSettingTeamID)
 	teamName, _ := settingsRepo.Get(context.Background(), SlackSettingTeamName)
+	connectedAt, _ := settingsRepo.Get(context.Background(), SlackSettingConnectedAt)
+	oauthState, _ := settingsRepo.Get(context.Background(), SlackSettingOAuthState)
+	sendResponses, _ := settingsRepo.Get(context.Background(), SlackSettingSendResponses)
 	require.Equal(t, "xoxb-123", botToken)
+	require.Equal(t, SlackBotTokenSourceOAuth, tokenSource)
+	require.Equal(t, "U123", botUserID)
 	require.Equal(t, "T123", teamID)
 	require.Equal(t, "OpenVibely", teamName)
+	require.NotEqual(t, "2024-01-02T03:04:05Z", connectedAt)
+	require.NotEmpty(t, connectedAt)
+	require.Empty(t, oauthState)
+	require.Equal(t, "true", sendResponses)
+	require.Equal(t, "xoxb-123", svc.resolveBotToken(context.Background()))
+	status, err := svc.GetConnectionStatus(context.Background())
+	require.NoError(t, err)
+	require.True(t, status.Connected)
+	require.Equal(t, SlackBotTokenSourceOAuth, status.BotTokenSource)
+}
+
+func TestSlackService_HandleOAuthCallbackFailurePreservesPreviousConfiguration(t *testing.T) {
+	failedKeys := []string{
+		SlackSettingBotTokenSource,
+		SlackSettingBotUserID,
+		SlackSettingTeamID,
+		SlackSettingTeamName,
+		SlackSettingConnectedAt,
+		SlackSettingOAuthState,
+		SlackSettingSendResponses,
+	}
+
+	for _, failedKey := range failedKeys {
+		t.Run(failedKey, func(t *testing.T) {
+			ctx := context.Background()
+			db := testutil.NewTestDB(t)
+			settingsRepo := repository.NewSettingsRepo(db)
+			previous := map[string]string{
+				SlackSettingClientID:         "cid",
+				SlackSettingClientSecret:     "secret",
+				SlackSettingBotToken:         "xoxb-old-oauth",
+				SlackSettingBotTokenOverride: "xoxb-manual",
+				SlackSettingBotTokenSource:   SlackBotTokenSourceManual,
+				SlackSettingBotUserID:        "U-old",
+				SlackSettingTeamID:           "T-old",
+				SlackSettingTeamName:         "Old Workspace",
+				SlackSettingConnectedAt:      "2024-01-02T03:04:05Z",
+				SlackSettingOAuthState:       "state-123",
+			}
+			if failedKey != SlackSettingSendResponses {
+				previous[SlackSettingSendResponses] = "false"
+			}
+			require.NoError(t, settingsRepo.SetMany(ctx, previous))
+
+			triggerEvent := "UPDATE"
+			if failedKey == SlackSettingSendResponses {
+				triggerEvent = "INSERT"
+			}
+			_, err := db.ExecContext(ctx, fmt.Sprintf(`CREATE TRIGGER reject_slack_oauth_%s BEFORE %s ON app_settings
+				WHEN NEW.key = '%s' BEGIN SELECT RAISE(ABORT, 'forced Slack OAuth settings failure'); END`,
+				strings.ReplaceAll(failedKey, "_", ""), triggerEvent, failedKey))
+			require.NoError(t, err)
+
+			oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, `{"ok":true,"access_token":"xoxb-new","bot_user_id":"U-new","team":{"id":"T-new","name":"New Workspace"}}`)
+			}))
+			defer oauthSrv.Close()
+
+			svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			svc.oauthBaseURL = oauthSrv.URL
+			err = svc.HandleOAuthCallback(ctx, "code-1", "state-123", "http://localhost:8080/channels/slack/callback")
+			require.Error(t, err)
+			require.ErrorContains(t, err, "save slack oauth settings")
+
+			keys := []string{
+				SlackSettingBotToken,
+				SlackSettingBotTokenOverride,
+				SlackSettingBotTokenSource,
+				SlackSettingBotUserID,
+				SlackSettingTeamID,
+				SlackSettingTeamName,
+				SlackSettingConnectedAt,
+				SlackSettingOAuthState,
+				SlackSettingSendResponses,
+			}
+			values, err := settingsRepo.GetMany(ctx, keys)
+			require.NoError(t, err)
+			for _, key := range keys {
+				require.Equal(t, previous[key], values[key], key)
+			}
+			require.Equal(t, "xoxb-manual", svc.resolveBotToken(ctx))
+		})
+	}
+}
+
+func TestSlackService_HandleOAuthCallbackMissingIdentityPreservesPreviousConfiguration(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.SetMany(ctx, map[string]string{
+		SlackSettingClientID:         "cid",
+		SlackSettingClientSecret:     "secret",
+		SlackSettingBotToken:         "xoxb-old-oauth",
+		SlackSettingBotTokenOverride: "xoxb-manual",
+		SlackSettingBotTokenSource:   SlackBotTokenSourceManual,
+		SlackSettingBotUserID:        "U-old",
+		SlackSettingTeamID:           "T-old",
+		SlackSettingTeamName:         "Old Workspace",
+		SlackSettingConnectedAt:      "2024-01-02T03:04:05Z",
+		SlackSettingOAuthState:       "state-123",
+	}))
+
+	oauthSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"ok":true,"access_token":"xoxb-new","bot_user_id":"","team":{"id":"T-new","name":"New Workspace"}}`)
+	}))
+	defer oauthSrv.Close()
+
+	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc.oauthBaseURL = oauthSrv.URL
+	err := svc.HandleOAuthCallback(ctx, "code-1", "state-123", "http://localhost:8080/channels/slack/callback")
+	require.ErrorContains(t, err, "missing Slack bot or team identity")
+	require.Equal(t, "xoxb-old-oauth", svc.getSetting(ctx, SlackSettingBotToken))
+	require.Equal(t, SlackBotTokenSourceManual, svc.getSetting(ctx, SlackSettingBotTokenSource))
+	require.Equal(t, "state-123", svc.getSetting(ctx, SlackSettingOAuthState))
+	require.Equal(t, "xoxb-manual", svc.resolveBotToken(ctx))
 }
 
 func TestSlackService_HandleOAuthCallbackInvalidState(t *testing.T) {
