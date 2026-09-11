@@ -2631,10 +2631,15 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 	cards, err := tc.handler.automationGraphSvc.List(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
+	var graphNodeCount int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ?`, project.ID, automationID).Scan(&graphNodeCount))
+	require.Positive(t, graphNodeCount)
 	expectedJSON, err := json.Marshal(service.AutomationCardSummary(cards[0]))
 	require.NoError(t, err)
 	var expected map[string]any
 	require.NoError(t, json.Unmarshal(expectedJSON, &expected))
+	require.Equal(t, float64(graphNodeCount), expected["graph_node_count"])
+	require.NotContains(t, expected, "node_count")
 
 	listed := execute("list_automations", nil)
 	automations, _ := listed["automations"].([]any)

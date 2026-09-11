@@ -913,7 +913,7 @@ var registry = []ActionDef{
 	// --- Automations domain (project-scoped definition control) ---
 	{
 		Name:         "list_automations",
-		Description:  "List compact summaries of all project Automations (ID, name, status, paused, adapter key, node count, next run, last run). Does not expose YAML graph definitions.",
+		Description:  "List compact summaries of all project Automations (ID, name, status, paused, adapter key, saved graph node count, operational state counts, next run, last run). Does not expose YAML graph definitions.",
 		Domain:       DomainAutomations,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

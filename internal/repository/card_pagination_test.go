@@ -142,6 +142,7 @@ func TestCollectionFiltersAndSortsApplyBeforePagination(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, automationsPage, 1)
 	require.Equal(t, "Zulu paused", automationsPage[0].Automation.Name)
+	require.Zero(t, automationsPage[0].GraphNodeCount, "legacy published Automations with no saved nodes report zero graph topology")
 
 	automationsDefault, err := automationsRepo.ListPortfolioCardsPageFiltered(ctx, project.ID, 10, 0, AutomationCardListFilter{})
 	require.NoError(t, err)

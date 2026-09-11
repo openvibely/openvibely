@@ -342,8 +342,7 @@ func AutomationCardSummary(card models.AutomationCard) map[string]any {
 		"paused":                    paused,
 		"adapter_key":               card.Version.AdapterKey,
 		"template_update_available": card.TemplateUpdateAvailable,
-		"node_count": card.Counts.Running + card.Counts.Waiting +
-			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
+		"graph_node_count":          card.GraphNodeCount,
 		"counts": map[string]int{
 			"running":            card.Counts.Running,
 			"waiting":            card.Counts.Waiting,
