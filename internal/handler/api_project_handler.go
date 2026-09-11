@@ -5,6 +5,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // ProjectResponse represents a project in the API response
@@ -36,7 +37,7 @@ type ProjectsListResponse struct {
 func (h *Handler) APIGetProjects(c echo.Context) error {
 	// applog.Debugf("[handler] APIGetProjects requested")
 
-	projects, err := h.projectSvc.List(c.Request().Context())
+	projects, err := h.projectSvc.ListAPIProjects(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] APIGetProjects error: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{
@@ -44,7 +45,10 @@ func (h *Handler) APIGetProjects(c echo.Context) error {
 		})
 	}
 
-	// Transform to response format
+	return writeAPIProjectsResponse(c, projectResponsesFromAPIItems(projects))
+}
+
+func projectResponsesFromAPIItems(projects []models.ProjectAPIItem) []ProjectResponse {
 	var projectResponses []ProjectResponse
 	for _, p := range projects {
 		projectResponses = append(projectResponses, ProjectResponse{
@@ -54,9 +58,23 @@ func (h *Handler) APIGetProjects(c echo.Context) error {
 			CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
+	return projectResponses
+}
 
-	// applog.Debugf("[handler] APIGetProjects returning %d projects", len(projectResponses))
+func projectResponsesFromFullProjects(projects []models.Project) []ProjectResponse {
+	var projectResponses []ProjectResponse
+	for _, p := range projects {
+		projectResponses = append(projectResponses, ProjectResponse{
+			ID:        p.ID,
+			Name:      p.Name,
+			Path:      p.RepoPath,
+			CreatedAt: p.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		})
+	}
+	return projectResponses
+}
 
+func writeAPIProjectsResponse(c echo.Context, projectResponses []ProjectResponse) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"projects": projectResponses,
 	})
