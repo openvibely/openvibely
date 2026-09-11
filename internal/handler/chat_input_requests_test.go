@@ -215,7 +215,40 @@ func TestChatInputRequestAnswerRejectsInvalidCrossProjectAndDuplicate(t *testing
 	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Maybe"}]}`, http.StatusBadRequest)
 	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+other.ID+`","answers":[{"question_id":"create","label":"Yes"}]}`, http.StatusForbidden)
 	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Yes"}]}`, http.StatusOK)
-	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"No"}]}`, http.StatusGone)
+	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"No"}]}`, http.StatusConflict)
+
+	custom, err := tc.handler.chatInputRequests.create(project.ID, "exec-custom", []chatInputRequestQuestion{{ID: "fallback", Question: "Which fallback?", Options: []chatInputRequestOption{{Label: "Provider-aware", Description: "Use provider fallback"}, {Label: "Shared", Description: "Use shared fallback"}}}})
+	require.NoError(t, err)
+	postInputRequestJSON(t, tc, "/chat/input-requests/"+custom.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"fallback","label":"Shared","custom_answer":"A custom fallback"}]}`, http.StatusBadRequest)
+	postInputRequestJSON(t, tc, "/chat/input-requests/"+custom.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"fallback","custom_answer":"Use the deployment-configured fallback"}]}`, http.StatusOK)
+	requests := tc.handler.chatInputRequests.listProject(project.ID)
+	var customAnswer string
+	for _, request := range requests {
+		if request.ID == custom.ID && len(request.Answers) == 1 {
+			customAnswer = request.Answers[0].Label
+		}
+	}
+	require.Equal(t, "Use the deployment-configured fallback", customAnswer)
+}
+
+func TestChatInputRequestsListsPendingAndCompletedRequests(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Input request state").Build()
+	pending, err := tc.handler.chatInputRequests.create(project.ID, "exec-state", []chatInputRequestQuestion{{
+		ID: "create", Question: "Create it?", Options: []chatInputRequestOption{{Label: "Yes", Description: "Create it"}, {Label: "No", Description: "Skip it"}},
+	}})
+	require.NoError(t, err)
+
+	rec := tc.HTTP().Get("/chat/input-requests?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"completed":false`)
+	require.Contains(t, rec.Body.String(), pending.ID)
+
+	postInputRequestJSON(t, tc, "/chat/input-requests/"+pending.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Yes"}]}`, http.StatusOK)
+	rec = tc.HTTP().Get("/chat/input-requests?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), `"completed":true`)
+	require.Contains(t, rec.Body.String(), `"label":"Yes"`)
 }
 
 func TestRequestUserInputCancellationAndTimeout(t *testing.T) {

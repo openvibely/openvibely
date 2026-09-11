@@ -422,6 +422,19 @@ func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []o
 			isError:  isError,
 		}
 	}
+	if requestIndex := exclusiveRequestUserInputTask(tasks); requestIndex >= 0 {
+		for i, task := range tasks {
+			if i == requestIndex {
+				runOne(i)
+				continue
+			}
+			results[i] = openAIToolExecutionResult{
+				call: task.call, inputMap: task.inputMap,
+				output: "tool call rejected: request_user_input must complete in its own model turn", isError: true,
+			}
+		}
+		return results
+	}
 
 	if len(tasks) > 1 && allOpenAIToolsReadOnly(tasks) {
 		var wg sync.WaitGroup
@@ -440,6 +453,18 @@ func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []o
 		runOne(i)
 	}
 	return results
+}
+
+func exclusiveRequestUserInputTask(tasks []openAIToolExecutionTask) int {
+	if len(tasks) < 2 {
+		return -1
+	}
+	for i, task := range tasks {
+		if task.call.Name == "request_user_input" {
+			return i
+		}
+	}
+	return -1
 }
 
 func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {

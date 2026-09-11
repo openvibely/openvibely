@@ -22,6 +22,22 @@ func (f anthropicRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, er
 
 type failingAnthropicBody struct{}
 
+func TestExecuteAnthropicToolUsesMakesRequestUserInputExclusive(t *testing.T) {
+	var executed []string
+	opts := &AgenticOptions{ToolExecutor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
+		executed = append(executed, name)
+		return "ok", false, nil
+	}}
+	blocks := []agenticBlock{{Name: "request_user_input"}, {Name: "create_task"}}
+	results := executeAnthropicToolUses(context.Background(), opts, blocks)
+	if len(executed) != 1 || executed[0] != "request_user_input" {
+		t.Fatalf("executed tools = %v, want only request_user_input", executed)
+	}
+	if results[0].isError || !results[1].isError {
+		t.Fatalf("unexpected results: %#v", results)
+	}
+}
+
 func (failingAnthropicBody) Read([]byte) (int, error) {
 	return 0, errors.New("read: operation timed out")
 }

@@ -20,6 +20,18 @@ func (f completionsRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, 
 
 type failingCompletionsBody struct{}
 
+func TestExclusiveCompletionsRequestUserInput(t *testing.T) {
+	calls := make([]CompletionsToolCall, 2)
+	calls[0].Function.Name = "create_task"
+	calls[1].Function.Name = "request_user_input"
+	if got := exclusiveCompletionsRequestUserInput(calls); got != 1 {
+		t.Fatalf("exclusive request index = %d, want 1", got)
+	}
+	if got := exclusiveCompletionsRequestUserInput(calls[:1]); got != -1 {
+		t.Fatalf("single tool request index = %d, want -1", got)
+	}
+}
+
 func (failingCompletionsBody) Read([]byte) (int, error) {
 	return 0, errors.New("read: operation timed out")
 }

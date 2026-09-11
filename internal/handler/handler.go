@@ -763,6 +763,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/automations/:automationId", h.GetAutomationLive)
 
 	// Chat input requests (project-scoped by submitted project_id)
+	e.GET("/chat/input-requests", h.ChatInputRequests)
 	e.POST("/chat/input-requests/:id/answer", h.ChatInputRequestAnswer)
 
 	// Tasks (project-scoped via ?project_id= query param)

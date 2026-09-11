@@ -769,6 +769,18 @@ func executeAnthropicToolUses(ctx context.Context, opts *AgenticOptions, blocks 
 			isError: isError,
 		}
 	}
+	if requestIndex := exclusiveAnthropicRequestUserInput(blocks); requestIndex >= 0 {
+		for i, block := range blocks {
+			if i == requestIndex {
+				runOne(i)
+				continue
+			}
+			results[i] = anthropicToolExecutionResult{
+				block: block, output: "tool call rejected: request_user_input must complete in its own model turn", isError: true,
+			}
+		}
+		return results
+	}
 
 	if len(blocks) > 1 && allAnthropicToolsReadOnly(blocks) {
 		var wg sync.WaitGroup
@@ -787,6 +799,18 @@ func executeAnthropicToolUses(ctx context.Context, opts *AgenticOptions, blocks 
 		runOne(i)
 	}
 	return results
+}
+
+func exclusiveAnthropicRequestUserInput(blocks []agenticBlock) int {
+	if len(blocks) < 2 {
+		return -1
+	}
+	for i, block := range blocks {
+		if block.Name == "request_user_input" {
+			return i
+		}
+	}
+	return -1
 }
 
 func runAnthropicToolUse(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
