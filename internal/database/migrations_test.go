@@ -1242,8 +1242,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 179 {
-		t.Fatalf("max goose version = %d, want 179", maxVersion)
+	if maxVersion != 180 {
+		t.Fatalf("max goose version = %d, want 180", maxVersion)
 	}
 }
 
@@ -1715,7 +1715,7 @@ func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO telegram_authorized_users (id, project_id, telegram_user_id, telegram_username, display_name) VALUES ('telegram-username-three', 'project-two', 0, 'ALICEUSER', 'Three')`); err == nil {
 		t.Fatal("expected global Telegram username uniqueness to reject mixed-case duplicate")
 	}
-	if err := goose.UpTo(db, ".", 179); err != nil {
+	if err := goose.UpTo(db, ".", 180); err != nil {
 		t.Fatalf("failed to restore project-scoped authorization migration: %v", err)
 	}
 	if _, err := db.Exec(`
@@ -1810,8 +1810,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 179 {
-		t.Fatalf("max goose version = %d, want 179", maxVersion)
+	if maxVersion != 180 {
+		t.Fatalf("max goose version = %d, want 180", maxVersion)
 	}
 }
 
@@ -2259,8 +2259,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 179 {
-		t.Fatalf("max goose version = %d, want 179", maxVersion)
+	if maxVersion != 180 {
+		t.Fatalf("max goose version = %d, want 180", maxVersion)
 	}
 }
 
@@ -2595,8 +2595,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 179 {
-		t.Fatalf("max goose version = %d, want 179", maxVersion)
+	if maxVersion != 180 {
+		t.Fatalf("max goose version = %d, want 180", maxVersion)
 	}
 }
 
