@@ -33,6 +33,14 @@ var (
 	taskAttachmentRemove   = os.Remove
 )
 
+type taskAttachmentLister interface {
+	ListByTask(context.Context, string) ([]models.Attachment, error)
+}
+
+var taskAttachmentListByTask = func(ctx context.Context, repo taskAttachmentLister, taskID string) ([]models.Attachment, error) {
+	return repo.ListByTask(ctx, taskID)
+}
+
 func attachmentRequestLimit(maxFileSize int64, maxFiles int) int64 {
 	if maxFiles < 1 {
 		maxFiles = 1
@@ -323,18 +331,25 @@ func (h *Handler) UploadAttachment(c echo.Context) error {
 	if result.directoryError != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create directory")
 	}
+	if result.listError != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to inspect existing attachments")
+	}
 	if result.uploadedCount == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "no files could be uploaded")
 	}
+	return h.renderTaskAttachmentList(c, taskID, task.ProjectID)
+}
 
+func (h *Handler) renderTaskAttachmentList(c echo.Context, taskID, projectID string) error {
 	// Return updated attachments list
 	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, task.ProjectID))
+	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, projectID))
 }
 
 type taskAttachmentUploadResult struct {
 	uploadedCount  int
 	directoryError error
+	listError      error
 }
 
 // persistTaskAttachmentFiles saves uploaded files to uploads/{taskID}/ and creates task attachment records.
@@ -348,13 +363,15 @@ func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string,
 	}
 
 	usedNames := make(map[string]bool, len(files))
-	if existing, err := h.attachmentRepo.ListByTask(ctx, taskID); err != nil {
+	existing, err := taskAttachmentListByTask(ctx, h.attachmentRepo, taskID)
+	if err != nil {
 		applog.Infof("[handler] %s error listing existing attachments for task=%s: %v", logScope, taskID, err)
-	} else {
-		for _, attachment := range existing {
-			usedNames[attachment.FileName] = true
-			usedNames[filepath.Base(attachment.FilePath)] = true
-		}
+		result.listError = err
+		return result
+	}
+	for _, attachment := range existing {
+		usedNames[attachment.FileName] = true
+		usedNames[filepath.Base(attachment.FilePath)] = true
 	}
 
 	for _, file := range files {
