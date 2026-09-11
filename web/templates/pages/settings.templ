@@ -853,10 +853,10 @@ templ settingsContent(view ChannelsSettingsView) {
 									<span>{ "@" + user.Username + " " }</span>
 								}
 								<span class="opacity-60">ID { user.XUserID }</span>
-								</span>
-								<button class="btn btn-ghost btn-xs text-error" hx-delete={ "/channels/x/authorized-users/" + user.ID + "?project_id=" + view.CurrentProjectID } hx-swap="none">Delete</button>
-							</div>
-						}
+							</span>
+							<button class="btn btn-ghost btn-xs text-error" hx-delete={ "/channels/x/authorized-users/" + user.ID + "?project_id=" + view.CurrentProjectID } hx-swap="none">Delete</button>
+						</div>
+					}
 						if len(view.XAuthorizedUsers) == 0 {
 							<p class="text-sm opacity-60">No users authorized. Inbound mentions are denied until a user is added.</p>
 						}					</div>
