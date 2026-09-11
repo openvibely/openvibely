@@ -156,6 +156,9 @@ func (h *Handler) executeRequestUserInputTool(ctx context.Context, params stream
 	if params.Surface != "" && params.Surface != chatcontrol.SurfaceWeb {
 		return "", fmt.Errorf("request_user_input is available only on web Chat")
 	}
+	if params.IsTaskFollowup {
+		return "", fmt.Errorf("request_user_input is available only on web Chat, not task thread follow-ups")
+	}
 	projectID := strings.TrimSpace(params.ProjectID)
 	if projectID == "" {
 		return "", fmt.Errorf("request_user_input: no current project")
