@@ -922,7 +922,7 @@ templ settingsContent(view ChannelsSettingsView) {
 							Authorized Users
 						</h4>
 						<p class="text-xs opacity-50 mb-3">
-							Authorized Telegram users are system-level for this channel and can use Telegram across projects. If no users are added, the bot is open to everyone. Outbound Message Targets remain project-specific.
+							Authorized Telegram users are scoped to this project. If no users are added, the bot is open to everyone. Outbound Message Targets remain project-specific.
 						</p>
 						@components.TelegramAuthorizedUsersList(view.AuthorizedUsers, view.CurrentProjectID)
 					}
@@ -1186,7 +1186,7 @@ templ settingsContent(view ChannelsSettingsView) {
 							Authorized Users
 						</h4>
 						<p class="text-xs opacity-50 mb-3">
-							Authorized Slack users are system-level for this channel and can use Slack across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.
+							Authorized Slack users are scoped to this project. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.
 						</p>
 						@components.SlackAuthorizedUsersList(view.SlackAuthorizedUsers, view.CurrentProjectID)
 					}
@@ -1241,7 +1241,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					if view.CurrentProjectID != "" {
 						<div class="divider"></div>
 						<h4 class="font-semibold text-sm mb-2">Authorized Users</h4>
-						<p class="text-xs opacity-50 mb-3">Authorized Discord users are system-level for this channel and can use Discord across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>
+						<p class="text-xs opacity-50 mb-3">Authorized Discord users are scoped to this project. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>
 						@components.DiscordAuthorizedUsersList(view.DiscordAuthorizedUsers, view.CurrentProjectID)
 					}
 					<div class="divider"></div>
@@ -1315,7 +1315,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						if view.CurrentProjectID != "" {
 							<div class="divider"></div>
 							<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">Authorized Senders</h4>
-							<p class="text-xs opacity-50 mb-3">Authorized email senders are system-level for this channel and can use Email across projects. If no senders are configured, access is denied until authorized senders are added. Outbound Message Targets remain project-specific.</p>
+							<p class="text-xs opacity-50 mb-3">Authorized email senders are scoped to this project. If no senders are configured, access is denied until authorized senders are added. Outbound Message Targets remain project-specific.</p>
 							@components.EmailAuthorizedSendersList(view.EmailAuthorizedSenders, view.CurrentProjectID)
 						}
 						<div class="divider"></div>

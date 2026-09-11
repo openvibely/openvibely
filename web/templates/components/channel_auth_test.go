@@ -36,7 +36,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			emptyState:    "No authorized users configured.",
 			confirmation:  "Remove this authorized user?",
 			emptyList:     SlackAuthorizedUsersList(nil, projectID),
-			populatedList: SlackAuthorizedUsersList([]models.SlackAuthorizedUser{{ID: "slack-row", SlackUserID: "U12345678", DisplayName: "Slack User"}}, projectID),
+			populatedList: SlackAuthorizedUsersList([]models.SlackAuthorizedUser{{ID: "slack-row", ProjectID: projectID, SlackUserID: "U12345678", DisplayName: "Slack User"}}, projectID),
 		},
 		{
 			name:          "Discord",
@@ -48,7 +48,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			emptyState:    "No authorized users configured. Access is denied until authorized users are added.",
 			confirmation:  "Remove this authorized user?",
 			emptyList:     DiscordAuthorizedUsersList(nil, projectID),
-			populatedList: DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "discord-row", DiscordUserID: "123456789012345678", DisplayName: "Discord User"}}, projectID),
+			populatedList: DiscordAuthorizedUsersList([]models.DiscordAuthorizedUser{{ID: "discord-row", ProjectID: projectID, DiscordUserID: "123456789012345678", DisplayName: "Discord User"}}, projectID),
 		},
 		{
 			name:          "Telegram",
@@ -60,7 +60,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			emptyState:    "No authorized users configured. Access is denied until authorized users are added.",
 			confirmation:  "Remove this authorized user?",
 			emptyList:     TelegramAuthorizedUsersList(nil, projectID),
-			populatedList: TelegramAuthorizedUsersList([]models.TelegramAuthorizedUser{{ID: "telegram-row", TelegramUserID: 987654321, TelegramUsername: "telegram_user", DisplayName: "Telegram User"}}, projectID),
+			populatedList: TelegramAuthorizedUsersList([]models.TelegramAuthorizedUser{{ID: "telegram-row", ProjectID: projectID, TelegramUserID: 987654321, TelegramUsername: "telegram_user", DisplayName: "Telegram User"}}, projectID),
 		},
 		{
 			name:          "Email",
@@ -72,7 +72,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 			emptyState:    "No authorized senders configured. Access is denied until senders are added.",
 			confirmation:  "Remove this authorized sender?",
 			emptyList:     EmailAuthorizedSendersList(nil, projectID),
-			populatedList: EmailAuthorizedSendersList([]models.EmailAuthorizedSender{{ID: "email-row", EmailAddress: "person@example.com", DisplayName: "Email Sender"}}, projectID),
+			populatedList: EmailAuthorizedSendersList([]models.EmailAuthorizedSender{{ID: "email-row", ProjectID: projectID, EmailAddress: "person@example.com", DisplayName: "Email Sender"}}, projectID),
 		},
 	}
 
@@ -97,6 +97,7 @@ func TestChannelAuthorizationListWrappersPreserveHTMXContracts(t *testing.T) {
 
 			populatedHTML := renderChannelAuthorizationComponent(t, tc.populatedList)
 			assertChannelAuthorizationContains(t, populatedHTML,
+				fmt.Sprintf(`data-project-id="%s"`, projectID),
 				fmt.Sprintf(`hx-delete="%s"`, tc.deleteRoute),
 				fmt.Sprintf(`hx-confirm="%s"`, tc.confirmation),
 			)

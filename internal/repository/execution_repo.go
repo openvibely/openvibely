@@ -343,7 +343,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		}
 		if _, err := dbexec.ExecContext(ctx, `UPDATE tasks
 			SET status = 'queued', category = 'active',
-				display_order = (SELECT COALESCE(MAX(peer.display_order), -1) + 1 FROM tasks peer WHERE peer.project_id = tasks.project_id AND peer.category = 'active'),
+				display_order = `+activeBoardTailOrderExpression+`,
 				updated_at = datetime('now') WHERE id = ?`, e.TaskID); err != nil {
 			return fmt.Errorf("reactivating task for direct follow-up: %w", err)
 		}

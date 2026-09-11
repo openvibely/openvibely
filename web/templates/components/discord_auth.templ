@@ -11,7 +11,7 @@ templ DiscordAuthorizedUsersList(users []models.DiscordAuthorizedUser, projectID
 	@channelAuthorizationList(
 		channelAuthorizationListConfig{
 			ContainerID: "discord-authorized-users",
-			Description: "Authorized Discord users are system-level for this channel and can use Discord across projects. Outbound Message Targets remain project-specific.",
+			Description: "Authorized Discord users are scoped to this project. Outbound Message Targets remain project-specific.",
 			EmptyState: "No authorized users configured. Access is denied until authorized users are added.",
 			RemoveConfirmation: "Remove this authorized user?",
 			AddHelp: "Use the numeric Discord user ID from Developer Mode, not the username or display name.",
@@ -32,7 +32,8 @@ func discordAuthorizationRows(users []models.DiscordAuthorizedUser, projectID st
 	for _, user := range users {
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       discordAuthorizedUserIdentity(user),
-			DeleteEndpoint: fmt.Sprintf("/channels/discord/authorized-users/%s?project_id=%s", user.ID, projectID),
+			ProjectID:      user.ProjectID,
+			DeleteEndpoint: fmt.Sprintf("/channels/discord/authorized-users/%s?project_id=%s", user.ID, user.ProjectID),
 		})
 	}
 	return rows
