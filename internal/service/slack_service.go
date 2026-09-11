@@ -459,19 +459,29 @@ func (s *SlackService) HandleOAuthCallback(ctx context.Context, code, state, red
 	if strings.TrimSpace(payload.AccessToken) == "" {
 		return fmt.Errorf("oauth response missing bot access token")
 	}
-
-	if err := s.setSetting(ctx, SlackSettingBotToken, strings.TrimSpace(payload.AccessToken)); err != nil {
-		return err
+	botUserID := strings.TrimSpace(payload.BotUserID)
+	teamID := strings.TrimSpace(payload.Team.ID)
+	teamName := strings.TrimSpace(payload.Team.Name)
+	if botUserID == "" || teamID == "" || teamName == "" {
+		return fmt.Errorf("oauth response missing Slack bot or team identity")
 	}
-	_ = s.setSetting(ctx, SlackSettingBotTokenSource, SlackBotTokenSourceOAuth)
-	_ = s.setSetting(ctx, SlackSettingBotUserID, strings.TrimSpace(payload.BotUserID))
-	_ = s.setSetting(ctx, SlackSettingTeamID, strings.TrimSpace(payload.Team.ID))
-	_ = s.setSetting(ctx, SlackSettingTeamName, strings.TrimSpace(payload.Team.Name))
-	_ = s.setSetting(ctx, SlackSettingConnectedAt, time.Now().UTC().Format(time.RFC3339))
-	_ = s.setSetting(ctx, SlackSettingOAuthState, "")
 
+	oauthSettings := map[string]string{
+		SlackSettingBotToken:       strings.TrimSpace(payload.AccessToken),
+		SlackSettingBotTokenSource: SlackBotTokenSourceOAuth,
+		SlackSettingBotUserID:      botUserID,
+		SlackSettingTeamID:         teamID,
+		SlackSettingTeamName:       teamName,
+		SlackSettingConnectedAt:    time.Now().UTC().Format(time.RFC3339),
+		SlackSettingOAuthState:     "",
+	}
 	if strings.TrimSpace(s.getSetting(ctx, SlackSettingSendResponses)) == "" {
-		_ = s.setSetting(ctx, SlackSettingSendResponses, "true")
+		oauthSettings[SlackSettingSendResponses] = "true"
+	}
+	if s.settingsRepo != nil {
+		if err := s.settingsRepo.SetMany(ctx, oauthSettings); err != nil {
+			return fmt.Errorf("save slack oauth settings: %w", err)
+		}
 	}
 
 	return s.ReloadFromSettings(ctx)

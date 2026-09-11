@@ -95,6 +95,26 @@ func TestReturnToChannelsNonHTMXRedirectsToChannels(t *testing.T) {
 	assert.Empty(t, rec.Header().Get("HX-Refresh"))
 }
 
+func TestHandleSlackCallbackErrorDoesNotRedirect(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetSlackService(&fakeSlackService{
+		callbackFn: func(context.Context, string, string, string) error {
+			return fmt.Errorf("save slack oauth settings: forced failure")
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/channels/slack/callback?code=code-1&state=state-1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.handleSlackCallback(c)
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	require.Equal(t, http.StatusBadRequest, httpErr.Code)
+	require.Empty(t, rec.Header().Get("Location"))
+}
+
 func TestHandleTelegramSaveHTMXTriggersChannelsRefresh(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 
