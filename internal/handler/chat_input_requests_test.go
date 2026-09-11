@@ -6,12 +6,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 )
@@ -82,6 +85,99 @@ func TestRequestUserInputToolPublishesSSEAndReturnsAnswer(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for tool result")
 	}
+}
+
+func TestRequestUserInputAnswerResumesProviderToolLoopAndAllowsAffirmativeCreateTask(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Interactive continuation")
+	cb := events.NewChatBroadcaster()
+	h.SetChatBroadcaster(cb)
+	sub, err := cb.SubscribeProject(project.ID)
+	require.NoError(t, err)
+	defer cb.Unsubscribe(sub)
+
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1/chat/completions", r.URL.Path)
+		attempt := requests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch attempt {
+		case 1:
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_input\",\"type\":\"function\",\"function\":{\"name\":\"request_user_input\",\"arguments\":\"{\\\"questions\\\":[{\\\"id\\\":\\\"create\\\",\\\"question\\\":\\\"Should I create a task for this?\\\",\\\"options\\\":[{\\\"label\\\":\\\"Create task\\\",\\\"description\\\":\\\"Create the task now.\\\"},{\\\"label\\\":\\\"Not now\\\",\\\"description\\\":\\\"Do not create a task.\\\"}]}]}\"}}]}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+		case 2:
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			messages := body["messages"].([]any)
+			last := messages[len(messages)-1].(map[string]any)
+			require.Equal(t, "tool", last["role"])
+			require.Contains(t, last["content"], "Create task")
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_create\",\"type\":\"function\",\"function\":{\"name\":\"create_task\",\"arguments\":\"{\\\"title\\\":\\\"Approved follow-up task\\\",\\\"prompt\\\":\\\"Do the approved work\\\",\\\"category\\\":\\\"backlog\\\",\\\"priority\\\":2}\"}}]}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+		default:
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			messages := body["messages"].([]any)
+			last := messages[len(messages)-1].(map[string]any)
+			require.Equal(t, "tool", last["role"])
+			require.Contains(t, last["content"], "Approved follow-up task")
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"content\":\"Created after affirmative answer.\"}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+		}
+	}))
+	defer srv.Close()
+
+	agent := models.LLMConfig{
+		Name: "Compatible input loop", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "provider/model", APIKey: "sk-test", BaseURL: srv.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions",
+		CustomAuthConfigJSON: `{"enabled":true,"allow_private_endpoints":true}`,
+	}
+
+	answerDone := make(chan struct{}, 1)
+	go func() {
+		defer func() { answerDone <- struct{}{} }()
+		deadline := time.After(3 * time.Second)
+		for {
+			select {
+			case evt := <-sub:
+				if evt.Type != events.ChatUserInputRequested || evt.InputRequest == nil {
+					continue
+				}
+				postInputRequestJSONToEcho(t, e, "/chat/input-requests/"+evt.InputRequest.ID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Create task"}]}`, http.StatusOK)
+				return
+			case <-deadline:
+				return
+			}
+		}
+	}()
+
+	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
+	rt := &llmcontracts.RuntimeTools{Definitions: defs, Executor: h.chatActionExecutor(streamingResponseParams{ProjectID: project.ID, ExecID: "exec-loop", Agent: agent, ChatMode: models.ChatModeOrchestrate, Surface: chatcontrol.SurfaceWeb}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)}
+	adapter := llmopenai_compatible.New(nil, nil)
+	result, err := adapter.Call(llmcontracts.WithRuntimeTools(ctx, rt), llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, Message: "Maybe create a task", Agent: agent, ExecID: "exec-loop", ProjectID: project.ID, ChatMode: models.ChatModeOrchestrate}, "")
+	require.NoError(t, err)
+	require.Contains(t, result.Output, "Created after affirmative answer.")
+	require.Equal(t, int32(3), requests.Load())
+	select {
+	case <-answerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("answer goroutine did not observe input request")
+	}
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryBacklog))
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, "Approved follow-up task", tasks[0].Title)
 }
 
 func TestChatInputRequestAnswerRejectsInvalidCrossProjectAndDuplicate(t *testing.T) {
@@ -157,10 +253,15 @@ func handlerToolDefNames(defs []llmcontracts.RuntimeToolDefinition) []string {
 
 func postInputRequestJSON(t *testing.T, tc *TestContext, path, body string, wantStatus int) *httptest.ResponseRecorder {
 	t.Helper()
+	return postInputRequestJSONToEcho(t, tc.echo, path, body, wantStatus)
+}
+
+func postInputRequestJSONToEcho(t *testing.T, e *echo.Echo, path, body string, wantStatus int) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	tc.echo.ServeHTTP(rec, req)
+	e.ServeHTTP(rec, req)
 	require.Equal(t, wantStatus, rec.Code, rec.Body.String())
 	return rec
 }
