@@ -3,6 +3,7 @@ package pages
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -43,6 +44,53 @@ func channelCardMatchesFilters(view ChannelsSettingsView, channelType string, co
 	default:
 		return true
 	}
+}
+
+type channelSettingsCard struct {
+	Kind    string
+	Name    string
+	Webhook models.WebhookEndpoint
+}
+
+func channelSettingsCards(view ChannelsSettingsView) []channelSettingsCard {
+	cards := make([]channelSettingsCard, 0, 7+len(view.Webhooks))
+	if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0, "Outbound Message Targets send_message Slack Telegram Email Discord X") {
+		cards = append(cards, channelSettingsCard{Kind: "outbound_targets", Name: "Outbound Message Targets"})
+	}
+	for _, fixed := range []struct {
+		kind    string
+		name    string
+		present bool
+	}{
+		{kind: "x", name: "X (formerly Twitter)", present: view.HasXChannel},
+		{kind: "github", name: "GitHub", present: view.HasGitHubChannel},
+		{kind: "slack", name: "Slack", present: view.HasSlackChannel},
+		{kind: "telegram", name: "Telegram Bot", present: view.HasTelegramChannel},
+		{kind: "discord", name: "Discord", present: view.HasDiscordChannel},
+		{kind: "email", name: "Email", present: view.HasEmailChannel},
+	} {
+		if fixed.present {
+			cards = append(cards, channelSettingsCard{Kind: fixed.kind, Name: fixed.name})
+		}
+	}
+	for _, webhook := range view.Webhooks {
+		cards = append(cards, channelSettingsCard{Kind: "webhook", Name: webhook.Name, Webhook: webhook})
+	}
+	sort.SliceStable(cards, func(i, j int) bool {
+		left, right := strings.ToLower(cards[i].Name), strings.ToLower(cards[j].Name)
+		if left == right {
+			left, right = cards[i].Name, cards[j].Name
+		}
+		if left == right {
+			left = cards[i].Kind + cards[i].Webhook.ID
+			right = cards[j].Kind + cards[j].Webhook.ID
+		}
+		if view.Sort == "name_desc" {
+			return left > right
+		}
+		return left < right
+	})
+	return cards
 }
 
 func channelCardListState(view ChannelsSettingsView) CardListState {
@@ -271,10 +319,12 @@ templ settingsContent(view ChannelsSettingsView) {
 
 			<!-- Active Channels -->
 			<div id="channel-card-list" data-card-pagination-list>
-				<div class="grid gap-4">				if channelCardMatchesFilters(view, "outbound_targets", len(view.ChannelTargets) > 0, len(view.ChannelTargets) > 0, "Outbound Message Targets send_message Slack Telegram Email Discord X") {
-					@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
-				}
-				if view.HasXChannel {
+				<div class="grid gap-4">
+					for _, card := range channelSettingsCards(view) {
+						if card.Kind == "outbound_targets" {
+							@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
+						}
+						if card.Kind == "x" {
 					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-card-sort-name="X (formerly Twitter)" data-card-select-id="channel:x" data-card-select-eligible="true" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected, "X formerly Twitter mentions posts") }>
 						<div class="card-body p-5">
 							<div class="flex items-start justify-between gap-3">
@@ -300,7 +350,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 				}
 
-				if view.HasGitHubChannel {
+						if card.Kind == "github" {
 				<!-- GitHub Card -->
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -378,7 +428,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				</div>
 			}
 
-			if view.HasSlackChannel {
+						if card.Kind == "slack" {
 				<!-- Slack Card -->
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -459,8 +509,8 @@ templ settingsContent(view ChannelsSettingsView) {
 				</div>
 			}
 
-			if view.HasTelegramChannel {
-				<!-- Telegram Bot Card -->
+						if card.Kind == "telegram" {
+							<!-- Telegram Bot Card -->
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="telegram"
@@ -537,7 +587,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				</div>
 				}
 
-				if view.HasDiscordChannel {
+						if card.Kind == "discord" {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="discord"
@@ -604,7 +654,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					</div>
 				}
 
-				if view.HasEmailChannel {
+						if card.Kind == "email" {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="email"
@@ -650,8 +700,9 @@ templ settingsContent(view ChannelsSettingsView) {
 						</div>
 					</div>
 				}
-					for _, wh := range view.Webhooks {
-						<!-- Webhook Card -->
+						if card.Kind == "webhook" {
+							{{ wh := card.Webhook }}
+							<!-- Webhook Card -->
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="webhook"
@@ -729,12 +780,13 @@ templ settingsContent(view ChannelsSettingsView) {
 							<div id={ "webhook-test-" + wh.ID } class="mt-2"></div>
 						</div>
 					</div>
+							</div>
+						}
+					}
 				</div>
-			}
-					</div>
-				</div>
-				@CardPaginationStatusWithBoundary(view.WebhooksHasMore)
-				if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasXChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 && view.WebhooksPageOffset == 0 && view.WebhooksSearch == "" {
+			</div>
+			@CardPaginationStatusWithBoundary(view.WebhooksHasMore)
+			if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasXChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 && view.WebhooksPageOffset == 0 && view.WebhooksSearch == "" {
 					<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-empty-state data-search-card data-search-text="No channels added yet">
 						<div class="card-body">
 							<h3 class="font-semibold">No channels added yet</h3>

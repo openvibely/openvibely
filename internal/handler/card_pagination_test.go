@@ -474,14 +474,12 @@ func TestPersonalityFilteringAndSortingPrecedePagination(t *testing.T) {
 }
 
 func TestChannelsSortContractOrdersMixedVisibleCardsByName(t *testing.T) {
-	var body bytes.Buffer
-	view := pages.ChannelsSettingsView{
+	baseView := pages.ChannelsSettingsView{
 		CurrentProjectID: "project-channels-sort",
 		HasGitHubChannel: true,
 		HasSlackChannel:  true,
 		HasXChannel:      true,
 		HasEmailChannel:  true,
-		Sort:             "name_desc",
 		ChannelTargets: []models.ChannelTarget{
 			{ID: "outbound-target", Name: "Team destination", Platform: "slack", TargetID: "channel-1"},
 		},
@@ -490,27 +488,35 @@ func TestChannelsSortContractOrdersMixedVisibleCardsByName(t *testing.T) {
 			{ID: "alpha-hook", Name: "Alpha webhook", Enabled: true},
 		},
 	}
-	require.NoError(t, pages.SettingsContent(view).Render(t.Context(), &body))
-	html := body.String()
-	require.Contains(t, html, `<option value="name_asc">Name A–Z</option>`)
-	require.Contains(t, html, `<option value="name_desc" selected>Name Z–A</option>`)
-	for _, card := range []struct {
-		selector string
+	for _, test := range []struct {
 		name     string
+		sort     string
+		expected []string
 	}{
-		{`data-channel-type="outbound-targets"`, `data-card-sort-name="Outbound Message Targets"`},
-		{`data-channel-type="x"`, `data-card-sort-name="X (formerly Twitter)"`},
-		{`data-channel-type="github"`, `data-card-sort-name="GitHub"`},
-		{`data-channel-type="slack"`, `data-card-sort-name="Slack"`},
-		{`data-channel-type="email"`, `data-card-sort-name="Email"`},
-		{`data-webhook-id="zulu-hook"`, `data-card-sort-name="Zulu webhook"`},
-		{`data-webhook-id="alpha-hook"`, `data-card-sort-name="Alpha webhook"`},
+		{name: "ascending", sort: "name_asc", expected: []string{"Alpha webhook", "Email", "GitHub", "Outbound Message Targets", "Slack", "X (formerly Twitter)", "Zulu webhook"}},
+		{name: "descending", sort: "name_desc", expected: []string{"Zulu webhook", "X (formerly Twitter)", "Slack", "Outbound Message Targets", "GitHub", "Email", "Alpha webhook"}},
 	} {
-		require.Contains(t, html, card.selector)
-		require.Contains(t, html, card.name)
+		t.Run(test.name, func(t *testing.T) {
+			view := baseView
+			view.Sort = test.sort
+			var body bytes.Buffer
+			require.NoError(t, pages.SettingsContent(view).Render(t.Context(), &body))
+			html := body.String()
+			selectedLabel := "Name A–Z"
+			if test.sort == "name_desc" {
+				selectedLabel = "Name Z–A"
+			}
+			require.Contains(t, html, `value="`+test.sort+`" selected>`+selectedLabel+`</option>`)
+			matches := regexp.MustCompile(`data-card-sort-name="([^"]+)"`).FindAllStringSubmatch(html, -1)
+			actual := make([]string, 0, len(matches))
+			for _, match := range matches {
+				actual = append(actual, match[1])
+			}
+			require.Equal(t, test.expected, actual, "server response must render the selected mixed-card order")
+			require.Contains(t, html, `data-card-loaded-name-sort`)
+			require.Contains(t, html, `data-card-pagination-list="#channel-card-list"`)
+		})
 	}
-	require.Contains(t, html, `data-card-loaded-name-sort`)
-	require.Contains(t, html, `data-card-pagination-list="#channel-card-list"`)
 }
 
 func TestChannelsWebhookEnabledFilterAppliesAcrossFixedAndPaginatedCards(t *testing.T) {

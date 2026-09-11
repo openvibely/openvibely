@@ -21,13 +21,35 @@ func TestWebhookRepo_ListCardsByProjectUsesCompactOrderedIndex(t *testing.T) {
 	seedWebhookCardFixture(t, db, project.ID, 200)
 	seedWebhookCardFixture(t, db, otherProject.ID, 25)
 
-	query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints WHERE project_id = ? ORDER BY name ASC, id ASC`
-	plan := webhookExplainQueryPlan(t, db, query, project.ID)
-	if !strings.Contains(plan, "idx_webhook_endpoints_project_name_id") {
-		t.Fatalf("card list plan = %s, want project/name/id index", plan)
-	}
-	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
-		t.Fatalf("card list plan = %s, want no temporary order sort", plan)
+	enabled := true
+	for _, test := range []struct {
+		name  string
+		sort  string
+		order string
+	}{
+		{name: "ascending", sort: "name_asc", order: "ASC"},
+		{name: "descending", sort: "name_desc", order: "DESC"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query := `SELECT ` + webhookCardColumns + ` FROM webhook_endpoints
+				WHERE project_id = ? AND enabled = ?
+				ORDER BY name COLLATE NOCASE ` + test.order + `, name ` + test.order + `, id ` + test.order + ` LIMIT ? OFFSET ?`
+			plan := webhookExplainQueryPlan(t, db, query, project.ID, true, 20, 20)
+			if !strings.Contains(plan, "idx_webhook_endpoints_project_name_id") {
+				t.Fatalf("paginated card list plan = %s, want project/name/id index", plan)
+			}
+			if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+				t.Fatalf("paginated card list plan = %s, want no temporary order sort", plan)
+			}
+
+			cards, err := repo.ListCardsByProjectPageFiltered(context.Background(), project.ID, 20, 20, WebhookCardFilter{Enabled: &enabled, Sort: test.sort})
+			if err != nil {
+				t.Fatalf("ListCardsByProjectPageFiltered: %v", err)
+			}
+			if len(cards) != 20 {
+				t.Fatalf("card count = %d, want 20", len(cards))
+			}
+		})
 	}
 
 	cards, err := repo.ListCardsByProject(context.Background(), project.ID)

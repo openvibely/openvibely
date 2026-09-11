@@ -143,7 +143,7 @@ func (r *WebhookRepo) ListByProject(ctx context.Context, projectID string) ([]mo
 
 func (r *WebhookRepo) ListCardsByProject(ctx context.Context, projectID string) ([]models.WebhookEndpoint, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+webhookCardColumns+` FROM webhook_endpoints WHERE project_id = ? ORDER BY name ASC, id ASC`, projectID)
+		`SELECT `+webhookCardColumns+` FROM webhook_endpoints WHERE project_id = ? ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing webhook endpoint cards: %w", err)
 	}
