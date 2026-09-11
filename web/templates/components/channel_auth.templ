@@ -12,6 +12,7 @@ type channelAuthorizationListConfig struct {
 
 type channelAuthorizationRow struct {
 	Identity       templpkg.Component
+	ProjectID      string
 	DeleteEndpoint string
 }
 
@@ -31,7 +32,7 @@ templ channelAuthorizationList(config channelAuthorizationListConfig, rows []cha
 		} else {
 			<div class="space-y-2 mb-3">
 				for _, row := range rows {
-					<div class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
+					<div data-project-id={ row.ProjectID } class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
 						@row.Identity
 						<button
 							type="button"

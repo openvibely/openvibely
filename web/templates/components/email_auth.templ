@@ -11,7 +11,7 @@ templ EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, project
 	@channelAuthorizationList(
 		channelAuthorizationListConfig{
 			ContainerID: "email-authorized-senders",
-			Description: "Authorized email senders are system-level for this channel and can use Email across projects. Outbound Message Targets remain project-specific.",
+			Description: "Authorized email senders are scoped to this project. Outbound Message Targets remain project-specific.",
 			EmptyState: "No authorized senders configured. Access is denied until senders are added.",
 			RemoveConfirmation: "Remove this authorized sender?",
 		},
@@ -31,7 +31,8 @@ func emailAuthorizationRows(senders []models.EmailAuthorizedSender, projectID st
 	for _, sender := range senders {
 		rows = append(rows, channelAuthorizationRow{
 			Identity:       emailAuthorizedSenderIdentity(sender),
-			DeleteEndpoint: fmt.Sprintf("/channels/email/authorized-senders/%s?project_id=%s", sender.ID, projectID),
+			ProjectID:      sender.ProjectID,
+			DeleteEndpoint: fmt.Sprintf("/channels/email/authorized-senders/%s?project_id=%s", sender.ID, sender.ProjectID),
 		})
 	}
 	return rows

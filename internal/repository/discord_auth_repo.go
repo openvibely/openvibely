@@ -20,7 +20,7 @@ func NewDiscordAuthRepo(db *sql.DB) *DiscordAuthRepo {
 		db:                          db,
 		table:                       "discord_authorized_users",
 		identityColumn:              "discord_user_id",
-		conflictTarget:              "discord_user_id",
+		conflictTarget:              "project_id, discord_user_id",
 		matchClause:                 `discord_user_id = ?`,
 		listErrLabel:                "discord auth users",
 		scanErrLabel:                "discord auth user",
@@ -39,16 +39,14 @@ func NewDiscordAuthRepo(db *sql.DB) *DiscordAuthRepo {
 	}}
 }
 
-// ListByProject returns all system-level authorized Discord users.
-// projectID is accepted for UI compatibility but does not scope inbound authorization.
+// ListByProject returns the authorized Discord users managed by one project.
 func (r *DiscordAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.DiscordAuthorizedUser, error) {
-	return r.allowlist.List(ctx)
+	return r.allowlist.ListByProject(ctx, projectID)
 }
 
-// CountByProject returns the system-level Discord authorized-user count.
-// projectID is accepted for UI/status compatibility but does not scope inbound authorization.
+// CountByProject returns the authorized Discord-user count for one project.
 func (r *DiscordAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
-	return r.allowlist.Count(ctx)
+	return countRowsByProject(ctx, r.allowlist.db, "discord_authorized_users", "discord auth users", projectID)
 }
 
 // IsAuthorized checks whether a Discord user is authorized at the system channel level.
@@ -90,10 +88,9 @@ func (r *DiscordAuthRepo) Create(ctx context.Context, u *models.DiscordAuthorize
 	return nil
 }
 
-// DeleteByProject removes all system-level Discord authorized users.
-// projectID is accepted for compatibility but does not scope inbound authorization.
+// DeleteByProject removes all Discord authorization rows owned by one project.
 func (r *DiscordAuthRepo) DeleteByProject(ctx context.Context, projectID string) error {
-	if _, err := execBoundSQLite(ctx, r.allowlist.db, `DELETE FROM discord_authorized_users`); err != nil {
+	if _, err := execBoundSQLite(ctx, r.allowlist.db, `DELETE FROM discord_authorized_users WHERE project_id = ?`, projectID); err != nil {
 		return fmt.Errorf("delete discord auth users: %w", err)
 	}
 	return nil
@@ -102,6 +99,11 @@ func (r *DiscordAuthRepo) DeleteByProject(ctx context.Context, projectID string)
 // Delete removes an authorized Discord user by ID.
 func (r *DiscordAuthRepo) Delete(ctx context.Context, id string) error {
 	return r.allowlist.Delete(ctx, id)
+}
+
+// DeleteForProject removes an authorized Discord user only from its owning project.
+func (r *DiscordAuthRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
+	return r.allowlist.DeleteForProject(ctx, projectID, id)
 }
 
 // GetByID returns a single authorized Discord user by ID.

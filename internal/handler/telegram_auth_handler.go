@@ -57,7 +57,7 @@ func (h *Handler) telegramAuthorizedUserCRUD() authorizedUserCRUD[models.Telegra
 	if h.telegramAuthRepo != nil {
 		crud.list = h.telegramAuthRepo.ListByProject
 		crud.getByID = h.telegramAuthRepo.GetByID
-		crud.delete = h.telegramAuthRepo.Delete
+		crud.delete = h.telegramAuthRepo.DeleteForProject
 		crud.projectID = func(user *models.TelegramAuthorizedUser) string { return user.ProjectID }
 	}
 	return crud

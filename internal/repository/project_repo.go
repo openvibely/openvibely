@@ -17,6 +17,9 @@ type ProjectRepo struct {
 	db *sql.DB
 }
 
+const projectWorkerCapacityProjectsQuery = `SELECT id, name, max_workers
+	FROM projects ORDER BY is_default DESC, name ASC`
+
 func NewProjectRepo(db *sql.DB) *ProjectRepo {
 	return &ProjectRepo{db: db}
 }
@@ -35,6 +38,27 @@ func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 		var p models.Project
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.RepoURL, &p.IsDefault, &p.DefaultAgentConfigID, &p.MaxWorkers, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning project: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
+// ListWorkerCapacityProjects returns the project identity, display name, and
+// configured worker limit used exclusively by Workers capacity rows. Ordering
+// remains default-first and then name-ascending, matching List.
+func (r *ProjectRepo) ListWorkerCapacityProjects(ctx context.Context) ([]models.ProjectWorkerCapacity, error) {
+	rows, err := r.db.QueryContext(ctx, projectWorkerCapacityProjectsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("listing project worker capacities: %w", err)
+	}
+	defer rows.Close()
+
+	var projects []models.ProjectWorkerCapacity
+	for rows.Next() {
+		var p models.ProjectWorkerCapacity
+		if err := rows.Scan(&p.ID, &p.Name, &p.MaxWorkers); err != nil {
+			return nil, fmt.Errorf("scanning project worker capacity: %w", err)
 		}
 		projects = append(projects, p)
 	}

@@ -57,7 +57,7 @@ func (h *Handler) discordAuthorizedUserCRUD() authorizedUserCRUD[models.DiscordA
 	if h.discordAuthRepo != nil {
 		crud.list = h.discordAuthRepo.ListByProject
 		crud.getByID = h.discordAuthRepo.GetByID
-		crud.delete = h.discordAuthRepo.Delete
+		crud.delete = h.discordAuthRepo.DeleteForProject
 		crud.projectID = func(user *models.DiscordAuthorizedUser) string { return user.ProjectID }
 	}
 	return crud

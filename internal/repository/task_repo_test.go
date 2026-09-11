@@ -1280,12 +1280,16 @@ func TestTaskRepo_ClaimTaskAppendsToActiveRunningLane(t *testing.T) {
 	ctx := context.Background()
 
 	moving := &models.Task{ProjectID: "default", Title: "Claim Moving", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
-	running := &models.Task{ProjectID: "default", Title: "Claim Existing Running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	running := &models.Task{ProjectID: "default", Title: "Claim Existing Scheduled Running", Category: models.CategoryScheduled, Status: models.StatusRunning, Prompt: "p"}
 	for _, task := range []*models.Task{moving, running} {
 		if err := repo.Create(ctx, task); err != nil {
 			t.Fatalf("Create(%s): %v", task.Title, err)
 		}
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = 50 WHERE id = ?`, running.ID); err != nil {
+		t.Fatalf("seed scheduled running display order: %v", err)
+	}
+	running.DisplayOrder = 50
 
 	claimed, err := repo.ClaimTask(ctx, moving.ID)
 	if err != nil {

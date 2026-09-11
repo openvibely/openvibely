@@ -210,8 +210,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		}
 
 		var nextOrder int
-		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks
-			WHERE project_id = ? AND category = 'active'`, projectID).Scan(&nextOrder); err != nil {
+		if err := conn.QueryRowContext(ctx, activeBoardTailOrderQuery, projectID).Scan(&nextOrder); err != nil {
 			return nil, err
 		}
 		admittedTaskIDs = admittedTaskIDs[:0]

@@ -13,6 +13,158 @@ import (
 	"github.com/openvibely/openvibely/internal/util"
 )
 
+func TestInsightsService_ResolveDirectAnalysisContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	svc := NewInsightsService(
+		repository.NewInsightsRepo(db),
+		repository.NewTaskRepo(db, nil),
+		projectRepo,
+		llmConfigRepo,
+		repository.NewExecutionRepo(db),
+	)
+
+	project := &models.Project{Name: "Direct analysis context", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	defaultAgent, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil {
+		t.Fatalf("get default agent: %v", err)
+	}
+	if defaultAgent == nil {
+		t.Fatal("expected seeded default agent")
+	}
+
+	gotProject, gotAgent, err := svc.resolveDirectAnalysisContext(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("resolve direct analysis context: %v", err)
+	}
+	if gotProject.ID != project.ID || gotProject.RepoPath != project.RepoPath {
+		t.Fatalf("project = %#v, want %#v", gotProject, project)
+	}
+	if gotAgent.ID != defaultAgent.ID {
+		t.Fatalf("agent = %#v, want %#v", gotAgent, defaultAgent)
+	}
+
+	if _, _, err := svc.resolveDirectAnalysisContext(ctx, "missing-project"); err == nil || !strings.HasPrefix(err.Error(), "get project:") {
+		t.Fatalf("missing project error = %v, want get project error", err)
+	}
+
+	if err := llmConfigRepo.Delete(ctx, defaultAgent.ID); err != nil {
+		t.Fatalf("delete default agent: %v", err)
+	}
+	if _, _, err := svc.resolveDirectAnalysisContext(ctx, project.ID); !errors.Is(err, errDirectAnalysisDefaultAgentUnavailable) {
+		t.Fatalf("missing default agent error = %v, want unavailable sentinel", err)
+	}
+}
+
+func TestInsightsService_DirectAnalysisReportsPreserveSetupErrors(t *testing.T) {
+	t.Run("missing project", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		taskRepo := repository.NewTaskRepo(db, nil)
+		insightsRepo := repository.NewInsightsRepo(db)
+		llmConfigRepo := repository.NewLLMConfigRepo(db)
+		execRepo := repository.NewExecutionRepo(db)
+		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+		mock := testutil.NewMockLLMCaller()
+		llmSvc.SetLLMCaller(mock)
+		svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+		svc.SetLLMService(llmSvc)
+
+		for _, report := range []struct {
+			name string
+			run  func() error
+		}{
+			{name: "knowledge extraction", run: func() error { _, err := svc.ExtractKnowledge(ctx, "missing-project"); return err }},
+			{name: "health check", run: func() error { _, err := svc.RunHealthCheck(ctx, "missing-project"); return err }},
+			{name: "idea grade", run: func() error { _, err := svc.GradeIdeas(ctx, "missing-project"); return err }},
+		} {
+			t.Run(report.name, func(t *testing.T) {
+				if err := report.run(); err == nil || !strings.HasPrefix(err.Error(), "get project:") {
+					t.Fatalf("error = %v, want get project error", err)
+				}
+			})
+		}
+		if got := mock.CallCount(); got != 0 {
+			t.Fatalf("direct AI calls = %d, want 0", got)
+		}
+	})
+
+	t.Run("missing default agent", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		taskRepo := repository.NewTaskRepo(db, nil)
+		insightsRepo := repository.NewInsightsRepo(db)
+		llmConfigRepo := repository.NewLLMConfigRepo(db)
+		execRepo := repository.NewExecutionRepo(db)
+		llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+		mock := testutil.NewMockLLMCaller()
+		llmSvc.SetLLMCaller(mock)
+		svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+		svc.SetLLMService(llmSvc)
+
+		project := &models.Project{Name: "No default Agent"}
+		if err := projectRepo.Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		defaultAgent, err := llmConfigRepo.GetDefault(ctx)
+		if err != nil || defaultAgent == nil {
+			t.Fatalf("get default agent = %#v, %v", defaultAgent, err)
+		}
+		if err := llmConfigRepo.Delete(ctx, defaultAgent.ID); err != nil {
+			t.Fatalf("delete default agent: %v", err)
+		}
+
+		for _, report := range []struct {
+			name      string
+			run       func() error
+			wantError string
+		}{
+			{name: "knowledge extraction", run: func() error { _, err := svc.ExtractKnowledge(ctx, project.ID); return err }, wantError: "no default agent"},
+			{name: "health check", run: func() error { _, err := svc.RunHealthCheck(ctx, project.ID); return err }, wantError: "no default agent configured"},
+			{name: "idea grade", run: func() error { _, err := svc.GradeIdeas(ctx, project.ID); return err }, wantError: "no default agent configured"},
+		} {
+			t.Run(report.name, func(t *testing.T) {
+				if err := report.run(); err == nil || err.Error() != report.wantError {
+					t.Fatalf("error = %v, want %q", err, report.wantError)
+				}
+			})
+		}
+		if got := mock.CallCount(); got != 0 {
+			t.Fatalf("direct AI calls = %d, want 0", got)
+		}
+	})
+}
+
+func TestInsightsService_DirectAnalysisReportsPreserveNilLLMBehavior(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	svc := NewInsightsService(
+		repository.NewInsightsRepo(db),
+		repository.NewTaskRepo(db, nil),
+		repository.NewProjectRepo(db),
+		repository.NewLLMConfigRepo(db),
+		repository.NewExecutionRepo(db),
+	)
+
+	knowledge, err := svc.ExtractKnowledge(ctx, "missing-project")
+	if err != nil || knowledge != nil {
+		t.Fatalf("knowledge = %#v, %v; want nil, nil", knowledge, err)
+	}
+	if _, err := svc.RunHealthCheck(ctx, "missing-project"); err == nil || err.Error() != "LLM service not available" {
+		t.Fatalf("health check error = %v, want unavailable service", err)
+	}
+	if _, err := svc.GradeIdeas(ctx, "missing-project"); err == nil || err.Error() != "LLM service not available" {
+		t.Fatalf("idea grade error = %v, want unavailable service", err)
+	}
+}
+
 func TestInsightsService_GetDashboard(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -303,6 +455,10 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
 	mock := testutil.NewMockLLMCaller()
+	var directUsageProjectIDs []string
+	mock.OnCall = func(ctx context.Context, _ testutil.MockLLMCall) {
+		directUsageProjectIDs = append(directUsageProjectIDs, directUsageProjectFromContext(ctx))
+	}
 	llmSvc.SetLLMCaller(mock)
 
 	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
@@ -390,6 +546,24 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	tags, err := knowledge[0].ParseTags()
 	if err != nil || len(tags) == 0 {
 		t.Fatalf("knowledge tags=%v err=%v", tags, err)
+	}
+	wantPromptFragments := []string{"## Project Metrics", "## Task Statistics", "Recent tasks:"}
+	if len(directUsageProjectIDs) != len(wantPromptFragments) {
+		t.Fatalf("direct usage contexts = %v, want three report calls", directUsageProjectIDs)
+	}
+	if len(mock.Calls) != len(wantPromptFragments) {
+		t.Fatalf("direct calls = %d, want %d", len(mock.Calls), len(wantPromptFragments))
+	}
+	for i, wantPromptFragment := range wantPromptFragments {
+		if directUsageProjectIDs[i] != project.ID {
+			t.Errorf("call %d usage project = %q, want %q", i, directUsageProjectIDs[i], project.ID)
+		}
+		if mock.Calls[i].WorkDir != project.RepoPath {
+			t.Errorf("call %d work directory = %q, want %q", i, mock.Calls[i].WorkDir, project.RepoPath)
+		}
+		if !strings.Contains(mock.Calls[i].Prompt, wantPromptFragment) {
+			t.Errorf("call %d prompt missing %q", i, wantPromptFragment)
+		}
 	}
 	if err := svc.DeleteKnowledge(ctx, project.ID, knowledge[0].ID); err != nil {
 		t.Fatalf("DeleteKnowledge: %v", err)

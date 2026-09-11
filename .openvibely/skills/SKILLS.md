@@ -286,7 +286,7 @@ always_use:
 
 ## openvibely_typed_broadcaster_workflow
 
-[OpenVibely Typed Broadcaster Workflow](openvibely_typed_broadcaster_workflow/SKILL.md) — Consolidate duplicated typed channel broadcasters while preserving SSE lifecycle, backpressure, and public APIs.
+[OpenVibely Typed Broadcaster Workflow](openvibely_typed_broadcaster_workflow/SKILL.md) — Consolidate duplicated typed channel broadcasters while preserving SSE lifecycle, backpressure, public APIs, and scoped routing.
 
 ## openvibely_sqlite_pool_concurrency_workflow
 
@@ -303,3 +303,7 @@ always_use:
 ## openvibely_bug_finder_workflow
 
 [OpenVibely Bug Finder Workflow](openvibely_bug_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely correctness audits and publish one deduplicated GitHub bug issue.
+
+## openvibely_project_deletion_workflow
+
+[OpenVibely Project Deletion Workflow](openvibely_project_deletion_workflow/SKILL.md) — Investigate and implement safe, atomic OpenVibely project deletion across relational data, runtime cleanup, migrations, and UI confirmation.

@@ -131,12 +131,14 @@ func TestTelegramAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 		AddedBy:        "web",
 	}
 	require.NoError(t, repo.Create(ctx, user))
-	require.NoError(t, repo.Create(ctx, &models.TelegramAuthorizedUser{
+	duplicate := &models.TelegramAuthorizedUser{
 		ProjectID:      otherProject.ID,
 		TelegramUserID: 999,
 		DisplayName:    "User Dup",
 		AddedBy:        "web",
-	}))
+	}
+	require.NoError(t, repo.Create(ctx, duplicate))
+	require.NotEqual(t, user.ID, duplicate.ID)
 
 	authorized, err := repo.IsAuthorized(ctx, otherProject.ID, 999, "")
 	require.NoError(t, err)
@@ -144,6 +146,8 @@ func TestTelegramAuthRepo_SystemAuthorizationAcrossProjects(t *testing.T) {
 	users, err := repo.ListByProject(ctx, otherProject.ID)
 	require.NoError(t, err)
 	require.Len(t, users, 1)
+	assert.Equal(t, duplicate.ID, users[0].ID)
+	assert.Equal(t, "User Dup", users[0].DisplayName)
 }
 
 func TestTelegramAuthRepo_IsAuthorized(t *testing.T) {
