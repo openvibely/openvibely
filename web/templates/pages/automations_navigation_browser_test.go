@@ -1284,6 +1284,16 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!values.length || values.some(function(value) { return value !== editor.value; })) fail('canvas mutation did not synchronize the YAML submitted by its forms');
   }
   function contains(editor, text, label) { if (!editor.value.includes(text)) fail(label + ': ' + editor.value); }
+  function waitFor(check, label) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      (function poll() {
+        try { if (check()) return resolve(); } catch (error) { return reject(error); }
+        if (performance.now() - started > 4000) return reject(new Error('timed out waiting for ' + label));
+        window.setTimeout(poll, 20);
+      })();
+    });
+  }
   function edge(from, to) { return Array.from(document.querySelectorAll('.automation-draft-edge')).find(function(group) { return group.dataset.from === from && group.dataset.to === to; }); }
   function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
   function connect(from, to, pointerId) {
@@ -1328,7 +1338,10 @@ window.addEventListener('DOMContentLoaded', function() {
       if (Array.from(canvasRoot.querySelectorAll('*')).some(function(element) { return element.children.length === 0 && element.textContent.includes(legacy); })) fail('blank-only canvas chrome remains: ' + legacy);
     });
     if (!isVisible(graph) || isVisible(yaml)) fail('initial Graph view must show only the canvas');
-    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    await waitFor(function() {
+      var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
+      return diagnostic && !diagnostic.classList.contains('hidden') && diagnostic.textContent.includes('line 1');
+    }, 'initial YAML diagnostic');
     var initialDiagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
     if (!initialDiagnostic || initialDiagnostic.classList.contains('hidden') || !initialDiagnostic.textContent.includes('line 1')) fail('preloaded YAML was not validated during editor initialization');
     var details = document.querySelector('[data-automation-details-panel]');
@@ -1349,12 +1362,15 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!details.querySelector('[data-automation-edge-detail]')) fail('Details view is missing transition details');
     click('[data-automation-view-yaml]', 'YAML view button');
     expectBuilderActive('yaml', 'selected builder YAML view');
-    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    await waitFor(function() {
+      var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
+      return diagnostic && diagnostic.textContent.includes('line 2');
+    }, 'visible-panel YAML diagnostic');
     var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
     if (!diagnostic || !diagnostic.textContent.includes('line 2')) fail('preloaded YAML was not validated when the YAML panel became visible');
     editor.value = editor.value.replace('# preloaded parser failure\n', '');
     editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    await waitFor(function() { return diagnostic.classList.contains('hidden'); }, 'valid YAML diagnostic to clear');
     if (!diagnostic.classList.contains('hidden')) fail('valid YAML did not clear the preloaded diagnostic');
     detailsButton.click();
     expectBuilderActive('details', 'selected builder Details view');
@@ -1586,7 +1602,10 @@ window.addEventListener('DOMContentLoaded', function() {
     click('[data-automation-view-yaml]', 'YAML view button after canvas edits');
     editor.value = 'schema_version: [';
     editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    await waitFor(function() {
+      var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
+      return diagnostic && !diagnostic.classList.contains('hidden') && diagnostic.textContent.includes('line 1') && document.querySelector('[data-automation-yaml-error-line]');
+    }, 'malformed YAML diagnostic');
     var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
     var errorLine = document.querySelector('[data-automation-yaml-error-line]');
     if (!diagnostic || diagnostic.classList.contains('hidden') || !diagnostic.textContent.includes('line 1')) fail('malformed YAML did not show an inline line-aware diagnostic');
