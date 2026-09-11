@@ -847,7 +847,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					</form>
 					<div class="mt-3 space-y-2">
 						for _, user := range view.XAuthorizedUsers {
-							<div class="flex items-center justify-between rounded-box bg-base-200 px-3 py-2">
+							<div data-x-authorized-user-id={ user.ID } data-x-authorized-project-id={ user.ProjectID } data-x-user-id={ user.XUserID } data-x-username={ user.Username } class="flex items-center justify-between rounded-box bg-base-200 px-3 py-2">
 								<span>
 								if user.Username != "" {
 									<span>{ "@" + user.Username + " " }</span>
