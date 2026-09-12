@@ -2331,9 +2331,11 @@ func (c *fakeEmailIMAPClient) Logout() error { return nil }
 
 type blockingEmailIMAPClient struct {
 	*fakeEmailIMAPClient
-	fetchStarted chan struct{}
-	releaseFetch chan struct{}
-	blockFetch   sync.Once
+	fetchStarted    chan struct{}
+	releaseFetch    chan struct{}
+	terminateCalled chan struct{}
+	blockFetch      sync.Once
+	terminateOnce   sync.Once
 }
 
 func newBlockingEmailIMAPClient(messages ...*imap.Message) *blockingEmailIMAPClient {
@@ -2341,6 +2343,7 @@ func newBlockingEmailIMAPClient(messages ...*imap.Message) *blockingEmailIMAPCli
 		fakeEmailIMAPClient: newFakeEmailIMAPClient(messages...),
 		fetchStarted:        make(chan struct{}),
 		releaseFetch:        make(chan struct{}),
+		terminateCalled:     make(chan struct{}),
 	}
 }
 
@@ -2350,6 +2353,11 @@ func (c *blockingEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchI
 		<-c.releaseFetch
 	})
 	return c.fakeEmailIMAPClient.Fetch(seqset, items, ch)
+}
+
+func (c *blockingEmailIMAPClient) Terminate() error {
+	c.terminateOnce.Do(func() { close(c.terminateCalled) })
+	return nil
 }
 func (c *fakeEmailIMAPClient) storeBatches() [][]uint32 {
 	batches := make([][]uint32, len(c.storedIDs))
@@ -3594,6 +3602,187 @@ func TestEmailServiceRemovalFencesBlockedPoll(t *testing.T) {
 	assert.Zero(t, client.storeCalls, "removing email must not acknowledge the old mailbox message")
 	assert.Empty(t, client.seenIDs())
 }
+func TestEmailServiceConcurrentStopWaitsForFence(t *testing.T) {
+	client := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "in-flight message", "alice@example.com", "body"))
+	processingStarted := make(chan struct{})
+	releaseProcessing := make(chan struct{})
+	var processingOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseProcessing) }) }
+	defer release()
+
+	svc := &EmailService{}
+	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) {
+		return EmailRuntimeConfig{Address: "old@example.com", Password: "secret", IMAPHost: "imap.example.com", SMTPHost: "smtp.example.com", PollInterval: time.Hour}, nil
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processingOnce.Do(func() { close(processingStarted) })
+		<-releaseProcessing
+		return true
+	}
+
+	require.NoError(t, svc.Start())
+	select {
+	case <-client.fetchStarted:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not reach the blocking IMAP fetch")
+	}
+	close(client.releaseFetch)
+	select {
+	case <-processingStarted:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not reach the in-flight handoff")
+	}
+
+	firstStopDone := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(firstStopDone)
+	}()
+	select {
+	case <-client.terminateCalled:
+	case <-time.After(time.Second):
+		t.Fatal("first Stop did not fence the active run")
+	}
+
+	secondStopDone := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(secondStopDone)
+	}()
+
+	secondStopReturnedEarly := false
+	select {
+	case <-secondStopDone:
+		secondStopReturnedEarly = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	select {
+	case <-firstStopDone:
+	case <-time.After(time.Second):
+		t.Fatal("first Stop did not finish after the handoff was released")
+	}
+	select {
+	case <-secondStopDone:
+	case <-time.After(time.Second):
+		t.Fatal("second Stop did not finish after the first Stop completed")
+	}
+	assert.False(t, secondStopReturnedEarly, "a concurrent Stop must wait for the captured run fence")
+	assert.Zero(t, client.storeCalls, "the stopped run must not acknowledge the in-flight message")
+}
+
+func TestEmailServiceStartWaitsForConcurrentStopFence(t *testing.T) {
+	oldConfig := EmailRuntimeConfig{
+		Provider:     EmailProviderCustom,
+		Address:      "old@example.com",
+		Password:     "old-secret",
+		IMAPHost:     "imap.example.com",
+		SMTPHost:     "smtp.example.com",
+		PollInterval: time.Hour,
+	}
+	newConfig := oldConfig
+	newConfig.Address = "new@example.com"
+	newConfig.Password = "new-secret"
+	oldClient := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "old account", "alice@example.com", "old body"))
+	newClient := newFakeEmailIMAPClient(testIMAPMessageWithBody(1, "new account", "alice@example.com", "new body"))
+	var loadCalls atomic.Int32
+	oldProcessingStarted := make(chan struct{})
+	releaseOldProcessing := make(chan struct{})
+	var oldProcessingOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseOldProcessing) }) }
+	defer release()
+	newProcessingStarted := make(chan struct{})
+	var newProcessingOnce sync.Once
+
+	svc := &EmailService{}
+	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) {
+		if loadCalls.Add(1) == 1 {
+			return oldConfig, nil
+		}
+		return newConfig, nil
+	}
+	svc.connectIMAP = func(_ context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error) {
+		if cfg.Address == oldConfig.Address {
+			return oldClient, nil
+		}
+		return newClient, nil
+	}
+	svc.processIncomingMessageFn = func(_ context.Context, msg EmailInboundMessage) bool {
+		if msg.Subject == "old account" {
+			oldProcessingOnce.Do(func() { close(oldProcessingStarted) })
+			<-releaseOldProcessing
+		} else if msg.Subject == "new account" {
+			newProcessingOnce.Do(func() { close(newProcessingStarted) })
+		}
+		return true
+	}
+
+	require.NoError(t, svc.Start())
+	select {
+	case <-oldClient.fetchStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old poll did not reach the blocking IMAP fetch")
+	}
+	close(oldClient.releaseFetch)
+	select {
+	case <-oldProcessingStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old poll did not reach the in-flight handoff")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-oldClient.terminateCalled:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not fence the old run")
+	}
+
+	startDone := make(chan error, 1)
+	go func() { startDone <- svc.Start() }()
+	startReturnedEarly := false
+	newProcessingReturnedEarly := false
+	select {
+	case err := <-startDone:
+		startReturnedEarly = true
+		require.NoError(t, err)
+	case <-newProcessingStarted:
+		newProcessingReturnedEarly = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not finish after the old handoff was released")
+	}
+	if !startReturnedEarly {
+		select {
+		case err := <-startDone:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("replacement Start did not finish after Stop")
+		}
+	}
+	select {
+	case <-newProcessingStarted:
+	case <-time.After(time.Second):
+		t.Fatal("replacement poll did not process the new account")
+	}
+	assert.False(t, startReturnedEarly, "Start must wait for a concurrent Stop to finish fencing")
+	assert.False(t, newProcessingReturnedEarly, "replacement polling must not begin before the old fence completes")
+	assert.Zero(t, oldClient.storeCalls, "the fenced old run must not acknowledge its message")
+	svc.Stop()
+}
+
 func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
