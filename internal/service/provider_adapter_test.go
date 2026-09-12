@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"testing"
 
@@ -256,25 +258,43 @@ func TestProviderContextCompactionFallback_RetriesStreamingRequestOnceForSupport
 	}
 }
 
-func TestProviderContextCompactionFallback_DoesNotRetryCompactedRequestTwice(t *testing.T) {
+func TestProviderContextCompactionFallback_CompactedRetryOverflowUsesLastResortOnce(t *testing.T) {
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
-	calls := 0
+	var logBuf bytes.Buffer
+	oldLogWriter := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(oldLogWriter)
+
+	var requests []llmcontracts.AgentRequest
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		calls++
+		requests = append(requests, req)
 		if req.Operation == llmcontracts.OperationDirect {
 			return llmcontracts.AgentResult{Output: "summary"}, nil
+		}
+		if len(requests) == 4 {
+			return llmcontracts.AgentResult{Output: "last resort ok"}, nil
 		}
 		return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
 	})
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAICompatible: adapter}
 	svc.routing = newAgentRoutingStrategy(svc)
 
-	_, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "current", nil, models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "model"}, "exec-1", []models.Execution{{PromptSent: "old", Output: "out", Status: models.ExecCompleted}}, "", "/tmp/work", nil)
-	if err == nil || !strings.Contains(err.Error(), "maximum context") {
-		t.Fatalf("error = %v, want retry context error", err)
+	history := make([]models.Execution, 25)
+	for i := range history {
+		history[i] = models.Execution{PromptSent: fmt.Sprintf("prompt-%02d", i), Output: "out", Status: models.ExecCompleted}
 	}
-	if calls != 3 {
-		t.Fatalf("provider calls = %d, want original + summary + exactly one retry", calls)
+	res, err := svc.CallAgentDirectStreamingDetailed(context.Background(), "current", nil, models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "model"}, "exec-1", history, "", "/tmp/work", nil)
+	if err != nil || res.Output != "last resort ok" {
+		t.Fatalf("result=%#v err=%v, want last resort success", res, err)
+	}
+	if len(requests) != 4 {
+		t.Fatalf("provider calls = %d, want original + summary + compacted retry + last resort", len(requests))
+	}
+	if len(requests[3].ChatHistory) != 20 || requests[3].ChatHistory[0].PromptSent != "prompt-05" {
+		t.Fatalf("last resort history = %#v", requests[3].ChatHistory)
+	}
+	if got := logBuf.String(); !strings.Contains(got, "WARNING: context compaction failed; using last-resort latest-20-turn truncation") {
+		t.Fatalf("last resort warning log missing: %s", got)
 	}
 }
 
@@ -332,6 +352,11 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 }
 
 func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testing.T) {
+	openAILimits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex"})
+	if openAILimits.ContextWindow != 272000 || openAILimits.AutoLimit != 244800 {
+		t.Fatalf("OpenAI Codex limits = %+v, want W=272000 auto=244800", openAILimits)
+	}
+
 	limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000})
 	if limits.AutoLimit != 900 || limits.TriggerLimit != 900 || limits.EffectiveHardLimit != 950 {
 		t.Fatalf("limits = %+v, want auto=900 trigger=900 hard=950", limits)
@@ -355,6 +380,13 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 	triggered, _, used = shouldTriggerContextCompaction(req)
 	if !triggered || used != 950 {
 		t.Fatalf("trigger=%v used=%d, want hard-limit trigger at 95%% even when threshold clamps", triggered, used)
+	}
+
+	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file", Description: strings.Repeat("tool", 200), Parameters: []byte(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite}}}
+	req = llmcontracts.AgentRequest{Ctx: llmcontracts.WithRuntimeTools(context.Background(), rt), Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 1000}, Message: strings.Repeat("a", 2000)}
+	triggered, _, used = shouldTriggerContextCompaction(req)
+	if !triggered || used <= 500 {
+		t.Fatalf("trigger=%v used=%d, want model-visible system/runtime tool context included", triggered, used)
 	}
 }
 
