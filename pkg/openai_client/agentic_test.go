@@ -237,8 +237,8 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 	if !ok || compaction["type"] != "compaction" {
 		t.Fatalf("last compacted item = %#v, want compaction", compactedItems[len(compactedItems)-1])
 	}
-	if summary != "summary" {
-		t.Fatalf("summary = %q, want summary", summary)
+	if summary != "" {
+		t.Fatalf("opaque encrypted compaction content must not be exposed as a text summary: %q", summary)
 	}
 }
 
@@ -1858,8 +1858,11 @@ func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 	if !resp.Compacted {
 		t.Fatal("expected response to report compaction")
 	}
-	if compactionCallback != "history summary" {
-		t.Fatalf("OnCompaction summary = %q, want history summary", compactionCallback)
+	if len(resp.CompactedInputItems) == 0 {
+		t.Fatal("expected provider-native compacted input items to be available for persistence")
+	}
+	if compactionCallback != "" {
+		t.Fatalf("opaque compaction content must not be exposed as summary: %q", compactionCallback)
 	}
 	if resp.Text != "final answer" {
 		t.Fatalf("Text = %q, want final answer", resp.Text)
@@ -1951,7 +1954,7 @@ func TestSendAgentic_ForceCompactionBeforeTurnUsesNativeCompaction(t *testing.T)
 	if requests != 2 {
 		t.Fatalf("requests = %d, want 2", requests)
 	}
-	if !resp.Compacted || compactionCallback != "forced summary" {
+	if !resp.Compacted || compactionCallback != "" {
 		t.Fatalf("compaction result compacted=%v callback=%q", resp.Compacted, compactionCallback)
 	}
 }
@@ -2195,8 +2198,8 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 	if !resp.Compacted {
 		t.Fatal("expected response to report compaction")
 	}
-	if compactionCallback != "tool summary" {
-		t.Fatalf("OnCompaction summary = %q, want tool summary", compactionCallback)
+	if compactionCallback != "" {
+		t.Fatalf("opaque compaction content must not be exposed as summary: %q", compactionCallback)
 	}
 	if resp.Text != "done" {
 		t.Fatalf("Text = %q, want done", resp.Text)
@@ -2404,8 +2407,8 @@ func TestSendAgentic_AutoCompactionOAuthUsesResponsesEndpoint(t *testing.T) {
 	if !resp.Compacted {
 		t.Fatal("expected response to report compaction")
 	}
-	if compactionCallback != "oauth summary" {
-		t.Fatalf("OnCompaction summary = %q, want oauth summary", compactionCallback)
+	if compactionCallback != "" {
+		t.Fatalf("opaque compaction content must not be exposed as summary: %q", compactionCallback)
 	}
 	if resp.Text != "ok" {
 		t.Fatalf("Text = %q, want ok", resp.Text)

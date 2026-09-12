@@ -80,6 +80,9 @@ type AgenticOptions struct {
 	// request, including the pending prompt/attachments/system/tools, crosses
 	// the compaction trigger.
 	ForceCompactionBeforeTurn bool
+	// InitialInputItems are provider-native Responses API items restored from a
+	// durable compaction checkpoint. They are replayed unchanged before History.
+	InitialInputItems []any
 
 	// Attachments are files to include with the initial message.
 	Attachments []*FileAttachment
@@ -109,16 +112,17 @@ type AgenticOptions struct {
 
 // AgenticResponse is the result of an agentic send.
 type AgenticResponse struct {
-	Text              string // final text output (all turns concatenated)
-	Model             string
-	InputTokens       int
-	OutputTokens      int
-	TotalTokens       int
-	CachedInputTokens int
-	ReasoningTokens   int
-	StopReason        string
-	ToolCalls         []ToolCall // log of all tool calls made
-	Compacted         bool       // true if history was compacted during this call
+	Text                string // final text output (all turns concatenated)
+	Model               string
+	InputTokens         int
+	OutputTokens        int
+	TotalTokens         int
+	CachedInputTokens   int
+	ReasoningTokens     int
+	StopReason          string
+	ToolCalls           []ToolCall // log of all tool calls made
+	Compacted           bool       // true if history was compacted during this call
+	CompactedInputItems []any      // provider-native continuation state after compaction
 }
 
 // agenticInputItem represents an item in the Responses API input array.
@@ -170,7 +174,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	// Build initial input items from prior history.
-	inputItems := make([]any, 0, len(c.History)+1)
+	inputItems := make([]any, 0, len(opts.InitialInputItems)+len(c.History)+1)
+	inputItems = append(inputItems, opts.InitialInputItems...)
 	for _, msg := range c.History {
 		inputItems = append(inputItems, agenticInputItem{
 			"type":    "message",
@@ -379,6 +384,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	result.Text = allText.String()
+	if result.Compacted {
+		result.CompactedInputItems = append([]any(nil), inputItems...)
+	}
 
 	// Update client history
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
@@ -1440,31 +1448,14 @@ func extractCompactionSummaryFromOutputItems(items []any) string {
 			continue
 		}
 		content := strings.TrimSpace(firstNonEmpty(
-			stringFromAny(item["encrypted_content"]),
-			stringFromAny(item["content"]),
 			stringFromAny(item["summary"]),
+			stringFromAny(item["content"]),
 		))
 		if content != "" {
 			return content
 		}
 	}
 
-	for _, raw := range items {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		itemType := strings.ToLower(strings.TrimSpace(stringFromAny(item["type"])))
-		switch itemType {
-		case "message":
-			if strings.EqualFold(strings.TrimSpace(stringFromAny(item["role"])), "user") {
-				content := strings.TrimSpace(openAIInputItemContentText(item["content"]))
-				if content != "" {
-					return content
-				}
-			}
-		}
-	}
 	return ""
 }
 

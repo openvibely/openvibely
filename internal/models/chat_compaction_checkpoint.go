@@ -12,6 +12,7 @@ type ChatCompactionCheckpoint struct {
 	History           []Execution
 	Summary           string
 	Strategy          string
+	ProviderStateJSON string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }

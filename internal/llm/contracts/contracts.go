@@ -50,6 +50,9 @@ type AgentRequest struct {
 	// threshold. The service sets this when the full normalized model-visible
 	// request estimate crosses the provider-aware trigger.
 	ForceNativeCompaction bool
+	// NativeCompactionStateJSON contains provider-native compacted input items
+	// that must be replayed structurally rather than rendered as chat text.
+	NativeCompactionStateJSON string
 }
 
 type lifecycleHookCallContextKey struct{}
@@ -74,6 +77,22 @@ func LifecycleHookCallFromContext(ctx context.Context) bool {
 }
 
 type transportScopeContextKey struct{}
+type nativeCompactionStateContextKey struct{}
+
+func WithNativeCompactionStateJSON(ctx context.Context, state string) context.Context {
+	if ctx == nil || state == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, nativeCompactionStateContextKey{}, state)
+}
+
+func NativeCompactionStateJSONFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	state, _ := ctx.Value(nativeCompactionStateContextKey{}).(string)
+	return state
+}
 
 func WithTransportScope(ctx context.Context, scope string) context.Context {
 	if ctx == nil || scope == "" {
@@ -93,13 +112,14 @@ func TransportScopeFromContext(ctx context.Context) string {
 // Usage tracks provider usage in a canonical shape.
 // Only TotalTokens is guaranteed across all transports; the other fields are best-effort.
 type Usage struct {
-	InputTokens       int
-	OutputTokens      int
-	TotalTokens       int
-	CachedInputTokens int
-	ReasoningTokens   int
-	ProviderRaw       map[string]int
-	ProviderIDs       map[string]string
+	InputTokens               int
+	OutputTokens              int
+	TotalTokens               int
+	CachedInputTokens         int
+	ReasoningTokens           int
+	ProviderRaw               map[string]int
+	ProviderIDs               map[string]string
+	NativeCompactionStateJSON string
 }
 
 // AgentResult is the canonical provider-agnostic adapter response.
@@ -113,13 +133,14 @@ type ChatContextMessage struct {
 }
 
 type AgentResult struct {
-	Output                   string
-	TextOnlyOutput           string
-	Usage                    Usage
-	StopReason               string
-	SessionID                string
-	ChatContext              ChatContext
-	Compacted                bool
-	NativeCompactionSummary  string
-	NativeCompactionStrategy string
+	Output                    string
+	TextOnlyOutput            string
+	Usage                     Usage
+	StopReason                string
+	SessionID                 string
+	ChatContext               ChatContext
+	Compacted                 bool
+	NativeCompactionSummary   string
+	NativeCompactionStrategy  string
+	NativeCompactionStateJSON string
 }
