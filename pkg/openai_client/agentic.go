@@ -74,6 +74,12 @@ type AgenticOptions struct {
 	// to round-trip back to the model in function_call_output items.
 	// When zero, openAIToolOutputTokenLimitDefault is used.
 	ToolOutputTokenLimit int
+	// ForceCompactionBeforeTurn forces the existing Codex-style native
+	// compaction pass over prior history before appending the current prompt.
+	// Use this when a caller has already estimated that the full model-visible
+	// request, including the pending prompt/attachments/system/tools, crosses
+	// the compaction trigger.
+	ForceCompactionBeforeTurn bool
 
 	// Attachments are files to include with the initial message.
 	Attachments []*FileAttachment
@@ -206,7 +212,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	if len(inputItems) > 0 {
 		var err error
-		inputItems, err = compactIfNeeded(inputItems, 0, false)
+		sessionEstimate := 0
+		if opts.ForceCompactionBeforeTurn {
+			sessionEstimate = compactionThreshold
+		}
+		inputItems, err = compactIfNeeded(inputItems, sessionEstimate, false)
 		if err != nil {
 			return nil, fmt.Errorf("pre-turn compaction: %w", err)
 		}

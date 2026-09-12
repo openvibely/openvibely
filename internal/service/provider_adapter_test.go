@@ -404,6 +404,9 @@ func TestProviderContextCompactionFallback_NativeProvidersReceiveProactiveThresh
 	if got.Operation != llmcontracts.OperationStreaming || got.Agent.DisableNativeCompaction {
 		t.Fatalf("native provider should be called directly with native compaction enabled, got %#v", got)
 	}
+	if !got.ForceNativeCompaction || !got.Agent.ForceNativeCompaction {
+		t.Fatalf("native full-request trigger should force provider-native compaction, got request=%v agent=%v", got.ForceNativeCompaction, got.Agent.ForceNativeCompaction)
+	}
 	if got.Agent.CompactionThreshold != 900 || got.NativeCompactionTokenThreshold != 900 {
 		t.Fatalf("native threshold = agent:%d request:%d, want 900", got.Agent.CompactionThreshold, got.NativeCompactionTokenThreshold)
 	}
