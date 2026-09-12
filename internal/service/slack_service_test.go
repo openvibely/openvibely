@@ -3801,12 +3801,128 @@ func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, project2.ID, savedID, "switch_project must persist selection to slack_user_projects")
 
+	// Assert the live cache reflects the successful switch as well.
+	svc.mu.RLock()
+	cachedID := svc.userProjects[slackUserProjectKey("T1", "U1")]
+	svc.mu.RUnlock()
+	require.Equal(t, project2.ID, cachedID, "successful switch must update the live cache")
+
 	// Assert getActiveProject reflects the change (loads from DB when cache is cold after the switch).
 	svc2 := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
 	activeProjectID, err := svc2.getActiveProject(ctx, "T1", "U1")
 	require.NoError(t, err)
 	require.Equal(t, project2.ID, activeProjectID,
 		"getActiveProject must return the newly-persisted project on next session")
+}
+
+func newSlackProjectSwitchTestService(t *testing.T) (*SlackService, *sql.DB, *models.Project, *models.Project) {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	slackUserProjectRepo := repository.NewSlackUserProjectRepo(db)
+	slackTaskContextRepo := repository.NewSlackTaskContextRepo(db)
+
+	project1 := &models.Project{Name: "Alpha", RepoPath: "/tmp/slack-switch-alpha", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	project2 := &models.Project{Name: "Beta", RepoPath: "/tmp/slack-switch-beta"}
+	require.NoError(t, projectRepo.Create(ctx, project2))
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
+	svc.postMessageFn = func(string, string, string) (string, error) { return "", nil }
+	return svc, db, project1, project2
+}
+
+func TestSlackService_RuntimeSwitchProjectPersistenceFailurePreservesCacheAndInboundRouting(t *testing.T) {
+	svc, db, project1, project2 := newSlackProjectSwitchTestService(t)
+	ctx := context.Background()
+	const teamID = "T1"
+	const userID = "U1"
+
+	require.NoError(t, svc.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, project1.ID))
+	require.NoError(t, svc.setActiveProject(ctx, teamID, userID, project1.ID))
+
+	_, err := db.ExecContext(ctx, `ALTER TABLE slack_user_projects RENAME TO slack_user_projects_unavailable`)
+	require.NoError(t, err)
+	runtime := svc.buildSlackActionToolRuntime(project1.ID, slackActionContext{TeamID: teamID, ChannelID: "C1", UserID: userID}, nil)
+	_, handled, isErr, err := runtime.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Beta"}`))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Error(t, err)
+	_, err = db.ExecContext(ctx, `ALTER TABLE slack_user_projects_unavailable RENAME TO slack_user_projects`)
+	require.NoError(t, err)
+
+	svc.mu.RLock()
+	cachedID := svc.userProjects[slackUserProjectKey(teamID, userID)]
+	svc.mu.RUnlock()
+	require.Equal(t, project1.ID, cachedID, "failed switch must preserve the existing cache entry")
+	savedID, err := svc.slackUserProjectRepo.GetUserProject(ctx, teamID, userID)
+	require.NoError(t, err)
+	require.Equal(t, project1.ID, savedID, "failed switch must preserve the durable selection")
+
+	var incoming ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { incoming = req })
+	svc.processIncomingMessage(slackIncomingMessage{TeamID: teamID, ChannelID: "C1", UserID: userID, Text: "continue", Source: "slack"})
+	require.Equal(t, project1.ID, incoming.ProjectID, "next inbound message must stay on the prior project")
+
+	_, handled, isErr, err = runtime.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Beta"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	svc.mu.RLock()
+	cachedID = svc.userProjects[slackUserProjectKey(teamID, userID)]
+	svc.mu.RUnlock()
+	require.Equal(t, project2.ID, cachedID)
+	savedID, err = svc.slackUserProjectRepo.GetUserProject(ctx, teamID, userID)
+	require.NoError(t, err)
+	require.Equal(t, project2.ID, savedID)
+}
+
+func TestSlackService_RuntimeSwitchProjectPersistenceFailureWithoutCacheUsesDurableInboundProject(t *testing.T) {
+	svc, db, project1, _ := newSlackProjectSwitchTestService(t)
+	ctx := context.Background()
+	const teamID = "T1"
+	const userID = "uncached-user"
+
+	require.NoError(t, svc.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, project1.ID))
+	_, err := db.ExecContext(ctx, `ALTER TABLE slack_user_projects RENAME TO slack_user_projects_unavailable`)
+	require.NoError(t, err)
+	runtime := svc.buildSlackActionToolRuntime(project1.ID, slackActionContext{TeamID: teamID, ChannelID: "C1", UserID: userID}, nil)
+	_, handled, isErr, err := runtime.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Beta"}`))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Error(t, err)
+	_, err = db.ExecContext(ctx, `ALTER TABLE slack_user_projects_unavailable RENAME TO slack_user_projects`)
+	require.NoError(t, err)
+
+	svc.mu.RLock()
+	_, cached := svc.userProjects[slackUserProjectKey(teamID, userID)]
+	svc.mu.RUnlock()
+	require.False(t, cached, "failed switch must not create a cache entry")
+
+	var incoming ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { incoming = req })
+	svc.processIncomingMessage(slackIncomingMessage{TeamID: teamID, ChannelID: "C1", UserID: userID, Text: "continue", Source: "slack"})
+	require.Equal(t, project1.ID, incoming.ProjectID, "uncached inbound message must load the durable project")
+}
+
+func TestSlackService_SetActiveProjectWithoutRepoUsesMemoryCache(t *testing.T) {
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	ctx := context.Background()
+	require.NoError(t, svc.setActiveProject(ctx, "T1", "U1", "memory-project"))
+	projectID, err := svc.getActiveProject(ctx, "T1", "U1")
+	require.NoError(t, err)
+	require.Equal(t, "memory-project", projectID)
 }
 
 func TestSlackTextAndAttachmentHelpers(t *testing.T) {

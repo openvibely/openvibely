@@ -257,6 +257,15 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 		closeDialogs := func() {
 			browser.evaluate(`document.querySelectorAll('dialog[open]').forEach(function(dialog) { dialog.close(); }); 'closed'`)
 		}
+		waitForNativeActionTarget := func(selector string) {
+			browser.waitFor("native action target "+selector, fmt.Sprintf(`(function() {
+					var el = document.querySelector(%q);
+					if (!el) return 'missing';
+					var rect = el.getBoundingClientRect();
+					var hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+					return rect.width > 0 && rect.height > 0 && hit && (hit === el || el.contains(hit)) ? 'ready' : 'waiting';
+				})()`, selector), "ready")
+		}
 		assertCard := func(id, name string) {
 			selector := cardSelector(id)
 			wantURL := "/automations/" + id + "?project_id=" + projectID
@@ -291,6 +300,7 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 			for _, actionSelector := range actionSelectors {
 				before := navigationCount(parentURL)
 				browser.click(moreSelector)
+				waitForNativeActionTarget(actionSelector)
 				browser.click(actionSelector)
 				if got := navigationCount(parentURL); got != before {
 					t.Fatalf("nested mouse action %s navigated parent card %s: count %s, want %s", actionSelector, id, got, before)
@@ -300,6 +310,7 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 			for _, actionSelector := range actionSelectors {
 				before := navigationCount(parentURL)
 				browser.click(moreSelector)
+				waitForNativeActionTarget(actionSelector)
 				for i := 0; i < 20; i++ {
 					press("Tab", "Tab", "")
 					if got := browser.evaluate(fmt.Sprintf(`document.activeElement && document.activeElement.matches(%q) ? 'true' : 'false'`, actionSelector)); got == "true" {
