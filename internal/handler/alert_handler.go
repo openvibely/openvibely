@@ -310,6 +310,15 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 
 // GetPendingAlertCount returns the compact project-scoped count used by
 // machine clients. It deliberately does not render alert cards.
+// @Summary Get pending alert count
+// @Description Returns the number of alerts whose decision state is pending for one project without rendering alert cards.
+// @Tags alerts
+// @Produce json
+// @Param project_id query string true "Project ID"
+// @Success 200 {object} map[string]int "Pending alert count"
+// @Failure 400 {object} ErrorResponse "Project ID is required"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/alerts/pending-count [get]
 func (h *Handler) GetPendingAlertCount(c echo.Context) error {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if projectID == "" {

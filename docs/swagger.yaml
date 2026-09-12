@@ -148,6 +148,13 @@ definitions:
       version:
         type: string
     type: object
+  handler.TaskStatusCountsResponse:
+    properties:
+      active_tasks:
+        type: integer
+      queued_tasks:
+        type: integer
+    type: object
   models.AccountLimitView:
     properties:
       label:
@@ -953,6 +960,36 @@ info:
   title: OpenVibely API
   version: "1.0"
 paths:
+  /api/alerts/pending-count:
+    get:
+      description: Returns the number of alerts whose decision state is pending for
+        one project without rendering alert cards.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pending alert count
+          schema:
+            additionalProperties:
+              type: integer
+            type: object
+        "400":
+          description: Project ID is required
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get pending alert count
+      tags:
+      - alerts
   /api/analytics/agent-usage-by-project:
     get:
       description: Returns model usage, success count, and failure count grouped by
@@ -1839,6 +1876,34 @@ paths:
               type: string
             type: object
       summary: Start swarm planner
+      tags:
+      - tasks
+  /api/tasks/status-counts:
+    get:
+      description: Returns only the active-category and queued-status predicates needed
+        by terminal status.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Project task status counts
+          schema:
+            $ref: '#/definitions/handler.TaskStatusCountsResponse'
+        "400":
+          description: Project ID is required
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get project task status counts
       tags:
       - tasks
 schemes:
