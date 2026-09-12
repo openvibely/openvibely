@@ -99,6 +99,129 @@ func TestLifecycleRepo_HookCRUDAndQueryByWhen(t *testing.T) {
 	}
 }
 
+func TestLifecycleRepo_HookListPathsPreserveFiltersOrderingAndValues(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	otherAgent := &models.Agent{
+		Name:         "Lifecycle Test Agent (other)",
+		Description:  "fixture",
+		SystemPrompt: "You help with tests.",
+		Model:        "inherit",
+	}
+	if err := agentRepo.Create(ctx, otherAgent); err != nil {
+		t.Fatalf("create other agent: %v", err)
+	}
+
+	before := &models.AgentLifecycleHook{
+		AgentID:         agent.ID,
+		When:            models.LifecycleBeforeRun,
+		SkillKey:        "project_context/load",
+		PromptOverride:  "before prompt",
+		OutputContract:  models.OutputContractContextBlock,
+		Blocking:        true,
+		Enabled:         true,
+		PermissionsJSON: `{"allow":["Read"]}`,
+		RunPolicyJSON:   `{"max_attempts":2}`,
+		ScheduleJSON:    `{"at":"09:00"}`,
+		PayloadJSON:     `{"blocks":["task_context"]}`,
+	}
+	if err := repo.CreateHook(ctx, before); err != nil {
+		t.Fatalf("create enabled hook: %v", err)
+	}
+
+	disabled := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "disabled/hook",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        false,
+	}
+	if err := repo.CreateHook(ctx, disabled); err != nil {
+		t.Fatalf("create disabled hook: %v", err)
+	}
+
+	after := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "memory/observe_task_for_learning",
+		OutputContract: models.OutputContractLearningSummary,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, after); err != nil {
+		t.Fatalf("create after-complete hook: %v", err)
+	}
+
+	otherBefore := &models.AgentLifecycleHook{
+		AgentID:        otherAgent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "other/before",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, otherBefore); err != nil {
+		t.Fatalf("create other agent hook: %v", err)
+	}
+
+	for id, createdAt := range map[string]string{
+		before.ID:      "2024-01-01 00:00:03",
+		disabled.ID:    "2024-01-01 00:00:01",
+		after.ID:       "2024-01-01 00:00:02",
+		otherBefore.ID: "2024-01-01 00:00:04",
+	} {
+		if _, err := db.ExecContext(ctx, `UPDATE agent_lifecycle_hooks SET created_at = ?, updated_at = ? WHERE id = ?`, createdAt, createdAt, id); err != nil {
+			t.Fatalf("set hook timestamp %s: %v", id, err)
+		}
+	}
+
+	byAgent, err := repo.HooksByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("hooks by agent: %v", err)
+	}
+	if got := hookIDs(byAgent); !reflect.DeepEqual(got, []string{after.ID, disabled.ID, before.ID}) {
+		t.Fatalf("HooksByAgent IDs = %v, want after/disabled/before order", got)
+	}
+
+	forWhen, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when: %v", err)
+	}
+	expectedForWhen := []string{before.ID, otherBefore.ID}
+	if agent.ID > otherAgent.ID {
+		expectedForWhen[0], expectedForWhen[1] = expectedForWhen[1], expectedForWhen[0]
+	}
+	if got := hookIDs(forWhen); !reflect.DeepEqual(got, expectedForWhen) {
+		t.Fatalf("HooksForWhen IDs = %v, want agent order %v", got, expectedForWhen)
+	}
+
+	var gotBefore *models.AgentLifecycleHook
+	for i := range forWhen {
+		if forWhen[i].ID == before.ID {
+			gotBefore = &forWhen[i]
+			break
+		}
+	}
+	if gotBefore == nil {
+		t.Fatalf("HooksForWhen omitted enabled hook %s", before.ID)
+	}
+	var expectedBefore *models.AgentLifecycleHook
+	for i := range byAgent {
+		if byAgent[i].ID == before.ID {
+			expectedBefore = &byAgent[i]
+			break
+		}
+	}
+	if expectedBefore == nil {
+		t.Fatalf("HooksByAgent omitted hook %s", before.ID)
+	}
+	if !reflect.DeepEqual(*gotBefore, *expectedBefore) {
+		t.Fatalf("hook decoded differently across list paths:\nby agent: %+v\nfor when: %+v", *expectedBefore, *gotBefore)
+	}
+}
+
 func containsHookID(hooks []models.AgentLifecycleHook, id string) bool {
 	for _, h := range hooks {
 		if h.ID == id {
@@ -106,6 +229,14 @@ func containsHookID(hooks []models.AgentLifecycleHook, id string) bool {
 		}
 	}
 	return false
+}
+
+func hookIDs(hooks []models.AgentLifecycleHook) []string {
+	ids := make([]string, 0, len(hooks))
+	for _, hook := range hooks {
+		ids = append(ids, hook.ID)
+	}
+	return ids
 }
 
 // TestLifecycleRepo_HooksForWhenExcludesArchivedAgentHooks verifies that
