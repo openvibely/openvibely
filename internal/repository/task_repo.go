@@ -29,6 +29,13 @@ const taskSelectColumns = `id, project_id, title, category, priority, status, pr
 // payloads remain on the authoritative worker claim/detail path.
 const activeTaskAdmissionSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, parent_task_id, swarm_role`
 
+const activeTaskAdmissionQuery = `SELECT ` + activeTaskAdmissionSelectColumns + `
+		 FROM tasks WHERE category = 'active' AND status = 'pending'
+		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
+		 AND NOT ` + taskThreadInputOwnsAdmissionPredicate + `
+		 ORDER BY priority DESC, display_order ASC, created_at ASC`
+
 const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent_id, agent_definition_id`
 
 const taskDetailActionMetadataColumns = `id, status`
@@ -2105,13 +2112,7 @@ func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models
 // authoritative dispatch guards: reservations, queued/running executions, and
 // pending task-thread inputs own admission and must remain excluded.
 func (r *TaskRepo) ListActivePendingAdmissions(ctx context.Context) ([]ActiveTaskAdmission, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+activeTaskAdmissionSelectColumns+`
-			 FROM tasks WHERE category = 'active' AND status = 'pending'
-			 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-			 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
-			 AND NOT `+taskThreadInputOwnsAdmissionPredicate+`
-			 ORDER BY priority DESC, display_order ASC, created_at ASC`)
+	rows, err := r.db.QueryContext(ctx, activeTaskAdmissionQuery)
 	if err != nil {
 		return nil, fmt.Errorf("listing active pending task admissions: %w", err)
 	}
