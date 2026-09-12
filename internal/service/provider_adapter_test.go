@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -127,24 +128,147 @@ func TestLLMService_CallAgentRawDirectNoToolsIsolatesUtilityRequest(t *testing.T
 	}
 }
 
+type recordingAnthropicAdapter struct {
+	lastReq     llmcontracts.AgentRequest
+	lastWorkDir string
+	callCount   int
+	writerIsNil bool
+}
+
+func (a *recordingAnthropicAdapter) Call(_ context.Context, req llmcontracts.AgentRequest, workDir string, writer *stream.Writer) (llmcontracts.AgentResult, error) {
+	a.lastReq = req
+	a.lastWorkDir = workDir
+	a.callCount++
+	a.writerIsNil = writer == nil
+	return llmcontracts.AgentResult{Output: "forwarded"}, nil
+}
+
+func TestAnthropicProviderAdapter_ForwardsSupportedOperations(t *testing.T) {
+	tests := []struct {
+		name        string
+		operation   llmcontracts.Operation
+		workDir     string
+		chatMode    models.ChatMode
+		followup    bool
+		history     []models.Execution
+		chatContext string
+	}{
+		{
+			name:      "direct",
+			operation: llmcontracts.OperationDirect,
+			workDir:   "/work/direct",
+		},
+		{
+			name:        "streaming chat followup",
+			operation:   llmcontracts.OperationStreaming,
+			workDir:     "/work/streaming",
+			chatMode:    models.ChatModeOrchestrate,
+			followup:    true,
+			history:     []models.Execution{{PromptSent: "previous prompt", Output: "previous output"}},
+			chatContext: "chat context sentinel",
+		},
+		{
+			name:      "task",
+			operation: llmcontracts.OperationTask,
+			workDir:   "/work/task",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lowLevel := &recordingAnthropicAdapter{}
+			adapter := &anthropicProviderAdapter{adapter: lowLevel}
+			req := llmcontracts.AgentRequest{
+				Ctx:               context.Background(),
+				Operation:         tt.operation,
+				Message:           "preserve this request",
+				Agent:             models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key"},
+				ChatMode:          tt.chatMode,
+				Followup:          tt.followup,
+				ChatHistory:       tt.history,
+				ChatSystemContext: tt.chatContext,
+				WorkDir:           tt.workDir,
+			}
+
+			result, err := adapter.Call(req)
+			if err != nil {
+				t.Fatalf("adapter.Call error: %v", err)
+			}
+			if result.Output != "forwarded" {
+				t.Fatalf("result output = %q, want forwarded", result.Output)
+			}
+			if lowLevel.callCount != 1 {
+				t.Fatalf("low-level call count = %d, want 1", lowLevel.callCount)
+			}
+			if !lowLevel.writerIsNil {
+				t.Fatal("expected nil stream writer")
+			}
+			if lowLevel.lastReq.Operation != req.Operation {
+				t.Fatalf("operation = %q, want %q", lowLevel.lastReq.Operation, req.Operation)
+			}
+			if lowLevel.lastReq.WorkDir != req.WorkDir || lowLevel.lastWorkDir != req.WorkDir {
+				t.Fatalf("work directory request=%q argument=%q, want %q", lowLevel.lastReq.WorkDir, lowLevel.lastWorkDir, req.WorkDir)
+			}
+			if lowLevel.lastReq.Message != req.Message || lowLevel.lastReq.Followup != req.Followup || lowLevel.lastReq.ChatMode != req.ChatMode || lowLevel.lastReq.ChatSystemContext != req.ChatSystemContext {
+				t.Fatalf("request context changed: got %#v, want message=%q followup=%v mode=%q context=%q", lowLevel.lastReq, req.Message, req.Followup, req.ChatMode, req.ChatSystemContext)
+			}
+			if len(lowLevel.lastReq.ChatHistory) != len(req.ChatHistory) || (len(req.ChatHistory) > 0 && (lowLevel.lastReq.ChatHistory[0].PromptSent != req.ChatHistory[0].PromptSent || lowLevel.lastReq.ChatHistory[0].Output != req.ChatHistory[0].Output)) {
+				t.Fatalf("chat history changed: got %#v, want %#v", lowLevel.lastReq.ChatHistory, req.ChatHistory)
+			}
+		})
+	}
+}
+
 func TestAnthropicProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
-	adapter := &anthropicProviderAdapter{svc: &LLMService{}}
+	for _, operation := range []llmcontracts.Operation{
+		llmcontracts.OperationDirect,
+		llmcontracts.OperationStreaming,
+		llmcontracts.OperationTask,
+	} {
+		t.Run(string(operation), func(t *testing.T) {
+			lowLevel := &recordingAnthropicAdapter{}
+			adapter := &anthropicProviderAdapter{adapter: lowLevel}
+			_, err := adapter.Call(llmcontracts.AgentRequest{
+				Ctx:       context.Background(),
+				Operation: operation,
+				Message:   "generate JSON",
+				Agent: models.LLMConfig{
+					Provider:   models.ProviderAnthropic,
+					AuthMethod: models.AuthMethodCLI,
+					Model:      "claude-sonnet-4",
+				},
+				WorkDir: "/work/retired-cli",
+			})
+			if err == nil {
+				t.Fatal("expected error for retired Anthropic CLI transport")
+			}
+			if !strings.Contains(err.Error(), "no longer supported") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if lowLevel.callCount != 0 {
+				t.Fatalf("low-level call count = %d, want 0", lowLevel.callCount)
+			}
+		})
+	}
+}
+
+func TestAnthropicProviderAdapter_RejectsUnknownOperationWithoutProviderCall(t *testing.T) {
+	lowLevel := &recordingAnthropicAdapter{}
+	adapter := &anthropicProviderAdapter{adapter: lowLevel}
 	_, err := adapter.Call(llmcontracts.AgentRequest{
-		Ctx:          context.Background(),
-		Operation:    llmcontracts.OperationDirect,
-		Message:      "generate JSON",
-		DisableTools: true,
+		Ctx:       context.Background(),
+		Operation: llmcontracts.Operation("unknown"),
 		Agent: models.LLMConfig{
 			Provider:   models.ProviderAnthropic,
-			AuthMethod: models.AuthMethodCLI,
-			Model:      "claude-sonnet-4",
+			AuthMethod: models.AuthMethodAPIKey,
+			APIKey:     "test-key",
 		},
 	})
-	if err == nil {
-		t.Fatal("expected error for retired Anthropic CLI transport")
+	if err == nil || err.Error() != "unsupported operation: unknown" {
+		t.Fatalf("error = %v, want unsupported operation: unknown", err)
 	}
-	if !strings.Contains(err.Error(), "no longer supported") {
-		t.Fatalf("unexpected error: %v", err)
+	if lowLevel.callCount != 0 {
+		t.Fatalf("low-level call count = %d, want 0", lowLevel.callCount)
 	}
 }
 
