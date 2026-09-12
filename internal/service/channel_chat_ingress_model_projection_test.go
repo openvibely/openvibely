@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -554,6 +556,77 @@ func BenchmarkChannelChatTaskContextProjection(b *testing.B) {
 	}
 }
 
+func TestChannelChatTaskContextProjectionPerformanceBudget(t *testing.T) {
+	const (
+		sampleCount     = 5
+		measurementRuns = 3
+	)
+
+	for _, taskCount := range []int{20, 300} {
+		t.Run(fmt.Sprintf("%d_tasks", taskCount), func(t *testing.T) {
+			fixture := newChannelTaskContextBenchmarkFixture(t, taskCount)
+			fixture.assertTwoContextReads(t, true)
+			fixture.assertTwoContextReads(t, false)
+
+			// Warm both paths before collecting paired samples on the same fixture.
+			fixture.mustLoad(t, true)
+			fixture.mustLoad(t, false)
+			full := measureChannelTaskContextPerformance(t, fixture, true, sampleCount, measurementRuns)
+			compact := measureChannelTaskContextPerformance(t, fixture, false, sampleCount, measurementRuns)
+			wallRatio := float64(full.medianWall) / float64(compact.medianWall)
+			byteRatio := full.medianBytes / compact.medianBytes
+			allocationRatio := full.medianAllocs / compact.medianAllocs
+			t.Logf("%d tasks: full median=%s %.0f B/op %.0f allocs/op; compact median=%s %.0f B/op %.0f allocs/op; reductions=%.1fx wall/%.1fx bytes/%.1fx allocs; logical reads=2/2", taskCount, full.medianWall, full.medianBytes, full.medianAllocs, compact.medianWall, compact.medianBytes, compact.medianAllocs, wallRatio, byteRatio, allocationRatio)
+			if wallRatio < 5 {
+				t.Fatalf("compact context median wall-time reduction = %.1fx, want at least 5x", wallRatio)
+			}
+			if byteRatio < 10 {
+				t.Fatalf("compact context median allocated-byte reduction = %.1fx, want at least 10x", byteRatio)
+			}
+		})
+	}
+}
+
+type channelTaskContextPerformanceMeasurement struct {
+	medianWall   time.Duration
+	medianBytes  float64
+	medianAllocs float64
+}
+
+func measureChannelTaskContextPerformance(tb testing.TB, fixture *channelTaskContextBenchmarkFixture, full bool, sampleCount, runs int) channelTaskContextPerformanceMeasurement {
+	tb.Helper()
+	wallSamples := make([]time.Duration, 0, sampleCount)
+	byteSamples := make([]float64, 0, sampleCount)
+	allocationSamples := make([]float64, 0, sampleCount)
+	for sample := 0; sample < sampleCount; sample++ {
+		started := time.Now()
+		for i := 0; i < runs; i++ {
+			fixture.mustLoad(tb, full)
+		}
+		wallSamples = append(wallSamples, time.Since(started)/time.Duration(runs))
+
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		for i := 0; i < runs; i++ {
+			fixture.mustLoad(tb, full)
+		}
+		runtime.ReadMemStats(&after)
+		byteSamples = append(byteSamples, float64(after.TotalAlloc-before.TotalAlloc)/float64(runs))
+		allocationSamples = append(allocationSamples, testing.AllocsPerRun(runs, func() {
+			fixture.mustLoad(tb, full)
+		}))
+	}
+	sort.Slice(wallSamples, func(i, j int) bool { return wallSamples[i] < wallSamples[j] })
+	sort.Float64s(byteSamples)
+	sort.Float64s(allocationSamples)
+	return channelTaskContextPerformanceMeasurement{
+		medianWall:   wallSamples[len(wallSamples)/2],
+		medianBytes:  byteSamples[len(byteSamples)/2],
+		medianAllocs: allocationSamples[len(allocationSamples)/2],
+	}
+}
+
 type channelTaskContextBenchmarkFixture struct {
 	ctx          context.Context
 	counter      *testutil.SQLStatementCounter
@@ -568,8 +641,8 @@ func newChannelTaskContextBenchmarkFixture(tb testing.TB, taskCount int) *channe
 	ctx := context.Background()
 	taskRepo := repository.NewTaskRepo(db, nil)
 	scheduleRepo := repository.NewScheduleRepo(db)
-	payload := strings.Repeat("payload", 32*1024/len("payload"))
-	chainPayload := strings.Repeat("chain-payload", 32*1024/len("chain-payload"))
+	payload := strings.Repeat("payload", 128*1024/len("payload"))
+	chainPayload := strings.Repeat("chain-payload", 128*1024/len("chain-payload"))
 	for i := 0; i < taskCount; i++ {
 		task := &models.Task{
 			ProjectID:   "default",
@@ -604,6 +677,17 @@ func newChannelTaskContextBenchmarkFixture(tb testing.TB, taskCount int) *channe
 		taskSvc:      NewTaskService(taskRepo, nil, nil),
 		taskRepo:     taskRepo,
 		scheduleRepo: scheduleRepo,
+	}
+}
+
+func (f *channelTaskContextBenchmarkFixture) mustLoad(tb testing.TB, full bool) {
+	tb.Helper()
+	contextText, err := f.load(full)
+	if err != nil {
+		tb.Fatalf("load benchmark context: %v", err)
+	}
+	if contextText == "" {
+		tb.Fatal("benchmark context is empty")
 	}
 }
 
