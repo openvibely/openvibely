@@ -453,7 +453,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		return "", llmusage.FromTotal(0), fmt.Errorf("anthropicclient agentic call: %w", err)
 	}
 
-	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
+	usage := anthropicContextUsage(resp)
 	if compactionSummary != "" {
 		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "anthropic_context_management"}
 	}
@@ -554,7 +554,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	sw.Flush()
 
 	output := sw.String()
-	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
+	usage := anthropicContextUsage(resp)
 	if compactionSummary != "" {
 		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "anthropic_context_management"}
 	}
@@ -654,7 +654,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	output := sw.String()
 	textOnly := sw.TextString()
-	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
+	usage := anthropicContextUsage(resp)
 	if compactionSummary != "" {
 		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "anthropic_context_management"}
 	}
@@ -721,6 +721,12 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthr
 }
 
 // buildClientHistory converts chat execution history to anthropicclient.Message slices.
+func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.Usage {
+	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
+	usage.LastContextTokens = resp.LastContextTokens
+	return usage
+}
+
 func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Message {
 	var messages []anthropicclient.Message
 	for _, exec := range chatHistory {

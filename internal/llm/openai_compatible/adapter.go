@@ -842,7 +842,9 @@ func usageFromResponse(resp *openaiclient.AgenticResponse) llmcontracts.Usage {
 	if resp == nil {
 		return llmusage.FromTotal(0)
 	}
-	return llmusage.FromOpenAIWithTotal(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens, resp.TotalTokens)
+	usage := llmusage.FromOpenAIWithTotal(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens, resp.TotalTokens)
+	usage.LastContextTokens = resp.LastContextTokens
+	return usage
 }
 
 func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err error) (llmcontracts.AgentResult, error) {

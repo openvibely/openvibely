@@ -227,6 +227,9 @@ func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {
 	if resp.Text != "Hello" || resp.InputTokens != 12 || resp.OutputTokens != 3 || resp.TotalTokens != 15 || resp.CachedInputTokens != 4 || resp.ReasoningTokens != 2 {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
+	if resp.LastContextTokens != 15 {
+		t.Fatalf("latest context=%d; cached/reasoning tokens must not be counted twice", resp.LastContextTokens)
+	}
 }
 
 func TestSendCompletionsPreservesReasoningAcrossRequests(t *testing.T) {

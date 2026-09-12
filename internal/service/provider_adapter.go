@@ -265,6 +265,9 @@ func openAIContextWindow(model string) int {
 func shouldTriggerContextCompaction(req llmcontracts.AgentRequest) (bool, compactionLimits, int) {
 	limits := compactionLimitsForAgent(req.Agent)
 	used := estimateModelVisibleRequestTokens(req)
+	if req.ContextTokenEstimate > 0 {
+		used = req.ContextTokenEstimate
+	}
 	return used >= limits.TriggerLimit || used >= limits.EffectiveHardLimit, limits, used
 }
 
@@ -333,6 +336,65 @@ func estimateAgentDefinitionTokens(agentDef *models.Agent) int {
 }
 
 func (s *LLMService) callProviderWithContextCompactionFallback(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if s == nil || s.execRepo == nil || contextCompactionFallbackDisabled(req.Ctx) {
+		return s.callProviderWithCompaction(adapter, req)
+	}
+	scope, ok := s.compactionScopeForRequest(req)
+	if !ok {
+		return s.callProviderWithCompaction(adapter, req)
+	}
+	model := req.Agent.Model
+	if req.AgentDefinition != nil && req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
+		model = req.AgentDefinition.Model
+	}
+	key := strings.Join([]string{req.Agent.ID, string(req.Agent.Provider), model, req.Agent.BaseURL, string(req.Agent.AuthMethod)}, "|")
+	baseline, err := s.execRepo.GetChatContextUsage(req.Ctx, scope.Type, scope.ID, key)
+	if err == nil && baseline != nil {
+		req.ContextTokenEstimate = estimateContextFromReportedUsage(req, *baseline)
+	}
+	res, err := s.callProviderWithCompaction(adapter, req)
+	if err == nil && req.ExecID != "" {
+		usage := models.ChatContextUsage{SourceExecutionID: req.ExecID, ContextTokens: res.Usage.LastContextTokens, OverheadTokens: requestContextOverhead(req)}
+		if saveErr := s.execRepo.SaveChatContextUsage(req.Ctx, scope.Type, scope.ID, key, usage); saveErr != nil {
+			applog.Infof("[agent-svc] persist context usage: %v", saveErr)
+		}
+	}
+	return res, err
+}
+
+func requestContextOverhead(req llmcontracts.AgentRequest) int {
+	req.Message = ""
+	if req.ChatHistory != nil {
+		req.ChatHistory = []models.Execution{}
+	}
+	req.Attachments = nil
+	req.NativeCompactionStateJSON = ""
+	return estimateModelVisibleRequestTokens(req)
+}
+
+func estimateContextFromReportedUsage(req llmcontracts.AgentRequest, baseline models.ChatContextUsage) int {
+	if baseline.ContextTokens <= 0 || baseline.SourceExecutionID == "" {
+		return 0
+	}
+	for i, item := range req.ChatHistory {
+		if item.ID != baseline.SourceExecutionID {
+			continue
+		}
+		for _, later := range req.ChatHistory[i+1:] {
+			if later.StartsNewContext {
+				return 0
+			}
+		}
+		req.ChatHistory = req.ChatHistory[i+1:]
+		req.NativeCompactionStateJSON = ""
+		// The reported count already includes the previous system/tools. Only
+		// add changes to that overhead and new user/tool content.
+		return max(1, baseline.ContextTokens+estimateModelVisibleRequestTokens(req)-baseline.OverheadTokens)
+	}
+	return 0 // Missing anchor: do not reuse an unrelated or truncated baseline.
+}
+
+func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	if contextCompactionFallbackDisabled(req.Ctx) {
 		return adapter.Call(req)
 	}

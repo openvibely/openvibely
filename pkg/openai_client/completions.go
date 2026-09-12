@@ -218,6 +218,10 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 
 		result.InputTokens += turnResult.inputTokens
+		result.LastContextTokens = 0
+		if turnResult.inputTokens > 0 {
+			result.LastContextTokens = turnResult.inputTokens + turnResult.outputTokens
+		}
 		result.OutputTokens += turnResult.outputTokens
 		result.TotalTokens += turnResult.totalTokens
 		result.CachedInputTokens += turnResult.cachedInputTokens

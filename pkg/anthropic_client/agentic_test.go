@@ -1081,7 +1081,7 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 
 			// Return final response
 			events := []string{
-				`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":5000}}}`,
+				`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":5000,"cache_creation_input_tokens":2000,"cache_read_input_tokens":3000}}}`,
 				`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
 				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done!"}}`,
 				`{"type":"content_block_stop","index":0}`,
@@ -1122,6 +1122,9 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 
 	if !compactionCalled {
 		t.Error("OnCompaction callback was not called")
+	}
+	if resp.LastContextTokens != 10010 {
+		t.Fatalf("latest context=%d, want final input+cache write+cache read+output (10010), excluding prior turn", resp.LastContextTokens)
 	}
 	if !resp.Compacted {
 		t.Error("expected Compacted=true in response")

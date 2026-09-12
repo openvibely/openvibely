@@ -124,6 +124,7 @@ func NormalizeEffort(model, value string) string {
 
 // AgenticResponse is the result of an agentic send.
 type AgenticResponse struct {
+	LastContextTokens        int    // Includes Anthropic's disjoint input/cache token buckets.
 	Text                     string // final text output (all turns concatenated)
 	Model                    string
 	InputTokens              int
@@ -345,6 +346,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 
 		result.InputTokens += resp.inputTokens
+		result.LastContextTokens = 0
+		if input := resp.inputTokens + resp.cacheCreationInputTokens + resp.cacheReadInputTokens; input > 0 {
+			result.LastContextTokens = input + resp.outputTokens
+		}
 		result.OutputTokens += resp.outputTokens
 		result.CacheCreationInputTokens += resp.cacheCreationInputTokens
 		result.CacheReadInputTokens += resp.cacheReadInputTokens
