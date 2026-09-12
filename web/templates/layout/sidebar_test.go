@@ -390,7 +390,16 @@ func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
 	if !strings.Contains(html, `'mixture_progress': handleLiveEvent`) {
 		t.Fatal("shared live SSE listener map must subscribe to mixture_progress")
 	}
-	if !strings.Contains(html, "eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress'") {
+	chatRouteStart := strings.Index(html, "if (eventType === 'chat_new_message'")
+	if chatRouteStart < 0 {
+		t.Fatal("shared live SSE dispatch must include the chat live-event route")
+	}
+	chatRouteEnd := strings.Index(html[chatRouteStart:], "if (eventType === 'diff_snapshot'")
+	if chatRouteEnd < 0 {
+		t.Fatal("shared live SSE chat route must precede the file-event route")
+	}
+	chatRoute := html[chatRouteStart : chatRouteStart+chatRouteEnd]
+	if !strings.Contains(chatRoute, "eventType === 'mixture_progress'") || !strings.Contains(chatRoute, "window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data)") {
 		t.Fatal("shared live SSE dispatch must route mixture_progress through chat live events")
 	}
 	if !strings.Contains(html, "window._tabVisibility.dispatchSSEEvent('sse-task-event', data)") || !strings.Contains(html, "if (eventType === 'mixture_progress')") {
