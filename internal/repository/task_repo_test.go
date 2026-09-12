@@ -99,7 +99,7 @@ func TestTaskRepo_ListChatContextByProjectUsesBoundedProjection(t *testing.T) {
 		t.Fatalf("compact context statements = %#v, want exactly one query", statements)
 	}
 	normalized := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
-	if !strings.Contains(normalized, "substr(prompt, 1, 501)") {
+	if !strings.Contains(normalized, "substr(t.prompt, 1, 501)") {
 		t.Fatalf("compact context query did not bound prompt: %s", statements[0])
 	}
 	for _, forbidden := range []string{"swarm_config", "worktree_path", "merge_target_branch", "lineage_depth", "task_goals", "completed_at"} {
@@ -107,7 +107,7 @@ func TestTaskRepo_ListChatContextByProjectUsesBoundedProjection(t *testing.T) {
 			t.Fatalf("compact context query selected full-only column %q: %s", forbidden, statements[0])
 		}
 	}
-	if !strings.Contains(normalized, "category != 'chat'") || !strings.Contains(normalized, "order by display_order asc, created_at asc") {
+	if !strings.Contains(normalized, "category != 'chat'") || !strings.Contains(normalized, "order by t.display_order asc, t.created_at asc") {
 		t.Fatalf("compact context query lost chat filtering or stable order: %s", statements[0])
 	}
 
