@@ -343,9 +343,10 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		data-thread-revision={ ChatTranscriptRevision(executions, nil, fmt.Sprintf("%s|%s|%s", task.Status, task.Category, derefString(task.AgentID))) }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
+		<div class="relative flex-1 min-h-0 min-w-0">
 			<div
 				id="task-thread-messages"
-				class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"
+				class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"
 				if preservedExecIDs == nil {
 					style="visibility: hidden;"
 					data-transcript-hydrating="true"
@@ -354,21 +355,23 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
 				data-scroll-intent-scope={ task.ID }
 			>
-			@TaskPrimaryAgentBanner(agentDef)
-			if hasEarlier && len(executions) > 0 {
-				@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
-			}
-			if len(executions) == 0 && len(pendingInputs) == 0 {
-				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
-			} else {
-				if preservedExecIDs != nil {
-					@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID, preservedExecIDs)
-				} else {
-					@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
+				@TaskPrimaryAgentBanner(agentDef)
+				if hasEarlier && len(executions) > 0 {
+					@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
 				}
-				@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
-				@TaskThreadStatusIndicator(task, executions)
-			}
+				if len(executions) == 0 && len(pendingInputs) == 0 {
+					@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
+				} else {
+					if preservedExecIDs != nil {
+						@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID, preservedExecIDs)
+					} else {
+						@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
+					}
+					@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
+					@TaskThreadStatusIndicator(task, executions)
+				}
+			</div>
+			@ChatLatestMessageButton("task-thread-messages", "scrollTracker_task-thread-messages")
 		</div>
 		<!-- Message Input Form (shared component with model selector) -->
 		@ChatInputForm(ChatInputFormConfig{

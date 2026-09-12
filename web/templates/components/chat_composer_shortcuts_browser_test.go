@@ -71,6 +71,10 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   function wait() { return new Promise(function(resolve) { setTimeout(resolve, 150); }); }
   var idleInput = document.getElementById('message-input');
   var activeInput = document.getElementById('task-message-input');
+  var idleForm = document.getElementById('chat-form');
+  var activeForm = document.getElementById('task-thread-form');
+  if (!idleForm.noValidate || !activeForm.noValidate) fail('composer forms must suppress native validation tooltips');
+  if (!idleInput.required || !activeInput.required) fail('composer required semantics are missing');
   var apple = idleInput.placeholder.includes('⌘+⏎ steers');
   var modifier = apple ? {metaKey:true} : {ctrlKey:true};
   var expectedHint = apple ? '⏎ sends or queues · ⌘+⏎ steers' : 'Enter sends or queues · Ctrl+Enter steers';
@@ -84,6 +88,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   await wait();
 
   idleInput.value = ''; key(idleInput); await wait();
+  idleInput.value = ' '; key(idleInput); await wait();
   idleInput.value = 'validation recovery'; key(idleInput, modifier); await wait();
 
   var pendingNormalXHR = null;
@@ -138,19 +143,20 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 
   var response = await fetch('/records');
   var records = await response.json();
-  if (records.length !== 10) fail('request count was ' + records.length + ', want 10');
+  if (records.length !== 11) fail('request count was ' + records.length + ', want 11');
   var paths = records.map(function(record) { return record.Path; }).join(',');
-  if (paths !== '/chat/send,/chat/steer,/chat/send,/chat/send,/chat/send,/tasks/task-1/thread/steer,/tasks/task-1/thread/steer,/tasks/task-1/cancel,/tasks/task-1/thread,/tasks/task-1/thread') fail('request paths were ' + paths);
-  if (records[0].Form.message[0] !== 'validation recovery') fail('validation-blocked submit stranded or changed the recovery draft');
-  if (records[1].Form.message[0] !== 'immediate keyboard steer' || records[1].Form.expected_turn_id[0] !== 'keyboard-turn') fail('immediate keyboard steer was not deferred to the accepted turn');
-  if (records[2].Form.message[0] !== 'idle enter') fail('plain idle Enter lost or changed its draft');
-  if (records[3].Form.message[0] !== 'idle steer fallback') fail('idle steer fallback lost or changed its draft');
-  if (records[4].Form.message[0] !== 'idle modifier click fallback') fail('idle modifier-click fallback lost or changed its draft');
-  if (records[5].Form.expected_turn_id[0] !== 'active-turn') fail('keyboard steer omitted expected-turn guard');
-  if (records[6].Form.expected_turn_id[0] !== 'active-turn') fail('click steer omitted expected-turn guard');
-  if (records[6].Form.attachment_session_id[0] !== 'session-1') fail('steer omitted attachment session');
-  if (records[8].Form.message[0] !== 'transition idle enter fallback') fail('active-to-idle Enter fallback lost or changed its draft');
-  if (records[9].Form.message[0] !== 'transition idle click fallback') fail('active-to-idle click fallback lost or changed its draft');
+  if (paths !== '/chat/send,/chat/send,/chat/steer,/chat/send,/chat/send,/chat/send,/tasks/task-1/thread/steer,/tasks/task-1/thread/steer,/tasks/task-1/cancel,/tasks/task-1/thread,/tasks/task-1/thread') fail('request paths were ' + paths);
+  if (records[0].Form.message[0] !== ' ') fail('whitespace-only draft was discarded');
+  if (records[1].Form.message[0] !== 'validation recovery') fail('validation-blocked submit stranded or changed the recovery draft');
+  if (records[2].Form.message[0] !== 'immediate keyboard steer' || records[2].Form.expected_turn_id[0] !== 'keyboard-turn') fail('immediate keyboard steer was not deferred to the accepted turn');
+  if (records[3].Form.message[0] !== 'idle enter') fail('plain idle Enter lost or changed its draft');
+  if (records[4].Form.message[0] !== 'idle steer fallback') fail('idle steer fallback lost or changed its draft');
+  if (records[5].Form.message[0] !== 'idle modifier click fallback') fail('idle modifier-click fallback lost or changed its draft');
+  if (records[6].Form.expected_turn_id[0] !== 'active-turn') fail('keyboard steer omitted expected-turn guard');
+  if (records[7].Form.expected_turn_id[0] !== 'active-turn') fail('click steer omitted expected-turn guard');
+  if (records[7].Form.attachment_session_id[0] !== 'session-1') fail('steer omitted attachment session');
+  if (records[9].Form.message[0] !== 'transition idle enter fallback') fail('active-to-idle Enter fallback lost or changed its draft');
+  if (records[10].Form.message[0] !== 'transition idle click fallback') fail('active-to-idle click fallback lost or changed its draft');
   if (activeInput.value !== '') fail('successful active-to-idle fallbacks did not clear the draft');
   document.getElementById('browser-result').textContent = 'PASS';
   document.body.setAttribute('data-test-result', 'pass');
@@ -171,10 +177,11 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(records) != 10 {
-		t.Fatalf("recorded requests = %d, want 10: %+v", len(records), records)
+	if len(records) != 11 {
+		t.Fatalf("recorded requests = %d, want 11: %+v", len(records), records)
 	}
 	wantDrafts := []string{
+		" ",
 		"validation recovery",
 		"immediate keyboard steer",
 		"idle enter",
@@ -184,14 +191,14 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 		"steer with attachment",
 	}
 	for i, want := range wantDrafts {
-		if got := strings.TrimSpace(records[i].Form.Get("message")); got != want {
+		if got := records[i].Form.Get("message"); got != want {
 			t.Fatalf("request %d draft = %q, want %q; records: %+v", i, got, want, records)
 		}
 	}
-	if got := strings.TrimSpace(records[8].Form.Get("message")); got != "transition idle enter fallback" {
+	if got := strings.TrimSpace(records[9].Form.Get("message")); got != "transition idle enter fallback" {
 		t.Fatalf("active-to-idle Enter fallback draft = %q; records: %+v", got, records)
 	}
-	if got := strings.TrimSpace(records[9].Form.Get("message")); got != "transition idle click fallback" {
+	if got := strings.TrimSpace(records[10].Form.Get("message")); got != "transition idle click fallback" {
 		t.Fatalf("active-to-idle click fallback draft = %q; records: %+v", got, records)
 	}
 }

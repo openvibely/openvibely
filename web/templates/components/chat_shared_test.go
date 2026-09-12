@@ -1006,20 +1006,22 @@ func TestFailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T
 	window.syncChatTranscriptRevision = function() {};
 	window.registerChatStreamEventSource = function() {};
 	window.unregisterChatStreamEventSource = function() {};
-	</script>` + chatScript.String() + `</head><body><main id="fixture-root">
+	window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); };
+	window.cancelAnimationFrame = clearTimeout;
+	</script><script>` + renderedBaseMarkdownCodeHelpers(t) + `</script>` + chatScript.String() + `</head><body><main id="fixture-root">
 	<div id="initial-messages" class="pane">` + initial.String() + `</div>
 	<div id="live-bottom-messages" class="pane"><div data-execution-pair="true" data-exec-status="running">` + liveBottom.String() + `</div></div>
 	<div id="live-reader-messages" class="pane"><div data-execution-pair="true" data-exec-status="running">` + liveReader.String() + `</div></div>
 	</main><script>
 	window.addEventListener('DOMContentLoaded', function() {
 	  var root = document.getElementById('fixture-root');
-		  function fail(message) { root.setAttribute('data-test-result', 'fail'); root.setAttribute('data-test-error', message); }
-		  function waitFor(predicate, callback, remaining) {
-		    if (predicate()) return callback();
-		    if (remaining <= 0) return fail('browser fixture readiness timed out');
-		    setTimeout(function() { waitFor(predicate, callback, remaining - 1); }, 25);
-		  }
-		  Promise.resolve(window.cleanAssistantMessages(document.getElementById('initial-messages'))).then(function() {
+	  function fail(message) { root.setAttribute('data-test-result', 'fail'); root.setAttribute('data-test-error', message); }
+	  function waitFor(predicate, callback, remaining) {
+	    if (predicate()) return callback();
+	    if (remaining <= 0) return fail('browser fixture readiness timed out');
+	    setTimeout(function() { waitFor(predicate, callback, remaining - 1); }, 25);
+	  }
+	  Promise.resolve(window.cleanAssistantMessages(document.getElementById('initial-messages'))).then(function() {
 	    var initialPane = document.getElementById('initial-messages');
 	    initialPane.scrollTop = initialPane.scrollHeight;
 	    var initialOutput = initialPane.querySelector('[data-raw-content]');
@@ -1031,39 +1033,44 @@ func TestFailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T
 	    if (!sourceBottom || !sourceReader) return fail('live streams were not attached');
 	    var partial = Array(121).join('live partial output line\n');
 	    sourceBottom.onmessage({data: partial});
-	    sourceReader.onmessage({data: partial});
-		    waitFor(function() {
-		      var bottomOutput = document.getElementById('streaming-message-live-bottom');
-		      var readerOutput = document.getElementById('streaming-message-live-reader');
-		      return bottomOutput && readerOutput && bottomOutput.getAttribute('data-raw-content') === partial && readerOutput.getAttribute('data-raw-content') === partial;
-		    }, function() {
-		      var bottomPane = document.getElementById('live-bottom-messages');
-		      var readerPane = document.getElementById('live-reader-messages');
-		      bottomPane.scrollTop = bottomPane.scrollHeight;
-		      var bottomTracker = window['scrollTracker_live-bottom-messages'];
-		      if (!bottomTracker) return fail('bottom tracker was not installed');
-		      bottomTracker.userScrolledUp = false;
-		      sourceBottom.listeners.error({data: 'live terminal failure <unsafe>'});
-		      waitFor(function() { return !!bottomPane.querySelector('[data-terminal-error="true"]'); }, function() {
-		        var output = bottomPane.querySelector('[data-raw-content]');
-		        var terminalError = bottomPane.querySelector('[data-terminal-error="true"]');
-		        if (!output || !terminalError || !(output.compareDocumentPosition(terminalError) & Node.DOCUMENT_POSITION_FOLLOWING)) return fail('live terminal error was not after partial output');
-		        if (bottomPane.scrollHeight - bottomPane.scrollTop - bottomPane.clientHeight > 2) return fail('near-bottom live reader was not kept at terminal error: height=' + bottomPane.scrollHeight + ' top=' + bottomPane.scrollTop + ' client=' + bottomPane.clientHeight);
-		        if (terminalError.textContent !== 'Error: live terminal failure <unsafe>' || terminalError.innerHTML.indexOf('<unsafe>') !== -1) return fail('live terminal error was not safely escaped');
-		        if (bottomPane.querySelectorAll('[data-terminal-error="true"]').length !== 1 || terminalError.getAttribute('role') !== 'alert') return fail('live terminal error was duplicated or inaccessible');
-		        readerPane.dispatchEvent(new WheelEvent('wheel', {deltaY: -100, bubbles: true}));
-		        readerPane.scrollTop = 0;
-		        readerPane.dispatchEvent(new Event('scroll'));
-		        var readerTracker = window['scrollTracker_live-reader-messages'];
-		        if (!readerTracker) return fail('older-reader tracker was not installed');
-		        readerTracker.userScrolledUp = true;
-		        sourceReader.listeners.error({data: 'reader terminal failure'});
-		        waitFor(function() { return !!readerPane.querySelector('[data-terminal-error="true"]'); }, function() {
-		          if (readerPane.scrollTop > 2) return fail('older-content reader position was stolen: height=' + readerPane.scrollHeight + ' top=' + readerPane.scrollTop + ' client=' + readerPane.clientHeight + ' tracker=' + readerTracker.userScrolledUp);
-		          root.setAttribute('data-test-result', 'pass');
-		        }, 80);
-		      }, 80);
-		    }, 80);
+	    waitFor(function() {
+	      var bottomOutput = document.getElementById('streaming-message-live-bottom');
+	      return bottomOutput && bottomOutput.querySelector('.chat-markdown') && bottomOutput.getAttribute('data-raw-content') === partial;
+	    }, function() {
+	      sourceReader.onmessage({data: partial});
+	      waitFor(function() {
+	        var readerOutput = document.getElementById('streaming-message-live-reader');
+	        return readerOutput && readerOutput.querySelector('.chat-markdown') && readerOutput.getAttribute('data-raw-content') === partial;
+	      }, function() {
+	        var bottomPane = document.getElementById('live-bottom-messages');
+	        var readerPane = document.getElementById('live-reader-messages');
+	        bottomPane.scrollTop = bottomPane.scrollHeight;
+	        var bottomTracker = window['scrollTracker_live-bottom-messages'];
+	        if (!bottomTracker) return fail('bottom tracker was not installed');
+	        bottomTracker.userScrolledUp = false;
+	        sourceBottom.listeners.error({data: 'live terminal failure <unsafe>'});
+	        waitFor(function() { return !!bottomPane.querySelector('[data-terminal-error="true"]'); }, function() {
+	          var output = bottomPane.querySelector('[data-raw-content]');
+	          var terminalError = bottomPane.querySelector('[data-terminal-error="true"]');
+	          if (!output || !terminalError || !(output.compareDocumentPosition(terminalError) & Node.DOCUMENT_POSITION_FOLLOWING)) return fail('live terminal error was not after partial output');
+	          if (bottomPane.scrollHeight - bottomPane.scrollTop - bottomPane.clientHeight > 2) return fail('near-bottom live reader was not kept at terminal error: height=' + bottomPane.scrollHeight + ' top=' + bottomPane.scrollTop + ' client=' + bottomPane.clientHeight);
+	          if (terminalError.textContent !== 'Error: live terminal failure <unsafe>' || terminalError.innerHTML.indexOf('<unsafe>') !== -1) return fail('live terminal error was not safely escaped');
+	          if (bottomPane.querySelectorAll('[data-terminal-error="true"]').length !== 1 || terminalError.getAttribute('role') !== 'alert') return fail('live terminal error was duplicated or inaccessible');
+	          readerPane.dispatchEvent(new WheelEvent('wheel', {deltaY: -100, bubbles: true}));
+	          readerPane.scrollTop = 0;
+	          readerPane.dispatchEvent(new Event('scroll'));
+	          var readerTracker = window['scrollTracker_live-reader-messages'];
+	          if (!readerTracker) return fail('older-reader tracker was not installed');
+	          readerTracker.userScrolledUp = true;
+	          sourceReader.listeners.error({data: 'reader terminal failure'});
+	          waitFor(function() { return !!readerPane.querySelector('[data-terminal-error="true"]'); }, function() {
+	            if (readerPane.scrollTop > 2) return fail('older-content reader position was stolen: height=' + readerPane.scrollHeight + ' top=' + readerPane.scrollTop + ' client=' + readerPane.clientHeight + ' tracker=' + readerTracker.userScrolledUp);
+	            root.setAttribute('data-test-result', 'pass');
+	          }, 200);
+	        }, 200);
+	      }, 200);
+	    }, 200);
+	  }, 200);
 	  }).catch(function(error) { fail(String(error && error.stack || error)); });
 	});
 	</script></body></html>`
@@ -1085,7 +1092,7 @@ func TestFailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T
 		t.Fatalf("create Chrome stderr: %v", err)
 	}
 	defer stderrFile.Close()
-	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-terminal-error-profile"), "--virtual-time-budget=6000", "--dump-dom", server.URL)
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-terminal-error-profile"), "--virtual-time-budget=20000", "--dump-dom", server.URL)
 	cmd.Stdout, cmd.Stderr = stdoutFile, stderrFile
 	configureTestBrowserProcess(cmd)
 	if err := cmd.Start(); err != nil {

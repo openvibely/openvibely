@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
@@ -54,7 +55,12 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`placeholder="Search automations..."`,
 		`data-search-no-results`,
 		`class="grid grid-cols-1 gap-4`,
-		`class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full"`,
+		`class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"`,
+		`role="link" tabindex="0" aria-label="Open Automation Native Delivery"`,
+		`role="link" tabindex="0" aria-label="Open Automation Paused Delivery"`,
+		`data-automation-url="/automations/automation-native?project_id=project-search"`,
+		`data-automation-url="/automations/automation-paused?project_id=project-search"`,
+		`onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"`,
 		`class="card-body relative"`,
 		`class="absolute top-4 right-4"`,
 		`data-automation-card-action`,
@@ -98,9 +104,6 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`class="card-body min-w-0 p-5"`,
 		`data-automation-card-edit="automation-native" type="submit"`,
 		`data-automation-card-edit="automation-native">Edit</button></form>`,
-		`role="link"`,
-		`focus:outline-none focus-visible:ring-2 focus-visible:ring-primary`,
-		`onkeydown=`,
 		"Published autonomous processes explicitly created or registered for this project.",
 		"Operational work summary",
 		"Last activity",
@@ -111,6 +114,297 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 			t.Errorf("expected compact Automation cards to omit %q", forbidden)
 		}
 	}
+
+	var filtered bytes.Buffer
+	filteredState := CardListState{ProjectID: "project-search", Search: "Paused Delivery"}
+	if err := AutomationsContentPageWithState(cards[1:], "project-search", true, filteredState).Render(context.Background(), &filtered); err != nil {
+		t.Fatalf("render filtered paginated Automation portfolio: %v", err)
+	}
+	filteredBody := filtered.String()
+	for _, want := range []string{
+		`data-card-pagination-has-more="true"`,
+		`data-card-search-initial="Paused Delivery"`,
+		`data-automation-url="/automations/automation-paused?project_id=project-search"`,
+		`role="link" tabindex="0" aria-label="Open Automation Paused Delivery"`,
+		`focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`,
+	} {
+		if !strings.Contains(filteredBody, want) {
+			t.Errorf("expected filtered paginated Automation portfolio to contain %q", want)
+		}
+	}
+}
+
+func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPagination(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projectID := "project-automation-browser"
+	cards := []models.AutomationCard{
+		{
+			Automation: models.Automation{
+				ID:             "automation-active-browser",
+				Name:           "Active Delivery",
+				LifecycleState: models.AutomationActive,
+				HealthState:    models.AutomationHealthHealthy,
+			},
+			Version: models.AutomationVersion{Version: 1, AdapterKey: "custom"},
+		},
+		{
+			Automation: models.Automation{
+				ID:             "automation-paused-browser",
+				Name:           "Paused Delivery",
+				LifecycleState: models.AutomationPaused,
+				HealthState:    models.AutomationHealthHealthy,
+			},
+			Version: models.AutomationVersion{Version: 2, AdapterKey: "native_sdlc"},
+		},
+	}
+	paginatedCard := models.AutomationCard{
+		Automation: models.Automation{
+			ID:             "automation-paginated-browser",
+			Name:           "Paginated Delivery",
+			LifecycleState: models.AutomationActive,
+			HealthState:    models.AutomationHealthHealthy,
+		},
+		Version: models.AutomationVersion{Version: 3, AdapterKey: "custom"},
+	}
+
+	renderFragment := func(fragmentCards []models.AutomationCard, hasMore bool) string {
+		var out bytes.Buffer
+		if err := AutomationsContentPage(fragmentCards, projectID, hasMore).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Automation browser fragment: %v", err)
+		}
+		return out.String()
+	}
+	var base bytes.Buffer
+	if err := layout.Base("Automation browser", nil, projectID).Render(context.Background(), &base); err != nil {
+		t.Fatalf("render Automation browser base: %v", err)
+	}
+	initialPage := strings.Replace(base.String(), "</body>", renderFragment(cards, true)+"</body>", 1)
+	for _, external := range []string{
+		"https://cdn.tailwindcss.com",
+		"https://unpkg.com/htmx.org@2.0.4",
+		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
+		"https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js",
+		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+		"wails://wails/runtime.js",
+	} {
+		initialPage = strings.ReplaceAll(initialPage, external, "/empty.js")
+	}
+	initialPage = strings.Replace(initialPage, "</head>", `<style>
+[data-card-select-id] { position: relative; display: block; width: 720px; min-height: 120px; margin: 16px; }
+[data-card-select-id] > .card-body { position: relative; min-height: 88px; padding: 16px; }
+[data-card-select-id] [data-automation-card-action] { position: absolute; top: 16px; right: 16px; z-index: 20; }
+[data-card-select-id] [data-automation-card-action] .dropdown { position: relative; }
+[data-card-select-id] [data-automation-card-action] .dropdown-content { position: absolute; top: 100%; right: 0; z-index: 100; display: block; min-width: 192px; margin: 0; padding: 8px; }
+[data-card-select-id] [data-automation-card-action] .dropdown-content li { display: block; }
+[data-card-select-id] [data-automation-card-action] .dropdown-content button { display: block; width: 100%; min-height: 32px; }
+</style></head>`, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/empty.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write([]byte(""))
+		case "/automations":
+			query := r.URL.Query()
+			search := strings.TrimSpace(query.Get("search"))
+			if search != "" {
+				w.Header().Set("X-OpenVibely-Card-Page-Has-More", "false")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(renderFragment([]models.AutomationCard{cards[1]}, false)))
+				return
+			}
+			if query.Get("page") == "1" {
+				w.Header().Set("X-OpenVibely-Card-Page-Has-More", "false")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(renderFragment([]models.AutomationCard{paginatedCard}, false)))
+				return
+			}
+			if query.Get("card_page") == "1" {
+				w.Header().Set("X-OpenVibely-Card-Page-Has-More", "true")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(renderFragment(cards, true)))
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(initialPage))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	targetURL := server.URL + "/automations?project_id=" + projectID
+	runComposerFocusCDP(t, chrome, targetURL, "automation-portfolio-keyboard", func(browser *composerFocusCDP) {
+		press := func(key, code, text string) {
+			params := map[string]any{"type": "keyDown", "key": key, "code": code}
+			if text != "" {
+				params["text"] = text
+				params["unmodifiedText"] = text
+			}
+			browser.call("Input.dispatchKeyEvent", params, nil)
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
+		}
+		pressRepeated := func(key, code, text string) {
+			params := map[string]any{"type": "keyDown", "key": key, "code": code, "autoRepeat": true}
+			if text != "" {
+				params["text"] = text
+				params["unmodifiedText"] = text
+			}
+			for i := 0; i < 3; i++ {
+				browser.call("Input.dispatchKeyEvent", params, nil)
+			}
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
+		}
+		cardSelector := func(id string) string {
+			return fmt.Sprintf(`[data-card-select-id=%q]`, id)
+		}
+		cardURL := func(id string) string {
+			selector := cardSelector(id)
+			return browser.evaluate(fmt.Sprintf(`document.querySelector(%q).dataset.automationUrl`, selector))
+		}
+		navigationCount := func(url string) string {
+			return browser.evaluate(fmt.Sprintf(`String(window.__automationNavigations.filter(function(value) { return value === %q; }).length)`, url))
+		}
+		closeDialogs := func() {
+			browser.evaluate(`document.querySelectorAll('dialog[open]').forEach(function(dialog) { dialog.close(); }); 'closed'`)
+		}
+		waitForNativeActionTarget := func(selector string) {
+			browser.waitFor("native action target "+selector, fmt.Sprintf(`(function() {
+					var el = document.querySelector(%q);
+					if (!el) return 'missing';
+					var rect = el.getBoundingClientRect();
+					var hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+					return rect.width > 0 && rect.height > 0 && hit && (hit === el || el.contains(hit)) ? 'ready' : 'waiting';
+				})()`, selector), "ready")
+		}
+		assertCard := func(id, name string) {
+			selector := cardSelector(id)
+			wantURL := "/automations/" + id + "?project_id=" + projectID
+			want := "link|0|Open Automation " + name + "|true|true|" + wantURL
+			got := browser.evaluate(fmt.Sprintf(`(function() {
+				var card = document.querySelector(%q);
+				if (!card) return 'missing';
+				return [card.getAttribute('role'), card.getAttribute('tabindex'), card.getAttribute('aria-label'), card.classList.contains('focus-visible:ring-2'), card.classList.contains('focus-visible:ring-primary'), card.dataset.automationUrl].join('|');
+			})()`, selector))
+			if got != want {
+				t.Fatalf("card %s accessibility state = %q, want %q", id, got, want)
+			}
+		}
+		tabToCard := func(id string) {
+			browser.click(`input[data-card-search]`)
+			for i := 0; i < 40; i++ {
+				press("Tab", "Tab", "")
+				got := browser.evaluate(`(function() {
+					var active = document.activeElement;
+					return active && active.getAttribute('data-card-select-id') || '';
+				})()`)
+				if got == id {
+					return
+				}
+			}
+			t.Fatalf("native Tab traversal did not reach card %s; active element was %s", id, browser.evaluate(`document.activeElement && document.activeElement.outerHTML || ''`))
+		}
+		exerciseActionIsolation := func(id string, actionSelectors []string) {
+			parentURL := cardURL(id)
+			moreSelector := cardSelector(id) + ` [data-automation-card-action] label`
+			browser.click(`input[data-card-search]`)
+			for _, actionSelector := range actionSelectors {
+				before := navigationCount(parentURL)
+				browser.click(moreSelector)
+				waitForNativeActionTarget(actionSelector)
+				browser.click(actionSelector)
+				if got := navigationCount(parentURL); got != before {
+					t.Fatalf("nested mouse action %s navigated parent card %s: count %s, want %s", actionSelector, id, got, before)
+				}
+				closeDialogs()
+			}
+			for _, actionSelector := range actionSelectors {
+				before := navigationCount(parentURL)
+				browser.click(moreSelector)
+				waitForNativeActionTarget(actionSelector)
+				for i := 0; i < 20; i++ {
+					press("Tab", "Tab", "")
+					if got := browser.evaluate(fmt.Sprintf(`document.activeElement && document.activeElement.matches(%q) ? 'true' : 'false'`, actionSelector)); got == "true" {
+						break
+					}
+					if i == 19 {
+						t.Fatalf("native Tab traversal did not reach nested action %s in card %s", actionSelector, id)
+					}
+				}
+				press("Enter", "Enter", "")
+				if got := navigationCount(parentURL); got != before {
+					t.Fatalf("nested native keyboard action %s navigated parent card %s: count %s, want %s", actionSelector, id, got, before)
+				}
+				closeDialogs()
+			}
+		}
+
+		browser.waitFor("Automation portfolio", `document.readyState + ':' + Boolean(document.getElementById('automations-container')) + ':' + document.querySelectorAll('[data-automation-url]').length`, "complete:true:2")
+		browser.evaluate(`window.htmx = {ajax: function() { return Promise.resolve(); }, process: function() {}}; window.__automationNavigations = []; window.openVibelyNavigate = function(url) { window.__automationNavigations.push(url); return Promise.resolve(); }; 'ready'`)
+		assertCard("automation-active-browser", "Active Delivery")
+		assertCard("automation-paused-browser", "Paused Delivery")
+
+		activeURL := cardURL("automation-active-browser")
+		browser.click(cardSelector("automation-active-browser") + " .card-body")
+		browser.waitFor("native mouse card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, activeURL)
+		tabToCard("automation-active-browser")
+		beforeRepeat := navigationCount(activeURL)
+		pressRepeated("Enter", "Enter", "")
+		if got := navigationCount(activeURL); got != beforeRepeat {
+			t.Fatalf("repeated Enter navigated active card: count %s, want %s", got, beforeRepeat)
+		}
+		press("Enter", "Enter", "")
+		browser.waitFor("native Enter card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, activeURL)
+
+		pausedURL := cardURL("automation-paused-browser")
+		tabToCard("automation-paused-browser")
+		beforeRepeat = navigationCount(pausedURL)
+		pressRepeated(" ", "Space", " ")
+		if got := navigationCount(pausedURL); got != beforeRepeat {
+			t.Fatalf("repeated Space navigated paused card: count %s, want %s", got, beforeRepeat)
+		}
+		press(" ", "Space", " ")
+		browser.waitFor("native Space card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, pausedURL)
+
+		exerciseActionIsolation("automation-active-browser", []string{
+			fmt.Sprintf(`[data-automation-card-edit=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-duplicate=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-run-now=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-pause=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-active-browser"),
+		})
+		exerciseActionIsolation("automation-paused-browser", []string{
+			fmt.Sprintf(`[data-automation-card-edit=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-duplicate=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-resume=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-paused-browser"),
+		})
+
+		browser.evaluate(`(function() { var root = document.getElementById('automations-container'); root.scrollTop = root.scrollHeight; root.dispatchEvent(new Event('scroll', {bubbles: true})); return 'scrolled'; })()`)
+		browser.waitFor("paginated Automation card", `document.querySelector('[data-card-select-id="automation-paginated-browser"]') ? 'true' : 'false'`, "true")
+		assertCard("automation-paginated-browser", "Paginated Delivery")
+		tabToCard("automation-paginated-browser")
+		press("Enter", "Enter", "")
+		browser.waitFor("native Enter paginated card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, cardURL("automation-paginated-browser"))
+
+		browser.click(`input[data-card-search]`)
+		browser.typeText("Paused Delivery")
+		browser.waitFor("filtered Automation card", `(function() {
+			var root = document.getElementById('automations-container');
+			var visibleCards = Array.from(root.querySelectorAll('[data-automation-url]')).filter(function(card) { return window.getComputedStyle(card).display !== 'none' && card.getClientRects().length > 0; });
+			return visibleCards.length + ':' + (visibleCards[0] && visibleCards[0].getAttribute('data-card-select-id') || '');
+		})()`, "1:automation-paused-browser")
+		assertCard("automation-paused-browser", "Paused Delivery")
+		tabToCard("automation-paused-browser")
+		press("Enter", "Enter", "")
+		browser.waitFor("native Enter filtered card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, pausedURL)
+		exerciseActionIsolation("automation-paused-browser", []string{
+			fmt.Sprintf(`[data-automation-card-edit=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-duplicate=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-resume=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-paused-browser"),
+		})
+	})
 }
 
 func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *testing.T) {
