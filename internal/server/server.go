@@ -56,6 +56,7 @@ var (
 	newDatabaseConnections           = database.NewReadWrite
 	registerDedicatedWriter          = repository.RegisterDedicatedWriter
 	loadAutomationConfirmationSecret = service.LoadOrCreateAutomationConfirmationSecret
+	newXServiceWithDependencies      = service.NewXServiceWithDependencies
 )
 
 func migrateLegacyStorage(cfg *config.Config) error {
@@ -805,13 +806,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
-	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
-	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
-	xSvc := service.NewXService(xCredentials, settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc)
-	xSvc.SetRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo, repository.NewThreadInputRepo(db))
-	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
-		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
-	}
 	llmSvc.SetChannelMessageRouter(channelMessageRouter)
 	channelMessageRouter.SetSlackService(slackSvc)
 	channelMessageRouter.SetSlackAuthStore(slackAuthRepo)
@@ -1137,6 +1131,34 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
 	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
+	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
+	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
+	xSvc := newXServiceWithDependencies(xCredentials, service.XServiceDependencies{
+		SettingsRepo:             settingsRepo,
+		ProjectRepo:              projectRepo,
+		LLMConfigRepo:            llmConfigRepo,
+		TaskRepo:                 taskRepo,
+		ExecutionRepo:            execRepo,
+		ScheduleRepo:             scheduleRepo,
+		TaskService:              taskSvc,
+		XAuthRepo:                xAuthRepo,
+		XUserProjectRepo:         xUserProjectRepo,
+		XTaskContextRepo:         xTaskContextRepo,
+		XInboundReceiptRepo:      xInboundReceiptRepo,
+		ThreadInputRepo:          repository.NewThreadInputRepo(db),
+		AgentRepo:                agentRepo,
+		CustomPersonalityRepo:    customPersonalityRepo,
+		ChatBroadcaster:          chatBroadcaster,
+		ExecutionStreamHub:       executionStreamHub,
+		ChannelChatRunner:        h.StartChannelChatRun,
+		ChannelTaskRunner:        h.StartChannelTaskRun,
+		QueuedTurnPromoter:       h.PromoteQueuedChatInput,
+		QueuedTaskThreadPromoter: h.PromoteQueuedTaskThreadInput,
+		ChannelMessageRouter:     channelMessageRouter,
+	})
+	if seconds, err := strconv.Atoi(strings.TrimSpace(xSettingValues[service.XSettingPollIntervalSeconds])); err == nil {
+		xSvc.SetPollInterval(time.Duration(seconds) * time.Second)
+	}
 	h.SetXService(xSvc)
 	h.SetReviewCommentRepo(reviewCommentRepo)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)
@@ -1164,7 +1186,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	discordSvc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 	discordSvc.SetChannelChatRunner(h.StartChannelChatRun)
 	discordSvc.SetChannelTaskRunner(h.StartChannelTaskRun)
-	xSvc.SetRuntime(agentRepo, customPersonalityRepo, chatBroadcaster, executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, channelMessageRouter)
 	if xCredentials.Ready() {
 		if err := xSvc.Start(); err != nil {
 			applog.Infof("warning: failed to start X mention polling: %v", err)

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
@@ -54,7 +55,12 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`placeholder="Search automations..."`,
 		`data-search-no-results`,
 		`class="grid grid-cols-1 gap-4`,
-		`class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full"`,
+		`class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"`,
+		`role="link" tabindex="0" aria-label="Open Automation Native Delivery"`,
+		`role="link" tabindex="0" aria-label="Open Automation Paused Delivery"`,
+		`data-automation-url="/automations/automation-native?project_id=project-search"`,
+		`data-automation-url="/automations/automation-paused?project_id=project-search"`,
+		`onkeydown="if (event.target !== this || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"`,
 		`class="card-body relative"`,
 		`class="absolute top-4 right-4"`,
 		`data-automation-card-action`,
@@ -98,9 +104,6 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`class="card-body min-w-0 p-5"`,
 		`data-automation-card-edit="automation-native" type="submit"`,
 		`data-automation-card-edit="automation-native">Edit</button></form>`,
-		`role="link"`,
-		`focus:outline-none focus-visible:ring-2 focus-visible:ring-primary`,
-		`onkeydown=`,
 		"Published autonomous processes explicitly created or registered for this project.",
 		"Operational work summary",
 		"Last activity",
@@ -110,6 +113,242 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("expected compact Automation cards to omit %q", forbidden)
 		}
+	}
+
+	var filtered bytes.Buffer
+	filteredState := CardListState{ProjectID: "project-search", Search: "Paused Delivery"}
+	if err := AutomationsContentPageWithState(cards[1:], "project-search", true, filteredState).Render(context.Background(), &filtered); err != nil {
+		t.Fatalf("render filtered paginated Automation portfolio: %v", err)
+	}
+	filteredBody := filtered.String()
+	for _, want := range []string{
+		`data-card-pagination-has-more="true"`,
+		`data-card-search-initial="Paused Delivery"`,
+		`data-automation-url="/automations/automation-paused?project_id=project-search"`,
+		`role="link" tabindex="0" aria-label="Open Automation Paused Delivery"`,
+		`focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`,
+	} {
+		if !strings.Contains(filteredBody, want) {
+			t.Errorf("expected filtered paginated Automation portfolio to contain %q", want)
+		}
+	}
+}
+
+func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPagination(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projectID := "project-automation-browser"
+	cards := []models.AutomationCard{
+		{
+			Automation: models.Automation{
+				ID:             "automation-active-browser",
+				Name:           "Active Delivery",
+				LifecycleState: models.AutomationActive,
+				HealthState:    models.AutomationHealthHealthy,
+			},
+			Version: models.AutomationVersion{Version: 1, AdapterKey: "custom"},
+		},
+		{
+			Automation: models.Automation{
+				ID:             "automation-paused-browser",
+				Name:           "Paused Delivery",
+				LifecycleState: models.AutomationPaused,
+				HealthState:    models.AutomationHealthHealthy,
+			},
+			Version: models.AutomationVersion{Version: 2, AdapterKey: "native_sdlc"},
+		},
+	}
+	paginatedCard := models.AutomationCard{
+		Automation: models.Automation{
+			ID:             "automation-paginated-browser",
+			Name:           "Paginated Delivery",
+			LifecycleState: models.AutomationActive,
+			HealthState:    models.AutomationHealthHealthy,
+		},
+		Version: models.AutomationVersion{Version: 3, AdapterKey: "custom"},
+	}
+
+	renderFragment := func(fragmentCards []models.AutomationCard, hasMore bool) string {
+		var out bytes.Buffer
+		if err := AutomationsContentPage(fragmentCards, projectID, hasMore).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Automation browser fragment: %v", err)
+		}
+		return out.String()
+	}
+	var base bytes.Buffer
+	if err := layout.Base("Automation browser", nil, projectID).Render(context.Background(), &base); err != nil {
+		t.Fatalf("render Automation browser base: %v", err)
+	}
+	initialFragment := renderFragment(cards, true)
+	initialPage := strings.Replace(base.String(), "</body>", initialFragment+`<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function fail(message) { throw new Error(message); }
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+  function waitFor(predicate, timeout) {
+    return new Promise(function(resolve, reject) {
+      var started = Date.now();
+      function poll() {
+        try {
+          var value = predicate();
+          if (value) { resolve(value); return; }
+        } catch (_) {}
+        if (Date.now() - started >= timeout) { reject(new Error('timed out waiting for browser state')); return; }
+        window.setTimeout(poll, 50);
+      }
+      poll();
+    });
+  }
+  function visible(card) {
+    return !!card && window.getComputedStyle(card).display !== 'none' && card.getClientRects().length > 0;
+  }
+  function card(id) { return document.querySelector('[data-card-select-id="' + id + '"]'); }
+  function countNavigation(navigations, url) {
+    return navigations.filter(function(value) { return value === url; }).length;
+  }
+  function keyboard(target, key) {
+    target.focus();
+    target.dispatchEvent(new KeyboardEvent('keydown', {key:key, bubbles:true, cancelable:true}));
+  }
+  async function exerciseActionIsolation(targetCard, navigations) {
+    var actionRoot = targetCard.querySelector('[data-automation-card-action]');
+    if (!actionRoot) fail('missing More actions area for ' + targetCard.getAttribute('data-card-select-id'));
+    var parentURL = targetCard.dataset.automationUrl;
+    var before = countNavigation(navigations, parentURL);
+    var controls = actionRoot.querySelectorAll('label, button, a');
+    if (!controls.length) fail('missing nested Automation actions for ' + targetCard.getAttribute('data-card-select-id'));
+    for (var i = 0; i < controls.length; i++) {
+      keyboard(controls[i], 'Enter');
+      controls[i].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+      await new Promise(function(resolve) { window.setTimeout(resolve, 10); });
+      if (countNavigation(navigations, parentURL) !== before) fail('nested action navigated the parent card: ' + controls[i].textContent.trim());
+      var dialog = document.querySelector('dialog[open]');
+      if (dialog) dialog.close();
+    }
+  }
+  (async function() {
+    await new Promise(function(resolve) { window.setTimeout(resolve, 300); });
+    var navigations = [];
+    window.htmx = {ajax:function() { return Promise.resolve(); }, process:function() {}};
+    window.openVibelyNavigate = function(url) { navigations.push(url); return Promise.resolve(); };
+    var root = document.getElementById('automations-container');
+    if (!root) fail('missing Automation pagination root');
+    var active = card('automation-active-browser');
+    var paused = card('automation-paused-browser');
+    if (!active || !paused) fail('missing initial active and paused Automation cards');
+    [active, paused].forEach(function(targetCard) {
+      if (targetCard.getAttribute('role') !== 'link') fail('saved Automation card is missing link semantics');
+      if (targetCard.getAttribute('tabindex') !== '0') fail('saved Automation card is not in normal tab order');
+      if (!targetCard.getAttribute('aria-label') || targetCard.getAttribute('aria-label').indexOf('Automation ') === -1) fail('saved Automation card is missing a meaningful name');
+      if (!targetCard.classList.contains('focus-visible:ring-2') || !targetCard.classList.contains('focus-visible:ring-primary')) fail('saved Automation card is missing its visible focus indicator');
+    });
+    keyboard(active, 'Enter');
+    if (navigations[navigations.length - 1] !== active.dataset.automationUrl) fail('Enter did not use the active Automation card destination');
+    keyboard(paused, ' ');
+    if (navigations[navigations.length - 1] !== paused.dataset.automationUrl) fail('Space did not use the paused Automation card destination');
+    await exerciseActionIsolation(active, navigations);
+    await exerciseActionIsolation(paused, navigations);
+
+    root.scrollTop = root.scrollHeight;
+    root.dispatchEvent(new Event('scroll', {bubbles:true}));
+    var paginated = await waitFor(function() { return card('automation-paginated-browser'); }, 5000);
+    if (paginated.getAttribute('role') !== 'link' || paginated.getAttribute('tabindex') !== '0' || paginated.getAttribute('aria-label') !== 'Open Automation Paginated Delivery') fail('paginated Automation card did not retain accessible navigation markup');
+    if (!paginated.classList.contains('focus-visible:ring-2') || !paginated.classList.contains('focus-visible:ring-primary')) fail('paginated Automation card is missing its visible focus indicator');
+    keyboard(paginated, 'Enter');
+    if (navigations[navigations.length - 1] !== paginated.dataset.automationUrl) fail('Enter did not navigate the paginated Automation card');
+
+    var search = root.querySelector('input[data-card-search]');
+    if (!search) fail('missing Automation card search control');
+    search.value = 'Paused Delivery';
+    search.dispatchEvent(new Event('input', {bubbles:true}));
+    await waitFor(function() {
+      var visibleCards = Array.from(root.querySelectorAll('[data-automation-url]')).filter(visible);
+      return visibleCards.length === 1 && visibleCards[0].getAttribute('data-card-select-id') === 'automation-paused-browser';
+    }, 5000);
+    var filtered = card('automation-paused-browser');
+    if (!filtered.classList.contains('focus-visible:ring-2') || !filtered.classList.contains('focus-visible:ring-primary')) fail('filtered Automation card is missing its visible focus indicator');
+    keyboard(filtered, 'Enter');
+    if (navigations[navigations.length - 1] !== filtered.dataset.automationUrl) fail('Enter did not navigate the filtered Automation card');
+    await exerciseActionIsolation(filtered, navigations);
+    await report('pass', '');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script></body>`, 1)
+	for _, external := range []string{
+		"https://cdn.tailwindcss.com",
+		"https://unpkg.com/htmx.org@2.0.4",
+		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
+		"https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js",
+		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+		"wails://wails/runtime.js",
+	} {
+		initialPage = strings.ReplaceAll(initialPage, external, "/empty.js")
+	}
+
+	browserResult := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/empty.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write([]byte(""))
+		case "/automations":
+			query := r.URL.Query()
+			search := strings.TrimSpace(query.Get("search"))
+			if search != "" {
+				w.Header().Set("X-OpenVibely-Card-Page-Has-More", "false")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(renderFragment([]models.AutomationCard{cards[1]}, false)))
+				return
+			}
+			if query.Get("page") == "1" {
+				w.Header().Set("X-OpenVibely-Card-Page-Has-More", "false")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(renderFragment([]models.AutomationCard{paginatedCard}, false)))
+				return
+			}
+			if query.Get("card_page") == "1" {
+				w.Header().Set("X-OpenVibely-Card-Page-Has-More", "true")
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_, _ = w.Write([]byte(renderFragment(cards, true)))
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(initialPage))
+		case "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "automation-portfolio-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--window-size=1200,800",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-portfolio-browser-profile"),
+		server.URL+"/automations?project_id="+projectID,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	defer stopBrowserProcess(cmd)
+
+	select {
+	case outcome := <-browserResult:
+		if outcome != "pass:" {
+			stderr, _ := os.ReadFile(stderrPath)
+			t.Fatalf("Automation portfolio keyboard browser regression failed: %s\n%s", outcome, strings.TrimSpace(string(stderr)))
+		}
+	case <-time.After(20 * time.Second):
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("timed out waiting for Automation portfolio keyboard browser regression\n%s", strings.TrimSpace(string(stderr)))
 	}
 }
 

@@ -96,6 +96,37 @@ type XService struct {
 	now                      func() time.Time
 }
 
+type XServiceDependencies struct {
+	SettingsRepo             *repository.SettingsRepo
+	ProjectRepo              *repository.ProjectRepo
+	LLMConfigRepo            *repository.LLMConfigRepo
+	TaskRepo                 *repository.TaskRepo
+	ExecutionRepo            *repository.ExecutionRepo
+	ScheduleRepo             *repository.ScheduleRepo
+	TaskService              *TaskService
+	XAuthRepo                *repository.XAuthRepo
+	XUserProjectRepo         *repository.XUserProjectRepo
+	XTaskContextRepo         *repository.XTaskContextRepo
+	XInboundReceiptRepo      *repository.XInboundReceiptRepo
+	ThreadInputRepo          *repository.ThreadInputRepo
+	AgentRepo                *repository.AgentRepo
+	CustomPersonalityRepo    *repository.CustomPersonalityRepo
+	ChatBroadcaster          *events.ChatBroadcaster
+	ExecutionStreamHub       *events.ExecutionStreamHub
+	ChannelChatRunner        ChannelChatRunner
+	ChannelTaskRunner        ChannelTaskRunner
+	QueuedTurnPromoter       func(string)
+	QueuedTaskThreadPromoter func(string)
+	ChannelMessageRouter     *ChannelMessageRouter
+}
+
+func NewXServiceWithDependencies(credentials XCredentials, deps XServiceDependencies) *XService {
+	svc := NewXService(credentials, deps.SettingsRepo, deps.ProjectRepo, deps.LLMConfigRepo, deps.TaskRepo, deps.ExecutionRepo, deps.ScheduleRepo, deps.TaskService)
+	svc.SetRepositories(deps.XAuthRepo, deps.XUserProjectRepo, deps.XTaskContextRepo, deps.XInboundReceiptRepo, deps.ThreadInputRepo)
+	svc.SetRuntime(deps.AgentRepo, deps.CustomPersonalityRepo, deps.ChatBroadcaster, deps.ExecutionStreamHub, deps.ChannelChatRunner, deps.ChannelTaskRunner, deps.QueuedTurnPromoter, deps.QueuedTaskThreadPromoter, deps.ChannelMessageRouter)
+	return svc
+}
+
 func NewXService(credentials XCredentials, settings *repository.SettingsRepo, projects *repository.ProjectRepo, configs *repository.LLMConfigRepo, tasks *repository.TaskRepo, execs *repository.ExecutionRepo, schedules *repository.ScheduleRepo, taskSvc *TaskService) *XService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &XService{api: NewXAPIClient(credentials), credentials: credentials, settingsRepo: settings, projectRepo: projects, llmConfigRepo: configs, taskRepo: tasks, execRepo: execs, scheduleRepo: schedules, taskSvc: taskSvc, ctx: ctx, cancel: cancel, pollInterval: 30 * time.Second, now: time.Now}
@@ -227,9 +258,18 @@ func (s *XService) TestConnection(ctx context.Context) (XUser, error) {
 	return me, err
 }
 func (s *XService) SetPollInterval(d time.Duration) {
-	if d >= 15*time.Second {
-		s.pollInterval = d
+	if d < 15*time.Second {
+		return
 	}
+	s.mu.Lock()
+	s.pollInterval = d
+	s.mu.Unlock()
+}
+
+func (s *XService) PollInterval() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pollInterval
 }
 
 func (s *XService) recordPollResult(err error) {
@@ -257,7 +297,7 @@ func (s *XService) poll(ctx context.Context, done chan struct{}) {
 				applog.Infof("[x] mention polling failed: %v", err)
 			}
 		}
-		timer := time.NewTimer(s.pollInterval)
+		timer := time.NewTimer(s.PollInterval())
 		select {
 		case <-ctx.Done():
 			timer.Stop()
