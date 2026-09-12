@@ -237,9 +237,9 @@ func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID strin
 	return contextRows, nil
 }
 
-	// NormalizeProjectedActiveTerminalTasks moves all projected active terminal
-	// tasks in one project-scoped transaction without hydrating full task rows. The
-	// row_number allocation preserves the order used by the full project listing.
+// NormalizeProjectedActiveTerminalTasks moves all projected active terminal
+// tasks in one project-scoped transaction without hydrating full task rows. The
+// row_number allocation preserves the order used by the full project listing.
 func (r *TaskRepo) NormalizeProjectedActiveTerminalTasks(ctx context.Context, projectID string) ([]ProjectedTaskCategoryChange, error) {
 	changes := make([]ProjectedTaskCategoryChange, 0)
 	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
@@ -314,6 +314,7 @@ func (r *TaskRepo) NormalizeProjectedActiveTerminalTasks(ctx context.Context, pr
 	}
 	return changes, nil
 }
+
 // ListBreadcrumbSelector returns a bounded compact task-title search for one project.
 func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
 	if limit <= 0 || limit > 50 {
