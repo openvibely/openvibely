@@ -831,13 +831,10 @@ type ModelCapacityResponse struct {
 	AvailableSlots int    `json:"available_slots"`
 }
 
-func (h *Handler) projectCapacityResponse(project *models.Project, queueSize int) ProjectCapacityResponse {
-	running := h.workerSvc.ProjectRunning(project.ID)
-	hasCapacity := h.workerSvc.HasProjectCapacity(project.ID)
-
+func projectCapacityResponseFromValues(id, name string, maxWorkers *int, running, queueSize int, hasCapacity bool) ProjectCapacityResponse {
 	var availableSlots *int
-	if project.MaxWorkers != nil && *project.MaxWorkers > 0 {
-		slots := *project.MaxWorkers - running
+	if maxWorkers != nil && *maxWorkers > 0 {
+		slots := *maxWorkers - running
 		if slots < 0 {
 			slots = 0
 		}
@@ -845,14 +842,32 @@ func (h *Handler) projectCapacityResponse(project *models.Project, queueSize int
 	}
 
 	return ProjectCapacityResponse{
-		ID:             project.ID,
-		Name:           project.Name,
+		ID:             id,
+		Name:           name,
 		Running:        running,
 		QueueSize:      queueSize,
-		MaxWorkers:     project.MaxWorkers,
+		MaxWorkers:     maxWorkers,
 		HasCapacity:    hasCapacity,
 		AvailableSlots: availableSlots,
 	}
+}
+
+func (h *Handler) projectCapacityResponse(project *models.Project, queueSize int) ProjectCapacityResponse {
+	running := h.workerSvc.ProjectRunning(project.ID)
+	return projectCapacityResponseFromValues(
+		project.ID,
+		project.Name,
+		project.MaxWorkers,
+		running,
+		queueSize,
+		h.workerSvc.HasProjectCapacity(project.ID),
+	)
+}
+
+func (h *Handler) projectWorkerCapacityResponse(project models.ProjectWorkerCapacity, queueSize int) ProjectCapacityResponse {
+	running := h.workerSvc.ProjectRunning(project.ID)
+	hasCapacity := project.MaxWorkers == nil || *project.MaxWorkers <= 0 || running < *project.MaxWorkers
+	return projectCapacityResponseFromValues(project.ID, project.Name, project.MaxWorkers, running, queueSize, hasCapacity)
 }
 
 func modelCapacityResponse(agent *models.LLMConfig, running int, hasCapacity bool) ModelCapacityResponse {
@@ -915,7 +930,7 @@ func (h *Handler) GetGlobalCapacity(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/capacity/projects [get]
 func (h *Handler) GetProjectCapacities(c echo.Context) error {
-	projects, err := h.projectSvc.List(c.Request().Context())
+	projects, err := h.projectSvc.ListWorkerCapacityProjects(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] GetProjectCapacities error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list projects")
@@ -930,7 +945,7 @@ func (h *Handler) GetProjectCapacities(c echo.Context) error {
 
 	capacities := make([]ProjectCapacityResponse, len(projects))
 	for i := range projects {
-		capacities[i] = h.projectCapacityResponse(&projects[i], pendingCounts[projects[i].ID])
+		capacities[i] = h.projectWorkerCapacityResponse(projects[i], pendingCounts[projects[i].ID])
 	}
 
 	return c.JSON(http.StatusOK, capacities)
