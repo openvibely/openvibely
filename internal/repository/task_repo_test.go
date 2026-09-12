@@ -28,6 +28,98 @@ func getDefaultProjectID(t *testing.T, db interface {
 	return "default"
 }
 
+func TestTaskRepo_ListChatContextByProjectUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	longPrompt := strings.Repeat("prompt-payload", 4096)
+	longSwarm := strings.Repeat("swarm-payload", 4096)
+	root := &models.Task{
+		ProjectID:   "default",
+		Title:       "Root context task",
+		Category:    models.CategoryBacklog,
+		Priority:    3,
+		Status:      models.StatusPending,
+		Prompt:      longPrompt,
+		Tag:         "feature",
+		ChainConfig: `{"enabled":true,"trigger":"on_completion","child_title":"Child context task"}`,
+	}
+	if err := repo.Create(ctx, root); err != nil {
+		t.Fatalf("create root task: %v", err)
+	}
+	child := &models.Task{
+		ProjectID:    "default",
+		Title:        "Child context task",
+		Category:     models.CategoryBacklog,
+		Priority:     2,
+		Status:       models.StatusRunning,
+		Prompt:       "child prompt",
+		ParentTaskID: &root.ID,
+	}
+	if err := repo.Create(ctx, child); err != nil {
+		t.Fatalf("create child task: %v", err)
+	}
+	chat := &models.Task{
+		ProjectID: "default",
+		Title:     "Hidden chat context task",
+		Category:  models.CategoryChat,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "must not appear",
+	}
+	if err := repo.Create(ctx, chat); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET swarm_config = ?, worktree_path = ?, merge_target_branch = ?, lineage_depth = ? WHERE id = ?`, longSwarm, "/private/worktree", "main", 7, root.ID); err != nil {
+		t.Fatalf("seed full-only task fields: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rows, err := repo.ListChatContextByProject(ctx, "default")
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListChatContextByProject: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("compact context rows = %d, want 2 non-chat tasks", len(rows))
+	}
+	if rows[0].ID != root.ID || rows[1].ID != child.ID {
+		t.Fatalf("compact context order = [%s, %s], want [%s, %s]", rows[0].ID, rows[1].ID, root.ID, child.ID)
+	}
+	if len(rows[0].PromptPreview) != 501 || rows[0].PromptPreview != longPrompt[:501] {
+		t.Fatalf("prompt preview length/content = %d/%q, want first 501 bytes", len(rows[0].PromptPreview), rows[0].PromptPreview[:min(20, len(rows[0].PromptPreview))])
+	}
+	if rows[0].ChainConfig == "" || rows[1].ParentTaskID == nil || *rows[1].ParentTaskID != root.ID {
+		t.Fatalf("compact context row omitted required chain/parent fields: %#v", rows)
+	}
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("compact context statements = %#v, want exactly one query", statements)
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	if !strings.Contains(normalized, "substr(prompt, 1, 501)") {
+		t.Fatalf("compact context query did not bound prompt: %s", statements[0])
+	}
+	for _, forbidden := range []string{"swarm_config", "worktree_path", "merge_target_branch", "lineage_depth", "task_goals", "completed_at"} {
+		if strings.Contains(normalized, forbidden) {
+			t.Fatalf("compact context query selected full-only column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(normalized, "category != 'chat'") || !strings.Contains(normalized, "order by display_order asc, created_at asc") {
+		t.Fatalf("compact context query lost chat filtering or stable order: %s", statements[0])
+	}
+
+	full, err := repo.GetByID(ctx, root.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if full.Prompt != longPrompt || full.SwarmConfig != longSwarm || full.WorktreePath != "/private/worktree" || full.MergeTargetBranch != "main" || full.LineageDepth != 7 {
+		t.Fatalf("full task detail changed after compact read: prompt=%d swarm=%d worktree=%q merge=%q lineage=%d", len(full.Prompt), len(full.SwarmConfig), full.WorktreePath, full.MergeTargetBranch, full.LineageDepth)
+	}
+}
+
 func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
