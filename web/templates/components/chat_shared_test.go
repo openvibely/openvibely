@@ -1070,7 +1070,6 @@ func TestFailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T
 	        }, 200);
 	      }, 200);
 	    }, 200);
-	  }, 200);
 	  }).catch(function(error) { fail(String(error && error.stack || error)); });
 	});
 	</script></body></html>`
