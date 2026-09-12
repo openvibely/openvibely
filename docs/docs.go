@@ -24,6 +24,50 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/alerts/pending-count": {
+            "get": {
+                "description": "Returns the number of alerts whose decision state is pending for one project without rendering alert cards.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "alerts"
+                ],
+                "summary": "Get pending alert count",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pending alert count",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "integer"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Project ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/analytics/agent-usage-by-project": {
             "get": {
                 "description": "Returns model usage, success count, and failure count grouped by project.",
@@ -988,6 +1032,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/tasks/status-counts": {
+            "get": {
+                "description": "Returns only the active-category and queued-status predicates needed by terminal status.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Get project task status counts",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Project task status counts",
+                        "schema": {
+                            "$ref": "#/definitions/handler.TaskStatusCountsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Project ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/tasks/{id}/lifecycle-executions": {
             "get": {
                 "description": "Returns one bounded page of lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task. Results are newest-first; use next_cursor with before for older activity and the newest execution ID with after for live inserts.",
@@ -1557,6 +1642,17 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
+                }
+            }
+        },
+        "handler.TaskStatusCountsResponse": {
+            "type": "object",
+            "properties": {
+                "active_tasks": {
+                    "type": "integer"
+                },
+                "queued_tasks": {
+                    "type": "integer"
                 }
             }
         },

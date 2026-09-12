@@ -2492,6 +2492,16 @@ type TaskStatusCountsResponse struct {
 	QueuedTasks int `json:"queued_tasks"`
 }
 
+// GetTaskStatusCounts returns active-category and queued-status counts for one project.
+// @Summary Get project task status counts
+// @Description Returns only the active-category and queued-status predicates needed by terminal status.
+// @Tags tasks
+// @Produce json
+// @Param project_id query string true "Project ID"
+// @Success 200 {object} TaskStatusCountsResponse "Project task status counts"
+// @Failure 400 {object} ErrorResponse "Project ID is required"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/tasks/status-counts [get]
 func (h *Handler) GetTaskStatusCounts(c echo.Context) error {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
 	if projectID == "" {
