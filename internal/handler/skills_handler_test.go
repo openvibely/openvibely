@@ -15,6 +15,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/require"
 )
@@ -597,7 +598,7 @@ func TestCreateSkillResponseIncludesFreshSearchText(t *testing.T) {
 }
 
 func TestUpdateSkillResponseSearchTextReflectsClearedFields(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+	h, e, _, db := setupTestHandlerWithDB(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
 	writeStandaloneSkill(t, root, "no_longer_matching", "Test Skill", "test description", "global")
@@ -634,6 +635,9 @@ func TestUpdateSkillResponseSearchTextReflectsClearedFields(t *testing.T) {
 	if strings.Contains(content, "Test Skill") || strings.Contains(content, "test description") {
 		t.Fatalf("expected cleared fields not to remain in frontmatter; got\n%s", content)
 	}
+	events := skillAnalyticsEventsForTest(t, db, "no_longer_matching")
+	require.Len(t, events, 1)
+	require.Equal(t, models.SkillEventEdited, events[0].EventType)
 }
 
 func TestCreateSkillDoesNotWriteEnabledTrueToFrontmatter(t *testing.T) {
