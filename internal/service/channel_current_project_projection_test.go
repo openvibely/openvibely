@@ -68,7 +68,10 @@ func requireProjectIdentityQuery(t *testing.T, statements []string) {
 	require.Equal(t, "select id, name from projects where id = ?", strings.ToLower(strings.Join(strings.Fields(statements[0]), " ")))
 }
 
-const channelCurrentProjectProjectionSamples = 7
+const (
+	channelCurrentProjectProjectionSamples    = 7
+	channelCurrentProjectProjectionOperations = 16
+)
 
 type channelCurrentProjectProjectionRuntimeMeasurement struct {
 	latency        time.Duration
@@ -131,18 +134,20 @@ func measureChannelCurrentProjectProjection(tb testing.TB, fixture *channelCurre
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		startedAt := time.Now()
-		got, err := lookup()
+		for range channelCurrentProjectProjectionOperations {
+			got, err := lookup()
+			if err != nil {
+				tb.Fatalf("measured lookup: %v", err)
+			}
+			if got != fixture.expected {
+				tb.Fatalf("measured lookup = %q, want %q", got, fixture.expected)
+			}
+		}
 		elapsed := time.Since(startedAt)
 		runtime.ReadMemStats(&after)
-		if err != nil {
-			tb.Fatalf("measured lookup: %v", err)
-		}
-		if got != fixture.expected {
-			tb.Fatalf("measured lookup = %q, want %q", got, fixture.expected)
-		}
-		latencies = append(latencies, elapsed)
-		allocatedBytes = append(allocatedBytes, after.TotalAlloc-before.TotalAlloc)
-		allocations = append(allocations, after.Mallocs-before.Mallocs)
+		latencies = append(latencies, elapsed/time.Duration(channelCurrentProjectProjectionOperations))
+		allocatedBytes = append(allocatedBytes, (after.TotalAlloc-before.TotalAlloc)/channelCurrentProjectProjectionOperations)
+		allocations = append(allocations, (after.Mallocs-before.Mallocs)/channelCurrentProjectProjectionOperations)
 	}
 	slices.Sort(latencies)
 	slices.Sort(allocatedBytes)
