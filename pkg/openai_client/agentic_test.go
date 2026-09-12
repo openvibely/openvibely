@@ -3063,7 +3063,7 @@ func TestOpenAIAutoCompactionTokenLimit_GPT56UsesExpandedContext(t *testing.T) {
 
 func TestOpenAIAutoCompactionTokenLimit_GPT6AstraUsesFullContext(t *testing.T) {
 	got := openAIAutoCompactionTokenLimit("gpt-6-astra")
-	want := (1050000 * 90) / 100
+	want := (272000 * 90) / 100
 	if got != want {
 		t.Fatalf("openAIAutoCompactionTokenLimit(gpt-6-astra) = %d, want %d", got, want)
 	}
