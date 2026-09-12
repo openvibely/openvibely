@@ -15,6 +15,14 @@ type Project struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
+// ProjectIdentity is the compact project row needed by channel current-project
+// responses. It intentionally excludes project metadata and settings used by
+// full project detail and management paths.
+type ProjectIdentity struct {
+	ID   string
+	Name string
+}
+
 // ProjectAPIItem is the compact project row needed by GET /api/projects. It
 // deliberately excludes project settings and repository metadata that the API
 // response does not expose.

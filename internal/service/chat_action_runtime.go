@@ -2824,7 +2824,7 @@ func channelViewSettingsResult(ctx context.Context, settingsRepo *repository.Set
 }
 
 func channelCurrentProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
-	project, err := projectRepo.GetByID(ctx, projectID)
+	project, err := projectRepo.GetIdentityByID(ctx, projectID)
 	if err != nil || project == nil {
 		return fmt.Sprintf("Current project ID: %s (details unavailable)", projectID)
 	}

@@ -225,6 +225,84 @@ func TestProjectRepo_ListRepoValidationProjectsUsesCompactUnorderedProjection(t 
 	t.Fatalf("project %q not returned from full List", project.ID)
 }
 
+func TestProjectRepo_GetIdentityByIDUsesCompactPrimaryKeyProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	repo := NewProjectRepo(db)
+	project := &models.Project{
+		Name:        "Compact identity project",
+		Description: strings.Repeat("d", 16<<10),
+		RepoPath:    strings.Repeat("p", 2<<10),
+		RepoURL:     strings.Repeat("u", 2<<10),
+	}
+	if err := repo.Create(ctx, project); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	identity, err := repo.GetIdentityByID(ctx, project.ID)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("GetIdentityByID: %v", err)
+	}
+	if identity == nil || identity.ID != project.ID || identity.Name != project.Name {
+		t.Fatalf("identity = %+v, want id/name from %+v", identity, project)
+	}
+	if statements := counter.Statements(); len(statements) != 1 {
+		t.Fatalf("statements = %d, want one: %v", len(statements), statements)
+	} else if query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " ")); query != "select id, name from projects where id = ?" {
+		t.Fatalf("unexpected identity query: %s", statements[0])
+	}
+
+	full, err := repo.GetByID(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if full == nil || full.Description != project.Description || full.RepoPath != project.RepoPath || full.RepoURL != project.RepoURL {
+		t.Fatalf("full project = %+v, want rich metadata retained", full)
+	}
+
+	for _, id := range []string{project.ID, "missing-project-identity"} {
+		rows, err := db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+projectIdentityByIDQuery, id)
+		if err != nil {
+			t.Fatalf("EXPLAIN QUERY PLAN for %q: %v", id, err)
+		}
+		var plan strings.Builder
+		for rows.Next() {
+			var rowID, parent, unused int
+			var detail string
+			if err := rows.Scan(&rowID, &parent, &unused, &detail); err != nil {
+				rows.Close()
+				t.Fatalf("scan query plan for %q: %v", id, err)
+			}
+			plan.WriteString(detail)
+			plan.WriteByte('\n')
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatalf("query plan rows for %q: %v", id, err)
+		}
+		rows.Close()
+		planText := strings.ToUpper(plan.String())
+		if strings.Contains(planText, "SCAN PROJECTS") || strings.Contains(planText, "USE TEMP B-TREE") {
+			t.Fatalf("identity query plan for %q is not a direct lookup:\n%s", id, plan.String())
+		}
+		if !strings.Contains(planText, "SEARCH PROJECTS") ||
+			(!strings.Contains(planText, "USING INDEX SQLITE_AUTOINDEX_PROJECTS_1") && !strings.Contains(planText, "USING INTEGER PRIMARY KEY")) {
+			t.Fatalf("identity query plan for %q does not prove primary-key lookup:\n%s", id, plan.String())
+		}
+	}
+
+	missing, err := repo.GetIdentityByID(ctx, "missing-project-identity")
+	if err != nil {
+		t.Fatalf("GetIdentityByID missing: %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("missing identity = %+v, want nil", missing)
+	}
+}
+
 func TestProjectRepo_CreateAndGetByID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewProjectRepo(db)
