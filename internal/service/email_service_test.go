@@ -1545,6 +1545,10 @@ func measureFileBackedEmailReceiptFilter(tb testing.TB, messageCount, receiptedC
 }
 
 func TestEmailPollReceiptFilterPerformance(t *testing.T) {
+	browserSlot, err := testutil.AcquireBrowserSlot()
+	require.NoError(t, err)
+	defer browserSlot.Release()
+
 	for _, testCase := range []struct {
 		messageCount  int
 		receiptedRate int
@@ -1574,6 +1578,10 @@ func TestEmailPollReceiptFilterPerformance(t *testing.T) {
 }
 
 func TestEmailPollOnceFileBackedReceiptBatchEvidence(t *testing.T) {
+	browserSlot, err := testutil.AcquireBrowserSlot()
+	require.NoError(t, err)
+	defer browserSlot.Release()
+
 	for _, messageCount := range []int{1, 10, 100, 1000} {
 		for _, receiptedRate := range []int{0, 50, 100} {
 			receiptedCount := messageCount * receiptedRate / 100

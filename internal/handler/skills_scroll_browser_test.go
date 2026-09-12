@@ -192,7 +192,7 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 		"--dump-dom",
 		srv.URL,
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := runHandlerBrowserProcess(cmd)
 	dom := string(out)
 	passed := strings.Contains(dom, `id="browser-result" data-status="pass"`)
 	if ctx.Err() != nil {
