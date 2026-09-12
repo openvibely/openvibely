@@ -243,11 +243,7 @@ func (h *Handler) CreateSkill(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	eventType := models.SkillEventEdited
-	if res != nil && len(res.Created) > 0 {
-		eventType = models.SkillEventCreated
-	}
-	h.recordManualSkillEvent(c, eventType, req.Handle, req.Scope, "")
+	h.recordManualSkillEvent(c, skillWriteEventType(res), req.Handle, req.Scope, "")
 	return h.ListSkills(c)
 }
 
@@ -314,11 +310,7 @@ func (h *Handler) ImportSkillPackage(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
-	eventType := models.SkillEventEdited
-	if res != nil && len(res.Created) > 0 {
-		eventType = models.SkillEventCreated
-	}
-	h.recordManualSkillEvent(c, eventType, decl.Skill.Key, scope, "")
+	h.recordManualSkillEvent(c, skillWriteEventType(res), decl.Skill.Key, scope, "")
 	return h.ListSkills(c)
 }
 

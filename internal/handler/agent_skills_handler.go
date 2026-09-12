@@ -125,11 +125,7 @@ func (h *Handler) CreateAgentOwnedSkill(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	eventType := models.SkillEventEdited
-	if res != nil && len(res.Created) > 0 {
-		eventType = models.SkillEventCreated
-	}
-	h.recordManualSkillEvent(c, eventType, req.Handle, models.SkillScopeAgentOwned, agent.ID)
+	h.recordManualSkillEvent(c, skillWriteEventType(res), req.Handle, models.SkillScopeAgentOwned, agent.ID)
 	return h.GetAgentSkills(c)
 }
 

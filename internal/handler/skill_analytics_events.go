@@ -4,8 +4,16 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func skillWriteEventType(res *agentlibrary.ImportResult) string {
+	if res != nil && len(res.Created) > 0 {
+		return models.SkillEventCreated
+	}
+	return models.SkillEventEdited
+}
 
 func (h *Handler) recordManualSkillEvent(c echo.Context, eventType, handle, scope, agentID string) {
 	if h == nil || h.skillAnalyticsRepo == nil || strings.TrimSpace(handle) == "" {
