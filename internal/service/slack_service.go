@@ -1546,15 +1546,15 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 
 func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, projectID string) error {
 	key := slackUserProjectKey(teamID, userID)
-	s.mu.Lock()
-	s.userProjects[key] = projectID
-	s.mu.Unlock()
 	if s.slackUserProjectRepo != nil {
 		if err := s.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, projectID); err != nil {
 			applog.Infof("[slack] persist active project failed: %v", err)
 			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
+	s.mu.Lock()
+	s.userProjects[key] = projectID
+	s.mu.Unlock()
 	return nil
 }
 
