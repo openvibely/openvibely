@@ -887,6 +887,9 @@ func nativeCompactionInputItems(ctx context.Context) []any {
 }
 
 func recordOpenAINativeCompactionState(usage *llmcontracts.Usage, resp *openaiclient.AgenticResponse) {
+	if usage != nil && resp != nil {
+		usage.LastContextTokens = resp.LastContextTokens
+	}
 	if usage == nil || resp == nil || len(resp.CompactedInputItems) == 0 {
 		return
 	}
