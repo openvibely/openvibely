@@ -326,6 +326,19 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		execDir := filepath.Join(uploadsDir, "chat", exec.ID)
 		if err := os.MkdirAll(execDir, 0755); err != nil {
 			applog.Infof("[handler] APIChatMessage error creating exec dir: %v", err)
+			if cleanupErr := os.RemoveAll(execDir); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
+				applog.Infof("[handler] APIChatMessage error removing failed exec dir %s: %v", execDir, cleanupErr)
+			}
+			h.completeWithFailure(c.Request().Context(), exec.ID, task.ID, fmt.Sprintf("failed to create upload directory: %v", err), 0)
+			h.finalizeStreamingTurn(streamingResponseParams{
+				ExecID:         exec.ID,
+				TaskID:         task.ID,
+				ProjectID:      projectID,
+				Surface:        chatcontrol.SurfaceAPI,
+				ChatMode:       models.ChatModeOrchestrate,
+				Message:        message,
+				IsTaskFollowup: false,
+			}, "")
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create upload directory"})
 		}
 
