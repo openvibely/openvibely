@@ -189,6 +189,8 @@ func TestLatestMessageButtonAndControllerContract(t *testing.T) {
 	content := script.String()
 	for _, required := range []string{
 		"returnToLatest: function(smooth)",
+		"currentTracker.returnToLatest(false)",
+		"else window.chatAutoScroll.scrollToBottom(messages, false)",
 		"window.installChatLatestMessageButtons",
 		"data-chat-latest-message",
 		"ResizeObserver",
@@ -257,7 +259,7 @@ func TestLatestMessageButtonDynamicBehaviorInChrome(t *testing.T) {
 			button.click();
 			if (!button.hidden || !button.classList.contains('hidden')) return fail(messagesID + ' button did not hide after click');
 			if (messages.scrollTop !== messages.scrollHeight - messages.clientHeight && messages.scrollTop !== messages.scrollHeight) return fail(messagesID + ' did not scroll to latest');
-			if (messages.dataset.lastBehavior !== 'smooth') return fail(messagesID + ' latest click was not smooth');
+			if (messages.dataset.lastBehavior !== 'auto') return fail(messagesID + ' latest click did not jump immediately');
 			var tracker = window['scrollTracker_' + messagesID];
 			if (!tracker || !tracker.shouldAutoScroll()) return fail(messagesID + ' did not restore pinned intent');
 		}
