@@ -191,6 +191,10 @@ type emailInboundReceiptStore interface {
 	WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(repository.SQLExecutor) error) (bool, error)
 }
 
+type emailInboundReceiptBatchStore interface {
+	ExistsBatch(ctx context.Context, mailboxAddress string, messageKeys []string) (map[string]struct{}, error)
+}
+
 type EmailService struct {
 	settingsRepo               *repository.SettingsRepo
 	projectRepo                *repository.ProjectRepo
@@ -530,23 +534,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 	// resolve the current setting through processIncomingMessage instead.
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	selfAddress := repository.NormalizeEmailAddress(cfg.Address)
-	acknowledgementSet := make(map[uint32]struct{}, len(metadata))
-	unresolved := make([]emailMessageCandidate, 0, len(metadata))
-	for _, meta := range metadata {
-		messageKey, stable := emailInboundMessageKey(EmailInboundMessage{MessageID: meta.MessageID}, mailbox.UidValidity, meta.UID)
-		if stable && s.emailInboundReceiptStore != nil {
-			received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
-			if err != nil {
-				applog.Infof("[email] check receipt for message %d failed: %v", meta.ID, err)
-				continue
-			}
-			if received {
-				acknowledgementSet[meta.ID] = struct{}{}
-				continue
-			}
-		}
-		unresolved = append(unresolved, emailMessageCandidate{ID: meta.ID, MessageKey: messageKey})
-	}
+	acknowledgementSet, unresolved := s.filterEmailReceiptCandidates(ctx, mailboxIdentity, mailbox.UidValidity, metadata)
 
 	if len(unresolved) > 0 {
 		unresolvedIDs := make([]uint32, 0, len(unresolved))
@@ -616,6 +604,83 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 			applog.Infof("[email] mark %d handled messages seen failed: %v", len(acknowledgementIDs), err)
 		}
 	}
+}
+
+func (s *EmailService) filterEmailReceiptCandidates(ctx context.Context, mailboxAddress string, uidValidity uint32, metadata []emailMessageMetadata) (map[uint32]struct{}, []emailMessageCandidate) {
+	acknowledgementSet := make(map[uint32]struct{}, len(metadata))
+	metadataCandidates := make([]emailMessageCandidate, 0, len(metadata))
+	stableKeys := make([]string, 0, len(metadata))
+	seenStableKeys := make(map[string]struct{}, len(metadata))
+	for _, meta := range metadata {
+		messageKey, stable := emailInboundMessageKey(EmailInboundMessage{MessageID: meta.MessageID}, uidValidity, meta.UID)
+		metadataCandidates = append(metadataCandidates, emailMessageCandidate{ID: meta.ID, MessageKey: messageKey})
+		if stable {
+			if _, seen := seenStableKeys[messageKey]; !seen {
+				seenStableKeys[messageKey] = struct{}{}
+				stableKeys = append(stableKeys, messageKey)
+			}
+		}
+	}
+
+	var receivedKeys map[string]struct{}
+	failedReceiptKeys := make(map[string]struct{})
+	if s.emailInboundReceiptStore != nil && len(stableKeys) > 0 {
+		receivedKeys, failedReceiptKeys = s.emailInboundReceiptPresence(ctx, mailboxAddress, stableKeys)
+	}
+	unresolved := make([]emailMessageCandidate, 0, len(metadataCandidates))
+	for _, candidate := range metadataCandidates {
+		if candidate.MessageKey != "" {
+			if _, failed := failedReceiptKeys[candidate.MessageKey]; failed {
+				continue
+			}
+			if _, received := receivedKeys[candidate.MessageKey]; received {
+				acknowledgementSet[candidate.ID] = struct{}{}
+				continue
+			}
+		}
+		unresolved = append(unresolved, candidate)
+	}
+	return acknowledgementSet, unresolved
+}
+
+func (s *EmailService) emailInboundReceiptPresence(ctx context.Context, mailboxAddress string, messageKeys []string) (map[string]struct{}, map[string]struct{}) {
+	receivedKeys := make(map[string]struct{}, len(messageKeys))
+	failedKeys := make(map[string]struct{})
+	if len(messageKeys) == 1 {
+		received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxAddress, messageKeys[0])
+		if err != nil {
+			applog.Infof("[email] check receipt for message key %q failed: %v", messageKeys[0], err)
+			failedKeys[messageKeys[0]] = struct{}{}
+			return receivedKeys, failedKeys
+		}
+		if received {
+			receivedKeys[messageKeys[0]] = struct{}{}
+		}
+		return receivedKeys, failedKeys
+	}
+	if batchStore, ok := s.emailInboundReceiptStore.(emailInboundReceiptBatchStore); ok {
+		keys, err := batchStore.ExistsBatch(ctx, mailboxAddress, messageKeys)
+		if err != nil {
+			applog.Infof("[email] check receipt batch failed: %v", err)
+			for _, messageKey := range messageKeys {
+				failedKeys[messageKey] = struct{}{}
+			}
+			return receivedKeys, failedKeys
+		}
+		return keys, failedKeys
+	}
+	for _, messageKey := range messageKeys {
+		received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxAddress, messageKey)
+		if err != nil {
+			applog.Infof("[email] check receipt for message key %q failed: %v", messageKey, err)
+			failedKeys[messageKey] = struct{}{}
+			continue
+		}
+		if received {
+			receivedKeys[messageKey] = struct{}{}
+		}
+	}
+	return receivedKeys, failedKeys
 }
 
 func emailMailboxIdentity(cfg EmailRuntimeConfig) string {
