@@ -215,7 +215,6 @@ func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t
 	}
 }
 
-
 func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
@@ -361,7 +360,6 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 		}
 	}
 }
-
 
 func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
