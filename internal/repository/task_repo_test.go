@@ -46,6 +46,10 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 		}
 		currentID = task.ID
 	}
+	chatTask := &models.Task{ProjectID: "default", Title: "Selector task internal chat", Category: models.CategoryChat, Priority: 2, Status: models.StatusPending}
+	if err := tasks.Create(ctx, chatTask); err != nil {
+		t.Fatal(err)
+	}
 	foreign := &models.Task{ProjectID: foreignProject.ID, Title: "Selector task foreign secret", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
 	if err := tasks.Create(ctx, foreign); err != nil {
 		t.Fatal(err)
@@ -67,8 +71,8 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 		t.Fatalf("got %d items, want bounded 20", len(items))
 	}
 	for _, item := range items {
-		if item.ID == foreign.ID || strings.Contains(item.Name, "foreign secret") {
-			t.Fatalf("foreign task leaked: %#v", item)
+		if item.ID == foreign.ID || item.ID == chatTask.ID || strings.Contains(item.Name, "foreign secret") || strings.Contains(item.Name, "internal chat") {
+			t.Fatalf("ineligible task leaked: %#v", item)
 		}
 	}
 
@@ -86,6 +90,14 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 	}
 	if len(items) != 20 || items[0].ID != currentID {
 		t.Fatalf("unfiltered selector must retain current-first ordering, got %#v", items)
+	}
+
+	items, err = tasks.ListBreadcrumbSelector(ctx, "default", "", currentID, false, 21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 21 || items[0].ID != currentID {
+		t.Fatalf("selector boundary must return the requested look-ahead page with current first, got %#v", items)
 	}
 }
 
@@ -133,6 +145,172 @@ func TestTaskRepo_BreadcrumbSelectorScheduleScopeRequiresScheduleRow(t *testing.
 	}
 	if len(items) != 0 {
 		t.Fatalf("nonmatching schedule search retained current task: %#v", items)
+	}
+}
+
+func TestTaskRepo_BreadcrumbSelectorRelevanceAndTieBreakers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewTaskRepo(db, nil)
+
+	current := &models.Task{ProjectID: "default", Title: "Please deploy current", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	exact := &models.Task{ProjectID: "default", Title: "deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	prefix := &models.Task{ProjectID: "default", Title: "deploy staging", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	contains := &models.Task{ProjectID: "default", Title: "can deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	for _, task := range []*models.Task{current, exact, prefix, contains} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create %q: %v", task.Title, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, task.ID); err != nil {
+			t.Fatalf("set timestamp for %q: %v", task.Title, err)
+		}
+	}
+
+	items, err := repo.ListBreadcrumbSelector(ctx, "default", "deploy", current.ID, false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector relevance: %v", err)
+	}
+	want := []string{current.ID, exact.ID, prefix.ID, contains.ID}
+	if len(items) != len(want) {
+		t.Fatalf("relevance result count = %d, want %d: %#v", len(items), len(want), items)
+	}
+	for i, wantID := range want {
+		if items[i].ID != wantID {
+			t.Fatalf("relevance item %d = %q, want %q; items=%#v", i, items[i].ID, wantID, items)
+		}
+	}
+
+	items, err = repo.ListBreadcrumbSelector(ctx, "default", "", "", false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector tie-breaker: %v", err)
+	}
+	gotIDs := make([]string, len(items))
+	for i, item := range items {
+		gotIDs[i] = item.ID
+	}
+	wantIDs := []string{current.ID, exact.ID, prefix.ID, contains.ID}
+	sort.Strings(wantIDs)
+	if !slices.Equal(gotIDs, wantIDs) {
+		t.Fatalf("empty-search tie-breaker order = %v, want %v", gotIDs, wantIDs)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = '2027-01-01 00:00:00' WHERE id = ?`, exact.ID); err != nil {
+		t.Fatalf("update indexed task: %v", err)
+	}
+	items, err = repo.ListBreadcrumbSelector(ctx, "default", "", "", false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector after update: %v", err)
+	}
+	if len(items) == 0 || items[0].ID != exact.ID {
+		t.Fatalf("updated task order = %#v, want updated task %q first", items, exact.ID)
+	}
+	if err := repo.Delete(ctx, exact.ID); err != nil {
+		t.Fatalf("delete indexed task: %v", err)
+	}
+	items, err = repo.ListBreadcrumbSelector(ctx, "default", "", "", false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector after delete: %v", err)
+	}
+	for _, item := range items {
+		if item.ID == exact.ID {
+			t.Fatalf("deleted task remained in selector results: %#v", items)
+		}
+	}
+}
+
+func TestTaskRepo_BreadcrumbSelectorRelevanceTieBreakersByBucket(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewTaskRepo(db, nil)
+
+	type fixture struct {
+		task      *models.Task
+		updatedAt string
+	}
+	fixtures := []fixture{
+		{task: &models.Task{ProjectID: "default", Title: "current deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2020-01-01 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2026-01-04 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "Deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2026-01-03 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "DEPLOY", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2026-01-03 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "deploy staging", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2026-01-02 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "Deploy production", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2026-01-01 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "DEPLOY canary", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2026-01-01 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "can deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2025-12-31 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "CAN deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2025-12-30 00:00:00"},
+		{task: &models.Task{ProjectID: "default", Title: "release deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}, updatedAt: "2025-12-30 00:00:00"},
+	}
+	for i := range fixtures {
+		if err := repo.Create(ctx, fixtures[i].task); err != nil {
+			t.Fatalf("create relevance fixture %d: %v", i, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id = ?`, fixtures[i].updatedAt, fixtures[i].task.ID); err != nil {
+			t.Fatalf("set relevance timestamp %d: %v", i, err)
+		}
+	}
+
+	sortIDs := func(tasks ...*models.Task) []string {
+		ids := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			ids = append(ids, task.ID)
+		}
+		sort.Strings(ids)
+		return ids
+	}
+	exactTie := sortIDs(fixtures[2].task, fixtures[3].task)
+	prefixTie := sortIDs(fixtures[5].task, fixtures[6].task)
+	containsTie := sortIDs(fixtures[8].task, fixtures[9].task)
+	want := append([]string{fixtures[0].task.ID, fixtures[1].task.ID}, exactTie...)
+	want = append(want, fixtures[4].task.ID)
+	want = append(want, prefixTie...)
+	want = append(want, fixtures[7].task.ID)
+	want = append(want, containsTie...)
+
+	items, err := repo.ListBreadcrumbSelector(ctx, "default", "deploy", fixtures[0].task.ID, false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector relevance tie breakers: %v", err)
+	}
+	got := make([]string, len(items))
+	for i, item := range items {
+		got[i] = item.ID
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("relevance order = %v, want current/exact/prefix/contains buckets with updated_at DESC, id ASC ties = %v", got, want)
+	}
+}
+
+func TestTaskRepo_BreadcrumbSelectorEmptySearchUsesDiscoveryOrderIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewTaskRepo(db, nil)
+
+	planRows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+breadcrumbSelectorRecencyQuery, "default", false, "missing-current", 20)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer planRows.Close()
+	var details []string
+	for planRows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := planRows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := planRows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	plan := strings.Join(details, "\n")
+	if !strings.Contains(plan, "idx_tasks_discovery_order") || strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("empty-search recency plan = %s, want discovery-order index without temporary sort", plan)
+	}
+
+	items, err := repo.ListBreadcrumbSelector(ctx, "default", "", "", false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector: %v", err)
+	}
+	if len(items) > 20 {
+		t.Fatalf("empty-search result count = %d, want at most 20", len(items))
 	}
 }
 
