@@ -32,10 +32,36 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	tc.CreateTask(project.ID).WithTitle("Completed task").WithCategory(models.CategoryCompleted).WithStatus(models.StatusCompleted).Build()
 	tc.CreateTask(project.ID).WithTitle("Chat queued").WithCategory(models.CategoryChat).WithStatus(models.StatusQueued).Build()
 	tc.CreateTask(project.ID).WithTitle("Scheduled queued").WithCategory(models.CategoryScheduled).WithStatus(models.StatusQueued).Build()
+	scheduledAutomationTask := &models.Task{
+		ProjectID: project.ID, Title: "Scheduled capacity queued", Prompt: "scheduled automation",
+		Category: models.CategoryScheduled, Status: models.StatusQueued,
+	}
+	require.NoError(t, tc.taskRepo.Create(context.Background(), scheduledAutomationTask))
+	scheduledRunAt := time.Now().UTC().Add(time.Hour)
+	scheduled := &models.Schedule{
+		TaskID: scheduledAutomationTask.ID, RunAt: scheduledRunAt, NextRun: &scheduledRunAt,
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true,
+	}
+	require.NoError(t, tc.scheduleRepo.Create(context.Background(), scheduled))
+	ctx := context.Background()
+	reservationStatements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO automations (id, project_id, stable_key, name) VALUES ('status-count-auto', ?, 'status-count-auto', 'Status count automation')`, []any{project.ID}},
+		{`INSERT INTO automation_versions (id, project_id, automation_id, version, adapter_key) VALUES ('status-count-version', ?, 'status-count-auto', 1, 'test')`, []any{project.ID}},
+		{`INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES ('status-count-node', ?, 'status-count-auto', 'status-count-version', 'trigger', 'Trigger', 'trigger', 'trigger')`, []any{project.ID}},
+		{`INSERT INTO automation_invocations (id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key) VALUES ('status-count-invocation', ?, 'status-count-auto', 'status-count-version', 'status-count-node', 'schedule', ?, 'status-count-occurrence')`, []any{project.ID, scheduled.ID}},
+		{`INSERT INTO automation_dispatch_outbox (id, invocation_id, task_id) VALUES ('status-count-dispatch', 'status-count-invocation', ?)`, []any{scheduledAutomationTask.ID}},
+		{`INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id) VALUES (?, 'status-count-dispatch', ?)`, []any{scheduledAutomationTask.ID, project.ID}},
+	}
+	for _, statement := range reservationStatements {
+		_, err := tc.db.ExecContext(ctx, statement.query, statement.args...)
+		require.NoError(t, err)
+	}
 	tc.CreateTask(project.ID).WithTitle("Active failed").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
 	tc.CreateTask(project.ID).WithTitle("Active cancelled").WithCategory(models.CategoryActive).WithStatus(models.StatusCancelled).Build()
 
-	ctx := context.Background()
 	parentID := "status-count-swarm-parent"
 	parent := &models.Task{
 		ID: parentID, ProjectID: project.ID, Title: "Swarm parent", Prompt: "parent",
@@ -57,7 +83,7 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	require.Equal(t, http.StatusOK, rec.Code)
 	var response TaskStatusCountsResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
-	require.Equal(t, TaskStatusCountsResponse{ActiveTasks: 3, QueuedTasks: 2}, response)
+	require.Equal(t, TaskStatusCountsResponse{ActiveTasks: 3, QueuedTasks: 3}, response)
 
 	emptyReq := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts?project_id="+empty.ID, nil)
 	emptyRec := httptest.NewRecorder()
