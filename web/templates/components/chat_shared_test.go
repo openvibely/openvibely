@@ -1957,6 +1957,7 @@ func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
 				"new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true })",
 				"if (!composerHasActiveTurn()) {",
 				"if (guard) guard.remove();",
+				"if (submittedMessage.trim() === '') return;",
 				"if (e.isComposing || e.keyCode === 229) return;",
 				"if (e.key === 'Enter' && !e.shiftKey)",
 				"if (shortcutModifierPressed(e)) {",

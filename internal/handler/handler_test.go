@@ -7717,12 +7717,91 @@ func TestHandler_GetTaskThread_LoadsAttachments(t *testing.T) {
 	assertContains(t, rec, "screenshot.png")
 }
 
-func TestHandler_TaskThreadSend_EmptyMessage(t *testing.T) {
-	_, e, _ := setupTestHandler(t)
+func TestHandler_TaskThreadSend_RejectsWhitespaceOnlyMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		message  string
+		status   models.TaskStatus
+		category models.TaskCategory
+	}{
+		{name: "idle", message: " \n\t ", status: models.StatusCompleted, category: models.CategoryCompleted},
+		{name: "active", message: "\n \r\n", status: models.StatusRunning, category: models.CategoryActive},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, llmConfigRepo := setupTestHandler(t)
+			ctx := context.Background()
+			agent := createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "Whitespace Follow-up Project")
+			task := createTask(t, h, project.ID, "Whitespace Follow-up Task", func(tk *models.Task) {
+				tk.Status = tt.status
+				tk.Category = tt.category
+				tk.AgentID = &agent.ID
+			})
+			var activeExecutionID string
+			if tt.name == "active" {
+				active := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+					ex.Status = models.ExecRunning
+					ex.PromptSent = "active task turn"
+				})
+				activeExecutionID = active.ID
+			}
+
+			beforeTask, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			beforeExecutions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+			require.NoError(t, err)
+			beforeInputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+			require.NoError(t, err)
+
+			form := url.Values{}
+			form.Set("message", tt.message)
+			rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+			assertCode(t, rec, http.StatusBadRequest)
+			assertContains(t, rec, "message is required")
+			assertNotContains(t, rec, "chat-bubble-assistant-msg")
+			assertNotContains(t, rec, "data-exec-id")
+
+			afterExecutions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, afterExecutions, len(beforeExecutions))
+			if activeExecutionID != "" {
+				require.Equal(t, activeExecutionID, afterExecutions[0].ID)
+			}
+			afterInputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, afterInputs, len(beforeInputs))
+			afterTask, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			assert.Equal(t, beforeTask.Status, afterTask.Status)
+			assert.Equal(t, beforeTask.Category, afterTask.Category)
+		})
+	}
+}
+
+func TestHandler_TaskThreadSend_TrimsPaddedMessage(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Padded Follow-up Project")
+	task := createTask(t, h, project.ID, "Padded Follow-up Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Category = models.CategoryCompleted
+		tk.AgentID = &agent.ID
+	})
+
 	form := url.Values{}
-	form.Set("message", "")
-	rec := postForm(e, "/tasks/fake-id/thread", form)
-	assertCode(t, rec, http.StatusBadRequest)
+	form.Set("message", "  padded follow-up \n")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "padded follow-up")
+	assertNotContains(t, rec, "  padded follow-up")
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, "padded follow-up", execs[0].PromptSent)
 }
 
 func TestHandler_TaskThreadSend_QueuesWhenModelAtCapacity(t *testing.T) {
