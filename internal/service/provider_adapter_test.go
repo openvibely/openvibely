@@ -301,13 +301,27 @@ func TestProviderContextCompactionFallback_CompactedRetryOverflowUsesLastResortO
 func TestProviderContextCompactionFallback_SummaryOverflowDropsOldestAndRetries(t *testing.T) {
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	var summaryPrompts []string
+	var summaryScope string
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		if req.Operation == llmcontracts.OperationDirect {
+			if !strings.HasPrefix(req.TransportScope, "compaction:") || llmcontracts.TransportScopeFromContext(req.Ctx) != req.TransportScope {
+				t.Fatalf("summary must have its own scoped transport: %q", req.TransportScope)
+			}
+			if summaryScope != "" && summaryScope != req.TransportScope {
+				t.Fatal("summary retry replaced the compaction session")
+			}
+			summaryScope = req.TransportScope
+			if !req.DisableTools || !req.Agent.DisableNativeCompaction {
+				t.Fatal("summary must disable tools and recursive compaction")
+			}
 			summaryPrompts = append(summaryPrompts, req.Message)
 			if len(summaryPrompts) == 1 {
 				return llmcontracts.AgentResult{}, fmt.Errorf("prompt is too long for context window")
 			}
 			return llmcontracts.AgentResult{Output: "summary"}, nil
+		}
+		if strings.HasPrefix(req.TransportScope, "compaction:") {
+			t.Fatal("summary session leaked into normal continuation")
 		}
 		if len(summaryPrompts) == 0 {
 			return llmcontracts.AgentResult{}, fmt.Errorf("context length exceeded")

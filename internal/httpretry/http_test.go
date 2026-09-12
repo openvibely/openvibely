@@ -300,6 +300,31 @@ func TestDoStreamDoesNotRetryRateLimitResponse(t *testing.T) {
 	}
 }
 
+func TestDoStreamTurnCustomRetryBudget(t *testing.T) {
+	attempts := 0
+	wantErr := errors.New("retryable stream failure")
+	_, err := DoStreamTurn(context.Background(), StreamTurnPolicy{
+		MaxRetries:     2,
+		RetryableError: func(error) bool { return true },
+		After: func(time.Duration) <-chan time.Time {
+			ready := make(chan time.Time, 1)
+			ready <- time.Now()
+			return ready
+		},
+		OnRetry: func(event RetryEvent) {
+			if event.MaxRetries != 2 {
+				t.Errorf("retry budget = %d, want 2", event.MaxRetries)
+			}
+		},
+	}, func(context.Context) (string, error) {
+		attempts++
+		return "", wantErr
+	})
+	if !errors.Is(err, wantErr) || attempts != 3 {
+		t.Fatalf("attempts = %d, error = %v; want initial attempt plus two retries", attempts, err)
+	}
+}
+
 func TestDoStreamTurnConnectionRetryCanBypassStreamBudget(t *testing.T) {
 	attempts := 0
 	var delays []time.Duration
