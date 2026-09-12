@@ -22,7 +22,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 		Form url.Values
 	}
 	var mu sync.Mutex
-	var records = make([]requestRecord, 0)
+	var records []requestRecord
 
 	renderForm := func(config ChatInputFormConfig) string {
 		var buf bytes.Buffer
