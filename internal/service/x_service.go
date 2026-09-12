@@ -258,9 +258,18 @@ func (s *XService) TestConnection(ctx context.Context) (XUser, error) {
 	return me, err
 }
 func (s *XService) SetPollInterval(d time.Duration) {
-	if d >= 15*time.Second {
-		s.pollInterval = d
+	if d < 15*time.Second {
+		return
 	}
+	s.mu.Lock()
+	s.pollInterval = d
+	s.mu.Unlock()
+}
+
+func (s *XService) PollInterval() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pollInterval
 }
 
 func (s *XService) recordPollResult(err error) {
@@ -288,7 +297,7 @@ func (s *XService) poll(ctx context.Context, done chan struct{}) {
 				applog.Infof("[x] mention polling failed: %v", err)
 			}
 		}
-		timer := time.NewTimer(s.pollInterval)
+		timer := time.NewTimer(s.PollInterval())
 		select {
 		case <-ctx.Done():
 			timer.Stop()

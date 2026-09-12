@@ -56,6 +56,7 @@ var (
 	newDatabaseConnections           = database.NewReadWrite
 	registerDedicatedWriter          = repository.RegisterDedicatedWriter
 	loadAutomationConfirmationSecret = service.LoadOrCreateAutomationConfirmationSecret
+	newXServiceWithDependencies      = service.NewXServiceWithDependencies
 )
 
 func migrateLegacyStorage(cfg *config.Config) error {
@@ -1132,7 +1133,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetXRepositories(xAuthRepo, xUserProjectRepo, xTaskContextRepo, xInboundReceiptRepo)
 	xSettingValues, _ := settingsRepo.GetMany(context.Background(), []string{service.XSettingConsumerKey, service.XSettingConsumerSecret, service.XSettingAccessToken, service.XSettingAccessTokenSecret, service.XSettingPollIntervalSeconds})
 	xCredentials := service.XCredentials{ConsumerKey: xSettingValues[service.XSettingConsumerKey], ConsumerSecret: xSettingValues[service.XSettingConsumerSecret], AccessToken: xSettingValues[service.XSettingAccessToken], AccessTokenSecret: xSettingValues[service.XSettingAccessTokenSecret]}
-	xSvc := service.NewXServiceWithDependencies(xCredentials, service.XServiceDependencies{
+	xSvc := newXServiceWithDependencies(xCredentials, service.XServiceDependencies{
 		SettingsRepo:             settingsRepo,
 		ProjectRepo:              projectRepo,
 		LLMConfigRepo:            llmConfigRepo,
