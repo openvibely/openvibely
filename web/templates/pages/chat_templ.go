@@ -572,7 +572,7 @@ func ChatModelInfo(info string) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(info)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1943, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1944, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
