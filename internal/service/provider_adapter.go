@@ -336,6 +336,7 @@ func (s *LLMService) callProviderWithContextCompactionFallback(adapter ProviderA
 	if contextCompactionFallbackDisabled(req.Ctx) {
 		return adapter.Call(req)
 	}
+	uncompactedReq := req
 	req = s.restoreCompactionCheckpoint(req)
 	lastResortBaseReq := req
 	locallyCompactedBeforeProvider := false
@@ -357,6 +358,10 @@ func (s *LLMService) callProviderWithContextCompactionFallback(adapter ProviderA
 		req.Agent.ForceNativeCompaction = true
 	}
 	if triggered && shouldUseLocalSummaryBeforeProvider(req) {
+		if req.NativeCompactionStateJSON != "" {
+			req.ChatHistory = uncompactedReq.ChatHistory
+			req.NativeCompactionStateJSON = ""
+		}
 		originalReq := req
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
 		if compactErr != nil {
@@ -373,6 +378,13 @@ func (s *LLMService) callProviderWithContextCompactionFallback(adapter ProviderA
 	if err == nil {
 		s.persistNativeCompactionCheckpoint(req, res)
 		return res, nil
+	}
+	// A text summarizer cannot decode native encrypted state. Recover the
+	// original transcript before switching strategies, including when the
+	// checkpoint consumed every prior execution.
+	if req.NativeCompactionStateJSON != "" {
+		req.ChatHistory = uncompactedReq.ChatHistory
+		req.NativeCompactionStateJSON = ""
 	}
 	if locallyCompactedBeforeProvider && recognizedContextLengthError(err) {
 		applog.Infof("[agent-svc] compacted provider retry still exceeded context; trying last-resort truncation: %v", err)
@@ -424,6 +436,13 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		return req
 	}
 	restored := req
+	if checkpoint.Strategy == "local_summary" {
+		// Retained prompts are synthetic context, not executions to hydrate.
+		// Also repair checkpoints written before IDs were stripped.
+		for i := range checkpoint.History {
+			checkpoint.History[i].ID = ""
+		}
+	}
 	restored.ChatHistory = mergeCheckpointHistory(req.ChatHistory, checkpoint.History, checkpoint.SourceExecutionID)
 	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
 	return restored
@@ -578,6 +597,8 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 		if err == nil {
 			compacted := req
 			compacted.ChatHistory = buildCompactedReplacementHistory(history, summary)
+			compacted.NativeCompactionStateJSON = ""
+			compacted.Ctx = llmcontracts.WithNativeCompactionStateJSON(compacted.Ctx, "")
 			return compacted, nil
 		}
 		if !recognizedContextLengthError(err) || len(history) == 1 {
@@ -590,7 +611,9 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 
 func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest, history []models.Execution) (string, error) {
 	summaryReq := req
+	summaryReq.NativeCompactionStateJSON = ""
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
+	summaryReq.Ctx = llmcontracts.WithNativeCompactionStateJSON(summaryReq.Ctx, "")
 	summaryReq.Operation = llmcontracts.OperationDirect
 	summaryReq.Message = buildLocalSummaryCompactionPrompt(history)
 	summaryReq.Attachments = nil
@@ -696,12 +719,12 @@ func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []m
 		}
 		tokens := estimatedUTF8Tokens(content)
 		if tokens <= remaining {
-			retained = append(retained, models.Execution{ID: history[i].ID, PromptSent: content, Status: models.ExecCompleted})
+			retained = append(retained, models.Execution{PromptSent: content, Status: models.ExecCompleted})
 			remaining -= tokens
 			continue
 		}
 		if remaining > 0 {
-			retained = append(retained, models.Execution{ID: history[i].ID, PromptSent: truncateMiddleByEstimatedTokens(content, remaining), Status: models.ExecCompleted})
+			retained = append(retained, models.Execution{PromptSent: truncateMiddleByEstimatedTokens(content, remaining), Status: models.ExecCompleted})
 		}
 		break
 	}

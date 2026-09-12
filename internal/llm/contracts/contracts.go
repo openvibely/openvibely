@@ -80,8 +80,8 @@ type transportScopeContextKey struct{}
 type nativeCompactionStateContextKey struct{}
 
 func WithNativeCompactionStateJSON(ctx context.Context, state string) context.Context {
-	if ctx == nil || state == "" {
-		return ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	return context.WithValue(ctx, nativeCompactionStateContextKey{}, state)
 }
