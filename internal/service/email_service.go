@@ -314,6 +314,7 @@ type EmailService struct {
 	uploadsDir                 string
 
 	mu                       sync.RWMutex
+	lifecycleMu              sync.Mutex
 	running                  bool
 	ctx                      context.Context
 	cancel                   context.CancelFunc
@@ -430,6 +431,12 @@ func (s *EmailService) IsRunning() bool {
 }
 
 func (s *EmailService) Start() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return s.startLocked()
+}
+
+func (s *EmailService) startLocked() error {
 	cfg, err := s.loadConfig(context.Background())
 	if err != nil || !cfg.Configured() {
 		return err
@@ -452,26 +459,37 @@ func (s *EmailService) Start() error {
 }
 
 func (s *EmailService) Stop() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.stopLocked()
+}
+
+func (s *EmailService) stopLocked() {
 	s.mu.Lock()
 	if !s.running {
 		s.mu.Unlock()
 		return
 	}
 	run := s.pollRun
-	s.running = false
-	s.ctx = nil
-	s.cancel = nil
 	s.mu.Unlock()
 
 	if run != nil {
 		run.stop()
 	}
+
+	s.mu.Lock()
+	s.running = false
+	s.ctx = nil
+	s.cancel = nil
+	s.mu.Unlock()
 	applog.Infof("[email] polling stopped")
 }
 
 func (s *EmailService) ReloadFromSettings(ctx context.Context) error {
-	s.Stop()
-	return s.Start()
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.stopLocked()
+	return s.startLocked()
 }
 
 func (s *EmailService) TestConnection(ctx context.Context) error {
