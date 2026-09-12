@@ -610,14 +610,18 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, state CardLis
 		id={ "alert-" + alert.ID }
 		data-alert-id={ alert.ID }
 		data-alert-scroll-anchor={ alert.ID }
-		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil) }
+		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil), templ.KV("focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset", alert.TaskID != nil) }
 		data-card-select-id={ alert.ID }
 		data-card-select-eligible="true"
 		data-search-card
 		data-search-text={ alertSearchText(alert) }
 		if alert.TaskID != nil {
+			role="link"
+			tabindex="0"
+			aria-label={ "Open task for alert " + alert.Title }
 			data-task-id={ *alert.TaskID }
 			onclick="openAlertTaskDialog(this.dataset.taskId)"
+			onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)"
 		}
 	>
 		<div class="card-body max-w-full min-w-0 p-4 sm:p-6">

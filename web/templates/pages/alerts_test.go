@@ -110,6 +110,50 @@ func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
 	}
 }
 
+func TestAlertsContent_TaskLinkedCardsAreKeyboardAccessible(t *testing.T) {
+	taskID := "task-direct"
+	sourceTaskID := "task-source"
+	alerts := []models.AlertSummary{
+		{ID: "alert-direct", ProjectID: "project-1", TaskID: &taskID, Title: "Build failed", Type: models.AlertTaskFailed},
+		{ID: "alert-source-only", ProjectID: "project-1", SourceTaskID: &sourceTaskID, Title: "Review requested", Type: models.AlertCustom},
+	}
+
+	var buf bytes.Buffer
+	if err := AlertsContent(alerts, "project-1", 1).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render alerts content: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`role="link"`,
+		`tabindex="0"`,
+		`aria-label="Open task for alert Build failed"`,
+		`data-task-id="task-direct"`,
+		`focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset`,
+		`onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)"`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("task-linked alert markup missing %q", required)
+		}
+	}
+
+	rowOpeningTag := func(id string) string {
+		marker := strings.Index(html, `id="`+id+`"`)
+		if marker < 0 {
+			t.Fatalf("alert row %q missing", id)
+		}
+		start := strings.LastIndex(html[:marker], "<div")
+		end := strings.IndexByte(html[marker:], '>')
+		if start < 0 || end < 0 {
+			t.Fatalf("alert row %q opening tag missing", id)
+		}
+		return html[start : marker+end+1]
+	}
+	if sourceRow := rowOpeningTag("alert-source-only"); strings.Contains(sourceRow, `role="link"`) || strings.Contains(sourceRow, `tabindex="0"`) || strings.Contains(sourceRow, `data-task-id=`) {
+		t.Fatalf("source-only alert gained a direct task navigation target: %s", sourceRow)
+	}
+}
+
 func TestAlertsContent_ListOmitsBodyAndMetadataAndLazyLoadsDetail(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
 	largeBody := strings.Repeat("Compiler diagnostics line with secret payload ", 200)

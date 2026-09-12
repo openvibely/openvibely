@@ -18,6 +18,161 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAlertsTaskLinkedCardsSupportNativeKeyboardNavigationInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projectID := "project-alerts-keyboard"
+	taskID := "task-alert-direct"
+	implementationTaskID := "task-alert-implementation"
+	sourceTaskID := "task-alert-source"
+	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
+	alerts := []models.AlertSummary{
+		{
+			ID: "alert-direct", ProjectID: projectID, TaskID: &taskID, SourceTaskID: &sourceTaskID,
+			ImplementationTaskID: &implementationTaskID, Type: models.AlertTaskNeedsFollowup, Severity: models.SeverityWarning,
+			Title: "Follow-up required", Message: "Review the task result", DecisionState: models.AlertDecisionPending,
+			ProcessingState: models.AlertProcessingUnclaimed, CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
+		{ID: "alert-source-only", ProjectID: projectID, SourceTaskID: &sourceTaskID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "Source-only notification", CreatedAt: createdAt, UpdatedAt: createdAt},
+	}
+	fullAlert := models.Alert{
+		ID: "alert-direct", ProjectID: projectID, TaskID: &taskID, SourceTaskID: &sourceTaskID,
+		Title: "Follow-up required", Body: "Inspect this body", Type: models.AlertTaskNeedsFollowup,
+		Severity: models.SeverityWarning, Source: "browser-test", DecisionState: models.AlertDecisionPending,
+		ProcessingState: models.AlertProcessingUnclaimed, CreatedAt: createdAt, UpdatedAt: createdAt,
+	}
+
+	var rendered bytes.Buffer
+	if err := Alerts(nil, projectID, alerts, 1).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render Alerts page: %v", err)
+	}
+	page := rendered.String()
+	for _, external := range []string{
+		"https://cdn.tailwindcss.com",
+		"https://unpkg.com/htmx.org@2.0.4",
+		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
+		"https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js",
+		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+		"wails://wails/runtime.js",
+	} {
+		page = strings.ReplaceAll(page, external, "/empty.js")
+	}
+	page = strings.Replace(page, "</head>", `<style>
+[data-alert-scroll-anchor] { display: block; width: 720px; min-height: 180px; margin: 16px; }
+[data-alert-scroll-anchor] > .card-body { min-height: 148px; padding: 16px; }
+</style></head>`, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/empty.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write([]byte(""))
+		case r.URL.Path == "/alerts":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+		case r.URL.Path == "/alerts/alert-direct/details":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if err := AlertDetail(fullAlert).Render(context.Background(), w); err != nil {
+				t.Errorf("render alert detail: %v", err)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runComposerFocusCDP(t, chrome, server.URL+"/alerts?project_id="+projectID, "alerts-task-keyboard", func(browser *composerFocusCDP) {
+		press := func(key, code, text string) {
+			params := map[string]any{"type": "keyDown", "key": key, "code": code}
+			if text != "" {
+				params["text"] = text
+				params["unmodifiedText"] = text
+			}
+			browser.call("Input.dispatchKeyEvent", params, nil)
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
+		}
+		pressRepeated := func(key, code, text string) {
+			params := map[string]any{"type": "keyDown", "key": key, "code": code, "autoRepeat": true}
+			if text != "" {
+				params["text"] = text
+				params["unmodifiedText"] = text
+			}
+			for i := 0; i < 3; i++ {
+				browser.call("Input.dispatchKeyEvent", params, nil)
+			}
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
+		}
+		cardSelector := `[data-alert-id="alert-direct"]`
+		taskURL := "/tasks/" + taskID + "?tab=history&from=alerts"
+		implementationURL := "/tasks/" + implementationTaskID + "?tab=history&from=alerts"
+		navigationCount := func(url string) string {
+			return browser.evaluate(fmt.Sprintf(`String(window.__alertNavigations.filter(function(value) { return value === %q; }).length)`, url))
+		}
+		tabToCard := func() {
+			browser.click(`input[data-card-search="alerts"]`)
+			for i := 0; i < 60; i++ {
+				press("Tab", "Tab", "")
+				if got := browser.evaluate(`document.activeElement && document.activeElement.matches('[data-alert-id="alert-direct"]') ? 'true' : 'false'`); got == "true" {
+					return
+				}
+			}
+			t.Fatalf("native Tab traversal did not reach the task-linked alert card; active element was %s", browser.evaluate(`document.activeElement && document.activeElement.outerHTML || ''`))
+		}
+
+		browser.waitFor("task-linked Alerts page", `document.readyState + ':' + Boolean(document.querySelector('[data-alert-id="alert-direct"]')) + ':' + Boolean(document.querySelector('[data-alert-id="alert-source-only"]'))`, "complete:true:true")
+		browser.evaluate(`window.htmx = {ajax: function() { return Promise.resolve(); }, process: function() {}}; window.__alertNavigations = []; window.openVibelyNavigate = function(url) { window.__alertNavigations.push(url); return Promise.resolve(); }; 'ready'`)
+		accessibility := browser.evaluate(fmt.Sprintf(`(function() { var direct = document.querySelector(%q), source = document.querySelector('[data-alert-id="alert-source-only"]'); return [direct.getAttribute('role'), direct.getAttribute('tabindex'), direct.getAttribute('aria-label'), direct.classList.contains('focus-visible:ring-2'), direct.classList.contains('focus-visible:ring-primary'), source.hasAttribute('role'), source.hasAttribute('tabindex')].join('|'); })()`, cardSelector))
+		if accessibility != "link|0|Open task for alert Follow-up required|true|true|false|false" {
+			t.Fatalf("unexpected Alerts card accessibility state: %s", accessibility)
+		}
+
+		browser.click(cardSelector + " .card-body")
+		browser.waitFor("native mouse task navigation", `window.__alertNavigations[window.__alertNavigations.length - 1] || ''`, taskURL)
+		tabToCard()
+		before := navigationCount(taskURL)
+		pressRepeated("Enter", "Enter", "")
+		if got := navigationCount(taskURL); got != before {
+			t.Fatalf("repeated Enter navigated task-linked alert card: count %s, want %s", got, before)
+		}
+		press("Enter", "Enter", "")
+		browser.waitFor("native Enter task navigation", `window.__alertNavigations[window.__alertNavigations.length - 1] || ''`, taskURL)
+		before = navigationCount(taskURL)
+		pressRepeated(" ", "Space", " ")
+		if got := navigationCount(taskURL); got != before {
+			t.Fatalf("repeated Space navigated task-linked alert card: count %s, want %s", got, before)
+		}
+		press(" ", "Space", "")
+		browser.waitFor("native Space task navigation", `window.__alertNavigations[window.__alertNavigations.length - 1] || ''`, taskURL)
+
+		nestedControls := []string{
+			cardSelector + " details summary",
+			cardSelector + " .btn-success",
+			cardSelector + " .btn-error.btn-outline",
+			cardSelector + ` button[title="Mark as read"]`,
+			cardSelector + " [data-alert-delete]",
+		}
+		for _, selector := range nestedControls {
+			before = navigationCount(taskURL)
+			browser.click(selector)
+			if got := navigationCount(taskURL); got != before {
+				t.Fatalf("nested control %s navigated parent task card: count %s, want %s", selector, got, before)
+			}
+		}
+		browser.waitFor("lazy alert detail", `document.querySelector(`+fmt.Sprintf("%q", cardSelector+" [data-alert-copy]")+") ? 'true' : 'false'", "true")
+		before = navigationCount(taskURL)
+		browser.click(cardSelector + " [data-alert-copy]")
+		if got := navigationCount(taskURL); got != before {
+			t.Fatalf("Copy body navigated parent task card: count %s, want %s", got, before)
+		}
+
+		before = navigationCount(taskURL)
+		browser.click(cardSelector + ` button[data-task-id="` + implementationTaskID + `"]`)
+		if got := navigationCount(taskURL); got != before {
+			t.Fatalf("View implementation task navigated parent task card: count %s, want %s", got, before)
+		}
+		browser.waitFor("implementation task navigation", `window.__alertNavigations[window.__alertNavigations.length - 1] || ''`, implementationURL)
+	})
+}
+
 func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
