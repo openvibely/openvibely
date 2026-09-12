@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -77,6 +78,72 @@ func setupXServiceTestWithDB(t testing.TB, db *sql.DB) (context.Context, *XServi
 	return ctx, svc, settings, auth, selections, p1, p2
 }
 
+func TestNewXServiceWithDependenciesWiresRepositoriesAndRuntime(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settings := repository.NewSettingsRepo(db)
+	projects := repository.NewProjectRepo(db)
+	configs := repository.NewLLMConfigRepo(db)
+	tasks := repository.NewTaskRepo(db, nil)
+	execs := repository.NewExecutionRepo(db)
+	schedules := repository.NewScheduleRepo(db)
+	taskSvc := (*TaskService)(nil)
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	contexts := repository.NewXTaskContextRepo(db)
+	receipts := repository.NewXInboundReceiptRepo(db)
+	inputs := repository.NewThreadInputRepo(db)
+	agents := repository.NewAgentRepo(db)
+	personalities := repository.NewCustomPersonalityRepo(db)
+	broadcaster := events.NewChatBroadcaster()
+	hub := events.NewExecutionStreamHub()
+	chatRan := false
+	taskRan := false
+	chatPromoted := false
+	taskPromoted := false
+	chatRunner := func(context.Context, ChannelChatRunRequest) { chatRan = true }
+	taskRunner := func(context.Context, ChannelTaskRunRequest) { taskRan = true }
+	chatPromoter := func(string) { chatPromoted = true }
+	taskPromoter := func(string) { taskPromoted = true }
+	router := NewChannelMessageRouter(nil, settings)
+
+	svc := NewXServiceWithDependencies(XCredentials{}, XServiceDependencies{
+		SettingsRepo: settings, ProjectRepo: projects, LLMConfigRepo: configs,
+		TaskRepo: tasks, ExecutionRepo: execs, ScheduleRepo: schedules, TaskService: taskSvc,
+		XAuthRepo: auth, XUserProjectRepo: selections, XTaskContextRepo: contexts,
+		XInboundReceiptRepo: receipts, ThreadInputRepo: inputs, AgentRepo: agents,
+		CustomPersonalityRepo: personalities, ChatBroadcaster: broadcaster,
+		ExecutionStreamHub: hub, ChannelChatRunner: chatRunner, ChannelTaskRunner: taskRunner,
+		QueuedTurnPromoter: chatPromoter, QueuedTaskThreadPromoter: taskPromoter,
+		ChannelMessageRouter: router,
+	})
+
+	require.Same(t, settings, svc.settingsRepo)
+	require.Same(t, projects, svc.projectRepo)
+	require.Same(t, configs, svc.llmConfigRepo)
+	require.Same(t, tasks, svc.taskRepo)
+	require.Same(t, execs, svc.execRepo)
+	require.Same(t, schedules, svc.scheduleRepo)
+	require.Same(t, taskSvc, svc.taskSvc)
+	require.Same(t, auth, svc.authRepo)
+	require.Same(t, selections, svc.userProjectRepo)
+	require.Same(t, contexts, svc.taskContextRepo)
+	require.Same(t, receipts, svc.receiptRepo)
+	require.Same(t, inputs, svc.threadInputRepo)
+	require.Same(t, agents, svc.agentRepo)
+	require.Same(t, personalities, svc.customPersonalityRepo)
+	require.Same(t, broadcaster, svc.chatBroadcaster)
+	require.Same(t, hub, svc.executionStreamHub)
+	require.Same(t, router, svc.channelMessageRouter)
+
+	svc.channelChatRunner(context.Background(), ChannelChatRunRequest{})
+	svc.channelTaskRunner(context.Background(), ChannelTaskRunRequest{})
+	svc.queuedTurnPromoter("chat")
+	svc.queuedTaskThreadPromoter("task")
+	require.True(t, chatRan)
+	require.True(t, taskRan)
+	require.True(t, chatPromoted)
+	require.True(t, taskPromoted)
+}
 func setupXBatchService(t testing.TB, db *sql.DB, counter *testutil.SQLStatementCounter, mentionsPerPage, pages int) (context.Context, *XService, *repository.SettingsRepo) {
 	ctx, svc, settings, auth, selections, project, _ := setupXServiceTestWithDB(t, db)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))

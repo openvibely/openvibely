@@ -18,6 +18,32 @@ var newXAPIClientForSettings = func(credentials service.XCredentials) service.XA
 	return service.NewXAPIClient(credentials)
 }
 
+func (h *Handler) newXService(credentials service.XCredentials) *service.XService {
+	return service.NewXServiceWithDependencies(credentials, service.XServiceDependencies{
+		SettingsRepo:             h.settingsRepo,
+		ProjectRepo:              h.projectRepo,
+		LLMConfigRepo:            h.llmConfigRepo,
+		TaskRepo:                 h.taskRepo,
+		ExecutionRepo:            h.execRepo,
+		ScheduleRepo:             h.scheduleRepo,
+		TaskService:              h.taskSvc,
+		XAuthRepo:                h.xAuthRepo,
+		XUserProjectRepo:         h.xUserProjectRepo,
+		XTaskContextRepo:         h.xTaskContextRepo,
+		XInboundReceiptRepo:      h.xInboundReceiptRepo,
+		ThreadInputRepo:          h.threadInputRepo,
+		AgentRepo:                h.agentRepo,
+		CustomPersonalityRepo:    h.customPersonalityRepo,
+		ChatBroadcaster:          h.chatBroadcaster,
+		ExecutionStreamHub:       h.executionStreamHub,
+		ChannelChatRunner:        h.StartChannelChatRun,
+		ChannelTaskRunner:        h.StartChannelTaskRun,
+		QueuedTurnPromoter:       h.PromoteQueuedChatInput,
+		QueuedTaskThreadPromoter: h.PromoteQueuedTaskThreadInput,
+		ChannelMessageRouter:     h.channelMessageRouter,
+	})
+}
+
 func (h *Handler) xCredentials(ctx context.Context, form echo.Context) (service.XCredentials, error) {
 	if h.settingsRepo == nil {
 		return service.XCredentials{}, fmt.Errorf("settings repository not configured")
@@ -70,10 +96,8 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "X poll interval must be between 15 and 300 seconds")
 	}
 	api := newXAPIClientForSettings(creds)
-	svc := service.NewXService(creds, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc := h.newXService(creds)
 	svc.SetAPI(api)
-	svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
-	svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	svc.SetPollInterval(time.Duration(pollSeconds) * time.Second)
 	me, baselineCursor, err := svc.PrepareConnection(ctx)
 	if err != nil {
