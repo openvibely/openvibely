@@ -139,6 +139,92 @@ func TestProjectRepo_ListRepoRootsUsesCompactUnorderedProjection(t *testing.T) {
 	}
 }
 
+func TestProjectRepo_ListRepoValidationProjectsUsesCompactUnorderedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{
+		Name:        "Validation project",
+		Description: strings.Repeat("description ", 1024),
+		RepoPath:    "/repos/validation",
+		RepoURL:     "https://example.test/" + strings.Repeat("url/", 256),
+	}
+	if err := repo.Create(ctx, project); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rows, err := repo.ListRepoValidationProjects(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListRepoValidationProjects: %v", err)
+	}
+	var found *ProjectRepoValidationProject
+	for i := range rows {
+		if rows[i].ID == project.ID {
+			found = &rows[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("project %q not returned from validation projection", project.ID)
+	}
+	if found.Name != project.Name || found.RepoPath != project.RepoPath || found.RepoURL != project.RepoURL {
+		t.Fatalf("validation row = %+v, want identity/repository fields from %+v", *found, *project)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %d, want 1: %v", len(statements), statements)
+	}
+	query := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	if query != "select id, name, repo_path, repo_url from projects" {
+		t.Fatalf("unexpected validation query: %s", statements[0])
+	}
+	if strings.Contains(query, "order by") {
+		t.Fatalf("validation query imposes display ordering: %s", statements[0])
+	}
+
+	planRows, err := db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statements[0])
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer planRows.Close()
+	var plan strings.Builder
+	for planRows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := planRows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		plan.WriteString(detail)
+		plan.WriteByte('\n')
+	}
+	if err := planRows.Err(); err != nil {
+		t.Fatalf("query plan rows: %v", err)
+	}
+	if strings.Contains(strings.ToUpper(plan.String()), "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("validation query uses temporary ORDER BY sort:\n%s", plan.String())
+	}
+
+	counter.Reset()
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	for i := range full {
+		if full[i].ID == project.ID {
+			if full[i].Description != project.Description || full[i].RepoURL != project.RepoURL || full[i].RepoPath != project.RepoPath {
+				t.Fatalf("full project row lost rich fields: %+v", full[i])
+			}
+			return
+		}
+	}
+	t.Fatalf("project %q not returned from full List", project.ID)
+}
+
 func TestProjectRepo_CreateAndGetByID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewProjectRepo(db)
