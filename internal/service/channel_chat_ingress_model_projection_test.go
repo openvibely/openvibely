@@ -214,6 +214,79 @@ func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t
 		})
 	}
 }
+
+func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+
+	failed := &models.Task{
+		ProjectID: "default",
+		Title:     "Active failed task",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusFailed,
+		Prompt:    "failed prompt",
+	}
+	cancelled := &models.Task{
+		ProjectID: "default",
+		Title:     "Active cancelled task",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusCancelled,
+		Prompt:    "cancelled prompt",
+	}
+	running := &models.Task{
+		ProjectID: "default",
+		Title:     "Active running task",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusRunning,
+		Prompt:    "running prompt",
+	}
+	for _, task := range []*models.Task{failed, cancelled, running} {
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", task.Title, err)
+		}
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	got, err := taskSvc.ListChatContextByProject(ctx, "default")
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListChatContextByProject: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("compact context tasks = %d, want 3", len(got))
+	}
+	byID := make(map[string]models.Task, len(got))
+	for _, task := range got {
+		byID[task.ID] = task
+	}
+	for _, task := range []*models.Task{failed, cancelled} {
+		if got := byID[task.ID].Category; got != models.CategoryBacklog {
+			t.Errorf("projected terminal task %q category = %q, want backlog", task.Title, got)
+		}
+		persisted, err := taskRepo.GetByID(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("reload terminal task %q: %v", task.Title, err)
+		}
+		if persisted.Category != models.CategoryBacklog {
+			t.Errorf("persisted terminal task %q category = %q, want backlog", task.Title, persisted.Category)
+		}
+	}
+	if got := byID[running.ID].Category; got != models.CategoryActive {
+		t.Errorf("projected running task category = %q, want active", got)
+	}
+	for _, statement := range counter.Statements() {
+		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(normalized, "select id, project_id, title, category, priority, status, prompt") {
+			t.Fatalf("compact normalization hydrated the full task projection: %s", statement)
+		}
+	}
+}
 func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)

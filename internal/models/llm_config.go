@@ -60,21 +60,25 @@ type LLMConfig struct {
 	OllamaBaseURL string `json:"ollama_base_url,omitempty"` // e.g. "http://localhost:11434"
 
 	// Provider-neutral endpoint fields used by OpenAI-compatible Chat Completions.
-	BaseURL               string `json:"base_url,omitempty"`
-	Transport             string `json:"transport,omitempty"`
-	PresetSlug            string `json:"preset_slug,omitempty"`
-	ModelsURL             string `json:"models_url,omitempty"`
-	AuthHeaderName        string `json:"auth_header_name,omitempty"`
-	AuthHeaderValuePrefix string `json:"auth_header_value_prefix,omitempty"`
-	ExtraHeadersJSON      string `json:"-"`
-	ExtraBodyJSON         string `json:"extra_body_json,omitempty"`
-	DefaultMaxTokens      int    `json:"default_max_tokens,omitempty"`
-	TokenExchangeFormat   string `json:"token_exchange_format,omitempty"`
-	TokenRefreshFormat    string `json:"token_refresh_format,omitempty"`
-	CustomAuthConfigJSON  string `json:"-"`
-	CustomAuthStateJSON   string `json:"-"`
-	OAuthConfigRevision   int64  `json:"-"`
-	MixtureConfigJSON     string `json:"mixture_config_json,omitempty"`
+	BaseURL                 string `json:"base_url,omitempty"`
+	Transport               string `json:"transport,omitempty"`
+	PresetSlug              string `json:"preset_slug,omitempty"`
+	ModelsURL               string `json:"models_url,omitempty"`
+	AuthHeaderName          string `json:"auth_header_name,omitempty"`
+	AuthHeaderValuePrefix   string `json:"auth_header_value_prefix,omitempty"`
+	ExtraHeadersJSON        string `json:"-"`
+	ExtraBodyJSON           string `json:"extra_body_json,omitempty"`
+	DefaultMaxTokens        int    `json:"default_max_tokens,omitempty"`
+	ContextWindow           int    `json:"context_window,omitempty"`
+	CompactionThreshold     int    `json:"compaction_threshold,omitempty"`
+	DisableNativeCompaction bool   `json:"-"`
+	ForceNativeCompaction   bool   `json:"-"`
+	TokenExchangeFormat     string `json:"token_exchange_format,omitempty"`
+	TokenRefreshFormat      string `json:"token_refresh_format,omitempty"`
+	CustomAuthConfigJSON    string `json:"-"`
+	CustomAuthStateJSON     string `json:"-"`
+	OAuthConfigRevision     int64  `json:"-"`
+	MixtureConfigJSON       string `json:"mixture_config_json,omitempty"`
 
 	// Bounded Models-page summary fields populated by the compact card query.
 	MixtureAggregatorID    string `json:"-"`

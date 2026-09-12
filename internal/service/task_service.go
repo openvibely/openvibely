@@ -122,7 +122,7 @@ func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID st
 	}
 	tasks := make([]models.Task, 0, len(rows))
 	for _, row := range rows {
-		tasks = append(tasks, models.Task{
+		task := models.Task{
 			ID:           row.ID,
 			Title:        row.Title,
 			Category:     row.Category,
@@ -133,7 +133,15 @@ func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID st
 			Tag:          row.Tag,
 			ParentTaskID: row.ParentTaskID,
 			ChainConfig:  row.ChainConfig,
-		})
+		}
+		moved, err := s.repo.NormalizeProjectedActiveTerminalTask(ctx, projectID, task.ID, task.Title, task.Category, task.Status)
+		if err != nil {
+			return nil, fmt.Errorf("normalizing chat context task %s: %w", task.ID, err)
+		}
+		if moved {
+			task.Category = models.CategoryBacklog
+		}
+		tasks = append(tasks, task)
 	}
 	return tasks, nil
 }

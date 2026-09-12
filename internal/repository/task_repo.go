@@ -228,6 +228,62 @@ func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID strin
 	return contextRows, nil
 }
 
+// NormalizeProjectedActiveTerminalTask moves a projected active terminal task
+// to the backlog without hydrating the full task record. It mirrors the
+// category-update side effects used by full task listings while keeping the
+// channel context path bounded to its compact projection.
+func (r *TaskRepo) NormalizeProjectedActiveTerminalTask(ctx context.Context, projectID, taskID, taskTitle string, category models.TaskCategory, status models.TaskStatus) (bool, error) {
+	if category != models.CategoryActive || (status != models.StatusFailed && status != models.StatusCancelled) {
+		return false, nil
+	}
+
+	moved := false
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var displayOrder int
+		if err := exec.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = ?`,
+			projectID, models.CategoryBacklog).Scan(&displayOrder); err != nil {
+			return fmt.Errorf("getting next display_order for terminal task: %w", err)
+		}
+
+		result, err := exec.ExecContext(ctx,
+			`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = NULL
+			 WHERE id = ? AND project_id = ? AND category = ? AND status IN (?, ?)`,
+			models.CategoryBacklog, displayOrder, taskID, projectID, models.CategoryActive, models.StatusFailed, models.StatusCancelled)
+		if err != nil {
+			return fmt.Errorf("updating terminal task category: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("checking terminal task category update: %w", err)
+		}
+		if changed == 0 {
+			return nil
+		}
+		moved = true
+
+		if _, err := exec.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now')
+			WHERE task_id = ? AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, taskID); err != nil {
+			return fmt.Errorf("cancelling reserved terminal task execution: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if moved && r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{
+			Type:        events.TaskCategoryChanged,
+			TaskID:      taskID,
+			TaskName:    taskTitle,
+			ProjectID:   projectID,
+			Category:    string(models.CategoryBacklog),
+			OldCategory: string(models.CategoryActive),
+		})
+	}
+	return moved, nil
+}
+
 // ListBreadcrumbSelector returns a bounded compact task-title search for one project.
 func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
 	if limit <= 0 || limit > 50 {

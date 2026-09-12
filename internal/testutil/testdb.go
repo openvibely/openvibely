@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -343,11 +344,48 @@ func NewStatementCountingTestDB(t testing.TB) (*sql.DB, *SQLStatementCounter) {
 	return db, counter
 }
 
+// NewFileBackedSplitStatementCountingTestDB creates a migrated file-backed
+// SQLite fixture with separate one-connection writer and query-only reader
+// handles, matching the production 1W + 1R topology. Both handles share
+// statement instrumentation for repository performance evidence.
+func NewFileBackedSplitStatementCountingTestDB(t testing.TB) (reader, writer *sql.DB, counter *SQLStatementCounter) {
+	t.Helper()
+
+	counter = &SQLStatementCounter{}
+	driverName := fmt.Sprintf("sqlite_file_split_statement_counter_%d", countingDriverID.Add(1))
+	sql.Register(driverName, &statementCountingDriver{inner: &sqlite.Driver{}, counter: counter})
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	initialized, err := database.New(dbPath)
+	if err != nil {
+		t.Fatalf("failed to initialize file-backed test database: %v", err)
+	}
+	if err := initialized.Close(); err != nil {
+		t.Fatalf("failed to close initialized file-backed test database: %v", err)
+	}
+	dsn := dbPath + "?_loc=UTC"
+	writer = openFileBackedWriter(t, driverName, dsn)
+	seedTestDefaultAgent(t, writer)
+	reader = openFileBackedReader(t, driverName, dsn)
+	t.Cleanup(func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close file-backed reader: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Errorf("close file-backed writer: %v", err)
+		}
+	})
+	return reader, writer, counter
+}
+
 // buildTestDB constructs a fresh isolated fixture and fails tb on error. It does
 // not register cleanup; callers own closing the returned database. NewTestDB
 // wraps it with a t.Cleanup close, while the benchmark closes each fixture
 // explicitly to measure per-iteration create/close cost accurately.
 func buildTestDB(tb testing.TB, driverName string) *sql.DB {
+	return buildTestDBWithDSN(tb, driverName, ":memory:?_loc=UTC", 1)
+}
+
+func buildTestDBWithDSN(tb testing.TB, driverName, dsn string, maxOpenConns int) *sql.DB {
 	tb.Helper()
 
 	schemaOnce.Do(initSchema)
@@ -356,7 +394,6 @@ func buildTestDB(tb testing.TB, driverName string) *sql.DB {
 	}
 
 	// Open a raw SQLite connection (no migrations).
-	dsn := ":memory:?_loc=UTC"
 	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		tb.Fatalf("failed to open test database: %v", err)
@@ -402,7 +439,59 @@ func buildTestDB(tb testing.TB, driverName string) *sql.DB {
 
 	seedTestDefaultAgent(tb, db)
 
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxOpenConns)
 	return db
+}
+
+func openFileBackedWriter(tb testing.TB, driverName, dsn string) *sql.DB {
+	tb.Helper()
+	writer, err := sql.Open(driverName, dsn)
+	if err != nil {
+		tb.Fatalf("failed to open file-backed writer: %v", err)
+	}
+	writer.SetMaxOpenConns(1)
+	writer.SetMaxIdleConns(1)
+	for _, pragma := range []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+	} {
+		if _, err := writer.Exec(pragma); err != nil {
+			writer.Close()
+			tb.Fatalf("failed to configure file-backed writer: %v", err)
+		}
+	}
+	if err := writer.Ping(); err != nil {
+		writer.Close()
+		tb.Fatalf("failed to ping file-backed writer: %v", err)
+	}
+	return writer
+}
+
+func openFileBackedReader(tb testing.TB, driverName, dsn string) *sql.DB {
+	tb.Helper()
+	reader, err := sql.Open(driverName, dsn)
+	if err != nil {
+		tb.Fatalf("failed to open file-backed reader: %v", err)
+	}
+	reader.SetMaxOpenConns(1)
+	reader.SetMaxIdleConns(1)
+	for _, pragma := range []string{
+		"PRAGMA foreign_keys=ON",
+		"PRAGMA busy_timeout=5000",
+		"PRAGMA query_only=ON",
+	} {
+		if _, err := reader.Exec(pragma); err != nil {
+			reader.Close()
+			tb.Fatalf("failed to configure file-backed reader: %v", err)
+		}
+	}
+	if err := reader.Ping(); err != nil {
+		reader.Close()
+		tb.Fatalf("failed to ping file-backed reader: %v", err)
+	}
+	return reader
 }
 
 func seedTestDefaultAgent(tb testing.TB, db *sql.DB) {
