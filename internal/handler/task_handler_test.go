@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -14,9 +15,35 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/stretchr/testify/require"
 )
 
-func TestHandler_CancelTask(t *testing.T) {
+func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Task Status Count Project").Build()
+	foreign := tc.CreateProject().WithName("Foreign Task Status Count Project").Build()
+
+	tc.CreateTask(project.ID).WithCategory(models.CategoryActive).WithStatus(models.StatusPending).Build()
+	tc.CreateTask(project.ID).WithCategory(models.CategoryActive).WithStatus(models.StatusRunning).Build()
+	tc.CreateTask(project.ID).WithCategory(models.CategoryActive).WithStatus(models.StatusQueued).Build()
+	tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).WithStatus(models.StatusQueued).Build()
+	tc.CreateTask(project.ID).WithCategory(models.CategoryCompleted).WithStatus(models.StatusCompleted).Build()
+	tc.CreateTask(foreign.ID).WithCategory(models.CategoryActive).WithStatus(models.StatusQueued).Build()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	require.NoError(t, tc.handler.GetTaskStatusCounts(tc.echo.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response TaskStatusCountsResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+	require.Equal(t, TaskStatusCountsResponse{ActiveTasks: 3, QueuedTasks: 2}, response)
+
+	badReq := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts", nil)
+	badRec := httptest.NewRecorder()
+	require.Error(t, tc.handler.GetTaskStatusCounts(tc.echo.NewContext(badReq, badRec)))
+	require.Equal(t, http.StatusBadRequest, badRec.Code)
+}
+
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 

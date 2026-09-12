@@ -754,7 +754,40 @@ func TestHandler_DeleteAlert(t *testing.T) {
 	})
 }
 
-func TestHandler_GetUnreadAlertCount(t *testing.T) {
+func TestHandler_GetPendingAlertCountIsProjectScoped(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Pending Count Project")
+	foreign := createProject(t, h, "Foreign Pending Count Project")
+
+	pending := &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: models.AlertCustom,
+		Severity: models.SeverityWarning, Title: "Pending", Body: "pending body", Source: "test",
+		DecisionState: models.AlertDecisionPending, ProcessingState: models.AlertProcessingUnclaimed}
+	require.NoError(t, h.alertSvc.Create(context.Background(), pending))
+	approved := &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: models.AlertCustom,
+		Severity: models.SeverityInfo, Title: "Approved", Body: "approved body", Source: "test",
+		DecisionState: models.AlertDecisionApproved, ProcessingState: models.AlertProcessingCompleted}
+	require.NoError(t, h.alertSvc.Create(context.Background(), approved))
+	foreignPending := &models.Alert{ProjectID: foreign.ID, Scope: models.AlertScopeProject, Type: models.AlertCustom,
+		Severity: models.SeverityWarning, Title: "Foreign pending", Body: "foreign body", Source: "test",
+		DecisionState: models.AlertDecisionPending, ProcessingState: models.AlertProcessingUnclaimed}
+	require.NoError(t, h.alertSvc.Create(context.Background(), foreignPending))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/alerts/pending-count?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.GetPendingAlertCount(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response struct {
+		Count int `json:"count"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, 1, response.Count)
+
+	badReq := httptest.NewRequest(http.MethodGet, "/api/alerts/pending-count", nil)
+	badRec := httptest.NewRecorder()
+	require.Error(t, h.GetPendingAlertCount(e.NewContext(badReq, badRec)))
+	require.Equal(t, http.StatusBadRequest, badRec.Code)
+}
+
 	t.Run("returns correct unread count", func(t *testing.T) {
 		h, e, _ := setupTestHandler(t)
 		project := createProject(t, h, "Test Project")

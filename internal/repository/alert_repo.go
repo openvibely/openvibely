@@ -404,6 +404,14 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 	return query, args
 }
 
+func (r *AlertRepo) CountPending(ctx context.Context, projectID string) (int, error) {
+	var count int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND decision_state = 'pending'`, projectID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("counting pending alerts: %w", err)
+	}
+	return count, nil
+}
+
 func (r *AlertRepo) CountUnread(ctx context.Context, projectID string) (int, error) {
 	var count int
 	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND is_read = 0`, projectID).Scan(&count); err != nil {
