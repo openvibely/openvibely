@@ -250,7 +250,9 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 				params["text"] = text
 				params["unmodifiedText"] = text
 			}
-			browser.call("Input.dispatchKeyEvent", params, nil)
+			for i := 0; i < 3; i++ {
+				browser.call("Input.dispatchKeyEvent", params, nil)
+			}
 			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
 		}
 		cardSelector := func(id string) string {
