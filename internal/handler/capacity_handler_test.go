@@ -198,6 +198,87 @@ func TestHandler_GetProjectCapacities(t *testing.T) {
 	assert.Equal(t, 2, *p2Resp.AvailableSlots)
 }
 
+func TestHandler_GetProjectCapacitiesUsesCompactProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+
+	maxWorkers := 2
+	project := &models.Project{
+		Name:        "Compact Capacity API",
+		Description: strings.Repeat("unused project description ", 16*1024/len("unused project description ")),
+		RepoPath:    "/private/workspaces/" + strings.Repeat("unused-repository-path/", 90),
+		RepoURL:     "https://github.example.test/" + strings.Repeat("unused-repository-url/", 90),
+		MaxWorkers:  &maxWorkers,
+	}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response []ProjectCapacityResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+
+	const compactQuery = "select id, name, max_workers from projects order by is_default desc, name asc"
+	const pendingCountQuery = "select project_id, count(*) from tasks where category = 'active' and status in ('pending', 'queued') group by project_id"
+	compactProjectQueries := 0
+	for _, statement := range counter.Statements() {
+		query := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		switch {
+		case query == compactQuery:
+			compactProjectQueries++
+		case strings.Contains(query, "from projects"):
+			t.Fatalf("capacity collection used a non-compact project query: %q", query)
+		case query != pendingCountQuery:
+			t.Fatalf("capacity collection used an unexpected query: %q", query)
+		}
+	}
+	assert.Equal(t, 1, compactProjectQueries)
+	assert.Len(t, counter.Statements(), 2, "capacity collection should list projects and count pending tasks once")
+
+	compactProjects, err := h.projectSvc.ListWorkerCapacityProjects(ctx)
+	require.NoError(t, err)
+	require.Len(t, response, len(compactProjects))
+	for i := range compactProjects {
+		assert.Equal(t, compactProjects[i].ID, response[i].ID)
+	}
+
+	var listed *ProjectCapacityResponse
+	for i := range response {
+		if response[i].ID == project.ID {
+			listed = &response[i]
+			break
+		}
+	}
+	require.NotNil(t, listed)
+	assert.Equal(t, project.Name, listed.Name)
+	assert.Equal(t, 1, listed.Running)
+	assert.Equal(t, 0, listed.QueueSize)
+	assert.NotNil(t, listed.MaxWorkers)
+	assert.Equal(t, 2, *listed.MaxWorkers)
+	assert.True(t, listed.HasCapacity)
+	require.NotNil(t, listed.AvailableSlots)
+	assert.Equal(t, 1, *listed.AvailableSlots)
+	assert.NotContains(t, rec.Body.String(), project.Description)
+	assert.NotContains(t, rec.Body.String(), project.RepoPath)
+	assert.NotContains(t, rec.Body.String(), project.RepoURL)
+
+	full, err := h.projectSvc.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, full)
+	assert.Equal(t, project.Description, full.Description)
+	assert.Equal(t, project.RepoPath, full.RepoPath)
+	assert.Equal(t, project.RepoURL, full.RepoURL)
+}
+
 func TestHandler_GetProjectCapacity(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
