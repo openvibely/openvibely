@@ -2485,6 +2485,29 @@ func (h *Handler) ExecuteBacklogTasks(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
 
+// TaskStatusCountsResponse is the compact machine-facing task projection used
+// by terminal status. Full task board responses remain HTML and unchanged.
+type TaskStatusCountsResponse struct {
+	ActiveTasks int `json:"active_tasks"`
+	QueuedTasks int `json:"queued_tasks"`
+}
+
+func (h *Handler) GetTaskStatusCounts(c echo.Context) error {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+	counts, err := h.taskRepo.CountProjectStatus(c.Request().Context(), projectID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskStatusCounts project=%s error: %v", projectID, err)
+		return err
+	}
+	return c.JSON(http.StatusOK, TaskStatusCountsResponse{
+		ActiveTasks: counts.ActiveTasks,
+		QueuedTasks: counts.QueuedTasks,
+	})
+}
+
 func (h *Handler) CountBacklogByPriority(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	applog.Infof("[handler] CountBacklogByPriority project=%s", projectID)

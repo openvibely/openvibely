@@ -775,6 +775,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/tasks/backlog", h.DeleteAllBacklogTasks)
 	e.POST("/tasks/backlog/execute", h.ExecuteBacklogTasks)
 	e.GET("/tasks/backlog/priority-counts", h.CountBacklogByPriority)
+	e.GET("/api/tasks/status-counts", h.GetTaskStatusCounts)
 	e.POST("/tasks/backlog/sort", h.SetBacklogSort)
 	e.POST("/tasks/completed/sort", h.SetCompletedSort)
 	e.PATCH("/tasks/batch-category", h.BatchUpdateTaskCategory)
@@ -1047,6 +1048,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/alerts/:id", h.DeleteAlert)
 	e.DELETE("/alerts", h.DeleteAllAlerts)
 	e.GET("/alerts/unread-count", h.GetUnreadAlertCount)
+	e.GET("/api/alerts/pending-count", h.GetPendingAlertCount)
 
 	// Proactive Insights (individual endpoints still work)
 	e.GET("/insights", h.ProactiveInsights)

@@ -15,6 +15,13 @@ import (
 
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
+// ProjectTaskStatusCounts contains only the task predicates needed by the
+// terminal status view. It intentionally does not hydrate task cards.
+type ProjectTaskStatusCounts struct {
+	ActiveTasks int
+	QueuedTasks int
+}
+
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
 // activeTaskAdmissionSelectColumns contains only the task fields needed by the
@@ -1975,6 +1982,37 @@ func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, p
 		results = append(results, tws)
 	}
 	return results, rows.Err()
+}
+
+// CountProjectStatus returns the active-category and queued-status counts for a
+// project in one grouped query. Unlike board listing, it does not select or
+// order task-card fields.
+func (r *TaskRepo) CountProjectStatus(ctx context.Context, projectID string) (ProjectTaskStatusCounts, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT category, status, COUNT(*) FROM tasks WHERE project_id = ? GROUP BY category, status`, projectID)
+	if err != nil {
+		return ProjectTaskStatusCounts{}, fmt.Errorf("counting project task status: %w", err)
+	}
+	defer rows.Close()
+
+	var counts ProjectTaskStatusCounts
+	for rows.Next() {
+		var category, status string
+		var count int
+		if err := rows.Scan(&category, &status, &count); err != nil {
+			return ProjectTaskStatusCounts{}, fmt.Errorf("scanning project task status count: %w", err)
+		}
+		if category == string(models.CategoryActive) {
+			counts.ActiveTasks += count
+		}
+		if status == string(models.StatusQueued) {
+			counts.QueuedTasks += count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return ProjectTaskStatusCounts{}, fmt.Errorf("reading project task status counts: %w", err)
+	}
+	return counts, nil
 }
 
 func (r *TaskRepo) CountByProjectAndCategory(ctx context.Context, projectID string) (map[string]int, error) {

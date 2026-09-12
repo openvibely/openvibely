@@ -197,6 +197,10 @@ func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, proj
 	return nil
 }
 
+func (s *AlertService) CountPending(ctx context.Context, projectID string) (int, error) {
+	return s.alertRepo.CountPending(ctx, projectID)
+}
+
 func (s *AlertService) CountUnread(ctx context.Context, projectID string) (int, error) {
 	return s.alertRepo.CountUnread(ctx, projectID)
 }

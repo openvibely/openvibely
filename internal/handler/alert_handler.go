@@ -308,6 +308,21 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/alerts")
 }
 
+// GetPendingAlertCount returns the compact project-scoped count used by
+// machine clients. It deliberately does not render alert cards.
+func (h *Handler) GetPendingAlertCount(c echo.Context) error {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+	count, err := h.alertSvc.CountPending(c.Request().Context(), projectID)
+	if err != nil {
+		applog.Infof("[handler] GetPendingAlertCount project=%s error: %v", projectID, err)
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]int{"count": count})
+}
+
 func (h *Handler) GetUnreadAlertCount(c echo.Context) error {
 	ctx := c.Request().Context()
 
