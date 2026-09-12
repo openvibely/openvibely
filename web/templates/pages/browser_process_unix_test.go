@@ -5,6 +5,7 @@ package pages
 import (
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 func startBrowserProcess(cmd *exec.Cmd) error {
@@ -16,9 +17,22 @@ func stopBrowserProcess(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
-	// Chrome uses child processes that can continue writing to the profile after
-	// the browser process exits. Kill the isolated process group before TempDir
-	// cleanup so those writes cannot race RemoveAll.
-	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	_ = cmd.Wait()
+
+	processGroup := -cmd.Process.Pid
+	waited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(waited)
+	}()
+
+	_ = syscall.Kill(processGroup, syscall.SIGTERM)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(processGroup, 0); err != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_ = syscall.Kill(processGroup, syscall.SIGKILL)
+	<-waited
 }
