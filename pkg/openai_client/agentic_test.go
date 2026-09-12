@@ -1866,6 +1866,96 @@ func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_ForceCompactionBeforeTurnUsesNativeCompaction(t *testing.T) {
+	requests := 0
+	var compactionCallback string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		switch requests {
+		case 1:
+			if !strings.HasSuffix(r.URL.Path, "/responses/compact") {
+				t.Fatalf("request 1 path = %q, want forced /responses/compact", r.URL.Path)
+			}
+			input := body["input"].([]any)
+			if len(input) != 2 {
+				t.Fatalf("forced compaction input len = %d, want prior history only", len(input))
+			}
+			for _, raw := range input {
+				item := raw.(map[string]any)
+				if strings.Contains(fmt.Sprint(item["content"]), "current task with large attachment") {
+					t.Fatalf("forced pre-turn compaction must not compact pending prompt: %#v", input)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"output":[{"type":"message","role":"user","content":"short history"},{"type":"compaction","encrypted_content":"forced summary"}]}`))
+		case 2:
+			if !strings.HasSuffix(r.URL.Path, "/responses") {
+				t.Fatalf("request 2 path = %q, want /responses", r.URL.Path)
+			}
+			input := body["input"].([]any)
+			foundCompaction := false
+			for _, raw := range input {
+				item, ok := raw.(map[string]any)
+				if ok && item["type"] == "compaction" {
+					foundCompaction = true
+				}
+			}
+			if !foundCompaction {
+				t.Fatalf("turn request missing forced compaction item: %#v", input)
+			}
+			currentMsg := input[len(input)-1].(map[string]any)
+			if got := currentMsg["content"].(string); got != "current task with large attachment" {
+				t.Fatalf("current prompt = %q, want unmodified pending prompt", got)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_final\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":8,\"output_tokens\":2}}}\n\n",
+			))
+		default:
+			t.Fatalf("unexpected request %d", requests)
+		}
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	client.History = []Message{
+		{Role: "user", Content: "short history"},
+		{Role: "assistant", Content: "short answer"},
+	}
+
+	resp, err := client.SendAgentic(context.Background(), "current task with large attachment", &AgenticOptions{
+		Model:                     "gpt-5.3-codex",
+		DisableTools:              true,
+		AutoCompaction:            true,
+		CompactionTokenThreshold:  10000,
+		ForceCompactionBeforeTurn: true,
+		OnCompaction: func(summary string) {
+			compactionCallback = summary
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if !resp.Compacted || compactionCallback != "forced summary" {
+		t.Fatalf("compaction result compacted=%v callback=%q", resp.Compacted, compactionCallback)
+	}
+}
+
 func TestSendAgentic_AutoCompactionUsesDedicatedCompactionPrompt(t *testing.T) {
 	requests := 0
 	systemPrompt := "SYSTEM: use managed memory and selected project skills"

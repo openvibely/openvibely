@@ -351,6 +351,10 @@ func (s *LLMService) callProviderWithContextCompactionFallback(adapter ProviderA
 		req.DisableNativeCompaction = true
 		req.Agent.DisableNativeCompaction = true
 	}
+	if triggered && providerHasNativeCompaction(req.Agent.Provider) && !req.DisableNativeCompaction && !req.Agent.DisableNativeCompaction {
+		req.ForceNativeCompaction = true
+		req.Agent.ForceNativeCompaction = true
+	}
 	if triggered && shouldUseLocalSummaryBeforeProvider(req) {
 		originalReq := req
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
@@ -567,8 +571,10 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.RawDirectPrompt = true
 	summaryReq.Followup = false
 	summaryReq.DisableNativeCompaction = true
+	summaryReq.ForceNativeCompaction = false
 	summaryReq.NativeCompactionTokenThreshold = 0
 	summaryReq.Agent.DisableNativeCompaction = true
+	summaryReq.Agent.ForceNativeCompaction = false
 	summaryReq.Agent.CompactionThreshold = 0
 	res, err := adapter.Call(summaryReq)
 	if err != nil {

@@ -45,6 +45,11 @@ type AgentRequest struct {
 	// DisableNativeCompaction lets the service avoid retrying a known-unsupported
 	// native endpoint/feature in the same process session.
 	DisableNativeCompaction bool
+	// ForceNativeCompaction asks native-capable providers to compact before the
+	// request even if their provider-local preflight estimate has not crossed its
+	// threshold. The service sets this when the full normalized model-visible
+	// request estimate crosses the provider-aware trigger.
+	ForceNativeCompaction bool
 }
 
 type lifecycleHookCallContextKey struct{}
