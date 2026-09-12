@@ -121,6 +121,29 @@ func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID st
 	if err != nil {
 		return nil, err
 	}
+	if !chatContextRowsNeedTerminalNormalization(rows) {
+		return chatContextTasksFromRows(rows), nil
+	}
+	if _, err := s.repo.NormalizeProjectedActiveTerminalTasks(ctx, projectID); err != nil {
+		return nil, fmt.Errorf("normalizing chat context terminal tasks: %w", err)
+	}
+	rows, err = s.repo.ListChatContextByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return chatContextTasksFromRows(rows), nil
+}
+
+func chatContextRowsNeedTerminalNormalization(rows []repository.ChatTaskContextRow) bool {
+	for _, row := range rows {
+		if row.Category == models.CategoryActive && (row.Status == models.StatusFailed || row.Status == models.StatusCancelled) {
+			return true
+		}
+	}
+	return false
+}
+
+func chatContextTasksFromRows(rows []repository.ChatTaskContextRow) []models.Task {
 	tasks := make([]models.Task, 0, len(rows))
 	for _, row := range rows {
 		tasks = append(tasks, models.Task{
@@ -136,7 +159,7 @@ func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID st
 			ChainConfig:  row.ChainConfig,
 		})
 	}
-	return tasks, nil
+	return tasks
 }
 
 func (s *TaskService) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {

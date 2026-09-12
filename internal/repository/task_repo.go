@@ -192,6 +192,15 @@ type ChatTaskContextRow struct {
 	ChainConfig   string
 }
 
+// ProjectedTaskCategoryChange describes one compact task row moved by a
+// project-scoped normalization update.
+type ProjectedTaskCategoryChange struct {
+	ID          string
+	Title       string
+	OldCategory models.TaskCategory
+	Category    models.TaskCategory
+}
+
 func NewTaskRepo(db *sql.DB, broadcaster *events.Broadcaster) *TaskRepo {
 	return &TaskRepo{
 		db:          db,
@@ -228,6 +237,83 @@ func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID strin
 	return contextRows, nil
 }
 
+	// NormalizeProjectedActiveTerminalTasks moves all projected active terminal
+	// tasks in one project-scoped transaction without hydrating full task rows. The
+	// row_number allocation preserves the order used by the full project listing.
+func (r *TaskRepo) NormalizeProjectedActiveTerminalTasks(ctx context.Context, projectID string) ([]ProjectedTaskCategoryChange, error) {
+	changes := make([]ProjectedTaskCategoryChange, 0)
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		rows, err := exec.QueryContext(ctx, `WITH candidates AS (
+				SELECT id, ROW_NUMBER() OVER (ORDER BY display_order ASC, created_at ASC) - 1 AS backlog_offset
+				FROM tasks
+				WHERE project_id = ? AND category = ? AND status IN (?, ?)
+			), backlog_tail AS (
+				SELECT COALESCE(MAX(display_order), -1) AS tail
+				FROM tasks
+				WHERE project_id = ? AND category = ?
+			)
+			UPDATE tasks
+			SET category = ?,
+				display_order = (SELECT backlog_tail.tail + candidates.backlog_offset + 1
+					FROM candidates, backlog_tail WHERE candidates.id = tasks.id),
+				updated_at = datetime('now'),
+				completed_at = NULL
+			WHERE id IN (SELECT id FROM candidates)
+			RETURNING id, title`,
+			projectID, models.CategoryActive, models.StatusFailed, models.StatusCancelled,
+			projectID, models.CategoryBacklog, models.CategoryBacklog)
+		if err != nil {
+			return fmt.Errorf("updating projected terminal task categories: %w", err)
+		}
+		for rows.Next() {
+			var change ProjectedTaskCategoryChange
+			if err := rows.Scan(&change.ID, &change.Title); err != nil {
+				rows.Close()
+				return fmt.Errorf("scanning projected terminal task category: %w", err)
+			}
+			change.OldCategory = models.CategoryActive
+			change.Category = models.CategoryBacklog
+			changes = append(changes, change)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("iterating projected terminal task categories: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("closing projected terminal task categories: %w", err)
+		}
+		if len(changes) == 0 {
+			return nil
+		}
+
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(changes)), ",")
+		args := make([]interface{}, 0, len(changes))
+		for _, change := range changes {
+			args = append(args, change.ID)
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE executions SET status = 'cancelled', error_message = 'Task left the reserved running lane', completed_at = datetime('now')
+			WHERE task_id IN (`+placeholders+`) AND status = 'queued' AND is_followup = 0 AND dispatch_id IS NULL`, args...); err != nil {
+			return fmt.Errorf("cancelling reserved projected terminal task executions: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if r.broadcaster != nil {
+		for _, change := range changes {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type:        events.TaskCategoryChanged,
+				TaskID:      change.ID,
+				TaskName:    change.Title,
+				ProjectID:   projectID,
+				Category:    string(change.Category),
+				OldCategory: string(change.OldCategory),
+			})
+		}
+	}
+	return changes, nil
+}
 // ListBreadcrumbSelector returns a bounded compact task-title search for one project.
 func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
 	if limit <= 0 || limit > 50 {
