@@ -61,7 +61,7 @@ func TestBuildChannelChatContextUsesCompactTaskProjection(t *testing.T) {
 	}
 	var taskStatement string
 	for _, statement := range statements {
-		if strings.Contains(strings.ToLower(statement), "substr(prompt") {
+		if strings.Contains(strings.ToLower(statement), "substr(t.prompt") {
 			taskStatement = strings.ToLower(statement)
 			break
 		}
@@ -165,6 +165,53 @@ func TestChannelChatContextCompactTaskProjectionMatchesFullContext(t *testing.T)
 	}
 }
 
+func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+
+	cases := []struct {
+		name        string
+		chainConfig string
+	}{
+		{name: "null scalar fields", chainConfig: `{"enabled":true,"trigger":null,"child_title":null}`},
+		{name: "case insensitive keys", chainConfig: `{"ENABLED":true,"TRIGGER":"on_completion","CHILD_TITLE":"Case child"}`},
+		{name: "wrong known scalar type", chainConfig: `{"enabled":true,"child_model":123}`},
+		{name: "wrong nested scalar type", chainConfig: `{"enabled":true,"child_chain_config":{"child_model":123}}`},
+		{name: "null nested chain", chainConfig: `{"enabled":true,"child_chain_config":null}`},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &models.Task{
+				ProjectID:    "default",
+				Title:        tc.name,
+				Category:     models.CategoryBacklog,
+				Priority:     2,
+				Status:       models.StatusPending,
+				Prompt:       "edge-case prompt",
+				ChainConfig:  tc.chainConfig,
+				DisplayOrder: i,
+			}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("create edge-case task: %v", err)
+			}
+			fullTasks, err := taskRepo.ListByProject(ctx, "default", "")
+			if err != nil {
+				t.Fatalf("list full edge-case tasks: %v", err)
+			}
+			compactTasks, err := taskSvc.ListChatContextByProject(ctx, "default")
+			if err != nil {
+				t.Fatalf("list compact edge-case tasks: %v", err)
+			}
+			want := BuildChatContextWithAgentDefinitions(fullTasks, nil, nil, nil, time.Unix(0, 0))
+			got := BuildChatContextWithAgentDefinitions(compactTasks, nil, nil, nil, time.Unix(0, 0))
+			if got != want {
+				t.Fatalf("compact chain context changed model-facing bytes\nwant:\n%s\ngot:\n%s", want, got)
+			}
+		})
+	}
+}
 func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
