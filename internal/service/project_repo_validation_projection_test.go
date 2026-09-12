@@ -16,7 +16,10 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-const validationProjectionSamples = 7
+const (
+	validationProjectionSamples    = 7
+	validationProjectionIterations = 3
+)
 
 type validationProjectionFixture struct {
 	reader      *sql.DB
@@ -235,19 +238,21 @@ func (fixture *validationProjectionFixture) measureProjectLoad(tb testing.TB, co
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	startedAt := time.Now()
-	if compact {
-		if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
-			tb.Fatalf("compact project load: %v", err)
+	for range validationProjectionIterations {
+		if compact {
+			if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
+				tb.Fatalf("compact project load: %v", err)
+			}
+		} else if _, err := fixture.projectRepo.List(context.Background()); err != nil {
+			tb.Fatalf("full project load: %v", err)
 		}
-	} else if _, err := fixture.projectRepo.List(context.Background()); err != nil {
-		tb.Fatalf("full project load: %v", err)
 	}
 	elapsed := time.Since(startedAt)
 	runtime.ReadMemStats(&after)
 	return validationProjectionMeasurement{
-		latency:        elapsed,
-		allocatedBytes: after.TotalAlloc - before.TotalAlloc,
-		allocations:    after.Mallocs - before.Mallocs,
+		latency:        elapsed / validationProjectionIterations,
+		allocatedBytes: (after.TotalAlloc - before.TotalAlloc) / validationProjectionIterations,
+		allocations:    (after.Mallocs - before.Mallocs) / validationProjectionIterations,
 	}
 }
 
@@ -277,7 +282,13 @@ func (fixture *validationProjectionFixture) countProjectLoadStatements(tb testin
 	tb.Helper()
 	fixture.counter.Reset()
 	fixture.counter.SetEnabled(true)
-	fixture.measureProjectLoad(tb, compact)
+	if compact {
+		if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
+			tb.Fatalf("count compact project load: %v", err)
+		}
+	} else if _, err := fixture.projectRepo.List(context.Background()); err != nil {
+		tb.Fatalf("count full project load: %v", err)
+	}
 	fixture.counter.SetEnabled(false)
 	return len(fixture.counter.Statements())
 }
