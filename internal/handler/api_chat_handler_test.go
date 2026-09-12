@@ -1272,6 +1272,91 @@ func TestAPIChatMessage_ImmediateAttachmentMetadataFailureRemovesFile(t *testing
 	}
 }
 
+func TestAPIChatMessage_MultipartAttachmentDirectoryFailureTerminalizesAndUnblocksChat(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Directory Failure Project")
+
+	originalUploadsDir := uploadsDir
+	blockedUploadsDir := filepath.Join(t.TempDir(), "uploads-file")
+	require.NoError(t, os.WriteFile(blockedUploadsDir, []byte("not a directory"), 0600))
+	uploadsDir = blockedUploadsDir
+	defer func() { uploadsDir = originalUploadsDir }()
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	require.NoError(t, writer.WriteField("message", "directory failure message"))
+	require.NoError(t, writer.WriteField("project_id", project.ID))
+	part, err := writer.CreateFormFile("attachments", "failure.txt")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("attachment content"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	var errorResponse map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &errorResponse))
+	assert.Equal(t, "failed to create upload directory", errorResponse["error"])
+
+	chatHistory, err := h.execRepo.ListChatHistory(ctx, project.ID, 50)
+	require.NoError(t, err)
+	require.Len(t, chatHistory, 1)
+	failedExec := chatHistory[0]
+	assert.Equal(t, models.ExecFailed, failedExec.Status)
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+failedExec.ID, nil)
+	statusRec := httptest.NewRecorder()
+	e.ServeHTTP(statusRec, statusReq)
+	require.Equal(t, http.StatusOK, statusRec.Code)
+	var statusResponse ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(statusRec.Body.Bytes(), &statusResponse))
+	assert.Equal(t, "failed", statusResponse.Status)
+	active, err := h.execRepo.FindLatestActiveChatExecution(ctx, project.ID)
+	require.NoError(t, err)
+	assert.Nil(t, active)
+	failedTask, err := h.taskRepo.GetByID(ctx, failedExec.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, failedTask)
+	assert.Equal(t, models.StatusFailed, failedTask.Status)
+
+	uploadsDir = originalUploadsDir
+	providerCalled := make(chan struct{}, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+	secondForm := url.Values{}
+	secondForm.Set("message", "subsequent message")
+	secondForm.Set("project_id", project.ID)
+	secondForm.Set("agent_id", agent.ID)
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(secondForm.Encode()))
+	secondReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	secondRec := httptest.NewRecorder()
+	e.ServeHTTP(secondRec, secondReq)
+
+	require.Equal(t, http.StatusCreated, secondRec.Code, secondRec.Body.String())
+	var secondResponse ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(secondRec.Body.Bytes(), &secondResponse))
+	assert.Equal(t, "processing", secondResponse.Status)
+	assert.False(t, secondResponse.Queued)
+	assert.NotEqual(t, failedExec.ID, secondResponse.MessageID)
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the subsequent message to reach the provider")
+	}
+	require.Eventually(t, func() bool {
+		execution, err := h.execRepo.GetByID(ctx, secondResponse.MessageID)
+		return err == nil && execution != nil && execution.Status == models.ExecCompleted
+	}, 5*time.Second, 25*time.Millisecond, "subsequent message should finish after bypassing the failed turn")
+}
+
 func TestAPIChatMessageStatus_Queued(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
