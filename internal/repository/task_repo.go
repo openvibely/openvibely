@@ -33,6 +33,27 @@ const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent
 
 const taskDetailActionMetadataColumns = `id, status`
 
+// chatTaskContextSelectColumns contains only the task fields used by the
+// external-channel Chat context formatter. Prompt is bounded in SQLite so the
+// scanner can never materialize an entire task description for this path. The
+// chain expression reconstructs only the fields the formatter reads; malformed
+// JSON becomes the same disabled configuration that ParseChainConfig uses for
+// an empty configuration.
+const chatTaskContextSelectColumns = `id, title, category, priority, status, substr(prompt, 1, 501), agent_id, tag, parent_task_id,
+	CASE WHEN json_valid(chain_config) THEN
+		CASE WHEN (json_type(chain_config, '$.enabled') IS NULL OR json_type(chain_config, '$.enabled') IN ('true', 'false'))
+				AND (json_type(chain_config, '$.trigger') IS NULL OR json_type(chain_config, '$.trigger') = 'text')
+				AND (json_type(chain_config, '$.child_title') IS NULL OR json_type(chain_config, '$.child_title') = 'text')
+			THEN json_object(
+				'enabled', json(CASE WHEN COALESCE(json_extract(chain_config, '$.enabled'), 0) THEN 'true' ELSE 'false' END),
+				'trigger', COALESCE(json_extract(chain_config, '$.trigger'), ''),
+				'child_title', COALESCE(json_extract(chain_config, '$.child_title'), '')
+			)
+			ELSE '{}'
+		END
+		ELSE '{}'
+	END`
+
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status`
 
 const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
@@ -89,6 +110,22 @@ type ActiveTaskAdmission struct {
 	SwarmRole         models.SwarmRole
 }
 
+// ChatTaskContextRow is the bounded task projection used to build external
+// channel Chat context. It is intentionally not a models.Task so callers
+// cannot accidentally treat it as a full record for mutation or execution.
+type ChatTaskContextRow struct {
+	ID            string
+	Title         string
+	Category      models.TaskCategory
+	Priority      int
+	Status        models.TaskStatus
+	PromptPreview string
+	AgentID       *string
+	Tag           models.TaskTag
+	ParentTaskID  *string
+	ChainConfig   string
+}
+
 func NewTaskRepo(db *sql.DB, broadcaster *events.Broadcaster) *TaskRepo {
 	return &TaskRepo{
 		db:          db,
@@ -98,6 +135,34 @@ func NewTaskRepo(db *sql.DB, broadcaster *events.Broadcaster) *TaskRepo {
 
 func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category string) ([]models.Task, error) {
 	return r.ListByProjectWithSort(ctx, projectID, category, "")
+}
+
+// ListChatContextByProject returns the bounded, project-scoped task rows needed
+// by external-channel Chat context. Chat-category tasks are excluded here just
+// as BuildChatContextWithAgentDefinitions excludes them before formatting.
+func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID string) ([]ChatTaskContextRow, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+chatTaskContextSelectColumns+`
+		FROM tasks
+		WHERE project_id = ? AND category != 'chat'
+		ORDER BY display_order ASC, created_at ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat task context: %w", err)
+	}
+	defer rows.Close()
+
+	contextRows := make([]ChatTaskContextRow, 0)
+	for rows.Next() {
+		var row ChatTaskContextRow
+		if err := rows.Scan(&row.ID, &row.Title, &row.Category, &row.Priority, &row.Status,
+			&row.PromptPreview, &row.AgentID, &row.Tag, &row.ParentTaskID, &row.ChainConfig); err != nil {
+			return nil, fmt.Errorf("scanning chat task context: %w", err)
+		}
+		contextRows = append(contextRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating chat task context: %w", err)
+	}
+	return contextRows, nil
 }
 
 // ListBreadcrumbSelector returns a bounded compact task-title search for one project.

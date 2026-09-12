@@ -290,7 +290,7 @@ type channelChatContextOptions struct {
 func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions) string {
 	existingTasks := []models.Task{}
 	if opts.TaskSvc != nil {
-		if tasks, err := opts.TaskSvc.ListByProject(ctx, opts.ProjectID, ""); err == nil {
+		if tasks, err := opts.TaskSvc.ListChatContextByProject(ctx, opts.ProjectID); err == nil {
 			existingTasks = tasks
 		}
 	}
