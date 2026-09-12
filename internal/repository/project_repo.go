@@ -182,6 +182,23 @@ func (r *ProjectRepo) ListSelectorOptions(ctx context.Context) ([]models.Project
 	return projects, rows.Err()
 }
 
+const projectIdentityByIDQuery = `SELECT id, name FROM projects WHERE id = ?`
+
+// GetIdentityByID returns only the project identity required by channel
+// current-project responses. Full project callers should continue using
+// GetByID so their metadata and settings remain available.
+func (r *ProjectRepo) GetIdentityByID(ctx context.Context, id string) (*models.ProjectIdentity, error) {
+	var project models.ProjectIdentity
+	err := r.db.QueryRowContext(ctx, projectIdentityByIDQuery, id).Scan(&project.ID, &project.Name)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting project identity: %w", err)
+	}
+	return &project, nil
+}
+
 func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, error) {
 	var p models.Project
 	err := r.db.QueryRowContext(ctx,
