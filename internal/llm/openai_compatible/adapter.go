@@ -680,8 +680,9 @@ func buildClientHistoryWithReplay(
 	preserveReasoningContent bool,
 	replayByExecutionID map[string][]models.ExecutionReplayMessage,
 ) []openaiclient.CompletionsHistoryMessage {
-	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(chatHistory)*2)
-	for _, exec := range chatHistory {
+	history := llmprompt.LimitChatHistory(chatHistory)
+	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(history)*2)
+	for _, exec := range history {
 		replay := replayByExecutionID[exec.ID]
 		if len(replay) == 0 {
 			replay = exec.ReplayMessages
@@ -749,7 +750,8 @@ func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConf
 		return buildClientHistory(chatHistory, preserveReasoningContent), nil
 	}
 
-	history := append([]models.Execution(nil), chatHistory...)
+	limitedHistory := llmprompt.LimitChatHistory(chatHistory)
+	history := append([]models.Execution(nil), limitedHistory...)
 	ids := make([]string, 0, len(history))
 	for _, exec := range history {
 		if strings.TrimSpace(exec.ID) != "" {

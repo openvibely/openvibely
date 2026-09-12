@@ -9,7 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestNormalizeRequest_TrimsAndPreservesFullHistory(t *testing.T) {
+func TestNormalizeRequest_TrimsAndLimits(t *testing.T) {
 	history := make([]models.Execution, 25)
 	for i := range history {
 		history[i] = models.Execution{PromptSent: "p", Output: "o", Status: models.ExecCompleted}
@@ -32,8 +32,8 @@ func TestNormalizeRequest_TrimsAndPreservesFullHistory(t *testing.T) {
 	if out.Message != "hello" {
 		t.Fatalf("expected trimmed message, got %q", out.Message)
 	}
-	if len(out.ChatHistory) != len(history) {
-		t.Fatalf("expected full history to be preserved for provider-aware compaction, got %d", len(out.ChatHistory))
+	if len(out.ChatHistory) != 20 {
+		t.Fatalf("expected limited history=20, got %d", len(out.ChatHistory))
 	}
 	if out.Attachments[0].FileName != "go.mod" {
 		t.Fatalf("expected trimmed filename, got %q", out.Attachments[0].FileName)

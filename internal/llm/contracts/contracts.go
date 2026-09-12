@@ -39,17 +39,6 @@ type AgentRequest struct {
 	// agent prompt but skip the shared coding-agent system prompt, the
 	// take-direct-action task header, and provider web tools.
 	LifecycleHookCall bool
-	// NativeCompactionTokenThreshold carries the provider-aware trigger_limit to
-	// providers with native compaction support. Zero lets a provider keep its default.
-	NativeCompactionTokenThreshold int
-	// DisableNativeCompaction lets the service avoid retrying a known-unsupported
-	// native endpoint/feature in the same process session.
-	DisableNativeCompaction bool
-	// ForceNativeCompaction asks native-capable providers to compact before the
-	// request even if their provider-local preflight estimate has not crossed its
-	// threshold. The service sets this when the full normalized model-visible
-	// request estimate crosses the provider-aware trigger.
-	ForceNativeCompaction bool
 }
 
 type lifecycleHookCallContextKey struct{}
@@ -113,13 +102,10 @@ type ChatContextMessage struct {
 }
 
 type AgentResult struct {
-	Output                   string
-	TextOnlyOutput           string
-	Usage                    Usage
-	StopReason               string
-	SessionID                string
-	ChatContext              ChatContext
-	Compacted                bool
-	NativeCompactionSummary  string
-	NativeCompactionStrategy string
+	Output         string
+	TextOnlyOutput string
+	Usage          Usage
+	StopReason     string
+	SessionID      string
+	ChatContext    ChatContext
 }

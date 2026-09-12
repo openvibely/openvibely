@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -909,66 +908,6 @@ func (r *ExecutionRepo) FindLatestActiveEmailChatExecution(ctx context.Context, 
 // ordered chronologically for prompt/UI consumption.
 func (r *ExecutionRepo) ListChatHistory(ctx context.Context, projectID string, limit int) ([]models.Execution, error) {
 	return r.listChatHistoryPage(ctx, projectID, "", limit)
-}
-
-func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
-	if r == nil || r.db == nil {
-		return nil
-	}
-	historyJSON, err := json.Marshal(checkpoint.History)
-	if err != nil {
-		return fmt.Errorf("marshal chat compaction checkpoint: %w", err)
-	}
-	_, err = execBoundSQLite(ctx, r.db, `
-		INSERT INTO chat_compaction_checkpoints (
-			scope_type, scope_id, model_config_id, source_execution_id, history_json, summary, strategy, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		ON CONFLICT(scope_type, scope_id) DO UPDATE SET
-			model_config_id = excluded.model_config_id,
-			source_execution_id = excluded.source_execution_id,
-			history_json = excluded.history_json,
-			summary = excluded.summary,
-			strategy = excluded.strategy,
-			updated_at = datetime('now')`,
-		checkpoint.ScopeType, checkpoint.ScopeID, checkpoint.ModelConfigID, checkpoint.SourceExecutionID, string(historyJSON), checkpoint.Summary, checkpoint.Strategy)
-	if err != nil {
-		return fmt.Errorf("upserting chat compaction checkpoint: %w", err)
-	}
-	return nil
-}
-
-func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeType, scopeID string) (*models.ChatCompactionCheckpoint, error) {
-	if r == nil || r.db == nil || strings.TrimSpace(scopeType) == "" || strings.TrimSpace(scopeID) == "" {
-		return nil, nil
-	}
-	var checkpoint models.ChatCompactionCheckpoint
-	var historyJSON string
-	err := r.db.QueryRowContext(ctx, `
-		SELECT scope_type, scope_id, model_config_id, source_execution_id, history_json, summary, strategy, created_at, updated_at
-		FROM chat_compaction_checkpoints
-		WHERE scope_type = ? AND scope_id = ?`, scopeType, scopeID).
-		Scan(&checkpoint.ScopeType, &checkpoint.ScopeID, &checkpoint.ModelConfigID, &checkpoint.SourceExecutionID, &historyJSON, &checkpoint.Summary, &checkpoint.Strategy, &checkpoint.CreatedAt, &checkpoint.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting chat compaction checkpoint: %w", err)
-	}
-	if err := json.Unmarshal([]byte(historyJSON), &checkpoint.History); err != nil {
-		return nil, fmt.Errorf("unmarshal chat compaction checkpoint: %w", err)
-	}
-	return &checkpoint, nil
-}
-
-func (r *ExecutionRepo) DeleteChatCompactionCheckpoint(ctx context.Context, scopeType, scopeID string) error {
-	if r == nil || r.db == nil || strings.TrimSpace(scopeType) == "" || strings.TrimSpace(scopeID) == "" {
-		return nil
-	}
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM chat_compaction_checkpoints WHERE scope_type = ? AND scope_id = ?`, scopeType, scopeID)
-	if err != nil {
-		return fmt.Errorf("deleting chat compaction checkpoint: %w", err)
-	}
-	return nil
 }
 
 // ListChatHistoryBefore returns the latest chat executions older than beforeExecID,

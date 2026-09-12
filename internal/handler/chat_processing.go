@@ -1552,7 +1552,9 @@ func (h *Handler) xRuntimeToolsForThreadInput(taskID string, input models.Thread
 		// Queued rows outlive channel connection state. Reconstruct only the
 		// identity/runtime adapter from durable dependencies so project switching
 		// remains authorized and persisted even while outbound X is disconnected.
-		svc = h.newXService(service.XCredentials{})
+		svc = service.NewXService(service.XCredentials{}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+		svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
+		svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	}
 	return svc.RuntimeTools(taskID, input.ProjectID, input.XAccountID, input.XUserID, input.XConversationID, input.XReplyToTweetID, input.XUsername)
 }

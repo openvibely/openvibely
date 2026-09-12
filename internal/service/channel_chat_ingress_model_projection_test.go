@@ -288,10 +288,7 @@ func TestChannelModelLoadingProjectionMeetsPerformanceBudget(t *testing.T) {
 	if testing.CoverMode() != "" {
 		return
 	}
-	// The compact path hydrates one full selected model after the projection. Keep
-	// the guard tight while allowing the provider-aware compaction scalar fields
-	// now stored on the full model record.
-	if compact.NsPerOp() > (200*1000) || compact.AllocedBytesPerOp() > 304*1024 {
+	if compact.NsPerOp() > (200*1000) || compact.AllocedBytesPerOp() > 300*1024 {
 		t.Fatalf("compact channel model loading exceeded budget: %d ns/op, %d B/op", compact.NsPerOp(), compact.AllocedBytesPerOp())
 	}
 	if full.NsPerOp()/compact.NsPerOp() < 50 {

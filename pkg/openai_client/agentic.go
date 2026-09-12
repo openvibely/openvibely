@@ -35,7 +35,7 @@ Keep the summary actionable and specific. Omit chit-chat and duplication.
 Return only the summary text.`
 	openAICompactionTranscriptLimit                    = 200000
 	openAICompactionTranscriptGap                      = "\n\n[Middle conversation content omitted before compaction]\n\n"
-	openAIEffectiveContextPercent                      = 90
+	openAIEffectiveContextPercent                      = 95
 	openAIRemoteCompactionV2RetainedMessageTokenBudget = 64000
 	openAIApproxBytesPerToken                          = 4
 	openAIResizedImageBytesEstimate                    = 7373
@@ -74,12 +74,6 @@ type AgenticOptions struct {
 	// to round-trip back to the model in function_call_output items.
 	// When zero, openAIToolOutputTokenLimitDefault is used.
 	ToolOutputTokenLimit int
-	// ForceCompactionBeforeTurn forces the existing Codex-style native
-	// compaction pass over prior history before appending the current prompt.
-	// Use this when a caller has already estimated that the full model-visible
-	// request, including the pending prompt/attachments/system/tools, crosses
-	// the compaction trigger.
-	ForceCompactionBeforeTurn bool
 
 	// Attachments are files to include with the initial message.
 	Attachments []*FileAttachment
@@ -212,11 +206,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	if len(inputItems) > 0 {
 		var err error
-		sessionEstimate := 0
-		if opts.ForceCompactionBeforeTurn {
-			sessionEstimate = compactionThreshold
-		}
-		inputItems, err = compactIfNeeded(inputItems, sessionEstimate, false)
+		inputItems, err = compactIfNeeded(inputItems, 0, false)
 		if err != nil {
 			return nil, fmt.Errorf("pre-turn compaction: %w", err)
 		}

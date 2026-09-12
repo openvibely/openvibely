@@ -940,8 +940,8 @@ func TestLLMService_CallAgentDirectStreamingDetailed_LifecycleContextContainsOnl
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected current-turn lifecycle context\n got: %#v\nwant: %#v", got, want)
 	}
-	if len(capture.lastReq.ChatHistory) != 22 || capture.lastReq.ChatHistory[0].PromptSent != "old prompt 00" {
-		t.Fatalf("provider request should retain full normalized history before provider-aware compaction, got %#v", capture.lastReq.ChatHistory)
+	if len(capture.lastReq.ChatHistory) != 20 || capture.lastReq.ChatHistory[0].PromptSent != "old prompt 02" {
+		t.Fatalf("provider request should retain normalized history, got %#v", capture.lastReq.ChatHistory)
 	}
 }
 

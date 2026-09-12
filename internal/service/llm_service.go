@@ -2199,7 +2199,7 @@ func (s *LLMService) callAgentDirectWithDefinitionMode(ctx context.Context, mess
 		return "", 0, err
 	}
 	start := time.Now()
-	res, err := s.callProviderWithContextCompactionFallback(adapter, req)
+	res, err := adapter.Call(req)
 	durationMs := time.Since(start).Milliseconds()
 	status := string(models.ExecCompleted)
 	errMsg := ""
@@ -2340,7 +2340,7 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 	if err != nil {
 		return llmcontracts.AgentResult{}, err
 	}
-	res, err := s.callProviderWithContextCompactionFallback(adapter, req)
+	res, err := adapter.Call(req)
 	assistantOutput := res.TextOnlyOutput
 	if assistantOutput == "" {
 		assistantOutput = res.Output
@@ -2426,7 +2426,7 @@ func (s *LLMService) callLLMDetailed(ctx context.Context, prompt string, attachm
 	if err != nil {
 		return llmcontracts.AgentResult{}, err
 	}
-	res, err := s.callProviderWithContextCompactionFallback(adapter, req)
+	res, err := adapter.Call(req)
 	assistantOutput := res.TextOnlyOutput
 	if assistantOutput == "" {
 		assistantOutput = res.Output

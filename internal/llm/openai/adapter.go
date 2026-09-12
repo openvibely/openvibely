@@ -344,20 +344,18 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	inThinking := false
-	compactionSummary := ""
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
-		Model:                     agent.Model,
-		MaxOutputTokens:           openAIAgenticOutputBudget,
-		System:                    applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
-		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
-		ReasoningSummary:          "auto",
-		AutoCompaction:            !agent.DisableNativeCompaction,
-		CompactionTokenThreshold:  agent.CompactionThreshold,
-		ForceCompactionBeforeTurn: agent.ForceNativeCompaction,
-		WebSearchEnabled:          true,
-		WorkDir:                   effectiveWorkDir, Attachments: oaAttachments,
+		Model:                  agent.Model,
+		MaxOutputTokens:        openAIAgenticOutputBudget,
+		System:                 applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
+		ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
+		ReasoningSummary:       "auto",
+		AutoCompaction:         true,
+		WebSearchEnabled:       true,
+		WorkDir:                effectiveWorkDir,
+		Attachments:            oaAttachments,
 		ExtraTools:             extraTools,
 		ToolExecutor:           toolExecutor,
 		ToolFilter:             toolFilter,
@@ -393,9 +391,9 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[openai-adapter] CallStreaming context compacted, summary_len=%d", len(summary))
-		}})
+		},
+	})
 	if err != nil {
 		sw.Flush()
 		applog.Infof("[openai-adapter] CallStreaming error: %v", err)
@@ -411,9 +409,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	output := sw.String()
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	if compactionSummary != "" {
-		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "openai_responses"}
-	}
 	applog.Infof("[openai-adapter] CallStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, textOnly, usage, errMaxTokens
@@ -458,21 +453,19 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	chatInThinking := false
-	compactionSummary := ""
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
-		Model:                     agent.Model,
-		MaxOutputTokens:           openAIAgenticOutputBudget,
-		System:                    systemPromptStr,
-		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
-		ReasoningSummary:          "auto",
-		AutoCompaction:            !agent.DisableNativeCompaction,
-		CompactionTokenThreshold:  agent.CompactionThreshold,
-		ForceCompactionBeforeTurn: agent.ForceNativeCompaction,
-		WebSearchEnabled:          true,
-		DisableTools:              disableTools, WorkDir: effectiveWorkDir,
+		Model:                  agent.Model,
+		MaxOutputTokens:        openAIAgenticOutputBudget,
+		System:                 systemPromptStr,
+		ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
+		ReasoningSummary:       "auto",
+		AutoCompaction:         true,
+		WebSearchEnabled:       true,
+		DisableTools:           disableTools,
+		WorkDir:                effectiveWorkDir,
 		Attachments:            oaAttachments,
 		ExtraTools:             extraTools,
 		ToolExecutor:           toolExecutor,
@@ -509,9 +502,9 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[openai-adapter] CallChatStreaming context compacted, summary_len=%d", len(summary))
-		}})
+		},
+	})
 	if err != nil {
 		sw.Flush()
 		applog.Infof("[openai-adapter] CallChatStreaming error: %v", err)
@@ -526,9 +519,6 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	output := sw.String()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	if compactionSummary != "" {
-		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "openai_responses"}
-	}
 	applog.Infof("[openai-adapter] CallChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, usage, errMaxTokens
@@ -867,8 +857,9 @@ func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string 
 }
 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
+	history := llmprompt.LimitChatHistory(chatHistory)
 	var messages []openaiclient.Message
-	for _, exec := range chatHistory {
+	for _, exec := range history {
 		if exec.PromptSent != "" {
 			messages = append(messages, openaiclient.Message{Role: "user", Content: exec.PromptSent})
 		}

@@ -23,33 +23,11 @@ import (
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
-	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
-	"github.com/openvibely/openvibely/internal/service"
 )
 
 type updateStarterProbe struct {
 	recovery, checks int
-}
-
-type startupXAPI struct {
-	me           service.XUser
-	mentionCalls int32
-	postCalls    int32
-}
-
-func (a *startupXAPI) Me(context.Context) (service.XUser, error) {
-	return a.me, nil
-}
-
-func (a *startupXAPI) Mentions(context.Context, string, string, string) (service.XMentionsResponse, error) {
-	atomic.AddInt32(&a.mentionCalls, 1)
-	return service.XMentionsResponse{}, nil
-}
-
-func (a *startupXAPI) Post(context.Context, string, string) (string, error) {
-	atomic.AddInt32(&a.postCalls, 1)
-	return "startup-post", nil
 }
 
 func (p *updateStarterProbe) StartRecovery(context.Context) { p.recovery++ }
@@ -450,108 +428,6 @@ func TestStart_ClosesSplitDatabaseAfterConfirmationSecretFailure(t *testing.T) {
 	}
 	if err := connections.Writer.Ping(); err == nil {
 		t.Fatal("writer database remains open")
-	}
-}
-
-func TestStartXServiceUsesPersistedSettingsAndRegistersRouter(t *testing.T) {
-	root := t.TempDir()
-	cfg := &config.Config{
-		Mode:             config.ModeDesktop,
-		Port:             "0",
-		DatabasePath:     filepath.Join(root, "database.db"),
-		ProjectRepoRoot:  filepath.Join(root, "repos"),
-		AppDataDir:       filepath.Join(root, "appdata"),
-		Environment:      "test",
-		UpdateServiceURL: mockUpdateServiceURL(t),
-	}
-
-	connections, err := database.NewReadWrite(cfg.DatabasePath)
-	if err != nil {
-		t.Fatalf("NewReadWrite() failed: %v", err)
-	}
-	unregister := repository.RegisterDedicatedWriter(connections.Reader, connections.Writer)
-	settingsRepo := repository.NewSettingsRepo(connections.Reader)
-	projectRepo := repository.NewProjectRepo(connections.Reader)
-	project := &models.Project{Name: "Startup X Project"}
-	if err := projectRepo.Create(context.Background(), project); err != nil {
-		unregister()
-		_ = connections.Close()
-		t.Fatalf("creating project: %v", err)
-	}
-	if err := settingsRepo.SetMany(context.Background(), map[string]string{
-		service.XSettingConsumerKey:         "persisted-consumer-key",
-		service.XSettingConsumerSecret:      "persisted-consumer-secret",
-		service.XSettingAccessToken:         "persisted-access-token",
-		service.XSettingAccessTokenSecret:   "persisted-access-secret",
-		service.XSettingPollIntervalSeconds: "17",
-		service.XSettingSinceID:             "",
-	}); err != nil {
-		unregister()
-		_ = connections.Close()
-		t.Fatalf("persisting X settings: %v", err)
-	}
-	unregister()
-	if err := connections.Close(); err != nil {
-		t.Fatalf("closing seed database: %v", err)
-	}
-
-	api := &startupXAPI{me: service.XUser{ID: "startup-account", Username: "startup-user"}}
-	originalFactory := newXServiceWithDependencies
-	var capturedCredentials service.XCredentials
-	var capturedService *service.XService
-	var capturedDependencies service.XServiceDependencies
-	newXServiceWithDependencies = func(credentials service.XCredentials, dependencies service.XServiceDependencies) *service.XService {
-		capturedCredentials = credentials
-		capturedDependencies = dependencies
-		capturedService = originalFactory(credentials, dependencies)
-		capturedService.SetAPI(api)
-		return capturedService
-	}
-	t.Cleanup(func() { newXServiceWithDependencies = originalFactory })
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	instance, err := Start(ctx, cfg)
-	if err != nil {
-		t.Fatalf("Start() failed: %v", err)
-	}
-	t.Cleanup(instance.Shutdown)
-
-	wantCredentials := service.XCredentials{
-		ConsumerKey: "persisted-consumer-key", ConsumerSecret: "persisted-consumer-secret",
-		AccessToken: "persisted-access-token", AccessTokenSecret: "persisted-access-secret",
-	}
-	if capturedCredentials != wantCredentials {
-		t.Fatalf("startup credentials = %#v, want %#v", capturedCredentials, wantCredentials)
-	}
-	if capturedService == nil {
-		t.Fatal("startup did not construct an X service")
-	}
-	if got := capturedService.PollInterval(); got != 17*time.Second {
-		t.Fatalf("startup poll interval = %s, want 17s", got)
-	}
-	status := capturedService.Status()
-	if !status.Running || !status.Connected || status.Username != "startup-user" {
-		t.Fatalf("startup X status = %#v, want running connected startup-user", status)
-	}
-	deadline := time.Now().Add(time.Second)
-	for atomic.LoadInt32(&api.mentionCalls) < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if calls := atomic.LoadInt32(&api.mentionCalls); calls < 2 {
-		t.Fatalf("startup X API mention calls = %d, want verification plus polling", calls)
-	}
-	if capturedDependencies.ChannelMessageRouter == nil {
-		t.Fatal("shared startup dependencies did not include the channel router")
-	}
-	result := capturedDependencies.ChannelMessageRouter.SendDirectTarget(ctx, project.ID, service.ChannelTarget{
-		Platform: "x", TargetID: "me",
-	}, service.SendMessageRequest{Message: "startup router message"})
-	if !result.OK {
-		t.Fatalf("router dispatch through startup X service failed: %#v", result)
-	}
-	if posts := atomic.LoadInt32(&api.postCalls); posts != 1 {
-		t.Fatalf("startup X API post calls = %d, want 1 router dispatch", posts)
 	}
 }
 
