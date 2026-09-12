@@ -19,7 +19,8 @@ import (
 const validationProjectionSamples = 7
 
 type validationProjectionFixture struct {
-	db          *sql.DB
+	reader      *sql.DB
+	writer      *sql.DB
 	counter     *testutil.SQLStatementCounter
 	projectRepo *repository.ProjectRepo
 	projectSvc  *ProjectService
@@ -135,15 +136,32 @@ func BenchmarkValidateRepoPathsProjectionFileBacked(b *testing.B) {
 
 func newValidationProjectionFixture(tb testing.TB, projectCount int) *validationProjectionFixture {
 	tb.Helper()
-	db, counter := testutil.NewFileBackedStatementCountingTestDB(tb)
+	reader, writer, counter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
+	if reader.Stats().MaxOpenConnections != 1 || writer.Stats().MaxOpenConnections != 1 {
+		tb.Fatalf("validation fixture requires production 1W + 1R topology: reader_max=%d writer_max=%d", reader.Stats().MaxOpenConnections, writer.Stats().MaxOpenConnections)
+	}
+	var readerQueryOnly, writerQueryOnly int
+	if err := reader.QueryRow(`PRAGMA query_only`).Scan(&readerQueryOnly); err != nil {
+		tb.Fatalf("read reader query_only pragma: %v", err)
+	}
+	if err := writer.QueryRow(`PRAGMA query_only`).Scan(&writerQueryOnly); err != nil {
+		tb.Fatalf("read writer query_only pragma: %v", err)
+	}
+	if readerQueryOnly != 1 || writerQueryOnly != 0 {
+		tb.Fatalf("validation fixture query_only: reader=%d writer=%d, want 1/0", readerQueryOnly, writerQueryOnly)
+	}
+	unregisterWriter := repository.RegisterDedicatedWriter(reader, writer)
+	tb.Cleanup(unregisterWriter)
+
 	repoPath := filepath.Join(tb.TempDir(), "existing-repository")
 	if err := os.MkdirAll(repoPath, 0o755); err != nil {
 		tb.Fatalf("create existing repository path: %v", err)
 	}
-	seedValidationProjectionProjects(tb, db, projectCount, repoPath)
-	repo := repository.NewProjectRepo(db)
+	seedValidationProjectionProjects(tb, writer, projectCount, repoPath)
+	repo := repository.NewProjectRepo(reader)
 	return &validationProjectionFixture{
-		db:          db,
+		reader:      reader,
+		writer:      writer,
 		counter:     counter,
 		projectRepo: repo,
 		projectSvc:  NewProjectService(repo),
