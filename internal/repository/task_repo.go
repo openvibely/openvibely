@@ -38,7 +38,9 @@ const taskDetailActionMetadataColumns = `id, status`
 // materialize an entire task description for this path. The chain projection
 // walks only the root and child_chain_config objects, validates the same known
 // JSON field types that encoding/json accepts (including null and case-insensitive
-// keys), and reconstructs only the fields the formatter reads. Invalid JSON or
+// keys), and reconstructs only the fields the formatter reads. Null duplicate scalar
+// fields are ignored during extraction because encoding/json leaves an existing scalar
+// unchanged when a later duplicate value is null. Invalid JSON or
 // invalid known field types become the same disabled configuration that
 // ParseChainConfig returns for malformed input.
 const chatTaskContextQuery = `WITH RECURSIVE
