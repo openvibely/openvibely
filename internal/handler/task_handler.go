@@ -2724,7 +2724,7 @@ func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 // Uses shared agent selection and streaming response processing from chat_processing.go.
 func (h *Handler) TaskThreadSend(c echo.Context) error {
 	taskID := c.Param("taskId")
-	message := c.FormValue("message")
+	message := strings.TrimSpace(c.FormValue("message"))
 	agentID := c.FormValue("agent_id")
 	sessionID := c.FormValue("attachment_session_id")
 
