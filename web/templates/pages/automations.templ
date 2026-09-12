@@ -81,13 +81,17 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 			<div class="grid grid-cols-1 gap-4 min-w-0 max-w-full">
 				for _, card := range cards {
 					<div
-						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full"
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
+						role="link"
+						tabindex="0"
+						aria-label={ "Open Automation " + card.Automation.Name }
 						data-automation-url={ automationCardURL(card, currentProjectID) }
 						data-search-card
 						data-search-text={ automationCardSearchText(card) }
 						data-card-select-id={ card.Automation.ID }
 						data-card-select-eligible="true"
 						onclick="window.openVibelyNavigate(this.dataset.automationUrl)"
+						onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"
 					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" data-automation-card-action onclick="event.stopPropagation()">
