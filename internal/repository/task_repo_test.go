@@ -1072,7 +1072,12 @@ func TestTaskRepo_ListActivePendingAdmissionsPreservesEligibilityAndOrder(t *tes
 	repo := NewTaskRepo(db, nil)
 	inputRepo := NewThreadInputRepo(db)
 	execRepo := NewExecutionRepo(db)
+	projectRepo := NewProjectRepo(db)
 	ctx := context.Background()
+	foreignProject := &models.Project{Name: "Foreign admission project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, foreignProject); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
 
 	first := &models.Task{ProjectID: "default", Title: "highest priority", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "first"}
 	second := &models.Task{ProjectID: "default", Title: "same priority earlier display", Category: models.CategoryActive, Priority: 3, Status: models.StatusPending, Prompt: "second"}
@@ -1085,12 +1090,28 @@ func TestTaskRepo_ListActivePendingAdmissionsPreservesEligibilityAndOrder(t *tes
 	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE title WHEN ? THEN 2 WHEN ? THEN 1 ELSE display_order END WHERE id IN (?, ?)`, second.Title, third.Title, second.ID, third.ID); err != nil {
 		t.Fatalf("set display order: %v", err)
 	}
+	foreign := &models.Task{ProjectID: foreignProject.ID, Title: "foreign project eligible", Category: models.CategoryActive, Priority: 5, Status: models.StatusPending, Prompt: "foreign"}
+	if err := repo.Create(ctx, foreign); err != nil {
+		t.Fatalf("create foreign eligible task: %v", err)
+	}
+	createdEarlier := &models.Task{ProjectID: "default", Title: "same priority earlier created", Category: models.CategoryActive, Priority: 2, Status: models.StatusPending, Prompt: "earlier"}
+	createdLater := &models.Task{ProjectID: "default", Title: "same priority later created", Category: models.CategoryActive, Priority: 2, Status: models.StatusPending, Prompt: "later"}
+	for _, task := range []*models.Task{createdEarlier, createdLater} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create created-at ordering task %q: %v", task.Title, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = CASE title WHEN ? THEN ? WHEN ? THEN ? ELSE created_at END WHERE id IN (?, ?)`,
+		createdEarlier.Title, "2020-01-01 00:00:00", createdLater.Title, "2021-01-01 00:00:00", createdEarlier.ID, createdLater.ID); err != nil {
+		t.Fatalf("set created-at ordering: %v", err)
+	}
 
 	backlog := &models.Task{ProjectID: "default", Title: "backlog", Category: models.CategoryBacklog, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
 	running := &models.Task{ProjectID: "default", Title: "running", Category: models.CategoryActive, Priority: 4, Status: models.StatusRunning, Prompt: "excluded"}
 	queuedExecution := &models.Task{ProjectID: "default", Title: "queued execution", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
+	runningExecution := &models.Task{ProjectID: "default", Title: "running execution", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
 	pendingInput := &models.Task{ProjectID: "default", Title: "pending input", Category: models.CategoryActive, Priority: 4, Status: models.StatusPending, Prompt: "excluded"}
-	for _, task := range []*models.Task{backlog, running, queuedExecution, pendingInput} {
+	for _, task := range []*models.Task{backlog, running, queuedExecution, runningExecution, pendingInput} {
 		if err := repo.Create(ctx, task); err != nil {
 			t.Fatalf("create excluded task %q: %v", task.Title, err)
 		}
@@ -1098,6 +1119,10 @@ func TestTaskRepo_ListActivePendingAdmissionsPreservesEligibilityAndOrder(t *tes
 	queuedExec := &models.Execution{TaskID: queuedExecution.ID, Status: models.ExecQueued, PromptSent: "queued"}
 	if err := execRepo.Create(ctx, queuedExec); err != nil {
 		t.Fatalf("create queued execution: %v", err)
+	}
+	runningExec := &models.Execution{TaskID: runningExecution.ID, Status: models.ExecRunning, PromptSent: "running"}
+	if err := execRepo.Create(ctx, runningExec); err != nil {
+		t.Fatalf("create running execution: %v", err)
 	}
 	prior := &models.Execution{TaskID: pendingInput.ID, Status: models.ExecCompleted, PromptSent: "prior"}
 	if err := execRepo.Create(ctx, prior); err != nil {
@@ -1133,16 +1158,314 @@ func TestTaskRepo_ListActivePendingAdmissionsPreservesEligibilityAndOrder(t *tes
 	if err != nil {
 		t.Fatalf("ListActivePendingAdmissions: %v", err)
 	}
-	if len(admissions) != 3 {
-		t.Fatalf("expected three eligible admissions, got %d: %#v", len(admissions), admissions)
+	if len(admissions) != 6 {
+		t.Fatalf("expected six eligible admissions, got %d: %#v", len(admissions), admissions)
 	}
-	gotTitles := []string{admissions[0].Title, admissions[1].Title, admissions[2].Title}
-	wantTitles := []string{first.Title, third.Title, second.Title}
+	gotTitles := []string{admissions[0].Title, admissions[1].Title, admissions[2].Title, admissions[3].Title, admissions[4].Title, admissions[5].Title}
+	wantTitles := []string{foreign.Title, first.Title, third.Title, second.Title, createdEarlier.Title, createdLater.Title}
 	for i := range wantTitles {
 		if gotTitles[i] != wantTitles[i] {
 			t.Errorf("admission %d: got %q, want %q (all=%#v)", i, gotTitles[i], wantTitles[i], gotTitles)
 		}
 	}
+}
+
+const activeTaskAdmissionStatusIndexQuery = `SELECT ` + activeTaskAdmissionSelectColumns + `
+		 FROM tasks INDEXED BY idx_tasks_status WHERE category = 'active' AND status = 'pending'
+		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
+		 AND NOT ` + taskThreadInputOwnsAdmissionPredicate + `
+		 ORDER BY priority DESC, display_order ASC, created_at ASC`
+
+const (
+	activeAdmissionPerformanceSamples    = 5
+	activeAdmissionMeasurementOperations = 8
+	activeAdmissionOrderIndexName        = "idx_tasks_active_pending_admission_order"
+)
+
+type activeAdmissionProductionFixture struct {
+	reader  *sql.DB
+	writer  *sql.DB
+	counter *testutil.SQLStatementCounter
+	repo    *TaskRepo
+}
+
+type activeAdmissionPerformanceMetrics struct {
+	latency        time.Duration
+	allocatedBytes uint64
+	allocations    uint64
+	returnedRows   int
+	statementCount int
+}
+
+func TestTaskRepo_ListActivePendingAdmissionsQueryPlanUsesOrderIndex(t *testing.T) {
+	reader, writer, _ := testutil.NewFileBackedSplitStatementCountingTestDB(t)
+	unregister := RegisterDedicatedWriter(reader, writer)
+	t.Cleanup(unregister)
+
+	rows, err := reader.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+activeTaskAdmissionQuery)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	plan := strings.Join(details, "\n")
+	if !strings.Contains(plan, activeAdmissionOrderIndexName) || strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("active admission query plan = %s, want %s without temporary order B-tree", plan, activeAdmissionOrderIndexName)
+	}
+}
+
+func TestTaskRepo_ListActivePendingAdmissionsLargeBacklogHasEmptyResult(t *testing.T) {
+	fixture := newActiveAdmissionProductionFixture(t, 10000, false)
+	ctx := context.Background()
+	if _, err := fixture.writer.ExecContext(ctx, `UPDATE tasks SET category = 'backlog' WHERE id LIKE 'scheduler-admission-%'`); err != nil {
+		t.Fatalf("remove active candidates: %v", err)
+	}
+
+	admissions, err := fixture.repo.ListActivePendingAdmissions(ctx)
+	if err != nil {
+		t.Fatalf("ListActivePendingAdmissions: %v", err)
+	}
+	if len(admissions) != 0 {
+		t.Fatalf("large backlog admissions = %#v, want empty result", admissions)
+	}
+}
+
+func TestTaskRepo_ListActivePendingAdmissionsProductionPerformanceEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-shaped scheduler admission performance evidence in short mode")
+	}
+
+	sizes := []int{20, 1000, 10000, 50000}
+	oneEligible := make(map[int]activeAdmissionPerformanceMetrics, len(sizes))
+	for _, size := range sizes {
+		size := size
+		t.Run(fmt.Sprintf("one_eligible/%d", size), func(t *testing.T) {
+			fixture := newActiveAdmissionProductionFixture(t, size, false)
+			wantRows := 1
+			candidate := measureActiveAdmissionLoad(t, func() ([]ActiveTaskAdmission, error) {
+				return fixture.repo.ListActivePendingAdmissions(context.Background())
+			}, wantRows)
+			candidate.statementCount = countActiveAdmissionStatements(t, fixture, wantRows)
+			oneEligible[size] = candidate
+			t.Logf("one-eligible rows=%d: median=%s, %d B/op, %d allocs/op, returned=%d, statements=%d",
+				size, candidate.latency, candidate.allocatedBytes, candidate.allocations, candidate.returnedRows, candidate.statementCount)
+
+			if size == 10000 || size == 50000 {
+				baseline := measureActiveAdmissionLoad(t, func() ([]ActiveTaskAdmission, error) {
+					return listActivePendingAdmissionsWithQuery(context.Background(), fixture.reader, activeTaskAdmissionStatusIndexQuery)
+				}, wantRows)
+				t.Logf("current status-index path rows=%d: median=%s, %d B/op, %d allocs/op, returned=%d",
+					size, baseline.latency, baseline.allocatedBytes, baseline.allocations, baseline.returnedRows)
+				if candidate.latency*5 > baseline.latency {
+					t.Fatalf("candidate median=%s, current status-index median=%s; want at least 80%% lower", candidate.latency, baseline.latency)
+				}
+			}
+		})
+	}
+	if oneEligible[50000].latency > oneEligible[20].latency*8 {
+		t.Fatalf("one-eligible 50,000-row median=%s scales with 20-row median=%s", oneEligible[50000].latency, oneEligible[20].latency)
+	}
+
+	for _, size := range sizes {
+		size := size
+		t.Run(fmt.Sprintf("mixed_eligibility/%d", size), func(t *testing.T) {
+			fixture := newActiveAdmissionProductionFixture(t, size, true)
+			wantRows := size/4 - size/8
+			metrics := measureActiveAdmissionLoad(t, func() ([]ActiveTaskAdmission, error) {
+				return fixture.repo.ListActivePendingAdmissions(context.Background())
+			}, wantRows)
+			metrics.statementCount = countActiveAdmissionStatements(t, fixture, wantRows)
+			t.Logf("mixed-eligibility rows=%d: median=%s, %d B/op, %d allocs/op, returned=%d, statements=%d",
+				size, metrics.latency, metrics.allocatedBytes, metrics.allocations, metrics.returnedRows, metrics.statementCount)
+		})
+	}
+}
+
+func BenchmarkTaskRepo_ListActivePendingAdmissionsProduction(b *testing.B) {
+	for _, size := range []int{20, 1000, 10000, 50000} {
+		for _, mixed := range []bool{false, true} {
+			fixtureName := "one_eligible"
+			if mixed {
+				fixtureName = "mixed_eligibility"
+			}
+			for _, path := range []struct {
+				name string
+				load func(*activeAdmissionProductionFixture) ([]ActiveTaskAdmission, error)
+			}{
+				{name: "order_covering", load: func(fixture *activeAdmissionProductionFixture) ([]ActiveTaskAdmission, error) {
+					return fixture.repo.ListActivePendingAdmissions(context.Background())
+				}},
+				{name: "current_status_index", load: func(fixture *activeAdmissionProductionFixture) ([]ActiveTaskAdmission, error) {
+					return listActivePendingAdmissionsWithQuery(context.Background(), fixture.reader, activeTaskAdmissionStatusIndexQuery)
+				}},
+			} {
+				size, mixed, fixtureName, path := size, mixed, fixtureName, path
+				b.Run(fmt.Sprintf("%s/%d/%s", fixtureName, size, path.name), func(b *testing.B) {
+					fixture := newActiveAdmissionProductionFixture(b, size, mixed)
+					wantRows := 1
+					if mixed {
+						wantRows = size/4 - size/8
+					}
+					for range 2 {
+						admissions, err := path.load(fixture)
+						if err != nil || len(admissions) != wantRows {
+							b.Fatalf("warm admission query returned %d rows with error %v, want %d", len(admissions), err, wantRows)
+						}
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						admissions, err := path.load(fixture)
+						if err != nil {
+							b.Fatalf("admission query: %v", err)
+						}
+						if len(admissions) != wantRows {
+							b.Fatalf("admission rows = %d, want %d", len(admissions), wantRows)
+						}
+					}
+					b.StopTimer()
+					b.ReportMetric(float64(wantRows), "returned_rows/op")
+					b.ReportMetric(1, "sql_statements/op")
+				})
+			}
+		}
+	}
+}
+
+func newActiveAdmissionProductionFixture(tb testing.TB, total int, mixed bool) *activeAdmissionProductionFixture {
+	tb.Helper()
+	reader, writer, counter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
+	unregister := RegisterDedicatedWriter(reader, writer)
+	tb.Cleanup(unregister)
+
+	mixedValue := 0
+	if mixed {
+		mixedValue = 1
+	}
+	_, err := writer.ExecContext(context.Background(), `WITH RECURSIVE task_numbers(n) AS (
+			SELECT 1
+			UNION ALL
+			SELECT n + 1 FROM task_numbers WHERE n < ?
+		)
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, display_order, created_at, updated_at)
+		SELECT printf('scheduler-admission-%d', n), 'default', printf('Scheduler admission %d', n),
+			CASE WHEN ? = 1
+				THEN CASE WHEN n % 4 = 0 THEN 'active' ELSE 'backlog' END
+				ELSE CASE WHEN n = 1 THEN 'active' ELSE 'backlog' END END,
+			CASE WHEN ? = 1 THEN n % 5 ELSE 1 END,
+			CASE WHEN ? = 1 AND n % 8 = 0 THEN 'running' ELSE 'pending' END,
+			'', n,
+			datetime('2020-01-01', printf('+%d seconds', n)),
+			datetime('2020-01-01', printf('+%d seconds', n))
+		FROM task_numbers`, total, mixedValue, mixedValue, mixedValue)
+	if err != nil {
+		tb.Fatalf("seed %d-task admission fixture: %v", total, err)
+	}
+	return &activeAdmissionProductionFixture{
+		reader:  reader,
+		writer:  writer,
+		counter: counter,
+		repo:    NewTaskRepo(reader, nil),
+	}
+}
+
+func measureActiveAdmissionLoad(t *testing.T, load func() ([]ActiveTaskAdmission, error), wantRows int) activeAdmissionPerformanceMetrics {
+	t.Helper()
+	for range 2 {
+		admissions, err := load()
+		if err != nil {
+			t.Fatalf("warm admission query: %v", err)
+		}
+		if len(admissions) != wantRows {
+			t.Fatalf("warm admission rows = %d, want %d", len(admissions), wantRows)
+		}
+	}
+
+	latencies := make([]time.Duration, 0, activeAdmissionPerformanceSamples)
+	allocatedBytes := make([]uint64, 0, activeAdmissionPerformanceSamples)
+	allocations := make([]uint64, 0, activeAdmissionPerformanceSamples)
+	for range activeAdmissionPerformanceSamples {
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		startedAt := time.Now()
+		for range activeAdmissionMeasurementOperations {
+			admissions, err := load()
+			if err != nil {
+				t.Fatalf("admission query: %v", err)
+			}
+			if len(admissions) != wantRows {
+				t.Fatalf("admission rows = %d, want %d", len(admissions), wantRows)
+			}
+		}
+		latencies = append(latencies, time.Since(startedAt)/activeAdmissionMeasurementOperations)
+		runtime.ReadMemStats(&after)
+		allocatedBytes = append(allocatedBytes, (after.TotalAlloc-before.TotalAlloc)/activeAdmissionMeasurementOperations)
+		allocations = append(allocations, (after.Mallocs-before.Mallocs)/activeAdmissionMeasurementOperations)
+	}
+	slices.Sort(latencies)
+	slices.Sort(allocatedBytes)
+	slices.Sort(allocations)
+	middle := activeAdmissionPerformanceSamples / 2
+	return activeAdmissionPerformanceMetrics{
+		latency:        latencies[middle],
+		allocatedBytes: allocatedBytes[middle],
+		allocations:    allocations[middle],
+		returnedRows:   wantRows,
+	}
+}
+
+func countActiveAdmissionStatements(t *testing.T, fixture *activeAdmissionProductionFixture, wantRows int) int {
+	t.Helper()
+	fixture.counter.Reset()
+	fixture.counter.SetEnabled(true)
+	defer fixture.counter.SetEnabled(false)
+	admissions, err := fixture.repo.ListActivePendingAdmissions(context.Background())
+	if err != nil {
+		t.Fatalf("count admission statements: %v", err)
+	}
+	if len(admissions) != wantRows {
+		t.Fatalf("counted admission rows = %d, want %d", len(admissions), wantRows)
+	}
+	statements := fixture.counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("admission statement count = %d, want one: %#v", len(statements), statements)
+	}
+	return len(statements)
+}
+
+func listActivePendingAdmissionsWithQuery(ctx context.Context, db *sql.DB, query string) ([]ActiveTaskAdmission, error) {
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var admissions []ActiveTaskAdmission
+	for rows.Next() {
+		var admission ActiveTaskAdmission
+		if err := rows.Scan(&admission.ID, &admission.ProjectID, &admission.Title,
+			&admission.Category, &admission.Priority, &admission.Status, &admission.AgentID,
+			&admission.AgentDefinitionID, &admission.ParentTaskID, &admission.SwarmRole); err != nil {
+			return nil, err
+		}
+		admissions = append(admissions, admission)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return admissions, nil
 }
 
 // TestTaskRepo_ListByCategory_WithChainConfig verifies ListByCategory correctly
