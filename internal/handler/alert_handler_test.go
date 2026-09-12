@@ -758,6 +758,7 @@ func TestHandler_GetPendingAlertCountIsProjectScoped(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Pending Count Project")
 	foreign := createProject(t, h, "Foreign Pending Count Project")
+	empty := createProject(t, h, "Empty Pending Count Project")
 
 	pending := &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: models.AlertCustom,
 		Severity: models.SeverityWarning, Title: "Pending", Body: "pending body", Source: "test",
@@ -782,12 +783,24 @@ func TestHandler_GetPendingAlertCountIsProjectScoped(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	require.Equal(t, 1, response.Count)
 
+	emptyReq := httptest.NewRequest(http.MethodGet, "/api/alerts/pending-count?project_id="+empty.ID, nil)
+	emptyRec := httptest.NewRecorder()
+	require.NoError(t, h.GetPendingAlertCount(e.NewContext(emptyReq, emptyRec)))
+	var emptyResponse struct {
+		Count int `json:"count"`
+	}
+	require.NoError(t, json.Unmarshal(emptyRec.Body.Bytes(), &emptyResponse))
+	require.Equal(t, 0, emptyResponse.Count)
+
 	badReq := httptest.NewRequest(http.MethodGet, "/api/alerts/pending-count", nil)
 	badRec := httptest.NewRecorder()
-	require.Error(t, h.GetPendingAlertCount(e.NewContext(badReq, badRec)))
-	require.Equal(t, http.StatusBadRequest, badRec.Code)
+	badErr := h.GetPendingAlertCount(e.NewContext(badReq, badRec))
+	var httpErr *echo.HTTPError
+	require.ErrorAs(t, badErr, &httpErr)
+	require.Equal(t, http.StatusBadRequest, httpErr.Code)
 }
 
+func TestHandler_GetUnreadAlertCount(t *testing.T) {
 	t.Run("returns correct unread count", func(t *testing.T) {
 		h, e, _ := setupTestHandler(t)
 		project := createProject(t, h, "Test Project")
