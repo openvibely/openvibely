@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
+
+const emailInboundReceiptBatchSize = 500
 
 // EmailInboundReceiptRepo records messages whose durable Email ingress handoff
 // completed, allowing IMAP acknowledgement retries without repeating the work.
@@ -26,6 +29,58 @@ func (r *EmailInboundReceiptRepo) Exists(ctx context.Context, mailboxAddress, me
 		return false, fmt.Errorf("check email inbound receipt: %w", err)
 	}
 	return exists, nil
+}
+
+// ExistsBatch returns the receipt keys already present for one mailbox. Queries
+// are deliberately chunked so callers cannot turn a large unread batch into an
+// unbounded SQLite statement or exceed SQLite's bind-variable limit.
+func (r *EmailInboundReceiptRepo) ExistsBatch(ctx context.Context, mailboxAddress string, messageKeys []string) (map[string]struct{}, error) {
+	existing := make(map[string]struct{}, len(messageKeys))
+	uniqueKeys := make([]string, 0, len(messageKeys))
+	seen := make(map[string]struct{}, len(messageKeys))
+	for _, messageKey := range messageKeys {
+		if _, ok := seen[messageKey]; ok {
+			continue
+		}
+		seen[messageKey] = struct{}{}
+		uniqueKeys = append(uniqueKeys, messageKey)
+	}
+	for start := 0; start < len(uniqueKeys); start += emailInboundReceiptBatchSize {
+		end := start + emailInboundReceiptBatchSize
+		if end > len(uniqueKeys) {
+			end = len(uniqueKeys)
+		}
+		chunk := uniqueKeys[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")
+		args := make([]interface{}, 0, len(chunk)+1)
+		args = append(args, mailboxAddress)
+		for _, messageKey := range chunk {
+			args = append(args, messageKey)
+		}
+		rows, err := r.db.QueryContext(ctx,
+			`SELECT message_key FROM email_inbound_receipts WHERE mailbox_address = ? AND message_key IN (`+placeholders+`)`,
+			args...,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("check email inbound receipt batch: %w", err)
+		}
+		for rows.Next() {
+			var messageKey string
+			if err := rows.Scan(&messageKey); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("scan email inbound receipt batch: %w", err)
+			}
+			existing[messageKey] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("read email inbound receipt batch: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("close email inbound receipt batch: %w", err)
+		}
+	}
+	return existing, nil
 }
 
 func (r *EmailInboundReceiptRepo) Record(ctx context.Context, mailboxAddress, messageKey string) error {
