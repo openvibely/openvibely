@@ -302,6 +302,15 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	if got := byID[running.ID].Category; got != models.CategoryActive {
 		t.Errorf("projected running task category = %q, want active", got)
 	}
+	fullTasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("reload full task context: %v", err)
+	}
+	wantContext := BuildChatContextWithAgentDefinitions(fullTasks, nil, nil, nil, time.Unix(0, 0))
+	gotContext := BuildChatContextWithAgentDefinitions(got, nil, nil, nil, time.Unix(0, 0))
+	if gotContext != wantContext {
+		t.Fatalf("compact normalized context changed model-facing bytes\nwant:\n%s\ngot:\n%s", wantContext, gotContext)
+	}
 	for _, statement := range counter.Statements() {
 		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
 		if strings.Contains(normalized, "select id, project_id, title, category, priority, status, prompt") {
