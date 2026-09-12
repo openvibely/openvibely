@@ -112,6 +112,7 @@ type AgenticOptions struct {
 
 // AgenticResponse is the result of an agentic send.
 type AgenticResponse struct {
+	LastContextTokens   int    // Latest response input + output; never cumulative billing usage.
 	Text                string // final text output (all turns concatenated)
 	Model               string
 	InputTokens         int
@@ -207,6 +208,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 
 		result.Compacted = true
+		result.LastContextTokens = 0 // Pre-compaction usage no longer describes this context.
 
 		if opts.OnCompaction != nil {
 			opts.OnCompaction(strings.TrimSpace(summary))
@@ -292,6 +294,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 
 		result.InputTokens += turnResult.inputTokens
+		result.LastContextTokens = 0
+		if turnResult.inputTokens > 0 {
+			result.LastContextTokens = turnResult.inputTokens + turnResult.outputTokens
+		}
 		result.OutputTokens += turnResult.outputTokens
 		result.CachedInputTokens += turnResult.cachedInputTokens
 		result.ReasoningTokens += turnResult.reasoningTokens

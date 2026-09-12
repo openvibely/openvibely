@@ -53,6 +53,7 @@ type AgentRequest struct {
 	// NativeCompactionStateJSON contains provider-native compacted input items
 	// that must be replayed structurally rather than rendered as chat text.
 	NativeCompactionStateJSON string
+	ContextTokenEstimate      int // Reported last-response usage plus locally added context.
 }
 
 type lifecycleHookCallContextKey struct{}
@@ -112,6 +113,7 @@ func TransportScopeFromContext(ctx context.Context) string {
 // Usage tracks provider usage in a canonical shape.
 // Only TotalTokens is guaranteed across all transports; the other fields are best-effort.
 type Usage struct {
+	LastContextTokens         int
 	InputTokens               int
 	OutputTokens              int
 	TotalTokens               int
