@@ -100,48 +100,50 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			</div>
 		</div>
 		<!-- Chat Messages Container -->
-		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
-			if hasEarlier && len(chatHistory) > 0 {
-				@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
-			}
-			if len(chatHistory) == 0 && len(pendingInputs) == 0 {
-				@components.ChatEmptyState("Start a conversation by typing a message below")
-			} else {
-				for _, exec := range chatHistory {
-					<div
-						id={ "chat-execution-" + exec.ID }
-						class="chat-execution-pair space-y-6"
-						data-execution-pair="true"
-						data-exec-id={ exec.ID }
-						data-exec-status={ string(exec.Status) }
-						data-execution-revision={ components.ChatExecutionRevision(exec) }
-						data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }
-						if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled {
-							hx-preserve="true"
-						}
-					>
-						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID)
-						} else {
-							@components.ChatBubble("User", exec.PromptSent)
-						}
-						if exec.Status == models.ExecCompleted {
-							@components.ChatBubble("Assistant", exec.Output)
-						} else if exec.Status == models.ExecFailed {
-							@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
-						} else if exec.Status == models.ExecCancelled {
-							@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
-						} else if exec.Status == models.ExecRunning {
-							@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
-						}
-					</div>
+		<div class="relative flex-1 min-h-0 min-w-0">
+			<div id="chat-messages" class="h-full min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
+				if hasEarlier && len(chatHistory) > 0 {
+					@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 				}
-				@components.PendingThreadInputRows(pendingInputs, chatQueuedSteerEndpoint)
-			}
+				if len(chatHistory) == 0 && len(pendingInputs) == 0 {
+					@components.ChatEmptyState("Start a conversation by typing a message below")
+				} else {
+					for _, exec := range chatHistory {
+						<div
+							id={ "chat-execution-" + exec.ID }
+							class="chat-execution-pair space-y-6"
+							data-execution-pair="true"
+							data-exec-id={ exec.ID }
+							data-exec-status={ string(exec.Status) }
+							data-execution-revision={ components.ChatExecutionRevision(exec) }
+							data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }
+							if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled {
+								hx-preserve="true"
+							}
+						>
+							if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
+								@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID)
+							} else {
+								@components.ChatBubble("User", exec.PromptSent)
+							}
+							if exec.Status == models.ExecCompleted {
+								@components.ChatBubble("Assistant", exec.Output)
+							} else if exec.Status == models.ExecFailed {
+								@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+							} else if exec.Status == models.ExecCancelled {
+								@components.ChatBubbleError("Assistant", "Cancelled", exec.Output)
+							} else if exec.Status == models.ExecRunning {
+								@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
+							}
+						</div>
+					}
+					@components.PendingThreadInputRows(pendingInputs, chatQueuedSteerEndpoint)
+				}
+			</div>
+			@components.ChatLatestMessageButton("chat-messages", "scrollTracker_chat-messages")
 		</div>
 		<div id="chat-plan-complete-prompt" class="hidden mb-3 alert bg-base-200/60 border border-base-content/10" data-has-plan-completion={ planCompleteDataAttr(latestPlanComplete) }>
-			<div class="w-full flex flex-wrap items-center justify-between gap-3">
-				<div>
+			<div class="w-full flex flex-wrap items-center justify-between gap-3">				<div>
 					<div class="font-medium text-sm">Plan complete.</div>
 					<div class="text-xs opacity-70">Switch to Orchestrate mode to implement this plan?</div>
 				</div>

@@ -3073,6 +3073,24 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	</script>
 }
 
+// ChatLatestMessageButton renders the shared control for returning a transcript to live output.
+templ ChatLatestMessageButton(messagesID string, trackerKey string) {
+	<button
+		type="button"
+		class="btn btn-sm absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border-base-300 bg-base-100 shadow-lg whitespace-nowrap hidden"
+		data-chat-latest-message
+		data-messages-id={ messagesID }
+		data-tracker-key={ trackerKey }
+		aria-label="Scroll to latest message"
+		hidden
+	>
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+		</svg>
+		Latest message
+	</button>
+}
+
 // ChatAutoScrollScript emits shared auto-scroll and transcript rendering/cleaning JS.
 // Should be included once per page that uses chat components.
 templ ChatAutoScrollScript() {
@@ -3504,7 +3522,7 @@ templ ChatAutoScrollScript() {
 				this.userScrolledUp = prevUserScrolledUp;
 			},
 
-				resetOnUserSend: function() {
+				returnToLatest: function(smooth) {
 					this.userScrolledUp = false;
 					window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
 					if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(this.element);
@@ -3512,10 +3530,13 @@ templ ChatAutoScrollScript() {
 					this._userInteracting = false;
 					this._pointerInteracting = false;
 					if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
-				if (this.element) {
-					window.chatAutoScroll.scrollToBottom(this.element, false);
-				}
-			},
+					if (typeof this.onIntentChange === 'function') this.onIntentChange();
+					if (this.element) window.chatAutoScroll.scrollToBottom(this.element, !!smooth);
+				},
+
+				resetOnUserSend: function() {
+					this.returnToLatest(false);
+				},
 
 			snapshot: function() {
 				if (!this.element) return { scrollTop: 0, userScrolledUp: false, pinned: true };
@@ -4027,7 +4048,94 @@ templ ChatAutoScrollScript() {
 				return existing;
 			};
 
-				window._chatSendScrollIntents = window._chatSendScrollIntents || {};
+			window._chatLatestMessageControllers = window._chatLatestMessageControllers || {};
+
+			window.installChatLatestMessageButtons = function() {
+				var mounted = {};
+				document.querySelectorAll('[data-chat-latest-message]').forEach(function(button) {
+					var messagesID = button.getAttribute('data-messages-id') || '';
+					var trackerKey = button.getAttribute('data-tracker-key') || '';
+					var messages = messagesID ? document.getElementById(messagesID) : null;
+					if (!messagesID || !messages || !trackerKey) return;
+					mounted[messagesID] = true;
+					var existing = window._chatLatestMessageControllers[messagesID];
+					if (existing && existing.button === button && existing.messages === messages) {
+						existing.update();
+						return;
+					}
+					if (existing) existing.destroy();
+
+					var frame = null;
+					var resizeObserver = null;
+					var mutationObserver = null;
+					function tracker() {
+						return window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messages) : window[trackerKey];
+					}
+					function update() {
+						if (!button.isConnected || !messages.isConnected || !window.chatAutoScroll) return;
+						var currentTracker = tracker();
+						var show = !window.chatAutoScroll.isNearBottom(messages) && (!currentTracker || !currentTracker.shouldAutoScroll());
+						button.hidden = !show;
+						button.classList.toggle('hidden', !show);
+					}
+					function scheduleUpdate() {
+						if (frame !== null) return;
+						frame = requestAnimationFrame(function() { frame = null; update(); });
+					}
+					function observeRows() {
+						if (!resizeObserver) return;
+						messages.querySelectorAll(':scope > *, :scope > [data-transcript-layout-root="true"]').forEach(function(row) {
+							resizeObserver.observe(row);
+						});
+					}
+					function onClick() {
+						var currentTracker = tracker();
+						if (currentTracker && currentTracker.returnToLatest) currentTracker.returnToLatest(true);
+						else window.chatAutoScroll.scrollToBottom(messages, true);
+						update();
+					}
+					messages.addEventListener('scroll', scheduleUpdate, {passive: true});
+					button.addEventListener('click', onClick);
+					if (window.ResizeObserver) {
+						resizeObserver = new ResizeObserver(scheduleUpdate);
+						resizeObserver.observe(messages);
+						observeRows();
+					}
+					if (window.MutationObserver) {
+						mutationObserver = new MutationObserver(function() { observeRows(); scheduleUpdate(); });
+						mutationObserver.observe(messages, {childList: true, subtree: true, characterData: true});
+					}
+					var controller = {
+						button: button,
+						messages: messages,
+						update: update,
+						destroy: function() {
+							messages.removeEventListener('scroll', scheduleUpdate);
+							button.removeEventListener('click', onClick);
+							if (resizeObserver) resizeObserver.disconnect();
+							if (mutationObserver) mutationObserver.disconnect();
+							if (frame !== null) cancelAnimationFrame(frame);
+						}
+					};
+					window._chatLatestMessageControllers[messagesID] = controller;
+					update();
+				});
+				Object.keys(window._chatLatestMessageControllers).forEach(function(messagesID) {
+					if (mounted[messagesID]) return;
+					var controller = window._chatLatestMessageControllers[messagesID];
+					controller.destroy();
+					delete window._chatLatestMessageControllers[messagesID];
+				});
+			};
+
+			if (!window._chatLatestMessageLifecycleBound) {
+				window._chatLatestMessageLifecycleBound = true;
+				document.addEventListener('htmx:afterSettle', window.installChatLatestMessageButtons);
+				document.addEventListener('htmx:historyRestore', function() { setTimeout(window.installChatLatestMessageButtons, 0); });
+			}
+			setTimeout(window.installChatLatestMessageButtons, 0);
+
+					window._chatSendScrollIntents = window._chatSendScrollIntents || {};
 
 				function chatSendScrollIntentScopeKey(scope) {
 					return 'scope:' + (scope || '');
