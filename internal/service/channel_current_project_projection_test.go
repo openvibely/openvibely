@@ -67,25 +67,36 @@ func requireProjectIdentityQuery(t *testing.T, statements []string) {
 
 type channelCurrentProjectProjectionFixture struct {
 	repo           *repository.ProjectRepo
+	counter        *testutil.SQLStatementCounter
 	compactHandler chatcontrol.RuntimeActionHandler
 	lookupID       string
 	expected       string
-	fullRowBytes   int
-	compactBytes   int
-	responseBytes  int
 }
 
-func newChannelCurrentProjectProjectionFixture(tb testing.TB, large bool, missing bool) *channelCurrentProjectProjectionFixture {
+func newChannelCurrentProjectProjectionFixture(tb testing.TB, fileBacked, large, missing bool) *channelCurrentProjectProjectionFixture {
 	tb.Helper()
-	db := testutil.NewTestDB(tb)
-	repo := repository.NewProjectRepo(db)
+
+	var projectRepo, writeRepo *repository.ProjectRepo
+	var counter *testutil.SQLStatementCounter
+	if fileBacked {
+		reader, writer, statementCounter := testutil.NewFileBackedSplitStatementCountingTestDB(tb)
+		projectRepo = repository.NewProjectRepo(reader)
+		writeRepo = repository.NewProjectRepo(writer)
+		counter = statementCounter
+	} else {
+		db, statementCounter := testutil.NewStatementCountingTestDB(tb)
+		projectRepo = repository.NewProjectRepo(db)
+		writeRepo = projectRepo
+		counter = statementCounter
+	}
+
 	project := &models.Project{Name: "Benchmark channel project"}
 	if large {
 		project.Description = strings.Repeat("d", 16<<10)
 		project.RepoPath = strings.Repeat("p", 2<<10)
 		project.RepoURL = strings.Repeat("u", 2<<10)
 	}
-	if err := repo.Create(context.Background(), project); err != nil {
+	if err := writeRepo.Create(context.Background(), project); err != nil {
 		tb.Fatalf("Create: %v", err)
 	}
 	lookupID := project.ID
@@ -94,26 +105,16 @@ func newChannelCurrentProjectProjectionFixture(tb testing.TB, large bool, missin
 		lookupID = "missing-channel-project"
 		expected = "Current project ID: " + lookupID + " (details unavailable)"
 	}
-	fullRowBytes := 0
-	if !missing {
-		fullRowBytes = len(project.ID) + len(project.Name) + len(project.Description) + len(project.RepoPath) + len(project.RepoURL)
-	}
-	compactBytes := 0
-	if !missing {
-		compactBytes = len(project.ID) + len(project.Name)
-	}
 	return &channelCurrentProjectProjectionFixture{
-		repo: repo,
+		repo:    projectRepo,
+		counter: counter,
 		compactHandler: buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
 			ChannelDisplayName: "Slack",
 			ProjectID:          lookupID,
-			ProjectRepo:        repo,
+			ProjectRepo:        projectRepo,
 		})["get_current_project"],
-		lookupID:      lookupID,
-		expected:      expected,
-		fullRowBytes:  fullRowBytes,
-		compactBytes:  compactBytes,
-		responseBytes: len(expected),
+		lookupID: lookupID,
+		expected: expected,
 	}
 }
 
@@ -134,27 +135,58 @@ func fullChannelCurrentProjectResult(ctx context.Context, projectRepo *repositor
 }
 
 func BenchmarkChannelCurrentProjectProjection(b *testing.B) {
-	for _, large := range []bool{false, true} {
-		for _, missing := range []bool{false, true} {
-			fixture := newChannelCurrentProjectProjectionFixture(b, large, missing)
-			caseName := fmt.Sprintf("%s/%s", map[bool]string{false: "empty", true: "large"}[large], map[bool]string{false: "existing", true: "missing"}[missing])
-			b.Run(caseName+"/full_GetByID", func(b *testing.B) {
-				runChannelCurrentProjectProjectionBenchmark(b, fixture.fullResult, fixture.expected, fixture.fullRowBytes, fixture.responseBytes)
-			})
-			b.Run(caseName+"/compact_channel_handler", func(b *testing.B) {
-				runChannelCurrentProjectProjectionBenchmark(b, func() (string, error) {
-					return fixture.compactResult()
-				}, fixture.expected, fixture.compactBytes, fixture.responseBytes)
-			})
+	for _, fileBacked := range []bool{false, true} {
+		topology := "in_memory"
+		if fileBacked {
+			topology = "file_backed_1w_1r"
+		}
+		for _, large := range []bool{false, true} {
+			for _, missing := range []bool{false, true} {
+				fixture := newChannelCurrentProjectProjectionFixture(b, fileBacked, large, missing)
+				caseName := fmt.Sprintf("%s/%s", map[bool]string{false: "empty", true: "large"}[large], map[bool]string{false: "existing", true: "missing"}[missing])
+				b.Run(topology+"/"+caseName+"/full_GetByID", func(b *testing.B) {
+					runChannelCurrentProjectProjectionBenchmark(b, fixture, fixture.fullResult)
+				})
+				b.Run(topology+"/"+caseName+"/compact_channel_handler", func(b *testing.B) {
+					runChannelCurrentProjectProjectionBenchmark(b, fixture, fixture.compactResult)
+				})
+			}
 		}
 	}
 }
 
-func runChannelCurrentProjectProjectionBenchmark(b *testing.B, lookup func() (string, error), expected string, selectedBytes, responseBytes int) {
-	b.Helper()
-	if got, err := lookup(); err != nil || got != expected {
-		b.Fatalf("warm lookup = %q, err=%v, want %q", got, err, expected)
+type channelCurrentProjectProjectionMeasurement struct {
+	responseBytes     int
+	selectedTextBytes int
+	sqlStatements     int
+}
+
+func (f *channelCurrentProjectProjectionFixture) observeLookup(tb testing.TB, lookup func() (string, error)) channelCurrentProjectProjectionMeasurement {
+	tb.Helper()
+	f.counter.Reset()
+	f.counter.SetEnabled(true)
+	got, err := lookup()
+	f.counter.SetEnabled(false)
+	if err != nil {
+		tb.Fatalf("observed lookup: %v", err)
 	}
+	if got != f.expected {
+		tb.Fatalf("observed lookup = %q, want %q", got, f.expected)
+	}
+	statements := f.counter.Statements()
+	if len(statements) != 1 {
+		tb.Fatalf("observed SQL statements = %d, want one: %v", len(statements), statements)
+	}
+	return channelCurrentProjectProjectionMeasurement{
+		responseBytes:     len(got),
+		selectedTextBytes: f.counter.SelectedTextBytes(),
+		sqlStatements:     len(statements),
+	}
+}
+
+func runChannelCurrentProjectProjectionBenchmark(b *testing.B, fixture *channelCurrentProjectProjectionFixture, lookup func() (string, error)) {
+	b.Helper()
+	observed := fixture.observeLookup(b, lookup)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -162,12 +194,12 @@ func runChannelCurrentProjectProjectionBenchmark(b *testing.B, lookup func() (st
 		if err != nil {
 			b.Fatal(err)
 		}
-		if got != expected {
-			b.Fatalf("lookup = %q, want %q", got, expected)
+		if got != fixture.expected {
+			b.Fatalf("lookup = %q, want %q", got, fixture.expected)
 		}
 	}
 	b.StopTimer()
-	b.ReportMetric(float64(selectedBytes), "selected_text_bytes/op")
-	b.ReportMetric(float64(responseBytes), "response_bytes/op")
-	b.ReportMetric(1, "sql_statements/op")
+	b.ReportMetric(float64(observed.selectedTextBytes), "selected_text_bytes/op")
+	b.ReportMetric(float64(observed.responseBytes), "response_bytes/op")
+	b.ReportMetric(float64(observed.sqlStatements), "sql_statements/op")
 }
