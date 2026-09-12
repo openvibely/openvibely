@@ -114,7 +114,8 @@ func (s *TaskService) ListByProject(ctx context.Context, projectID, category str
 
 // ListChatContextByProject returns only the task fields consumed by external
 // channel Chat context. The repository projection bounds prompt text and never
-// returns a row suitable for full-record updates or execution.
+// returns a row suitable for full-record updates or execution. Active terminal
+// rows are normalized from the same projected metadata without full hydration.
 func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID string) ([]models.Task, error) {
 	rows, err := s.repo.ListChatContextByProject(ctx, projectID)
 	if err != nil {
