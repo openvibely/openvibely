@@ -337,7 +337,7 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 	history := []models.Execution{
 		{PromptSent: "too old"},
 		{PromptSent: oversized},
-		{PromptSent: "tail"},
+		{ID: "execution-with-stored-replay", PromptSent: "tail"},
 	}
 	retained := retainedUserMessageHistory(history, 20)
 	if len(retained) != 2 {
@@ -346,8 +346,62 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 	if retained[1].PromptSent != "tail" {
 		t.Fatalf("newest retained message should be last = %#v", retained)
 	}
+	if retained[1].ID != "" {
+		t.Fatal("retained prompt must not hydrate the original execution's tool replay")
+	}
 	if got := retained[0].PromptSent; !strings.Contains(got, "[Middle of user message omitted") || !strings.HasPrefix(got, "prefix-") || !strings.HasSuffix(got, "-suffix") {
 		t.Fatalf("boundary message was not middle-truncated with prefix/suffix preserved: %q", got)
+	}
+}
+
+func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewExecutionRepo(db)
+	ctx := context.Background()
+	state := `[{"type":"compaction","encrypted_content":"opaque"}]`
+	if err := repo.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{
+		ScopeType: "chat_project", ScopeID: "fallback", ModelConfigID: "model",
+		SourceExecutionID: "source", Strategy: "openai_responses", ProviderStateJSON: state,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewLLMService(nil, repo, nil, nil, nil, nil)
+	calls := 0
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		switch calls {
+		case 1:
+			if req.NativeCompactionStateJSON != state || len(req.ChatHistory) != 0 {
+				t.Fatalf("expected restored native checkpoint: %#v", req)
+			}
+			return llmcontracts.AgentResult{}, fmt.Errorf("maximum context length exceeded")
+		case 2:
+			if req.Operation != llmcontracts.OperationDirect || !strings.Contains(req.Message, "original answer") {
+				t.Fatalf("summary must use original transcript: %#v", req)
+			}
+		case 3:
+			if len(req.ChatHistory) != 2 || req.ChatHistory[0].ID != "" || !strings.Contains(req.ChatHistory[1].Output, "text summary") {
+				t.Fatalf("expected synthetic summary context: %#v", req)
+			}
+		default:
+			t.Fatalf("unexpected call %d", calls)
+		}
+		if req.NativeCompactionStateJSON != "" || llmcontracts.NativeCompactionStateJSONFromContext(req.Ctx) != "" {
+			t.Fatal("text compaction leaked native encrypted state")
+		}
+		return llmcontracts.AgentResult{Output: "text summary"}, nil
+	})
+	_, err := svc.callProviderWithContextCompactionFallback(adapter, llmcontracts.AgentRequest{
+		Ctx: llmcontracts.WithNativeCompactionStateJSON(ctx, state), Operation: llmcontracts.OperationStreaming,
+		ProjectID: "fallback", Agent: models.LLMConfig{ID: "model", Provider: models.ProviderOpenAI},
+		ChatHistory: []models.Execution{{ID: "source", PromptSent: "original question", Output: "original answer", Status: models.ExecCompleted}},
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+	checkpoint, err := repo.GetChatCompactionCheckpoint(ctx, "chat_project", "fallback")
+	if err != nil || checkpoint == nil || checkpoint.ProviderStateJSON != "" || checkpoint.Strategy != "local_summary" {
+		t.Fatalf("checkpoint=%#v err=%v", checkpoint, err)
 	}
 }
 
