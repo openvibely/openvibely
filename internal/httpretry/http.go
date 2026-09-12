@@ -67,6 +67,8 @@ type RetryEvent struct {
 // failed attempts may already have been emitted; callers own whether those
 // visible/persisted deltas are appended, marked, or rolled back.
 type StreamTurnPolicy struct {
+	// MaxRetries overrides the default when positive.
+	MaxRetries                           int
 	After                                func(time.Duration) <-chan time.Time
 	OnRetry                              func(RetryEvent)
 	RetryableError                       func(error) bool
@@ -279,6 +281,7 @@ func IsConnectionSetupFailure(err error) bool {
 // not buffer callbacks or enforce UI rollback; fn/callers decide live-output
 // semantics.
 func DoStreamTurn[T any](ctx context.Context, policy StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
+	maxRetries := streamTurnNotifyPolicy(policy).MaxRetries
 	after := policy.After
 	if after == nil {
 		after = time.After
@@ -333,7 +336,7 @@ func DoStreamTurn[T any](ctx context.Context, policy StreamTurnPolicy, fn func(c
 			continue
 		}
 
-		if retries >= StreamTurnMaxRetries {
+		if retries >= maxRetries {
 			return result, err
 		}
 		retries++
@@ -347,8 +350,12 @@ func DoStreamTurn[T any](ctx context.Context, policy StreamTurnPolicy, fn func(c
 }
 
 func streamTurnNotifyPolicy(policy StreamTurnPolicy) Policy {
+	maxRetries := policy.MaxRetries
+	if maxRetries <= 0 {
+		maxRetries = StreamTurnMaxRetries
+	}
 	return Policy{
-		MaxRetries:     StreamTurnMaxRetries,
+		MaxRetries:     maxRetries,
 		After:          policy.After,
 		OnRetry:        policy.OnRetry,
 		RetryableError: policy.RetryableError,

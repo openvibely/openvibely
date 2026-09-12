@@ -229,7 +229,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, disableTools bool, rawDirectPrompt bool, lifecycleHookCall bool) (string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v lifecycle_hook=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools, lifecycleHookCall)
 
-	client, releaseTransport, err := a.getClient(ctx, agent, "")
+	client, releaseTransport, err := a.getClient(ctx, agent, llmcontracts.TransportScopeFromContext(ctx))
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -816,6 +816,10 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig, transpo
 		if transportScope != "" {
 			state, release := a.acquireResponsesTransportState(agent, transportScope)
 			client.SetResponsesTransportState(state)
+			if strings.HasPrefix(transportScope, "compaction:") {
+				// Summary attempts share a session only until their compact turn ends.
+				context.AfterFunc(ctx, state.Close)
+			}
 			releaseTransport = release
 		}
 		return client, releaseTransport, nil
@@ -836,6 +840,9 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig, transpo
 		if transportScope != "" {
 			state, release := a.acquireResponsesTransportState(agent, transportScope)
 			client.SetResponsesTransportState(state)
+			if strings.HasPrefix(transportScope, "compaction:") {
+				context.AfterFunc(ctx, state.Close)
+			}
 			releaseTransport = release
 		}
 		return client, releaseTransport, nil

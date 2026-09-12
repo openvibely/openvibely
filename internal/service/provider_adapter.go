@@ -654,8 +654,17 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 
 func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
 	history := append([]models.Execution(nil), req.ChatHistory...)
+	summaryBase := req
+	summaryCtx := req.Ctx
+	if summaryCtx == nil {
+		summaryCtx = context.Background()
+	}
+	summaryCtx, cancelSummary := context.WithCancel(summaryCtx)
+	summaryBase.Ctx = summaryCtx
+	defer cancelSummary()
+	summaryBase.TransportScope = fmt.Sprintf("compaction:%s:%d", req.ExecID, time.Now().UnixNano())
 	for len(history) > 0 {
-		summary, err := s.localSummaryCompaction(adapter, req, history)
+		summary, err := s.localSummaryCompaction(adapter, summaryBase, history)
 		if err == nil {
 			compacted := req
 			compacted.ChatHistory = buildCompactedReplacementHistory(history, summary)
@@ -680,7 +689,7 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.Message = buildLocalSummaryCompactionPrompt(history)
 	summaryReq.Attachments = nil
 	summaryReq.ExecID = ""
-	summaryReq.TransportScope = ""
+	summaryReq.Ctx = llmcontracts.WithTransportScope(summaryReq.Ctx, req.TransportScope)
 	summaryReq.ChatHistory = nil
 	summaryReq.ChatSystemContext = ""
 	summaryReq.ProjectInstructions = ""

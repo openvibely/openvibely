@@ -201,6 +201,7 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	client.responsesTransportState.websocketDisabled.Store(true)
 	items := []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}
 	compactedItems, summary, err := client.compactAgenticInputItems(context.Background(), items, DefaultTools(), &AgenticOptions{
 		Model:           "gpt-5.6-luna",
@@ -244,8 +245,10 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 
 func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/responses/compact" {
-			t.Fatalf("path = %q, want /v1/responses/compact", r.URL.Path)
+		if r.URL.Path != "/v1/responses" {
+			t.Errorf("path = %q, want /v1/responses", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusBadRequest)
+			return
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
 			t.Fatalf("Authorization = %q", got)
@@ -264,8 +267,12 @@ func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.
 		if parallel, ok := body["parallel_tool_calls"].(bool); !ok || parallel {
 			t.Fatalf("parallel_tool_calls = %#v, want false", body["parallel_tool_calls"])
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"type":"compaction","encrypted_content":"summary"}]}`))
+		input := body["input"].([]any)
+		if input[len(input)-1].(map[string]any)["type"] != "compaction_trigger" {
+			t.Error("missing compaction trigger")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"summary\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"compact\",\"status\":\"completed\"}}\n\n"))
 	}))
 	defer srv.Close()
 
@@ -274,12 +281,111 @@ func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.
 	defer func() { OpenAIAPIBaseURL = original }()
 
 	client := NewWithAPIKey("sk-test")
+	client.responsesTransportState.websocketDisabled.Store(true)
 	items := []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}
 	_, _, err := client.compactAgenticInputItems(context.Background(), items, DefaultTools(), &AgenticOptions{
 		Model: "gpt-5.6-sol",
 	}, false)
 	if err != nil {
 		t.Fatalf("compactAgenticInputItems: %v", err)
+	}
+}
+
+func TestNativeCompactionReusesTurnTransport(t *testing.T) {
+	for _, oauth := range []bool{false, true} {
+		for _, fallback := range []bool{false, true} {
+			t.Run(fmt.Sprintf("oauth=%v/http=%v", oauth, fallback), func(t *testing.T) {
+				var upgrades atomic.Int32
+				requests := make(chan map[string]any, 3)
+				respond := func(body map[string]any) []byte {
+					requests <- body
+					input, _ := body["input"].([]any)
+					for _, raw := range input {
+						if item, ok := raw.(map[string]any); ok && item["type"] == "compaction_trigger" {
+							return []byte("{\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"opaque-unchanged\"}}\n" + `{"type":"response.completed","response":{"id":"compacted","status":"completed"}}`)
+						}
+					}
+					return []byte(`{"type":"response.completed","response":{"id":"normal","status":"completed","output":[]}}`)
+				}
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("Upgrade") == "websocket" {
+						upgrades.Add(1)
+						if fallback {
+							http.Error(w, "no websocket", http.StatusUpgradeRequired)
+							return
+						}
+						conn, err := websocket.Accept(w, r, nil)
+						if err != nil {
+							t.Error(err)
+							return
+						}
+						defer conn.CloseNow()
+						for i := 0; i < 3; i++ {
+							_, data, err := conn.Read(r.Context())
+							if err != nil {
+								t.Error(err)
+								return
+							}
+							var body map[string]any
+							if err := json.Unmarshal(data, &body); err != nil {
+								t.Error(err)
+								return
+							}
+							for _, event := range strings.Split(string(respond(body)), "\n") {
+								if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+									t.Error(err)
+									return
+								}
+							}
+						}
+						return
+					}
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+						return
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					for _, event := range strings.Split(string(respond(body)), "\n") {
+						fmt.Fprintf(w, "data: %s\n\n", event)
+					}
+				}))
+				defer srv.Close()
+				oldAPI, oldOAuth := OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL
+				OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = srv.URL+"/", srv.URL
+				defer func() { OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = oldAPI, oldOAuth }()
+				client := NewWithAPIKey("sk-test")
+				if oauth {
+					client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+				}
+				defer client.CloseResponsesTransport()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				opts := &AgenticOptions{Model: "gpt-5.6-sol", DisableTools: true, MaxTurns: 1}
+				if _, err := client.SendAgentic(ctx, "hello", opts); err != nil {
+					t.Fatal(err)
+				}
+				items := []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}
+				compacted, _, err := client.compactAgenticInputItems(ctx, items, nil, opts, oauth)
+				if err != nil {
+					t.Fatal(err)
+				}
+				opts.InitialInputItems = compacted
+				if _, err := client.SendAgentic(ctx, "continue", opts); err != nil {
+					t.Fatal(err)
+				}
+				if upgrades.Load() != 1 {
+					t.Fatalf("upgrades = %d, want one shared connection/one fallback attempt", upgrades.Load())
+				}
+				<-requests
+				<-requests
+				last := <-requests
+				encoded, _ := json.Marshal(last["input"])
+				if !strings.Contains(string(encoded), "opaque-unchanged") {
+					t.Fatalf("continuation lost compaction: %s", encoded)
+				}
+			})
+		}
 	}
 }
 

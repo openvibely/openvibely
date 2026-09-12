@@ -876,7 +876,7 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	}
 
 	instructions := compactionInstructions(opts)
-	if isChatGPTOAuth {
+	if isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) {
 		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
 	}
 
@@ -885,7 +885,7 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		return nil, "", fmt.Errorf("compaction input is empty after trimming")
 	}
 
-	if isChatGPTOAuth {
+	if isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) {
 		return c.compactAgenticInputItemsViaResponsesV2(ctx, trimmedInput, tools, opts)
 	}
 
@@ -971,95 +971,37 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	compactionInput := append([]any(nil), inputItems...)
 	compactionInput = append(compactionInput, agenticInputItem{"type": "compaction_trigger"})
 
-	payload := map[string]any{
-		"model":   opts.Model,
-		"input":   compactionInput,
-		"stream":  true,
-		"store":   false,
-		"include": []string{"reasoning.encrypted_content"},
-	}
-	system := openAICompactionV2Instructions(opts, true)
-	if system != "" {
-		payload["instructions"] = system
-	}
-	if len(tools) > 0 {
-		payload["tools"] = tools
-		payload["parallel_tool_calls"] = openAIModelSupportsParallelToolCalls(opts.Model)
-	}
-
-	reasoningPayload := map[string]any{}
-	if effort := normalizeReasoningEffort(opts.ReasoningEffort); effort != "" {
-		reasoningPayload["effort"] = effort
-	}
-	if summary := normalizeReasoningSummary(opts.ReasoningSummary); summary != "" {
-		reasoningPayload["summary"] = summary
-	}
-	if isResponsesLiteWebsocketModel(opts.Model) {
-		if len(reasoningPayload) == 0 {
-			reasoningPayload["effort"] = responsesLiteDefaultReasoningEffort(opts.Model)
-		}
-		reasoningPayload["context"] = "all_turns"
-	}
-	if len(reasoningPayload) > 0 {
-		payload["reasoning"] = reasoningPayload
-	}
-
-	body, err := json.Marshal(payload)
+	// Use the normal model-session transport, including WebSocket connection
+	// reuse, incremental input tracking, OAuth recovery, and HTTP fallback.
+	compactionOpts := *opts
+	compactionOpts.System = openAICompactionV2Instructions(opts, strings.TrimSpace(c.auth.APIKey) == "")
+	compactionOpts.WebSearchEnabled = false
+	compactionOpts.OnText = nil
+	compactionOpts.OnThinking = nil
+	compactionOpts.OnToolUse = nil
+	compactionOpts.OnToolResult = nil
+	isOAuth := strings.TrimSpace(c.auth.APIKey) == ""
+	result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		MaxRetries:                           2, // Codex remote compaction v2 stream retry cap.
+		RetryableError:                       isRetryableResponsesTransportError,
+		RetryConnectionFailuresWithoutBudget: true,
+	}, func(attemptCtx context.Context) (*agenticTurnResult, error) {
+		return c.sendAgenticTurn(attemptCtx, compactionInput, tools, &compactionOpts, isOAuth)
+	})
 	if err != nil {
-		return nil, "", fmt.Errorf("marshal compaction response request: %w", err)
-	}
-
-	endpoint, err := c.responsesEndpoint(true)
-	if err != nil {
-		return nil, "", err
-	}
-
-	buildReq := func() (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-		if err != nil {
-			return nil, err
-		}
-		c.applyAuthHeaders(httpReq, true)
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Accept", "text/event-stream")
-		if isResponsesLiteWebsocketModel(opts.Model) {
-			httpReq.Header.Set("x-openai-internal-codex-responses-lite", "true")
-		}
-		return httpReq, nil
-	}
-
-	resp, err := c.doWithOAuthRecovery(ctx, endpoint, true, buildReq)
-	if err != nil {
-		return nil, "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errBody, _ := io.ReadAll(resp.Body)
-		apiErr := parseAPIError(resp.StatusCode, errBody)
-		return nil, "", fmt.Errorf("POST %q (compaction response): %w", endpoint, apiErr)
-	}
-
-	result, err := c.parseAgenticStream(resp.Body, nil, nil)
-	if err != nil {
-		return nil, "", fmt.Errorf("parse compaction response: %w", err)
+		return nil, "", fmt.Errorf("compaction response: %w", err)
 	}
 	compactionItems := make([]any, 0, 1)
 	for _, raw := range result.outputItems {
 		item, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "compaction") {
+		if ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "compaction") {
 			compactionItems = append(compactionItems, item)
 		}
 	}
 	if len(compactionItems) != 1 {
 		return nil, "", fmt.Errorf("compaction response returned %d compaction items, want 1", len(compactionItems))
 	}
-
-	summary := extractCompactionSummaryFromOutputItems(compactionItems)
-	return buildAgenticRemoteCompactionV2History(inputItems, compactionItems[0]), summary, nil
+	return buildAgenticRemoteCompactionV2History(inputItems, compactionItems[0]), extractCompactionSummaryFromOutputItems(compactionItems), nil
 }
 
 func buildAgenticRemoteCompactionV2History(inputItems []any, compactionItem any) []any {
