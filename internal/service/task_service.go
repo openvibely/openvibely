@@ -112,6 +112,32 @@ func (s *TaskService) ListByProject(ctx context.Context, projectID, category str
 	return s.ListByProjectWithSort(ctx, projectID, category, "")
 }
 
+// ListChatContextByProject returns only the task fields consumed by external
+// channel Chat context. The repository projection bounds prompt text and never
+// returns a row suitable for full-record updates or execution.
+func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID string) ([]models.Task, error) {
+	rows, err := s.repo.ListChatContextByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	tasks := make([]models.Task, 0, len(rows))
+	for _, row := range rows {
+		tasks = append(tasks, models.Task{
+			ID:           row.ID,
+			Title:        row.Title,
+			Category:     row.Category,
+			Priority:     row.Priority,
+			Status:       row.Status,
+			Prompt:       row.PromptPreview,
+			AgentID:      row.AgentID,
+			Tag:          row.Tag,
+			ParentTaskID: row.ParentTaskID,
+			ChainConfig:  row.ChainConfig,
+		})
+	}
+	return tasks, nil
+}
+
 func (s *TaskService) ListBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
 	return s.repo.ListBreadcrumbSelector(ctx, projectID, search, currentID, scheduleOnly, limit)
 }

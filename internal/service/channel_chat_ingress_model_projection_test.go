@@ -6,11 +6,164 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestBuildChannelChatContextUsesCompactTaskProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	task := &models.Task{
+		ProjectID:   "default",
+		Title:       "Inbound context task",
+		Category:    models.CategoryBacklog,
+		Priority:    2,
+		Status:      models.StatusPending,
+		Prompt:      strings.Repeat("prompt payload ", 4096),
+		ChainConfig: `{"enabled":true,"trigger":"on_completion","child_title":"Inbound child"}`,
+		SwarmConfig: strings.Repeat("swarm payload ", 4096),
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create context task: %v", err)
+	}
+	runAt := time.Now().UTC().Add(time.Hour)
+	if err := scheduleRepo.Create(ctx, &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          runAt,
+		RepeatType:     models.RepeatOnce,
+		RepeatInterval: 1,
+		Enabled:        true,
+		NextRun:        &runAt,
+	}); err != nil {
+		t.Fatalf("create context schedule: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	got := buildChannelChatContext(ctx, channelChatContextOptions{
+		ProjectID:    "default",
+		TaskSvc:      taskSvc,
+		ScheduleRepo: scheduleRepo,
+	})
+	counter.SetEnabled(false)
+	if !strings.Contains(got, task.Title) || !strings.Contains(got, "Inbound child") || !strings.Contains(got, "Scheduled tasks in this project:") {
+		t.Fatalf("shared context lost task or schedule details: %s", got)
+	}
+	statements := counter.Statements()
+	if len(statements) != 2 {
+		t.Fatalf("shared context statements = %#v, want exactly task plus schedule reads", statements)
+	}
+	var taskStatement string
+	for _, statement := range statements {
+		if strings.Contains(strings.ToLower(statement), "substr(prompt") {
+			taskStatement = strings.ToLower(statement)
+			break
+		}
+	}
+	if taskStatement == "" {
+		t.Fatalf("shared context did not use compact task query: %#v", statements)
+	}
+	for _, forbidden := range []string{"swarm_config", "worktree_path", "merge_target_branch", "lineage_depth", "completed_at"} {
+		if strings.Contains(taskStatement, forbidden) {
+			t.Fatalf("shared context task query selected full-only column %q: %s", forbidden, taskStatement)
+		}
+	}
+}
+
+func TestChannelChatContextCompactTaskProjectionMatchesFullContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	root := &models.Task{
+		ProjectID:   "default",
+		Title:       "Compact root",
+		Category:    models.CategoryBacklog,
+		Priority:    3,
+		Status:      models.StatusPending,
+		Tag:         "feature",
+		Prompt:      "short prompt",
+		ChainConfig: `{"enabled":true,"trigger":"on_completion","child_title":"Generated child"}`,
+	}
+	long := &models.Task{
+		ProjectID:   "default",
+		Title:       "Compact long",
+		Category:    models.CategoryScheduled,
+		Priority:    2,
+		Status:      models.StatusRunning,
+		Prompt:      strings.Repeat("long prompt ", 100),
+		ChainConfig: `{"enabled":true,"trigger":"on_planning_complete","child_title":"Long child"}`,
+	}
+	malformed := &models.Task{
+		ProjectID:    "default",
+		Title:        "Compact malformed",
+		Category:     models.CategoryCompleted,
+		Priority:     1,
+		Status:       models.StatusCompleted,
+		Prompt:       "malformed chain",
+		ChainConfig:  `{"enabled":`,
+		ParentTaskID: &root.ID,
+	}
+	chat := &models.Task{
+		ProjectID: "default",
+		Title:     "Compact chat task",
+		Category:  models.CategoryChat,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "chat task must remain excluded",
+	}
+	for _, task := range []*models.Task{root, long, malformed, chat} {
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", task.Title, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE title WHEN 'Compact long' THEN 1 WHEN 'Compact malformed' THEN 2 WHEN 'Compact root' THEN 3 ELSE 4 END WHERE project_id = 'default'`); err != nil {
+		t.Fatalf("set deterministic task display order: %v", err)
+	}
+	runAt := time.Date(2026, time.January, 12, 9, 30, 0, 0, time.UTC)
+	for _, task := range []*models.Task{root, long} {
+		nextRun := runAt.Add(time.Hour)
+		if err := scheduleRepo.Create(ctx, &models.Schedule{
+			TaskID:         task.ID,
+			RunAt:          runAt,
+			RepeatType:     models.RepeatDaily,
+			RepeatInterval: 1,
+			Enabled:        task == root,
+			NextRun:        &nextRun,
+		}); err != nil {
+			t.Fatalf("create schedule for %q: %v", task.Title, err)
+		}
+	}
+
+	fullTasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("list full task context fixture: %v", err)
+	}
+	compactTasks, err := taskSvc.ListChatContextByProject(ctx, "default")
+	if err != nil {
+		t.Fatalf("list compact task context fixture: %v", err)
+	}
+	schedules, err := scheduleRepo.ListByProject(ctx, "default")
+	if err != nil {
+		t.Fatalf("list schedule context fixture: %v", err)
+	}
+	want := BuildChatContextWithAgentDefinitions(fullTasks, nil, nil, schedules, runAt)
+	got := BuildChatContextWithAgentDefinitions(compactTasks, nil, nil, schedules, runAt)
+	if got != want {
+		t.Fatalf("compact context changed model-facing bytes\nwant:\n%s\ngot:\n%s", want, got)
+	}
+	if strings.Contains(got, chat.Title) || !strings.Contains(got, "Generated child") || !strings.Contains(got, "tag:feature") || !strings.Contains(got, "parent:"+root.ID) {
+		t.Fatalf("compact context lost task filtering or annotations: %s", got)
+	}
+}
 
 func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
@@ -190,6 +343,121 @@ func TestChannelChatAgentSelectionWithNoModelsUsesCompactQuery(t *testing.T) {
 	assertChannelCompactStatement(t, statements)
 }
 
+func BenchmarkChannelChatTaskContextProjection(b *testing.B) {
+	for _, taskCount := range []int{20, 300} {
+		b.Run(fmt.Sprintf("Full/%d", taskCount), func(b *testing.B) {
+			fixture := newChannelTaskContextBenchmarkFixture(b, taskCount)
+			fixture.assertTwoContextReads(b, true)
+			fixture.benchmark(b, true)
+		})
+		b.Run(fmt.Sprintf("Compact/%d", taskCount), func(b *testing.B) {
+			fixture := newChannelTaskContextBenchmarkFixture(b, taskCount)
+			fixture.assertTwoContextReads(b, false)
+			fixture.benchmark(b, false)
+		})
+	}
+}
+
+type channelTaskContextBenchmarkFixture struct {
+	ctx          context.Context
+	counter      *testutil.SQLStatementCounter
+	taskSvc      *TaskService
+	taskRepo     *repository.TaskRepo
+	scheduleRepo *repository.ScheduleRepo
+}
+
+func newChannelTaskContextBenchmarkFixture(tb testing.TB, taskCount int) *channelTaskContextBenchmarkFixture {
+	tb.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	payload := strings.Repeat("payload", 32*1024/len("payload"))
+	chainPayload := strings.Repeat("chain-payload", 32*1024/len("chain-payload"))
+	for i := 0; i < taskCount; i++ {
+		task := &models.Task{
+			ProjectID:   "default",
+			Title:       fmt.Sprintf("Benchmark task %03d", i),
+			Category:    models.CategoryBacklog,
+			Priority:    2,
+			Status:      models.StatusPending,
+			Prompt:      payload,
+			ChainConfig: chainPayload,
+			SwarmConfig: payload,
+		}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			tb.Fatalf("create benchmark task %d: %v", i, err)
+		}
+		if i%3 == 0 {
+			runAt := time.Date(2026, time.January, 12, 9, 30, 0, 0, time.UTC).Add(time.Duration(i) * time.Minute)
+			if err := scheduleRepo.Create(ctx, &models.Schedule{
+				TaskID:         task.ID,
+				RunAt:          runAt,
+				RepeatType:     models.RepeatDaily,
+				RepeatInterval: 1,
+				Enabled:        true,
+				NextRun:        &runAt,
+			}); err != nil {
+				tb.Fatalf("create benchmark schedule %d: %v", i, err)
+			}
+		}
+	}
+	return &channelTaskContextBenchmarkFixture{
+		ctx:          ctx,
+		counter:      counter,
+		taskSvc:      NewTaskService(taskRepo, nil, nil),
+		taskRepo:     taskRepo,
+		scheduleRepo: scheduleRepo,
+	}
+}
+
+func (f *channelTaskContextBenchmarkFixture) load(full bool) (string, error) {
+	var (
+		tasks []models.Task
+		err   error
+	)
+	if full {
+		tasks, err = f.taskSvc.ListByProject(f.ctx, "default", "")
+	} else {
+		tasks, err = f.taskSvc.ListChatContextByProject(f.ctx, "default")
+	}
+	if err != nil {
+		return "", err
+	}
+	schedules, err := f.scheduleRepo.ListByProject(f.ctx, "default")
+	if err != nil {
+		return "", err
+	}
+	return BuildChatContextWithAgentDefinitions(tasks, nil, nil, schedules, time.Date(2026, time.January, 12, 12, 0, 0, 0, time.UTC)), nil
+}
+
+func (f *channelTaskContextBenchmarkFixture) assertTwoContextReads(tb testing.TB, full bool) {
+	tb.Helper()
+	f.counter.Reset()
+	f.counter.SetEnabled(true)
+	if _, err := f.load(full); err != nil {
+		tb.Fatalf("load benchmark context: %v", err)
+	}
+	f.counter.SetEnabled(false)
+	if got := len(f.counter.Statements()); got != 2 {
+		tb.Fatalf("context query count = %d, want 2", got)
+	}
+}
+
+func (f *channelTaskContextBenchmarkFixture) benchmark(b *testing.B, full bool) {
+	b.Helper()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		contextText, err := f.load(full)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if contextText == "" {
+			b.Fatal("benchmark context is empty")
+		}
+	}
+}
 func BenchmarkChannelModelLoads(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := repository.NewLLMConfigRepo(db)
