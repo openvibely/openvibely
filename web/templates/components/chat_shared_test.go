@@ -110,6 +110,18 @@ func TestChatInputForm_ComposerHintHasNoTooltipAndKeepsAccessibleName(t *testing
 				t.Fatalf("render composer: %v", err)
 			}
 			body := buf.String()
+			formStart := strings.Index(body, "<form")
+			if formStart == -1 {
+				t.Fatal("composer form is missing")
+			}
+			formEnd := strings.Index(body[formStart:], ">")
+			if formEnd == -1 {
+				t.Fatal("composer form opening tag is incomplete")
+			}
+			form := body[formStart : formStart+formEnd+1]
+			if !strings.Contains(form, `novalidate`) {
+				t.Fatalf("composer form must suppress native validation tooltips: %s", form)
+			}
 			textareaStart := strings.Index(body, "<textarea")
 			if textareaStart == -1 {
 				t.Fatal("composer textarea is missing")
@@ -124,6 +136,9 @@ func TestChatInputForm_ComposerHintHasNoTooltipAndKeepsAccessibleName(t *testing
 			}
 			if !strings.Contains(textarea, `aria-label="Message"`) {
 				t.Fatalf("composer textarea must retain an accessible name: %s", textarea)
+			}
+			if !strings.Contains(textarea, `required`) {
+				t.Fatalf("composer textarea must retain required semantics: %s", textarea)
 			}
 			if !strings.Contains(textarea, `placeholder="Enter sends or queues"`) {
 				t.Fatalf("composer textarea must retain its visible keyboard hint: %s", textarea)
