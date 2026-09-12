@@ -41,6 +41,41 @@ func TestBreadcrumbSelectorTaskResultsAreProjectScopedAndPreserveAllowlistedTab(
 	require.NotContains(t, rec.Body.String(), secret.Title)
 }
 
+func TestBreadcrumbSelectorTaskResultsExposeTwentyRowBoundaryAndHasMore(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Task selector boundary project")
+	for i := 0; i < 21; i++ {
+		createTask(t, h, project.ID, fmt.Sprintf("Boundary selector task %02d", i))
+	}
+	current := createTask(t, h, project.ID, "Boundary selector current task")
+
+	req := httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+current.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	require.Equal(t, 20, strings.Count(body, `data-breadcrumb-selector-option`))
+	require.Contains(t, body, `aria-selected="true"`)
+	require.Contains(t, body, current.Title)
+	require.Contains(t, body, "More matches are available")
+
+	exactProject := createProject(t, h, "Task selector exact boundary project")
+	for i := 0; i < 19; i++ {
+		createTask(t, h, exactProject.ID, fmt.Sprintf("Exact boundary selector task %02d", i))
+	}
+	exactCurrent := createTask(t, h, exactProject.ID, "Exact boundary selector current task")
+
+	req = httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+exactProject.ID+"&current_id="+exactCurrent.ID, nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body = rec.Body.String()
+	require.Equal(t, 20, strings.Count(body, `data-breadcrumb-selector-option`))
+	require.Contains(t, body, exactCurrent.Title)
+	require.Equal(t, 19, strings.Count(body, "Exact boundary selector task"))
+	require.NotContains(t, body, "More matches are available")
+}
+
 func TestBreadcrumbSelectorScheduleOriginShowsOnlyTasksWithScheduleRows(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Schedule selector project")
