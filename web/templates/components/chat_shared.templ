@@ -2097,7 +2097,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							function submitComposer(endpoint, intent, payload) {
 								if (!endpoint) return;
 								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : (messageInput ? messageInput.value : '');
-								if (!submittedMessage.trim()) return;
+								if (submittedMessage === '') return;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
 									var expectedTurnInput = form.querySelector('input[name="expected_turn_id"]');
 									payload = payload || {
