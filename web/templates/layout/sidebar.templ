@@ -319,7 +319,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									return;
 								}
 
-							if (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'chat_user_input_requested' || eventType === 'mixture_progress') {
+							if (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress' || eventType === 'chat_user_input_requested') {
 								window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);
 								if (eventType === 'mixture_progress') {
 									window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
