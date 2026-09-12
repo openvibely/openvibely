@@ -71,6 +71,10 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   function wait() { return new Promise(function(resolve) { setTimeout(resolve, 150); }); }
   var idleInput = document.getElementById('message-input');
   var activeInput = document.getElementById('task-message-input');
+  var idleForm = document.getElementById('chat-form');
+  var activeForm = document.getElementById('task-thread-form');
+  if (!idleForm.noValidate || !activeForm.noValidate) fail('composer forms must suppress native validation tooltips');
+  if (!idleInput.required || !activeInput.required) fail('composer required semantics are missing');
   var apple = idleInput.placeholder.includes('⌘+⏎ steers');
   var modifier = apple ? {metaKey:true} : {ctrlKey:true};
   var expectedHint = apple ? '⏎ sends or queues · ⌘+⏎ steers' : 'Enter sends or queues · Ctrl+Enter steers';
