@@ -33,26 +33,87 @@ const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent
 
 const taskDetailActionMetadataColumns = `id, status`
 
-// chatTaskContextSelectColumns contains only the task fields used by the
-// external-channel Chat context formatter. Prompt is bounded in SQLite so the
-// scanner can never materialize an entire task description for this path. The
-// chain expression reconstructs only the fields the formatter reads; malformed
-// JSON becomes the same disabled configuration that ParseChainConfig uses for
-// an empty configuration.
-const chatTaskContextSelectColumns = `id, title, category, priority, status, substr(prompt, 1, 501), agent_id, tag, parent_task_id,
-	CASE WHEN json_valid(chain_config) THEN
-		CASE WHEN (json_type(chain_config, '$.enabled') IS NULL OR json_type(chain_config, '$.enabled') IN ('true', 'false'))
-				AND (json_type(chain_config, '$.trigger') IS NULL OR json_type(chain_config, '$.trigger') = 'text')
-				AND (json_type(chain_config, '$.child_title') IS NULL OR json_type(chain_config, '$.child_title') = 'text')
+// chatTaskContextQuery contains only the task fields used by the external-channel
+// Chat context formatter. Prompt is bounded in SQLite so the scanner can never
+// materialize an entire task description for this path. The chain projection
+// walks only the root and child_chain_config objects, validates the same known
+// JSON field types that encoding/json accepts (including null and case-insensitive
+// keys), and reconstructs only the fields the formatter reads. Invalid JSON or
+// invalid known field types become the same disabled configuration that
+// ParseChainConfig returns for malformed input.
+const chatTaskContextQuery = `WITH RECURSIVE
+	chain_json AS (
+		SELECT t.id AS task_id, tree.id AS node_id, tree.parent, tree.key, tree.type, tree.value
+		FROM tasks t
+		JOIN json_tree(CASE WHEN json_valid(t.chain_config) THEN t.chain_config ELSE 'null' END) AS tree ON TRUE
+		WHERE t.project_id = ? AND t.category != 'chat'
+	),
+	chain_nodes(task_id, node_id) AS (
+		SELECT task_id, node_id
+		FROM chain_json
+		WHERE parent IS NULL AND type = 'object'
+		UNION ALL
+		SELECT child.task_id, child.node_id
+		FROM chain_json child
+		JOIN chain_nodes parent ON parent.task_id = child.task_id AND parent.node_id = child.parent
+		WHERE lower(CAST(child.key AS TEXT)) = 'child_chain_config' AND child.type = 'object'
+	),
+	chain_projection AS (
+		SELECT root.task_id,
+			CASE WHEN root.type = 'object'
+				AND NOT EXISTS (
+					SELECT 1
+					FROM chain_json field
+					JOIN chain_nodes node ON node.task_id = field.task_id AND node.node_id = field.parent
+					WHERE field.task_id = root.task_id
+						AND lower(CAST(field.key AS TEXT)) IN (
+							'enabled', 'trigger', 'child_agent_id', 'child_model', 'child_category',
+							'child_title', 'child_prompt_prefix', 'child_task_id',
+							'child_automation_node_key', 'child_chain_config'
+						)
+						AND (
+							(lower(CAST(field.key AS TEXT)) = 'enabled' AND field.type NOT IN ('true', 'false', 'null'))
+							OR (lower(CAST(field.key AS TEXT)) IN (
+								'trigger', 'child_agent_id', 'child_model', 'child_category', 'child_title',
+								'child_prompt_prefix', 'child_task_id', 'child_automation_node_key'
+							) AND field.type NOT IN ('text', 'null'))
+							OR (lower(CAST(field.key AS TEXT)) = 'child_chain_config' AND field.type NOT IN ('object', 'null'))
+						)
+				)
 			THEN json_object(
-				'enabled', json(CASE WHEN COALESCE(json_extract(chain_config, '$.enabled'), 0) THEN 'true' ELSE 'false' END),
-				'trigger', COALESCE(json_extract(chain_config, '$.trigger'), ''),
-				'child_title', COALESCE(json_extract(chain_config, '$.child_title'), '')
+				'enabled', json(CASE WHEN COALESCE((
+					SELECT field.value
+					FROM chain_json field
+					WHERE field.task_id = root.task_id AND field.parent = root.node_id
+						AND lower(CAST(field.key AS TEXT)) = 'enabled'
+					ORDER BY field.node_id DESC LIMIT 1
+				), 0) != 0 THEN 'true' ELSE 'false' END),
+				'trigger', COALESCE((
+					SELECT field.value
+					FROM chain_json field
+					WHERE field.task_id = root.task_id AND field.parent = root.node_id
+						AND lower(CAST(field.key AS TEXT)) = 'trigger'
+					ORDER BY field.node_id DESC LIMIT 1
+				), ''),
+				'child_title', COALESCE((
+					SELECT field.value
+					FROM chain_json field
+					WHERE field.task_id = root.task_id AND field.parent = root.node_id
+						AND lower(CAST(field.key AS TEXT)) = 'child_title'
+					ORDER BY field.node_id DESC LIMIT 1
+				), '')
 			)
 			ELSE '{}'
-		END
-		ELSE '{}'
-	END`
+			END AS chain_config
+		FROM chain_json root
+		WHERE root.parent IS NULL
+	)
+	SELECT t.id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, 501), t.agent_id, t.tag, t.parent_task_id,
+		COALESCE(chain_projection.chain_config, '{}')
+	FROM tasks t
+	LEFT JOIN chain_projection ON chain_projection.task_id = t.id
+	WHERE t.project_id = ? AND t.category != 'chat'
+	ORDER BY t.display_order ASC, t.created_at ASC`
 
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, auto_merge_on_goal_achieved, merge_target_branch, merge_status`
 
@@ -141,10 +202,7 @@ func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category
 // by external-channel Chat context. Chat-category tasks are excluded here just
 // as BuildChatContextWithAgentDefinitions excludes them before formatting.
 func (r *TaskRepo) ListChatContextByProject(ctx context.Context, projectID string) ([]ChatTaskContextRow, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT `+chatTaskContextSelectColumns+`
-		FROM tasks
-		WHERE project_id = ? AND category != 'chat'
-		ORDER BY display_order ASC, created_at ASC`, projectID)
+	rows, err := r.db.QueryContext(ctx, chatTaskContextQuery, projectID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing chat task context: %w", err)
 	}
