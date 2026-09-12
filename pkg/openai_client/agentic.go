@@ -839,7 +839,7 @@ func openAIAutoCompactionTokenLimit(model string) int {
 func openAIModelContextWindow(model string) (int, bool) {
 	switch strings.ToLower(strings.TrimSpace(model)) {
 	case "gpt-6-astra":
-		return 1050000, true
+		return 272000, true
 	case "gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna":
