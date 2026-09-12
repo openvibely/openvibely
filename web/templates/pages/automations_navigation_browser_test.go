@@ -60,7 +60,7 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`role="link" tabindex="0" aria-label="Open Automation Paused Delivery"`,
 		`data-automation-url="/automations/automation-native?project_id=project-search"`,
 		`data-automation-url="/automations/automation-paused?project_id=project-search"`,
-		`onkeydown="if (event.target !== this || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"`,
+		`onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"`,
 		`class="card-body relative"`,
 		`class="absolute top-4 right-4"`,
 		`data-automation-card-action`,
@@ -244,6 +244,15 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 			browser.call("Input.dispatchKeyEvent", params, nil)
 			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
 		}
+		pressRepeated := func(key, code, text string) {
+			params := map[string]any{"type": "keyDown", "key": key, "code": code, "autoRepeat": true}
+			if text != "" {
+				params["text"] = text
+				params["unmodifiedText"] = text
+			}
+			browser.call("Input.dispatchKeyEvent", params, nil)
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
+		}
 		cardSelector := func(id string) string {
 			return fmt.Sprintf(`[data-card-select-id=%q]`, id)
 		}
@@ -337,11 +346,21 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 		browser.click(cardSelector("automation-active-browser") + " .card-body")
 		browser.waitFor("native mouse card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, activeURL)
 		tabToCard("automation-active-browser")
+		beforeRepeat := navigationCount(activeURL)
+		pressRepeated("Enter", "Enter", "")
+		if got := navigationCount(activeURL); got != beforeRepeat {
+			t.Fatalf("repeated Enter navigated active card: count %s, want %s", got, beforeRepeat)
+		}
 		press("Enter", "Enter", "")
 		browser.waitFor("native Enter card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, activeURL)
 
 		pausedURL := cardURL("automation-paused-browser")
 		tabToCard("automation-paused-browser")
+		beforeRepeat = navigationCount(pausedURL)
+		pressRepeated(" ", "Space", " ")
+		if got := navigationCount(pausedURL); got != beforeRepeat {
+			t.Fatalf("repeated Space navigated paused card: count %s, want %s", got, beforeRepeat)
+		}
 		press(" ", "Space", " ")
 		browser.waitFor("native Space card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, pausedURL)
 

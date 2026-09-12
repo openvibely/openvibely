@@ -515,7 +515,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" data-card-select-eligible=\"true\" onclick=\"window.openVibelyNavigate(this.dataset.automationUrl)\" onkeydown=\"if (event.target !== this || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" data-automation-card-action onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" data-card-select-eligible=\"true\" onclick=\"window.openVibelyNavigate(this.dataset.automationUrl)\" onkeydown=\"if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" data-automation-card-action onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

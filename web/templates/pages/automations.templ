@@ -91,7 +91,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 						data-card-select-id={ card.Automation.ID }
 						data-card-select-eligible="true"
 						onclick="window.openVibelyNavigate(this.dataset.automationUrl)"
-						onkeydown="if (event.target !== this || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"
+						onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"
 					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" data-automation-card-action onclick="event.stopPropagation()">
