@@ -294,12 +294,15 @@ func TestDeleteGlobalSkillUsesTargetScopeOnUnfilteredProjectPage(t *testing.T) {
 }
 
 func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
-	h, e, _ := setupTestHandler(t)
+	h, e, _, db := setupTestHandlerWithDB(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
+	project := createProject(t, h, "Delete Skill Analytics Project")
+	project.RepoPath = t.TempDir()
+	require.NoError(t, h.projectRepo.Update(t.Context(), project))
 	writeStandaloneSkill(t, root, "debug_tests", "Debug Tests", "Find and fix tests", "global")
 
-	req := httptest.NewRequest(http.MethodDelete, "/skills/debug_tests?scope=global", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/skills/debug_tests?scope=global&project_id="+project.ID, nil)
 	req.Header.Set("HX-Request", "true")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -320,6 +323,13 @@ func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
 	if strings.Contains(string(index), "debug_tests") {
 		t.Fatalf("expected skill index to omit deleted skill, got:\n%s", index)
 	}
+	events := skillAnalyticsEventsForTest(t, db, "debug_tests")
+	require.Len(t, events, 1)
+	require.Equal(t, project.ID, events[0].ProjectID)
+	require.Equal(t, models.SkillScopeGlobal, events[0].SkillScope)
+	require.Equal(t, models.SkillEventEdited, events[0].EventType)
+	require.Equal(t, models.SkillEventSourceManual, events[0].Source)
+	require.Equal(t, models.SkillSurfaceTaskThread, events[0].Surface)
 }
 
 func TestImportSkillPackageWritesSkillAndSupportFiles(t *testing.T) {
