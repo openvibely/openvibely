@@ -6,6 +6,8 @@ import "os/exec"
 
 func configureTestBrowserProcess(_ *exec.Cmd) {}
 
+func startTestBrowserProcess(cmd *exec.Cmd) error { return cmd.Start() }
+
 func stopTestBrowserProcess(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return

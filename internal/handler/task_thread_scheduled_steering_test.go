@@ -366,6 +366,12 @@ func handlerTestChromePath(t *testing.T) string {
 
 func runHandlerChromeFixture(t *testing.T, chrome, targetURL, name string, virtualTimeBudget int, timeout time.Duration) {
 	t.Helper()
+	browserSlot, err := testutil.AcquireBrowserSlot()
+	if err != nil {
+		t.Fatalf("acquire browser test slot: %v", err)
+	}
+	defer browserSlot.Release()
+
 	tempDir := t.TempDir()
 	stdoutPath := filepath.Join(tempDir, "chrome-stdout.html")
 	stderrPath := filepath.Join(tempDir, "chrome-stderr.log")

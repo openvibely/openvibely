@@ -1313,7 +1313,7 @@ func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *t
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=8000", "--dump-dom", fixture.URL,
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := runHandlerBrowserProcess(cmd)
 	if ctx.Err() != nil {
 		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
 	}
@@ -1465,7 +1465,7 @@ func TestCardPaginationProductionBrowserDoesNotRestoreClearedURLSearchAfterRefre
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL+"?search=foo",
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := runHandlerBrowserProcess(cmd)
 	if ctx.Err() != nil {
 		t.Fatalf("Chrome timed out: %v (clearedSearchRequests=%d)\n%s", ctx.Err(), clearedSearchRequests.Load(), out)
 	}
@@ -1587,7 +1587,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := runHandlerBrowserProcess(cmd)
 	if ctx.Err() != nil {
 		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
 	}
@@ -1712,7 +1712,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *tes
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := runHandlerBrowserProcess(cmd)
 	if ctx.Err() != nil {
 		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
 	}
@@ -1945,7 +1945,7 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=10000", "--dump-dom", fixture.URL,
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := runHandlerBrowserProcess(cmd)
 	if ctx.Err() != nil {
 		t.Fatalf("Chrome timed out: %v (requests=%d wrongOffsets=%d)\n%s", ctx.Err(), continuationRequests.Load(), wrongOffsets.Load(), out)
 	}
@@ -2203,7 +2203,7 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check",
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=12000", "--dump-dom", fixture.URL,
 	)
-	out, err := cmd.CombinedOutput()
+	out, err := runHandlerBrowserProcess(cmd)
 	if ctx.Err() != nil {
 		t.Fatalf("Chrome timed out: %v (staleStarted=%v staleRequests=%d retryRequests=%d livePageRequests=%d)\n%s", ctx.Err(), staleStarted.Load(), staleRequests.Load(), retryRequests.Load(), livePageRequests.Load(), out)
 	}

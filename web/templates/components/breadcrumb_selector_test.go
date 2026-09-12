@@ -202,7 +202,7 @@ func runBreadcrumbSelectorMobileFixture(t *testing.T, chrome, targetURL string, 
 	)
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := cmd.Start(); err != nil {
+	if err := startTestBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome mobile breadcrumb fixture: %v", err)
 	}
 	defer stopTestBrowserProcess(cmd)

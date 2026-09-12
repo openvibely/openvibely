@@ -186,7 +186,7 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check", "--no-first-run",
 		"--virtual-time-budget=3000", "--dump-dom", srv.URL,
 	)
-	out, runErr := cmd.CombinedOutput()
+	out, runErr := runHandlerBrowserProcess(cmd)
 	dom := string(out)
 	if ctx.Err() != nil && !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		t.Fatalf("chrome timed out: %v\n%s", ctx.Err(), out)
@@ -350,7 +350,7 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 		"--disable-background-networking", "--disable-extensions", "--no-default-browser-check", "--no-first-run",
 		"--virtual-time-budget=3000", "--dump-dom", srv.URL,
 	)
-	out, runErr := cmd.CombinedOutput()
+	out, runErr := runHandlerBrowserProcess(cmd)
 	dom := string(out)
 	if runErr != nil {
 		t.Fatalf("chrome failed: %v\n%s", runErr, out)

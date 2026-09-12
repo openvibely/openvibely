@@ -295,7 +295,7 @@ func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virt
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
-	if err := cmd.Start(); err != nil {
+	if err := startTestBrowserProcess(cmd); err != nil {
 		_ = stdoutFile.Close()
 		_ = stderrFile.Close()
 		t.Fatalf("start Chrome %s fixture: %v", name, err)
