@@ -354,6 +354,59 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 	}
 }
 
+func TestReportedContextUsagePersistsAndTriggersNextTurn(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewExecutionRepo(db)
+	ctx := context.Background()
+	first := llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, ProjectID: "usage-project", ExecID: "previous", Agent: models.LLMConfig{ID: "usage-model", Provider: models.ProviderOpenAICompatible, ContextWindow: 10000}, Message: "short"}
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		return llmcontracts.AgentResult{Output: "done", Usage: llmcontracts.Usage{LastContextTokens: 9500, TotalTokens: 900000}}, nil
+	})
+	svc := NewLLMService(nil, repo, nil, nil, nil, nil)
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, first); err != nil {
+		t.Fatal(err)
+	}
+	// New service simulates a restart: the baseline must come from the database.
+	svc = NewLLMService(nil, repo, nil, nil, nil, nil)
+	second := first
+	second.ExecID = "next"
+	second.ChatHistory = []models.Execution{{ID: "previous", PromptSent: "short", Output: "done", Status: models.ExecCompleted}}
+	calls := 0
+	adapter = providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		if calls == 1 && req.Operation != llmcontracts.OperationDirect {
+			t.Fatal("reported usage should trigger proactive summary despite tiny text history")
+		}
+		if req.ContextTokenEstimate >= 900000 {
+			t.Fatal("used cumulative billing usage")
+		}
+		return llmcontracts.AgentResult{Output: "summary"}, nil
+	})
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, second); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls=%d, want summary and continuation", calls)
+	}
+}
+
+func TestReportedContextUsageAddsOnlyNewContent(t *testing.T) {
+	req := llmcontracts.AgentRequest{Message: "12345678", ChatHistory: []models.Execution{{ID: "source", Output: strings.Repeat("x", 10000)}}}
+	baseline := models.ChatContextUsage{SourceExecutionID: "source", ContextTokens: 120000}
+	if got := estimateContextFromReportedUsage(req, baseline); got != 120002 {
+		t.Fatalf("got %d, want 120002", got)
+	}
+	baseline.ContextTokens = 0
+	if got := estimateContextFromReportedUsage(req, baseline); got != 0 {
+		t.Fatalf("missing usage must use full estimate: %d", got)
+	}
+	baseline.ContextTokens = 120000
+	baseline.SourceExecutionID = "missing"
+	if got := estimateContextFromReportedUsage(req, baseline); got != 0 {
+		t.Fatalf("missing source must use full estimate: %d", got)
+	}
+}
+
 func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewExecutionRepo(db)

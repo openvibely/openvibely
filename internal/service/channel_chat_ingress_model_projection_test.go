@@ -221,6 +221,14 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	taskRepo := repository.NewTaskRepo(db, nil)
 	taskSvc := NewTaskService(taskRepo, nil, nil)
 
+	backlog := &models.Task{
+		ProjectID: "default",
+		Title:     "Existing backlog task",
+		Category:  models.CategoryBacklog,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "backlog prompt",
+	}
 	failed := &models.Task{
 		ProjectID: "default",
 		Title:     "Active failed task",
@@ -245,10 +253,18 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 		Status:    models.StatusRunning,
 		Prompt:    "running prompt",
 	}
-	for _, task := range []*models.Task{failed, cancelled, running} {
+	for _, task := range []*models.Task{backlog, failed, cancelled, running} {
 		if err := taskRepo.Create(ctx, task); err != nil {
 			t.Fatalf("create task %q: %v", task.Title, err)
 		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE title
+		WHEN 'Existing backlog task' THEN 5
+		WHEN 'Active running task' THEN 20
+		WHEN 'Active failed task' THEN 100
+		WHEN 'Active cancelled task' THEN 101
+	END WHERE project_id = ?`, "default"); err != nil {
+		t.Fatalf("set deterministic display order: %v", err)
 	}
 
 	counter.Reset()
@@ -258,8 +274,14 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListChatContextByProject: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("compact context tasks = %d, want 3", len(got))
+	wantOrder := []string{"Existing backlog task", "Active failed task", "Active cancelled task", "Active running task"}
+	if len(got) != len(wantOrder) {
+		t.Fatalf("compact context tasks = %d, want %d", len(got), len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if got[i].Title != want {
+			t.Fatalf("compact context order[%d] = %q, want %q", i, got[i].Title, want)
+		}
 	}
 	byID := make(map[string]models.Task, len(got))
 	for _, task := range got {
@@ -287,6 +309,7 @@ func TestListChatContextByProjectNormalizesActiveTerminalTasks(t *testing.T) {
 		}
 	}
 }
+
 func TestChannelChatIngressUsesCompactSelectionAndSelectedDetail(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)

@@ -122,6 +122,7 @@ func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID st
 		return nil, err
 	}
 	tasks := make([]models.Task, 0, len(rows))
+	moved := 0
 	for _, row := range rows {
 		task := models.Task{
 			ID:           row.ID,
@@ -135,14 +136,41 @@ func (s *TaskService) ListChatContextByProject(ctx context.Context, projectID st
 			ParentTaskID: row.ParentTaskID,
 			ChainConfig:  row.ChainConfig,
 		}
-		moved, err := s.repo.NormalizeProjectedActiveTerminalTask(ctx, projectID, task.ID, task.Title, task.Category, task.Status)
+		wasMoved, err := s.repo.NormalizeProjectedActiveTerminalTask(ctx, projectID, task.ID, task.Title, task.Category, task.Status)
 		if err != nil {
 			return nil, fmt.Errorf("normalizing chat context task %s: %w", task.ID, err)
 		}
-		if moved {
+		if wasMoved {
 			task.Category = models.CategoryBacklog
+			moved++
 		}
 		tasks = append(tasks, task)
+	}
+	if moved == 0 {
+		return tasks, nil
+	}
+
+	// Normalization assigns the task a backlog display_order. Reload the same
+	// compact projection so the result preserves the full-list ordering contract
+	// without hydrating any full task records.
+	rows, err = s.repo.ListChatContextByProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	tasks = make([]models.Task, 0, len(rows))
+	for _, row := range rows {
+		tasks = append(tasks, models.Task{
+			ID:           row.ID,
+			Title:        row.Title,
+			Category:     row.Category,
+			Priority:     row.Priority,
+			Status:       row.Status,
+			Prompt:       row.PromptPreview,
+			AgentID:      row.AgentID,
+			Tag:          row.Tag,
+			ParentTaskID: row.ParentTaskID,
+			ChainConfig:  row.ChainConfig,
+		})
 	}
 	return tasks, nil
 }
