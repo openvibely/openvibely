@@ -4095,8 +4095,8 @@ templ ChatAutoScrollScript() {
 					}
 					function onClick() {
 						var currentTracker = tracker();
-						if (currentTracker && currentTracker.returnToLatest) currentTracker.returnToLatest(true);
-						else window.chatAutoScroll.scrollToBottom(messages, true);
+						if (currentTracker && currentTracker.returnToLatest) currentTracker.returnToLatest(false);
+						else window.chatAutoScroll.scrollToBottom(messages, false);
 						update();
 					}
 					messages.addEventListener('scroll', scheduleUpdate, {passive: true});
