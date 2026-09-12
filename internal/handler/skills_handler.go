@@ -404,6 +404,7 @@ func (h *Handler) DeleteSkill(c echo.Context) error {
 	if err := removeStandaloneSkillIndexEntry(filepath.Join(root, "skills", "SKILLS.md"), handle); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
+	h.recordManualSkillEvent(c, models.SkillEventEdited, handle, scope, "")
 	return h.ListSkills(c)
 }
 
