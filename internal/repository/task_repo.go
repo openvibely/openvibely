@@ -84,23 +84,26 @@ const chatTaskContextQuery = `WITH RECURSIVE
 				'enabled', json(CASE WHEN COALESCE((
 					SELECT field.value
 					FROM chain_json field
-					WHERE field.task_id = root.task_id AND field.parent = root.node_id
-						AND lower(CAST(field.key AS TEXT)) = 'enabled'
-					ORDER BY field.node_id DESC LIMIT 1
+						WHERE field.task_id = root.task_id AND field.parent = root.node_id
+							AND lower(CAST(field.key AS TEXT)) = 'enabled'
+							AND field.type != 'null'
+						ORDER BY field.node_id DESC LIMIT 1
 				), 0) != 0 THEN 'true' ELSE 'false' END),
 				'trigger', COALESCE((
 					SELECT field.value
 					FROM chain_json field
-					WHERE field.task_id = root.task_id AND field.parent = root.node_id
-						AND lower(CAST(field.key AS TEXT)) = 'trigger'
-					ORDER BY field.node_id DESC LIMIT 1
+						WHERE field.task_id = root.task_id AND field.parent = root.node_id
+							AND lower(CAST(field.key AS TEXT)) = 'trigger'
+							AND field.type != 'null'
+						ORDER BY field.node_id DESC LIMIT 1
 				), ''),
 				'child_title', COALESCE((
 					SELECT field.value
 					FROM chain_json field
-					WHERE field.task_id = root.task_id AND field.parent = root.node_id
-						AND lower(CAST(field.key AS TEXT)) = 'child_title'
-					ORDER BY field.node_id DESC LIMIT 1
+						WHERE field.task_id = root.task_id AND field.parent = root.node_id
+							AND lower(CAST(field.key AS TEXT)) = 'child_title'
+							AND field.type != 'null'
+						ORDER BY field.node_id DESC LIMIT 1
 				), '')
 			)
 			ELSE '{}'
