@@ -29,6 +29,7 @@ type SQLStatementCounter struct {
 	mu                sync.Mutex
 	enabled           bool
 	statements        []string
+	selectedTextBytes int
 	observer          func(context.Context, string)
 	rowsCloseObserver func(context.Context, string)
 }
@@ -43,12 +44,19 @@ func (c *SQLStatementCounter) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.statements = nil
+	c.selectedTextBytes = 0
 }
 
 func (c *SQLStatementCounter) Statements() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]string(nil), c.statements...)
+}
+
+func (c *SQLStatementCounter) SelectedTextBytes() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.selectedTextBytes
 }
 
 func (c *SQLStatementCounter) SetObserver(observer func(context.Context, string)) {
@@ -67,10 +75,10 @@ func (c *SQLStatementCounter) SetRowsCloseObserver(observer func(context.Context
 	c.rowsCloseObserver = observer
 }
 
-func (c *SQLStatementCounter) hasRowsCloseObserver() bool {
+func (c *SQLStatementCounter) hasRowsInstrumentation() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.rowsCloseObserver != nil
+	return c.enabled || c.rowsCloseObserver != nil
 }
 
 func (c *SQLStatementCounter) recordRowsClose(ctx context.Context, query string) {
@@ -79,6 +87,22 @@ func (c *SQLStatementCounter) recordRowsClose(ctx context.Context, query string)
 	c.mu.Unlock()
 	if observer != nil {
 		observer(ctx, query)
+	}
+}
+
+func (c *SQLStatementCounter) recordSelectedTextBytes(values []driver.Value) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.enabled {
+		return
+	}
+	for _, value := range values {
+		switch value := value.(type) {
+		case string:
+			c.selectedTextBytes += len(value)
+		case []byte:
+			c.selectedTextBytes += len(value)
+		}
 	}
 }
 
@@ -150,7 +174,7 @@ func (c *statementCountingConn) QueryContext(ctx context.Context, query string, 
 	if err != nil {
 		return nil, err
 	}
-	if !c.counter.hasRowsCloseObserver() {
+	if !c.counter.hasRowsInstrumentation() {
 		return rows, nil
 	}
 	return &statementCountingRows{Rows: rows, ctx: ctx, query: query, counter: c.counter}, nil
@@ -216,7 +240,7 @@ func (s *statementCountingStmt) Query(args []driver.Value) (driver.Rows, error) 
 	if err != nil {
 		return nil, err
 	}
-	if !s.counter.hasRowsCloseObserver() {
+	if !s.counter.hasRowsInstrumentation() {
 		return rows, nil
 	}
 	return &statementCountingRows{Rows: rows, ctx: context.Background(), query: s.query, counter: s.counter}, nil
@@ -237,7 +261,7 @@ func (s *statementCountingStmt) QueryContext(ctx context.Context, args []driver.
 		if err != nil {
 			return nil, err
 		}
-		if !s.counter.hasRowsCloseObserver() {
+		if !s.counter.hasRowsInstrumentation() {
 			return rows, nil
 		}
 		return &statementCountingRows{Rows: rows, ctx: ctx, query: s.query, counter: s.counter}, nil
@@ -251,6 +275,14 @@ type statementCountingRows struct {
 	query     string
 	counter   *SQLStatementCounter
 	closeOnce sync.Once
+}
+
+func (r *statementCountingRows) Next(dest []driver.Value) error {
+	err := r.Rows.Next(dest)
+	if err == nil {
+		r.counter.recordSelectedTextBytes(dest)
+	}
+	return err
 }
 
 func (r *statementCountingRows) Close() error {
