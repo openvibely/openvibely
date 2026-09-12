@@ -2328,6 +2328,37 @@ func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ int
 	return nil
 }
 func (c *fakeEmailIMAPClient) Logout() error { return nil }
+
+type blockingEmailIMAPClient struct {
+	*fakeEmailIMAPClient
+	fetchStarted    chan struct{}
+	releaseFetch    chan struct{}
+	terminateCalled chan struct{}
+	blockFetch      sync.Once
+	terminateOnce   sync.Once
+}
+
+func newBlockingEmailIMAPClient(messages ...*imap.Message) *blockingEmailIMAPClient {
+	return &blockingEmailIMAPClient{
+		fakeEmailIMAPClient: newFakeEmailIMAPClient(messages...),
+		fetchStarted:        make(chan struct{}),
+		releaseFetch:        make(chan struct{}),
+		terminateCalled:     make(chan struct{}),
+	}
+}
+
+func (c *blockingEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
+	c.blockFetch.Do(func() {
+		close(c.fetchStarted)
+		<-c.releaseFetch
+	})
+	return c.fakeEmailIMAPClient.Fetch(seqset, items, ch)
+}
+
+func (c *blockingEmailIMAPClient) Terminate() error {
+	c.terminateOnce.Do(func() { close(c.terminateCalled) })
+	return nil
+}
 func (c *fakeEmailIMAPClient) storeBatches() [][]uint32 {
 	batches := make([][]uint32, len(c.storedIDs))
 	for i, ids := range c.storedIDs {
@@ -3421,6 +3452,335 @@ func TestEmailServiceReloadFromSettingsUsesNewPollSnapshot(t *testing.T) {
 
 	require.NoError(t, svc.ReloadFromSettings(context.Background()))
 	assert.False(t, svc.IsRunning(), "removing the address must stop the poller instead of retaining the prior snapshot")
+}
+
+func TestEmailServiceStopFencesBlockedPoll(t *testing.T) {
+	h := newEmailPollReceiptTestHarness(t)
+	cfg := EmailRuntimeConfig{
+		Provider:     EmailProviderCustom,
+		Address:      "old@example.com",
+		Password:     "old-secret",
+		IMAPHost:     "imap.example.com",
+		SMTPHost:     "smtp.example.com",
+		PollInterval: time.Hour,
+	}
+	client := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "old message", "alice@example.com", "old body"))
+	h.svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) { return cfg, nil }
+	h.svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	require.Nil(t, h.svc.processIncomingMessageFn)
+
+	require.NoError(t, h.svc.Start())
+	run := h.svc.pollRun
+	select {
+	case <-client.fetchStarted:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not reach the blocking IMAP fetch")
+	}
+
+	h.svc.Stop()
+	close(client.releaseFetch)
+	select {
+	case <-run.done:
+	case <-time.After(time.Second):
+		t.Fatal("stopped poll did not exit after the blocked IMAP operation was released")
+	}
+
+	tasks, err := h.taskRepo.ListByProject(h.ctx, h.project.ID, "")
+	require.NoError(t, err)
+	assert.Empty(t, tasks, "a poll released after Stop must not create a task")
+	assert.Zero(t, h.receipts.recordCalls, "a stale poll must not record a receipt")
+	assert.Zero(t, h.receipts.withHandoffCalls, "a stale poll must not record a durable handoff")
+	assert.Zero(t, client.storeCalls, "a stale poll must not acknowledge the message")
+	assert.Empty(t, client.seenIDs())
+}
+
+func TestEmailServiceReloadFencesBlockedPreviousAccount(t *testing.T) {
+	oldConfig := EmailRuntimeConfig{
+		Provider:     EmailProviderCustom,
+		Address:      "old@example.com",
+		Password:     "old-secret",
+		IMAPHost:     "imap.example.com",
+		SMTPHost:     "smtp.example.com",
+		PollInterval: time.Hour,
+	}
+	newConfig := oldConfig
+	newConfig.Address = "new@example.com"
+	newConfig.Password = "new-secret"
+	oldClient := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "old account", "alice@example.com", "old body"))
+	newClient := newFakeEmailIMAPClient(testIMAPMessageWithBody(1, "new account", "alice@example.com", "new body"))
+	var loadCalls atomic.Int32
+	processed := make(chan string, 2)
+	svc := &EmailService{}
+	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) {
+		if loadCalls.Add(1) == 1 {
+			return oldConfig, nil
+		}
+		return newConfig, nil
+	}
+	svc.connectIMAP = func(_ context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error) {
+		if cfg.Address == oldConfig.Address {
+			return oldClient, nil
+		}
+		return newClient, nil
+	}
+	svc.processIncomingMessageFn = func(_ context.Context, msg EmailInboundMessage) bool {
+		processed <- msg.Subject
+		return true
+	}
+
+	require.NoError(t, svc.Start())
+	oldRun := svc.pollRun
+	select {
+	case <-oldClient.fetchStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old poll did not reach the blocking IMAP fetch")
+	}
+
+	require.NoError(t, svc.ReloadFromSettings(context.Background()))
+	select {
+	case subject := <-processed:
+		require.Equal(t, "new account", subject, "the replacement poll must use the new account")
+	case <-time.After(time.Second):
+		t.Fatal("replacement poll did not process the new account")
+	}
+
+	close(oldClient.releaseFetch)
+	select {
+	case <-oldRun.done:
+	case <-time.After(time.Second):
+		t.Fatal("old poll did not exit after the blocked IMAP operation was released")
+	}
+	svc.Stop()
+
+	assert.Empty(t, processed, "the superseded poll must not hand off its old-account message")
+	assert.Zero(t, oldClient.storeCalls, "the superseded poll must not acknowledge its old-account message")
+	assert.Empty(t, oldClient.seenIDs())
+	assert.Equal(t, 1, newClient.storeCalls, "the replacement poll should acknowledge its handled message")
+	assert.Equal(t, []uint32{1}, newClient.seenIDs())
+}
+
+func TestEmailServiceRemovalFencesBlockedPoll(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	cfg := EmailRuntimeConfig{
+		Provider:     EmailProviderCustom,
+		Address:      "old@example.com",
+		Password:     "old-secret",
+		IMAPHost:     "imap.example.com",
+		SMTPHost:     "smtp.example.com",
+		PollInterval: time.Hour,
+	}
+	client := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "removed account", "alice@example.com", "old body"))
+	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	var processed atomic.Int32
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) { return cfg, nil }
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed.Add(1)
+		return true
+	}
+
+	require.NoError(t, svc.Start())
+	run := svc.pollRun
+	select {
+	case <-client.fetchStarted:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not reach the blocking IMAP fetch")
+	}
+
+	// handleEmailRemove stops the service before clearing the persisted settings.
+	svc.Stop()
+	close(client.releaseFetch)
+	select {
+	case <-run.done:
+	case <-time.After(time.Second):
+		t.Fatal("removed poll did not exit after the blocked IMAP operation was released")
+	}
+
+	assert.Zero(t, processed.Load(), "removing email must not hand off the old mailbox message")
+	assert.Zero(t, receipts.recordCalls, "removing email must not record a receipt")
+	assert.Zero(t, client.storeCalls, "removing email must not acknowledge the old mailbox message")
+	assert.Empty(t, client.seenIDs())
+}
+func TestEmailServiceConcurrentStopWaitsForFence(t *testing.T) {
+	client := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "in-flight message", "alice@example.com", "body"))
+	processingStarted := make(chan struct{})
+	releaseProcessing := make(chan struct{})
+	var processingOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseProcessing) }) }
+	defer release()
+
+	svc := &EmailService{}
+	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) {
+		return EmailRuntimeConfig{Address: "old@example.com", Password: "secret", IMAPHost: "imap.example.com", SMTPHost: "smtp.example.com", PollInterval: time.Hour}, nil
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processingOnce.Do(func() { close(processingStarted) })
+		<-releaseProcessing
+		return true
+	}
+
+	require.NoError(t, svc.Start())
+	select {
+	case <-client.fetchStarted:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not reach the blocking IMAP fetch")
+	}
+	close(client.releaseFetch)
+	select {
+	case <-processingStarted:
+	case <-time.After(time.Second):
+		t.Fatal("poll did not reach the in-flight handoff")
+	}
+
+	firstStopDone := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(firstStopDone)
+	}()
+	select {
+	case <-client.terminateCalled:
+	case <-time.After(time.Second):
+		t.Fatal("first Stop did not fence the active run")
+	}
+
+	secondStopDone := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(secondStopDone)
+	}()
+
+	secondStopReturnedEarly := false
+	select {
+	case <-secondStopDone:
+		secondStopReturnedEarly = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	select {
+	case <-firstStopDone:
+	case <-time.After(time.Second):
+		t.Fatal("first Stop did not finish after the handoff was released")
+	}
+	select {
+	case <-secondStopDone:
+	case <-time.After(time.Second):
+		t.Fatal("second Stop did not finish after the first Stop completed")
+	}
+	assert.False(t, secondStopReturnedEarly, "a concurrent Stop must wait for the captured run fence")
+	assert.Zero(t, client.storeCalls, "the stopped run must not acknowledge the in-flight message")
+}
+
+func TestEmailServiceStartWaitsForConcurrentStopFence(t *testing.T) {
+	oldConfig := EmailRuntimeConfig{
+		Provider:     EmailProviderCustom,
+		Address:      "old@example.com",
+		Password:     "old-secret",
+		IMAPHost:     "imap.example.com",
+		SMTPHost:     "smtp.example.com",
+		PollInterval: time.Hour,
+	}
+	newConfig := oldConfig
+	newConfig.Address = "new@example.com"
+	newConfig.Password = "new-secret"
+	oldClient := newBlockingEmailIMAPClient(testIMAPMessageWithBody(1, "old account", "alice@example.com", "old body"))
+	newClient := newFakeEmailIMAPClient(testIMAPMessageWithBody(1, "new account", "alice@example.com", "new body"))
+	var loadCalls atomic.Int32
+	oldProcessingStarted := make(chan struct{})
+	releaseOldProcessing := make(chan struct{})
+	var oldProcessingOnce sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseOldProcessing) }) }
+	defer release()
+	newProcessingStarted := make(chan struct{})
+	var newProcessingOnce sync.Once
+
+	svc := &EmailService{}
+	svc.configLoader = func(context.Context) (EmailRuntimeConfig, error) {
+		if loadCalls.Add(1) == 1 {
+			return oldConfig, nil
+		}
+		return newConfig, nil
+	}
+	svc.connectIMAP = func(_ context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error) {
+		if cfg.Address == oldConfig.Address {
+			return oldClient, nil
+		}
+		return newClient, nil
+	}
+	svc.processIncomingMessageFn = func(_ context.Context, msg EmailInboundMessage) bool {
+		if msg.Subject == "old account" {
+			oldProcessingOnce.Do(func() { close(oldProcessingStarted) })
+			<-releaseOldProcessing
+		} else if msg.Subject == "new account" {
+			newProcessingOnce.Do(func() { close(newProcessingStarted) })
+		}
+		return true
+	}
+
+	require.NoError(t, svc.Start())
+	select {
+	case <-oldClient.fetchStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old poll did not reach the blocking IMAP fetch")
+	}
+	close(oldClient.releaseFetch)
+	select {
+	case <-oldProcessingStarted:
+	case <-time.After(time.Second):
+		t.Fatal("old poll did not reach the in-flight handoff")
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		svc.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-oldClient.terminateCalled:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not fence the old run")
+	}
+
+	startDone := make(chan error, 1)
+	go func() { startDone <- svc.Start() }()
+	startReturnedEarly := false
+	newProcessingReturnedEarly := false
+	select {
+	case err := <-startDone:
+		startReturnedEarly = true
+		require.NoError(t, err)
+	case <-newProcessingStarted:
+		newProcessingReturnedEarly = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not finish after the old handoff was released")
+	}
+	if !startReturnedEarly {
+		select {
+		case err := <-startDone:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("replacement Start did not finish after Stop")
+		}
+	}
+	select {
+	case <-newProcessingStarted:
+	case <-time.After(time.Second):
+		t.Fatal("replacement poll did not process the new account")
+	}
+	assert.False(t, startReturnedEarly, "Start must wait for a concurrent Stop to finish fencing")
+	assert.False(t, newProcessingReturnedEarly, "replacement polling must not begin before the old fence completes")
+	assert.Zero(t, oldClient.storeCalls, "the fenced old run must not acknowledge its message")
+	svc.Stop()
 }
 
 func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {

@@ -185,6 +185,95 @@ type emailIMAPClient interface {
 	Logout() error
 }
 
+// emailIMAPTerminator is implemented by clients that can close their transport
+// without waiting for another IMAP command to complete. It is intentionally
+// separate from emailIMAPClient so test and alternate clients do not need to
+// provide transport-specific shutdown behavior.
+type emailIMAPTerminator interface {
+	Terminate() error
+}
+
+type emailPollRun struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+
+	stateMu     sync.Mutex
+	stopped     bool
+	client      emailIMAPClient
+	sideEffects sync.RWMutex
+}
+
+func (r *emailPollRun) setClient(client emailIMAPClient) {
+	if client == nil {
+		return
+	}
+	r.stateMu.Lock()
+	stopped := r.stopped
+	if !stopped {
+		r.client = client
+	}
+	r.stateMu.Unlock()
+	if stopped {
+		terminateEmailIMAPClient(client)
+	}
+}
+
+func (r *emailPollRun) clearClient(emailIMAPClient) {
+	r.stateMu.Lock()
+	r.client = nil
+	r.stateMu.Unlock()
+}
+
+func (r *emailPollRun) isActive() bool {
+	if r.ctx.Err() != nil {
+		return false
+	}
+	r.stateMu.Lock()
+	active := !r.stopped
+	r.stateMu.Unlock()
+	return active
+}
+
+func (r *emailPollRun) acquireSideEffects() bool {
+	r.sideEffects.RLock()
+	if r.isActive() {
+		return true
+	}
+	r.sideEffects.RUnlock()
+	return false
+}
+
+func (r *emailPollRun) releaseSideEffects() {
+	r.sideEffects.RUnlock()
+}
+
+func (r *emailPollRun) stop() {
+	r.stateMu.Lock()
+	if r.stopped {
+		r.stateMu.Unlock()
+		return
+	}
+	r.stopped = true
+	client := r.client
+	r.stateMu.Unlock()
+
+	r.cancel()
+	terminateEmailIMAPClient(client)
+
+	// Wait for any handoff that already acquired the read lock. Work that is
+	// still blocked in IMAP does not hold this lock and is fenced when it
+	// returns, so Stop does not wait on an operation without cancellation.
+	r.sideEffects.Lock()
+	r.sideEffects.Unlock()
+}
+
+func terminateEmailIMAPClient(client emailIMAPClient) {
+	if terminator, ok := client.(emailIMAPTerminator); ok {
+		_ = terminator.Terminate()
+	}
+}
+
 type emailInboundReceiptStore interface {
 	Exists(ctx context.Context, mailboxAddress, messageKey string) (bool, error)
 	Record(ctx context.Context, mailboxAddress, messageKey string) error
@@ -225,9 +314,11 @@ type EmailService struct {
 	uploadsDir                 string
 
 	mu                       sync.RWMutex
+	lifecycleMu              sync.Mutex
 	running                  bool
 	ctx                      context.Context
 	cancel                   context.CancelFunc
+	pollRun                  *emailPollRun
 	connectIMAP              func(ctx context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error)
 	sendMail                 func(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error
 	configLoader             func(context.Context) (EmailRuntimeConfig, error)
@@ -340,6 +431,12 @@ func (s *EmailService) IsRunning() bool {
 }
 
 func (s *EmailService) Start() error {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return s.startLocked()
+}
+
+func (s *EmailService) startLocked() error {
 	cfg, err := s.loadConfig(context.Background())
 	if err != nil || !cfg.Configured() {
 		return err
@@ -350,31 +447,49 @@ func (s *EmailService) Start() error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	run := &emailPollRun{ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	s.ctx = ctx
 	s.cancel = cancel
+	s.pollRun = run
 	s.running = true
 	s.mu.Unlock()
-	go s.pollLoop(ctx, cfg)
+	go s.pollLoop(run, cfg)
 	applog.Infof("[email] polling started for %s", cfg.Address)
 	return nil
 }
 
 func (s *EmailService) Stop() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.stopLocked()
+}
+
+func (s *EmailService) stopLocked() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.running {
+		s.mu.Unlock()
 		return
 	}
-	if s.cancel != nil {
-		s.cancel()
+	run := s.pollRun
+	s.mu.Unlock()
+
+	if run != nil {
+		run.stop()
 	}
+
+	s.mu.Lock()
 	s.running = false
+	s.ctx = nil
+	s.cancel = nil
+	s.mu.Unlock()
 	applog.Infof("[email] polling stopped")
 }
 
 func (s *EmailService) ReloadFromSettings(ctx context.Context) error {
-	s.Stop()
-	return s.Start()
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.stopLocked()
+	return s.startLocked()
 }
 
 func (s *EmailService) TestConnection(ctx context.Context) error {
@@ -465,9 +580,11 @@ func emailRuntimeConfigFromValues(values map[string]string) EmailRuntimeConfig {
 	return cfg
 }
 
-func (s *EmailService) pollLoop(ctx context.Context, cfg EmailRuntimeConfig) {
+func (s *EmailService) pollLoop(run *emailPollRun, cfg EmailRuntimeConfig) {
+	defer close(run.done)
+	ctx := run.ctx
 	if cfg.MarkExistingSeenOnStart {
-		if err := s.markUnreadSeen(ctx, cfg); err != nil {
+		if err := s.markUnreadSeenForRun(ctx, cfg, run); err != nil {
 			applog.Infof("[email] mark existing seen failed: %v", err)
 		}
 	}
@@ -478,7 +595,7 @@ func (s *EmailService) pollLoop(ctx context.Context, cfg EmailRuntimeConfig) {
 		case <-ctx.Done():
 			return
 		default:
-			s.pollOnce(ctx, cfg)
+			s.pollOnceForRun(ctx, cfg, run)
 		}
 		select {
 		case <-ctx.Done():
@@ -489,31 +606,84 @@ func (s *EmailService) pollLoop(ctx context.Context, cfg EmailRuntimeConfig) {
 }
 
 func (s *EmailService) markUnreadSeen(ctx context.Context, cfg EmailRuntimeConfig) error {
+	return s.markUnreadSeenForRun(ctx, cfg, nil)
+}
+
+func (s *EmailService) markUnreadSeenForRun(ctx context.Context, cfg EmailRuntimeConfig, run *emailPollRun) error {
+	if !emailPollCanContinue(ctx, run) {
+		return ctx.Err()
+	}
 	client, err := s.connectIMAP(ctx, cfg)
 	if err != nil {
 		return err
 	}
+	if run != nil {
+		run.setClient(client)
+		defer run.clearClient(client)
+	}
 	defer client.Logout()
+	if !emailPollCanContinue(ctx, run) {
+		return ctx.Err()
+	}
 	if _, err := client.Select("INBOX", false); err != nil {
 		return err
+	}
+	if !emailPollCanContinue(ctx, run) {
+		return ctx.Err()
 	}
 	ids, err := client.Search(unseenCriteria())
 	if err != nil || len(ids) == 0 {
 		return err
 	}
+	if !emailPollCanContinue(ctx, run) {
+		return ctx.Err()
+	}
+	if run != nil {
+		if !run.acquireSideEffects() {
+			return ctx.Err()
+		}
+		defer run.releaseSideEffects()
+		if !run.isActive() {
+			return ctx.Err()
+		}
+	}
 	return storeSeen(client, ids)
 }
 
+func emailPollCanContinue(ctx context.Context, run *emailPollRun) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	return run == nil || run.isActive()
+}
+
 func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
+	s.pollOnceForRun(ctx, cfg, nil)
+}
+
+func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfig, run *emailPollRun) {
+	if !emailPollCanContinue(ctx, run) {
+		return
+	}
 	client, err := s.connectIMAP(ctx, cfg)
 	if err != nil {
 		applog.Infof("[email] IMAP connection failed: %v", err)
 		return
 	}
+	if run != nil {
+		run.setClient(client)
+		defer run.clearClient(client)
+	}
 	defer client.Logout()
+	if !emailPollCanContinue(ctx, run) {
+		return
+	}
 	mailbox, err := client.Select("INBOX", false)
 	if err != nil {
 		applog.Infof("[email] select inbox failed: %v", err)
+		return
+	}
+	if !emailPollCanContinue(ctx, run) {
 		return
 	}
 	ids, err := client.Search(unseenCriteria())
@@ -523,9 +693,15 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		}
 		return
 	}
+	if !emailPollCanContinue(ctx, run) {
+		return
+	}
 	metadata, err := fetchEmailMessageMetadata(client, ids)
 	if err != nil {
 		applog.Infof("[email] fetch message metadata failed: %v", err)
+		return
+	}
+	if !emailPollCanContinue(ctx, run) {
 		return
 	}
 
@@ -535,6 +711,9 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 	mailboxIdentity := emailMailboxIdentity(cfg)
 	selfAddress := repository.NormalizeEmailAddress(cfg.Address)
 	acknowledgementSet, unresolved := s.filterEmailReceiptCandidates(ctx, mailboxIdentity, mailbox.UidValidity, metadata)
+	if !emailPollCanContinue(ctx, run) {
+		return
+	}
 
 	if len(unresolved) > 0 {
 		unresolvedIDs := make([]uint32, 0, len(unresolved))
@@ -545,11 +724,17 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		if err != nil {
 			applog.Infof("[email] fetch messages failed: %v", err)
 		} else {
+			if !emailPollCanContinue(ctx, run) {
+				return
+			}
 			messagesByID := make(map[uint32]fetchedEmailMessage, len(messages))
 			for _, fetched := range messages {
 				messagesByID[fetched.ID] = fetched
 			}
 			for _, candidate := range unresolved {
+				if !emailPollCanContinue(ctx, run) {
+					return
+				}
 				fetched, ok := messagesByID[candidate.ID]
 				if !ok {
 					continue
@@ -575,23 +760,34 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 						continue
 					}
 				}
+				if run != nil {
+					if !run.acquireSideEffects() {
+						return
+					}
+				}
 				result := emailIncomingProcessResult{}
 				if s.processIncomingMessageFn != nil {
 					result.handled = s.ProcessIncoming(ctx, fetched.Message)
 				} else {
 					result = s.processIncomingMessageWithNormalizedSelfAddress(ctx, fetched.Message, mailboxIdentity, messageKey, selfAddress)
 				}
-				if !result.handled {
-					continue
-				}
-				if s.emailInboundReceiptStore != nil && !result.receiptRecorded {
+				if result.handled && s.emailInboundReceiptStore != nil && !result.receiptRecorded {
 					if err := s.emailInboundReceiptStore.Record(ctx, mailboxIdentity, messageKey); err != nil {
 						applog.Infof("[email] record receipt for message %d failed: %v", fetched.ID, err)
 					}
 				}
+				if run != nil {
+					run.releaseSideEffects()
+				}
+				if !result.handled {
+					continue
+				}
 				acknowledgementSet[fetched.ID] = struct{}{}
 			}
 		}
+	}
+	if !emailPollCanContinue(ctx, run) {
+		return
 	}
 	acknowledgementIDs := make([]uint32, 0, len(acknowledgementSet))
 	for _, meta := range metadata {
@@ -600,12 +796,20 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		}
 	}
 	if len(acknowledgementIDs) > 0 {
+		if run != nil {
+			if !run.acquireSideEffects() {
+				return
+			}
+			defer run.releaseSideEffects()
+			if !run.isActive() {
+				return
+			}
+		}
 		if err := storeSeen(client, acknowledgementIDs); err != nil {
 			applog.Infof("[email] mark %d handled messages seen failed: %v", len(acknowledgementIDs), err)
 		}
 	}
 }
-
 func (s *EmailService) filterEmailReceiptCandidates(ctx context.Context, mailboxAddress string, uidValidity uint32, metadata []emailMessageMetadata) (map[uint32]struct{}, []emailMessageCandidate) {
 	acknowledgementSet := make(map[uint32]struct{}, len(metadata))
 	metadataCandidates := make([]emailMessageCandidate, 0, len(metadata))
@@ -710,14 +914,25 @@ func storeSeen(client emailIMAPClient, ids []uint32) error {
 }
 
 func defaultEmailIMAPConnect(ctx context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	addr := fmt.Sprintf("%s:%d", cfg.IMAPHost, cfg.IMAPPort)
 	client, err := imapclient.DialTLS(addr, &tls.Config{ServerName: cfg.IMAPHost})
 	if err != nil {
 		return nil, fmt.Errorf("connect IMAP: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		_ = client.Terminate()
+		return nil, err
+	}
 	if err := client.Login(cfg.Address, cfg.Password); err != nil {
 		_ = client.Logout()
 		return nil, fmt.Errorf("login IMAP: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = client.Terminate()
+		return nil, err
 	}
 	return client, nil
 }
@@ -1003,7 +1218,7 @@ func (s *EmailService) processIncomingMessageWithNormalizedSelfAddress(ctx conte
 		applog.Infof("[email] incoming message deferred: service dependencies are not fully configured")
 		return emailIncomingProcessResult{}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), emailProcessTimeout)
+	ctx, cancel := context.WithTimeout(ctx, emailProcessTimeout)
 	defer cancel()
 	projectID, authorized, err := s.resolveAuthorizedProjectForInbound(ctx, msg.FromAddress)
 	if err != nil {
