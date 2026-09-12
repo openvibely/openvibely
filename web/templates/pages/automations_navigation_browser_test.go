@@ -178,100 +178,7 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 	if err := layout.Base("Automation browser", nil, projectID).Render(context.Background(), &base); err != nil {
 		t.Fatalf("render Automation browser base: %v", err)
 	}
-	initialFragment := renderFragment(cards, true)
-	initialPage := strings.Replace(base.String(), "</body>", initialFragment+`<script>
-window.addEventListener('DOMContentLoaded', function() {
-  function fail(message) { throw new Error(message); }
-  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
-  function waitFor(predicate, timeout) {
-    return new Promise(function(resolve, reject) {
-      var started = Date.now();
-      function poll() {
-        try {
-          var value = predicate();
-          if (value) { resolve(value); return; }
-        } catch (_) {}
-        if (Date.now() - started >= timeout) { reject(new Error('timed out waiting for browser state')); return; }
-        window.setTimeout(poll, 50);
-      }
-      poll();
-    });
-  }
-  function visible(card) {
-    return !!card && window.getComputedStyle(card).display !== 'none' && card.getClientRects().length > 0;
-  }
-  function card(id) { return document.querySelector('[data-card-select-id="' + id + '"]'); }
-  function countNavigation(navigations, url) {
-    return navigations.filter(function(value) { return value === url; }).length;
-  }
-  function keyboard(target, key) {
-    target.focus();
-    target.dispatchEvent(new KeyboardEvent('keydown', {key:key, bubbles:true, cancelable:true}));
-  }
-  async function exerciseActionIsolation(targetCard, navigations) {
-    var actionRoot = targetCard.querySelector('[data-automation-card-action]');
-    if (!actionRoot) fail('missing More actions area for ' + targetCard.getAttribute('data-card-select-id'));
-    var parentURL = targetCard.dataset.automationUrl;
-    var before = countNavigation(navigations, parentURL);
-    var controls = actionRoot.querySelectorAll('label, button, a');
-    if (!controls.length) fail('missing nested Automation actions for ' + targetCard.getAttribute('data-card-select-id'));
-    for (var i = 0; i < controls.length; i++) {
-      keyboard(controls[i], 'Enter');
-      controls[i].dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
-      await new Promise(function(resolve) { window.setTimeout(resolve, 10); });
-      if (countNavigation(navigations, parentURL) !== before) fail('nested action navigated the parent card: ' + controls[i].textContent.trim());
-      var dialog = document.querySelector('dialog[open]');
-      if (dialog) dialog.close();
-    }
-  }
-  (async function() {
-    await new Promise(function(resolve) { window.setTimeout(resolve, 300); });
-    var navigations = [];
-    window.htmx = {ajax:function() { return Promise.resolve(); }, process:function() {}};
-    window.openVibelyNavigate = function(url) { navigations.push(url); return Promise.resolve(); };
-    var root = document.getElementById('automations-container');
-    if (!root) fail('missing Automation pagination root');
-    var active = card('automation-active-browser');
-    var paused = card('automation-paused-browser');
-    if (!active || !paused) fail('missing initial active and paused Automation cards');
-    [active, paused].forEach(function(targetCard) {
-      if (targetCard.getAttribute('role') !== 'link') fail('saved Automation card is missing link semantics');
-      if (targetCard.getAttribute('tabindex') !== '0') fail('saved Automation card is not in normal tab order');
-      if (!targetCard.getAttribute('aria-label') || targetCard.getAttribute('aria-label').indexOf('Automation ') === -1) fail('saved Automation card is missing a meaningful name');
-      if (!targetCard.classList.contains('focus-visible:ring-2') || !targetCard.classList.contains('focus-visible:ring-primary')) fail('saved Automation card is missing its visible focus indicator');
-    });
-    keyboard(active, 'Enter');
-    if (navigations[navigations.length - 1] !== active.dataset.automationUrl) fail('Enter did not use the active Automation card destination');
-    keyboard(paused, ' ');
-    if (navigations[navigations.length - 1] !== paused.dataset.automationUrl) fail('Space did not use the paused Automation card destination');
-    await exerciseActionIsolation(active, navigations);
-    await exerciseActionIsolation(paused, navigations);
-
-    root.scrollTop = root.scrollHeight;
-    root.dispatchEvent(new Event('scroll', {bubbles:true}));
-    var paginated = await waitFor(function() { return card('automation-paginated-browser'); }, 5000);
-    if (paginated.getAttribute('role') !== 'link' || paginated.getAttribute('tabindex') !== '0' || paginated.getAttribute('aria-label') !== 'Open Automation Paginated Delivery') fail('paginated Automation card did not retain accessible navigation markup');
-    if (!paginated.classList.contains('focus-visible:ring-2') || !paginated.classList.contains('focus-visible:ring-primary')) fail('paginated Automation card is missing its visible focus indicator');
-    keyboard(paginated, 'Enter');
-    if (navigations[navigations.length - 1] !== paginated.dataset.automationUrl) fail('Enter did not navigate the paginated Automation card');
-
-    var search = root.querySelector('input[data-card-search]');
-    if (!search) fail('missing Automation card search control');
-    search.value = 'Paused Delivery';
-    search.dispatchEvent(new Event('input', {bubbles:true}));
-    await waitFor(function() {
-      var visibleCards = Array.from(root.querySelectorAll('[data-automation-url]')).filter(visible);
-      return visibleCards.length === 1 && visibleCards[0].getAttribute('data-card-select-id') === 'automation-paused-browser';
-    }, 5000);
-    var filtered = card('automation-paused-browser');
-    if (!filtered.classList.contains('focus-visible:ring-2') || !filtered.classList.contains('focus-visible:ring-primary')) fail('filtered Automation card is missing its visible focus indicator');
-    keyboard(filtered, 'Enter');
-    if (navigations[navigations.length - 1] !== filtered.dataset.automationUrl) fail('Enter did not navigate the filtered Automation card');
-    await exerciseActionIsolation(filtered, navigations);
-    await report('pass', '');
-  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
-});
-</script></body>`, 1)
+	initialPage := strings.Replace(base.String(), "</body>", renderFragment(cards, true)+"</body>", 1)
 	for _, external := range []string{
 		"https://cdn.tailwindcss.com",
 		"https://unpkg.com/htmx.org@2.0.4",
@@ -282,8 +189,16 @@ window.addEventListener('DOMContentLoaded', function() {
 	} {
 		initialPage = strings.ReplaceAll(initialPage, external, "/empty.js")
 	}
+	initialPage = strings.Replace(initialPage, "</head>", `<style>
+[data-card-select-id] { position: relative; display: block; width: 720px; min-height: 120px; margin: 16px; }
+[data-card-select-id] > .card-body { position: relative; min-height: 88px; padding: 16px; }
+[data-card-select-id] [data-automation-card-action] { position: absolute; top: 16px; right: 16px; z-index: 20; }
+[data-card-select-id] [data-automation-card-action] .dropdown { position: relative; }
+[data-card-select-id] [data-automation-card-action] .dropdown-content { position: absolute; top: 100%; right: 0; z-index: 100; display: block; min-width: 192px; margin: 0; padding: 8px; }
+[data-card-select-id] [data-automation-card-action] .dropdown-content li { display: block; }
+[data-card-select-id] [data-automation-card-action] .dropdown-content button { display: block; width: 100%; min-height: 32px; }
+</style></head>`, 1)
 
-	browserResult := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/empty.js":
@@ -312,44 +227,152 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(initialPage))
-		case "/browser-result":
-			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
-			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 
-	stderrPath := filepath.Join(t.TempDir(), "automation-portfolio-browser.stderr")
-	stderrFile, err := os.Create(stderrPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer stderrFile.Close()
-	cmd := exec.Command(chrome,
-		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
-		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--window-size=1200,800",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-portfolio-browser-profile"),
-		server.URL+"/automations?project_id="+projectID,
-	)
-	cmd.Stderr = stderrFile
-	if err := startBrowserProcess(cmd); err != nil {
-		t.Fatalf("start Chrome: %v", err)
-	}
-	defer stopBrowserProcess(cmd)
-
-	select {
-	case outcome := <-browserResult:
-		if outcome != "pass:" {
-			stderr, _ := os.ReadFile(stderrPath)
-			t.Fatalf("Automation portfolio keyboard browser regression failed: %s\n%s", outcome, strings.TrimSpace(string(stderr)))
+	targetURL := server.URL + "/automations?project_id=" + projectID
+	runComposerFocusCDP(t, chrome, targetURL, "automation-portfolio-keyboard", func(browser *composerFocusCDP) {
+		press := func(key, code, text string) {
+			params := map[string]any{"type": "keyDown", "key": key, "code": code}
+			if text != "" {
+				params["text"] = text
+				params["unmodifiedText"] = text
+			}
+			browser.call("Input.dispatchKeyEvent", params, nil)
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": code}, nil)
 		}
-	case <-time.After(20 * time.Second):
-		stderr, _ := os.ReadFile(stderrPath)
-		t.Fatalf("timed out waiting for Automation portfolio keyboard browser regression\n%s", strings.TrimSpace(string(stderr)))
-	}
+		cardSelector := func(id string) string {
+			return fmt.Sprintf(`[data-card-select-id=%q]`, id)
+		}
+		cardURL := func(id string) string {
+			selector := cardSelector(id)
+			return browser.evaluate(fmt.Sprintf(`document.querySelector(%q).dataset.automationUrl`, selector))
+		}
+		navigationCount := func(url string) string {
+			return browser.evaluate(fmt.Sprintf(`String(window.__automationNavigations.filter(function(value) { return value === %q; }).length)`, url))
+		}
+		closeDialogs := func() {
+			browser.evaluate(`document.querySelectorAll('dialog[open]').forEach(function(dialog) { dialog.close(); }); 'closed'`)
+		}
+		assertCard := func(id, name string) {
+			selector := cardSelector(id)
+			wantURL := "/automations/" + id + "?project_id=" + projectID
+			want := "link|0|Open Automation " + name + "|true|true|" + wantURL
+			got := browser.evaluate(fmt.Sprintf(`(function() {
+				var card = document.querySelector(%q);
+				if (!card) return 'missing';
+				return [card.getAttribute('role'), card.getAttribute('tabindex'), card.getAttribute('aria-label'), card.classList.contains('focus-visible:ring-2'), card.classList.contains('focus-visible:ring-primary'), card.dataset.automationUrl].join('|');
+			})()`, selector))
+			if got != want {
+				t.Fatalf("card %s accessibility state = %q, want %q", id, got, want)
+			}
+		}
+		tabToCard := func(id string) {
+			browser.click(`input[data-card-search]`)
+			for i := 0; i < 40; i++ {
+				press("Tab", "Tab", "")
+				got := browser.evaluate(`(function() {
+					var active = document.activeElement;
+					return active && active.getAttribute('data-card-select-id') || '';
+				})()`)
+				if got == id {
+					return
+				}
+			}
+			t.Fatalf("native Tab traversal did not reach card %s; active element was %s", id, browser.evaluate(`document.activeElement && document.activeElement.outerHTML || ''`))
+		}
+		exerciseActionIsolation := func(id string, actionSelectors []string) {
+			parentURL := cardURL(id)
+			moreSelector := cardSelector(id) + ` [data-automation-card-action] label`
+			browser.click(`input[data-card-search]`)
+			for _, actionSelector := range actionSelectors {
+				before := navigationCount(parentURL)
+				browser.click(moreSelector)
+				browser.click(actionSelector)
+				if got := navigationCount(parentURL); got != before {
+					t.Fatalf("nested mouse action %s navigated parent card %s: count %s, want %s", actionSelector, id, got, before)
+				}
+				closeDialogs()
+			}
+			for _, actionSelector := range actionSelectors {
+				before := navigationCount(parentURL)
+				browser.click(moreSelector)
+				for i := 0; i < 20; i++ {
+					press("Tab", "Tab", "")
+					if got := browser.evaluate(fmt.Sprintf(`document.activeElement && document.activeElement.matches(%q) ? 'true' : 'false'`, actionSelector)); got == "true" {
+						break
+					}
+					if i == 19 {
+						t.Fatalf("native Tab traversal did not reach nested action %s in card %s", actionSelector, id)
+					}
+				}
+				press("Enter", "Enter", "")
+				if got := navigationCount(parentURL); got != before {
+					t.Fatalf("nested native keyboard action %s navigated parent card %s: count %s, want %s", actionSelector, id, got, before)
+				}
+				closeDialogs()
+			}
+		}
+
+		browser.waitFor("Automation portfolio", `document.readyState + ':' + Boolean(document.getElementById('automations-container')) + ':' + document.querySelectorAll('[data-automation-url]').length`, "complete:true:2")
+		browser.evaluate(`window.htmx = {ajax: function() { return Promise.resolve(); }, process: function() {}}; window.__automationNavigations = []; window.openVibelyNavigate = function(url) { window.__automationNavigations.push(url); return Promise.resolve(); }; 'ready'`)
+		assertCard("automation-active-browser", "Active Delivery")
+		assertCard("automation-paused-browser", "Paused Delivery")
+
+		activeURL := cardURL("automation-active-browser")
+		browser.click(cardSelector("automation-active-browser") + " .card-body")
+		browser.waitFor("native mouse card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, activeURL)
+		tabToCard("automation-active-browser")
+		press("Enter", "Enter", "")
+		browser.waitFor("native Enter card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, activeURL)
+
+		pausedURL := cardURL("automation-paused-browser")
+		tabToCard("automation-paused-browser")
+		press(" ", "Space", " ")
+		browser.waitFor("native Space card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, pausedURL)
+
+		exerciseActionIsolation("automation-active-browser", []string{
+			fmt.Sprintf(`[data-automation-card-edit=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-duplicate=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-run-now=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-pause=%q]`, "automation-active-browser"),
+			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-active-browser"),
+		})
+		exerciseActionIsolation("automation-paused-browser", []string{
+			fmt.Sprintf(`[data-automation-card-edit=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-duplicate=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-resume=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-paused-browser"),
+		})
+
+		browser.evaluate(`(function() { var root = document.getElementById('automations-container'); root.scrollTop = root.scrollHeight; root.dispatchEvent(new Event('scroll', {bubbles: true})); return 'scrolled'; })()`)
+		browser.waitFor("paginated Automation card", `document.querySelector('[data-card-select-id="automation-paginated-browser"]') ? 'true' : 'false'`, "true")
+		assertCard("automation-paginated-browser", "Paginated Delivery")
+		tabToCard("automation-paginated-browser")
+		press("Enter", "Enter", "")
+		browser.waitFor("native Enter paginated card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, cardURL("automation-paginated-browser"))
+
+		browser.click(`input[data-card-search]`)
+		browser.typeText("Paused Delivery")
+		browser.waitFor("filtered Automation card", `(function() {
+			var root = document.getElementById('automations-container');
+			var visibleCards = Array.from(root.querySelectorAll('[data-automation-url]')).filter(function(card) { return window.getComputedStyle(card).display !== 'none' && card.getClientRects().length > 0; });
+			return visibleCards.length + ':' + (visibleCards[0] && visibleCards[0].getAttribute('data-card-select-id') || '');
+		})()`, "1:automation-paused-browser")
+		assertCard("automation-paused-browser", "Paused Delivery")
+		tabToCard("automation-paused-browser")
+		press("Enter", "Enter", "")
+		browser.waitFor("native Enter filtered card navigation", `window.__automationNavigations[window.__automationNavigations.length - 1] || ''`, pausedURL)
+		exerciseActionIsolation("automation-paused-browser", []string{
+			fmt.Sprintf(`[data-automation-card-edit=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-duplicate=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-resume=%q]`, "automation-paused-browser"),
+			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-paused-browser"),
+		})
+	})
 }
 
 func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *testing.T) {
