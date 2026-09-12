@@ -344,7 +344,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	inThinking := false
-	compactionSummary := ""
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
@@ -356,6 +355,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		AutoCompaction:            !agent.DisableNativeCompaction,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
 		ForceCompactionBeforeTurn: agent.ForceNativeCompaction,
+		InitialInputItems:         nativeCompactionInputItems(ctx),
 		WebSearchEnabled:          true,
 		WorkDir:                   effectiveWorkDir, Attachments: oaAttachments,
 		ExtraTools:             extraTools,
@@ -393,7 +393,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[openai-adapter] CallStreaming context compacted, summary_len=%d", len(summary))
 		}})
 	if err != nil {
@@ -411,9 +410,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	output := sw.String()
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	if compactionSummary != "" {
-		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "openai_responses"}
-	}
+	recordOpenAINativeCompactionState(&usage, resp)
 	applog.Infof("[openai-adapter] CallStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, textOnly, usage, errMaxTokens
@@ -458,7 +455,6 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 	chatInThinking := false
-	compactionSummary := ""
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
@@ -471,6 +467,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		AutoCompaction:            !agent.DisableNativeCompaction,
 		CompactionTokenThreshold:  agent.CompactionThreshold,
 		ForceCompactionBeforeTurn: agent.ForceNativeCompaction,
+		InitialInputItems:         nativeCompactionInputItems(ctx),
 		WebSearchEnabled:          true,
 		DisableTools:              disableTools, WorkDir: effectiveWorkDir,
 		Attachments:            oaAttachments,
@@ -509,7 +506,6 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnCompaction: func(summary string) {
-			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[openai-adapter] CallChatStreaming context compacted, summary_len=%d", len(summary))
 		}})
 	if err != nil {
@@ -526,9 +522,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	output := sw.String()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	if compactionSummary != "" {
-		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "openai_responses"}
-	}
+	recordOpenAINativeCompactionState(&usage, resp)
 	applog.Infof("[openai-adapter] CallChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, usage, errMaxTokens
@@ -877,6 +871,35 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 		}
 	}
 	return messages
+}
+
+func nativeCompactionInputItems(ctx context.Context) []any {
+	raw := strings.TrimSpace(llmcontracts.NativeCompactionStateJSONFromContext(ctx))
+	if raw == "" {
+		return nil
+	}
+	var items []any
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		applog.Infof("[openai-adapter] ignoring invalid native compaction checkpoint: %v", err)
+		return nil
+	}
+	return items
+}
+
+func recordOpenAINativeCompactionState(usage *llmcontracts.Usage, resp *openaiclient.AgenticResponse) {
+	if usage == nil || resp == nil || len(resp.CompactedInputItems) == 0 {
+		return
+	}
+	raw, err := json.Marshal(resp.CompactedInputItems)
+	if err != nil {
+		applog.Infof("[openai-adapter] marshal native compaction checkpoint: %v", err)
+		return
+	}
+	usage.NativeCompactionStateJSON = string(raw)
+	if usage.ProviderIDs == nil {
+		usage.ProviderIDs = make(map[string]string)
+	}
+	usage.ProviderIDs["native_compaction_strategy"] = "openai_responses"
 }
 
 func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {

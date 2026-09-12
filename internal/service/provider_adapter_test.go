@@ -248,8 +248,8 @@ func TestProviderContextCompactionFallback_RetriesStreamingRequestOnceForSupport
 			if len(retry.ChatHistory) != 3 {
 				t.Fatalf("compacted history length = %d, want retained users plus summary", len(retry.ChatHistory))
 			}
-			if retry.ChatHistory[0].PromptSent != "new user" || retry.ChatHistory[1].PromptSent != "old user" {
-				t.Fatalf("retained user messages should be newest first, got %#v", retry.ChatHistory)
+			if retry.ChatHistory[0].PromptSent != "old user" || retry.ChatHistory[1].PromptSent != "new user" {
+				t.Fatalf("retained user messages should remain chronological, got %#v", retry.ChatHistory)
 			}
 			if got := retry.ChatHistory[2].Output; !strings.Contains(got, compactedHistorySummaryPrefix) || !strings.Contains(got, "completed: old work") {
 				t.Fatalf("retry history missing protected summary prefix/content: %q", got)
@@ -343,10 +343,10 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 	if len(retained) != 2 {
 		t.Fatalf("retained = %#v, want boundary plus newest", retained)
 	}
-	if retained[0].PromptSent != "tail" {
-		t.Fatalf("newest retained first = %#v", retained)
+	if retained[1].PromptSent != "tail" {
+		t.Fatalf("newest retained message should be last = %#v", retained)
 	}
-	if got := retained[1].PromptSent; !strings.Contains(got, "[Middle of user message omitted") || !strings.HasPrefix(got, "prefix-") || !strings.HasSuffix(got, "-suffix") {
+	if got := retained[0].PromptSent; !strings.Contains(got, "[Middle of user message omitted") || !strings.HasPrefix(got, "prefix-") || !strings.HasSuffix(got, "-suffix") {
 		t.Fatalf("boundary message was not middle-truncated with prefix/suffix preserved: %q", got)
 	}
 }
@@ -557,9 +557,9 @@ func TestProviderContextCompactionFallback_NativeSuccessPersistsCheckpoint(t *te
 	execRepo := repository.NewExecutionRepo(db)
 	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-		return llmcontracts.AgentResult{Output: "ok", Compacted: true, NativeCompactionSummary: "native summary", NativeCompactionStrategy: "openai_responses"}, nil
+		return llmcontracts.AgentResult{Output: "ok", Compacted: true, NativeCompactionStateJSON: `[{"type":"compaction","encrypted_content":"opaque"}]`, NativeCompactionStrategy: "openai_responses"}, nil
 	})
-	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Agent: models.LLMConfig{ID: "model-native", Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 100000}, ProjectID: "project-native", ChatHistory: []models.Execution{{ID: "source-native", PromptSent: "old", Output: "out", Status: models.ExecCompleted}}}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", ExecID: "exec-native", Agent: models.LLMConfig{ID: "model-native", Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 100000}, ProjectID: "project-native", ChatHistory: []models.Execution{{ID: "source-native", PromptSent: "old", Output: "out", Status: models.ExecCompleted}}}
 	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
 		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
 	}
@@ -567,8 +567,44 @@ func TestProviderContextCompactionFallback_NativeSuccessPersistsCheckpoint(t *te
 	if err != nil {
 		t.Fatalf("GetChatCompactionCheckpoint: %v", err)
 	}
-	if checkpoint == nil || checkpoint.Strategy != "openai_responses" || !strings.Contains(checkpoint.History[len(checkpoint.History)-1].Output, "native summary") {
+	if checkpoint == nil || checkpoint.Strategy != "openai_responses" || checkpoint.ProviderStateJSON != `[{"type":"compaction","encrypted_content":"opaque"}]` || len(checkpoint.History) != 0 || checkpoint.SourceExecutionID != "exec-native" {
 		t.Fatalf("checkpoint = %#v", checkpoint)
+	}
+}
+
+func TestProviderContextCompactionFallback_RestoresNativeStateForMatchingModelOnly(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := repository.NewExecutionRepo(db)
+	state := `[{"type":"compaction","encrypted_content":"opaque"}]`
+	if err := execRepo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{
+		ScopeType: "chat_project", ScopeID: "project-native-restore", ModelConfigID: "model-1",
+		SourceExecutionID: "source", Strategy: "openai_responses", ProviderStateJSON: state,
+	}); err != nil {
+		t.Fatalf("UpsertChatCompactionCheckpoint: %v", err)
+	}
+
+	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
+	var requests []llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		requests = append(requests, req)
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	history := []models.Execution{{ID: "old"}, {ID: "source"}, {ID: "new", PromptSent: "new"}}
+
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, ProjectID: "project-native-restore", Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAI}, ChatHistory: history}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatal(err)
+	}
+	if requests[0].NativeCompactionStateJSON != state || len(requests[0].ChatHistory) != 1 || requests[0].ChatHistory[0].ID != "new" {
+		t.Fatalf("matching-model restore = %#v", requests[0])
+	}
+
+	req.Agent.ID = "model-2"
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatal(err)
+	}
+	if requests[1].NativeCompactionStateJSON != "" || len(requests[1].ChatHistory) != len(history) {
+		t.Fatalf("mismatched-model restore = %#v", requests[1])
 	}
 }
 

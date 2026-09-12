@@ -832,6 +832,7 @@ func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) 
 	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
 
 	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "list", Access: llmcontracts.RuntimeToolAccessRead}}})
+	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, `[{"type":"compaction","encrypted_content":"opaque-checkpoint"}]`)
 	adapter := New(nil, nil, nil)
 	out, usage, err := adapter.CallChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
@@ -849,7 +850,7 @@ func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) 
 		t.Fatalf("plan-mode runtime tools should not disable tools: %#v", gotBody)
 	}
 	encoded, _ := json.Marshal(gotBody["input"])
-	if !strings.Contains(string(encoded), "What changed?") || !strings.Contains(string(encoded), "previous prompt") {
+	if !strings.Contains(string(encoded), "What changed?") || !strings.Contains(string(encoded), "previous prompt") || !strings.Contains(string(encoded), "opaque-checkpoint") {
 		t.Fatalf("chat input missing message/history: %s", encoded)
 	}
 }

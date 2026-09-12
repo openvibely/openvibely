@@ -69,13 +69,14 @@ func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err erro
 		textOnly = output
 	}
 	res := llmcontracts.AgentResult{
-		Output:                   output,
-		TextOnlyOutput:           textOnly,
-		Usage:                    usage,
-		NativeCompactionSummary:  usage.ProviderIDs["native_compaction_summary"],
-		NativeCompactionStrategy: usage.ProviderIDs["native_compaction_strategy"],
+		Output:                    output,
+		TextOnlyOutput:            textOnly,
+		Usage:                     usage,
+		NativeCompactionSummary:   usage.ProviderIDs["native_compaction_summary"],
+		NativeCompactionStrategy:  usage.ProviderIDs["native_compaction_strategy"],
+		NativeCompactionStateJSON: usage.NativeCompactionStateJSON,
 	}
-	if strings.TrimSpace(res.NativeCompactionSummary) != "" {
+	if strings.TrimSpace(res.NativeCompactionSummary) != "" || strings.TrimSpace(res.NativeCompactionStateJSON) != "" {
 		res.Compacted = true
 	}
 	// Detect max_tokens errors from any provider adapter. Each provider package
@@ -268,7 +269,7 @@ func shouldTriggerContextCompaction(req llmcontracts.AgentRequest) (bool, compac
 }
 
 func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
-	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.ChatSystemContext) + estimatedUTF8Tokens(req.ProjectInstructions)
+	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.NativeCompactionStateJSON)
 	total += estimateProviderSystemPromptTokens(req)
 	total += estimateRuntimeToolDefinitionTokens(llmcontracts.RuntimeToolsFromContext(req.Ctx))
 	total += estimateAgentDefinitionTokens(req.AgentDefinition)
@@ -416,11 +417,15 @@ func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) 
 		applog.Infof("[agent-svc] restore context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
 		return req
 	}
-	if checkpoint == nil || len(checkpoint.History) == 0 {
+	if checkpoint == nil || (len(checkpoint.History) == 0 && strings.TrimSpace(checkpoint.ProviderStateJSON) == "") {
+		return req
+	}
+	if checkpoint.ModelConfigID != "" && req.Agent.ID != "" && checkpoint.ModelConfigID != req.Agent.ID {
 		return req
 	}
 	restored := req
 	restored.ChatHistory = mergeCheckpointHistory(req.ChatHistory, checkpoint.History, checkpoint.SourceExecutionID)
+	restored.NativeCompactionStateJSON = checkpoint.ProviderStateJSON
 	return restored
 }
 
@@ -438,6 +443,11 @@ func mergeCheckpointHistory(history, checkpoint []models.Execution, sourceExecut
 }
 
 func (s *LLMService) persistNativeCompactionCheckpoint(req llmcontracts.AgentRequest, res llmcontracts.AgentResult) {
+	providerStateJSON := strings.TrimSpace(res.NativeCompactionStateJSON)
+	if providerStateJSON != "" {
+		s.persistNativeProviderStateCheckpoint(req, res.NativeCompactionStrategy, providerStateJSON)
+		return
+	}
 	summary := strings.TrimSpace(res.NativeCompactionSummary)
 	if summary == "" || len(req.ChatHistory) == 0 {
 		return
@@ -449,6 +459,29 @@ func (s *LLMService) persistNativeCompactionCheckpoint(req llmcontracts.AgentReq
 	compacted := req
 	compacted.ChatHistory = buildCompactedReplacementHistory(req.ChatHistory, summary)
 	s.persistCompactionCheckpoint(req, compacted, summary, strategy)
+}
+
+func (s *LLMService) persistNativeProviderStateCheckpoint(req llmcontracts.AgentRequest, strategy, providerStateJSON string) {
+	if s == nil || s.execRepo == nil {
+		return
+	}
+	scope, ok := s.compactionScopeForRequest(req)
+	if !ok {
+		return
+	}
+	sourceID := strings.TrimSpace(req.ExecID)
+	if sourceID == "" && len(req.ChatHistory) > 0 {
+		sourceID = req.ChatHistory[len(req.ChatHistory)-1].ID
+	}
+	if strings.TrimSpace(strategy) == "" {
+		strategy = "native"
+	}
+	if err := s.execRepo.UpsertChatCompactionCheckpoint(req.Ctx, models.ChatCompactionCheckpoint{
+		ScopeType: scope.Type, ScopeID: scope.ID, ModelConfigID: req.Agent.ID,
+		SourceExecutionID: sourceID, Strategy: strategy, ProviderStateJSON: providerStateJSON,
+	}); err != nil {
+		applog.Infof("[agent-svc] persist native context checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
+	}
 }
 
 func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmcontracts.AgentRequest, summary, strategy string) {
@@ -672,6 +705,9 @@ func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []m
 		}
 		break
 	}
+	for i, j := 0, len(retained)-1; i < j; i, j = i+1, j-1 {
+		retained[i], retained[j] = retained[j], retained[i]
+	}
 	return retained
 }
 
@@ -807,6 +843,7 @@ type openAIProviderAdapter struct {
 }
 
 func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, req.NativeCompactionStateJSON)
 	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
 		req.AgentDefinition = runtimeAgentDef
