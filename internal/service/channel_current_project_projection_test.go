@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
@@ -63,6 +66,93 @@ func requireProjectIdentityQuery(t *testing.T, statements []string) {
 	t.Helper()
 	require.Len(t, statements, 1)
 	require.Equal(t, "select id, name from projects where id = ?", strings.ToLower(strings.Join(strings.Fields(statements[0]), " ")))
+}
+
+const channelCurrentProjectProjectionSamples = 7
+
+type channelCurrentProjectProjectionRuntimeMeasurement struct {
+	latency        time.Duration
+	allocatedBytes uint64
+	allocations    uint64
+}
+
+func TestChannelCurrentProjectProjectionPerformanceEvidence(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping production-shaped channel project projection measurements in short mode")
+	}
+
+	for _, fileBacked := range []bool{false, true} {
+		topology := "in_memory"
+		if fileBacked {
+			topology = "file_backed_1w_1r"
+		}
+		for _, large := range []bool{false, true} {
+			for _, missing := range []bool{false, true} {
+				caseName := fmt.Sprintf("%s/%s/%s", topology, map[bool]string{false: "empty", true: "large"}[large], map[bool]string{false: "existing", true: "missing"}[missing])
+				t.Run(caseName, func(t *testing.T) {
+					fixture := newChannelCurrentProjectProjectionFixture(t, fileBacked, large, missing)
+					fullObserved := fixture.observeLookup(t, fixture.fullResult)
+					compactObserved := fixture.observeLookup(t, fixture.compactResult)
+					full := measureChannelCurrentProjectProjection(t, fixture, fixture.fullResult)
+					compact := measureChannelCurrentProjectProjection(t, fixture, fixture.compactResult)
+
+					require.Equal(t, fullObserved.responseBytes, compactObserved.responseBytes)
+					require.Equal(t, fullObserved.sqlStatements, 1)
+					require.Equal(t, compactObserved.sqlStatements, 1)
+					require.LessOrEqual(t, compact.allocations, full.allocations, "compact handler allocations must not exceed full-row baseline")
+					if large && !missing {
+						require.LessOrEqual(t, compactObserved.selectedTextBytes*10, fullObserved.selectedTextBytes, "large-row compact selection must reduce project text bytes by at least 90%%")
+						require.Less(t, compact.latency, full.latency, "large-row compact median latency must improve")
+						require.Less(t, compact.allocatedBytes, full.allocatedBytes, "large-row compact median allocations must improve")
+					}
+					if !missing {
+						require.LessOrEqual(t, compact.latency, full.latency, "compact median latency must not regress")
+					}
+					t.Logf("full median=%s B/op=%d allocs/op=%d; compact median=%s B/op=%d allocs/op=%d; selected_text_bytes=%d->%d response_bytes=%d/%d sql_statements=%d/%d",
+						full.latency, full.allocatedBytes, full.allocations,
+						compact.latency, compact.allocatedBytes, compact.allocations,
+						fullObserved.selectedTextBytes, compactObserved.selectedTextBytes,
+						fullObserved.responseBytes, compactObserved.responseBytes,
+						fullObserved.sqlStatements, compactObserved.sqlStatements,
+					)
+				})
+			}
+		}
+	}
+}
+
+func measureChannelCurrentProjectProjection(tb testing.TB, fixture *channelCurrentProjectProjectionFixture, lookup func() (string, error)) channelCurrentProjectProjectionRuntimeMeasurement {
+	tb.Helper()
+	latencies := make([]time.Duration, 0, channelCurrentProjectProjectionSamples)
+	allocatedBytes := make([]uint64, 0, channelCurrentProjectProjectionSamples)
+	allocations := make([]uint64, 0, channelCurrentProjectProjectionSamples)
+	for range channelCurrentProjectProjectionSamples {
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		startedAt := time.Now()
+		got, err := lookup()
+		elapsed := time.Since(startedAt)
+		runtime.ReadMemStats(&after)
+		if err != nil {
+			tb.Fatalf("measured lookup: %v", err)
+		}
+		if got != fixture.expected {
+			tb.Fatalf("measured lookup = %q, want %q", got, fixture.expected)
+		}
+		latencies = append(latencies, elapsed)
+		allocatedBytes = append(allocatedBytes, after.TotalAlloc-before.TotalAlloc)
+		allocations = append(allocations, after.Mallocs-before.Mallocs)
+	}
+	slices.Sort(latencies)
+	slices.Sort(allocatedBytes)
+	slices.Sort(allocations)
+	middle := len(latencies) / 2
+	return channelCurrentProjectProjectionRuntimeMeasurement{
+		latency:        latencies[middle],
+		allocatedBytes: allocatedBytes[middle],
+		allocations:    allocations[middle],
+	}
 }
 
 type channelCurrentProjectProjectionFixture struct {
