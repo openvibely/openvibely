@@ -180,6 +180,8 @@ func TestChannelChatContextCompactChainProjectionMatchesJSONUnmarshalEdgeCases(t
 		{name: "wrong known scalar type", chainConfig: `{"enabled":true,"child_model":123}`},
 		{name: "wrong nested scalar type", chainConfig: `{"enabled":true,"child_chain_config":{"child_model":123}}`},
 		{name: "null nested chain", chainConfig: `{"enabled":true,"child_chain_config":null}`},
+		{name: "duplicate null preserves scalar values", chainConfig: `{"enabled":true,"trigger":"on_completion","child_title":"Duplicate child","enabled":null,"trigger":null,"child_title":null}`},
+		{name: "duplicate non-null overwrites scalar values", chainConfig: `{"enabled":true,"trigger":"on_completion","child_title":"First child","enabled":false,"trigger":"on_planning_complete","child_title":"Second child"}`},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
