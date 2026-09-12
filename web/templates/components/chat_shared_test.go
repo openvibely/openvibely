@@ -110,6 +110,18 @@ func TestChatInputForm_ComposerHintHasNoTooltipAndKeepsAccessibleName(t *testing
 				t.Fatalf("render composer: %v", err)
 			}
 			body := buf.String()
+			formStart := strings.Index(body, "<form")
+			if formStart == -1 {
+				t.Fatal("composer form is missing")
+			}
+			formEnd := strings.Index(body[formStart:], ">")
+			if formEnd == -1 {
+				t.Fatal("composer form opening tag is incomplete")
+			}
+			form := body[formStart : formStart+formEnd+1]
+			if !strings.Contains(form, `novalidate`) {
+				t.Fatalf("composer form must suppress native validation tooltips: %s", form)
+			}
 			textareaStart := strings.Index(body, "<textarea")
 			if textareaStart == -1 {
 				t.Fatal("composer textarea is missing")
@@ -125,10 +137,181 @@ func TestChatInputForm_ComposerHintHasNoTooltipAndKeepsAccessibleName(t *testing
 			if !strings.Contains(textarea, `aria-label="Message"`) {
 				t.Fatalf("composer textarea must retain an accessible name: %s", textarea)
 			}
+			if !strings.Contains(textarea, `required`) {
+				t.Fatalf("composer textarea must retain required semantics: %s", textarea)
+			}
 			if !strings.Contains(textarea, `placeholder="Enter sends or queues"`) {
 				t.Fatalf("composer textarea must retain its visible keyboard hint: %s", textarea)
 			}
 		})
+	}
+}
+
+func TestLatestMessageButtonAndControllerContract(t *testing.T) {
+	var button bytes.Buffer
+	if err := ChatLatestMessageButton("chat-messages", "scrollTracker_chat-messages").Render(context.Background(), &button); err != nil {
+		t.Fatalf("render latest-message button: %v", err)
+	}
+	markup := button.String()
+	for _, required := range []string{
+		`type="button"`,
+		`data-chat-latest-message`,
+		`data-messages-id="chat-messages"`,
+		`data-tracker-key="scrollTracker_chat-messages"`,
+		`aria-label="Scroll to latest message"`,
+		`Latest message`,
+		`hidden`,
+	} {
+		if !strings.Contains(markup, required) {
+			t.Errorf("latest-message button missing %q: %s", required, markup)
+		}
+	}
+
+	var script bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &script); err != nil {
+		t.Fatalf("render shared auto-scroll script: %v", err)
+	}
+	content := script.String()
+	for _, required := range []string{
+		"returnToLatest: function(smooth)",
+		"window.installChatLatestMessageButtons",
+		"data-chat-latest-message",
+		"ResizeObserver",
+		"MutationObserver",
+		"htmx:afterSettle",
+		"htmx:historyRestore",
+		"controller.destroy()",
+	} {
+		if !strings.Contains(content, required) {
+			t.Errorf("latest-message controller missing %q", required)
+		}
+	}
+
+	var thread bytes.Buffer
+	if err := TaskThreadView(&models.Task{ID: "task-latest", ProjectID: "project-latest"}, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &thread); err != nil {
+		t.Fatalf("render task thread: %v", err)
+	}
+	threadMarkup := thread.String()
+	if !strings.Contains(threadMarkup, `data-messages-id="task-thread-messages"`) || !strings.Contains(threadMarkup, `data-tracker-key="scrollTracker_task-thread-messages"`) {
+		t.Fatalf("task thread must install the shared latest-message control: %s", threadMarkup)
+	}
+}
+
+func TestLatestMessageButtonDynamicBehaviorInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	var chatButton, threadButton, chatScript bytes.Buffer
+	if err := ChatLatestMessageButton("chat-messages", "scrollTracker_chat-messages").Render(context.Background(), &chatButton); err != nil {
+		t.Fatalf("render Chat latest button: %v", err)
+	}
+	if err := ChatLatestMessageButton("task-thread-messages", "scrollTracker_task-thread-messages").Render(context.Background(), &threadButton); err != nil {
+		t.Fatalf("render Thread latest button: %v", err)
+	}
+	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
+	}
+
+	rows := strings.Repeat(`<div class="row">message</div>`, 18)
+	html := `<!doctype html><html><head><meta charset="utf-8"><style>
+		.fixture { position: relative; height: 180px; margin: 8px; }
+		.messages { height: 100%; overflow-y: auto; }
+		.row { height: 32px; }
+		.hidden,[hidden] { display: none !important; }
+	</style></head><body><main id="fixture-root" data-test-result="pending">
+		<section class="fixture"><div id="chat-messages" class="messages" data-scroll-intent-scope="project-1">` + rows + `</div>` + chatButton.String() + `</section>
+		<section class="fixture"><div id="task-thread-messages" class="messages" data-scroll-intent-scope="task-1">` + rows + `</div>` + threadButton.String() + `</section>
+	</main>` + chatScript.String() + `<script>
+	(function() {
+		var root = document.getElementById('fixture-root');
+		function fail(message) { root.dataset.testResult = 'fail'; root.dataset.testError = message; }
+		Element.prototype.scrollTo = function(options) { this.scrollTop = options.top; this.dataset.lastBehavior = options.behavior; };
+		function scrollUp(messages) {
+			messages.scrollTop = messages.scrollHeight;
+			messages.dispatchEvent(new WheelEvent('wheel', {bubbles: true, deltaY: -120}));
+			messages.scrollTop = 0;
+			messages.dispatchEvent(new Event('scroll', {bubbles: true}));
+		}
+		function checkScrolledUp(messagesID) {
+			var button = document.querySelector('[data-messages-id="' + messagesID + '"]');
+			var messages = document.getElementById(messagesID);
+			if (!button || button.hidden || button.classList.contains('hidden')) return fail(messagesID + ' button did not appear after scrolling up');
+			var before = messages.scrollTop;
+			var streamed = document.createElement('div'); streamed.className = 'row'; streamed.textContent = 'streamed update'; messages.appendChild(streamed);
+			if (messages.scrollTop !== before) return fail(messagesID + ' streamed update moved a reader');
+			button.click();
+			if (!button.hidden || !button.classList.contains('hidden')) return fail(messagesID + ' button did not hide after click');
+			if (messages.scrollTop !== messages.scrollHeight - messages.clientHeight && messages.scrollTop !== messages.scrollHeight) return fail(messagesID + ' did not scroll to latest');
+			if (messages.dataset.lastBehavior !== 'smooth') return fail(messagesID + ' latest click was not smooth');
+			var tracker = window['scrollTracker_' + messagesID];
+			if (!tracker || !tracker.shouldAutoScroll()) return fail(messagesID + ' did not restore pinned intent');
+		}
+		window.installChatLatestMessageButtons();
+		scrollUp(document.getElementById('chat-messages'));
+		scrollUp(document.getElementById('task-thread-messages'));
+		setTimeout(function() {
+			if (root.dataset.testResult === 'fail') return;
+			checkScrolledUp('chat-messages');
+			checkScrolledUp('task-thread-messages');
+			if (root.dataset.testResult === 'fail') return;
+			var oldThread = document.getElementById('task-thread-messages');
+			var replacement = oldThread.cloneNode(true); oldThread.replaceWith(replacement);
+			document.dispatchEvent(new CustomEvent('htmx:afterSettle', {bubbles: true}));
+			scrollUp(replacement);
+			setTimeout(function() {
+				if (root.dataset.testResult === 'fail') return;
+				var controller = window._chatLatestMessageControllers['task-thread-messages'];
+				if (!controller || controller.messages !== replacement) return fail('Thread controller did not rebind after HTMX replacement');
+				var button = document.querySelector('[data-messages-id="task-thread-messages"]');
+				button.classList.add('hidden'); button.hidden = true;
+				document.dispatchEvent(new CustomEvent('htmx:historyRestore', {bubbles: true}));
+				setTimeout(function() {
+					if (button.hidden || button.classList.contains('hidden')) return fail('history restoration did not refresh Thread button state');
+					root.dataset.testResult = 'pass';
+				}, 30);
+			}, 30);
+		}, 30);
+	})();
+	</script></body></html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+	stdoutPath := filepath.Join(t.TempDir(), "chrome-latest-message.html")
+	stderrPath := filepath.Join(t.TempDir(), "chrome-latest-message.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create Chrome stdout: %v", err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-latest-message-profile"), "--virtual-time-budget=3000", "--dump-dom", server.URL)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	configureTestBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome latest-message fixture: %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	var result string
+	for time.Now().Before(deadline) {
+		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			result = string(output)
+			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stopTestBrowserProcess(cmd)
+	if !strings.Contains(result, `data-test-result="pass"`) {
+		state := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("latest-message browser fixture failed: %s\nChrome stderr: %s", state, stderr)
 	}
 }
 
@@ -1780,6 +1963,7 @@ func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
 				"new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true })",
 				"if (!composerHasActiveTurn()) {",
 				"if (guard) guard.remove();",
+				"if (submittedMessage.trim() === '') return;",
 				"if (e.isComposing || e.keyCode === 229) return;",
 				"if (e.key === 'Enter' && !e.shiftKey)",
 				"if (shortcutModifierPressed(e)) {",
@@ -4444,8 +4628,8 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"`) {
-		t.Fatal("task thread messages pane should avoid stacking an outer bottom margin above the composer")
+	if !strings.Contains(content, `class="relative flex-1 min-h-0 min-w-0"`) || !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"`) {
+		t.Fatal("task thread messages shell should anchor the latest control without stacking an outer bottom margin above the composer")
 	}
 	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
 		t.Fatal("task thread messages pane must not add a second vertical gap before the composer")
@@ -5068,7 +5252,7 @@ func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testi
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="h-full overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {

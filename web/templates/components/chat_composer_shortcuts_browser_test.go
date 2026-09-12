@@ -22,7 +22,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 		Form url.Values
 	}
 	var mu sync.Mutex
-	var records []requestRecord
+	var records = make([]requestRecord, 0)
 
 	renderForm := func(config ChatInputFormConfig) string {
 		var buf bytes.Buffer
@@ -89,8 +89,14 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 
   idleInput.value = ''; key(idleInput); await wait();
   idleInput.value = ' '; key(idleInput); await wait();
+  var beforeSetupResponse = await fetch('/records');
+  var beforeSetupRecords = await beforeSetupResponse.json();
+  if (beforeSetupRecords.length !== 0) fail('whitespace-only draft was submitted');
+  idleInput.value = 'setup normal'; key(idleInput); await wait();
   idleInput.value = 'validation recovery'; key(idleInput, modifier); await wait();
-
+  var beforePendingResponse = await fetch('/records');
+  var beforePendingRecords = await beforePendingResponse.json();
+  if (beforePendingRecords.length !== 2 || beforePendingRecords[0].Form.message[0] !== 'setup normal' || beforePendingRecords[1].Form.message[0] !== 'validation recovery') fail('normal setup or validation recovery was lost');
   var pendingNormalXHR = null;
   function beginPendingNormalSend(initialDraft) {
     var chatForm = document.getElementById('chat-form');
@@ -146,7 +152,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   if (records.length !== 11) fail('request count was ' + records.length + ', want 11');
   var paths = records.map(function(record) { return record.Path; }).join(',');
   if (paths !== '/chat/send,/chat/send,/chat/steer,/chat/send,/chat/send,/chat/send,/tasks/task-1/thread/steer,/tasks/task-1/thread/steer,/tasks/task-1/cancel,/tasks/task-1/thread,/tasks/task-1/thread') fail('request paths were ' + paths);
-  if (records[0].Form.message[0] !== ' ') fail('whitespace-only draft was discarded');
+  if (records[0].Form.message[0] !== 'setup normal') fail('valid setup draft was lost');
   if (records[1].Form.message[0] !== 'validation recovery') fail('validation-blocked submit stranded or changed the recovery draft');
   if (records[2].Form.message[0] !== 'immediate keyboard steer' || records[2].Form.expected_turn_id[0] !== 'keyboard-turn') fail('immediate keyboard steer was not deferred to the accepted turn');
   if (records[3].Form.message[0] !== 'idle enter') fail('plain idle Enter lost or changed its draft');
@@ -181,7 +187,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 		t.Fatalf("recorded requests = %d, want 11: %+v", len(records), records)
 	}
 	wantDrafts := []string{
-		" ",
+		"setup normal",
 		"validation recovery",
 		"immediate keyboard steer",
 		"idle enter",
