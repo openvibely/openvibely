@@ -637,6 +637,15 @@ func TestBuildTaskOccurrenceMap_WeeklyPastWeek(t *testing.T) {
 // TestBuildTaskOccurrenceMap_ProductionData simulates the exact production database data
 // to verify that the occurrence map matches what we'd expect to see in the UI.
 func TestBuildTaskOccurrenceMap_ProductionData(t *testing.T) {
+	// Keep the production-shaped UTC fixtures deterministic across CI runners.
+	originalLocation := time.Local
+	est, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load production schedule timezone: %v", err)
+	}
+	time.Local = est
+	t.Cleanup(func() { time.Local = originalLocation })
+
 	// Week of Feb 22-28, 2026 (system timezone is EST = UTC-5)
 	startOfWeek := time.Date(2026, 2, 22, 0, 0, 0, 0, time.Local)
 
