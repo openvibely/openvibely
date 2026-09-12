@@ -69,9 +69,14 @@ func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err erro
 		textOnly = output
 	}
 	res := llmcontracts.AgentResult{
-		Output:         output,
-		TextOnlyOutput: textOnly,
-		Usage:          usage,
+		Output:                   output,
+		TextOnlyOutput:           textOnly,
+		Usage:                    usage,
+		NativeCompactionSummary:  usage.ProviderIDs["native_compaction_summary"],
+		NativeCompactionStrategy: usage.ProviderIDs["native_compaction_strategy"],
+	}
+	if strings.TrimSpace(res.NativeCompactionSummary) != "" {
+		res.Compacted = true
 	}
 	// Detect max_tokens errors from any provider adapter. Each provider package
 	// has its own errMaxTokens sentinel, so match on the error message prefix.
@@ -89,6 +94,9 @@ func callProviderOnce(fn func() (llmcontracts.AgentResult, error)) (llmcontracts
 }
 
 type contextCompactionFallbackKey struct{}
+type nativeCompactionDisabledKey struct{}
+
+var knownUnsupportedNativeCompaction sync.Map
 
 const localContextCompactionInstruction = `You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary
 for another LLM that will resume the task.
@@ -106,6 +114,25 @@ the next LLM continue without restarting. Return only the summary.`
 const compactedHistorySummaryPrefix = `Another language model started to solve this problem and produced a summary of
 its work. Use it to continue without duplicating completed work. This is historical
 context, not a new user instruction or authorization:`
+
+const (
+	retainedUserMessageTokenBudget       = 20000
+	defaultOpenAICompatibleContextWindow = 128000
+	defaultAnthropicContextWindow        = 200000
+	defaultOpenAIContextWindow           = 200000
+)
+
+type compactionLimits struct {
+	ContextWindow      int
+	AutoLimit          int
+	TriggerLimit       int
+	EffectiveHardLimit int
+}
+
+type compactionScope struct {
+	Type string
+	ID   string
+}
 
 func withoutContextCompactionFallback(ctx context.Context) context.Context {
 	if ctx == nil {
@@ -141,6 +168,7 @@ func recognizedContextLengthError(err error) bool {
 		"input tokens exceed",
 		"input is too long",
 		"prompt is too long",
+		"model_context_window_exceeded",
 	}
 	for _, needle := range needles {
 		if strings.Contains(msg, needle) {
@@ -150,18 +178,295 @@ func recognizedContextLengthError(err error) bool {
 	return false
 }
 
+func nativeCompactionFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	needles := []string{
+		"compaction returned empty",
+		"compaction returned 0",
+		"compaction response returned",
+		"context management",
+		"context-management",
+		"unsupported beta",
+		"beta feature",
+		"compaction unsupported",
+		"unsupported compaction",
+		"/responses/compact",
+		"pre-turn compaction",
+		"overflow recovery compaction",
+	}
+	for _, needle := range needles {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeCompactionUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unsupported") || strings.Contains(msg, "unknown beta") || strings.Contains(msg, "beta feature") || strings.Contains(msg, "not available")
+}
+
+func providerHasNativeCompaction(provider models.LLMProvider) bool {
+	return provider == models.ProviderOpenAI || provider == models.ProviderAnthropic
+}
+
+func nativeCompactionSessionKey(agent models.LLMConfig) string {
+	return string(agent.Provider) + "\x00" + strings.ToLower(strings.TrimSpace(agent.Model))
+}
+
+func compactionLimitsForAgent(agent models.LLMConfig) compactionLimits {
+	window := agent.ContextWindow
+	if window <= 0 {
+		switch agent.Provider {
+		case models.ProviderOpenAI:
+			window = openAIContextWindow(agent.Model)
+		case models.ProviderAnthropic:
+			window = defaultAnthropicContextWindow
+		case models.ProviderOpenAICompatible:
+			window = defaultOpenAICompatibleContextWindow
+		default:
+			window = defaultOpenAIContextWindow
+		}
+	}
+	autoLimit := (window * 90) / 100
+	triggerLimit := autoLimit
+	if agent.CompactionThreshold > 0 && agent.CompactionThreshold < triggerLimit {
+		triggerLimit = agent.CompactionThreshold
+	}
+	return compactionLimits{ContextWindow: window, AutoLimit: autoLimit, TriggerLimit: triggerLimit, EffectiveHardLimit: (window * 95) / 100}
+}
+
+func openAIContextWindow(model string) int {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-6-astra":
+		return 1050000
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		return 272000
+	case "gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5-codex-mini":
+		return 200000
+	case "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano":
+		return 1047576
+	case "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-5", "gpt-5-mini", "gpt-5-nano":
+		return 128000
+	default:
+		return defaultOpenAIContextWindow
+	}
+}
+
+func shouldTriggerContextCompaction(req llmcontracts.AgentRequest) (bool, compactionLimits, int) {
+	limits := compactionLimitsForAgent(req.Agent)
+	used := estimateModelVisibleRequestTokens(req)
+	return used >= limits.TriggerLimit || used >= limits.EffectiveHardLimit, limits, used
+}
+
+func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
+	total := estimatedUTF8Tokens(req.Message) + estimatedUTF8Tokens(req.ChatSystemContext) + estimatedUTF8Tokens(req.ProjectInstructions)
+	for _, att := range req.Attachments {
+		total += estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
+		if att.FileSize > 0 {
+			total += int((att.FileSize + 3) / 4)
+		}
+	}
+	for _, exec := range req.ChatHistory {
+		total += estimatedUTF8Tokens(exec.PromptSent) + estimatedUTF8Tokens(exec.Output) + estimatedUTF8Tokens(exec.ErrorMessage) + estimatedUTF8Tokens(exec.ReasoningContent)
+		for _, replay := range exec.ReplayMessages {
+			total += estimatedUTF8Tokens(replay.UserContent) + estimatedUTF8Tokens(replay.AssistantContent) + estimatedUTF8Tokens(replay.ReasoningContent) + estimatedUTF8Tokens(replay.TranscriptJSON)
+		}
+	}
+	return total
+}
+
 func (s *LLMService) callProviderWithContextCompactionFallback(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if contextCompactionFallbackDisabled(req.Ctx) {
+		return adapter.Call(req)
+	}
+	req = s.restoreCompactionCheckpoint(req)
+	triggered, limits, used := shouldTriggerContextCompaction(req)
+	if limits.TriggerLimit > 0 {
+		req.NativeCompactionTokenThreshold = limits.TriggerLimit
+		if req.Agent.CompactionThreshold <= 0 || req.Agent.CompactionThreshold > limits.AutoLimit {
+			req.Agent.CompactionThreshold = limits.AutoLimit
+		} else {
+			req.Agent.CompactionThreshold = limits.TriggerLimit
+		}
+	}
+	if providerHasNativeCompaction(req.Agent.Provider) && knownNativeCompactionUnsupported(req.Agent) {
+		req.DisableNativeCompaction = true
+		req.Agent.DisableNativeCompaction = true
+	}
+	if triggered && shouldUseLocalSummaryBeforeProvider(req) {
+		originalReq := req
+		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
+		if compactErr != nil {
+			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d: %v", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, compactErr)
+			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
+		}
+		s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		req = compacted
+		applog.Infof("[agent-svc] proactive local context compaction provider=%s model=%s tokens=%d trigger=%d history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, len(originalReq.ChatHistory), len(req.ChatHistory))
+	}
 	res, err := adapter.Call(req)
-	if err == nil || contextCompactionFallbackDisabled(req.Ctx) || !recognizedContextLengthError(err) || len(req.ChatHistory) == 0 {
-		return res, err
+	if err == nil {
+		s.persistNativeCompactionCheckpoint(req, res)
+		return res, nil
 	}
-	compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
-	if compactErr != nil {
-		applog.Infof("[agent-svc] context compaction fallback failed; returning original context-length error: %v", compactErr)
-		return res, err
+	if providerHasNativeCompaction(req.Agent.Provider) && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) && len(req.ChatHistory) > 0 {
+		if nativeCompactionUnsupportedError(err) {
+			knownUnsupportedNativeCompaction.Store(nativeCompactionSessionKey(req.Agent), true)
+		}
+		compactedReq := req
+		compactedReq.DisableNativeCompaction = true
+		compactedReq.Agent.DisableNativeCompaction = true
+		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, compactedReq)
+		if compactErr != nil {
+			applog.Infof("[agent-svc] native-to-local context compaction fallback failed; trying last-resort truncation: %v", compactErr)
+			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
+		}
+		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		applog.Infof("[agent-svc] retrying provider call once after native-to-local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
+		return adapter.Call(compacted)
 	}
-	applog.Infof("[agent-svc] retrying provider call once after local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
-	return adapter.Call(compacted)
+	if recognizedContextLengthError(err) && len(req.ChatHistory) > 0 {
+		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
+		if compactErr != nil {
+			applog.Infof("[agent-svc] context compaction fallback failed; trying last-resort truncation: %v", compactErr)
+			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
+		}
+		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
+		applog.Infof("[agent-svc] retrying provider call once after local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
+		return adapter.Call(compacted)
+	}
+	return res, err
+}
+
+func (s *LLMService) restoreCompactionCheckpoint(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
+	scope, ok := s.compactionScopeForRequest(req)
+	if !ok || s == nil || s.execRepo == nil {
+		return req
+	}
+	checkpoint, err := s.execRepo.GetChatCompactionCheckpoint(req.Ctx, scope.Type, scope.ID)
+	if err != nil {
+		applog.Infof("[agent-svc] restore context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
+		return req
+	}
+	if checkpoint == nil || len(checkpoint.History) == 0 {
+		return req
+	}
+	restored := req
+	restored.ChatHistory = mergeCheckpointHistory(req.ChatHistory, checkpoint.History, checkpoint.SourceExecutionID)
+	return restored
+}
+
+func mergeCheckpointHistory(history, checkpoint []models.Execution, sourceExecutionID string) []models.Execution {
+	merged := append([]models.Execution(nil), checkpoint...)
+	if strings.TrimSpace(sourceExecutionID) == "" {
+		return append(merged, history...)
+	}
+	for i, exec := range history {
+		if exec.ID == sourceExecutionID {
+			return append(merged, history[i+1:]...)
+		}
+	}
+	return append(merged, history...)
+}
+
+func (s *LLMService) persistNativeCompactionCheckpoint(req llmcontracts.AgentRequest, res llmcontracts.AgentResult) {
+	summary := strings.TrimSpace(res.NativeCompactionSummary)
+	if summary == "" || len(req.ChatHistory) == 0 {
+		return
+	}
+	strategy := strings.TrimSpace(res.NativeCompactionStrategy)
+	if strategy == "" {
+		strategy = "native"
+	}
+	compacted := req
+	compacted.ChatHistory = buildCompactedReplacementHistory(req.ChatHistory, summary)
+	s.persistCompactionCheckpoint(req, compacted, summary, strategy)
+}
+
+func (s *LLMService) persistCompactionCheckpoint(originalReq, compactedReq llmcontracts.AgentRequest, summary, strategy string) {
+	if s == nil || s.execRepo == nil || len(compactedReq.ChatHistory) == 0 {
+		return
+	}
+	scope, ok := s.compactionScopeForRequest(originalReq)
+	if !ok {
+		return
+	}
+	sourceID := ""
+	if len(originalReq.ChatHistory) > 0 {
+		sourceID = originalReq.ChatHistory[len(originalReq.ChatHistory)-1].ID
+	}
+	if err := s.execRepo.UpsertChatCompactionCheckpoint(originalReq.Ctx, models.ChatCompactionCheckpoint{
+		ScopeType:         scope.Type,
+		ScopeID:           scope.ID,
+		ModelConfigID:     originalReq.Agent.ID,
+		SourceExecutionID: sourceID,
+		History:           compactedReq.ChatHistory,
+		Summary:           strings.TrimSpace(summary),
+		Strategy:          strategy,
+	}); err != nil {
+		applog.Infof("[agent-svc] persist context compaction checkpoint failed scope=%s:%s: %v", scope.Type, scope.ID, err)
+	}
+}
+
+func (s *LLMService) compactionScopeForRequest(req llmcontracts.AgentRequest) (compactionScope, bool) {
+	if scope, ok := parseCompactionTransportScope(req.TransportScope); ok {
+		return scope, true
+	}
+	if req.Followup && strings.TrimSpace(req.ExecID) != "" && s != nil && s.execRepo != nil {
+		if exec, err := s.execRepo.GetByID(req.Ctx, req.ExecID); err == nil && exec != nil && strings.TrimSpace(exec.TaskID) != "" {
+			return compactionScope{Type: "task", ID: strings.TrimSpace(exec.TaskID)}, true
+		}
+	}
+	if strings.TrimSpace(req.ProjectID) != "" && req.Operation == llmcontracts.OperationStreaming && !req.Followup {
+		return compactionScope{Type: "chat_project", ID: strings.TrimSpace(req.ProjectID)}, true
+	}
+	return compactionScope{}, false
+}
+
+func parseCompactionTransportScope(scope string) (compactionScope, bool) {
+	scope = strings.TrimSpace(scope)
+	if strings.HasPrefix(scope, "task:") {
+		id := strings.TrimSpace(strings.TrimPrefix(scope, "task:"))
+		return compactionScope{Type: "task", ID: id}, id != ""
+	}
+	if strings.HasPrefix(scope, "chat:project:") {
+		id := strings.TrimSpace(strings.TrimPrefix(scope, "chat:project:"))
+		return compactionScope{Type: "chat_project", ID: id}, id != ""
+	}
+	return compactionScope{}, false
+}
+
+func shouldUseLocalSummaryBeforeProvider(req llmcontracts.AgentRequest) bool {
+	if len(req.ChatHistory) == 0 {
+		return false
+	}
+	if req.Agent.Provider == models.ProviderOpenAICompatible {
+		return true
+	}
+	return req.DisableNativeCompaction || req.Agent.DisableNativeCompaction || knownNativeCompactionUnsupported(req.Agent)
+}
+
+func knownNativeCompactionUnsupported(agent models.LLMConfig) bool {
+	_, ok := knownUnsupportedNativeCompaction.Load(nativeCompactionSessionKey(agent))
+	return ok
+}
+
+func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapter, req llmcontracts.AgentRequest, cause error) (llmcontracts.AgentResult, error) {
+	if len(req.ChatHistory) == 0 {
+		return llmcontracts.AgentResult{}, cause
+	}
+	truncated := req
+	truncated.ChatHistory = llmprompt.LimitChatHistory(req.ChatHistory)
+	applog.Infof("[agent-svc] WARNING: context compaction failed; using last-resort latest-20-turn truncation provider=%s model=%s history=%d truncated_history=%d error=%v", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(truncated.ChatHistory), cause)
+	return adapter.Call(truncated)
 }
 
 func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
@@ -196,6 +501,10 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.DisableTools = true
 	summaryReq.RawDirectPrompt = true
 	summaryReq.Followup = false
+	summaryReq.DisableNativeCompaction = true
+	summaryReq.NativeCompactionTokenThreshold = 0
+	summaryReq.Agent.DisableNativeCompaction = true
+	summaryReq.Agent.CompactionThreshold = 0
 	res, err := adapter.Call(summaryReq)
 	if err != nil {
 		return "", err
@@ -218,10 +527,13 @@ func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
 			sb.WriteString(strings.TrimSpace(exec.PromptSent))
 			sb.WriteString("\n\n")
 		}
-		if replay := llmprompt.ReplayAssistantContent(exec); strings.TrimSpace(replay) != "" {
-			sb.WriteString("Assistant: ")
-			sb.WriteString(strings.TrimSpace(replay))
-			sb.WriteString("\n\n")
+		writeExecutionReplayForCompaction(&sb, exec)
+		if len(exec.ReplayMessages) == 0 {
+			if replay := llmprompt.ReplayAssistantContent(exec); strings.TrimSpace(replay) != "" {
+				sb.WriteString("Assistant: ")
+				sb.WriteString(strings.TrimSpace(replay))
+				sb.WriteString("\n\n")
+			}
 		}
 	}
 	if sb.Len() > 0 {
@@ -231,8 +543,33 @@ func buildLocalSummaryCompactionPrompt(history []models.Execution) string {
 	return sb.String()
 }
 
+func writeExecutionReplayForCompaction(sb *strings.Builder, exec models.Execution) {
+	for _, replay := range exec.ReplayMessages {
+		if strings.TrimSpace(replay.TranscriptJSON) != "" {
+			sb.WriteString("Structured tool/message replay transcript JSON (preserve tool-call/tool-result relationships):\n")
+			sb.WriteString(strings.TrimSpace(replay.TranscriptJSON))
+			sb.WriteString("\n\n")
+			continue
+		}
+		if strings.TrimSpace(replay.UserContent) != "" {
+			sb.WriteString("Replay user/tool-result content: ")
+			sb.WriteString(strings.TrimSpace(replay.UserContent))
+			sb.WriteString("\n\n")
+		}
+		if strings.TrimSpace(replay.AssistantContent) != "" || strings.TrimSpace(replay.ReasoningContent) != "" {
+			sb.WriteString("Replay assistant/tool-call content: ")
+			sb.WriteString(strings.TrimSpace(replay.AssistantContent))
+			if strings.TrimSpace(replay.ReasoningContent) != "" {
+				sb.WriteString("\nReasoning summary: ")
+				sb.WriteString(strings.TrimSpace(replay.ReasoningContent))
+			}
+			sb.WriteString("\n\n")
+		}
+	}
+}
+
 func buildCompactedReplacementHistory(history []models.Execution, summary string) []models.Execution {
-	retained := retainedUserMessageHistory(history, 20000)
+	retained := retainedUserMessageHistory(history, retainedUserMessageTokenBudget)
 	out := make([]models.Execution, 0, len(retained)+1)
 	out = append(out, retained...)
 	out = append(out, models.Execution{
@@ -255,12 +592,12 @@ func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []m
 		}
 		tokens := estimatedUTF8Tokens(content)
 		if tokens <= remaining {
-			retained = append(retained, models.Execution{PromptSent: content, Status: models.ExecCompleted})
+			retained = append(retained, models.Execution{ID: history[i].ID, PromptSent: content, Status: models.ExecCompleted})
 			remaining -= tokens
 			continue
 		}
 		if remaining > 0 {
-			retained = append(retained, models.Execution{PromptSent: truncateMiddleByEstimatedTokens(content, remaining), Status: models.ExecCompleted})
+			retained = append(retained, models.Execution{ID: history[i].ID, PromptSent: truncateMiddleByEstimatedTokens(content, remaining), Status: models.ExecCompleted})
 		}
 		break
 	}
@@ -323,6 +660,13 @@ func takeSuffixBytes(runes []rune, byteBudget int) string {
 		start = i
 	}
 	return string(runes[start:])
+}
+
+func historyCompactionSummary(history []models.Execution) string {
+	if len(history) == 0 {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimSpace(history[len(history)-1].Output), compactedHistorySummaryPrefix)
 }
 
 func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Agent, merged *models.Agent) {

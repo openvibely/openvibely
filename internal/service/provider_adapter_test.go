@@ -9,6 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -327,6 +328,212 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 	}
 	if got := retained[1].PromptSent; !strings.Contains(got, "[Middle of user message omitted") || !strings.HasPrefix(got, "prefix-") || !strings.HasSuffix(got, "-suffix") {
 		t.Fatalf("boundary message was not middle-truncated with prefix/suffix preserved: %q", got)
+	}
+}
+
+func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testing.T) {
+	limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000})
+	if limits.AutoLimit != 900 || limits.TriggerLimit != 900 || limits.EffectiveHardLimit != 950 {
+		t.Fatalf("limits = %+v, want auto=900 trigger=900 hard=950", limits)
+	}
+	limits = compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000, CompactionThreshold: 1200})
+	if limits.TriggerLimit != 900 {
+		t.Fatalf("configured threshold should clamp to 90%% auto limit, got %+v", limits)
+	}
+	limits = compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000, CompactionThreshold: 700})
+	if limits.TriggerLimit != 700 {
+		t.Fatalf("configured lower threshold should be honored, got %+v", limits)
+	}
+
+	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 1000}, Message: strings.Repeat("a", 3600)}
+	triggered, _, used := shouldTriggerContextCompaction(req)
+	if !triggered || used != 900 {
+		t.Fatalf("trigger=%v used=%d, want trigger at 90%%", triggered, used)
+	}
+	req.Message = strings.Repeat("a", 3800)
+	req.Agent.CompactionThreshold = 2000
+	triggered, _, used = shouldTriggerContextCompaction(req)
+	if !triggered || used != 950 {
+		t.Fatalf("trigger=%v used=%d, want hard-limit trigger at 95%% even when threshold clamps", triggered, used)
+	}
+}
+
+func TestProviderContextCompactionFallback_NativeProvidersReceiveProactiveThreshold(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	var got llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		got = req
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 3600), Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 1000, CompactionThreshold: 1200}, ChatHistory: []models.Execution{{PromptSent: "old", Output: "done"}}}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
+	}
+	if got.Operation != llmcontracts.OperationStreaming || got.Agent.DisableNativeCompaction {
+		t.Fatalf("native provider should be called directly with native compaction enabled, got %#v", got)
+	}
+	if got.Agent.CompactionThreshold != 900 || got.NativeCompactionTokenThreshold != 900 {
+		t.Fatalf("native threshold = agent:%d request:%d, want 900", got.Agent.CompactionThreshold, got.NativeCompactionTokenThreshold)
+	}
+}
+
+func TestProviderContextCompactionFallback_OpenAICompatibleProactiveSummaryAndPersistence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := repository.NewExecutionRepo(db)
+	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
+	var requests []llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		requests = append(requests, req)
+		if req.Operation == llmcontracts.OperationDirect {
+			if !req.DisableTools || !req.RawDirectPrompt || !req.Agent.DisableNativeCompaction {
+				t.Fatalf("summary request semantics = %#v", req)
+			}
+			return llmcontracts.AgentResult{Output: "completed work; no authorization to write"}, nil
+		}
+		return llmcontracts.AgentResult{Output: "ok", TextOnlyOutput: "ok"}, nil
+	})
+	history := []models.Execution{
+		{ID: "old", PromptSent: strings.Repeat("o", 2400), Output: "old", Status: models.ExecCompleted},
+		{ID: "source", PromptSent: strings.Repeat("n", 2400), Output: "new", Status: models.ExecCompleted},
+	}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 1000}, ProjectID: "project-1", ChatHistory: history}
+	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
+	if err != nil || res.Output != "ok" {
+		t.Fatalf("call result=%#v err=%v", res, err)
+	}
+	if len(requests) != 2 || requests[0].Operation != llmcontracts.OperationDirect || requests[1].Operation != llmcontracts.OperationStreaming {
+		t.Fatalf("requests = %#v, want proactive summary then original operation", requests)
+	}
+	checkpoint, err := execRepo.GetChatCompactionCheckpoint(context.Background(), "chat_project", "project-1")
+	if err != nil {
+		t.Fatalf("GetChatCompactionCheckpoint: %v", err)
+	}
+	if checkpoint == nil || checkpoint.SourceExecutionID != "source" || !strings.Contains(checkpoint.Summary, "completed work") {
+		t.Fatalf("checkpoint = %#v", checkpoint)
+	}
+}
+
+func TestProviderContextCompactionFallback_RestoresDurableCheckpointOnFollowingTurn(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := repository.NewExecutionRepo(db)
+	checkpointHistory := []models.Execution{{Output: compactedHistorySummaryPrefix + "\n\nsummary", Status: models.ExecCompleted}}
+	if err := execRepo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{ScopeType: "chat_project", ScopeID: "project-restore", SourceExecutionID: "source", History: checkpointHistory, Summary: "summary", Strategy: "local_summary"}); err != nil {
+		t.Fatalf("UpsertChatCompactionCheckpoint: %v", err)
+	}
+	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
+	var got llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		got = req
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "next", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 100000}, ProjectID: "project-restore", ChatHistory: []models.Execution{{ID: "old", PromptSent: "old"}, {ID: "source", PromptSent: "source"}, {ID: "new", PromptSent: "new"}}}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
+	}
+	if len(got.ChatHistory) != 2 || !strings.Contains(got.ChatHistory[0].Output, "summary") || got.ChatHistory[1].PromptSent != "new" {
+		t.Fatalf("restored history = %#v", got.ChatHistory)
+	}
+}
+
+func TestProviderContextCompactionFallback_NativeFailureFallsBackAndCachesUnsupported(t *testing.T) {
+	model := "native-unsupported-test"
+	knownUnsupportedNativeCompaction.Delete(string(models.ProviderOpenAI) + "\x00" + model)
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	var requests []llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		requests = append(requests, req)
+		if len(requests) == 1 {
+			if req.Operation != llmcontracts.OperationStreaming || req.Agent.DisableNativeCompaction {
+				t.Fatalf("first native request = %#v", req)
+			}
+			return llmcontracts.AgentResult{}, fmt.Errorf("pre-turn compaction: unsupported compaction endpoint")
+		}
+		if len(requests) == 2 {
+			if req.Operation != llmcontracts.OperationDirect || !req.Agent.DisableNativeCompaction {
+				t.Fatalf("summary fallback request = %#v", req)
+			}
+			return llmcontracts.AgentResult{Output: "summary"}, nil
+		}
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: model, ContextWindow: 100000}, ChatHistory: []models.Execution{{PromptSent: "old", Output: "done"}}}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
+	}
+	if len(requests) != 3 || !requests[2].Agent.DisableNativeCompaction {
+		t.Fatalf("requests = %#v, want native failure, local summary, retry with native disabled", requests)
+	}
+	if !knownNativeCompactionUnsupported(req.Agent) {
+		t.Fatal("native unsupported state was not cached")
+	}
+}
+
+func TestProviderContextCompactionFallback_LastResortTruncationAfterStrategiesFail(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	var requests []llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		requests = append(requests, req)
+		if req.Operation == llmcontracts.OperationDirect {
+			return llmcontracts.AgentResult{}, fmt.Errorf("summary provider unavailable")
+		}
+		if len(requests) == 3 {
+			return llmcontracts.AgentResult{Output: "truncated ok"}, nil
+		}
+		return llmcontracts.AgentResult{}, fmt.Errorf("context length exceeded")
+	})
+	history := make([]models.Execution, 25)
+	for i := range history {
+		history[i] = models.Execution{PromptSent: fmt.Sprintf("prompt-%02d", i), Output: "out", Status: models.ExecCompleted}
+	}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 100000}, ChatHistory: history}
+	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
+	if err != nil || res.Output != "truncated ok" {
+		t.Fatalf("result=%#v err=%v", res, err)
+	}
+	if len(requests) != 3 || len(requests[2].ChatHistory) != 20 || requests[2].ChatHistory[0].PromptSent != "prompt-05" {
+		t.Fatalf("last resort request = %#v", requests)
+	}
+}
+
+func TestProviderContextCompactionFallback_PreservesReplayAndAuthorizationBoundary(t *testing.T) {
+	history := []models.Execution{{
+		PromptSent: "inspect tool output",
+		Output:     "assistant fallback should not be used",
+		Status:     models.ExecCompleted,
+		ReplayMessages: []models.ExecutionReplayMessage{{
+			TranscriptJSON: `[{"role":"assistant","tool_calls":[{"id":"call_1","function":{"name":"read_file"}}]},{"role":"tool","tool_call_id":"call_1","content":"result"}]`,
+		}},
+	}}
+	prompt := buildLocalSummaryCompactionPrompt(history)
+	if !strings.Contains(prompt, "tool_call_id") || !strings.Contains(prompt, "preserve tool-call/tool-result relationships") {
+		t.Fatalf("summary prompt did not preserve structured replay: %s", prompt)
+	}
+	compacted := buildCompactedReplacementHistory(history, "Assistant suggests create_task should run")
+	if len(compacted) == 0 || compacted[len(compacted)-1].PromptSent != "" {
+		t.Fatalf("summary must be assistant historical context, got %#v", compacted)
+	}
+	if got := compacted[len(compacted)-1].Output; !strings.Contains(got, "not a new user instruction or authorization") || !strings.Contains(got, "Assistant suggests create_task") {
+		t.Fatalf("summary boundary missing or content dropped: %q", got)
+	}
+}
+
+func TestProviderContextCompactionFallback_NativeSuccessPersistsCheckpoint(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := repository.NewExecutionRepo(db)
+	svc := NewLLMService(nil, execRepo, nil, nil, nil, nil)
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		return llmcontracts.AgentResult{Output: "ok", Compacted: true, NativeCompactionSummary: "native summary", NativeCompactionStrategy: "openai_responses"}, nil
+	})
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Agent: models.LLMConfig{ID: "model-native", Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 100000}, ProjectID: "project-native", ChatHistory: []models.Execution{{ID: "source-native", PromptSent: "old", Output: "out", Status: models.ExecCompleted}}}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
+	}
+	checkpoint, err := execRepo.GetChatCompactionCheckpoint(context.Background(), "chat_project", "project-native")
+	if err != nil {
+		t.Fatalf("GetChatCompactionCheckpoint: %v", err)
+	}
+	if checkpoint == nil || checkpoint.Strategy != "openai_responses" || !strings.Contains(checkpoint.History[len(checkpoint.History)-1].Output, "native summary") {
+		t.Fatalf("checkpoint = %#v", checkpoint)
 	}
 }
 

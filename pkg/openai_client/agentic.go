@@ -35,7 +35,7 @@ Keep the summary actionable and specific. Omit chit-chat and duplication.
 Return only the summary text.`
 	openAICompactionTranscriptLimit                    = 200000
 	openAICompactionTranscriptGap                      = "\n\n[Middle conversation content omitted before compaction]\n\n"
-	openAIEffectiveContextPercent                      = 95
+	openAIEffectiveContextPercent                      = 90
 	openAIRemoteCompactionV2RetainedMessageTokenBudget = 64000
 	openAIApproxBytesPerToken                          = 4
 	openAIResizedImageBytesEstimate                    = 7373

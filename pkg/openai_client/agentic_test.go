@@ -2950,7 +2950,7 @@ func TestShouldAutoCompactInputItems_DoesNotCompactSmallTranscript(t *testing.T)
 
 func TestOpenAIAutoCompactionTokenLimit_UsesEffectiveContextPercent(t *testing.T) {
 	got := openAIAutoCompactionTokenLimit("gpt-5.3-codex")
-	want := (272000 * 95) / 100
+	want := (272000 * 90) / 100
 	if got != want {
 		t.Fatalf("openAIAutoCompactionTokenLimit = %d, want %d", got, want)
 	}
@@ -2960,7 +2960,7 @@ func TestOpenAIAutoCompactionTokenLimit_GPT56UsesExpandedContext(t *testing.T) {
 	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			got := openAIAutoCompactionTokenLimit(model)
-			want := (272000 * 95) / 100
+			want := (272000 * 90) / 100
 			if got != want {
 				t.Fatalf("openAIAutoCompactionTokenLimit(%q) = %d, want %d", model, got, want)
 			}
@@ -2970,7 +2970,7 @@ func TestOpenAIAutoCompactionTokenLimit_GPT56UsesExpandedContext(t *testing.T) {
 
 func TestOpenAIAutoCompactionTokenLimit_GPT6AstraUsesFullContext(t *testing.T) {
 	got := openAIAutoCompactionTokenLimit("gpt-6-astra")
-	want := (1050000 * 95) / 100
+	want := (1050000 * 90) / 100
 	if got != want {
 		t.Fatalf("openAIAutoCompactionTokenLimit(gpt-6-astra) = %d, want %d", got, want)
 	}
@@ -2978,7 +2978,7 @@ func TestOpenAIAutoCompactionTokenLimit_GPT6AstraUsesFullContext(t *testing.T) {
 
 func TestOpenAIAutoCompactionTokenLimit_SparkUses128KContext(t *testing.T) {
 	got := openAIAutoCompactionTokenLimit("gpt-5.3-codex-spark")
-	want := (128000 * 95) / 100
+	want := (128000 * 90) / 100
 	if got != want {
 		t.Fatalf("openAIAutoCompactionTokenLimit = %d, want %d", got, want)
 	}
