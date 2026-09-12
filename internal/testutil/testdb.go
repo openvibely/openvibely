@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -343,11 +344,29 @@ func NewStatementCountingTestDB(t testing.TB) (*sql.DB, *SQLStatementCounter) {
 	return db, counter
 }
 
+// NewFileBackedStatementCountingTestDB creates a migrated file-backed SQLite
+// fixture with production-sized connection capacity and statement
+// instrumentation for repository performance evidence.
+func NewFileBackedStatementCountingTestDB(t testing.TB) (*sql.DB, *SQLStatementCounter) {
+	t.Helper()
+
+	counter := &SQLStatementCounter{}
+	driverName := fmt.Sprintf("sqlite_file_statement_counter_%d", countingDriverID.Add(1))
+	sql.Register(driverName, &statementCountingDriver{inner: &sqlite.Driver{}, counter: counter})
+	db := buildTestDBWithDSN(t, driverName, filepath.Join(t.TempDir(), "test.db")+"?_loc=UTC", 2)
+	t.Cleanup(func() { db.Close() })
+	return db, counter
+}
+
 // buildTestDB constructs a fresh isolated fixture and fails tb on error. It does
 // not register cleanup; callers own closing the returned database. NewTestDB
 // wraps it with a t.Cleanup close, while the benchmark closes each fixture
 // explicitly to measure per-iteration create/close cost accurately.
 func buildTestDB(tb testing.TB, driverName string) *sql.DB {
+	return buildTestDBWithDSN(tb, driverName, ":memory:?_loc=UTC", 1)
+}
+
+func buildTestDBWithDSN(tb testing.TB, driverName, dsn string, maxOpenConns int) *sql.DB {
 	tb.Helper()
 
 	schemaOnce.Do(initSchema)
@@ -356,7 +375,6 @@ func buildTestDB(tb testing.TB, driverName string) *sql.DB {
 	}
 
 	// Open a raw SQLite connection (no migrations).
-	dsn := ":memory:?_loc=UTC"
 	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		tb.Fatalf("failed to open test database: %v", err)
@@ -402,6 +420,8 @@ func buildTestDB(tb testing.TB, driverName string) *sql.DB {
 
 	seedTestDefaultAgent(tb, db)
 
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxOpenConns)
 	return db
 }
 

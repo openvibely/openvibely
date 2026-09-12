@@ -478,7 +478,7 @@ func (s *projectDeletionFileStage) finalize(ctx context.Context) error {
 // critical for containerized deployments where ephemeral filesystem paths can
 // disappear on restart if they were not under a persistent volume mount.
 func (s *ProjectService) ValidateRepoPaths(ctx context.Context) []string {
-	projects, err := s.repo.List(ctx)
+	projects, err := s.repo.ListRepoValidationProjects(ctx)
 	if err != nil {
 		applog.Infof("warning: could not list projects for repo path validation: %v", err)
 		return nil

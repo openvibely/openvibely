@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -445,6 +446,45 @@ func TestValidateRepoPaths_SkipsEmptyRepoPath(t *testing.T) {
 	missing := svc.ValidateRepoPaths(ctx)
 	if len(missing) != 0 {
 		t.Fatalf("expected 0 missing repo path warnings, got %d", len(missing))
+	}
+}
+
+func TestValidateRepoPaths_PreservesWarningContentsForMixedPaths(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	svc := NewProjectService(projectRepo)
+	ctx := context.Background()
+
+	existingPath := t.TempDir()
+	missingURL := &models.Project{
+		Name:     "Missing GitHub Repo",
+		RepoPath: filepath.Join(t.TempDir(), "missing-github"),
+		RepoURL:  "https://github.example.test/org/repository",
+	}
+	missingLocal := &models.Project{
+		Name:     "Missing Local Repo",
+		RepoPath: filepath.Join(t.TempDir(), "missing-local"),
+	}
+	existing := &models.Project{Name: "Existing Repo", RepoPath: existingPath, RepoURL: "https://ignored.example.test/existing"}
+	empty := &models.Project{Name: "No Repo", RepoURL: "https://ignored.example.test/empty"}
+	for _, project := range []*models.Project{missingURL, missingLocal, existing, empty} {
+		if err := projectRepo.Create(ctx, project); err != nil {
+			t.Fatalf("Create %q: %v", project.Name, err)
+		}
+	}
+
+	got := svc.ValidateRepoPaths(ctx)
+	want := map[string]struct{}{
+		fmt.Sprintf("project %q (id=%s): repo_path %q does not exist on disk (repo_url=%s — may need re-clone or volume mount fix)", missingURL.Name, missingURL.ID, missingURL.RepoPath, missingURL.RepoURL): {},
+		fmt.Sprintf("project %q (id=%s): repo_path %q does not exist on disk (local repo — ensure the path is mounted into the container)", missingLocal.Name, missingLocal.ID, missingLocal.RepoPath):        {},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("warnings = %d, want %d: %v", len(got), len(want), got)
+	}
+	for _, warning := range got {
+		if _, ok := want[warning]; !ok {
+			t.Fatalf("unexpected warning %q", warning)
+		}
 	}
 }
 

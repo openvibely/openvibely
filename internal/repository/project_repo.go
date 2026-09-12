@@ -13,6 +13,13 @@ type ProjectRepoRoot struct {
 	RepoPath string
 }
 
+type ProjectRepoValidationProject struct {
+	ID       string
+	Name     string
+	RepoPath string
+	RepoURL  string
+}
+
 type ProjectRepo struct {
 	db *sql.DB
 }
@@ -90,6 +97,28 @@ func (r *ProjectRepo) ListWorkerCapacityProjects(ctx context.Context) ([]models.
 }
 
 const projectRepoRootsQuery = `SELECT id, repo_path FROM projects`
+const projectRepoValidationProjectsQuery = `SELECT id, name, repo_path, repo_url FROM projects`
+
+// ListRepoValidationProjects returns the compact unordered project projection
+// needed by startup repository-path validation. Keep this separate from List:
+// validation does not need display ordering or project settings and metadata.
+func (r *ProjectRepo) ListRepoValidationProjects(ctx context.Context) ([]ProjectRepoValidationProject, error) {
+	rows, err := r.db.QueryContext(ctx, projectRepoValidationProjectsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("listing project repository validation rows: %w", err)
+	}
+	defer rows.Close()
+
+	projects := make([]ProjectRepoValidationProject, 0, 64)
+	for rows.Next() {
+		var p ProjectRepoValidationProject
+		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &p.RepoURL); err != nil {
+			return nil, fmt.Errorf("scanning project repository validation row: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
 
 // ForEachRepoRoot scans the compact unordered repository-root projection and
 // invokes visit once per project without materializing a full result slice.
