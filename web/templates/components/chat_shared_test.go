@@ -155,6 +155,9 @@ func TestLatestMessageButtonAndControllerContract(t *testing.T) {
 	markup := button.String()
 	for _, required := range []string{
 		`type="button"`,
+		`data-chat-latest-message-position`,
+		`pointer-events-none`,
+		`pointer-events-auto`,
 		`data-chat-latest-message`,
 		`data-messages-id="chat-messages"`,
 		`data-tracker-key="scrollTracker_chat-messages"`,
@@ -165,6 +168,18 @@ func TestLatestMessageButtonAndControllerContract(t *testing.T) {
 		if !strings.Contains(markup, required) {
 			t.Errorf("latest-message button missing %q: %s", required, markup)
 		}
+	}
+	buttonStart := strings.Index(markup, `<button`)
+	if buttonStart < 0 {
+		t.Fatalf("latest-message button opening tag missing: %s", markup)
+	}
+	buttonEnd := strings.Index(markup[buttonStart:], `>`)
+	if buttonEnd < 0 {
+		t.Fatalf("latest-message button opening tag is incomplete: %s", markup)
+	}
+	buttonTag := markup[buttonStart : buttonStart+buttonEnd+1]
+	if strings.Contains(buttonTag, `translate-x`) || strings.Contains(buttonTag, `left-1/2`) {
+		t.Fatalf("interactive latest-message button must not own transform-based centering because DaisyUI pressed transforms move its hit target: %s", buttonTag)
 	}
 
 	var script bytes.Buffer
@@ -216,6 +231,7 @@ func TestLatestMessageButtonDynamicBehaviorInChrome(t *testing.T) {
 		.messages { height: 100%; overflow-y: auto; }
 		.row { height: 32px; }
 		.hidden,[hidden] { display: none !important; }
+		.\\-translate-x-1\\/2 { transform: translateX(-50%); }
 	</style></head><body><main id="fixture-root" data-test-result="pending">
 		<section class="fixture"><div id="chat-messages" class="messages" data-scroll-intent-scope="project-1">` + rows + `</div>` + chatButton.String() + `</section>
 		<section class="fixture"><div id="task-thread-messages" class="messages" data-scroll-intent-scope="task-1">` + rows + `</div>` + threadButton.String() + `</section>
@@ -234,6 +250,7 @@ func TestLatestMessageButtonDynamicBehaviorInChrome(t *testing.T) {
 			var button = document.querySelector('[data-messages-id="' + messagesID + '"]');
 			var messages = document.getElementById(messagesID);
 			if (!button || button.hidden || button.classList.contains('hidden')) return fail(messagesID + ' button did not appear after scrolling up');
+			if (getComputedStyle(button).transform !== 'none') return fail(messagesID + ' button owns a centering transform that can conflict with its pressed state');
 			var before = messages.scrollTop;
 			var streamed = document.createElement('div'); streamed.className = 'row'; streamed.textContent = 'streamed update'; messages.appendChild(streamed);
 			if (messages.scrollTop !== before) return fail(messagesID + ' streamed update moved a reader');

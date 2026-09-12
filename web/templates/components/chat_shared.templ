@@ -3078,20 +3078,22 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 // ChatLatestMessageButton renders the shared control for returning a transcript to live output.
 templ ChatLatestMessageButton(messagesID string, trackerKey string) {
-	<button
-		type="button"
-		class="btn btn-sm absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border-base-300 bg-base-100 shadow-lg whitespace-nowrap hidden"
-		data-chat-latest-message
-		data-messages-id={ messagesID }
-		data-tracker-key={ trackerKey }
-		aria-label="Scroll to latest message"
-		hidden
-	>
-		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-		</svg>
-		Latest message
-	</button>
+	<div class="absolute inset-x-0 bottom-3 z-20 flex justify-center pointer-events-none" data-chat-latest-message-position>
+		<button
+			type="button"
+			class="btn btn-sm rounded-full border-base-300 bg-base-100 shadow-lg whitespace-nowrap pointer-events-auto hidden"
+			data-chat-latest-message
+			data-messages-id={ messagesID }
+			data-tracker-key={ trackerKey }
+			aria-label="Scroll to latest message"
+			hidden
+		>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+			</svg>
+			Latest message
+		</button>
+	</div>
 }
 
 // ChatAutoScrollScript emits shared auto-scroll and transcript rendering/cleaning JS.

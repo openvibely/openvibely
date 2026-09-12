@@ -3539,14 +3539,14 @@ func ChatLatestMessageButton(messagesID string, trackerKey string) templ.Compone
 			templ_7745c5c3_Var189 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 230, "<button type=\"button\" class=\"btn btn-sm absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full border-base-300 bg-base-100 shadow-lg whitespace-nowrap hidden\" data-chat-latest-message data-messages-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 230, "<div class=\"absolute inset-x-0 bottom-3 z-20 flex justify-center pointer-events-none\" data-chat-latest-message-position><button type=\"button\" class=\"btn btn-sm rounded-full border-base-300 bg-base-100 shadow-lg whitespace-nowrap pointer-events-auto hidden\" data-chat-latest-message data-messages-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var190 string
 		templ_7745c5c3_Var190, templ_7745c5c3_Err = templ.ResolveAttributeValue(messagesID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3085, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3086, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var190)
 		if templ_7745c5c3_Err != nil {
@@ -3559,13 +3559,13 @@ func ChatLatestMessageButton(messagesID string, trackerKey string) templ.Compone
 		var templ_7745c5c3_Var191 string
 		templ_7745c5c3_Var191, templ_7745c5c3_Err = templ.ResolveAttributeValue(trackerKey)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3086, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 3087, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var191)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 232, "\" aria-label=\"Scroll to latest message\" hidden><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg> Latest message</button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 232, "\" aria-label=\"Scroll to latest message\" hidden><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg> Latest message</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
