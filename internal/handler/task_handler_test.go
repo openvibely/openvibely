@@ -30,6 +30,25 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	tc.CreateTask(project.ID).WithTitle("Active queued").WithCategory(models.CategoryActive).WithStatus(models.StatusQueued).Build()
 	tc.CreateTask(project.ID).WithTitle("Backlog queued").WithCategory(models.CategoryBacklog).WithStatus(models.StatusQueued).Build()
 	tc.CreateTask(project.ID).WithTitle("Completed task").WithCategory(models.CategoryCompleted).WithStatus(models.StatusCompleted).Build()
+	tc.CreateTask(project.ID).WithTitle("Chat queued").WithCategory(models.CategoryChat).WithStatus(models.StatusQueued).Build()
+	tc.CreateTask(project.ID).WithTitle("Scheduled queued").WithCategory(models.CategoryScheduled).WithStatus(models.StatusQueued).Build()
+	tc.CreateTask(project.ID).WithTitle("Active failed").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
+	tc.CreateTask(project.ID).WithTitle("Active cancelled").WithCategory(models.CategoryActive).WithStatus(models.StatusCancelled).Build()
+
+	ctx := context.Background()
+	parentID := "status-count-swarm-parent"
+	parent := &models.Task{
+		ID: parentID, ProjectID: project.ID, Title: "Swarm parent", Prompt: "parent",
+		Category: models.CategoryCompleted, Status: models.StatusCompleted, SwarmRole: models.SwarmRoleParent,
+	}
+	require.NoError(t, tc.handler.taskRepo.Create(ctx, parent))
+	childParentID := parent.ID
+	require.NoError(t, tc.handler.taskRepo.Create(ctx, &models.Task{
+		ID: "status-count-swarm-worker", ProjectID: project.ID, Title: "Swarm worker", Prompt: "worker",
+		Category: models.CategoryActive, Status: models.StatusQueued, SwarmRole: models.SwarmRoleWorker,
+		ParentTaskID: &childParentID,
+	}))
+
 	tc.CreateTask(foreign.ID).WithTitle("Foreign queued").WithCategory(models.CategoryActive).WithStatus(models.StatusQueued).Build()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts?project_id="+project.ID, nil)

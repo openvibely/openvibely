@@ -1985,32 +1985,37 @@ func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, p
 }
 
 // CountProjectStatus returns the active-category and queued-status counts for a
-// project in one grouped query. Unlike board listing, it does not select or
-// order task-card fields.
+// project using the same card projection as the full task board. Hidden chat,
+// ordinary scheduled, and swarm-child rows must not change the status shown by
+// clients that previously counted rendered task cards.
 func (r *TaskRepo) CountProjectStatus(ctx context.Context, projectID string) (ProjectTaskStatusCounts, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT category, status, COUNT(*) FROM tasks WHERE project_id = ? GROUP BY category, status`, projectID)
-	if err != nil {
-		return ProjectTaskStatusCounts{}, fmt.Errorf("counting project task status: %w", err)
-	}
-	defer rows.Close()
+	const query = `
+		SELECT
+			COALESCE(SUM(CASE WHEN t.category = 'active'
+				AND t.status NOT IN ('failed', 'cancelled')
+				AND COALESCE(t.swarm_role, '') NOT IN ('planner', 'worker', 'reviewer', 'merger', 'integrator')
+			THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN t.status = 'queued'
+				AND COALESCE(t.swarm_role, '') NOT IN ('planner', 'worker', 'reviewer', 'merger', 'integrator')
+				AND (
+					t.category IN ('active', 'backlog', 'completed')
+					OR (t.category = 'scheduled' AND EXISTS (
+						SELECT 1
+						FROM automation_dispatch_outbox d
+						JOIN automation_task_run_reservations r
+							ON r.dispatch_id = d.id AND r.task_id = d.task_id
+						WHERE d.task_id = t.id
+							AND d.execution_id IS NULL
+							AND d.status IN ('pending', 'processing', 'submitted')
+					))
+				)
+			THEN 1 ELSE 0 END), 0)
+		FROM tasks t
+		WHERE t.project_id = ?`
 
 	var counts ProjectTaskStatusCounts
-	for rows.Next() {
-		var category, status string
-		var count int
-		if err := rows.Scan(&category, &status, &count); err != nil {
-			return ProjectTaskStatusCounts{}, fmt.Errorf("scanning project task status count: %w", err)
-		}
-		if category == string(models.CategoryActive) {
-			counts.ActiveTasks += count
-		}
-		if status == string(models.StatusQueued) {
-			counts.QueuedTasks += count
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return ProjectTaskStatusCounts{}, fmt.Errorf("reading project task status counts: %w", err)
+	if err := r.db.QueryRowContext(ctx, query, projectID).Scan(&counts.ActiveTasks, &counts.QueuedTasks); err != nil {
+		return ProjectTaskStatusCounts{}, fmt.Errorf("counting project task status: %w", err)
 	}
 	return counts, nil
 }
