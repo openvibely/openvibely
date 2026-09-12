@@ -18,6 +18,7 @@ import (
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
+	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -888,9 +889,13 @@ func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Age
 	return raw, merged
 }
 
+type anthropicAdapterCaller interface {
+	Call(context.Context, llmcontracts.AgentRequest, string, *llmstream.Writer) (llmcontracts.AgentResult, error)
+}
+
 type anthropicProviderAdapter struct {
 	svc     *LLMService
-	adapter *llmanthropic.Adapter
+	adapter anthropicAdapterCaller
 }
 
 func anthropicAdapterEnabled(agent models.LLMConfig) bool {
@@ -908,19 +913,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 	}
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {
-		case llmcontracts.OperationDirect:
-			if anthropicAdapterEnabled(req.Agent) {
-				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
-			}
-			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
-
-		case llmcontracts.OperationStreaming:
-			if anthropicAdapterEnabled(req.Agent) {
-				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
-			}
-			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
-
-		case llmcontracts.OperationTask:
+		case llmcontracts.OperationDirect, llmcontracts.OperationStreaming, llmcontracts.OperationTask:
 			if anthropicAdapterEnabled(req.Agent) {
 				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 			}
