@@ -34,6 +34,7 @@ type projectCapacityAPIProjectionMeasurement struct {
 	allocatedBytes       uint64
 	allocations          uint64
 	selectedProjectBytes int
+	responseBody         string
 	responseBytes        int
 	sqlStatements        int
 }
@@ -49,11 +50,17 @@ func TestGetProjectCapacitiesProjectionProductionPerformance(t *testing.T) {
 			full := fixture.measure(t, fixture.renderFullRowBaseline, true)
 			compact := fixture.measure(t, fixture.renderCompactHandler, false)
 
+			if compact.responseBody != full.responseBody {
+				t.Fatalf("compact JSON response differs from full-row baseline:\nfull: %s\ncompact: %s", full.responseBody, compact.responseBody)
+			}
 			if compact.responseBytes != full.responseBytes {
 				t.Fatalf("compact JSON response bytes = %d, full-row baseline = %d", compact.responseBytes, full.responseBytes)
 			}
-			if compact.sqlStatements != full.sqlStatements {
-				t.Fatalf("compact SQL statements = %d, full-row baseline = %d", compact.sqlStatements, full.sqlStatements)
+			if compact.sqlStatements != 2 {
+				t.Fatalf("compact SQL statements = %d, want project list plus pending count", compact.sqlStatements)
+			}
+			if full.sqlStatements != projectCount+2 {
+				t.Fatalf("full-row baseline SQL statements = %d, want full project list, pending count, and one capacity lookup per project", full.sqlStatements)
 			}
 			if projectCount == 500 {
 				if compact.selectedProjectBytes*10 > full.selectedProjectBytes {
@@ -121,6 +128,7 @@ func newProjectCapacityAPIProjectionFixture(tb testing.TB, projectCount int) *pr
 	seedProjectCapacityAPIProjectionFixture(tb, writer, projectCount)
 
 	h, e, _ := setupTestHandlerForDB(tb, reader)
+	h.workerSvc.SetProjectRepo(h.projectRepo)
 	return &projectCapacityAPIProjectionFixture{
 		counter:     counter,
 		projectRepo: repository.NewProjectRepo(reader),
@@ -248,7 +256,7 @@ func (fixture *projectCapacityAPIProjectionFixture) measure(tb testing.TB, rende
 	latencies := make([]time.Duration, 0, projectCapacityAPIProjectionSamples)
 	allocatedBytes := make([]uint64, 0, projectCapacityAPIProjectionSamples)
 	allocations := make([]uint64, 0, projectCapacityAPIProjectionSamples)
-	responseBytes := make([]int, 0, projectCapacityAPIProjectionSamples)
+	responseBodies := make([]string, 0, projectCapacityAPIProjectionSamples)
 	for range projectCapacityAPIProjectionSamples {
 		runtime.GC()
 		var before, after runtime.MemStats
@@ -263,25 +271,34 @@ func (fixture *projectCapacityAPIProjectionFixture) measure(tb testing.TB, rende
 		latencies = append(latencies, elapsed)
 		allocatedBytes = append(allocatedBytes, after.TotalAlloc-before.TotalAlloc)
 		allocations = append(allocations, after.Mallocs-before.Mallocs)
-		responseBytes = append(responseBytes, len(body))
+		responseBodies = append(responseBodies, body)
 	}
 
 	measuredResponseBytes, sqlStatements := fixture.queryMetrics(tb, render)
-	if len(responseBytes) == 0 || measuredResponseBytes != responseBytes[0] {
-		tb.Fatalf("response size varied between measured samples: %v versus %d", responseBytes, measuredResponseBytes)
+	if len(responseBodies) == 0 {
+		tb.Fatalf("no response samples collected")
+	}
+	for i, body := range responseBodies[1:] {
+		if body != responseBodies[0] {
+			tb.Fatalf("response bytes varied between measured samples at sample %d", i+1)
+		}
+	}
+	if measuredResponseBytes != len(responseBodies[0]) {
+		tb.Fatalf("response size varied between measured samples: %d versus %d", len(responseBodies[0]), measuredResponseBytes)
 	}
 	selectedProjectBytes := fixture.selectedProjectBytes(tb, full)
 	slices.Sort(latencies)
 	slices.Sort(allocatedBytes)
 	slices.Sort(allocations)
-	slices.Sort(responseBytes)
+	responseBody := responseBodies[0]
 	return projectCapacityAPIProjectionMeasurement{
 		medianLatency:        latencies[len(latencies)/2],
 		p95Latency:           latencies[len(latencies)-1],
 		allocatedBytes:       allocatedBytes[len(allocatedBytes)/2],
 		allocations:          allocations[len(allocations)/2],
 		selectedProjectBytes: selectedProjectBytes,
-		responseBytes:        responseBytes[len(responseBytes)/2],
+		responseBody:         responseBody,
+		responseBytes:        len(responseBody),
 		sqlStatements:        sqlStatements,
 	}
 }
@@ -301,17 +318,23 @@ func (fixture *projectCapacityAPIProjectionFixture) queryMetrics(tb testing.TB, 
 func (fixture *projectCapacityAPIProjectionFixture) selectedProjectBytes(tb testing.TB, full bool) int {
 	tb.Helper()
 	fixture.counter.SetEnabled(true)
+	defer fixture.counter.SetEnabled(false)
 	fixture.counter.Reset()
 	ctx := context.Background()
 	if full {
-		if _, err := fixture.projectRepo.List(ctx); err != nil {
+		projects, err := fixture.projectRepo.List(ctx)
+		if err != nil {
 			tb.Fatalf("list full project rows for byte metric: %v", err)
+		}
+		for i := range projects {
+			if !fixture.h.workerSvc.HasProjectCapacity(projects[i].ID) {
+				tb.Fatalf("check project capacity for byte metric: project=%q", projects[i].ID)
+			}
 		}
 	} else {
 		if _, err := fixture.projectRepo.ListWorkerCapacityProjects(ctx); err != nil {
 			tb.Fatalf("list compact project rows for byte metric: %v", err)
 		}
 	}
-	fixture.counter.SetEnabled(false)
 	return fixture.counter.SelectedTextBytes()
 }
