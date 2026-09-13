@@ -12,6 +12,14 @@ import (
 	"testing"
 )
 
+func TestCompletionsContinuationPreflightConservativelyCountsToolArguments(t *testing.T) {
+	messages := []completionsMessage{{Role: "assistant", Content: strings.Repeat("{}", 4000)}}
+	err := ensureCompletionsRequestFits(messages, nil, &CompletionsOptions{ContextWindow: 6000, MaxOutputTokens: 1000})
+	if err == nil {
+		t.Fatal("expected local complete-request rejection")
+	}
+}
+
 type completionsRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f completionsRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

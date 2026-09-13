@@ -271,6 +271,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	if rt != nil && len(rt.Definitions) > 0 && !disableTools {
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 			Model:                  agent.Model,
+			ContextWindow:          agent.ContextWindow,
 			MaxOutputTokens:        openAIDirectOutputBudget,
 			System:                 systemPrompt,
 			ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
@@ -348,6 +349,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
+		ContextWindow:             agent.ContextWindow,
 		MaxOutputTokens:           openAIAgenticOutputBudget,
 		System:                    applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
 		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
@@ -460,6 +462,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
+		ContextWindow:             agent.ContextWindow,
 		MaxOutputTokens:           openAIAgenticOutputBudget,
 		System:                    systemPromptStr,
 		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
@@ -568,6 +571,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
 		Model:            agent.Model,
+		ContextWindow:    agent.ContextWindow,
 		MaxOutputTokens:  openAIAgenticOutputBudget,
 		System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
 		WorkDir:          effectiveWorkDir,
@@ -647,6 +651,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
 	resp, err := client.SendCompletions(ctx, message, &openaiclient.CompletionsOptions{
 		Model:            agent.Model,
+		ContextWindow:    agent.ContextWindow,
 		MaxOutputTokens:  openAIAgenticOutputBudget,
 		System:           systemPromptStr,
 		DisableTools:     disableTools,

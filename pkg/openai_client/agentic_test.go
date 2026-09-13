@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // buildSSE constructs a server-sent events stream from JSON data lines.
@@ -3365,6 +3366,14 @@ func TestTrimCompactionInputItemsToFitContextWindow_PreservesObjectiveAndRecentC
 	}
 	if got := last["role"]; got != "assistant" {
 		t.Fatalf("trimmed[last].role = %v, want assistant", got)
+	}
+}
+
+func TestAgenticContinuationPreflightConservativelyCountsToolArguments(t *testing.T) {
+	items := []any{map[string]any{"type": "function_call", "arguments": strings.Repeat("{}", 4000)}}
+	err := ensureOpenAIAgenticRequestFits(items, nil, &AgenticOptions{Model: "custom", ContextWindow: 6000, MaxOutputTokens: 1000})
+	if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed preflight rejection", err)
 	}
 }
 

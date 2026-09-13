@@ -22,6 +22,14 @@ func (f anthropicRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, er
 
 type failingAnthropicBody struct{}
 
+func TestAnthropicContinuationPreflightConservativelyCountsToolPayload(t *testing.T) {
+	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("{}", 4000)}}
+	err := ensureAnthropicAgenticRequestFits(messages, nil, &AgenticOptions{ContextWindow: 6000, MaxTokens: 1000})
+	if err == nil {
+		t.Fatal("expected local complete-request rejection")
+	}
+}
+
 func TestExecuteAnthropicToolUsesMakesRequestUserInputExclusive(t *testing.T) {
 	var executed []string
 	opts := &AgenticOptions{ToolExecutor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {

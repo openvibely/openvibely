@@ -101,7 +101,8 @@ type AgentRequest struct {
 	// NativeCompactionStateJSON contains provider-native compacted input items
 	// that must be replayed structurally rather than rendered as chat text.
 	NativeCompactionStateJSON string
-	ContextTokenEstimate      int // Reported last-response usage plus locally added context.
+	ContextTokenEstimate      int  // Reported last-response usage plus locally added context.
+	ProviderRuntimeResolved   bool // Transient: plugin/model resolution already ran before request budgeting.
 }
 
 type lifecycleHookCallContextKey struct{}

@@ -368,10 +368,17 @@ func TestProviderContextBudget_OversizedPendingInputIsExternalizedWithoutCompact
 	t.Setenv("OPENVIBELY_APP_DATA_DIR", root)
 	original := "diagnose this log\n" + strings.Repeat("x", 2_664_043-len("diagnose this log\n"))
 	var got llmcontracts.AgentRequest
+	var artifactData []byte
+	var artifactMode os.FileMode
 	calls := 0
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 		calls++
 		got = req
+		artifact := filepath.Join(root, "task-inputs", "oversized-exec", "prompt.txt")
+		artifactData, _ = os.ReadFile(artifact)
+		if info, err := os.Stat(artifact); err == nil {
+			artifactMode = info.Mode().Perm()
+		}
 		return llmcontracts.AgentResult{Output: "ok"}, nil
 	})
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
@@ -394,19 +401,14 @@ func TestProviderContextBudget_OversizedPendingInputIsExternalizedWithoutCompact
 		t.Fatalf("model-facing prompt was not externalized: %q", got.Message)
 	}
 	artifact := filepath.Join(root, "task-inputs", "oversized-exec", "prompt.txt")
-	data, err := os.ReadFile(artifact)
-	if err != nil {
-		t.Fatalf("read artifact: %v", err)
+	if string(artifactData) != original {
+		t.Fatalf("artifact bytes during provider call = %d, want complete original %d", len(artifactData), len(original))
 	}
-	if string(data) != original {
-		t.Fatalf("artifact bytes = %d, want complete original %d", len(data), len(original))
+	if artifactMode != 0o600 {
+		t.Fatalf("artifact mode = %v, want 0600", artifactMode)
 	}
-	info, err := os.Stat(artifact)
-	if err != nil {
-		t.Fatalf("stat artifact: %v", err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("artifact mode = %v, want 0600", info.Mode().Perm())
+	if _, err := os.Stat(artifact); !os.IsNotExist(err) {
+		t.Fatalf("artifact must be cleaned after provider call, stat err=%v", err)
 	}
 	if estimateModelVisibleRequestTokens(got) > requestBudgetForAgent(got.Agent).SafeInputLimit {
 		t.Fatal("externalized request still exceeds safe input limit")
@@ -704,8 +706,9 @@ func TestNativeCheckpointFailureSummarizesOriginalTranscript(t *testing.T) {
 	repo := repository.NewExecutionRepo(db)
 	ctx := context.Background()
 	state := `[{"type":"compaction","encrypted_content":"opaque"}]`
+	checkpointAgent := models.LLMConfig{ID: "model", Provider: models.ProviderOpenAI}
 	if err := repo.UpsertChatCompactionCheckpoint(ctx, models.ChatCompactionCheckpoint{
-		ScopeType: "chat_project", ScopeID: "fallback", ModelConfigID: "model",
+		ScopeType: "chat_project", ScopeID: "fallback", ModelConfigID: "model", CompatibilityKey: providerCompatibilityKey(checkpointAgent),
 		SourceExecutionID: "source", Strategy: "openai_responses", ProviderStateJSON: state,
 	}); err != nil {
 		t.Fatal(err)
@@ -836,10 +839,10 @@ func TestProviderContextCompactionFallback_OpenAICompatibleProactiveSummaryAndPe
 		return llmcontracts.AgentResult{Output: "ok", TextOnlyOutput: "ok"}, nil
 	})
 	history := []models.Execution{
-		{ID: "old", PromptSent: strings.Repeat("o", 2400), Output: "old", Status: models.ExecCompleted},
-		{ID: "source", PromptSent: strings.Repeat("n", 2400), Output: "new", Status: models.ExecCompleted},
+		{ID: "old", PromptSent: strings.Repeat("o", 5000), Output: "old", Status: models.ExecCompleted},
+		{ID: "source", PromptSent: strings.Repeat("n", 5000), Output: "new", Status: models.ExecCompleted},
 	}
-	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 10000}, ProjectID: "project-1", ChatHistory: history}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 20000}, ProjectID: "project-1", ChatHistory: history}
 	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
 	if err != nil || res.Output != "ok" {
 		t.Fatalf("call result=%#v err=%v", res, err)
@@ -880,7 +883,7 @@ func TestProviderContextCompactionFallback_RestoresDurableCheckpointOnFollowingT
 
 func TestProviderContextCompactionFallback_NativeFailureFallsBackAndCachesUnsupported(t *testing.T) {
 	model := "native-unsupported-test"
-	knownUnsupportedNativeCompaction.Delete(string(models.ProviderOpenAI) + "\x00" + model)
+	knownUnsupportedNativeCompaction.Delete(nativeCompactionSessionKey(models.LLMConfig{Provider: models.ProviderOpenAI, Model: model}))
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	var requests []llmcontracts.AgentRequest
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
@@ -984,8 +987,9 @@ func TestProviderContextCompactionFallback_RestoresNativeStateForMatchingModelOn
 	db := testutil.NewTestDB(t)
 	execRepo := repository.NewExecutionRepo(db)
 	state := `[{"type":"compaction","encrypted_content":"opaque"}]`
+	checkpointAgent := models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAI}
 	if err := execRepo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{
-		ScopeType: "chat_project", ScopeID: "project-native-restore", ModelConfigID: "model-1",
+		ScopeType: "chat_project", ScopeID: "project-native-restore", ModelConfigID: "model-1", CompatibilityKey: providerCompatibilityKey(checkpointAgent),
 		SourceExecutionID: "source", Strategy: "openai_responses", ProviderStateJSON: state,
 	}); err != nil {
 		t.Fatalf("UpsertChatCompactionCheckpoint: %v", err)
@@ -1514,5 +1518,79 @@ func TestApplyAgentToSystemPrompt_AgentWithSkills(t *testing.T) {
 	}
 	if !strings.Contains(result, "Do the test thing") {
 		t.Fatalf("expected skill content in prompt, got %q", result)
+	}
+}
+
+func TestRequestPreflightUsesFinalResolvedAgentRuntime(t *testing.T) {
+	origResolve := resolvePluginRuntimeBundleFn
+	defer func() { resolvePluginRuntimeBundleFn = origResolve }()
+	resolvePluginRuntimeBundleFn = func(context.Context, []string) (*agentplugins.RuntimeBundle, error) {
+		return &agentplugins.RuntimeBundle{Skills: []models.SkillConfig{{Name: "large", Content: strings.Repeat("x", 900)}}, PluginIDs: []string{"plugin@test"}}, nil
+	}
+	calls := 0
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		return llmcontracts.AgentResult{Output: "unexpected"}, nil
+	})
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationTask, Message: "small",
+		Agent:           models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "tiny", ContextWindow: 1000},
+		AgentDefinition: &models.Agent{Plugins: []string{"plugin@test"}, SystemPrompt: strings.Repeat("s", 600)},
+	}
+	_, err := (&LLMService{}).callProviderWithCompaction(adapter, req)
+	if err == nil || calls != 0 || (!llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) && !llmcontracts.ErrorIs(err, llmcontracts.ErrorPendingInputInfeasible)) {
+		t.Fatalf("err=%v calls=%d, want typed local rejection before adapter", err, calls)
+	}
+}
+
+func TestOversizedInputArtifactHasAuthorizedBoundedReaderAndIsCleaned(t *testing.T) {
+	root := t.TempDir()
+	svc := &LLMService{globalSkillRoot: root}
+	var artifactPath string
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		rt := llmcontracts.RuntimeToolsFromContext(req.Ctx)
+		if rt == nil || !rt.HasDefinition(oversizedInputReaderTool) || rt.Executor == nil {
+			t.Fatal("oversized input reader was not authorized")
+		}
+		artifactPath = filepath.Join(root, "task-inputs", req.ExecID, "prompt.txt")
+		out, handled, isError, err := rt.Executor(req.Ctx, oversizedInputReaderTool, []byte(`{"offset":10,"limit":32}`))
+		if err != nil || !handled || isError || out != strings.Repeat("z", 32) {
+			t.Fatalf("reader output=%q handled=%v isError=%v err=%v", out, handled, isError, err)
+		}
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationTask, ExecID: "exec-artifact", WorkDir: t.TempDir(), Message: strings.Repeat("z", 40000), Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 20000}}
+	if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(artifactPath); !os.IsNotExist(err) {
+		t.Fatalf("artifact must be removed after provider/tool loop, stat err=%v", err)
+	}
+}
+
+func TestNativeCompactionCapabilityCacheIsConfigurationScoped(t *testing.T) {
+	a := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "same", BaseURL: "https://one.example/v1", AuthMethod: models.AuthMethodAPIKey, APIKey: "key-one"}
+	b := a
+	b.BaseURL = "https://two.example/v1"
+	b.APIKey = "key-two"
+	if nativeCompactionSessionKey(a) == nativeCompactionSessionKey(b) {
+		t.Fatal("different endpoint/auth configurations shared native capability key")
+	}
+}
+
+func TestNativeCheckpointRequiresCompleteCompatibilityIdentity(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewExecutionRepo(db)
+	base := models.LLMConfig{ID: "same-id", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", BaseURL: "https://one.example/v1", AuthMethod: models.AuthMethodAPIKey, APIKey: "one"}
+	if err := repo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{ScopeType: "chat_project", ScopeID: "identity", ModelConfigID: base.ID, CompatibilityKey: providerCompatibilityKey(base), ProviderStateJSON: `[{"type":"compaction"}]`}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewLLMService(nil, repo, nil, nil, nil, nil)
+	changed := base
+	changed.BaseURL = "https://two.example/v1"
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, ProjectID: "identity", Agent: changed, ChatHistory: []models.Execution{{ID: "source", PromptSent: "original"}}}
+	got := svc.restoreCompactionCheckpoint(req)
+	if got.NativeCompactionStateJSON != "" || len(got.ChatHistory) != 1 {
+		t.Fatalf("incompatible opaque state restored: %#v", got)
 	}
 }

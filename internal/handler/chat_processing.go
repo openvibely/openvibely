@@ -1675,7 +1675,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		PromptSent:    failed.PromptSent,
 		IsFollowup:    true,
 	}
-	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: failed.PromptSent, Source: models.TaskOriginWeb}
+	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: failed.PromptSent, Source: models.TaskOriginWeb, RetrySourceExecutionID: failed.ID}
 	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
 	if err != nil {
 		return err
@@ -1860,7 +1860,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	h.resumeUserStoppedGoalForManualStart(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	h.reactivateAchievedGoalForManualFollowup(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, exec.TaskID, taskThreadHistoryLimit)
-	priorHistory := filterChatHistory(priorExecs, exec.ID)
+	priorHistory := filterRetryChatHistory(priorExecs, exec.ID, input.RetrySourceExecutionID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
 		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {

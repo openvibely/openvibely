@@ -12,9 +12,11 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
@@ -30,13 +32,14 @@ const (
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
-	Model        string
-	MaxTokens    int
-	Effort       string // output_config.effort; empty preserves the provider default
-	System       string
-	WorkDir      string // working directory for tool execution
-	MaxTurns     int    // max agentic loop iterations (default 25)
-	DisableTools bool   // when true, no tools are sent (chat orchestrator mode)
+	Model         string
+	MaxTokens     int
+	ContextWindow int    // complete-request admission window; defaults conservatively when zero
+	Effort        string // output_config.effort; empty preserves the provider default
+	System        string
+	WorkDir       string // working directory for tool execution
+	MaxTurns      int    // max agentic loop iterations (default 25)
+	DisableTools  bool   // when true, no tools are sent (chat orchestrator mode)
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example runtime action tools) to be sent.
 	SkipDefaultTools bool
@@ -891,7 +894,38 @@ func usesAdaptiveThinking(model string) bool {
 }
 
 // sendAgenticTurn sends a single streaming request and returns parsed content blocks.
+func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) error {
+	if opts == nil {
+		return nil
+	}
+	window := opts.ContextWindow
+	if window <= 0 {
+		window = 200000
+	}
+	reserved := opts.MaxTokens
+	if reserved <= 0 {
+		reserved = 8192
+	}
+	safe := window - reserved - max(1024, window/50)
+	encoded, err := json.Marshal(struct {
+		Messages []agenticMessage `json:"messages"`
+		Tools    []ToolDefinition `json:"tools,omitempty"`
+		System   string           `json:"system,omitempty"`
+	}{messages, tools, opts.System})
+	if err != nil {
+		return err
+	}
+	tokens := utf8.RuneCount(encoded)
+	if tokens <= safe {
+		return nil
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Anthropic Messages preflight", fmt.Errorf("complete request requires %d input tokens; safe limit is %d", tokens, safe))
+}
+
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil {
+		return nil, err
+	}
 	policy := httpretry.DefaultPolicy()
 	policy.MaxRetries = 0
 	policy.AllowReplay = true

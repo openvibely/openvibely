@@ -11,15 +11,18 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
 	Model           string
 	MaxOutputTokens int
+	ContextWindow   int
 	// Temperature preserves explicit zero, which many providers treat
 	// differently from their default. Use OmittedTemperature for models that
 	// do not accept the parameter.
@@ -200,6 +203,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil {
+			return nil, err
+		}
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			RetryConnectionFailuresWithoutBudget: true,
 			OnRetry: func(event httpretry.RetryEvent) {
@@ -376,6 +382,29 @@ type completionsTurnResult struct {
 	totalTokens       int
 	cachedInputTokens int
 	reasoningTokens   int
+}
+
+func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) error {
+	if opts == nil {
+		return nil
+	}
+	window := opts.ContextWindow
+	if window <= 0 {
+		window = 128000
+	}
+	safe := window - opts.MaxOutputTokens - max(1024, window/50)
+	encoded, err := json.Marshal(struct {
+		Messages []completionsMessage     `json:"messages"`
+		Tools    []map[string]interface{} `json:"tools,omitempty"`
+	}{messages, tools})
+	if err != nil {
+		return err
+	}
+	tokens := utf8.RuneCount(encoded)
+	if tokens <= safe {
+		return nil
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Chat Completions preflight", fmt.Errorf("complete request requires %d input tokens; safe limit is %d", tokens, safe))
 }
 
 func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
