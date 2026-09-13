@@ -540,15 +540,17 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 	var snapshots []models.AccountUsageSnapshot
 	errorsByKey := map[string]string{}
 	seenAccounts := map[string]bool{}
+	failedCredentialOwners := map[string]bool{}
 	type pendingAccountFailure struct {
 		snapshot       models.AccountUsageSnapshot
 		message        string
+		accountKey     string
 		configID       string
 		configRevision int64
 		provider       models.LLMProvider
 	}
 	pendingFailures := map[string]pendingAccountFailure{}
-	var pendingFailureKeys []string
+	var pendingFailureOwnerKeys []string
 	for _, cfg := range configs {
 		if cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
 			continue
@@ -557,6 +559,10 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			continue
 		}
 		if provider != "" && string(cfg.Provider) != provider {
+			continue
+		}
+		credentialOwnerKey := accountUsageCredentialOwnerKeyForConfig(cfg)
+		if failedCredentialOwners[credentialOwnerKey] {
 			continue
 		}
 		key := accountUsageKeyForConfig(cfg)
@@ -571,19 +577,21 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 				continue
 			}
 			seenAccounts[key] = true
-			delete(pendingFailures, key)
+			delete(pendingFailures, credentialOwnerKey)
 			continue
 		}
 		snapshot, err := s.accountFetcher(ctx, cfg)
 		if err != nil {
+			failedCredentialOwners[credentialOwnerKey] = true
 			reason := accountRefreshFailureReason(err)
 			message := accountRefreshFailureMessage(reason)
 			applog.Infof("[usage] account usage refresh failed provider=%s reason=%s: %v", cfg.Provider, reason, sanitizeAccountUsageError(err))
-			if _, exists := pendingFailures[key]; !exists {
-				pendingFailureKeys = append(pendingFailureKeys, key)
-				pendingFailures[key] = pendingAccountFailure{
+			if _, exists := pendingFailures[credentialOwnerKey]; !exists {
+				pendingFailureOwnerKeys = append(pendingFailureOwnerKeys, credentialOwnerKey)
+				pendingFailures[credentialOwnerKey] = pendingAccountFailure{
 					snapshot:       accountRefreshFailureSnapshot(cfg, latest, reason),
 					message:        message,
+					accountKey:     key,
 					configID:       cfg.ID,
 					configRevision: cfg.OAuthConfigRevision,
 					provider:       cfg.Provider,
@@ -616,12 +624,12 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			continue
 		}
 		seenAccounts[key] = true
-		delete(pendingFailures, key)
+		delete(pendingFailures, credentialOwnerKey)
 		snapshots = append(snapshots, *snapshot)
 	}
-	for _, key := range pendingFailureKeys {
-		failure, ok := pendingFailures[key]
-		if !ok || seenAccounts[key] {
+	for _, ownerKey := range pendingFailureOwnerKeys {
+		failure, ok := pendingFailures[ownerKey]
+		if !ok {
 			continue
 		}
 		stored, err := s.usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(
@@ -635,7 +643,9 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			applog.Infof("[usage] skipped stale account usage refresh failure provider=%s", failure.snapshot.Provider)
 			continue
 		}
-		errorsByKey[key] = failure.message
+		if !seenAccounts[failure.accountKey] {
+			errorsByKey[failure.accountKey] = failure.message
+		}
 		snapshots = append(snapshots, failure.snapshot)
 	}
 	return snapshots, errorsByKey
@@ -654,9 +664,9 @@ func latestAccountSnapshotForConfig(ctx context.Context, usageRepo *repository.U
 		if !snapshotMatchesConfigAccount(*snapshot, cfg) {
 			continue
 		}
-		if isAccountRefreshFailure(snapshot.RateLimitReachedType) && strings.TrimSpace(snapshot.AgentConfigID) != strings.TrimSpace(cfg.ID) {
-			// Account identity is shared, but a refresh failure is config-scoped.
-			// Ignore sibling failures when deciding this config's cooldown.
+		if isAccountRefreshFailure(snapshot.RateLimitReachedType) && !snapshotHasSameOAuthCredentialOwner(*snapshot, cfg) {
+			// Provider account identity is shared for display, but a failure cooldown
+			// applies only to the explicit OAuth connection that produced it.
 			continue
 		}
 		age := time.Since(snapshot.FetchedAt)
@@ -802,11 +812,18 @@ func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []model
 		index[accountUsageKeyForViewWithConfigs(account, configsByID)] = i
 	}
 	for _, snapshot := range snapshots {
-		if !accountUsageSnapshotShouldRender(snapshot, configsByID) {
+		cfg, ok := configForAccountSnapshot(snapshot, configsByID)
+		if !ok || cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
 			continue
 		}
-		view := accountViewFromSnapshot(sanitizeSnapshotAccountDisplay(snapshot, configsByID))
-		key := accountUsageKeyForSnapshotWithConfigs(snapshot, configsByID)
+		// The model that originally fetched this connection-bound snapshot may
+		// since have moved to another account. Sanitize legacy per-model account
+		// identities before attributing the rendered view to a model that still
+		// owns the snapshot's immutable connection generation.
+		snapshot = sanitizeSnapshotAccountDisplay(snapshot, configsByID)
+		snapshot.AgentConfigID = cfg.ID
+		view := accountViewFromSnapshot(snapshot)
+		key := accountUsageKeyForConfig(cfg)
 		if i, ok := index[key]; ok {
 			existing[i] = preferAccountUsageView(existing[i], view)
 			continue
@@ -827,11 +844,6 @@ func configForAccountSnapshot(snapshot models.AccountUsageSnapshot, configsByID 
 		}
 	}
 	return models.LLMConfig{}, false
-}
-
-func accountUsageSnapshotShouldRender(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) bool {
-	cfg, ok := configForAccountSnapshot(snapshot, configsByID)
-	return ok && cfg.AuthMethod == models.AuthMethodOAuth && strings.TrimSpace(cfg.OAuthAccessToken) != ""
 }
 
 func applyAccountErrors(accounts []models.AccountUsageView, errorsByKey map[string]string, configsByID map[string]models.LLMConfig) []models.AccountUsageView {
@@ -1161,6 +1173,23 @@ func accountUsageKey(provider, accountID, agentConfigID string) string {
 	return provider + "\x00config\x00" + strings.TrimSpace(agentConfigID)
 }
 
+func accountUsageCredentialOwnerKeyForConfig(cfg models.LLMConfig) string {
+	provider := string(cfg.Provider)
+	if connectionID := strings.TrimSpace(cfg.OAuthConnectionID); connectionID != "" {
+		return provider + "\x00connection\x00" + connectionID
+	}
+	return provider + "\x00config\x00" + strings.TrimSpace(cfg.ID)
+}
+
+func snapshotHasSameOAuthCredentialOwner(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
+	snapshotConnectionID := strings.TrimSpace(snapshot.OAuthConnectionID)
+	configConnectionID := strings.TrimSpace(cfg.OAuthConnectionID)
+	if snapshotConnectionID != "" || configConnectionID != "" {
+		return snapshotConnectionID != "" && snapshotConnectionID == configConnectionID
+	}
+	return strings.TrimSpace(snapshot.AgentConfigID) == strings.TrimSpace(cfg.ID)
+}
+
 func accountUsageKeyForConfig(cfg models.LLMConfig) string {
 	provider := string(cfg.Provider)
 	if strings.TrimSpace(cfg.OAuthAccountID) != "" {
@@ -1181,20 +1210,6 @@ func accountUsageKeyForViewWithConfigs(view models.AccountUsageView, configsByID
 		return accountUsageKeyForConfig(cfg)
 	}
 	return accountUsageKeyForView(view)
-}
-
-func accountUsageKeyForSnapshot(snapshot models.AccountUsageSnapshot) string {
-	if strings.TrimSpace(snapshot.AccountID) == "" && strings.TrimSpace(snapshot.OAuthConnectionID) != "" {
-		return snapshot.Provider + "\x00connection\x00" + strings.TrimSpace(snapshot.OAuthConnectionID)
-	}
-	return accountUsageKey(snapshot.Provider, snapshot.AccountID, snapshot.AgentConfigID)
-}
-
-func accountUsageKeyForSnapshotWithConfigs(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) string {
-	if cfg, ok := configForAccountSnapshot(snapshot, configsByID); ok {
-		return accountUsageKeyForConfig(cfg)
-	}
-	return accountUsageKeyForSnapshot(snapshot)
 }
 
 func snapshotMatchesConfigGeneration(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
