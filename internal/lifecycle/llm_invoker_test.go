@@ -8,6 +8,8 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 type fakeCaller struct {
@@ -75,6 +77,14 @@ func (f *fakeLLMConfig) GetByID(_ context.Context, id string) (*models.LLMConfig
 		return nil, nil
 	}
 	return f.byID[id], nil
+}
+
+type defaultOnlyLLMConfig struct {
+	def *models.LLMConfig
+}
+
+func (f *defaultOnlyLLMConfig) GetDefault(_ context.Context) (*models.LLMConfig, error) {
+	return f.def, nil
 }
 
 func TestLLMHookInvoker_RenderAndCall(t *testing.T) {
@@ -145,6 +155,145 @@ func TestLLMHookInvoker_UsesConfiguredModelIDFromAgent(t *testing.T) {
 	}
 	if caller.lastConfig.ID != configured.ID || caller.lastConfig.Provider != configured.Provider || caller.lastConfig.Model != configured.Model || caller.lastConfig.AuthMethod != configured.AuthMethod {
 		t.Fatalf("expected hydrated configured model, got %#v", caller.lastConfig)
+	}
+}
+
+func TestLLMHookInvoker_MissingConfiguredModelIDFallsBackToDefault(t *testing.T) {
+	caller := &fakeCaller{reply: `{"content":"hello"}`}
+	defaultConfig := &models.LLMConfig{ID: "default-config", Name: "Default", Provider: models.ProviderTest, Model: "default-model"}
+	agentDef := &models.Agent{Name: "Goal Agent", Model: "0123456789abcdef0123456789abcdef"}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"goal": agentDef}}, &fakeLLMConfig{def: defaultConfig, byID: map[string]*models.LLMConfig{}})
+
+	_, err := inv.Invoke(context.Background(), models.AgentLifecycleHook{AgentID: "goal", OutputContract: models.OutputContractContextBlock}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.lastConfig.ID != defaultConfig.ID || caller.lastConfig.Provider != defaultConfig.Provider || caller.lastConfig.Model != defaultConfig.Model {
+		t.Fatalf("expected valid default config after missing configured ID, got %#v", caller.lastConfig)
+	}
+}
+
+func TestLLMHookInvoker_MissingConfiguredModelIDWithoutByIDLookupUsesDefault(t *testing.T) {
+	caller := &fakeCaller{reply: `{"content":"hello"}`}
+	defaultConfig := &models.LLMConfig{ID: "default-config", Name: "Default", Provider: models.ProviderTest, Model: "default-model"}
+	agentDef := &models.Agent{Name: "Goal Agent", Model: "0123456789abcdef0123456789abcdef"}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"goal": agentDef}}, &defaultOnlyLLMConfig{def: defaultConfig})
+
+	_, err := inv.Invoke(context.Background(), models.AgentLifecycleHook{AgentID: "goal", OutputContract: models.OutputContractContextBlock}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.lastConfig.ID != defaultConfig.ID || caller.lastConfig.Provider == "" || caller.lastConfig.Model != defaultConfig.Model {
+		t.Fatalf("expected valid default config without by-ID lookup, got %#v", caller.lastConfig)
+	}
+}
+
+func TestLLMHookInvoker_MissingConfiguredModelIDWithoutDefaultIsActionable(t *testing.T) {
+	caller := &fakeCaller{reply: `{"content":"hello"}`}
+	agentDef := &models.Agent{Name: "Memory Curator", Model: "0123456789abcdef0123456789abcdef"}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"memory": agentDef}}, &fakeLLMConfig{byID: map[string]*models.LLMConfig{}})
+
+	_, err := inv.Invoke(context.Background(), models.AgentLifecycleHook{AgentID: "memory", OutputContract: models.OutputContractContextBlock}, HookInput{})
+	if err == nil || !strings.Contains(err.Error(), "configured model") || !strings.Contains(err.Error(), "no default") {
+		t.Fatalf("expected actionable missing-model error, got %v", err)
+	}
+	if caller.calledDirect || caller.calledWithDef || caller.calledWithDefNoTools {
+		t.Fatal("missing configured model without a default must fail before calling the model")
+	}
+}
+
+func TestLLMHookInvoker_PreservesLegacyProviderModelSlug(t *testing.T) {
+	caller := &fakeCaller{reply: `{"content":"hello"}`}
+	agentDef := &models.Agent{Name: "Legacy Agent", Model: "claude-sonnet-4-5-20250929"}
+	defaultConfig := &models.LLMConfig{ID: "default-config", Name: "Default", Provider: models.ProviderTest, Model: "default-model"}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"legacy": agentDef}}, &fakeLLMConfig{def: defaultConfig, byID: map[string]*models.LLMConfig{}})
+
+	_, err := inv.Invoke(context.Background(), models.AgentLifecycleHook{AgentID: "legacy", OutputContract: models.OutputContractContextBlock}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.lastConfig.Model != agentDef.Model {
+		t.Fatalf("legacy model slug = %q, want %q", caller.lastConfig.Model, agentDef.Model)
+	}
+}
+
+func TestRunner_GoalHookAfterConfiguredModelDeletionUsesDefault(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmRepo := repository.NewLLMConfigRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+
+	project := &models.Project{Name: "Lifecycle model deletion", RepoPath: "/tmp/lifecycle-model-deletion"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Lifecycle model deletion task", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "Evaluate the goal."}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	configured := &models.LLMConfig{Name: "Deleted Goal Model", Provider: models.ProviderTest, Model: "deleted-goal-model", IsDefault: false}
+	if err := llmRepo.Create(ctx, configured); err != nil {
+		t.Fatalf("create configured model: %v", err)
+	}
+	defaultConfig, err := llmRepo.GetDefault(ctx)
+	if err != nil || defaultConfig == nil {
+		t.Fatalf("get default model: %v", err)
+	}
+	goal := &models.Agent{
+		Key: "goal_override_runner_1168", Name: "Goal Agent Override Runner",
+		SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected,
+		Model: configured.ID, Enabled: true,
+		Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"},
+	}
+	if err := agentRepo.Create(ctx, goal); err != nil {
+		t.Fatalf("create goal agent: %v", err)
+	}
+	seededHooks, err := lifecycleRepo.HooksForWhen(ctx, models.LifecycleAfterComplete)
+	if err != nil {
+		t.Fatalf("list seeded after-complete hooks: %v", err)
+	}
+	for _, seededHook := range seededHooks {
+		if err := lifecycleRepo.DeleteHook(ctx, seededHook.ID); err != nil {
+			t.Fatalf("remove seeded after-complete hook: %v", err)
+		}
+	}
+	hook := &models.AgentLifecycleHook{
+		AgentID: goal.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal",
+		OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true,
+	}
+	if err := lifecycleRepo.CreateHook(ctx, hook); err != nil {
+		t.Fatalf("create goal hook: %v", err)
+	}
+	if err := llmRepo.Delete(ctx, configured.ID); err != nil {
+		t.Fatalf("delete configured model: %v", err)
+	}
+
+	caller := &fakeCaller{reply: `{"summary":"goal evaluated"}`}
+	invoker := NewLLMHookInvoker(caller, agentRepo, llmRepo)
+	runner := NewRunner(lifecycleRepo, invoker, nil)
+	runtimeTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{
+		{Name: "get_task_goal"}, {Name: "send_to_task"}, {Name: "mark_task_goal_achieved"}, {Name: "report_task_goal_blocked"},
+	}}
+	result, err := runner.RunSlot(llmcontracts.WithRuntimeTools(ctx, runtimeTools), models.LifecycleAfterComplete, HookInput{TaskID: task.ID, TaskRunID: "run-1168", ProjectID: project.ID})
+	if err != nil {
+		t.Fatalf("run goal hook: %v", err)
+	}
+	if len(result.Outputs) != 1 || result.Outputs[0].Error != "" {
+		t.Fatalf("goal hook output = %+v, want completed output", result.Outputs)
+	}
+	if caller.lastConfig.ID != defaultConfig.ID || caller.lastConfig.Provider == "" || caller.lastConfig.Model != defaultConfig.Model {
+		t.Fatalf("goal hook used invalid model config: %#v", caller.lastConfig)
+	}
+	executions, err := lifecycleRepo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list lifecycle executions: %v", err)
+	}
+	if len(executions) != 1 || executions[0].Status != models.LifecycleExecCompleted {
+		t.Fatalf("lifecycle executions = %+v, want one completed execution", executions)
 	}
 }
 
