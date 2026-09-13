@@ -833,6 +833,97 @@ func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t 
 	}
 }
 
+func TestUsageAnalyticsService_MovedSnapshotOriginRemainsAttributedToOriginalConnection(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			origin := &models.LLMConfig{
+				Name:              "A snapshot origin",
+				Provider:          provider,
+				Model:             "model-origin",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-a-access",
+				OAuthRefreshToken: "account-a-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "account-a",
+			}
+			sibling := &models.LLMConfig{
+				Name:       "B account A sibling",
+				Provider:   provider,
+				Model:      "model-sibling",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			target := &models.LLMConfig{
+				Name:              "C account B target",
+				Provider:          provider,
+				Model:             "model-target",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-b-access",
+				OAuthRefreshToken: "account-b-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "account-b",
+			}
+			for _, cfg := range []*models.LLMConfig{origin, sibling, target} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
+				t.Fatalf("link sibling to account A: %v", err)
+			}
+
+			used := 37.0
+			snapshot := &models.AccountUsageSnapshot{
+				Provider:             string(provider),
+				AccountID:            "account-a",
+				AgentConfigID:        origin.ID,
+				OAuthConnectionID:    origin.OAuthConnectionID,
+				PlanType:             "Account A Plan",
+				SecondaryLabel:       "weekly limit",
+				SecondaryUsedPercent: &used,
+			}
+			stored, err := usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(
+				ctx, snapshot, origin.ID, origin.OAuthConfigRevision, provider,
+			)
+			if err != nil || !stored {
+				t.Fatalf("store account A snapshot = %v, %v", stored, err)
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
+				t.Fatalf("move snapshot origin to account B: %v", err)
+			}
+
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			view, err := svc.BuildLocalAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
+			}
+			if len(view.AccountLimits) != 2 {
+				t.Fatalf("account cards = %+v, want isolated account A and B cards", view.AccountLimits)
+			}
+			var accountA, accountB *models.AccountUsageView
+			for i := range view.AccountLimits {
+				account := &view.AccountLimits[i]
+				switch account.AccountID {
+				case "account-a":
+					accountA = account
+				case "account-b":
+					accountB = account
+				}
+			}
+			if accountA == nil || accountA.AgentConfigID != sibling.ID || accountA.PlanType != "Account A Plan" || accountA.SecondaryLimit == nil || accountA.SecondaryLimit.UsedPercent == nil || *accountA.SecondaryLimit.UsedPercent != used {
+				t.Fatalf("account A snapshot was not retained by its connection: %+v", view.AccountLimits)
+			}
+			if accountB == nil || accountB.PlanType == "Account A Plan" || accountB.SecondaryLimit != nil {
+				t.Fatalf("account A snapshot leaked into account B: %+v", view.AccountLimits)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, alreadyNeedsReauth := range []bool{false, true} {
