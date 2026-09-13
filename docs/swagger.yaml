@@ -1768,7 +1768,8 @@ paths:
         agent heatmap, underused skill metrics, and bounded supporting skill events
         for an exact chart selection.
       parameters:
-      - description: Project ID filter
+      - description: Project ID filter; required when requesting supporting skill
+          evidence
         in: query
         name: project_id
         type: string
@@ -1802,8 +1803,8 @@ paths:
         in: query
         name: skill_period
         type: string
-      - description: Supporting event type (used, selected, loaded, viewed, created,
-          edited)
+      - description: Supporting event type (used, followed, ignored, selected, loaded,
+          viewed, created, edited)
         in: query
         name: skill_event
         type: string
@@ -1822,6 +1823,10 @@ paths:
           description: Skill analytics
           schema:
             $ref: '#/definitions/models.SkillAnalyticsDashboard'
+        "400":
+          description: Supporting evidence requires project_id
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
         "500":
           description: Internal server error
           schema:
@@ -1873,7 +1878,8 @@ paths:
         model breakdowns, account limit snapshots, and bounded supporting usage events
         for an exact chart selection.
       parameters:
-      - description: Project ID filter
+      - description: Project ID filter; required when requesting supporting usage
+          evidence
         in: query
         name: project_id
         type: string
@@ -1918,6 +1924,10 @@ paths:
           description: Usage analytics
           schema:
             $ref: '#/definitions/models.AnalyticsUsageViewModel'
+        "400":
+          description: Supporting evidence requires project_id
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
         "500":
           description: Internal server error
           schema:

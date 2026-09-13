@@ -241,6 +241,64 @@ func TestAnalyticsContent_RejectsStaleDashboardAndEvidenceResponsesInChrome(t *t
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestAnalyticsContent_RejectsStaleEvidenceErrorsAndClearsChartsOnFilterChangeInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+(function(){
+  var result=document.getElementById('reconnect-result'),charts={},destroyed=[],rejectOldSkill=null,rejectOldUsage=null,agentDashboardResolve=null;
+  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+  function dashboard(){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[{label:'< 1m',count:1}],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:0,evidence_limit:20,evidence_offset:0,recent_outcomes:[],insights:[]};}
+  function skills(query){return {usage_over_time:[{period:'2026-01-10',created_count:1},{period:'2026-01-11',created_count:1}],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence_total:query.get('skill_period')?1:0,evidence:query.get('skill_period')?[{id:'skill-'+query.get('skill_period'),created_at:'2026-01-11T00:00:00Z',skill_handle:'project:review',event_type:'created',source:'manual',surface:'task_thread'}]:[]};}
+  function usage(query){return {usage_rate:[{period:'2026-01-10',total_tokens:1},{period:'2026-01-11',total_tokens:2}],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[],evidence_total:query.get('usage_period')||query.get('usage_provider')?1:0,evidence:query.get('usage_period')||query.get('usage_provider')?[{id:'usage-'+query.get('usage_period'),occurred_at:'2026-01-11T00:00:00Z',provider:'test',model:'model-a',total_tokens:2}]:[]};}
+  window.Chart=function(ctx,config){var id=ctx&&ctx.canvas?ctx.canvas.id:'';charts[id]=config;this.destroy=function(){destroyed.push(id);};};
+  window.fetch=function(url){var value=String(url),query=new URL(value,location.href).searchParams,payload=[];
+    if(value.indexOf('/api/analytics/dashboard')>=0){if(query.get('agent')==='agent-1')return new Promise(function(resolve){agentDashboardResolve=function(){resolve({ok:true,json:function(){return Promise.resolve(dashboard());}});};});payload=dashboard();}
+    if(value.indexOf('/api/analytics/skills')>=0){if(query.get('skill_period')==='2026-01-10')return new Promise(function(_,reject){rejectOldSkill=reject;});payload=skills(query);}
+    if(value.indexOf('/api/analytics/usage')>=0){if(query.get('usage_period')==='2026-01-10')return new Promise(function(_,reject){rejectOldUsage=reject;});payload=usage(query);}
+    return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
+  };
+  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out');setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
+  window.addEventListener('load',function(){waitFor(function(){return charts.skillUsageTrendChart&&charts.usageRateChart&&charts.cycleDistributionChart;},function(){
+    charts.skillUsageTrendChart.options.onClick({},[{index:0,datasetIndex:1}]);
+    waitFor(function(){return rejectOldSkill!==null;},function(){
+      charts.skillUsageTrendChart.options.onClick({},[{index:1,datasetIndex:1}]);
+      waitFor(function(){return document.getElementById('skillEventEvidenceTable').textContent.indexOf('skill-2026-01-11')>=0;},function(){
+        rejectOldSkill(new Error('old selection failed'));
+        setTimeout(function(){
+          if(!document.getElementById('analyticsError').classList.contains('hidden'))fail('stale skill evidence failure replaced the newer selection');
+          if(document.getElementById('skillEventEvidenceTable').textContent.indexOf('skill-2026-01-11')<0)fail('stale skill evidence failure cleared newer records');
+          charts.usageRateChart.options.onClick({},[{index:0,datasetIndex:0}]);
+          waitFor(function(){return rejectOldUsage!==null;},function(){
+            charts.usageRateChart.options.onClick({},[{index:1,datasetIndex:0}]);
+            waitFor(function(){return document.getElementById('usageEventEvidenceTable').textContent.indexOf('usage-2026-01-11')>=0;},function(){
+              rejectOldUsage(new Error('old usage selection failed'));
+              setTimeout(function(){
+                if(!document.getElementById('analyticsError').classList.contains('hidden'))fail('stale usage evidence failure replaced the newer selection');
+                if(document.getElementById('usageEventEvidenceTable').textContent.indexOf('usage-2026-01-11')<0)fail('stale usage evidence failure cleared newer records');
+                var agent=document.getElementById('analyticsAgentFilter');agent.value='agent-1';agent.dispatchEvent(new Event('change'));
+                setTimeout(function(){
+                  if(destroyed.indexOf('cycleDistributionChart')<0)fail('filter change left the old chart visible');
+                  var state=document.querySelector('#cycleDistributionChart + [data-analytics-chart-state], #cycleDistributionChart ~ [data-analytics-chart-state]');
+                  if(!state||state.textContent.indexOf('Loading')<0)fail('filter change did not show a controlled loading state');
+                  agentDashboardResolve();
+                  result.setAttribute('data-test-result','pass');
+                },20);
+              },40);
+            });
+          });
+        },40);
+      });
+    });
+  });});
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
@@ -253,12 +311,12 @@ func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome
   window.Chart=function(ctx,config){this.destroy=function(){};if(ctx&&ctx.canvas)charts[ctx.canvas.id]=config;};
 	  window.fetch=function(url){var value=String(url),query=new URL(value,location.href).searchParams,payload=[];urls.push(value);
 	    if(value.indexOf('/api/analytics/dashboard')>=0)payload={definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:1,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:'hour-task',task_title:'Hour task',technical_result:'running',goal_result:'',merge_state:'',agent_id:'agent-1',agent_name:'Agent One',model:'Model',model_config_ids:[],execution_hours:[10],terminal_period_statuses:[],category:'active',started_in_period:true,cycle_eligible:false,execution_count:1,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};
-	    if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[{period:'2026-01-10',selected_count:1,loaded_count:0,viewed_count:0,created_count:2,edited_count:0}],top_skills:[],follow_through:[],agent_usage:{agents:[{agent_id:'agent-1',agent_name:'Agent One'}],cells:[{agent_id:'agent-1',skill_handle:'project:review',selected_count:1,loaded_count:0,viewed_count:0}]},underused:[],evidence_total:query.get('skill_period')||query.get('skill_handle')?1:0,evidence:query.get('skill_period')||query.get('skill_handle')?[{id:'skill-event-1',created_at:'2026-01-10T10:00:00Z',task_id:'skill-task',execution_id:'skill-exec',agent_id:'agent-1',agent_name:'Agent One',skill_handle:query.get('skill_handle')||'project:created',event_type:query.get('skill_event')||'selected',source:'manual',surface:'task_thread'}]:[]};
-	    if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[{period:'2026-01-10',total_tokens:10}],usage_rate_by_model:[{period:'2026-01-10',provider:'test',model:'model-a',total_tokens:10}],totals:{call_count:1},model_breakdown:[{provider:'test',model:'model-a',total_tokens:10}],account_limits:[],evidence_total:query.get('usage_period')?1:0,evidence:query.get('usage_period')?[{id:'usage-event-1',occurred_at:'2026-01-10T11:00:00Z',provider:'test',model:'model-a',task_id:'usage-task',execution_id:'usage-exec',total_tokens:10,cost_usd:0.01}]:[]};    if(value.indexOf('/api/analytics/execution-trends-by-hour')>=0)payload=[{Hour:10,Count:1}];
+	    if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[{period:'2026-01-10',selected_count:1,loaded_count:0,viewed_count:0,created_count:2,edited_count:0}],top_skills:[{skill_handle:'project:review',selected_count:1,loaded_count:1,viewed_count:0,created_count:2,edited_count:0}],follow_through:[{skill_handle:'project:review',selected_count:2,loaded_or_viewed_count:1,ignored_count:1}],agent_usage:{agents:[{agent_id:'agent-1',agent_name:'Agent One'}],cells:[{agent_id:'agent-1',skill_handle:'project:review',selected_count:1,loaded_count:0,viewed_count:0}]},underused:[],evidence_total:query.get('skill_period')||query.get('skill_handle')?1:0,evidence:query.get('skill_period')||query.get('skill_handle')?[{id:'skill-event-1',created_at:'2026-01-10T10:00:00Z',task_id:'skill-task',execution_id:'skill-exec',agent_id:'agent-1',agent_name:'Agent One',skill_handle:query.get('skill_handle')||'project:created',event_type:query.get('skill_event')||'selected',source:'manual',surface:'task_thread'}]:[]};
+	    if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[{period:'2026-01-10',total_tokens:10}],usage_rate_by_model:[{period:'2026-01-10',provider:'test',model:'model-a',total_tokens:10}],totals:{call_count:1},model_breakdown:[{provider:'test',model:'model-a',total_tokens:10}],account_limits:[],evidence_total:query.get('usage_period')||query.get('usage_provider')?1:0,evidence:query.get('usage_period')||query.get('usage_provider')?[{id:'usage-event-1',occurred_at:'2026-01-10T11:00:00Z',provider:'test',model:'model-a',task_id:'usage-task',execution_id:'usage-exec',total_tokens:10,cost_usd:0.01}]:[]};    if(value.indexOf('/api/analytics/execution-trends-by-hour')>=0)payload=[{Hour:10,Count:1}];
     return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
 	  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out; urls='+urls.join('|')+'; skill='+document.getElementById('skillEventEvidenceTable').textContent+'; usage='+document.getElementById('usageEventEvidenceTable').textContent);setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
-	  window.addEventListener('load',function(){waitFor(function(){return charts.hourlyTrendsChart&&charts.skillUsageTrendChart&&charts.skillAgentChart&&charts.usageRateChart;},function(){    charts.hourlyTrendsChart.options.onClick({},[{index:10}]);
+	  window.addEventListener('load',function(){waitFor(function(){return charts.hourlyTrendsChart&&charts.skillUsageTrendChart&&charts.skillTopChart&&charts.skillFollowChart&&charts.skillAgentChart&&charts.usageRateChart&&charts.modelTokenBreakdownChart;},function(){    charts.hourlyTrendsChart.options.onClick({},[{index:10}]);
     var params=new URLSearchParams(location.search);
     if(params.get('evidence')!=='execution_hour'||params.get('execution_hour')!=='10'||document.getElementById('outcomeEvidenceTable').textContent.indexOf('Hour task')<0)fail('hour click did not filter exact task evidence');
 	    charts.skillUsageTrendChart.options.onClick({},[{index:0,datasetIndex:1}]);
@@ -272,7 +330,14 @@ func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome
 	    charts.usageRateChart.options.onClick({},[{index:0,datasetIndex:0}]);
 		    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage')>=0&&url.indexOf('usage_period=2026-01-10')>=0;})&&document.getElementById('usageEventEvidenceTable').textContent.indexOf('usage-event-1')>=0;},function(){	    params=new URLSearchParams(location.search);
 	    if(params.get('usage_period')!=='2026-01-10'||params.get('usage_model')!=='combined'||document.getElementById('usageEvidenceSelection').textContent.indexOf('2026-01-10')<0)fail('token trend click lost period/model aggregate or supporting records');
-	    result.setAttribute('data-test-result','pass');
+	    charts.skillTopChart.options.onClick({},[{index:0,datasetIndex:3}]);
+	    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills')>=0&&url.indexOf('skill_handle=project%3Areview')>=0&&url.indexOf('skill_event=created')>=0;});},function(){
+	      charts.skillFollowChart.options.onClick({},[{index:0,datasetIndex:1}]);
+	      waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills')>=0&&url.indexOf('skill_handle=project%3Areview')>=0&&url.indexOf('skill_event=ignored')>=0;});},function(){
+	        charts.modelTokenBreakdownChart.options.onClick({},[{index:0}]);
+	        waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage')>=0&&url.indexOf('usage_provider=test')>=0&&url.indexOf('usage_model_name=model-a')>=0;})&&document.getElementById('usageEventEvidenceTable').textContent.indexOf('usage-event-1')>=0;},function(){result.setAttribute('data-test-result','pass');});
+	      });
+	    });
 	    });
 	    });
 	    });  });});
@@ -377,7 +442,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Observed outcomes among tasks using skills`, `Observed outcomes by Agent and skill`, `Current account state · not date-filtered`,
 		`Selected Agent outcome trend`, `Performance by task category`, `Selected Agent model mix`, `Recurring failures`,
 		`Node funnel`, `Node durations`, `Node failures`, `Current bottlenecks`, `Model performance by task category`,
-		`Technical Execution Completion Over Time`, `Memory effectiveness unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `navigateEvidence('outcomes','execution_hour'`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `window.location.href='/skills?project_id='`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `navigateEvidence('outcomes','model_id'`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
+		`Technical Execution Completion Over Time`, `Memory effectiveness unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `navigateEvidence('outcomes','execution_hour'`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `skill_event:eventType`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `navigateEvidence('outcomes','model_id'`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 		`table.innerHTML = '<tr><td colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable</td></tr>'`,
 	} {
 		if !strings.Contains(content, expected) {

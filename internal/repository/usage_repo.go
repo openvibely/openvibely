@@ -713,6 +713,9 @@ func (r *UsageRepo) GetEvidence(ctx context.Context, filter UsageFilter) ([]mode
 	if filter.EvidencePeriod == "" && filter.EvidenceProvider == "" && filter.EvidenceModel == "" {
 		return []models.UsageEvidenceRow{}, 0, nil
 	}
+	if strings.TrimSpace(filter.ProjectID) == "" {
+		return nil, 0, fmt.Errorf("usage Analytics evidence project_id is required")
+	}
 	where, args := usageWhere(filter)
 	if filter.EvidencePeriod != "" {
 		where += " AND " + usagePeriodExpression(filter.GroupBy) + " = ?"
