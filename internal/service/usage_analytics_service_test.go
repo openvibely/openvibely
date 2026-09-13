@@ -798,6 +798,41 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 	}
 }
 
+func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+			first := &models.LLMConfig{Name: "Shared first", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access", OAuthRefreshToken: "refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+			second := &models.LLMConfig{Name: "Shared second", Provider: provider, Model: "model-two", AuthMethod: models.AuthMethodOAuth}
+			for _, cfg := range []*models.LLMConfig{first, second} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+				t.Fatalf("link connection: %v", err)
+			}
+			calls := 0
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				calls++
+				pct := 4.0
+				return &models.AccountUsageSnapshot{Provider: string(provider), AgentConfigID: cfg.ID, SecondaryLabel: "weekly", SecondaryUsedPercent: &pct}, nil
+			})
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider), Refresh: true})
+			if err != nil {
+				t.Fatalf("BuildAnalyticsUsage: %v", err)
+			}
+			if calls != 1 || len(view.AccountLimits) != 1 || view.AccountLimits[0].SecondaryLimit == nil {
+				t.Fatalf("shared connection result calls=%d accounts=%+v", calls, view.AccountLimits)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, alreadyNeedsReauth := range []bool{false, true} {
@@ -1252,10 +1287,13 @@ func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testi
 	modelPct := 7.5
 	monthlyLimit := 200.0
 	usedCredits := 12.5
+	oldFetchedAt := time.Now().UTC().Add(-time.Hour)
 	if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
 		Provider:             "openai",
 		AccountID:            "acct-openai",
 		AgentConfigID:        config.ID,
+		OAuthConnectionID:    config.OAuthConnectionID,
+		FetchedAt:            oldFetchedAt,
 		PlanType:             "Codex Pro",
 		BillingLabel:         "Subscription billing",
 		SubscriptionStatus:   "Active",
@@ -1288,6 +1326,9 @@ func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testi
 	}
 	if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error == "" || len(view.AccountLimits[0].Limits) != 3 || view.AccountLimits[0].Limits[0].UsedPercent == nil || *view.AccountLimits[0].Limits[0].UsedPercent != pct {
 		t.Fatalf("expected old snapshot with refresh error and all limits, got %+v", view.AccountLimits)
+	}
+	if !view.AccountLimits[0].UpdatedAt.After(oldFetchedAt) {
+		t.Fatalf("refresh failure timestamp = %v, want newer than prior snapshot %v", view.AccountLimits[0].UpdatedAt, oldFetchedAt)
 	}
 	if view.AccountLimits[0].PlanType != "Codex Pro" || view.AccountLimits[0].BillingLabel != "Subscription billing" || view.AccountLimits[0].StatusLabel != "Active" || view.AccountLimits[0].ExtraUsageLabel != "Usage credits available" {
 		t.Fatalf("expected profile/credit metadata to survive refresh failure, got %+v", view.AccountLimits[0])
@@ -1330,6 +1371,96 @@ func TestUsageAnalyticsService_RefreshFailureKeepsLocalUsageAndBacksOff(t *testi
 	}
 	if strings.Contains(snapshots[0].RawJSON, "<html>") || strings.Contains(snapshots[0].RawJSON, "chatgpt.com") {
 		t.Fatalf("failure snapshot stored raw provider details: %s", snapshots[0].RawJSON)
+	}
+}
+
+func TestUsageAnalyticsService_LegacyConfigIDSnapshotDoesNotHideRefreshFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	usageRepo := repository.NewUsageRepo(db)
+	configRepo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	config := &models.LLMConfig{
+		Name:             "OpenAI OAuth",
+		Provider:         models.ProviderOpenAI,
+		Model:            "gpt-5.3-codex",
+		AuthMethod:       models.AuthMethodOAuth,
+		OAuthAccessToken: "token",
+		OAuthAccountID:   "acct-openai",
+	}
+	if err := configRepo.Create(ctx, config); err != nil {
+		t.Fatalf("create OAuth config: %v", err)
+	}
+
+	oldFetchedAt := time.Now().UTC().Add(-time.Hour)
+	pct := 24.0
+	weeklyPct := 41.0
+	if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+		Provider:           "openai",
+		AccountID:          config.ID,
+		AgentConfigID:      config.ID,
+		OAuthConnectionID:  config.OAuthConnectionID,
+		FetchedAt:          oldFetchedAt,
+		PlanType:           "Codex Pro",
+		BillingLabel:       "Subscription billing",
+		SubscriptionStatus: "Active",
+		PrimaryLabel:       "5-hour session",
+		PrimaryUsedPercent: &pct,
+		ExtraLimits: []models.AccountUsageExtraLimit{{
+			Provider:      "openai",
+			AccountID:     config.ID,
+			AgentConfigID: config.ID,
+			LimitKey:      "weekly",
+			Label:         "weekly limit",
+			UsedPercent:   &weeklyPct,
+		}},
+	}); err != nil {
+		t.Fatalf("create legacy snapshot: %v", err)
+	}
+
+	calls := 0
+	svc := NewUsageAnalyticsService(usageRepo, configRepo)
+	svc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		calls++
+		return nil, accountUsageHTTPError{Method: "GET", URL: "https://chatgpt.com/backend-api/wham/usage", StatusCode: 403, ContentType: "text/html"}
+	})
+
+	view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+	if err != nil {
+		t.Fatalf("BuildAnalyticsUsage refresh: %v", err)
+	}
+	if len(view.AccountLimits) != 1 {
+		t.Fatalf("account limit cards = %+v, want one", view.AccountLimits)
+	}
+	account := view.AccountLimits[0]
+	if account.AccountID != config.OAuthAccountID {
+		t.Fatalf("account id = %q, want provider identity %q", account.AccountID, config.OAuthAccountID)
+	}
+	if account.Error != accountRefreshFailureMessage("refresh_failed_forbidden") {
+		t.Fatalf("refresh error = %q, want sanitized forbidden error", account.Error)
+	}
+	if !account.UpdatedAt.After(oldFetchedAt) {
+		t.Fatalf("refresh failure timestamp = %v, want newer than legacy snapshot %v", account.UpdatedAt, oldFetchedAt)
+	}
+	if account.PlanType != "Codex Pro" || account.BillingLabel != "Subscription billing" || account.StatusLabel != "Active" {
+		t.Fatalf("legacy profile metadata was not preserved: %+v", account)
+	}
+	if len(account.ExtraLimits) != 1 || account.ExtraLimits[0].UsedPercent == nil || *account.ExtraLimits[0].UsedPercent != weeklyPct {
+		t.Fatalf("legacy extra limit was not preserved: %+v", account.ExtraLimits)
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls = %d, want one forced refresh", calls)
+	}
+
+	view, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+	if err != nil {
+		t.Fatalf("BuildAnalyticsUsage after refresh failure: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls after cooldown = %d, want one", calls)
+	}
+	if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error != accountRefreshFailureMessage("refresh_failed_forbidden") {
+		t.Fatalf("persisted refresh failure was hidden on the next request: %+v", view.AccountLimits)
 	}
 }
 
@@ -2573,7 +2704,14 @@ func BenchmarkUsageAnalyticsServiceRequestScopedSnapshots(b *testing.B) {
 			name := fmt.Sprintf("optimized/configs=%d/refresh=%t", configCount, refresh)
 			b.Run(name, func(b *testing.B) {
 				db, counter, svc, ctx, filter := setupUsageAnalyticsSnapshotBenchmark(b, configCount, refresh)
+				counter.Reset()
+				counter.SetEnabled(true)
+				if _, err := svc.BuildAnalyticsUsage(ctx, filter); err != nil {
+					counter.SetEnabled(false)
+					b.Fatalf("measuring BuildAnalyticsUsage: %v", err)
+				}
 				counter.SetEnabled(false)
+				latestQueries, extraLimitQueries := countAccountSnapshotQueries(counter.Statements())
 				_ = db
 				b.ReportAllocs()
 				b.ResetTimer()
@@ -2583,14 +2721,21 @@ func BenchmarkUsageAnalyticsServiceRequestScopedSnapshots(b *testing.B) {
 					}
 				}
 				b.StopTimer()
-				b.ReportMetric(1, "latest-snapshot-queries/op")
-				b.ReportMetric(1, "extra-limit-queries/op")
+				b.ReportMetric(float64(latestQueries), "latest-snapshot-queries/op")
+				b.ReportMetric(float64(extraLimitQueries), "extra-limit-queries/op")
 			})
 
 			name = fmt.Sprintf("baseline/configs=%d/refresh=%t", configCount, refresh)
 			b.Run(name, func(b *testing.B) {
 				db, counter, svc, ctx, filter := setupUsageAnalyticsSnapshotBenchmark(b, configCount, refresh)
+				counter.Reset()
+				counter.SetEnabled(true)
+				if err := buildAnalyticsUsageSnapshotBaseline(ctx, svc, filter); err != nil {
+					counter.SetEnabled(false)
+					b.Fatalf("measuring buildAnalyticsUsageSnapshotBaseline: %v", err)
+				}
 				counter.SetEnabled(false)
+				latestQueries, extraLimitQueries := countAccountSnapshotQueries(counter.Statements())
 				_ = db
 				b.ReportAllocs()
 				b.ResetTimer()
@@ -2600,8 +2745,8 @@ func BenchmarkUsageAnalyticsServiceRequestScopedSnapshots(b *testing.B) {
 					}
 				}
 				b.StopTimer()
-				b.ReportMetric(float64(configCount+1), "latest-snapshot-queries/op")
-				b.ReportMetric(float64(configCount+1), "extra-limit-queries/op")
+				b.ReportMetric(float64(latestQueries), "latest-snapshot-queries/op")
+				b.ReportMetric(float64(extraLimitQueries), "extra-limit-queries/op")
 			})
 		}
 	}
