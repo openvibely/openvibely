@@ -176,10 +176,10 @@ func TestBreadcrumbSelectorLongTitleClampsInsideNarrowViewportInChrome(t *testin
 		_, _ = fmt.Fprint(w, page)
 	}))
 	defer server.Close()
-	runBreadcrumbSelectorMobileFixture(t, chrome, server.URL+"/", 375, 667)
+	runHeadlessChromeCDPFixture(t, chrome, server.URL+"/", "mobile breadcrumb", 375, 667, 10*time.Second)
 }
 
-func runBreadcrumbSelectorMobileFixture(t *testing.T, chrome, targetURL string, width, height int) {
+func runHeadlessChromeCDPFixture(t *testing.T, chrome, targetURL, name string, width, height int, timeout time.Duration) {
 	t.Helper()
 	debugListener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -203,7 +203,7 @@ func runBreadcrumbSelectorMobileFixture(t *testing.T, chrome, targetURL string, 
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
 	if err := startTestBrowserProcess(cmd); err != nil {
-		t.Fatalf("start Chrome mobile breadcrumb fixture: %v", err)
+		t.Fatalf("start Chrome %s fixture: %v", name, err)
 	}
 	defer stopTestBrowserProcess(cmd)
 
@@ -213,7 +213,7 @@ func runBreadcrumbSelectorMobileFixture(t *testing.T, chrome, targetURL string, 
 		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 	}
 	var target debugTarget
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		resp, requestErr := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", debugPort))
 		if requestErr == nil {
@@ -235,14 +235,14 @@ func runBreadcrumbSelectorMobileFixture(t *testing.T, chrome, targetURL string, 
 		time.Sleep(25 * time.Millisecond)
 	}
 	if target.WebSocketDebuggerURL == "" {
-		t.Fatal("find Chrome debugging target for mobile breadcrumb fixture")
+		t.Fatalf("find Chrome debugging target for %s fixture", name)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
 	if err != nil {
-		t.Fatalf("connect to Chrome debugging target: %v", err)
+		t.Fatalf("connect to Chrome debugging target for %s fixture: %v", name, err)
 	}
 	defer conn.CloseNow()
 
@@ -288,7 +288,7 @@ func runBreadcrumbSelectorMobileFixture(t *testing.T, chrome, targetURL string, 
 	call("Page.navigate", map[string]any{"url": targetURL}, nil)
 
 	result := "pending"
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+	for deadline := time.Now().Add(timeout); time.Now().Before(deadline); {
 		var response struct {
 			Result struct {
 				Value string `json:"value"`
@@ -311,7 +311,7 @@ func runBreadcrumbSelectorMobileFixture(t *testing.T, chrome, targetURL string, 
 	if len(stderr) > 5000 {
 		stderr = stderr[len(stderr)-5000:]
 	}
-	t.Fatalf("mobile breadcrumb fixture failed: %s\nChrome stderr tail:\n%s", result, stderr)
+	t.Fatalf("real %s fixture failed: %s\nChrome stderr tail:\n%s", name, result, stderr)
 }
 
 func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testing.T) {
