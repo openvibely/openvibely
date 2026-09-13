@@ -60,6 +60,36 @@ WHERE auth_method = 'oauth'
   AND provider IN ('openai', 'anthropic')
   AND oauth_connection_id IS NOT NULL;
 
+-- Preserve snapshot ownership before removing the connection identifier. Legacy
+-- no-identity snapshots used their originating model id as account_id, so clear
+-- that pseudo-identity before selecting a current model for the same connection.
+UPDATE account_usage_snapshots
+SET account_id = NULL
+WHERE oauth_connection_id IS NOT NULL
+  AND account_id = agent_config_id;
+
+UPDATE account_usage_snapshots
+SET agent_config_id = (
+    SELECT a.id
+    FROM agent_configs a
+    JOIN oauth_connections c ON c.id = a.oauth_connection_id
+    WHERE c.id = account_usage_snapshots.oauth_connection_id
+      AND c.provider = account_usage_snapshots.provider
+      AND c.oauth_revision = account_usage_snapshots.oauth_config_revision
+      AND a.provider = c.provider
+      AND a.auth_method = 'oauth'
+    ORDER BY a.id
+    LIMIT 1
+)
+WHERE oauth_connection_id IS NOT NULL;
+
+-- Snapshots with no current owner or a superseded connection generation must
+-- fail closed under the version-186 model/revision matching rules.
+UPDATE account_usage_snapshots
+SET oauth_config_revision = -1
+WHERE oauth_connection_id IS NOT NULL
+  AND agent_config_id IS NULL;
+
 DROP INDEX idx_account_usage_snapshots_connection_revision;
 ALTER TABLE account_usage_snapshots DROP COLUMN oauth_connection_id;
 DROP INDEX idx_agent_configs_oauth_connection;
