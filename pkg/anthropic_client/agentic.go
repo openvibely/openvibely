@@ -231,6 +231,49 @@ type compactionBlockJSON struct {
 	Content *string `json:"content"`
 }
 
+const nativeCompactionStateVersion = 1
+
+type nativeCompactionState struct {
+	Version  int              `json:"version"`
+	Messages []agenticMessage `json:"messages"`
+}
+
+func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
+	var state nativeCompactionState
+	if err := json.Unmarshal([]byte(raw), &state); err == nil && state.Version == nativeCompactionStateVersion {
+		if !hasLeadingCompactionMessage(state.Messages) {
+			return nil, fmt.Errorf("invalid compaction message envelope")
+		}
+		return state.Messages, nil
+	}
+
+	// Accept checkpoints produced before the state envelope retained the
+	// post-compaction assistant/tool continuation.
+	var block compactionBlockJSON
+	if err := json.Unmarshal([]byte(raw), &block); err != nil {
+		return nil, err
+	}
+	if block.Type != "compaction" || block.Content == nil {
+		return nil, fmt.Errorf("invalid compaction block")
+	}
+	return []agenticMessage{{Role: "user", Content: []compactionBlockJSON{block}}}, nil
+}
+
+func hasLeadingCompactionMessage(messages []agenticMessage) bool {
+	if len(messages) == 0 || messages[0].Role != "user" {
+		return false
+	}
+	raw, err := json.Marshal(messages[0].Content)
+	if err != nil {
+		return false
+	}
+	var blocks []compactionBlockJSON
+	if err := json.Unmarshal(raw, &blocks); err != nil || len(blocks) != 1 {
+		return false
+	}
+	return blocks[0].Type == "compaction" && blocks[0].Content != nil
+}
+
 // agenticRequest is the API request body for agentic sends.
 type agenticRequest struct {
 	Model             string                   `json:"model"`
@@ -323,14 +366,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	// Build initial messages from a compatible native checkpoint, history, and new prompt.
 	messages := make([]agenticMessage, 0, len(c.History)+2)
 	if state := strings.TrimSpace(opts.NativeCompactionStateJSON); state != "" {
-		var compactBlock compactionBlockJSON
-		if err := json.Unmarshal([]byte(state), &compactBlock); err != nil {
+		checkpointMessages, err := decodeNativeCompactionState(state)
+		if err != nil {
 			return nil, fmt.Errorf("decode Anthropic native compaction state: %w", err)
 		}
-		if compactBlock.Type != "compaction" || compactBlock.Content == nil {
-			return nil, fmt.Errorf("decode Anthropic native compaction state: invalid compaction block")
-		}
-		messages = append(messages, agenticMessage{Role: "user", Content: []compactionBlockJSON{compactBlock}})
+		messages = append(messages, checkpointMessages...)
 	}
 	for _, msg := range c.History {
 		messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
@@ -349,6 +389,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
+	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		// Send request (streaming)
@@ -392,16 +433,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			compactBlock.Content = resp.compaction.content
 
 			if resp.compaction.content != nil {
-				encodedState, err := json.Marshal(compactBlock)
-				if err != nil {
-					return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
-				}
-				result.NativeCompactionStateJSON = string(encodedState)
+				hasDurableCompactionState = true
 				applog.Infof("[anthropicclient] context compacted on turn %d, summary_len=%d", turn+1, len(*resp.compaction.content))
 				if opts.OnCompaction != nil {
 					opts.OnCompaction(*resp.compaction.content)
 				}
 			} else {
+				hasDurableCompactionState = false
 				applog.Infof("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
 			}
 
@@ -533,6 +571,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		allText.WriteString(turnText)
 	}
 
+	if hasDurableCompactionState {
+		encodedState, err := json.Marshal(nativeCompactionState{Version: nativeCompactionStateVersion, Messages: messages})
+		if err != nil {
+			return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
+		}
+		result.NativeCompactionStateJSON = string(encodedState)
+	}
 	result.Text = allText.String()
 
 	// Update client history with the final state
