@@ -1408,6 +1408,7 @@ paths:
       - multipart/form-data
       description: |-
         Send a chat message to the AI agent with optional file attachments.
+        Messages containing only spaces, tabs, or line breaks are rejected with HTTP 400.
         Returns 201 immediately with a message ID. The AI processes the message asynchronously.
         Poll GET /api/chat/message/{id} to check status and retrieve the response.
         Supported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)

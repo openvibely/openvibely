@@ -679,7 +679,7 @@ const docTemplate = `{
         },
         "/api/chat/message": {
             "post": {
-                "description": "Send a chat message to the AI agent with optional file attachments.\nReturns 201 immediately with a message ID. The AI processes the message asynchronously.\nPoll GET /api/chat/message/{id} to check status and retrieve the response.\nSupported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)\nMaximum file size: 10 MB per file\nMaximum files per request: 10",
+                "description": "Send a chat message to the AI agent with optional file attachments.\nMessages containing only spaces, tabs, or line breaks are rejected with HTTP 400.\nReturns 201 immediately with a message ID. The AI processes the message asynchronously.\nPoll GET /api/chat/message/{id} to check status and retrieve the response.\nSupported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)\nMaximum file size: 10 MB per file\nMaximum files per request: 10",
                 "consumes": [
                     "multipart/form-data"
                 ],

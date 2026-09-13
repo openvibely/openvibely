@@ -104,6 +104,7 @@ type ChatMessageStatusResponse struct {
 // APIChatMessage godoc
 // @Summary Send a chat message with optional file attachments (async)
 // @Description Send a chat message to the AI agent with optional file attachments.
+// @Description Messages containing only spaces, tabs, or line breaks are rejected with HTTP 400.
 // @Description Returns 201 immediately with a message ID. The AI processes the message asynchronously.
 // @Description Poll GET /api/chat/message/{id} to check status and retrieve the response.
 // @Description Supported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)
@@ -140,8 +141,9 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	message := c.FormValue("message")
 	projectID := c.FormValue("project_id")
 
-	// Validate required fields
-	if message == "" {
+	// Validate required fields. A message must contain visible content before
+	// any project/model lookup, attachment staging, or chat admission side effect.
+	if strings.TrimSpace(message) == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "message is required"})
 	}
 	if projectID == "" {
