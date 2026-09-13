@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +21,89 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavailable(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"new-access","refresh_token":"new-refresh","expires_in":7200}`))
+			}))
+			defer tokenServer.Close()
+
+			h, _, repo := setupTestHandler(t)
+			config := &models.LLMConfig{
+				Name:              string(provider) + " reconnect",
+				Provider:          provider,
+				Model:             "test-model",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "old-access",
+				OAuthRefreshToken: "old-refresh",
+				OAuthExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+				OAuthAccountID:    "previous-account",
+			}
+			require.NoError(t, repo.Create(context.Background(), config))
+			current, err := repo.GetByID(context.Background(), config.ID)
+			require.NoError(t, err)
+
+			_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
+				ConfigID:       current.ID,
+				Provider:       provider,
+				TokenURL:       tokenServer.URL,
+				ConfigRevision: current.OAuthConfigRevision,
+			}, "code", "state")
+			require.NoError(t, err)
+
+			stored, err := repo.GetByID(context.Background(), current.ID)
+			require.NoError(t, err)
+			require.Empty(t, stored.OAuthAccountID, "reconnect must not retain identity from the previous OAuth principal")
+			require.Equal(t, current.OAuthConfigRevision+1, stored.OAuthConfigRevision)
+		})
+	}
+}
+
+func TestStandardOAuthProviderErrorsAreNotExposedOrLogged(t *testing.T) {
+	const providerSecret = "private@example.com bearer-secret"
+
+	var logs bytes.Buffer
+	previousOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+
+	h, _, _ := setupTestHandler(t)
+	state := fmt.Sprintf("private-provider-error-%d", time.Now().UnixNano())
+	oauthFlowsMu.Lock()
+	oauthFlows[state] = &oauthPendingFlow{
+		State:     state,
+		CreatedAt: time.Now(),
+		Provider:  models.ProviderOpenAI,
+	}
+	oauthFlowsMu.Unlock()
+
+	callbackURL := "/auth/callback?state=" + url.QueryEscape(state) +
+		"&error=" + url.QueryEscape(providerSecret) +
+		"&error_description=" + url.QueryEscape(providerSecret)
+	rec := httptest.NewRecorder()
+	h.handleOAuthCallbackResponse(rec, httptest.NewRequest(http.MethodGet, callbackURL, nil), "/models", nil)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "Authorization was denied or cancelled")
+	require.NotContains(t, rec.Body.String(), providerSecret)
+	require.NotContains(t, logs.String(), providerSecret)
+}
+
+func TestOAuthManualCompleteDoesNotExposeProviderErrorDescription(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	payload := `{"callback_url":"http://localhost/callback?state=state&code=code&error=access_denied&error_description=private%40example.com"}`
+	req := httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "Authorization was denied or cancelled")
+	require.NotContains(t, rec.Body.String(), "private@example.com")
+}
 
 func TestStandardOAuthCallbackFencesConcurrentRefreshWrites(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
@@ -1030,7 +1115,7 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 	})
 }
 
-func TestOAuthCallbackEscapesProviderErrorDescription(t *testing.T) {
+func TestOAuthCallbackDoesNotReflectProviderErrorDescription(t *testing.T) {
 	h, _, _ := setupTestHandler(t)
 	state := fmt.Sprintf("escaped-error-%d", time.Now().UnixNano())
 
@@ -1056,8 +1141,9 @@ func TestOAuthCallbackEscapesProviderErrorDescription(t *testing.T) {
 	h.handleOAuthCallbackResponse(rec, req, "/models", nil)
 
 	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "Authorization was denied or cancelled")
 	require.NotContains(t, rec.Body.String(), "<script>")
-	require.Contains(t, rec.Body.String(), "&lt;script&gt;")
+	require.NotContains(t, rec.Body.String(), "&lt;script&gt;")
 }
 
 func TestHandler_standardOAuthCallbackRequiresUsableAccessToken(t *testing.T) {

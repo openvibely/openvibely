@@ -829,26 +829,13 @@ func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, access
 	return nil
 }
 
-func (r *LLMConfigRepo) UpdateStandardOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID ...string) (bool, error) {
-	var (
-		result sql.Result
-		err    error
-	)
-	if len(accountID) > 0 {
-		result, err = execBoundSQLite(ctx, r.db,
-			`UPDATE agent_configs
-			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
-			     oauth_needs_reauth = 0, oauth_config_revision = oauth_config_revision + 1, updated_at = datetime('now')
-			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-			accessToken, refreshToken, expiresAt, accountID[0], id, expectedRevision, provider, models.AuthMethodOAuth)
-	} else {
-		result, err = execBoundSQLite(ctx, r.db,
-			`UPDATE agent_configs
-			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?,
-			     oauth_needs_reauth = 0, oauth_config_revision = oauth_config_revision + 1, updated_at = datetime('now')
-			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-			accessToken, refreshToken, expiresAt, id, expectedRevision, provider, models.AuthMethodOAuth)
-	}
+func (r *LLMConfigRepo) UpdateStandardOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID string) (bool, error) {
+	result, err := execBoundSQLite(ctx, r.db,
+		`UPDATE agent_configs
+		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
+		     oauth_needs_reauth = 0, oauth_config_revision = oauth_config_revision + 1, updated_at = datetime('now')
+		 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
+		accessToken, refreshToken, expiresAt, accountID, id, expectedRevision, provider, models.AuthMethodOAuth)
 	if err != nil {
 		return false, fmt.Errorf("conditionally updating OAuth connection: %w", err)
 	}
