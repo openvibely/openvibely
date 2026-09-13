@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestTaskEvent_ToSSE_IncludesTaskName(t *testing.T) {
@@ -258,14 +259,31 @@ func benchmarkBroadcasterScopedFanout(b *testing.B, matching int, distributed bo
 		}
 	})
 
+	const publishBatchSize = 10
 	event := TaskEvent{Type: TaskStatusChanged, TaskID: "task-0", ProjectID: "project-0", Status: "running"}
+	var publisherNanos int64
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		broadcaster.Publish(event)
-		for _, sub := range matchingSubscribers {
-			<-sub
+	for published := 0; published < b.N; {
+		batchSize := publishBatchSize
+		if remaining := b.N - published; remaining < batchSize {
+			batchSize = remaining
 		}
+		started := time.Now()
+		for i := 0; i < batchSize; i++ {
+			broadcaster.Publish(event)
+		}
+		publisherNanos += time.Since(started).Nanoseconds()
+
+		// Drain outside the manual publisher timing measurement so the next batch starts
+		// with every matching channel below its public buffer capacity.
+		for _, sub := range matchingSubscribers {
+			for i := 0; i < batchSize; i++ {
+				<-sub
+			}
+		}
+		published += batchSize
 	}
 	b.StopTimer()
+	b.ReportMetric(float64(publisherNanos)/float64(b.N), "publisher-ns/op")
 }
