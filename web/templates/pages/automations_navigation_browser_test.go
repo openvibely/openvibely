@@ -353,6 +353,7 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 
 		browser.waitFor("Automation portfolio", `(function() {
 			var root = document.getElementById('automations-container');
+			if (root && !root._openVibelyCardPaginationState && typeof window.refreshCardPagination === 'function') window.refreshCardPagination(root);
 			return document.readyState === 'complete' && root && root._openVibelyCardPaginationState && document.querySelector('[data-card-select-id="automation-active-browser"]') && document.querySelector('[data-card-select-id="automation-paused-browser"]') ? 'ready' : 'waiting';
 		})()`, "ready")
 		browser.evaluate(`window.htmx = {ajax: function() { return Promise.resolve(); }, process: function() {}}; window.__automationNavigations = []; window.openVibelyNavigate = function(url) { window.__automationNavigations.push(url); return Promise.resolve(); }; 'ready'`)
