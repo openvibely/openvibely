@@ -86,6 +86,9 @@ func TestServerInvalidTimeoutsFatalBeforeHelper(t *testing.T) {
 			if strings.Contains(string(output), "[update-helper] started") {
 				t.Fatalf("server helper started after invalid timeout: %q", output)
 			}
+			if strings.Contains(string(output), "timed out waiting for parent process to exit") {
+				t.Fatalf("server helper ran after invalid timeout: %q", output)
+			}
 		})
 	}
 }

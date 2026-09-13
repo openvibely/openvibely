@@ -798,6 +798,41 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 	}
 }
 
+func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+			first := &models.LLMConfig{Name: "Shared first", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access", OAuthRefreshToken: "refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+			second := &models.LLMConfig{Name: "Shared second", Provider: provider, Model: "model-two", AuthMethod: models.AuthMethodOAuth}
+			for _, cfg := range []*models.LLMConfig{first, second} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+				t.Fatalf("link connection: %v", err)
+			}
+			calls := 0
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				calls++
+				pct := 4.0
+				return &models.AccountUsageSnapshot{Provider: string(provider), AgentConfigID: cfg.ID, SecondaryLabel: "weekly", SecondaryUsedPercent: &pct}, nil
+			})
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider), Refresh: true})
+			if err != nil {
+				t.Fatalf("BuildAnalyticsUsage: %v", err)
+			}
+			if calls != 1 || len(view.AccountLimits) != 1 || view.AccountLimits[0].SecondaryLimit == nil {
+				t.Fatalf("shared connection result calls=%d accounts=%+v", calls, view.AccountLimits)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, alreadyNeedsReauth := range []bool{false, true} {

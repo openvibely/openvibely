@@ -207,7 +207,7 @@ func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 	if !strings.Contains(body, "class=\"flex flex-col h-[78vh]\"") {
 		t.Errorf("expected agents page to include fixed-height modal content container")
 	}
-	if !strings.Contains(body, "id=\"agent_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"") {
+	if !strings.Contains(body, "id=\"agent_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost(); invalidateAgentModalHydration()\"") {
 		t.Errorf("expected agents modal to resync toast host on close for top-layer stacking")
 	}
 	if !strings.Contains(body, "function getTopMostOpenModal()") {
@@ -1833,8 +1833,8 @@ func assertGenerateAgentLoadedFullDefaultModel(t *testing.T, statements []string
 	t.Helper()
 	for _, statement := range statements {
 		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(stmt, " from agent_configs where is_default = 1 limit 1") {
-			projection := strings.Split(stmt, " from agent_configs ")[0]
+		if strings.Contains(stmt, " from agent_configs where is_default = 1 limit 1") || strings.Contains(stmt, " from agent_configs a left join oauth_connections") && strings.Contains(stmt, " where a.is_default = 1 limit 1") {
+			projection := strings.Split(stmt, " from agent_configs")[0]
 			if strings.Contains(projection, "api_key") && strings.Contains(projection, "extra_body_json") {
 				return
 			}
