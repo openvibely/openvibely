@@ -1511,25 +1511,27 @@ func TestHandler_ListAgents_IncludesDefaultOffPluginText(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))
 
-	if err := llmConfigRepo.Create(context.Background(), &models.LLMConfig{
+	openAIConfig := &models.LLMConfig{
 		Name:       "GPT 5.4",
 		Provider:   models.ProviderOpenAI,
 		Model:      "gpt-5.4",
 		MaxTokens:  4096,
 		IsDefault:  false,
 		AuthMethod: models.AuthMethodAPIKey,
-	}); err != nil {
+	}
+	if err := llmConfigRepo.Create(context.Background(), openAIConfig); err != nil {
 		t.Fatalf("create openai model: %v", err)
 	}
 
-	if err := llmConfigRepo.Create(context.Background(), &models.LLMConfig{
+	anthropicConfig := &models.LLMConfig{
 		Name:       "Claude Sonnet 4.5",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
 		IsDefault:  false,
 		AuthMethod: models.AuthMethodCLI,
-	}); err != nil {
+	}
+	if err := llmConfigRepo.Create(context.Background(), anthropicConfig); err != nil {
 		t.Fatalf("create anthropic model: %v", err)
 	}
 
@@ -1544,10 +1546,10 @@ func TestHandler_ListAgents_IncludesDefaultOffPluginText(t *testing.T) {
 	if !strings.Contains(body, "No plugins selected") {
 		t.Fatalf("expected default-off plugin copy in agent modal")
 	}
-	if !strings.Contains(body, `<option value="gpt-5.4">GPT 5.4</option>`) {
+	if !strings.Contains(body, fmt.Sprintf(`<option value="%s">GPT 5.4 (gpt-5.4)</option>`, openAIConfig.ID)) {
 		t.Fatalf("expected configured OpenAI model option in agent modal, body=%s", body)
 	}
-	if !strings.Contains(body, `option value="claude-sonnet-4-5-20250929"`) {
+	if !strings.Contains(body, fmt.Sprintf(`option value="%s">Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)`, anthropicConfig.ID)) {
 		t.Fatalf("expected configured Anthropic model value in agent modal, body=%s", body)
 	}
 	if strings.Contains(body, `<option value="sonnet">Sonnet</option>`) {
@@ -1575,8 +1577,8 @@ func TestHandler_AgentModelPickerRoutesUseCompactProjection(t *testing.T) {
 	assertCompactAgentPickerQueries(t, counter.Statements(), 1)
 	body := rec.Body.String()
 	inheritIndex := strings.Index(body, `<option value="inherit">Inherit (from task)</option>`)
-	defaultIndex := strings.Index(body, `<option value="agent-picker-default">Agent Picker Default</option>`)
-	firstCustomIndex := strings.Index(body, `<option value="agent-picker-model-00">Agent Picker 00</option>`)
+	defaultIndex := strings.Index(body, `>Agent Picker Default (agent-picker-default)</option>`)
+	firstCustomIndex := strings.Index(body, `>Agent Picker 00 (agent-picker-model-00)</option>`)
 	if inheritIndex < 0 || defaultIndex < 0 || firstCustomIndex < 0 || !(inheritIndex < defaultIndex && defaultIndex < firstCustomIndex) {
 		t.Fatalf("agent model dropdown order/labels not preserved: inherit=%d default=%d firstCustom=%d", inheritIndex, defaultIndex, firstCustomIndex)
 	}
@@ -2857,7 +2859,12 @@ func TestHandler_AgentNameValidation_AllowsDisabledAndNonPrimaryDuplicates(t *te
 
 func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetAgentRepo(repository.NewAgentRepo(db))
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	protected := &models.Agent{Name: "System: Goal Agent", Key: "test_goal_agent_ui", SystemKind: models.AgentSystemKindGoal, SystemPrompt: "goal", Model: "inherit", GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	if err := agentRepo.Create(t.Context(), protected); err != nil {
+		t.Fatalf("create protected goal agent: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
 	rec := httptest.NewRecorder()
@@ -2884,6 +2891,15 @@ func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
 	}
 	if !strings.Contains(body, "agent_lifecycle_hooks_json').value = JSON.stringify(collectLifecycleHooksFromDOM())") {
 		t.Fatalf("expected lifecycle hooks to serialize with the main agent form")
+	}
+	if !strings.Contains(body, `data-agent-system-kind`) || !strings.Contains(body, `data-agent-required-system-agent`) {
+		t.Fatalf("expected system-agent hydration metadata in rendered cards")
+	}
+	if !strings.Contains(body, `id="advanced_required_system_notice"`) || !strings.Contains(body, "Goal Agent is required") {
+		t.Fatalf("expected required system-agent lock notice in dialog")
+	}
+	if !strings.Contains(body, "setProtectedAgentControlState") {
+		t.Fatalf("expected protected system-agent control hydration script")
 	}
 }
 
@@ -3298,6 +3314,118 @@ func TestHandler_UpdateAgent_RefreshesMaterializedAgentRootFile(t *testing.T) {
 	}
 	if !containsAll(string(data), "name: Claudia Updated", "system_prompt: new prompt", "updated description") {
 		t.Fatalf("materialized agent root not refreshed:\n%s", data)
+	}
+}
+
+func TestHandler_UpdateAgent_AllowsEligibleSystemAgentModelAndEnabledControls(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	modelCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "System Control Model"
+		a.Provider = models.ProviderTest
+		a.Model = "system-control-model"
+	})
+
+	agent := &models.Agent{
+		Name:            "System: Skill Curator",
+		Key:             "test_skill_curator",
+		SystemKind:      models.AgentSystemKindSkillCurator,
+		SystemPrompt:    "original prompt",
+		Model:           "inherit",
+		Tools:           []string{"Read"},
+		GeneratedStatus: models.AgentStatusProtected,
+		CreatedBy:       models.AgentCreatedBySystem,
+		Enabled:         true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create protected agent: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", agent.Name)
+	form.Set("description", agent.Description)
+	form.Set("system_prompt", agent.SystemPrompt)
+	form.Set("model", modelCfg.ID)
+	form.Set("tools_json", `["Read"]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "test_skill_curator")
+	form.Set("scope", "global")
+	form.Set("selectable_as_primary", "false")
+	form.Set("enabled", "false")
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("reload protected agent: %v %#v", err, stored)
+	}
+	if stored.Model != modelCfg.ID || stored.Enabled {
+		t.Fatalf("expected model/disabled controls to persist, got model=%q enabled=%v", stored.Model, stored.Enabled)
+	}
+	if stored.SystemPrompt != "original prompt" || len(stored.Tools) != 1 || stored.Tools[0] != "Read" {
+		t.Fatalf("locked protected fields changed: %+v", stored)
+	}
+}
+
+func TestHandler_UpdateAgent_RejectsRequiredGoalAgentDisable(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	modelCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Goal Model"
+		a.Provider = models.ProviderTest
+		a.Model = "goal-model"
+	})
+
+	agent := &models.Agent{
+		Name:            "System: Goal Agent",
+		Key:             "test_goal_agent",
+		SystemKind:      models.AgentSystemKindGoal,
+		SystemPrompt:    "goal prompt",
+		Model:           "inherit",
+		Tools:           []string{"Read"},
+		GeneratedStatus: models.AgentStatusProtected,
+		CreatedBy:       models.AgentCreatedBySystem,
+		Enabled:         true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create goal agent: %v", err)
+	}
+	form := url.Values{}
+	form.Set("name", agent.Name)
+	form.Set("description", agent.Description)
+	form.Set("system_prompt", agent.SystemPrompt)
+	form.Set("model", modelCfg.ID)
+	form.Set("tools_json", `["Read"]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "test_goal_agent")
+	form.Set("scope", "global")
+	form.Set("selectable_as_primary", "false")
+	form.Set("enabled", "false")
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("reload goal agent: %v %#v", err, stored)
+	}
+	if !stored.Enabled || stored.Model != "inherit" {
+		t.Fatalf("rejected goal update mutated controls: model=%q enabled=%v", stored.Model, stored.Enabled)
 	}
 }
 

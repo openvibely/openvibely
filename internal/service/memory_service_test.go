@@ -378,8 +378,11 @@ func TestMemoryService_EnsureGlobalAgentsCreatesAndRepairsMemoryCuratorAndHooks(
 	if repaired.ID != agent.ID {
 		t.Fatalf("expected Memory Curator repaired in place, got id=%s want=%s", repaired.ID, agent.ID)
 	}
-	if repaired.Name == "Broken Memory Agent" || repaired.Key != models.AgentSystemKindMemoryCurator || repaired.Scope != models.AgentScopeGlobal || repaired.ProjectID != "" || repaired.SelectableAsPrimary || !repaired.Enabled || repaired.GeneratedStatus != models.AgentStatusProtected || repaired.CreatedBy != models.AgentCreatedBySystem {
+	if repaired.Name == "Broken Memory Agent" || repaired.Key != models.AgentSystemKindMemoryCurator || repaired.Scope != models.AgentScopeGlobal || repaired.ProjectID != "" || repaired.SelectableAsPrimary || repaired.GeneratedStatus != models.AgentStatusProtected || repaired.CreatedBy != models.AgentCreatedBySystem {
 		t.Fatalf("Memory Curator stale identity was not repaired: %#v", repaired)
+	}
+	if repaired.Enabled {
+		t.Fatalf("Memory Curator disabled state should be user-managed across reconciliation: %#v", repaired)
 	}
 	if !AgentAllowsTool(repaired, models.AgentToolScopedFiles) || !repaired.ToolConfig.SkipDefaultTools || !repaired.ToolConfig.DisableRuntimeWorktree || len(repaired.ToolConfig.ScopedFiles) != 1 {
 		t.Fatalf("Memory Curator stale tool config was not repaired: tools=%v config=%#v", repaired.Tools, repaired.ToolConfig)
@@ -456,8 +459,11 @@ func TestMemoryService_EnsureGlobalAgentsRepairsLegacyMemoryAliasInPlace(t *test
 	if agent.ID != legacy.ID {
 		t.Fatalf("expected legacy Memory alias repaired in place, got id=%s want=%s", agent.ID, legacy.ID)
 	}
-	if agent.Key != models.AgentSystemKindMemoryCurator || agent.Name != memoryAgentName || agent.GeneratedStatus != models.AgentStatusProtected || agent.CreatedBy != models.AgentCreatedBySystem || agent.SelectableAsPrimary || !agent.Enabled {
+	if agent.Key != models.AgentSystemKindMemoryCurator || agent.Name != memoryAgentName || agent.GeneratedStatus != models.AgentStatusProtected || agent.CreatedBy != models.AgentCreatedBySystem || agent.SelectableAsPrimary {
 		t.Fatalf("legacy Memory alias was not repaired to canonical protected row: %#v", agent)
+	}
+	if agent.Enabled {
+		t.Fatalf("legacy Memory alias disabled state should be preserved across reconciliation: %#v", agent)
 	}
 	deleted, err := agentRepo.GetByKey(ctx, "memory_consolidator")
 	if err != nil {

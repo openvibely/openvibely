@@ -66,6 +66,10 @@ type LLMConfigLookup interface {
 	GetDefault(ctx context.Context) (*models.LLMConfig, error)
 }
 
+type LLMConfigByIDLookup interface {
+	GetByID(ctx context.Context, id string) (*models.LLMConfig, error)
+}
+
 // LLMHookInvoker dispatches a lifecycle hook to the LLM service. The hook
 // input is rendered as a prompt block (skill body + prompt override + serialized
 // previous outputs); the model is expected to return a JSON payload matching
@@ -142,7 +146,7 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 
 // resolveLLMConfig picks the model the hook should run under. Preference:
 //  1. hook's persisted model override (future column; not implemented yet)
-//  2. agent's model field
+//  2. agent's model field as a configured model ID, with legacy slug fallback
 //  3. the configured default LLMConfig
 //  4. an empty config (so the caller's defaults apply)
 func (i *LLMHookInvoker) resolveLLMConfig(ctx context.Context, hook models.AgentLifecycleHook) (models.LLMConfig, *models.Agent, error) {
@@ -150,9 +154,19 @@ func (i *LLMHookInvoker) resolveLLMConfig(ctx context.Context, hook models.Agent
 	if i.agents != nil && hook.AgentID != "" {
 		if a, err := i.agents.GetByID(ctx, hook.AgentID); err == nil && a != nil {
 			agentDef = a
-			cfg := models.LLMConfig{Name: a.Name, Model: a.Model}
-			if a.Model != "" && a.Model != "inherit" {
-				return cfg, agentDef, nil
+			model := strings.TrimSpace(a.Model)
+			if model != "" && !strings.EqualFold(model, "inherit") {
+				if byID, ok := i.models.(LLMConfigByIDLookup); ok {
+					cfg, err := byID.GetByID(ctx, model)
+					if err != nil {
+						return models.LLMConfig{}, agentDef, err
+					}
+					if cfg != nil {
+						return *cfg, agentDef, nil
+					}
+				}
+				// Legacy rows stored provider model slugs instead of model config IDs.
+				return models.LLMConfig{Name: a.Name, Model: model}, agentDef, nil
 			}
 		}
 	}
