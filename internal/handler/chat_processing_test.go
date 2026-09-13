@@ -461,6 +461,19 @@ func TestFilterChatHistory_ExcludesRunningAndCurrentExec(t *testing.T) {
 	}
 }
 
+func TestFilterRetryChatHistory_ExcludesCurrentAndFailedSourceOnly(t *testing.T) {
+	executions := []models.Execution{
+		{ID: "completed", Status: models.ExecCompleted, PromptSent: "completed prompt"},
+		{ID: "useful-failure", Status: models.ExecFailed, PromptSent: "other failed prompt"},
+		{ID: "retried-source", Status: models.ExecFailed, PromptSent: strings.Repeat("large", 100)},
+		{ID: "retry", Status: models.ExecRunning, PromptSent: strings.Repeat("large", 100)},
+	}
+	result := filterRetryChatHistory(executions, "retry", "retried-source")
+	require.Len(t, result, 2)
+	assert.Equal(t, "completed", result[0].ID)
+	assert.Equal(t, "useful-failure", result[1].ID)
+}
+
 func TestFilterChatHistory_ReturnsNonNilForEmpty(t *testing.T) {
 	// filterChatHistory must return a non-nil slice even when empty,
 	// so CallAgentDirectStreaming routes to the chat path.
@@ -7001,12 +7014,10 @@ func TestRetryLatestFailedTaskThreadFollowup_ReplaysFailedFollowupPromptFromActi
 	assert.Equal(t, "fix the failed follow-up", call.Prompt)
 	assert.NotEqual(t, "original task prompt", call.Prompt)
 	req := mock.LastAgentRequest()
-	require.Len(t, req.ChatHistory, 2)
+	require.Len(t, req.ChatHistory, 1)
 	assert.Equal(t, "original task prompt", req.ChatHistory[0].PromptSent)
 	assert.Contains(t, req.ChatHistory[0].Output, "initial task output")
-	assert.Equal(t, "fix the failed follow-up", req.ChatHistory[1].PromptSent)
-	assert.Equal(t, models.ExecFailed, req.ChatHistory[1].Status)
-	assert.Contains(t, req.ChatHistory[1].Output, "failed follow-up output")
+	assert.NotContains(t, req.ChatHistory, failedFollowup)
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 		if err != nil || len(execs) != 3 || execs[2].Status != models.ExecCompleted {

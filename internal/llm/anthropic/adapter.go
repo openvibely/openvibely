@@ -71,6 +71,13 @@ func claudeCodeMaxOutputTokens(model string) int {
 	return parsed
 }
 
+// OutputTokenBudget returns the exact max_tokens reservation used for an
+// Anthropic request so shared context budgeting cannot admit input against a
+// smaller, fictional output reserve.
+func OutputTokenBudget(model string) int {
+	return claudeCodeMaxOutputTokens(model)
+}
+
 func parseClaudeCodeMaxOutputTokensEnv(raw string, upperLimit int) (int, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

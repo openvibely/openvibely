@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -361,6 +363,111 @@ func TestRequestUsesChatStreamingTreatsFirstTurnChatAsChat(t *testing.T) {
 	}
 }
 
+func TestProviderContextBudget_OversizedPendingInputIsExternalizedWithoutCompactingSmallHistory(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OPENVIBELY_APP_DATA_DIR", root)
+	original := "diagnose this log\n" + strings.Repeat("x", 2_664_043-len("diagnose this log\n"))
+	var got llmcontracts.AgentRequest
+	calls := 0
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		got = req
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationStreaming,
+		Message: original, ExecID: "oversized-exec", WorkDir: t.TempDir(), Followup: true,
+		Agent:       models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", ContextWindow: 272000},
+		ChatHistory: []models.Execution{{ID: "old", PromptSent: "small history", Output: "small answer", Status: models.ExecCompleted}},
+	}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls = %d, want one ordinary request", calls)
+	}
+	if got.ForceNativeCompaction || got.Agent.ForceNativeCompaction {
+		t.Fatal("small history must not be compacted because only pending input is oversized")
+	}
+	if got.Message == original || !strings.Contains(got.Message, "Full input:") || !strings.Contains(got.Message, "2664043") {
+		t.Fatalf("model-facing prompt was not externalized: %q", got.Message)
+	}
+	artifact := filepath.Join(root, "task-inputs", "oversized-exec", "prompt.txt")
+	data, err := os.ReadFile(artifact)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if string(data) != original {
+		t.Fatalf("artifact bytes = %d, want complete original %d", len(data), len(original))
+	}
+	info, err := os.Stat(artifact)
+	if err != nil {
+		t.Fatalf("stat artifact: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("artifact mode = %v, want 0600", info.Mode().Perm())
+	}
+	if estimateModelVisibleRequestTokens(got) > requestBudgetForAgent(got.Agent).SafeInputLimit {
+		t.Fatal("externalized request still exceeds safe input limit")
+	}
+}
+
+func TestProviderContextBudget_LargeHistoryAndOversizedPendingAreHandledSeparately(t *testing.T) {
+	t.Setenv("OPENVIBELY_APP_DATA_DIR", t.TempDir())
+	original := strings.Repeat("L", 2_664_043)
+	var requests []llmcontracts.AgentRequest
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		requests = append(requests, req)
+		if err := ensureRequestFits(req, "test provider-bound request"); err != nil {
+			t.Fatalf("oversized provider request %d: %v", len(requests), err)
+		}
+		if req.Operation == llmcontracts.OperationDirect {
+			return llmcontracts.AgentResult{Output: "bounded history summary"}, nil
+		}
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationStreaming,
+		Message: original, ExecID: "both-large", WorkDir: t.TempDir(), Followup: true,
+		Agent:       models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "local-compatible", ContextWindow: 50000},
+		ChatHistory: []models.Execution{{ID: "old", PromptSent: strings.Repeat("history", 12000), Output: strings.Repeat("tool", 12000), Status: models.ExecCompleted}},
+	}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 2 || requests[0].Operation != llmcontracts.OperationDirect || requests[1].Operation != llmcontracts.OperationStreaming {
+		t.Fatalf("requests = %#v, want bounded summary then continuation", requests)
+	}
+	if requests[1].Message == original || !strings.Contains(requests[1].Message, "Full input:") {
+		t.Fatal("oversized pending input was not handled independently after history compaction")
+	}
+	if requests[1].ForceNativeCompaction || requests[1].Agent.ForceNativeCompaction {
+		t.Fatal("local summary retry retained stale native compaction force")
+	}
+}
+
+func TestProviderContextBudget_NoProviderCallWhenPendingInputCannotBeExternalized(t *testing.T) {
+	calls := 0
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		return llmcontracts.AgentResult{}, nil
+	})
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	_, err := svc.callProviderWithContextCompactionFallback(adapter, llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationStreaming,
+		Message: strings.Repeat("!", 20000), ExecID: "no-artifact", DisableTools: true,
+		Agent: models.LLMConfig{Provider: models.ProviderOllama, ContextWindow: 4096},
+	})
+	if !llmcontracts.ErrorIs(err, llmcontracts.ErrorPendingInputInfeasible) {
+		t.Fatalf("error = %v, want pending-input infeasible", err)
+	}
+	if calls != 0 {
+		t.Fatalf("provider calls = %d, want zero", calls)
+	}
+}
+
 func TestProviderContextCompactionFallback_RetriesStreamingRequestOnceForSupportedProviders(t *testing.T) {
 	providers := []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible}
 	for _, provider := range providers {
@@ -464,7 +571,7 @@ func TestProviderContextCompactionFallback_CompactedRetryOverflowUsesLastResortO
 	if len(requests[3].ChatHistory) != 20 || requests[3].ChatHistory[0].PromptSent != "prompt-05" {
 		t.Fatalf("last resort history = %#v", requests[3].ChatHistory)
 	}
-	if got := logBuf.String(); !strings.Contains(got, "WARNING: context compaction failed; using last-resort latest-20-turn truncation") {
+	if got := logBuf.String(); !strings.Contains(got, "WARNING: context compaction failed; using token-budgeted last-resort truncation") {
 		t.Fatalf("last resort warning log missing: %s", got)
 	}
 }
@@ -515,8 +622,8 @@ func TestProviderContextCompactionFallback_SummaryOverflowDropsOldestAndRetries(
 }
 
 func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t *testing.T) {
-	if got := estimatedUTF8Tokens("éé"); got != 1 {
-		t.Fatalf("estimated UTF-8 tokens = %d, want ceil(4 bytes / 4)=1", got)
+	if got := estimatedUTF8Tokens("éé"); got != 2 {
+		t.Fatalf("conservative UTF-8 token estimate = %d, want one token per rune", got)
 	}
 	oversized := "prefix-" + strings.Repeat("x", 200) + "-suffix"
 	history := []models.Execution{
@@ -534,8 +641,8 @@ func TestProviderContextCompactionFallback_RetainsUserMessagesWithinUTF8Budget(t
 	if retained[1].ID != "" {
 		t.Fatal("retained prompt must not hydrate the original execution's tool replay")
 	}
-	if got := retained[0].PromptSent; !strings.Contains(got, "[Middle of user message omitted") || !strings.HasPrefix(got, "prefix-") || !strings.HasSuffix(got, "-suffix") {
-		t.Fatalf("boundary message was not middle-truncated with prefix/suffix preserved: %q", got)
+	if got := retained[0].PromptSent; !strings.Contains(got, "omitted") {
+		t.Fatalf("boundary message was not visibly middle-truncated: %q", got)
 	}
 }
 
@@ -578,8 +685,8 @@ func TestReportedContextUsagePersistsAndTriggersNextTurn(t *testing.T) {
 func TestReportedContextUsageAddsOnlyNewContent(t *testing.T) {
 	req := llmcontracts.AgentRequest{Message: "12345678", ChatHistory: []models.Execution{{ID: "source", Output: strings.Repeat("x", 10000)}}}
 	baseline := models.ChatContextUsage{SourceExecutionID: "source", ContextTokens: 120000}
-	if got := estimateContextFromReportedUsage(req, baseline); got != 120002 {
-		t.Fatalf("got %d, want 120002", got)
+	if got := estimateContextFromReportedUsage(req, baseline); got != 120008 {
+		t.Fatalf("got %d, want 120008", got)
 	}
 	baseline.ContextTokens = 0
 	if got := estimateContextFromReportedUsage(req, baseline); got != 0 {
@@ -649,6 +756,15 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 		t.Fatalf("OpenAI Codex limits = %+v, want W=272000 auto=244800", openAILimits)
 	}
 
+	openAIBudget := requestBudgetForAgent(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex"})
+	if openAIBudget.ReservedOutputTokens != 16384 || openAIBudget.SafeInputLimit != 244800 {
+		t.Fatalf("OpenAI request budget = %+v", openAIBudget)
+	}
+	anthropicBudget := requestBudgetForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ContextWindow: 200000})
+	if anthropicBudget.ReservedOutputTokens != 64000 || anthropicBudget.SafeInputLimit != 132000 {
+		t.Fatalf("Anthropic request budget = %+v, want concrete Claude output reservation", anthropicBudget)
+	}
+
 	limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000})
 	if limits.AutoLimit != 900 || limits.TriggerLimit != 900 || limits.EffectiveHardLimit != 950 {
 		t.Fatalf("limits = %+v, want auto=900 trigger=900 hard=950", limits)
@@ -664,14 +780,14 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 
 	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 1000}, Message: strings.Repeat("a", 3600)}
 	triggered, _, used := shouldTriggerContextCompaction(req)
-	if !triggered || used != 900 {
-		t.Fatalf("trigger=%v used=%d, want trigger at 90%%", triggered, used)
+	if !triggered || used != 3600 {
+		t.Fatalf("trigger=%v used=%d, want conservative ASCII estimate", triggered, used)
 	}
 	req.Message = strings.Repeat("a", 3800)
 	req.Agent.CompactionThreshold = 2000
 	triggered, _, used = shouldTriggerContextCompaction(req)
-	if !triggered || used != 950 {
-		t.Fatalf("trigger=%v used=%d, want hard-limit trigger at 95%% even when threshold clamps", triggered, used)
+	if !triggered || used != 3800 {
+		t.Fatalf("trigger=%v used=%d, want conservative hard-limit estimate", triggered, used)
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file", Description: strings.Repeat("tool", 200), Parameters: []byte(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite}}}
@@ -689,7 +805,7 @@ func TestProviderContextCompactionFallback_NativeProvidersReceiveProactiveThresh
 		got = req
 		return llmcontracts.AgentResult{Output: "ok"}, nil
 	})
-	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 3600), Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 1000, CompactionThreshold: 1200}, ChatHistory: []models.Execution{{PromptSent: "old", Output: "done"}}}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "small pending", Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 10000, CompactionThreshold: 12000}, ChatHistory: []models.Execution{{PromptSent: strings.Repeat("old", 3000), Output: "done"}}}
 	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
 		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
 	}
@@ -699,8 +815,8 @@ func TestProviderContextCompactionFallback_NativeProvidersReceiveProactiveThresh
 	if !got.ForceNativeCompaction || !got.Agent.ForceNativeCompaction {
 		t.Fatalf("native full-request trigger should force provider-native compaction, got request=%v agent=%v", got.ForceNativeCompaction, got.Agent.ForceNativeCompaction)
 	}
-	if got.Agent.CompactionThreshold != 900 || got.NativeCompactionTokenThreshold != 900 {
-		t.Fatalf("native threshold = agent:%d request:%d, want 900", got.Agent.CompactionThreshold, got.NativeCompactionTokenThreshold)
+	if got.Agent.CompactionThreshold != 7300 || got.NativeCompactionTokenThreshold != 7300 {
+		t.Fatalf("native threshold = agent:%d request:%d, want safe input limit 7300", got.Agent.CompactionThreshold, got.NativeCompactionTokenThreshold)
 	}
 }
 
@@ -723,7 +839,7 @@ func TestProviderContextCompactionFallback_OpenAICompatibleProactiveSummaryAndPe
 		{ID: "old", PromptSent: strings.Repeat("o", 2400), Output: "old", Status: models.ExecCompleted},
 		{ID: "source", PromptSent: strings.Repeat("n", 2400), Output: "new", Status: models.ExecCompleted},
 	}
-	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 1000}, ProjectID: "project-1", ChatHistory: history}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: strings.Repeat("m", 80), Agent: models.LLMConfig{ID: "model-1", Provider: models.ProviderOpenAICompatible, Model: "compat", ContextWindow: 10000}, ProjectID: "project-1", ChatHistory: history}
 	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
 	if err != nil || res.Output != "ok" {
 		t.Fatalf("call result=%#v err=%v", res, err)
