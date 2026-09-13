@@ -11,10 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/config"
@@ -110,32 +108,14 @@ func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) er
 	if cfg == nil {
 		return nil
 	}
-	return applyUpdateIntegrationTimeoutValues(&cfg.WaitTimeout, &cfg.ValidationTimeout)
+	return update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout)
 }
 
 func applyAppBundleUpdateIntegrationTimeouts(cfg *update.AppBundleUpdateHelperConfig) error {
 	if cfg == nil {
 		return nil
 	}
-	return applyUpdateIntegrationTimeoutValues(&cfg.WaitTimeout, &cfg.ValidationTimeout)
-}
-
-func applyUpdateIntegrationTimeoutValues(waitTimeout, validationTimeout *time.Duration) error {
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
-		milliseconds, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("parse update integration wait timeout: %w", err)
-		}
-		*waitTimeout = time.Duration(milliseconds) * time.Millisecond
-	}
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
-		milliseconds, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("parse update integration validation timeout: %w", err)
-		}
-		*validationTimeout = time.Duration(milliseconds) * time.Millisecond
-	}
-	return nil
+	return update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout)
 }
 
 func ensureDesktopPluginRoot(cfg *config.Config) error {
