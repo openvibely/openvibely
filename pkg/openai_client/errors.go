@@ -15,6 +15,9 @@ var (
 	// ErrNoAuth is returned when authentication is missing or invalid.
 	ErrNoAuth = errors.New("missing or invalid authentication")
 
+	// ErrOAuthReauthenticationRequired is returned when the refresh grant is permanently invalid.
+	ErrOAuthReauthenticationRequired = errors.New("OAuth reauthentication required")
+
 	// ErrTokenExpired is returned when the OAuth token has expired and cannot be refreshed.
 	ErrTokenExpired = errors.New("token expired and refresh failed")
 

@@ -1,6 +1,7 @@
 package anthropicclient
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,9 @@ func TestRefreshTokenFailureRedactsResponseBody(t *testing.T) {
 	_, err := RefreshToken("secret-refresh")
 	if err == nil {
 		t.Fatal("expected refresh failure")
+	}
+	if !errors.Is(err, ErrOAuthReauthenticationRequired) {
+		t.Fatalf("invalid_grant error = %v, want reauthentication classification", err)
 	}
 	message := err.Error()
 	for _, forbidden := range []string{"secret-refresh", "secret-access", "invalid_grant", "refresh_token", "access_token"} {

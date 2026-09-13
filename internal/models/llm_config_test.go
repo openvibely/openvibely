@@ -96,6 +96,17 @@ func TestLLMConfig_HasValidOAuthToken(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "Reauthentication required",
+			config: LLMConfig{
+				Provider:         ProviderAnthropic,
+				AuthMethod:       AuthMethodOAuth,
+				OAuthAccessToken: "valid-token",
+				OAuthExpiresAt:   futureExpiry,
+				OAuthNeedsReauth: true,
+			},
+			expected: false,
+		},
+		{
 			name: "Expired token",
 			config: LLMConfig{
 				Provider:         ProviderAnthropic,

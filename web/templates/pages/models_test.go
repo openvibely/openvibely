@@ -7,9 +7,23 @@ import (
 	"html"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestOAuthStatusTextShowsPermanentReauthenticationState(t *testing.T) {
+	cfg := models.LLMConfig{
+		Provider:         models.ProviderAnthropic,
+		AuthMethod:       models.AuthMethodOAuth,
+		OAuthAccessToken: "present",
+		OAuthExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		OAuthNeedsReauth: true,
+	}
+	if got := oauthStatusText(cfg); got != "Reconnect Required" {
+		t.Fatalf("oauthStatusText = %q, want Reconnect Required", got)
+	}
+}
 
 func TestCardPaginationCompletionIsSilent(t *testing.T) {
 	var buf bytes.Buffer

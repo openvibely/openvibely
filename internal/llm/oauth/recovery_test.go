@@ -121,6 +121,55 @@ func TestManagerEnsureFreshSingleflightsConcurrentRefresh(t *testing.T) {
 	}
 }
 
+func TestManagerEnsureFreshUsesDurableLeaseAcrossManagers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-durable-lease", Provider: models.ProviderOpenAI})
+	firstManager := NewManager(repo)
+	secondManager := NewManager(repo)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	calls := 0
+	var mu sync.Mutex
+	refresh := func(ctx context.Context, cfg models.LLMConfig) (TokenSet, error) {
+		mu.Lock()
+		calls++
+		call := calls
+		mu.Unlock()
+		if call == 1 {
+			close(started)
+			<-release
+		}
+		return TokenSet{AccessToken: "leased-access", RefreshToken: "leased-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := firstManager.EnsureFresh(context.Background(), cfg, time.Hour, refresh)
+		firstDone <- err
+	}()
+	<-started
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := secondManager.EnsureFresh(context.Background(), cfg, time.Hour, refresh)
+		secondDone <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", calls)
+	}
+}
+
 func TestManagerRecoverUnauthorizedSkipsRefreshWhenConfigAlreadyChanged(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
@@ -174,6 +223,35 @@ func TestManagerEnsureFreshDoesNotSkipChangedButStillExpiringToken(t *testing.T)
 	}
 	if fresh.OAuthAccessToken != "fresh-access" {
 		t.Fatalf("access token = %q", fresh.OAuthAccessToken)
+	}
+}
+
+func TestManagerRefreshRejectsStaleConfigRevision(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-stale", Provider: models.ProviderOpenAI})
+	mgr := NewManager(repo)
+
+	_, err := mgr.EnsureFresh(context.Background(), cfg, time.Hour, func(ctx context.Context, refreshing models.LLMConfig) (TokenSet, error) {
+		current, loadErr := repo.GetByID(ctx, refreshing.ID)
+		if loadErr != nil {
+			return TokenSet{}, loadErr
+		}
+		current.Model = "changed-model"
+		if updateErr := repo.Update(ctx, current); updateErr != nil {
+			return TokenSet{}, updateErr
+		}
+		return TokenSet{AccessToken: "stale-access", RefreshToken: "stale-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "changed while OAuth refresh was in progress") {
+		t.Fatalf("EnsureFresh error = %v, want stale revision rejection", err)
+	}
+	loaded, loadErr := repo.GetByID(context.Background(), cfg.ID)
+	if loadErr != nil {
+		t.Fatalf("GetByID: %v", loadErr)
+	}
+	if loaded.OAuthAccessToken == "stale-access" || loaded.OAuthRefreshToken == "stale-refresh" {
+		t.Fatalf("stale refresh overwrote edited config: %#v", loaded)
 	}
 }
 

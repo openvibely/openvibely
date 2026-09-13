@@ -589,28 +589,9 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			applog.Infof("[usage] storing account usage snapshot failed provider=%s: %v", cfg.Provider, err)
 			continue
 		}
-		s.syncOAuthAccountGroup(ctx, cfg, configs, key)
 		snapshots = append(snapshots, *snapshot)
 	}
 	return snapshots, errorsByKey
-}
-
-func (s *UsageAnalyticsService) syncOAuthAccountGroup(ctx context.Context, refreshed models.LLMConfig, configs []models.LLMConfig, groupKey string) {
-	if s == nil || s.llmConfigRepo == nil || strings.TrimSpace(refreshed.ID) == "" {
-		return
-	}
-	latest, err := s.llmConfigRepo.GetByID(ctx, refreshed.ID)
-	if err != nil || latest == nil || strings.TrimSpace(latest.OAuthAccessToken) == "" {
-		return
-	}
-	for _, cfg := range configs {
-		if cfg.ID == refreshed.ID || accountUsageKeyForConfig(cfg) != groupKey {
-			continue
-		}
-		if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, latest.OAuthAccessToken, latest.OAuthRefreshToken, latest.OAuthExpiresAt, latest.OAuthAccountID); err != nil {
-			applog.Infof("[usage] syncing OAuth account tokens failed provider=%s: %v", cfg.Provider, err)
-		}
-	}
 }
 
 func latestAccountSnapshotForConfig(ctx context.Context, usageRepo *repository.UsageRepo, cfg models.LLMConfig, force bool) (*models.AccountUsageSnapshot, bool) {
@@ -1435,8 +1416,11 @@ func (s *UsageAnalyticsService) resolveAccountUsageOAuthAccountID(ctx context.Co
 	}
 	cfg.OAuthAccountID = accountID
 	if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
-		if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, cfg.OAuthExpiresAt, accountID); err != nil {
+		updated, err := s.llmConfigRepo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, accountID)
+		if err != nil {
 			applog.Infof("[usage] persisting OAuth account id failed provider=%s: %v", cfg.Provider, err)
+		} else if !updated {
+			applog.Infof("[usage] skipped stale OAuth account id update provider=%s", cfg.Provider)
 		}
 	}
 	return cfg
@@ -1492,13 +1476,7 @@ func (s *UsageAnalyticsService) anthropicAccountUsageRefreshFunc() oauthRefreshF
 }
 
 func (s *UsageAnalyticsService) defaultAnthropicAccountUsageRefreshFunc() oauthRefreshFunc {
-	return func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
-		auth, err := anthropicclient.RefreshToken(cfg.OAuthRefreshToken)
-		if err != nil {
-			return llmoauth.TokenSet{}, err
-		}
-		return llmoauth.TokenSet{AccessToken: auth.Token, RefreshToken: auth.RefreshToken, ExpiresAt: auth.ExpiresAt}, nil
-	}
+	return oauthRefreshFunc(llmoauth.AnthropicRefreshFunc())
 }
 
 func (s *UsageAnalyticsService) openAIAccountUsageRefreshFunc() oauthRefreshFunc {
@@ -1509,17 +1487,7 @@ func (s *UsageAnalyticsService) openAIAccountUsageRefreshFunc() oauthRefreshFunc
 }
 
 func (s *UsageAnalyticsService) defaultOpenAIAccountUsageRefreshFunc() oauthRefreshFunc {
-	return func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
-		auth, err := openaiclient.RefreshToken(cfg.OAuthRefreshToken)
-		if err != nil {
-			return llmoauth.TokenSet{}, err
-		}
-		accountID := strings.TrimSpace(cfg.OAuthAccountID)
-		if accountID == "" {
-			accountID = openaiclient.ExtractChatGPTAccountID(auth.Token)
-		}
-		return llmoauth.TokenSet{AccessToken: auth.Token, RefreshToken: auth.RefreshToken, ExpiresAt: auth.ExpiresAt, AccountID: accountID}, nil
-	}
+	return oauthRefreshFunc(llmoauth.OpenAIRefreshFunc())
 }
 
 func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
@@ -1529,8 +1497,11 @@ func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cf
 		if profile.AccountID != "" && cfg.OAuthAccountID != profile.AccountID {
 			cfg.OAuthAccountID = profile.AccountID
 			if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
-				if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, cfg.OAuthExpiresAt, cfg.OAuthAccountID); err != nil {
+				updated, err := s.llmConfigRepo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, cfg.OAuthAccountID)
+				if err != nil {
 					applog.Infof("[usage] persisting Anthropic OAuth profile account id failed provider=%s: %v", cfg.Provider, err)
+				} else if !updated {
+					applog.Infof("[usage] skipped stale Anthropic OAuth profile account id update provider=%s", cfg.Provider)
 				}
 			}
 		}

@@ -550,6 +550,7 @@ func clearOAuthState(agent *models.LLMConfig) {
 	agent.OAuthRefreshToken = ""
 	agent.OAuthExpiresAt = 0
 	agent.OAuthAccountID = ""
+	agent.OAuthNeedsReauth = false
 	agent.OAuthClientID = ""
 	agent.OAuthClientSecret = ""
 	agent.OAuthAuthorizeURL = ""
@@ -563,6 +564,7 @@ func clearOAuthCredentials(agent *models.LLMConfig) {
 	agent.OAuthRefreshToken = ""
 	agent.OAuthExpiresAt = 0
 	agent.OAuthAccountID = ""
+	agent.OAuthNeedsReauth = false
 	agent.CustomAuthStateJSON = ""
 }
 

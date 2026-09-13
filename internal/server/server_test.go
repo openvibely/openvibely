@@ -23,7 +23,9 @@ import (
 	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
 type updateStarterProbe struct {
@@ -216,6 +218,80 @@ func TestMethodOverrideSkipsExactAuthenticationProtocolPaths(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("unrelated method override status=%d", rec.Code)
+	}
+}
+
+func TestStartRefreshesExpiringOAuthConfigsInBackground(t *testing.T) {
+	tokenRequested := make(chan struct{}, 1)
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case tokenRequested <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"background-access","refresh_token":"background-refresh","expires_in":7200}`))
+	}))
+	defer tokenServer.Close()
+	oldTokenURL := openaiclient.OpenAIOAuthTokenURL
+	openaiclient.OpenAIOAuthTokenURL = tokenServer.URL
+	defer func() { openaiclient.OpenAIOAuthTokenURL = oldTokenURL }()
+
+	tmpDir := t.TempDir()
+	databasePath := filepath.Join(tmpDir, "oauth-background.db")
+	db, err := database.New(databasePath)
+	if err != nil {
+		t.Fatalf("prepare database: %v", err)
+	}
+	repo := repository.NewLLMConfigRepo(db)
+	cfg := &models.LLMConfig{Name: "Idle OpenAI", Provider: models.ProviderOpenAI, Model: "gpt", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-access", OAuthRefreshToken: "old-refresh", OAuthExpiresAt: time.Now().Add(-time.Minute).UnixMilli()}
+	if err := repo.Create(context.Background(), cfg); err != nil {
+		db.Close()
+		t.Fatalf("create OAuth config: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close prepared database: %v", err)
+	}
+
+	serverCfg := &config.Config{
+		Mode:                     config.ModeServer,
+		Port:                     "0",
+		DatabasePath:             databasePath,
+		ProjectRepoRoot:          filepath.Join(tmpDir, "repos"),
+		AppDataDir:               filepath.Join(tmpDir, "appdata"),
+		Environment:              "production",
+		EnvironmentExplicitlySet: true,
+		UpdateServiceURL:         mockUpdateServiceURL(t),
+	}
+	instance, err := Start(context.Background(), serverCfg)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer instance.Shutdown()
+	select {
+	case <-tokenRequested:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background OAuth refresh did not run after startup")
+	}
+
+	readDB, err := database.New(databasePath)
+	if err != nil {
+		t.Fatalf("open refreshed database: %v", err)
+	}
+	defer readDB.Close()
+	readRepo := repository.NewLLMConfigRepo(readDB)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		loaded, loadErr := readRepo.GetByID(context.Background(), cfg.ID)
+		if loadErr != nil {
+			t.Fatalf("load refreshed config: %v", loadErr)
+		}
+		if loaded.OAuthAccessToken == "background-access" && loaded.OAuthRefreshToken == "background-refresh" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background refresh was not persisted: %#v", loaded)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

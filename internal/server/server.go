@@ -531,6 +531,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	// Services
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	oauthRefreshSvc := service.NewOAuthRefreshService(llmConfigRepo, nil)
 	llmSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	llmSvc.SetExecutionStreamHub(executionStreamHub)
 
@@ -1249,6 +1250,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 
 	boundAddr := ln.Addr().String()
+	oauthRefreshSvc.Start(srvCtx)
 	applog.Infof("starting server on %s", boundAddr)
 
 	// Derive a usable base URL.
@@ -1275,6 +1277,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		close(shutdownOnce)
 		applog.Infof("shutting down...")
 		srvCancel()
+		oauthRefreshSvc.Stop()
 		stopUpdateCoordinatorChecks(updateCoordinator)
 		if hostedPendingStore != nil {
 			hostedPendingStore.Close()

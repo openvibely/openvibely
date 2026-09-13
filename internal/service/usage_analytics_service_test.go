@@ -796,46 +796,61 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 	}
 }
 
-func TestUsageAnalyticsService_SyncsRefreshedOAuthTokensAcrossDuplicateAccountConfigs(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	usageRepo := repository.NewUsageRepo(db)
-	configRepo := repository.NewLLMConfigRepo(db)
-	ctx := context.Background()
+func TestUsageAnalyticsService_RefreshKeepsDuplicateAccountCredentialsIsolated(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
 
-	sonnet := &models.LLMConfig{Name: "Anthropic Sonnet", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "same-access", OAuthRefreshToken: "same-refresh"}
-	if err := configRepo.Create(ctx, sonnet); err != nil {
-		t.Fatalf("create sonnet config: %v", err)
-	}
-	opus := &models.LLMConfig{Name: "Anthropic Opus", Provider: models.ProviderAnthropic, Model: "claude-opus", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "same-access", OAuthRefreshToken: "same-refresh"}
-	if err := configRepo.Create(ctx, opus); err != nil {
-		t.Fatalf("create opus config: %v", err)
-	}
+			first := &models.LLMConfig{Name: "First", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-one", OAuthRefreshToken: "refresh-one", OAuthAccountID: "shared-account"}
+			if err := configRepo.Create(ctx, first); err != nil {
+				t.Fatalf("create first config: %v", err)
+			}
+			second := &models.LLMConfig{Name: "Second", Provider: provider, Model: "model-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-two", OAuthRefreshToken: "refresh-two", OAuthAccountID: "shared-account"}
+			if err := configRepo.Create(ctx, second); err != nil {
+				t.Fatalf("create second config: %v", err)
+			}
 
-	svc := NewUsageAnalyticsService(usageRepo, configRepo)
-	svc.SetOAuthRefreshers(func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
-		return llmoauth.TokenSet{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
-	}, nil)
-	svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
-		fresh, err := svc.ensureFreshAccountUsageOAuth(ctx, cfg, svc.anthropicAccountUsageRefreshFunc())
-		if err != nil {
-			return nil, err
-		}
-		if fresh.OAuthAccessToken != "fresh-access" {
-			t.Fatalf("fetch used stale access token %q", fresh.OAuthAccessToken)
-		}
-		pct := 1.0
-		return &models.AccountUsageSnapshot{Provider: string(fresh.Provider), AgentConfigID: fresh.ID, SecondaryLabel: "weekly limit", SecondaryUsedPercent: &pct, RawJSON: `{"seven_day":{"utilization":1}}`}, nil
-	})
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			refresh := func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
+				return llmoauth.TokenSet{AccessToken: "fresh-access", RefreshToken: "fresh-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+			}
+			if provider == models.ProviderAnthropic {
+				svc.SetOAuthRefreshers(refresh, nil)
+			} else {
+				svc.SetOAuthRefreshers(nil, refresh)
+			}
+			svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				var refreshFunc oauthRefreshFunc
+				if provider == models.ProviderAnthropic {
+					refreshFunc = svc.anthropicAccountUsageRefreshFunc()
+				} else {
+					refreshFunc = svc.openAIAccountUsageRefreshFunc()
+				}
+				fresh, err := svc.ensureFreshAccountUsageOAuth(ctx, cfg, refreshFunc)
+				if err != nil {
+					return nil, err
+				}
+				if fresh.OAuthAccessToken != "fresh-access" {
+					t.Fatalf("fetch used stale access token %q", fresh.OAuthAccessToken)
+				}
+				pct := 1.0
+				return &models.AccountUsageSnapshot{Provider: string(fresh.Provider), AccountID: fresh.OAuthAccountID, AgentConfigID: fresh.ID, SecondaryLabel: "weekly limit", SecondaryUsedPercent: &pct}, nil
+			})
 
-	if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true}); err != nil {
-		t.Fatalf("BuildAnalyticsUsage: %v", err)
-	}
-	loaded, err := configRepo.GetByID(ctx, opus.ID)
-	if err != nil {
-		t.Fatalf("load duplicate config: %v", err)
-	}
-	if loaded.OAuthAccessToken != "fresh-access" || loaded.OAuthRefreshToken != "fresh-refresh" {
-		t.Fatalf("duplicate config tokens were not synced: access=%q refresh=%q", loaded.OAuthAccessToken, loaded.OAuthRefreshToken)
+			if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true}); err != nil {
+				t.Fatalf("BuildAnalyticsUsage: %v", err)
+			}
+			loaded, err := configRepo.GetByID(ctx, second.ID)
+			if err != nil {
+				t.Fatalf("load duplicate config: %v", err)
+			}
+			if loaded.OAuthAccessToken != "access-two" || loaded.OAuthRefreshToken != "refresh-two" {
+				t.Fatalf("duplicate account credentials overwritten: access=%q refresh=%q", loaded.OAuthAccessToken, loaded.OAuthRefreshToken)
+			}
+		})
 	}
 }
 

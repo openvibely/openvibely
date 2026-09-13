@@ -131,6 +131,9 @@ func TestRefreshTokenFailureRedactsResponseBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected refresh failure")
 	}
+	if !errors.Is(err, ErrOAuthReauthenticationRequired) {
+		t.Fatalf("invalid_grant error = %v, want reauthentication classification", err)
+	}
 	message := err.Error()
 	for _, forbidden := range []string{"secret-refresh", "secret-access", "invalid_grant", "refresh_token", "access_token"} {
 		if strings.Contains(message, forbidden) {
