@@ -54,7 +54,7 @@ func (h *Handler) Analytics(c echo.Context) error {
 
 // GetAnalyticsUsage returns detailed LLM usage analytics.
 // @Summary Get LLM usage analytics
-// @Description Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, and account limit snapshots.
+// @Description Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, account limit snapshots, and bounded supporting usage events for an exact chart selection.
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
@@ -63,6 +63,9 @@ func (h *Handler) Analytics(c echo.Context) error {
 // @Param group_by query string false "Usage rate grouping: hour, day, week, month" default(day)
 // @Param date_from query string false "Optional start datetime filter"
 // @Param date_to query string false "Optional end datetime filter"
+// @Param usage_period query string false "Exact grouped period for supporting usage events"
+// @Param usage_provider query string false "Exact provider for supporting usage events"
+// @Param usage_model_name query string false "Exact model for supporting usage events"
 // @Success 200 {object} models.AnalyticsUsageViewModel "Usage analytics"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/usage [get]
@@ -81,7 +84,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 
 // GetSkillAnalytics returns the Skill Curator analytics dashboard data.
 // @Summary Get skill analytics
-// @Description Returns skill usage over time, top skills, selection follow-through, agent heatmap, and underused skill metrics.
+// @Description Returns skill usage over time, top skills, selection follow-through, agent heatmap, underused skill metrics, and bounded supporting skill events for an exact chart selection.
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
@@ -91,6 +94,10 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 // @Param surface query string false "Surface filter"
 // @Param skill_scope query string false "Skill scope filter"
 // @Param event_type query string false "Event type filter (selected, loaded, viewed, created, edited)"
+// @Param skill_period query string false "Exact grouped period for supporting skill events"
+// @Param skill_event query string false "Supporting event type (used, selected, loaded, viewed, created, edited)"
+// @Param skill_agent query string false "Exact Agent ID or __unassigned__ for supporting skill events"
+// @Param skill_handle query string false "Exact skill handle for supporting skill events"
 // @Success 200 {object} models.SkillAnalyticsDashboard "Skill analytics"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/skills [get]
@@ -114,14 +121,19 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 		agentID = strings.TrimSpace(c.QueryParam("agent"))
 	}
 	filter := repository.SkillAnalyticsFilter{
-		ProjectID:  strings.TrimSpace(c.QueryParam("project_id")),
-		AgentID:    agentID,
-		WorkflowID: strings.TrimSpace(c.QueryParam("workflow")),
-		Surface:    strings.TrimSpace(c.QueryParam("surface")),
-		SkillScope: strings.TrimSpace(c.QueryParam("skill_scope")),
-		EventType:  strings.TrimSpace(c.QueryParam("event_type")),
-		Limit:      10,
-		GroupBy:    strings.TrimSpace(c.QueryParam("group_by")),
+		ProjectID:           strings.TrimSpace(c.QueryParam("project_id")),
+		AgentID:             agentID,
+		WorkflowID:          strings.TrimSpace(c.QueryParam("workflow")),
+		Surface:             strings.TrimSpace(c.QueryParam("surface")),
+		SkillScope:          strings.TrimSpace(c.QueryParam("skill_scope")),
+		EventType:           strings.TrimSpace(c.QueryParam("event_type")),
+		Limit:               10,
+		GroupBy:             strings.TrimSpace(c.QueryParam("group_by")),
+		EvidencePeriod:      strings.TrimSpace(c.QueryParam("skill_period")),
+		EvidenceEvent:       strings.TrimSpace(c.QueryParam("skill_event")),
+		EvidenceAgentID:     strings.TrimSpace(c.QueryParam("skill_agent")),
+		EvidenceSkillHandle: strings.TrimSpace(c.QueryParam("skill_handle")),
+		EvidenceLimit:       50,
 	}
 	if filter.GroupBy == "" {
 		filter.GroupBy = "day"
@@ -205,12 +217,15 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 		DateTo:     c.QueryParam("date_to"),
 		Refresh:    c.QueryParam("refresh") == "true" || c.QueryParam("refresh") == "1",
 	})
+	filter.EvidencePeriod = strings.TrimSpace(c.QueryParam("usage_period"))
+	filter.EvidenceProvider = strings.TrimSpace(c.QueryParam("usage_provider"))
+	filter.EvidenceModel = strings.TrimSpace(c.QueryParam("usage_model_name"))
+	filter.EvidenceLimit = 50
 	return filter
 }
 
 // GetAnalyticsDashboard returns project-scoped task outcome, Agent, workflow,
-// evidence, and comparison metrics for the Analytics evaluation views.
-// @Summary Get outcome-oriented Analytics dashboard data
+// evidence, and comparison metrics for the Analytics evaluation views.// @Summary Get outcome-oriented Analytics dashboard data
 // @Description Returns task-level outcome KPIs, definitions, comparisons, evidence, reusable Agent performance, observed skill outcomes, and workflow performance for one project.
 // @Tags analytics
 // @Produce json

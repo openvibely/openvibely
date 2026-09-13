@@ -193,7 +193,6 @@
                 "tags": [
                     "analytics"
                 ],
-                "summary": "Get outcome-oriented Analytics dashboard data",
                 "parameters": [
                     {
                         "type": "string",
@@ -422,7 +421,7 @@
         },
         "/api/analytics/skills": {
             "get": {
-                "description": "Returns skill usage over time, top skills, selection follow-through, agent heatmap, and underused skill metrics.",
+                "description": "Returns skill usage over time, top skills, selection follow-through, agent heatmap, underused skill metrics, and bounded supporting skill events for an exact chart selection.",
                 "produces": [
                     "application/json"
                 ],
@@ -473,6 +472,30 @@
                         "type": "string",
                         "description": "Event type filter (selected, loaded, viewed, created, edited)",
                         "name": "event_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact grouped period for supporting skill events",
+                        "name": "skill_period",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Supporting event type (used, selected, loaded, viewed, created, edited)",
+                        "name": "skill_event",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact Agent ID or __unassigned__ for supporting skill events",
+                        "name": "skill_agent",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact skill handle for supporting skill events",
+                        "name": "skill_handle",
                         "in": "query"
                     }
                 ],
@@ -550,7 +573,7 @@
         },
         "/api/analytics/usage": {
             "get": {
-                "description": "Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, and account limit snapshots.",
+                "description": "Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, account limit snapshots, and bounded supporting usage events for an exact chart selection.",
                 "produces": [
                     "application/json"
                 ],
@@ -595,6 +618,24 @@
                         "type": "string",
                         "description": "Optional end datetime filter",
                         "name": "date_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact grouped period for supporting usage events",
+                        "name": "usage_period",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact provider for supporting usage events",
+                        "name": "usage_provider",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact model for supporting usage events",
+                        "name": "usage_model_name",
                         "in": "query"
                     }
                 ],
@@ -2190,6 +2231,15 @@
                         "type": "string"
                     }
                 },
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.UsageEvidenceRow"
+                    }
+                },
+                "evidence_total": {
+                    "type": "integer"
+                },
                 "last_updated_at": {
                     "type": "string"
                 },
@@ -2727,6 +2777,15 @@
                 "agent_usage": {
                     "$ref": "#/definitions/models.SkillAgentUsageHeatmap"
                 },
+                "evidence": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillAnalyticsEvidenceRow"
+                    }
+                },
+                "evidence_total": {
+                    "type": "integer"
+                },
                 "follow_through": {
                     "type": "array",
                     "items": {
@@ -2750,6 +2809,44 @@
                     "items": {
                         "$ref": "#/definitions/models.SkillUsagePeriodMetric"
                     }
+                }
+            }
+        },
+        "models.SkillAnalyticsEvidenceRow": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "event_type": {
+                    "type": "string"
+                },
+                "execution_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "skill_handle": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "surface": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
                 }
             }
         },
@@ -3105,6 +3202,44 @@
                     "type": "string"
                 },
                 "viewed_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.UsageEvidenceRow": {
+            "type": "object",
+            "properties": {
+                "cost_usd": {
+                    "type": "number"
+                },
+                "execution_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "occurred_at": {
+                    "type": "string"
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "total_tokens": {
                     "type": "integer"
                 }
             }

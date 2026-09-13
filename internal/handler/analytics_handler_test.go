@@ -283,6 +283,17 @@ func TestParseUsageAndSkillFiltersIncludeAnalyticsDimensions(t *testing.T) {
 	}
 }
 
+func TestParseAnalyticsSupportingEvidenceFilters(t *testing.T) {
+	usage := parseUsageFilter(echoContext("/api/analytics/usage?usage_period=2026-01-10&usage_provider=openai&usage_model_name=gpt-a"))
+	if usage.EvidencePeriod != "2026-01-10" || usage.EvidenceProvider != "openai" || usage.EvidenceModel != "gpt-a" || usage.EvidenceLimit != 50 {
+		t.Fatalf("usage evidence filters = %+v", usage)
+	}
+	skill := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?skill_period=2026-01-10&skill_event=created&skill_agent=agent-1&skill_handle=project%3Areview"))
+	if skill.EvidencePeriod != "2026-01-10" || skill.EvidenceEvent != "created" || skill.EvidenceAgentID != "agent-1" || skill.EvidenceSkillHandle != "project:review" || skill.EvidenceLimit != 50 {
+		t.Fatalf("skill evidence filters = %+v", skill)
+	}
+}
+
 func TestParseUsageFilter_Defaults(t *testing.T) {
 	filter := parseUsageFilter(echoContext("/api/analytics/usage"))
 	if filter.GroupBy != "day" {

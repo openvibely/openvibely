@@ -20,15 +20,19 @@ func NewUsageRepo(db *sql.DB) *UsageRepo {
 }
 
 type UsageFilter struct {
-	ProjectID  string
-	Provider   string
-	AccountID  string
-	AgentID    string
-	WorkflowID string
-	DateFrom   time.Time
-	DateTo     time.Time
-	GroupBy    string
-	Refresh    bool
+	ProjectID        string
+	Provider         string
+	AccountID        string
+	AgentID          string
+	WorkflowID       string
+	DateFrom         time.Time
+	DateTo           time.Time
+	GroupBy          string
+	Refresh          bool
+	EvidencePeriod   string
+	EvidenceProvider string
+	EvidenceModel    string
+	EvidenceLimit    int
 }
 
 func (r *UsageRepo) RecordUsageEvent(ctx context.Context, event *models.LLMUsageEvent) error {
@@ -703,6 +707,55 @@ func sqliteWeekMonday(t time.Time) int {
 		return 0
 	}
 	return (yday-firstMonday)/7 + 1
+}
+
+func (r *UsageRepo) GetEvidence(ctx context.Context, filter UsageFilter) ([]models.UsageEvidenceRow, int, error) {
+	if filter.EvidencePeriod == "" && filter.EvidenceProvider == "" && filter.EvidenceModel == "" {
+		return []models.UsageEvidenceRow{}, 0, nil
+	}
+	where, args := usageWhere(filter)
+	if filter.EvidencePeriod != "" {
+		where += " AND " + usagePeriodExpression(filter.GroupBy) + " = ?"
+		args = append(args, filter.EvidencePeriod)
+	}
+	if filter.EvidenceProvider != "" {
+		where += " AND provider = ?"
+		args = append(args, filter.EvidenceProvider)
+	}
+	if filter.EvidenceModel != "" {
+		where += " AND model = ?"
+		args = append(args, filter.EvidenceModel)
+	}
+	var total int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM llm_usage_events "+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting usage Analytics evidence: %w", err)
+	}
+	limit := filter.EvidenceLimit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id,occurred_at,COALESCE(project_id,''),COALESCE(task_id,''),COALESCE(execution_id,''),provider,model,operation,status,total_tokens,cost_usd
+		FROM llm_usage_events `+where+` ORDER BY occurred_at DESC,id DESC LIMIT ?`, append(args, limit)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("getting usage Analytics evidence: %w", err)
+	}
+	defer rows.Close()
+	out := []models.UsageEvidenceRow{}
+	for rows.Next() {
+		var row models.UsageEvidenceRow
+		var occurredAt string
+		var cost sql.NullFloat64
+		if err := rows.Scan(&row.ID, &occurredAt, &row.ProjectID, &row.TaskID, &row.ExecutionID, &row.Provider, &row.Model, &row.Operation, &row.Status, &row.TotalTokens, &cost); err != nil {
+			return nil, 0, err
+		}
+		row.OccurredAt = parseSQLiteTime(occurredAt)
+		if cost.Valid {
+			value := cost.Float64
+			row.CostUSD = &value
+		}
+		out = append(out, row)
+	}
+	return out, total, rows.Err()
 }
 
 func usageWhere(filter UsageFilter) (string, []any) {
