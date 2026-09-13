@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2682,6 +2683,79 @@ func TestMigration187CreatesSeparateOAuthConnectionsForExistingModels(t *testing
 	}
 	if snapshotConnectionID != "openai-one" {
 		t.Fatalf("migrated snapshot connection = %q, want %q", snapshotConnectionID, "openai-one")
+	}
+}
+
+func TestMigration187RollbackRestoresSharedOAuthConnectionState(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "shared-oauth-connections-rollback.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 186); err != nil {
+		t.Fatalf("migrate to 186: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO agent_configs (id, name, provider, model, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_needs_reauth, oauth_config_revision)
+		VALUES
+			('rollback-one', 'Rollback One', 'openai', 'gpt-one', 'oauth', 'old-one', 'old-refresh-one', 111, 'old-account-one', 0, 2),
+			('rollback-two', 'Rollback Two', 'openai', 'gpt-two', 'oauth', 'old-two', 'old-refresh-two', 222, 'old-account-two', 0, 3),
+			('rollback-anthropic', 'Rollback Anthropic', 'anthropic', 'claude', 'oauth', 'old-three', 'old-refresh-three', 333, 'old-account-three', 0, 4);`); err != nil {
+		t.Fatalf("seed pre-187 OAuth configs: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 187); err != nil {
+		t.Fatalf("migrate to 187: %v", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE agent_configs SET oauth_connection_id = 'rollback-one' WHERE id = 'rollback-two';
+		UPDATE oauth_connections
+		SET oauth_access_token = 'shared-access', oauth_refresh_token = 'shared-refresh', oauth_expires_at = 999,
+			oauth_account_id = 'shared-account', oauth_needs_reauth = 1, oauth_revision = 12
+		WHERE id = 'rollback-one';
+		UPDATE oauth_connections
+		SET oauth_access_token = 'anthropic-access', oauth_refresh_token = 'anthropic-refresh', oauth_expires_at = 777,
+			oauth_account_id = 'anthropic-account', oauth_needs_reauth = 0, oauth_revision = 8
+		WHERE id = 'rollback-anthropic';`); err != nil {
+		t.Fatalf("prepare shared connection state: %v", err)
+	}
+	if err := goose.DownTo(db, ".", 186); err != nil {
+		t.Fatalf("roll back migration 187: %v", err)
+	}
+
+	rows, err := db.Query(`
+		SELECT id, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_needs_reauth, oauth_config_revision
+		FROM agent_configs WHERE id IN ('rollback-one', 'rollback-two', 'rollback-anthropic') ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query rolled-back OAuth state: %v", err)
+	}
+	defer rows.Close()
+	seen := map[string]string{}
+	for rows.Next() {
+		var id, access, refresh, account string
+		var expires, revision int64
+		var needsReauth bool
+		if err := rows.Scan(&id, &access, &refresh, &expires, &account, &needsReauth, &revision); err != nil {
+			t.Fatalf("scan rolled-back OAuth state: %v", err)
+		}
+		seen[id] = fmt.Sprintf("%s|%s|%d|%s|%t|%d", access, refresh, expires, account, needsReauth, revision)
+	}
+	shared := "shared-access|shared-refresh|999|shared-account|true|12"
+	if seen["rollback-one"] != shared || seen["rollback-two"] != shared {
+		t.Fatalf("shared OpenAI state not restored to both models: %+v", seen)
+	}
+	if seen["rollback-anthropic"] != "anthropic-access|anthropic-refresh|777|anthropic-account|false|8" {
+		t.Fatalf("Anthropic state not restored: %+v", seen)
+	}
+	if testColumnExists(t, db, "agent_configs", "oauth_connection_id") {
+		t.Fatal("agent_configs.oauth_connection_id remained after rollback")
+	}
+	var connectionTableCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'oauth_connections'`).Scan(&connectionTableCount); err != nil {
+		t.Fatalf("check rolled-back OAuth connection table: %v", err)
+	}
+	if connectionTableCount != 0 {
+		t.Fatal("oauth_connections remained after rollback")
 	}
 }
 

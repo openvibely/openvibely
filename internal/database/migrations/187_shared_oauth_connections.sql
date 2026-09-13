@@ -46,6 +46,20 @@ SET oauth_connection_id = (
 WHERE oauth_config_revision >= 0;
 
 -- +goose Down
+-- Rehydrate the legacy per-model ownership before removing shared connections.
+-- A shared connection is intentionally duplicated onto every linked model so a
+-- rollback remains usable on schema version 186.
+UPDATE agent_configs
+SET oauth_access_token = COALESCE((SELECT c.oauth_access_token FROM oauth_connections c WHERE c.id = agent_configs.oauth_connection_id AND c.provider = agent_configs.provider), ''),
+    oauth_refresh_token = COALESCE((SELECT c.oauth_refresh_token FROM oauth_connections c WHERE c.id = agent_configs.oauth_connection_id AND c.provider = agent_configs.provider), ''),
+    oauth_expires_at = COALESCE((SELECT c.oauth_expires_at FROM oauth_connections c WHERE c.id = agent_configs.oauth_connection_id AND c.provider = agent_configs.provider), 0),
+    oauth_account_id = COALESCE((SELECT c.oauth_account_id FROM oauth_connections c WHERE c.id = agent_configs.oauth_connection_id AND c.provider = agent_configs.provider), ''),
+    oauth_needs_reauth = COALESCE((SELECT c.oauth_needs_reauth FROM oauth_connections c WHERE c.id = agent_configs.oauth_connection_id AND c.provider = agent_configs.provider), 0),
+    oauth_config_revision = COALESCE((SELECT c.oauth_revision FROM oauth_connections c WHERE c.id = agent_configs.oauth_connection_id AND c.provider = agent_configs.provider), oauth_config_revision)
+WHERE auth_method = 'oauth'
+  AND provider IN ('openai', 'anthropic')
+  AND oauth_connection_id IS NOT NULL;
+
 DROP INDEX idx_account_usage_snapshots_connection_revision;
 ALTER TABLE account_usage_snapshots DROP COLUMN oauth_connection_id;
 DROP INDEX idx_agent_configs_oauth_connection;

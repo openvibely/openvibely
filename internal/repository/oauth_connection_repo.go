@@ -3,10 +3,17 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+)
+
+var (
+	ErrOAuthConnectionNotFound    = errors.New("OAuth connection not found")
+	ErrOAuthConnectionInvalidMove = errors.New("invalid OAuth connection model move")
+	ErrOAuthConnectionLinked      = errors.New("OAuth connection has linked models")
 )
 
 func scanOAuthConnection(row interface{ Scan(...any) error }, connection *models.OAuthConnection) error {
@@ -21,6 +28,12 @@ func scanOAuthConnection(row interface{ Scan(...any) error }, connection *models
 const oauthConnectionColumns = `c.id, c.provider, c.name,
 	c.oauth_access_token, c.oauth_refresh_token, c.oauth_expires_at,
 	c.oauth_account_id, c.oauth_needs_reauth, c.oauth_revision,
+	c.created_at, c.updated_at,
+	(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
+
+const oauthConnectionSummaryColumns = `c.id, c.provider, c.name,
+	CASE WHEN c.oauth_access_token != '' THEN 'present' ELSE '' END, '', c.oauth_expires_at,
+	'', c.oauth_needs_reauth, 0,
 	c.created_at, c.updated_at,
 	(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
 
@@ -59,7 +72,7 @@ func (r *LLMConfigRepo) GetOAuthConnectionByID(ctx context.Context, id string) (
 }
 
 func (r *LLMConfigRepo) ListOAuthConnections(ctx context.Context, provider models.LLMProvider) ([]models.OAuthConnection, error) {
-	query := `SELECT ` + oauthConnectionColumns + ` FROM oauth_connections c`
+	query := `SELECT ` + oauthConnectionSummaryColumns + ` FROM oauth_connections c`
 	var args []any
 	if provider != "" {
 		query += ` WHERE c.provider = ?`
@@ -232,6 +245,97 @@ func (r *LLMConfigRepo) DisconnectLinkedOAuthConnection(ctx context.Context, mod
 	return changed == 1, err
 }
 
+func (r *LLMConfigRepo) RenameOAuthConnection(ctx context.Context, connectionID, name string) error {
+	connectionID = strings.TrimSpace(connectionID)
+	name = strings.TrimSpace(name)
+	if connectionID == "" {
+		return fmt.Errorf("%w: connection is required", ErrOAuthConnectionNotFound)
+	}
+	if name == "" {
+		return fmt.Errorf("OAuth connection name is required")
+	}
+	if len(name) > 200 {
+		return fmt.Errorf("OAuth connection name must be at most 200 characters")
+	}
+	result, err := execBoundSQLite(ctx, r.db,
+		`UPDATE oauth_connections SET name = ?, updated_at = datetime('now') WHERE id = ?`, name, connectionID)
+	if err != nil {
+		return fmt.Errorf("renaming OAuth connection: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking OAuth connection rename: %w", err)
+	}
+	if changed != 1 {
+		return ErrOAuthConnectionNotFound
+	}
+	return nil
+}
+
+func (r *LLMConfigRepo) MoveModelsToOAuthConnection(ctx context.Context, modelIDs []string, connectionID string) error {
+	connectionID = strings.TrimSpace(connectionID)
+	if connectionID == "" {
+		return fmt.Errorf("%w: connection is required", ErrOAuthConnectionInvalidMove)
+	}
+	seen := make(map[string]struct{}, len(modelIDs))
+	ids := make([]string, 0, len(modelIDs))
+	for _, id := range modelIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return fmt.Errorf("%w: model identifiers must not be empty", ErrOAuthConnectionInvalidMove)
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("%w: at least one model is required", ErrOAuthConnectionInvalidMove)
+	}
+
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
+	if err != nil {
+		return fmt.Errorf("begin move OAuth models tx: %w", err)
+	}
+	defer cleanup()
+	var provider models.LLMProvider
+	if err := tx.QueryRowContext(ctx, `SELECT provider FROM oauth_connections WHERE id = ?`, connectionID).Scan(&provider); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrOAuthConnectionNotFound
+		}
+		return fmt.Errorf("loading target OAuth connection: %w", err)
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	var compatible int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_configs
+		WHERE id IN (`+placeholders+`) AND provider = ? AND auth_method = ?`,
+		append(args, provider, models.AuthMethodOAuth)...,
+	).Scan(&compatible); err != nil {
+		return fmt.Errorf("validating OAuth models for move: %w", err)
+	}
+	if compatible != len(ids) {
+		return fmt.Errorf("%w: all selected models must exist and use %s OAuth", ErrOAuthConnectionInvalidMove, provider)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_configs
+		SET oauth_connection_id = ?, oauth_access_token = '', oauth_refresh_token = '',
+			oauth_expires_at = 0, oauth_account_id = '', oauth_needs_reauth = 0,
+			updated_at = datetime('now')
+		WHERE id IN (`+placeholders+`)`, append([]any{connectionID}, args...)...); err != nil {
+		return fmt.Errorf("moving models to OAuth connection: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit move OAuth models tx: %w", err)
+	}
+	return nil
+}
+
 func (r *LLMConfigRepo) DeleteOAuthConnection(ctx context.Context, connectionID string) error {
 	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
@@ -243,7 +347,7 @@ func (r *LLMConfigRepo) DeleteOAuthConnection(ctx context.Context, connectionID 
 		return fmt.Errorf("counting linked OAuth models: %w", err)
 	}
 	if linked != 0 {
-		return fmt.Errorf("OAuth connection is linked to %d model(s)", linked)
+		return fmt.Errorf("%w: %d model(s)", ErrOAuthConnectionLinked, linked)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_connections WHERE id = ?`, connectionID); err != nil {
 		return fmt.Errorf("deleting OAuth connection: %w", err)
