@@ -15,6 +15,127 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestDisconnectModelOAuthConnectionAffectsAllLinkedModels(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	first := &models.LLMConfig{Name: "Shared OpenAI one", Provider: models.ProviderOpenAI, Model: "gpt-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+	second := &models.LLMConfig{Name: "Shared OpenAI two", Provider: models.ProviderOpenAI, Model: "gpt-two", AuthMethod: models.AuthMethodOAuth}
+	for _, cfg := range []*models.LLMConfig{first, second} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	if err := repo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+		t.Fatalf("link OAuth connection: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/models/"+first.ID+"/oauth/disconnect", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("disconnect status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	for _, cfg := range []*models.LLMConfig{first, second} {
+		loaded, err := repo.GetByID(ctx, cfg.ID)
+		if err != nil {
+			t.Fatalf("load %s: %v", cfg.Name, err)
+		}
+		if loaded.OAuthAccessToken != "" || loaded.OAuthRefreshToken != "" || !loaded.OAuthNeedsReauth || loaded.OAuthConnectionID != first.OAuthConnectionID {
+			t.Fatalf("linked model did not inherit disconnected account state: %#v", loaded)
+		}
+	}
+}
+
+func TestOAuthConnectionManagementRoutesRenameMoveAndDelete(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	target := &models.LLMConfig{Name: "Managed OpenAI target", Provider: models.ProviderOpenAI, Model: "gpt-target", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "target-access", OAuthRefreshToken: "target-refresh"}
+	moved := &models.LLMConfig{Name: "Managed OpenAI moved", Provider: models.ProviderOpenAI, Model: "gpt-moved", AuthMethod: models.AuthMethodOAuth}
+	for _, cfg := range []*models.LLMConfig{target, moved} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	abandonedConnectionID := moved.OAuthConnectionID
+
+	renameForm := url.Values{"name": {"Team OpenAI"}}
+	renameReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+target.OAuthConnectionID+"/rename", strings.NewReader(renameForm.Encode()))
+	renameReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	renameRec := httptest.NewRecorder()
+	e.ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusSeeOther {
+		t.Fatalf("rename status = %d, body=%s", renameRec.Code, renameRec.Body.String())
+	}
+
+	moveForm := url.Values{"model_ids": {moved.ID}}
+	moveReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+target.OAuthConnectionID+"/models", strings.NewReader(moveForm.Encode()))
+	moveReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	moveRec := httptest.NewRecorder()
+	e.ServeHTTP(moveRec, moveReq)
+	if moveRec.Code != http.StatusSeeOther {
+		t.Fatalf("move status = %d, body=%s", moveRec.Code, moveRec.Body.String())
+	}
+	loaded, err := repo.GetByID(ctx, moved.ID)
+	if err != nil {
+		t.Fatalf("load moved model: %v", err)
+	}
+	if loaded.OAuthConnectionID != target.OAuthConnectionID || loaded.OAuthConnectionName != "Team OpenAI" {
+		t.Fatalf("model did not move to renamed connection: %#v", loaded)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+abandonedConnectionID+"/delete", nil)
+	deleteRec := httptest.NewRecorder()
+	e.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusSeeOther {
+		t.Fatalf("delete unreferenced status = %d, body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	connection, err := repo.GetOAuthConnectionByID(ctx, abandonedConnectionID)
+	if err != nil || connection != nil {
+		t.Fatalf("unreferenced connection remained: %#v, %v", connection, err)
+	}
+
+	linkedDeleteReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+target.OAuthConnectionID+"/delete", nil)
+	linkedDeleteRec := httptest.NewRecorder()
+	e.ServeHTTP(linkedDeleteRec, linkedDeleteReq)
+	if linkedDeleteRec.Code != http.StatusConflict {
+		t.Fatalf("delete linked status = %d, body=%s", linkedDeleteRec.Code, linkedDeleteRec.Body.String())
+	}
+}
+
+func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{Name: "Shared Anthropic model", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatalf("create OAuth model: %v", err)
+	}
+	sibling := &models.LLMConfig{Name: "Shared Anthropic sibling", Provider: models.ProviderAnthropic, Model: "claude-opus", AuthMethod: models.AuthMethodOAuth}
+	if err := repo.Create(ctx, sibling); err != nil {
+		t.Fatalf("create sibling OAuth model: %v", err)
+	}
+	if err := repo.LinkOAuthConnection(ctx, sibling.ID, cfg.OAuthConnectionID); err != nil {
+		t.Fatalf("link sibling OAuth model: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/models", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("models status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "OAuth Account") || !strings.Contains(body, "OAuth Accounts") || !strings.Contains(body, cfg.Name) || !strings.Contains(body, cfg.OAuthConnectionID) || !strings.Contains(body, "Move selected models") || !strings.Contains(body, "/rename") {
+		t.Fatalf("shared OAuth account selector/management controls missing: %s", body)
+	}
+	wantDisconnectConfirmation := `hx-confirm="Disconnect this OAuth account? Linked models: Shared Anthropic model (claude-sonnet), Shared Anthropic sibling (claude-opus). All will require reconnecting."`
+	if !strings.Contains(body, wantDisconnectConfirmation) {
+		t.Fatalf("disconnect confirmation does not identify every affected model: %s", body)
+	}
+	if strings.Contains(body, "secret-access") || strings.Contains(body, "secret-refresh") {
+		t.Fatal("Models page exposed OAuth credentials")
+	}
+}
+
 func TestResolveProviderAndAuth(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -1927,7 +2048,7 @@ func assertCompactModelsRefreshQuery(t *testing.T, statements []string) {
 	var refreshStatements []string
 	for _, statement := range statements {
 		normalized := strings.Join(strings.Fields(statement), " ")
-		if strings.Contains(normalized, "FROM agent_configs WHERE 1=1 ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC") {
+		if strings.Contains(normalized, "FROM agent_configs AS configs WHERE 1=1 ORDER BY name COLLATE NOCASE ASC, name ASC, id ASC") {
 			refreshStatements = append(refreshStatements, normalized)
 		}
 	}
@@ -1944,6 +2065,36 @@ func assertCompactModelsRefreshQuery(t *testing.T, statements []string) {
 		if !strings.Contains(refresh, required) {
 			t.Fatalf("model refresh query does not look like compact card projection; missing %q in %s", required, refresh)
 		}
+	}
+}
+
+func TestNormalizeBrowserModelFormNewOAuthConnectionDoesNotCopyExistingCredentials(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	form := url.Values{
+		"name":                {"Fresh Anthropic account"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"subscription"},
+		"auth_method":         {"oauth"},
+		"oauth_connection_id": {"new"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/models/id", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	agent := &models.LLMConfig{
+		ID:                  "id",
+		OAuthConnectionID:   "existing-connection",
+		OAuthAccessToken:    "existing-access",
+		OAuthRefreshToken:   "existing-refresh",
+		OAuthExpiresAt:      time.Now().Add(time.Hour).UnixMilli(),
+		OAuthAccountID:      "existing-account",
+		OAuthNeedsReauth:    true,
+		OAuthConfigRevision: 7,
+	}
+	if err := h.normalizeBrowserModelForm(context.Background(), e.NewContext(req, httptest.NewRecorder()), agent, modelFormOptions{mode: modelFormUpdate}); err != nil {
+		t.Fatal(err)
+	}
+	if agent.OAuthConnectionID != "" || agent.OAuthAccessToken != "" || agent.OAuthRefreshToken != "" || agent.OAuthExpiresAt != 0 || agent.OAuthAccountID != "" || agent.OAuthNeedsReauth || agent.OAuthConfigRevision != 0 {
+		t.Fatalf("new OAuth connection retained existing account state: %#v", agent)
 	}
 }
 
@@ -2032,6 +2183,65 @@ func TestCreateModel_SubscriptionLegacyCLINormalizesOAuth(t *testing.T) {
 	}
 	if found.AuthMethod != models.AuthMethodOAuth {
 		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
+	}
+}
+
+func TestCreateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			_, e, repo := setupTestHandler(t)
+			ctx := context.Background()
+			existing := &models.LLMConfig{
+				Name:              string(provider) + " existing account",
+				Provider:          provider,
+				Model:             "existing-model",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "existing-access",
+				OAuthRefreshToken: "existing-refresh",
+				OAuthExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+			}
+			if err := repo.Create(ctx, existing); err != nil {
+				t.Fatalf("create existing OAuth model: %v", err)
+			}
+
+			form := url.Values{}
+			form.Set("name", string(provider)+" linked model")
+			form.Set("provider", string(provider))
+			form.Set("auth_method", "oauth")
+			form.Set("oauth_connection_id", existing.OAuthConnectionID)
+			form.Set("model", "linked-model")
+			if provider == models.ProviderAnthropic {
+				form.Set("anthropic_auth_type", "subscription")
+			} else {
+				form.Set("openai_auth_type", "oauth")
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("create linked model status = %d, body=%s", rec.Code, rec.Body.String())
+			}
+
+			configs, err := repo.List(ctx)
+			if err != nil {
+				t.Fatalf("list models: %v", err)
+			}
+			var linked *models.LLMConfig
+			for i := range configs {
+				if configs[i].Name == string(provider)+" linked model" {
+					linked = &configs[i]
+					break
+				}
+			}
+			if linked == nil {
+				t.Fatal("linked model not found")
+			}
+			if linked.OAuthConnectionID != existing.OAuthConnectionID || linked.OAuthAccessToken != "existing-access" || linked.OAuthRefreshToken != "existing-refresh" {
+				t.Fatalf("model did not use selected OAuth account: %#v", linked)
+			}
+		})
 	}
 }
 

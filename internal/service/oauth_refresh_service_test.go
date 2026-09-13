@@ -65,6 +65,47 @@ func TestOAuthRefreshServiceRunOnceRefreshesEachExpiringConfigIndependently(t *t
 	}
 }
 
+func TestOAuthRefreshServiceRunOnceRefreshesSharedConnectionOnce(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	expiresSoon := time.Now().Add(5 * time.Minute).UnixMilli()
+	first := &models.LLMConfig{Name: "OpenAI shared first", Provider: models.ProviderOpenAI, Model: "gpt-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "shared-old", OAuthRefreshToken: "shared-refresh", OAuthExpiresAt: expiresSoon}
+	second := &models.LLMConfig{Name: "OpenAI shared second", Provider: models.ProviderOpenAI, Model: "gpt-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "private-old", OAuthRefreshToken: "private-refresh", OAuthExpiresAt: expiresSoon}
+	other := &models.LLMConfig{Name: "OpenAI other", Provider: models.ProviderOpenAI, Model: "gpt-three", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "other-old", OAuthRefreshToken: "other-refresh", OAuthExpiresAt: expiresSoon}
+	for _, cfg := range []*models.LLMConfig{first, second, other} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	if err := repo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+		t.Fatalf("link shared connection: %v", err)
+	}
+
+	calls := map[string]int{}
+	refresh := func(_ context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
+		calls[cfg.OAuthConnectionID]++
+		return llmoauth.TokenSet{AccessToken: cfg.OAuthConnectionID + "-access", RefreshToken: cfg.OAuthConnectionID + "-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+	}
+	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	worker.SetRefreshers(nil, refresh)
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if calls[first.OAuthConnectionID] != 1 || calls[other.OAuthConnectionID] != 1 || len(calls) != 2 {
+		t.Fatalf("refresh calls by connection = %#v, want one per account", calls)
+	}
+	for _, cfg := range []*models.LLMConfig{first, second} {
+		loaded, err := repo.GetByID(ctx, cfg.ID)
+		if err != nil {
+			t.Fatalf("load %s: %v", cfg.Name, err)
+		}
+		if loaded.OAuthAccessToken != first.OAuthConnectionID+"-access" || loaded.OAuthRefreshToken != first.OAuthConnectionID+"-refresh" {
+			t.Fatalf("linked model %s did not receive shared refresh: %#v", cfg.Name, loaded)
+		}
+	}
+}
+
 func TestOAuthRefreshServicePersistsPermanentReauthAndSkipsUntilCleared(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
