@@ -1414,6 +1414,11 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var firstStats = await stats();
 	    if (firstStats.newer_calls !== 1) throw new Error('first gap scroll requested ' + firstStats.newer_calls + ' pages, want exactly one');
 	    if (row('event-21')) throw new Error('first gap scroll rendered more than one missed page');
+	    await waitFor(function() {
+	      var states = window._taskLifecycleActivityStates || {};
+	      var state = states['project-lifecycle-reconnect-browser:task-lifecycle-reconnect-browser'];
+	      return !!state && !state.restoring;
+	    }, 'first gap page scroll restoration', 3000);
 
 	    scrollGapIntoView();
 	    await waitFor(function() { return !!row('event-25') && !gap(); }, 'second bounded missed lifecycle page', 3000);

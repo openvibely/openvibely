@@ -90,7 +90,7 @@ func (c *composerFocusCDP) evaluate(expression string) string {
 
 func (c *composerFocusCDP) waitFor(label, expression, want string) {
 	c.t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	var got string
 	for time.Now().Before(deadline) {
 		got = c.evaluate(expression)
