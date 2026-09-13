@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +33,20 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	tc.handler.SetLifecycleRepo(lifecycleRepo)
 
 	ctx := t.Context()
+	projects, err := tc.projectRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list test projects: %v", err)
+	}
+	var projectID string
+	for _, project := range projects {
+		if project.IsDefault {
+			projectID = project.ID
+			break
+		}
+	}
+	if projectID == "" {
+		t.Fatal("default test project not found")
+	}
 	a := &models.Agent{
 		Name:                "Agent A",
 		Description:         "agent A description",
@@ -50,7 +65,8 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		Description:         "agent B description",
 		SystemPrompt:        "agent B prompt",
 		Key:                 "agent_b_key",
-		Scope:               models.AgentScopeGlobal,
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectID,
 		Model:               "inherit",
 		SelectableAsPrimary: false,
 		Enabled:             false,
@@ -93,6 +109,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	const agentA = %q;
 	const agentB = %q;
 	const agentProtected = %q;
+	const projectQuery = %q;
 	const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 	const fail = message => {
 		fetch('/browser-result?status=fail&message=' + encodeURIComponent(String(message))).catch(() => {});
@@ -157,7 +174,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 			const sourceRefs = document.getElementById('advanced_source_refs').value;
 			const protectedVisible = !document.getElementById('advanced_protected_notice').classList.contains('hidden');
 			const hookKeys = Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).map(input => input.value).join(',');
-			if (key !== 'agent_b_key' || scope !== 'global' || enabled || selectable || !writeSkills || readAgents || sourceRefs !== 'https://example.test/agent-b' || protectedVisible || !hookKeys.includes('agent_b_hook')) {
+			if (key !== 'agent_b_key' || scope !== 'project' || enabled || selectable || !writeSkills || readAgents || sourceRefs !== 'https://example.test/agent-b' || protectedVisible || !hookKeys.includes('agent_b_hook')) {
 				throw new Error('B modal state was overwritten: ' + JSON.stringify({key, scope, enabled, selectable, writeSkills, readAgents, sourceRefs, protectedVisible, hookKeys}));
 			}
 		};
@@ -184,7 +201,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		save.click();
 		await waitFor(() => { const modal = document.getElementById('agent_modal'); return modal && !modal.open; }, 'B save response');
 
-		const loadJSON = async path => originalFetch(path).then(response => {
+		const loadJSON = async path => originalFetch(path + projectQuery).then(response => {
 			if (!response.ok) throw new Error(path + ' returned ' + response.status);
 			return response.json();
 		});
@@ -192,10 +209,9 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		const savedB = await loadJSON('/agents/' + agentB + '/json');
 		const hooksA = await loadJSON('/agents/' + agentA + '/lifecycle-hooks');
 		const hooksB = await loadJSON('/agents/' + agentB + '/lifecycle-hooks');
-		if (savedA.key !== 'agent_a_key' || savedA.enabled !== true || !savedA.permission_defaults.read_agents || savedA.source_refs[0] !== 'https://example.test/agent-a' || savedB.key !== 'agent_b_key' || savedB.enabled !== false || savedB.selectable_as_primary !== false || !savedB.permission_defaults.write_skills || savedB.source_refs[0] !== 'https://example.test/agent-b' || hooksA[0].skill_key !== 'agent_a_hook' || hooksB[0].skill_key !== 'agent_b_hook') {
+		if (savedA.key !== 'agent_a_key' || savedA.enabled !== true || !savedA.permission_defaults.read_agents || savedA.source_refs[0] !== 'https://example.test/agent-a' || savedB.key !== 'agent_b_key' || savedB.scope !== 'project' || savedB.enabled !== false || savedB.selectable_as_primary !== false || !savedB.permission_defaults.write_skills || savedB.source_refs[0] !== 'https://example.test/agent-b' || hooksA[0].skill_key !== 'agent_a_hook' || hooksB[0].skill_key !== 'agent_b_hook') {
 			throw new Error('persisted A/B state was mixed: ' + JSON.stringify({savedA, savedB, hooksA, hooksB}));
 		}
-
 		gate.active = true;
 		gate.requests = {};
 		gate.queued = {};
@@ -208,10 +224,10 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		await release(agentB + '/lifecycle-hooks');
 		await release(agentProtected + '/json');
 		await sleep(100);
-		if (document.getElementById('advanced_key').value !== 'agent_b_key' || !document.getElementById('advanced_enabled') || !document.getElementById('advanced_scope') || document.getElementById('advanced_key').disabled || document.getElementById('advanced_scope').disabled || !document.getElementById('advanced_protected_notice').classList.contains('hidden')) {
-			throw new Error('protected-to-regular switch left protected state active');
+		const regularHookKeys = Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).map(input => input.value);
+		if (document.getElementById('advanced_key').value !== 'agent_b_key' || !document.getElementById('advanced_enabled') || !document.getElementById('advanced_scope') || document.getElementById('advanced_key').disabled || document.getElementById('advanced_scope').disabled || !document.getElementById('advanced_protected_notice').classList.contains('hidden') || regularHookKeys.length !== 1 || regularHookKeys[0] !== 'agent_b_hook') {
+			throw new Error('protected-to-regular switch left protected state active: ' + JSON.stringify({key: document.getElementById('advanced_key').value, keyDisabled: document.getElementById('advanced_key').disabled, scopeDisabled: document.getElementById('advanced_scope').disabled, protectedVisible: !document.getElementById('advanced_protected_notice').classList.contains('hidden'), hookKeys: regularHookKeys}));
 		}
-
 		gate.requests = {};
 		gate.queued = {};
 		clickCard(agentB);
@@ -245,8 +261,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		fail(err && err.stack ? err.stack : err);
 	}
 })();
-</script>`, a.ID, b.ID, protected.ID)
-
+	</script>`, a.ID, b.ID, protected.ID, "?project_id="+url.QueryEscape(projectID))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
@@ -287,8 +302,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer", "--disable-dev-shm-usage",
 		"--disable-background-networking", "--disable-extensions", "--no-first-run", "--no-default-browser-check",
-		"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), server.URL+"/agents",
-	)
+		"--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), server.URL+"/agents?project_id="+url.QueryEscape(projectID))
 	cmd.Stderr = stderrFile
 	if err := startHandlerBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
@@ -321,7 +335,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 	if err != nil {
 		t.Fatalf("reload B after browser save: %v", err)
 	}
-	if storedA == nil || storedB == nil || storedA.Key != "agent_a_key" || !storedA.Enabled || !storedA.PermissionDefaults.ReadAgents || storedB.Key != "agent_b_key" || storedB.Enabled || storedB.SelectableAsPrimary || !storedB.PermissionDefaults.WriteSkills {
+	if storedA == nil || storedB == nil || storedA.Key != "agent_a_key" || !storedA.Enabled || !storedA.PermissionDefaults.ReadAgents || storedB.Key != "agent_b_key" || storedB.Scope != models.AgentScopeProject || storedB.ProjectID != projectID || storedB.Enabled || storedB.SelectableAsPrimary || !storedB.PermissionDefaults.WriteSkills {
 		t.Fatalf("repository state was mixed after browser save: A=%+v B=%+v", storedA, storedB)
 	}
 	hooksA, err := lifecycleRepo.HooksByAgent(ctx, a.ID)
