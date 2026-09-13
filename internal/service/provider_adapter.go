@@ -889,6 +889,17 @@ func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Age
 	return raw, merged
 }
 
+func prepareAgentRuntimeRequest(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
+	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	if runtimeAgentDef == nil {
+		return req
+	}
+	req.AgentDefinition = runtimeAgentDef
+	req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
+	req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
+	return req
+}
+
 type anthropicAdapterCaller interface {
 	Call(context.Context, llmcontracts.AgentRequest, string, *llmstream.Writer) (llmcontracts.AgentResult, error)
 }
@@ -906,6 +917,13 @@ func unsupportedModelTransport(provider models.LLMProvider, authMethod models.Au
 	return fmt.Errorf("%s model auth method %q is no longer supported; reconfigure the model to use OAuth or an API key", provider, authMethod)
 }
 
+func (a *anthropicProviderAdapter) callSupportedOperation(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if anthropicAdapterEnabled(req.Agent) {
+		return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
+	}
+	return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
+}
+
 func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
@@ -914,10 +932,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {
 		case llmcontracts.OperationDirect, llmcontracts.OperationStreaming, llmcontracts.OperationTask:
-			if anthropicAdapterEnabled(req.Agent) {
-				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
-			}
-			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
+			return a.callSupportedOperation(req)
 		default:
 			return llmcontracts.AgentResult{}, fmt.Errorf("unsupported operation: %s", req.Operation)
 		}
@@ -931,14 +946,8 @@ type openAIProviderAdapter struct {
 
 func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, req.NativeCompactionStateJSON)
-	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
-	if runtimeAgentDef != nil {
-		req.AgentDefinition = runtimeAgentDef
-	}
-	// Apply agent definition: inject system prompt + skill content
+	req = prepareAgentRuntimeRequest(req)
 	if req.AgentDefinition != nil {
-		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
-		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
 		if req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
 			req.Agent.Model = req.AgentDefinition.Model
 		}
@@ -981,13 +990,8 @@ type openAICompatibleProviderAdapter struct {
 }
 
 func (a *openAICompatibleProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
-	if runtimeAgentDef != nil {
-		req.AgentDefinition = runtimeAgentDef
-	}
+	req = prepareAgentRuntimeRequest(req)
 	if req.AgentDefinition != nil {
-		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
-		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
 		if req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
 			req.Agent.Model = req.AgentDefinition.Model
 		}
@@ -1003,15 +1007,7 @@ type ollamaProviderAdapter struct {
 }
 
 func (a *ollamaProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
-	if runtimeAgentDef != nil {
-		req.AgentDefinition = runtimeAgentDef
-	}
-	// Apply agent definition: inject system prompt + skill content
-	if req.AgentDefinition != nil {
-		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
-		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
-	}
+	req = prepareAgentRuntimeRequest(req)
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 	})

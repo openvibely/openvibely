@@ -878,11 +878,14 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/models/:id", h.UpdateModel)
 	e.PUT("/models/:id", h.UpdateModel)
 	e.POST("/models/:id/set-default", h.SetDefaultModel)
+	e.POST("/models/oauth-connections/:id/rename", h.RenameOAuthConnection)
+	e.POST("/models/oauth-connections/:id/models", h.MoveModelsToOAuthConnection)
+	e.POST("/models/oauth-connections/:id/delete", h.DeleteOAuthConnection)
 	e.DELETE("/models/bulk", h.DeleteModelsBulk)
 	e.DELETE("/models/:id", h.DeleteModel)
-
 	// OAuth for model providers
 	e.GET("/models/:id/oauth/initiate", h.OAuthInitiate)
+	e.POST("/models/:id/oauth/disconnect", h.DisconnectModelOAuthConnection)
 	e.POST("/models/oauth/manual-complete", h.OAuthManualComplete)
 	e.GET("/callback", h.OAuthCallback)              // Anthropic public-mode callback
 	e.GET("/auth/callback", h.OAuthCallback)         // OpenAI public-mode callback
