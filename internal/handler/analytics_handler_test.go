@@ -296,8 +296,8 @@ func TestParseAnalyticsSupportingEvidenceFilters(t *testing.T) {
 	if usage.EvidencePeriod != "2026-01-10" || usage.EvidenceProvider != "openai" || usage.EvidenceModel != "gpt-a" || usage.EvidenceLimit != 50 {
 		t.Fatalf("usage evidence filters = %+v", usage)
 	}
-	skill := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?skill_period=2026-01-10&skill_event=created&skill_agent=agent-1&skill_handle=project%3Areview"))
-	if skill.EvidencePeriod != "2026-01-10" || skill.EvidenceEvent != "created" || skill.EvidenceAgentID != "agent-1" || skill.EvidenceSkillHandle != "project:review" || skill.EvidenceLimit != 50 {
+	skill := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?skill_period=2026-01-10&skill_event=created&skill_agent=agent-1&skill_handle=project%3Areview&skill_evidence_scope=project"))
+	if skill.EvidencePeriod != "2026-01-10" || skill.EvidenceEvent != "created" || skill.EvidenceAgentID != "agent-1" || skill.EvidenceSkillHandle != "project:review" || skill.EvidenceSkillScope != "project" || skill.EvidenceLimit != 50 {
 		t.Fatalf("skill evidence filters = %+v", skill)
 	}
 }

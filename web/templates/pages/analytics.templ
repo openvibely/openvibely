@@ -408,7 +408,7 @@ templ analyticsContent(currentProject *models.Project) {
 								if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));						}
 
 							function clearEvidenceParams(params) {
-								['evidence','model','model_id','category','period','technical_status','cycleDistribution','followupDistribution','execution_hour','skill_period','skill_event','skill_agent','skill_handle','usage_period','usage_model','usage_provider','usage_model_name'].forEach(function(key) { params.delete(key); });
+								['evidence','model','model_id','category','period','technical_status','cycleDistribution','followupDistribution','execution_hour','skill_period','skill_event','skill_agent','skill_handle','skill_evidence_scope','usage_period','usage_model','usage_provider','usage_model_name'].forEach(function(key) { params.delete(key); });
 								return params;
 							}						function showAggregateSelection(view, values, labelID, text) {
 							const params = clearEvidenceParams(new URLSearchParams(window.location.search));
@@ -424,7 +424,9 @@ templ analyticsContent(currentProject *models.Project) {
 							const skillLabel = document.getElementById('skillEvidenceSelection');
 							const usageLabel = document.getElementById('usageEvidenceSelection');
 							if (skillLabel) {
-									const skillText = params.get('skill_handle') ? (params.has('skill_agent') ? (params.get('skill_agent') || 'Unassigned') : 'All Agents') + ' · ' + params.get('skill_handle') + (params.get('skill_event') ? ' · ' + params.get('skill_event') : '') : (params.get('skill_event') && params.get('skill_period') ? params.get('skill_event') + ' · ' + params.get('skill_period') : '');								skillLabel.textContent = skillText ? 'Selected skill activity · ' + skillText : '';
+								const scope = params.get('skill_evidence_scope');
+								const skillText = params.get('skill_handle') ? (params.has('skill_agent') ? (params.get('skill_agent') || 'Unassigned') : 'All Agents') + ' · ' + params.get('skill_handle') + (scope ? ' [' + scope + ']' : '') + (params.get('skill_event') ? ' · ' + params.get('skill_event') : '') : (params.get('skill_event') && params.get('skill_period') ? params.get('skill_event') + ' · ' + params.get('skill_period') : '');
+								skillLabel.textContent = skillText ? 'Selected skill activity · ' + skillText : '';
 								skillLabel.classList.toggle('hidden', !skillText);
 							}
 							if (usageLabel) {
@@ -704,7 +706,7 @@ templ analyticsContent(currentProject *models.Project) {
 									function skillEvidenceParams() {
 										const selected = new URLSearchParams(window.location.search);
 										const params = analyticsParams({ project_id: projectID, range: skillRangeParam(), group_by: document.getElementById('groupBy').value });
-										['skill_period','skill_event','skill_agent','skill_handle'].forEach(function(key) { const value=selected.get(key); if(value) params.set(key,value); });
+										['skill_period','skill_event','skill_agent','skill_handle','skill_evidence_scope'].forEach(function(key) { const value=selected.get(key); if(value) params.set(key,value); });
 										return params;
 									}
 
@@ -724,7 +726,7 @@ templ analyticsContent(currentProject *models.Project) {
 											const execution = row.execution_id ? '<code>' + escapeHTML(row.execution_id) + '</code>' : 'No execution';
 											const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name || row.agent_id) + '</a>' : escapeHTML(row.agent_name || 'Unassigned');
 											const occurred = row.created_at ? new Date(row.created_at).toLocaleString() : 'Unavailable';
-											return '<tr><td><code>' + escapeHTML(row.id) + '</code></td><td>' + escapeHTML(occurred) + '</td><td><code>' + escapeHTML(row.skill_handle) + '</code></td><td>' + agent + '</td><td>' + escapeHTML(row.event_type) + '</td><td>' + escapeHTML((row.source || 'unknown') + ' / ' + (row.surface || 'unknown')) + '</td><td>' + task + '<br>' + execution + '</td></tr>';
+											return '<tr><td><code>' + escapeHTML(row.id) + '</code></td><td>' + escapeHTML(occurred) + '</td><td><code>' + escapeHTML(row.skill_handle) + '</code><br><span class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '</span></td><td>' + agent + '</td><td>' + escapeHTML(row.event_type) + '</td><td>' + escapeHTML((row.source || 'unknown') + ' / ' + (row.surface || 'unknown')) + '</td><td>' + task + '<br>' + execution + '</td></tr>';
 										}).join('') : '<tr><td colspan="7" class="text-center opacity-50">No matching skill events</td></tr>';
 									}
 
@@ -880,14 +882,14 @@ templ analyticsContent(currentProject *models.Project) {
 									if (canvas) {
 										charts.skillTop = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
-											data: { labels: chartRows.map(r => skillLabel(r.skill_handle)), datasets: [
+											data: { labels: chartRows.map(r => skillLabel(r.skill_handle + ' [' + (r.skill_scope || 'unknown') + ']')), datasets: [
 												{ label: 'Selected', data: chartRows.map(r => r.selected_count || 0), backgroundColor: 'rgba(59, 130, 246, 0.5)', borderColor: 'rgb(59, 130, 246)', borderWidth: 1 },
 												{ label: 'Loaded', data: chartRows.map(r => r.loaded_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 												{ label: 'Viewed', data: chartRows.map(r => r.viewed_count || 0), backgroundColor: 'rgba(251, 146, 60, 0.5)', borderColor: 'rgb(251, 146, 60)', borderWidth: 1 },
 												{ label: 'Created', data: chartRows.map(r => r.created_count || 0), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 },
 											{ label: 'Edited', data: chartRows.map(r => r.edited_count || 0), backgroundColor: 'rgba(147, 51, 234, 0.5)', borderColor: 'rgb(147, 51, 234)', borderWidth: 1 }
 										] },
-										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const item=items[0];const row=chartRows[item.index];const eventType=['selected','loaded','viewed','created','edited'][item.datasetIndex]||'';showAggregateSelection('learning',{skill_handle:row.skill_handle,skill_event:eventType},'skillEvidenceSelection',row.skill_handle+' · '+eventType+' · events '+Number([row.selected_count,row.loaded_count,row.viewed_count,row.created_count,row.edited_count][item.datasetIndex]||0));loadSkillEvidence();}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
+										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const item=items[0];const row=chartRows[item.index];const eventType=['selected','loaded','viewed','created','edited'][item.datasetIndex]||'';showAggregateSelection('learning',{skill_handle:row.skill_handle,skill_evidence_scope:row.skill_scope,skill_event:eventType},'skillEvidenceSelection',row.skill_handle+' ['+(row.skill_scope||'unknown')+'] · '+eventType+' · events '+Number([row.selected_count,row.loaded_count,row.viewed_count,row.created_count,row.edited_count][item.datasetIndex]||0));loadSkillEvidence();}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
 									}
 								}
 
@@ -897,11 +899,11 @@ templ analyticsContent(currentProject *models.Project) {
 									if (canvas) {
 										charts.skillFollow = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
-											data: { labels: chartRows.map(r => skillLabel(r.skill_handle)), datasets: [
+											data: { labels: chartRows.map(r => skillLabel(r.skill_handle + ' [' + (r.skill_scope || 'unknown') + ']')), datasets: [
 												{ label: 'Used', data: chartRows.map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 											{ label: 'Ignored', data: chartRows.map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
 										] },
-										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const item=items[0];const row=chartRows[item.index];const eventType=item.datasetIndex===0?'followed':'ignored';const count=item.datasetIndex===0?row.loaded_or_viewed_count:row.ignored_count;showAggregateSelection('learning',{skill_handle:row.skill_handle,skill_event:eventType},'skillEvidenceSelection',row.skill_handle+' · '+eventType+' selections '+Number(count||0));loadSkillEvidence();}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
+										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const item=items[0];const row=chartRows[item.index];const eventType=item.datasetIndex===0?'followed':'ignored';const count=item.datasetIndex===0?row.loaded_or_viewed_count:row.ignored_count;showAggregateSelection('learning',{skill_handle:row.skill_handle,skill_evidence_scope:row.skill_scope,skill_event:eventType},'skillEvidenceSelection',row.skill_handle+' ['+(row.skill_scope||'unknown')+'] · '+eventType+' selections '+Number(count||0));loadSkillEvidence();}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
 									}
 								}
 

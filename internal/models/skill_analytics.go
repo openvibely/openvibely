@@ -62,6 +62,7 @@ type SkillAnalyticsEvidenceRow struct {
 	AgentID     string    `json:"agent_id,omitempty"`
 	AgentName   string    `json:"agent_name"`
 	SkillHandle string    `json:"skill_handle"`
+	SkillScope  string    `json:"skill_scope"`
 	EventType   string    `json:"event_type"`
 	Source      string    `json:"source"`
 	Surface     string    `json:"surface"`
