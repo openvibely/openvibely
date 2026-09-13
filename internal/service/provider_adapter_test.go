@@ -145,32 +145,74 @@ func (a *recordingAnthropicAdapter) Call(_ context.Context, req llmcontracts.Age
 
 func TestAnthropicProviderAdapter_ForwardsSupportedOperations(t *testing.T) {
 	tests := []struct {
-		name        string
-		operation   llmcontracts.Operation
-		workDir     string
-		chatMode    models.ChatMode
-		followup    bool
-		history     []models.Execution
-		chatContext string
+		name             string
+		operation        llmcontracts.Operation
+		authMethod       models.AuthMethod
+		apiKey           string
+		oauthAccessToken string
+		workDir          string
+		chatMode         models.ChatMode
+		followup         bool
+		history          []models.Execution
+		chatContext      string
 	}{
 		{
-			name:      "direct",
-			operation: llmcontracts.OperationDirect,
-			workDir:   "/work/direct",
+			name:       "direct api key",
+			operation:  llmcontracts.OperationDirect,
+			authMethod: models.AuthMethodAPIKey,
+			apiKey:     "test-api-key",
+			workDir:    "/work/direct-api-key",
 		},
 		{
-			name:        "streaming chat followup",
+			name:             "direct oauth",
+			operation:        llmcontracts.OperationDirect,
+			authMethod:       models.AuthMethodOAuth,
+			oauthAccessToken: "test-oauth-token",
+			workDir:          "/work/direct-oauth",
+		},
+		{
+			name:        "streaming chat first turn",
 			operation:   llmcontracts.OperationStreaming,
-			workDir:     "/work/streaming",
+			authMethod:  models.AuthMethodAPIKey,
+			apiKey:      "test-api-key",
+			workDir:     "/work/streaming-first-turn",
 			chatMode:    models.ChatModeOrchestrate,
-			followup:    true,
-			history:     []models.Execution{{PromptSent: "previous prompt", Output: "previous output"}},
-			chatContext: "chat context sentinel",
+			chatContext: "first-turn chat context sentinel",
 		},
 		{
-			name:      "task",
-			operation: llmcontracts.OperationTask,
-			workDir:   "/work/task",
+			name:        "streaming chat history",
+			operation:   llmcontracts.OperationStreaming,
+			authMethod:  models.AuthMethodAPIKey,
+			apiKey:      "test-api-key",
+			workDir:     "/work/streaming-history",
+			chatMode:    models.ChatModePlan,
+			history:     []models.Execution{{PromptSent: "previous prompt", Output: "previous output"}},
+			chatContext: "history chat context sentinel",
+		},
+		{
+			name:             "streaming chat followup oauth",
+			operation:        llmcontracts.OperationStreaming,
+			authMethod:       models.AuthMethodOAuth,
+			oauthAccessToken: "test-oauth-token",
+			workDir:          "/work/streaming-followup-oauth",
+			chatMode:         models.ChatModeOrchestrate,
+			followup:         true,
+			history:          []models.Execution{{PromptSent: "previous prompt", Output: "previous output"}},
+			chatContext:      "followup chat context sentinel",
+		},
+		{
+			name:       "task api key",
+			operation:  llmcontracts.OperationTask,
+			authMethod: models.AuthMethodAPIKey,
+			apiKey:     "test-api-key",
+			workDir:    "/work/task-api-key",
+		},
+		{
+			name:             "task oauth",
+			operation:        llmcontracts.OperationTask,
+			authMethod:       models.AuthMethodOAuth,
+			oauthAccessToken: "test-oauth-token",
+			workDir:          "/work/task-oauth",
 		},
 	}
 
@@ -179,10 +221,15 @@ func TestAnthropicProviderAdapter_ForwardsSupportedOperations(t *testing.T) {
 			lowLevel := &recordingAnthropicAdapter{}
 			adapter := &anthropicProviderAdapter{adapter: lowLevel}
 			req := llmcontracts.AgentRequest{
-				Ctx:               context.Background(),
-				Operation:         tt.operation,
-				Message:           "preserve this request",
-				Agent:             models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key"},
+				Ctx:       context.Background(),
+				Operation: tt.operation,
+				Message:   "preserve this request",
+				Agent: models.LLMConfig{
+					Provider:         models.ProviderAnthropic,
+					AuthMethod:       tt.authMethod,
+					APIKey:           tt.apiKey,
+					OAuthAccessToken: tt.oauthAccessToken,
+				},
 				ChatMode:          tt.chatMode,
 				Followup:          tt.followup,
 				ChatHistory:       tt.history,

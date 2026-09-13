@@ -917,6 +917,13 @@ func unsupportedModelTransport(provider models.LLMProvider, authMethod models.Au
 	return fmt.Errorf("%s model auth method %q is no longer supported; reconfigure the model to use OAuth or an API key", provider, authMethod)
 }
 
+func (a *anthropicProviderAdapter) callSupportedOperation(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if anthropicAdapterEnabled(req.Agent) {
+		return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
+	}
+	return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
+}
+
 func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
@@ -925,10 +932,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {
 		case llmcontracts.OperationDirect, llmcontracts.OperationStreaming, llmcontracts.OperationTask:
-			if anthropicAdapterEnabled(req.Agent) {
-				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
-			}
-			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
+			return a.callSupportedOperation(req)
 		default:
 			return llmcontracts.AgentResult{}, fmt.Errorf("unsupported operation: %s", req.Operation)
 		}
