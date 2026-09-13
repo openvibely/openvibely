@@ -1446,15 +1446,46 @@ func (s *UsageAnalyticsService) resolveAccountUsageOAuthAccountID(ctx context.Co
 	if accountID == "" {
 		return cfg
 	}
+	cfg, _ = s.persistResolvedOAuthAccountID(ctx, cfg, accountID)
+	return cfg
+}
+
+// persistResolvedOAuthAccountID updates only the identity for the credential
+// generation that produced it. If that generation is stale, it returns the
+// authoritative row so callers cannot continue with superseded credentials.
+// The boolean reports whether accountID belongs to the returned config.
+func (s *UsageAnalyticsService) persistResolvedOAuthAccountID(ctx context.Context, cfg models.LLMConfig, accountID string) (models.LLMConfig, bool) {
 	cfg.OAuthAccountID = accountID
-	if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
-		updated, err := s.llmConfigRepo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, accountID)
-		if err != nil {
-			applog.Infof("[usage] persisting OAuth account id failed provider=%s: %v", cfg.Provider, err)
-		} else if !updated {
-			applog.Infof("[usage] skipped stale OAuth account id update provider=%s", cfg.Provider)
-		}
+	if s.llmConfigRepo == nil || strings.TrimSpace(cfg.ID) == "" {
+		return cfg, true
 	}
+	updated, err := s.llmConfigRepo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, accountID)
+	if err != nil {
+		applog.Infof("[usage] persisting OAuth account id failed provider=%s: %v", cfg.Provider, err)
+		return abandonAccountUsageOAuthCandidate(cfg), false
+	}
+	if updated {
+		return cfg, true
+	}
+	applog.Infof("[usage] skipped stale OAuth account id update provider=%s", cfg.Provider)
+	current, err := s.llmConfigRepo.GetByID(ctx, cfg.ID)
+	if err != nil {
+		applog.Infof("[usage] reloading OAuth config after stale account id failed provider=%s: %v", cfg.Provider, err)
+		return abandonAccountUsageOAuthCandidate(cfg), false
+	}
+	if current == nil {
+		return abandonAccountUsageOAuthCandidate(cfg), false
+	}
+	return *current, false
+}
+
+func abandonAccountUsageOAuthCandidate(cfg models.LLMConfig) models.LLMConfig {
+	cfg.AuthMethod = ""
+	cfg.OAuthAccessToken = ""
+	cfg.OAuthRefreshToken = ""
+	cfg.OAuthExpiresAt = 0
+	cfg.OAuthAccountID = ""
+	cfg.OAuthNeedsReauth = false
 	return cfg
 }
 
@@ -1527,14 +1558,12 @@ func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cf
 	if profileErr == nil {
 		cfg = profileCfg
 		if profile.AccountID != "" && cfg.OAuthAccountID != profile.AccountID {
-			cfg.OAuthAccountID = profile.AccountID
-			if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
-				updated, err := s.llmConfigRepo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, cfg.OAuthAccountID)
-				if err != nil {
-					applog.Infof("[usage] persisting Anthropic OAuth profile account id failed provider=%s: %v", cfg.Provider, err)
-				} else if !updated {
-					applog.Infof("[usage] skipped stale Anthropic OAuth profile account id update provider=%s", cfg.Provider)
-				}
+			var identityCurrent bool
+			cfg, identityCurrent = s.persistResolvedOAuthAccountID(ctx, cfg, profile.AccountID)
+			if !identityCurrent {
+				// The profile belongs to a superseded credential generation. Do not
+				// issue or persist account usage from that stale identity.
+				return nil, nil
 			}
 		}
 	} else {
