@@ -457,47 +457,52 @@ func TestHandler_ProjectCapacityCollectionAndDetailPreserveJSONBytes(t *testing.
 		{name: "over finite limit", initialLimit: intPtr(2), updatedLimit: intPtr(1), running: 2, wantMaxWorkers: intPtr(1), wantHasCapacity: false, wantSlots: intPtr(0)},
 	}
 
-	for _, tt := range tests {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+	h.workerSvc.Resize(10)
+	projects := make([]*models.Project, len(tests))
+	for i, tt := range tests {
+		project := &models.Project{Name: "Exact capacity " + tt.name, MaxWorkers: tt.initialLimit}
+		require.NoError(t, h.projectSvc.Create(ctx, project))
+		for j := 0; j < tt.running; j++ {
+			require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+		}
+		if tt.updatedLimit != nil {
+			project.MaxWorkers = tt.updatedLimit
+			require.NoError(t, h.projectRepo.Update(ctx, project))
+		}
+		projects[i] = project
+	}
+	defer func() {
+		for i, project := range projects {
+			for j := 0; j < tests[i].running; j++ {
+				h.workerSvc.ReleaseProjectSlot(project.ID)
+			}
+		}
+	}()
+
+	collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
+	collectionRec := httptest.NewRecorder()
+	e.ServeHTTP(collectionRec, collectionReq)
+	require.Equal(t, http.StatusOK, collectionRec.Code)
+
+	var collection []json.RawMessage
+	require.NoError(t, json.Unmarshal(collectionRec.Body.Bytes(), &collection))
+	collectionByID := make(map[string]json.RawMessage, len(collection))
+	for _, raw := range collection {
+		var fields struct {
+			ID string `json:"id"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &fields))
+		collectionByID[fields.ID] = raw
+	}
+
+	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, e, _ := setupTestHandler(t)
-			ctx := context.Background()
-			project := &models.Project{Name: "Exact capacity " + tt.name, MaxWorkers: tt.initialLimit}
-			require.NoError(t, h.projectSvc.Create(ctx, project))
-			h.workerSvc.SetProjectRepo(h.projectRepo)
-
-			for i := 0; i < tt.running; i++ {
-				require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
-			}
-			if tt.running > 0 {
-				defer func() {
-					for i := 0; i < tt.running; i++ {
-						h.workerSvc.ReleaseProjectSlot(project.ID)
-					}
-				}()
-			}
-
-			if tt.updatedLimit != nil {
-				project.MaxWorkers = tt.updatedLimit
-				require.NoError(t, h.projectRepo.Update(ctx, project))
-			}
-
-			collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
-			collectionRec := httptest.NewRecorder()
-			e.ServeHTTP(collectionRec, collectionReq)
-			require.Equal(t, http.StatusOK, collectionRec.Code)
-
-			var collection []json.RawMessage
-			require.NoError(t, json.Unmarshal(collectionRec.Body.Bytes(), &collection))
-			var collectionObject json.RawMessage
-			for _, raw := range collection {
-				var fields map[string]json.RawMessage
-				require.NoError(t, json.Unmarshal(raw, &fields))
-				if string(fields["id"]) == `"`+project.ID+`"` {
-					collectionObject = raw
-					break
-				}
-			}
-			require.NotNil(t, collectionObject)
+			project := projects[i]
+			collectionObject, ok := collectionByID[project.ID]
+			require.True(t, ok)
 
 			detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/"+project.ID, nil)
 			detailRec := httptest.NewRecorder()
