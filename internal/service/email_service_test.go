@@ -1427,6 +1427,7 @@ func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
 }
 
 type fakeEmailIMAPClient struct {
+	mu                         sync.RWMutex
 	messages                   map[uint32]*imap.Message
 	seen                       map[uint32]bool
 	fetchCount                 int
@@ -1459,6 +1460,8 @@ func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
 }
 
 func (c *fakeEmailIMAPClient) setMessage(msg *imap.Message) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.messages[msg.SeqNum] = msg
 	if len(msg.Body) == 0 {
 		delete(c.bodyData, msg.SeqNum)
@@ -1553,9 +1556,13 @@ func testIMAPReplyInReplyToOnlyWithBody(id uint32, subject, from, inReplyTo, bod
 
 func (c *fakeEmailIMAPClient) Login(string, string) error { return nil }
 func (c *fakeEmailIMAPClient) Select(string, bool) (*imap.MailboxStatus, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return &imap.MailboxStatus{UidValidity: c.uidValidity}, nil
 }
 func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	var ids []uint32
 	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
 		if !c.seen[id] {
@@ -1565,6 +1572,7 @@ func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
 	return ids, nil
 }
 func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
+	c.mu.Lock()
 	c.fetchCount++
 	c.fetchItems = append(c.fetchItems, append([]imap.FetchItem(nil), items...))
 	var fetchedIDs []uint32
@@ -1593,7 +1601,7 @@ func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem,
 			}
 		}
 	}
-	defer close(ch)
+	fetchedMessages := make([]*imap.Message, 0, len(fetchedIDs))
 	for _, id := range fetchedIDs {
 		message := c.messages[id]
 		if bodyData := c.bodyData[id]; len(bodyData) > 0 {
@@ -1617,11 +1625,18 @@ func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem,
 			}
 			message = &copyMessage
 		}
+		fetchedMessages = append(fetchedMessages, message)
+	}
+	c.mu.Unlock()
+
+	defer close(ch)
+	for _, message := range fetchedMessages {
 		ch <- message
 	}
 	return nil
 }
 func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ interface{}, _ chan *imap.Message) error {
+	c.mu.Lock()
 	c.storeCalls++
 	var storedIDs []uint32
 	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
@@ -1632,19 +1647,33 @@ func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ int
 	if len(storedIDs) > 0 {
 		c.storedIDs = append(c.storedIDs, storedIDs)
 	}
-	if c.storeDelay > 0 {
-		time.Sleep(c.storeDelay)
-	}
-	if c.storeFailures > 0 {
+	storeDelay := c.storeDelay
+	storeFailed := c.storeFailures > 0
+	if storeFailed {
 		c.storeFailures--
+	}
+	c.mu.Unlock()
+
+	if storeDelay > 0 {
+		time.Sleep(storeDelay)
+	}
+	if storeFailed {
 		return fmt.Errorf("transient store failure")
 	}
+	c.mu.Lock()
 	for _, id := range storedIDs {
 		c.seen[id] = true
 	}
+	c.mu.Unlock()
 	return nil
 }
 func (c *fakeEmailIMAPClient) Logout() error { return nil }
+
+func (c *fakeEmailIMAPClient) storeCallCount() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.storeCalls
+}
 
 type blockingEmailIMAPClient struct {
 	*fakeEmailIMAPClient
@@ -1677,6 +1706,8 @@ func (c *blockingEmailIMAPClient) Terminate() error {
 	return nil
 }
 func (c *fakeEmailIMAPClient) storeBatches() [][]uint32 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	batches := make([][]uint32, len(c.storedIDs))
 	for i, ids := range c.storedIDs {
 		batches[i] = append([]uint32(nil), ids...)
@@ -1684,6 +1715,8 @@ func (c *fakeEmailIMAPClient) storeBatches() [][]uint32 {
 	return batches
 }
 func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	var ids []uint32
 	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
 		if c.seen[id] {
@@ -2807,7 +2840,7 @@ func TestEmailServiceStopFencesBlockedPoll(t *testing.T) {
 	assert.Empty(t, tasks, "a poll released after Stop must not create a task")
 	assert.Zero(t, h.receipts.recordCalls, "a stale poll must not record a receipt")
 	assert.Zero(t, h.receipts.withHandoffCalls, "a stale poll must not record a durable handoff")
-	assert.Zero(t, client.storeCalls, "a stale poll must not acknowledge the message")
+	assert.Zero(t, client.storeCallCount(), "a stale poll must not acknowledge the message")
 	assert.Empty(t, client.seenIDs())
 }
 
@@ -2870,9 +2903,9 @@ func TestEmailServiceReloadFencesBlockedPreviousAccount(t *testing.T) {
 	svc.Stop()
 
 	assert.Empty(t, processed, "the superseded poll must not hand off its old-account message")
-	assert.Zero(t, oldClient.storeCalls, "the superseded poll must not acknowledge its old-account message")
+	assert.Zero(t, oldClient.storeCallCount(), "the superseded poll must not acknowledge its old-account message")
 	assert.Empty(t, oldClient.seenIDs())
-	assert.Equal(t, 1, newClient.storeCalls, "the replacement poll should acknowledge its handled message")
+	assert.Equal(t, 1, newClient.storeCallCount(), "the replacement poll should acknowledge its handled message")
 	assert.Equal(t, []uint32{1}, newClient.seenIDs())
 }
 
@@ -2916,7 +2949,7 @@ func TestEmailServiceRemovalFencesBlockedPoll(t *testing.T) {
 
 	assert.Zero(t, processed.Load(), "removing email must not hand off the old mailbox message")
 	assert.Zero(t, receipts.recordCalls, "removing email must not record a receipt")
-	assert.Zero(t, client.storeCalls, "removing email must not acknowledge the old mailbox message")
+	assert.Zero(t, client.storeCallCount(), "removing email must not acknowledge the old mailbox message")
 	assert.Empty(t, client.seenIDs())
 }
 func TestEmailServiceConcurrentStopWaitsForFence(t *testing.T) {
@@ -2988,7 +3021,7 @@ func TestEmailServiceConcurrentStopWaitsForFence(t *testing.T) {
 		t.Fatal("second Stop did not finish after the first Stop completed")
 	}
 	assert.False(t, secondStopReturnedEarly, "a concurrent Stop must wait for the captured run fence")
-	assert.Zero(t, client.storeCalls, "the stopped run must not acknowledge the in-flight message")
+	assert.Zero(t, client.storeCallCount(), "the stopped run must not acknowledge the in-flight message")
 }
 
 func TestEmailServiceStartWaitsForConcurrentStopFence(t *testing.T) {
@@ -3096,7 +3129,7 @@ func TestEmailServiceStartWaitsForConcurrentStopFence(t *testing.T) {
 	}
 	assert.False(t, startReturnedEarly, "Start must wait for a concurrent Stop to finish fencing")
 	assert.False(t, newProcessingReturnedEarly, "replacement polling must not begin before the old fence completes")
-	assert.Zero(t, oldClient.storeCalls, "the fenced old run must not acknowledge its message")
+	assert.Zero(t, oldClient.storeCallCount(), "the fenced old run must not acknowledge its message")
 	svc.Stop()
 }
 
