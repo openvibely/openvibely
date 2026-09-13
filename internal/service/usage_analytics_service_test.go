@@ -833,6 +833,134 @@ func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t 
 	}
 }
 
+func TestUsageAnalyticsService_RefreshFailureCooldownUsesOAuthConnection(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			t.Run("shared_connection", func(t *testing.T) {
+				db := testutil.NewTestDB(t)
+				usageRepo := repository.NewUsageRepo(db)
+				configRepo := repository.NewLLMConfigRepo(db)
+				ctx := context.Background()
+
+				first := &models.LLMConfig{
+					Name:              "A Shared Failure",
+					Provider:          provider,
+					Model:             "model-one",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  "shared-access",
+					OAuthRefreshToken: "shared-refresh",
+					OAuthAccountID:    "shared-account",
+				}
+				if err := configRepo.Create(ctx, first); err != nil {
+					t.Fatalf("create first config: %v", err)
+				}
+				second := &models.LLMConfig{
+					Name:       "B Shared Failure",
+					Provider:   provider,
+					Model:      "model-two",
+					AuthMethod: models.AuthMethodOAuth,
+				}
+				if err := configRepo.Create(ctx, second); err != nil {
+					t.Fatalf("create second config: %v", err)
+				}
+				if err := configRepo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+					t.Fatalf("link shared connection: %v", err)
+				}
+
+				calls := 0
+				svc := NewUsageAnalyticsService(usageRepo, configRepo)
+				svc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+					calls++
+					return nil, errors.New("shared connection unavailable")
+				})
+
+				view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider), Refresh: true})
+				if err != nil {
+					t.Fatalf("forced BuildAnalyticsUsage: %v", err)
+				}
+				if calls != 1 {
+					t.Fatalf("shared connection provider calls = %d, want 1; view=%+v", calls, view.AccountLimits)
+				}
+
+				if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)}); err != nil {
+					t.Fatalf("cooldown BuildAnalyticsUsage: %v", err)
+				}
+				if calls != 1 {
+					t.Fatalf("shared connection cooldown calls = %d, want 1", calls)
+				}
+				if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error == "" {
+					t.Fatalf("expected shared failure card, got %+v", view.AccountLimits)
+				}
+			})
+
+			t.Run("separate_connections_same_account", func(t *testing.T) {
+				db := testutil.NewTestDB(t)
+				usageRepo := repository.NewUsageRepo(db)
+				configRepo := repository.NewLLMConfigRepo(db)
+				ctx := context.Background()
+
+				failed := &models.LLMConfig{
+					Name:              "A Separate Failure",
+					Provider:          provider,
+					Model:             "model-one",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  "failed-access",
+					OAuthRefreshToken: "failed-refresh",
+					OAuthAccountID:    "same-account",
+				}
+				healthy := &models.LLMConfig{
+					Name:              "B Separate Healthy",
+					Provider:          provider,
+					Model:             "model-two",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  "healthy-access",
+					OAuthRefreshToken: "healthy-refresh",
+					OAuthAccountID:    "same-account",
+				}
+				for _, cfg := range []*models.LLMConfig{failed, healthy} {
+					if err := configRepo.Create(ctx, cfg); err != nil {
+						t.Fatalf("create %s config: %v", cfg.Name, err)
+					}
+				}
+				if failed.OAuthConnectionID == healthy.OAuthConnectionID {
+					t.Fatal("separate fixtures unexpectedly share an OAuth connection")
+				}
+
+				var fetched []string
+				svc := NewUsageAnalyticsService(usageRepo, configRepo)
+				svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+					fetched = append(fetched, cfg.ID)
+					if cfg.ID == failed.ID {
+						return nil, errors.New("failed connection unavailable")
+					}
+					pct := 12.0
+					return &models.AccountUsageSnapshot{
+						Provider:             string(provider),
+						AccountID:            cfg.OAuthAccountID,
+						AgentConfigID:        cfg.ID,
+						SecondaryLabel:       "weekly limit",
+						SecondaryUsedPercent: &pct,
+					}, nil
+				})
+
+				view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider), Refresh: true})
+				if err != nil {
+					t.Fatalf("BuildAnalyticsUsage: %v", err)
+				}
+				if len(fetched) != 2 || fetched[0] != failed.ID || fetched[1] != healthy.ID {
+					t.Fatalf("separate connection fetches = %v, want failed then healthy configs", fetched)
+				}
+				if len(view.AccountLimits) != 1 || view.AccountLimits[0].AgentConfigID != healthy.ID || view.AccountLimits[0].Error != "" {
+					t.Fatalf("healthy separate connection did not win account card: %+v", view.AccountLimits)
+				}
+				if view.AccountLimits[0].SecondaryLimit == nil || view.AccountLimits[0].SecondaryLimit.UsedPercent == nil || *view.AccountLimits[0].SecondaryLimit.UsedPercent != 12 {
+					t.Fatalf("healthy separate connection limits missing: %+v", view.AccountLimits[0])
+				}
+			})
+		})
+	}
+}
+
 func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, alreadyNeedsReauth := range []bool{false, true} {
