@@ -889,6 +889,17 @@ func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Age
 	return raw, merged
 }
 
+func prepareAgentRuntimeRequest(req llmcontracts.AgentRequest) llmcontracts.AgentRequest {
+	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	if runtimeAgentDef == nil {
+		return req
+	}
+	req.AgentDefinition = runtimeAgentDef
+	req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
+	req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
+	return req
+}
+
 type anthropicAdapterCaller interface {
 	Call(context.Context, llmcontracts.AgentRequest, string, *llmstream.Writer) (llmcontracts.AgentResult, error)
 }
@@ -931,14 +942,8 @@ type openAIProviderAdapter struct {
 
 func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, req.NativeCompactionStateJSON)
-	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
-	if runtimeAgentDef != nil {
-		req.AgentDefinition = runtimeAgentDef
-	}
-	// Apply agent definition: inject system prompt + skill content
+	req = prepareAgentRuntimeRequest(req)
 	if req.AgentDefinition != nil {
-		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
-		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
 		if req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
 			req.Agent.Model = req.AgentDefinition.Model
 		}
@@ -981,13 +986,8 @@ type openAICompatibleProviderAdapter struct {
 }
 
 func (a *openAICompatibleProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
-	if runtimeAgentDef != nil {
-		req.AgentDefinition = runtimeAgentDef
-	}
+	req = prepareAgentRuntimeRequest(req)
 	if req.AgentDefinition != nil {
-		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
-		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
 		if req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
 			req.Agent.Model = req.AgentDefinition.Model
 		}
@@ -1003,15 +1003,7 @@ type ollamaProviderAdapter struct {
 }
 
 func (a *ollamaProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
-	if runtimeAgentDef != nil {
-		req.AgentDefinition = runtimeAgentDef
-	}
-	// Apply agent definition: inject system prompt + skill content
-	if req.AgentDefinition != nil {
-		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
-		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
-	}
+	req = prepareAgentRuntimeRequest(req)
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 	})
