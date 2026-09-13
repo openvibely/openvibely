@@ -186,6 +186,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/analytics/dashboard": {
+            "get": {
+                "description": "Returns task-level outcome KPIs, definitions, comparisons, evidence, reusable Agent performance, observed skill outcomes, and workflow performance for one project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get outcome-oriented Analytics dashboard data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Authoritative project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "30d",
+                        "description": "Convenience range: 7d, 30d, 90d, 365d, month, all",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional inclusive start datetime",
+                        "name": "date_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional exclusive end datetime",
+                        "name": "date_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Compare with the immediately preceding equivalent period",
+                        "name": "compare",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Outcome Analytics dashboard",
+                        "schema": {
+                            "$ref": "#/definitions/models.AnalyticsDashboard"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing project ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/analytics/execution-trends-by-hour": {
             "get": {
                 "description": "Returns execution counts grouped by hour-of-day.",
@@ -1732,6 +1798,166 @@ const docTemplate = `{
                 }
             }
         },
+        "models.AgentPerformance": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_name": {
+                    "type": "string"
+                },
+                "first_pass": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "follow_up": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "known_cost_per_achieved_goal": {
+                    "$ref": "#/definitions/models.CostCoverage"
+                },
+                "median_duration_ms": {
+                    "type": "integer"
+                },
+                "most_used_model": {
+                    "type": "string"
+                },
+                "tasks_evaluated": {
+                    "type": "integer"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                }
+            }
+        },
+        "models.AnalyticsDashboard": {
+            "type": "object",
+            "properties": {
+                "agents": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AgentPerformance"
+                    }
+                },
+                "current": {
+                    "$ref": "#/definitions/models.OutcomeMetrics"
+                },
+                "cycle_distribution": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnalyticsDistributionPoint"
+                    }
+                },
+                "definitions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.MetricDefinition"
+                    }
+                },
+                "follow_up_distribution": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnalyticsDistributionPoint"
+                    }
+                },
+                "funnel": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.OutcomeFunnelStage"
+                    }
+                },
+                "insights": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnalyticsInsight"
+                    }
+                },
+                "previous": {
+                    "$ref": "#/definitions/models.OutcomeMetrics"
+                },
+                "recent_outcomes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.EvidenceTaskRow"
+                    }
+                },
+                "skill_outcomes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillOutcomePerformance"
+                    }
+                },
+                "workflows": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.WorkflowPerformance"
+                    }
+                }
+            }
+        },
+        "models.AnalyticsDistributionPoint": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.AnalyticsInsight": {
+            "type": "object",
+            "properties": {
+                "comparison_window": {
+                    "type": "string"
+                },
+                "current_percent": {
+                    "type": "number"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "evidence_view": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "metric_key": {
+                    "type": "string"
+                },
+                "previous_percent": {
+                    "type": "number"
+                },
+                "sample_size": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.AnalyticsMetric": {
+            "type": "object",
+            "properties": {
+                "denominator": {
+                    "type": "integer"
+                },
+                "numerator": {
+                    "type": "integer"
+                },
+                "percent": {
+                    "type": "number"
+                },
+                "sample_size": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.AnalyticsUsageViewModel": {
             "type": "object",
             "properties": {
@@ -1785,6 +2011,20 @@ const docTemplate = `{
                 }
             }
         },
+        "models.CostCoverage": {
+            "type": "object",
+            "properties": {
+                "covered": {
+                    "type": "integer"
+                },
+                "eligible": {
+                    "type": "integer"
+                },
+                "value": {
+                    "type": "number"
+                }
+            }
+        },
         "models.DailyUsagePoint": {
             "type": "object",
             "properties": {
@@ -1817,6 +2057,47 @@ const docTemplate = `{
                 }
             }
         },
+        "models.EvidenceTaskRow": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_name": {
+                    "type": "string"
+                },
+                "cycle_time_ms": {
+                    "type": "integer"
+                },
+                "execution_count": {
+                    "type": "integer"
+                },
+                "follow_up_count": {
+                    "type": "integer"
+                },
+                "goal_result": {
+                    "type": "string"
+                },
+                "known_cost_usd": {
+                    "type": "number"
+                },
+                "merge_state": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "task_title": {
+                    "type": "string"
+                },
+                "technical_result": {
+                    "type": "string"
+                }
+            }
+        },
         "models.MergeStatus": {
             "type": "string",
             "enum": [
@@ -1833,6 +2114,23 @@ const docTemplate = `{
                 "MergeStatusFailed",
                 "MergeStatusConflict"
             ]
+        },
+        "models.MetricDefinition": {
+            "type": "object",
+            "properties": {
+                "definition": {
+                    "type": "string"
+                },
+                "denominator": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
         },
         "models.ModelUsagePoint": {
             "type": "object",
@@ -1866,6 +2164,61 @@ const docTemplate = `{
                 },
                 "total_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "models.OutcomeFunnelStage": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "denominator": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.OutcomeMetrics": {
+            "type": "object",
+            "properties": {
+                "first_pass": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "follow_up": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "known_cost_per_achieved_goal": {
+                    "$ref": "#/definitions/models.CostCoverage"
+                },
+                "known_cost_per_completed_task": {
+                    "$ref": "#/definitions/models.CostCoverage"
+                },
+                "known_failed_execution_cost": {
+                    "type": "number"
+                },
+                "median_cycle_time_ms": {
+                    "type": "integer"
+                },
+                "p90_cycle_time_ms": {
+                    "type": "integer"
+                },
+                "tasks_evaluated": {
+                    "type": "integer"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "tokens_per_achieved_goal": {
+                    "$ref": "#/definitions/models.CostCoverage"
                 }
             }
         },
@@ -2078,6 +2431,26 @@ const docTemplate = `{
                 },
                 "skill_scope": {
                     "type": "string"
+                }
+            }
+        },
+        "models.SkillOutcomePerformance": {
+            "type": "object",
+            "properties": {
+                "follow_up": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "skill_handle": {
+                    "type": "string"
+                },
+                "tasks_evaluated": {
+                    "type": "integer"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
                 }
             }
         },
@@ -2417,6 +2790,41 @@ const docTemplate = `{
                 }
             }
         },
+        "models.WorkflowPerformance": {
+            "type": "object",
+            "properties": {
+                "average_duration_ms": {
+                    "type": "integer"
+                },
+                "blocked_count": {
+                    "type": "integer"
+                },
+                "completed_count": {
+                    "type": "integer"
+                },
+                "completion_rate": {
+                    "type": "number"
+                },
+                "failed_count": {
+                    "type": "integer"
+                },
+                "health": {
+                    "type": "string"
+                },
+                "invocation_count": {
+                    "type": "integer"
+                },
+                "waiting_count": {
+                    "type": "integer"
+                },
+                "workflow_id": {
+                    "type": "string"
+                },
+                "workflow_name": {
+                    "type": "string"
+                }
+            }
+        },
         "repository.AgentUsage": {
             "type": "object",
             "properties": {
@@ -2503,6 +2911,9 @@ const docTemplate = `{
         "repository.SuccessFailureRate": {
             "type": "object",
             "properties": {
+                "cancelledCount": {
+                    "type": "integer"
+                },
                 "failureCount": {
                     "type": "integer"
                 },

@@ -28,35 +28,35 @@ templ analyticsContent(currentProject *models.Project) {
 			}
 		</div>
 		if currentProject != nil {
-			<!-- Filters -->
-			<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
-				<div class="card-body p-4">
-					<div class="flex flex-wrap gap-4 items-end">
-						<div class="form-control">
-							<label class="label"><span class="label-text">Date Range</span></label>
-							<select id="dateRange" class="select select-bordered select-sm">
-								<option value="7">Last 7 Days</option>
-								<option value="30" selected>Last 30 Days</option>
-								<option value="90">Last 90 Days</option>
-								<option value="365">Last Year</option>
-								<option value="all">All Time</option>
-							</select>
+				<!-- Shared filters and reloadable view navigation -->
+				<div class="sticky top-0 z-20 bg-base-200/95 backdrop-blur pb-3 mb-6" data-analytics-navigation>
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body p-4">
+							<div class="flex flex-wrap gap-4 items-end">
+								<div class="form-control"><label class="label" for="dateRange"><span class="label-text">Date Range</span></label><select id="dateRange" class="select select-bordered select-sm"><option value="7">Last 7 Days</option><option value="30" selected>Last 30 Days</option><option value="90">Last 90 Days</option><option value="365">Last Year</option><option value="all">All Time</option></select></div>
+								<div class="form-control"><label class="label" for="groupBy"><span class="label-text">Group By</span></label><select id="groupBy" class="select select-bordered select-sm"><option value="day" selected>Day</option><option value="week">Week</option><option value="month">Month</option></select></div>
+								<label class="label cursor-pointer gap-2 pb-2"><input id="comparePeriod" type="checkbox" class="checkbox checkbox-sm" checked/><span class="label-text">Compare previous period</span></label>
+								<div class="form-control"><label class="label" for="analyticsAgentFilter"><span class="label-text">Agent</span></label><select id="analyticsAgentFilter" class="select select-bordered select-sm"><option value="">All Agents</option></select></div>
+								<div class="form-control"><label class="label" for="analyticsWorkflowFilter"><span class="label-text">Workflow</span></label><select id="analyticsWorkflowFilter" class="select select-bordered select-sm"><option value="">All Workflows</option></select></div>
+								<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
+							</div>
+							<nav class="flex gap-2 overflow-x-auto mt-4 pb-1" aria-label="Analytics views"><button class="btn btn-sm whitespace-nowrap" data-analytics-view="overview">Overview</button><button class="btn btn-sm whitespace-nowrap" data-analytics-view="outcomes">Outcomes</button><button class="btn btn-sm whitespace-nowrap" data-analytics-view="agents">Agents</button><button class="btn btn-sm whitespace-nowrap" data-analytics-view="workflows">Workflows</button><button class="btn btn-sm whitespace-nowrap" data-analytics-view="learning">Learning</button><button class="btn btn-sm whitespace-nowrap" data-analytics-view="usage">Usage</button><button class="btn btn-sm whitespace-nowrap" data-analytics-view="all">All Metrics</button></nav>
 						</div>
-						<div class="form-control">
-							<label class="label"><span class="label-text">Group By</span></label>
-							<select id="groupBy" class="select select-bordered select-sm">
-								<option value="day" selected>Day</option>
-								<option value="week">Week</option>
-								<option value="month">Month</option>
-							</select>
-						</div>
-						<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
 					</div>
+					<nav id="analyticsJumpLinks" class="hidden flex gap-3 overflow-x-auto pt-2 text-sm" aria-label="Jump to analytics section"><a class="link" href="#analytics-overview">Overview</a><a class="link" href="#analytics-outcomes">Outcomes</a><a class="link" href="#analytics-agents">Agents</a><a class="link" href="#analytics-workflows">Workflows</a><a class="link" href="#analytics-learning">Learning</a><a class="link" href="#analytics-usage">Usage</a></nav>
 				</div>
-			</div>
-				<!-- Provider Account Cards -->
-				<div id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-					<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>
+				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
+				<section id="analytics-overview" data-analytics-section="overview" class="space-y-6 mb-6">
+					<div><h3 class="text-xl font-bold">Overview</h3><p class="text-sm opacity-60">Task outcomes with technical status kept separate from goal evidence.</p></div>
+					<div id="analyticsKpis" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-success">Notable improvements</h4><div id="analyticsImprovements"><p class="opacity-50">No supported comparison insight yet.</p></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-warning">Needs attention</h4><div id="analyticsAttention"><p class="opacity-50">No supported attention insight yet.</p></div></div></div></div>
+					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Recent outcomes</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Merge/review</th><th>Agent definition</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="recentOutcomesTable"></tbody></table></div></div></div>
+				</section>
+					<section id="analytics-outcomes" data-analytics-section="outcomes" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Outcomes</h3><p class="text-sm opacity-60">Execution completion is not proof that a goal was achieved.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Outcome funnel</h4><div id="outcomeFunnel" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Cycle-time distribution</h4><div class="h-64"><canvas id="cycleDistributionChart"></canvas></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Follow-up / rework distribution</h4><div class="h-64"><canvas id="followupDistributionChart"></canvas></div></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Task-level outcome evidence</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Agent</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="outcomeEvidenceTable"></tbody></table></div></div></div></section>					<section id="analytics-agents" data-analytics-section="agents" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Agent performance</h3><p class="text-sm opacity-60">Reusable Agent definitions, separate from model configurations.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Technical completion</th><th>Goal achievement</th><th>First pass</th><th>Follow-up</th><th>Duration</th><th>Cost / achieved goal</th><th>Most-used model</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Recent supporting tasks for selected Agent</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Model</th><th>Executions</th><th>Follow-ups</th></tr></thead><tbody id="agentEvidenceTable"></tbody></table></div></div></div></section>				<section id="analytics-workflows" data-analytics-section="workflows" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Workflow performance</h3><p class="text-sm opacity-60">Automation invocations use the selected period; waiting, blocked, and health are labeled current state.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Workflow</th><th>Invocations</th><th>Completion</th><th>Failures</th><th>Duration</th><th>Waiting / blocked</th><th>Known cost</th><th>Health</th></tr></thead><tbody id="workflowPerformanceTable"></tbody></table></div></div></div></section>
+					<section id="analytics-learning" data-analytics-section="learning" class="space-y-4"><div><h3 class="text-xl font-bold mt-6">Learning</h3><p class="text-sm opacity-60">Observed skill activity and task outcomes; association is not causation.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes among tasks using skills</h4><p class="text-sm opacity-60">Tasks where a skill was selected or loaded in the selected period. Small samples are descriptive only.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical task outcome</th><th>Goal achievement</th><th>Follow-up</th></tr></thead><tbody id="skillOutcomeTable"></tbody></table></div></div></div></section>				<div id="analytics-usage" data-analytics-section="usage"><h3 class="text-xl font-bold mt-6">Usage</h3><p class="text-sm opacity-60 mb-4">Local provider usage and available recorded cost.</p><div id="usageOutcomeContext" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div></div>
+					<!-- Provider Account Cards: current account state, intentionally independent of the date window. -->
+					<div class="mb-2"><h3 class="text-lg font-semibold">Provider account limits</h3><p class="text-xs opacity-60">Current account state · not date-filtered</p></div>
+					<div id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">					<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>
 				</div>
 				<!-- Usage Charts -->
 				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -99,7 +99,7 @@ templ analyticsContent(currentProject *models.Project) {
 				<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">				<!-- Success/Failure Rates -->
 				<div class="card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body">
-						<h3 class="card-title text-lg">Success/Failure Rates Over Time</h3>
+						<h3 class="card-title text-lg">Technical Execution Completion Over Time</h3>
 						<div class="relative h-64">
 							<canvas id="successFailureChart"></canvas>
 						</div>
@@ -211,7 +211,12 @@ templ analyticsContent(currentProject *models.Project) {
 						</div>
 					</div>
 				</div>
-			<!-- Failed Task Patterns -->
+						<div id="memoryEffectivenessUnavailable" class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+							<div class="card-body">
+								<h3 class="card-title text-lg">Memory effectiveness unavailable</h3>
+								<p class="text-sm opacity-60">Memory recall lacks reliable task-outcome instrumentation. Recall alone does not establish usefulness.</p>
+							</div>
+						</div>				<!-- Failed Task Patterns -->
 			<div class="card bg-base-100 shadow-sm border border-base-300">
 				<div class="card-body">
 					<h3 class="card-title text-lg">Failed Task Patterns</h3>
@@ -240,22 +245,183 @@ templ analyticsContent(currentProject *models.Project) {
 						try { c.destroy(); } catch(e) {}
 					});
 				}
-				window._analyticsCharts = {};
+					window._analyticsCharts = {};
+					if (window._analyticsAbortController) window._analyticsAbortController.abort();
+					window._analyticsAbortController = new AbortController();
 
-				function initAnalytics() {
+					function initAnalytics() {
 					var dataEl = document.getElementById('analytics-data');
 					if (!dataEl) return;
 					var projectID = dataEl.dataset.projectId;
-					var charts = window._analyticsCharts;
-					var latestUsageAnalytics = null;
+						var charts = window._analyticsCharts;
+						var eventSignal = window._analyticsAbortController.signal;
+						var latestUsageAnalytics = null;
+						var latestDashboard = null;
 
-					// Helper to safely fetch JSON arrays from API
-					async function fetchJSON(url) {
-						const response = await fetch(url);
-						if (!response.ok) return [];
-						const data = await response.json();
-						return Array.isArray(data) ? data : [];
-					}
+						// Fetch JSON or surface a controlled error. Never preserve stale data.
+						async function fetchJSON(url) {
+							const response = await fetch(url);
+							if (!response.ok) throw new Error('Analytics request failed (' + response.status + ')');
+							return await response.json();
+						}
+
+						function destroyChart(key) {
+							if (!charts[key]) return;
+							try { charts[key].destroy(); } catch (e) {}
+							delete charts[key];
+						}
+							function showAnalyticsError(error) {
+								Object.keys(charts).forEach(destroyChart);
+								const box = document.getElementById('analyticsError');
+								box.textContent = error && error.message ? error.message : 'Analytics request failed';
+								box.classList.remove('hidden');
+								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',9],['agentEvidenceTable',6],['workflowPerformanceTable',8],['skillOutcomeTable',5],['usageBreakdownTable',8],['underusedSkillsTable',4]].forEach(function(item) {
+									const table = document.getElementById(item[0]);
+									if (table) table.innerHTML = '<tr><td colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable</td></tr>';
+								});
+								['analyticsKpis','outcomeFunnel','analyticsImprovements','analyticsAttention','usageOutcomeContext','accountUsageCards','frequentTasksList'].forEach(function(id) { const node=document.getElementById(id); if (node) node.textContent='Analytics unavailable'; });
+								const failedBody = document.querySelector('#failedPatternsTable tbody');
+								if (failedBody) failedBody.innerHTML = '<tr><td colspan="4" class="text-center opacity-50">Analytics unavailable</td></tr>';
+							}
+						function renderChartState(key, canvasID, rows, message) {
+							destroyChart(key);
+								const canvas = document.getElementById(canvasID);
+								if (!canvas) return null;
+								const chartLabels = { cycleDistributionChart: 'Cycle-time distribution', followupDistributionChart: 'Follow-up distribution', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', successFailureChart: 'Technical execution completion over time', hourlyTrendsChart: 'Task executions by hour', avgTimeTaskChart: 'Average execution duration by task', avgTimeAgentChart: 'Average execution duration by model', agentUsageChart: 'Model breakdown by executions' };
+								canvas.setAttribute('role', 'img');
+								canvas.setAttribute('aria-label', chartLabels[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
+							if (old) old.remove();
+							if (!rows || rows.length === 0) {
+								canvas.classList.add('hidden');
+								const state = document.createElement('p');
+								state.setAttribute('data-analytics-chart-state', '');
+								state.className = 'text-center opacity-50 py-12';
+								state.textContent = message || 'No data in this period';
+								canvas.parentElement.appendChild(state);
+								return null;
+							}
+							canvas.classList.remove('hidden');
+							return canvas;
+						}
+
+						const validViews = ['overview', 'outcomes', 'agents', 'workflows', 'learning', 'usage', 'all'];
+						let selectedView = 'overview';
+						function analyticsURL(view) {
+							const params = new URLSearchParams(window.location.search);
+							params.set('project_id', projectID);
+							params.set('view', view);
+							params.set('range', usageRangeParam());
+							params.set('group_by', document.getElementById('groupBy').value);
+								params.set('compare', document.getElementById('comparePeriod').checked ? '1' : '0');
+								const agent = document.getElementById('analyticsAgentFilter').value;
+								const workflow = document.getElementById('analyticsWorkflowFilter').value;
+								if (agent) params.set('agent', agent); else params.delete('agent');
+								if (workflow) params.set('workflow', workflow); else params.delete('workflow');
+								return '/analytics?' + params.toString();						}
+						function viewDetailElements(view) {
+							const ids = {
+								outcomes: ['successFailureChart', 'avgTimeTaskChart', 'failedPatternsTable'],
+								agents: ['avgTimeAgentChart', 'agentUsageChart'],
+									learning: ['skillUsageTrendChart', 'skillTopChart', 'skillFollowChart', 'skillAgentChart', 'underusedSkillsTable', 'memoryEffectivenessUnavailable'],								usage: ['accountUsageCards', 'usageRateChart', 'modelTokenBreakdownChart', 'usageBreakdownTable'],
+								activity: ['hourlyTrendsChart', 'frequentTasksList']
+							};
+							return (ids[view] || []).map(function(id) {
+								const node = document.getElementById(id);
+								return node ? (node.closest('.card') || node) : null;
+							}).filter(Boolean);
+						}
+						function applyView(view, updateHistory) {
+							selectedView = validViews.includes(view) ? view : 'overview';
+							document.querySelectorAll('[data-analytics-section]').forEach(function(section) { section.classList.add('hidden'); });
+							['outcomes', 'agents', 'learning', 'usage', 'activity'].forEach(function(name) { viewDetailElements(name).forEach(function(node) { node.classList.add('hidden'); }); });
+							if (selectedView === 'all') {
+								document.querySelectorAll('[data-analytics-section]').forEach(function(section) { section.classList.remove('hidden'); });
+								['outcomes', 'agents', 'learning', 'usage', 'activity'].forEach(function(name) { viewDetailElements(name).forEach(function(node) { node.classList.remove('hidden'); }); });
+							} else {
+								const section = document.querySelector('[data-analytics-section="' + selectedView + '"]');
+								if (section) section.classList.remove('hidden');
+								viewDetailElements(selectedView).forEach(function(node) { node.classList.remove('hidden'); });
+							}
+							document.getElementById('analyticsJumpLinks').classList.toggle('hidden', selectedView !== 'all');
+							document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.classList.toggle('btn-primary', button.dataset.analyticsView === selectedView); });
+								if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));						}
+
+						function ratioText(value) { return formatNumber(value.numerator) + ' / ' + formatNumber(value.denominator) + ' (' + Number(value.percent || 0).toFixed(1) + '%)'; }
+						function costCoverageText(value) { return value ? formatCost(value.value) + ' across ' + value.covered + ' of ' + value.eligible : 'Unavailable'; }
+						function renderDashboard(data) {
+							const current = data.current || {};
+							const previous = data.previous || null;
+							const definitions = new Map((data.definitions || []).map(function(item) { return [item.key, item]; }));
+							const cards = [
+								['technical_completion', 'Technical completion rate', ratioText(current.technical_completion || {})],
+								['goal_achievement', 'Goal achievement rate', ratioText(current.goal_achievement || {})],
+								['first_pass', 'Technical first-pass rate', ratioText(current.first_pass || {})],
+								['follow_up', 'Follow-up rate', ratioText(current.follow_up || {})],
+								['median_cycle_time', 'Median task cycle time', formatDuration(current.median_cycle_time_ms || 0)],
+								['known_cost_per_achieved_goal', 'Cost per achieved goal', costCoverageText(current.known_cost_per_achieved_goal)],
+								['sample_size', 'Sample size', formatNumber(current.tasks_evaluated || 0) + ' tasks']
+							];
+							document.getElementById('analyticsKpis').innerHTML = cards.map(function(card) {
+								const definition = definitions.get(card[0]);
+								let delta = '';
+									if (previous && previous[card[0]] && current[card[0]] && typeof current[card[0]].percent === 'number') { const change = Number(current[card[0]].percent) - Number(previous[card[0]].percent || 0); delta = '<div class="text-xs opacity-60">' + (change >= 0 ? '+' : '') + change.toFixed(1) + ' percentage points · previous ' + Number(previous[card[0]].percent).toFixed(1) + '% · n=' + previous[card[0]].denominator + '</div>'; }								return '<a class="card bg-base-100 border border-base-300 hover:border-primary" href="' + escapeHTML(analyticsURL(card[0] === 'known_cost_per_achieved_goal' ? 'usage' : 'outcomes')) + '"><div class="card-body p-4"><div class="text-sm font-semibold">' + escapeHTML(card[1]) + '</div><div class="text-xl font-bold">' + escapeHTML(card[2]) + '</div>' + delta + '<div class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator</div></div></a>';
+							}).join('');
+							const recent = data.recent_outcomes || [];
+								document.getElementById('recentOutcomesTable').innerHTML = recent.length ? recent.map(function(row) {
+									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
+									const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name);
+									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.merge_state || 'Not applicable') + '</td><td>' + agent + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
+								}).join('') : '<tr><td colspan="10" class="text-center opacity-50">No task outcomes in this period</td></tr>';
+								document.getElementById('outcomeEvidenceTable').innerHTML = recent.length ? recent.map(function(row) {
+									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
+									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
+								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { return '<a class="card bg-base-200" href="' + escapeHTML(analyticsURL('outcomes')) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
+							renderDistributionChart('cycleDistribution', 'cycleDistributionChart', data.cycle_distribution || []);
+							renderDistributionChart('followupDistribution', 'followupDistributionChart', data.follow_up_distribution || []);
+								renderAgentPerformance(data.agents || []);
+								renderSkillOutcomes(data.skill_outcomes || []);
+								renderWorkflowPerformance(data.workflows || []);							renderInsights(data.insights || []);
+								renderUsageOutcomeContext(current, latestUsageAnalytics ? latestUsageAnalytics.totals : null);
+							}
+							function renderUsageOutcomeContext(current, totals) {
+								const usageContext = document.getElementById('usageOutcomeContext');
+								if (!usageContext) return;
+								const inputTokens = totals && totals.input_tokens ? Number(totals.input_tokens) : 0;
+								const cachedTokens = totals && totals.cached_input_tokens ? Number(totals.cached_input_tokens) : 0;
+								const cacheText = inputTokens > 0 ? formatNumber(cachedTokens) + ' / ' + formatNumber(inputTokens) + ' input tokens (' + (cachedTokens * 100 / inputTokens).toFixed(1) + '%)' : 'Unavailable';
+								usageContext.innerHTML = [['Known cost / achieved goal', costCoverageText(current.known_cost_per_achieved_goal)], ['Known cost / technical completion', costCoverageText(current.known_cost_per_completed_task)], ['Known failed execution cost', formatCost(current.known_failed_execution_cost || 0)], ['Tokens / achieved goal', current.tokens_per_achieved_goal ? formatNumber(current.tokens_per_achieved_goal.value) + ' across ' + current.tokens_per_achieved_goal.covered + ' of ' + current.tokens_per_achieved_goal.eligible : 'Unavailable'], ['Cache utilization', cacheText]].map(function(item) { return '<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">' + escapeHTML(item[0]) + '</span><strong>' + escapeHTML(item[1]) + '</strong></div></div>'; }).join('');
+							}
+						function renderDistributionChart(key, canvasID, rows) {
+							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');
+							if (!canvas) return;
+							charts[key] = new Chart(canvas.getContext('2d'), { type: 'bar', data: { labels: rows.map(function(row) { return row.label; }), datasets: [{ label: 'Tasks (sample n=' + rows.reduce(function(sum, row) { return sum + row.count; }, 0) + ')', data: rows.map(function(row) { return row.count; }), backgroundColor: 'rgba(59, 130, 246, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } } });
+						}
+							function renderAgentPerformance(rows) {
+								const filter = document.getElementById('analyticsAgentFilter');
+								const selected = filter.value || new URLSearchParams(window.location.search).get('agent') || '';							filter.innerHTML = '<option value="">All Agents</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.agent_id || '__unassigned__') + '">' + escapeHTML(row.agent_name) + '</option>'; }).join(''); filter.value = selected;
+							const visible = rows.filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
+								document.getElementById('agentPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const name = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name); return '<tr><td>' + name + '</td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.first_pass)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td><td>' + escapeHTML(formatDuration(row.median_duration_ms || 0)) + '</td><td>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '</td><td>' + escapeHTML(row.most_used_model || 'Unavailable') + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="text-center opacity-50">No Agent evidence in this period</td></tr>';
+								const evidence = ((latestDashboard && latestDashboard.recent_outcomes) || []).filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
+								document.getElementById('agentEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) { const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'</a></td><td>'+escapeHTML(row.technical_result)+'</td><td>'+escapeHTML(row.goal_result||'Not goal-bearing')+'</td><td>'+escapeHTML(row.model)+'</td><td>'+row.execution_count+'</td><td>'+row.follow_up_count+'</td></tr>'; }).join('') : '<tr><td colspan="6" class="text-center opacity-50">No recent supporting tasks in this period</td></tr>';						}
+							function renderSkillOutcomes(rows) {
+								const table = document.getElementById('skillOutcomeTable');
+								if (!table) return;
+								table.innerHTML = rows.length ? rows.map(function(row) {
+									return '<tr><td><code>' + escapeHTML(row.skill_handle) + '</code></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';
+								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
+							}
+							function renderWorkflowPerformance(rows) {
+								const filter = document.getElementById('analyticsWorkflowFilter'); const selected = filter.value || new URLSearchParams(window.location.search).get('workflow') || '';							filter.innerHTML = '<option value="">All Workflows</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.workflow_id) + '">' + escapeHTML(row.workflow_name) + '</option>'; }).join(''); filter.value = selected;
+							const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
+							document.getElementById('workflowPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'</a></td><td>'+row.invocation_count+'</td><td>'+row.completed_count+' / '+(row.completed_count+row.failed_count)+' ('+Number(row.completion_rate||0).toFixed(1)+'%)</td><td>'+row.failed_count+'</td><td>'+escapeHTML(formatDuration(row.average_duration_ms||0))+'</td><td>'+row.waiting_count+' / '+row.blocked_count+'</td><td>Unavailable</td><td>'+escapeHTML(row.health)+'</td></tr>'; }).join('') : '<tr><td colspan="8" class="text-center"><span class="opacity-50">No automations in this project.</span> <a class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Inspect or create automations</a></td></tr>';
+						}
+						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){return '<a class="block link" href="'+escapeHTML(analyticsURL(row.evidence_view||'outcomes'))+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
+
+						async function loadDashboard() {
+							const params = new URLSearchParams({ project_id: projectID, range: usageRangeParam(), compare: document.getElementById('comparePeriod').checked ? '1' : '0' });
+							try { latestDashboard = await fetchJSON('/api/analytics/dashboard?' + params.toString()); renderDashboard(latestDashboard); }
+							catch (error) { showAnalyticsError(error); }
+						}
 
 						function formatNumber(value) {
 							return new Intl.NumberFormat().format(value || 0);
@@ -330,10 +496,9 @@ templ analyticsContent(currentProject *models.Project) {
 									try {
 										const groupBy = document.getElementById('groupBy').value;
 									const params = new URLSearchParams({ project_id: projectID, range: skillRangeParam(), group_by: groupBy });
-										const response = await fetch('/api/analytics/skills?' + params.toString());
-										if (!response.ok) return;
-										renderSkillAnalytics(await response.json());
-									} catch (e) { console.error('loadSkillAnalytics:', e); }
+										const data = await fetchJSON('/api/analytics/skills?' + params.toString());
+										renderSkillAnalytics(data);
+									} catch (e) { console.error('loadSkillAnalytics:', e); showAnalyticsError(e); }
 								}
 
 								function renderSkillAnalytics(data) {
@@ -444,12 +609,11 @@ templ analyticsContent(currentProject *models.Project) {
 									function lineDataset(label, data, color) {
 										return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
 									}
-								function renderSkillUsageTrend(totals) {
-									if (charts.skillUsageTrend) charts.skillUsageTrend.destroy();
-									const canvas = document.getElementById('skillUsageTrendChart');
-									if (!canvas) return;
-									const totalRows = totals || [];
-									const labels = totalRows.map(row => row.period || '');
+							function renderSkillUsageTrend(totals) {
+								const totalRows = totals || [];
+								const canvas = renderChartState('skillUsageTrend', 'skillUsageTrendChart', totalRows, 'No skill activity in this period');
+								if (!canvas) return;
+								const labels = totalRows.map(row => row.period || '');
 									const datasets = [
 										lineDataset('Used', totalRows.map(row => (row.selected_count || 0) + (row.loaded_count || 0) + (row.viewed_count || 0)), 'rgb(59, 130, 246)'),
 										lineDataset('Created', totalRows.map(row => row.created_count || 0), 'rgb(20, 184, 166)'),
@@ -464,13 +628,12 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 								function renderSkillTop(rows) {
-									if (charts.skillTop) charts.skillTop.destroy();
-									const canvas = document.getElementById('skillTopChart');
 									const chartRows = rows.slice(0, 8).map(function(row) {
 										return Object.assign({}, row, {
 											activity: (row.selected_count || 0) + (row.loaded_count || 0) + (row.viewed_count || 0) + (row.created_count || 0) + (row.edited_count || 0)
 										});
 									});
+									const canvas = renderChartState('skillTop', 'skillTopChart', chartRows, 'No skill activity in this period');
 									if (canvas) {
 										charts.skillTop = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
@@ -487,14 +650,14 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 								function renderSkillFollow(rows) {
-									if (charts.skillFollow) charts.skillFollow.destroy();
-									const canvas = document.getElementById('skillFollowChart');
+									const chartRows = rows.slice(0, 8);
+									const canvas = renderChartState('skillFollow', 'skillFollowChart', chartRows, 'No skill follow-through evidence in this period');
 									if (canvas) {
 										charts.skillFollow = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
-											data: { labels: rows.slice(0, 8).map(r => skillLabel(r.skill_handle)), datasets: [
-												{ label: 'Used', data: rows.slice(0, 8).map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
-												{ label: 'Ignored', data: rows.slice(0, 8).map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
+											data: { labels: chartRows.map(r => skillLabel(r.skill_handle)), datasets: [
+												{ label: 'Used', data: chartRows.map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
+												{ label: 'Ignored', data: chartRows.map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
 											] },
 											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
@@ -502,8 +665,6 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 								function renderSkillAgentUsage(heatmap) {
-									if (charts.skillAgent) charts.skillAgent.destroy();
-									const canvas = document.getElementById('skillAgentChart');
 									const cells = heatmap.cells || [];
 									const agentNames = new Map((heatmap.agents || []).map(a => [a.agent_id || '', a.agent_name || a.agent_id || 'Unassigned']));
 									const rows = cells.map(function(cell) {
@@ -512,6 +673,7 @@ templ analyticsContent(currentProject *models.Project) {
 											activity: (cell.selected_count || 0) + (cell.loaded_count || 0) + (cell.viewed_count || 0)
 										});
 									}).filter(row => row.activity > 0).sort((a, b) => b.activity - a.activity).slice(0, 8);
+									const canvas = renderChartState('skillAgent', 'skillAgentChart', rows, 'No Agent and skill pair activity in this period');
 									if (canvas) {
 										charts.skillAgent = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
@@ -609,11 +771,10 @@ templ analyticsContent(currentProject *models.Project) {
 								function renderUsageRateChart(data) {
 									const rate = data?.usage_rate || [];
 									const rateByModel = data?.usage_rate_by_model || [];
-									const rateKeys = modelSeriesKeys(rateByModel);
-									const choice = fillModelChoiceSelect('usageRateModelSelect', rateKeys);
-									if (charts.usageRate) charts.usageRate.destroy();
-									const rateCtx = document.getElementById('usageRateChart');
-									if (!rateCtx) return;
+								const rateKeys = modelSeriesKeys(rateByModel);
+								const choice = fillModelChoiceSelect('usageRateModelSelect', rateKeys);
+								const rateCtx = renderChartState('usageRate', 'usageRateChart', rate, 'No token usage in this period');
+								if (!rateCtx) return;
 									let labels = [];
 									let datasets = [];
 									if (choice === 'combined' || rateByModel.length === 0) {
@@ -638,6 +799,7 @@ templ analyticsContent(currentProject *models.Project) {
 
 								function renderUsageAnalytics(data) {
 									const totals = data.totals || {};
+									renderUsageOutcomeContext(latestDashboard ? latestDashboard.current || {} : {}, totals);
 									const lastUpdated = document.getElementById('usageLastUpdated');
 									lastUpdated.textContent = data.last_updated_at ? 'Last updated ' + new Date(data.last_updated_at).toLocaleString() : 'Local usage history';
 										renderUsageRateChart(data);
@@ -654,11 +816,10 @@ templ analyticsContent(currentProject *models.Project) {
 											table.innerHTML = rows.join('');
 										}
 									}
-									if (charts.modelTokenBreakdown) charts.modelTokenBreakdown.destroy();
-									const modelCtx = document.getElementById('modelTokenBreakdownChart');
-									if (modelCtx) {
-										charts.modelTokenBreakdown = new Chart(modelCtx.getContext('2d'), {
-											type: 'pie',
+								const modelCtx = renderChartState('modelTokenBreakdown', 'modelTokenBreakdownChart', breakdown, 'No model token usage in this period');
+								if (modelCtx) {
+									charts.modelTokenBreakdown = new Chart(modelCtx.getContext('2d'), {
+										type: 'bar',
 											data: {
 												labels: breakdown.map(row => `${row.provider}/${row.model}`),
 												datasets: [{
@@ -723,11 +884,9 @@ templ analyticsContent(currentProject *models.Project) {
 										const groupBy = document.getElementById('groupBy').value;
 										const params = new URLSearchParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy });
 										if (refreshUsage) params.append('refresh', 'true');
-										const response = await fetch(`/api/analytics/usage?${params}`);
-										if (!response.ok) return;
-										latestUsageAnalytics = await response.json();
+										latestUsageAnalytics = await fetchJSON('/api/analytics/usage?' + params.toString());
 										renderUsageAnalytics(latestUsageAnalytics);
-									} catch (e) { console.error('loadUsageAnalytics:', e); }
+									} catch (e) { console.error('loadUsageAnalytics:', e); showAnalyticsError(e); }
 								}
 
 								// Load Success/Failure Rates
@@ -739,20 +898,18 @@ templ analyticsContent(currentProject *models.Project) {
 						if (dateFrom) params.append('date_from', dateFrom);
 						if (dateTo) params.append('date_to', dateTo);
 
-						const data = await fetchJSON(`/api/analytics/success-failure-rates?${params}`);
-						if (data.length === 0) return;
+							const data = await fetchJSON(`/api/analytics/success-failure-rates?${params}`);
+							const ctx = renderChartState('successFailure', 'successFailureChart', data, 'No terminal executions in this period');
+							if (!ctx) return;
 
-						if (charts.successFailure) charts.successFailure.destroy();
-						const ctx = document.getElementById('successFailureChart');
-						if (!ctx) return;
-						charts.successFailure = new Chart(ctx.getContext('2d'), {
+							charts.successFailure = new Chart(ctx.getContext('2d'), {
 							type: 'line',
 							plugins: [analyticsActivePointOnTop],
 							data: {
 								labels: data.map(d => d.Period || 'N/A'),
 								datasets: [
 									{
-										label: 'Success Rate (%)',
+										label: 'Technical completion rate (%)',
 										data: data.map(d => d.SuccessRate || 0),
 										borderColor: 'rgb(34, 197, 94)',
 										backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -773,12 +930,12 @@ templ analyticsContent(currentProject *models.Project) {
 								interaction: { mode: 'index', intersect: false },
 								plugins: { tooltip: analyticsLineTooltipOptions() },
 								scales: {
-									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Success Rate (%)' } },
+									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Technical completion rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }
 								}
 							}
 						});
-						} catch (e) { console.error('loadSuccessFailureRates:', e); }
+						} catch (e) { console.error('loadSuccessFailureRates:', e); showAnalyticsError(e); }
 					}
 
 					// Load Hourly Trends
@@ -789,12 +946,11 @@ templ analyticsContent(currentProject *models.Project) {
 						if (dateFrom) params.append('date_from', dateFrom);
 						if (dateTo) params.append('date_to', dateTo);
 
-						const data = await fetchJSON(`/api/analytics/execution-trends-by-hour?${params}`);
+							const data = await fetchJSON(`/api/analytics/execution-trends-by-hour?${params}`);
 
-						if (charts.hourlyTrends) charts.hourlyTrends.destroy();
-						const ctx = document.getElementById('hourlyTrendsChart');
-						if (!ctx) return;
-						charts.hourlyTrends = new Chart(ctx.getContext('2d'), {
+							const ctx = renderChartState('hourlyTrends', 'hourlyTrendsChart', data, 'No executions in this period');
+							if (!ctx) return;
+							charts.hourlyTrends = new Chart(ctx.getContext('2d'), {
 							type: 'bar',
 							data: {
 								labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
@@ -815,19 +971,20 @@ templ analyticsContent(currentProject *models.Project) {
 								scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' } } }
 							}
 						});
-						} catch (e) { console.error('loadHourlyTrends:', e); }
+						} catch (e) { console.error('loadHourlyTrends:', e); showAnalyticsError(e); }
 					}
 
 					// Load Avg Execution Time by Task
 					async function loadAvgTimeByTask() {
 						try {
-						const data = await fetchJSON(`/api/analytics/avg-execution-time-by-task?project_id=${projectID}&limit=10`);
-						if (data.length === 0) return;
-
-						if (charts.avgTimeTask) charts.avgTimeTask.destroy();
-						const ctx = document.getElementById('avgTimeTaskChart');
-						if (!ctx) return;
-						charts.avgTimeTask = new Chart(ctx.getContext('2d'), {
+							const { dateFrom, dateTo } = getDateRange();
+							const params = new URLSearchParams({ project_id: projectID, limit: '10' });
+							if (dateFrom) params.set('date_from', dateFrom);
+							if (dateTo) params.set('date_to', dateTo);
+							const data = await fetchJSON('/api/analytics/avg-execution-time-by-task?' + params.toString());
+							const ctx = renderChartState('avgTimeTask', 'avgTimeTaskChart', data, 'No completed execution durations in this period');
+							if (!ctx) return;
+							charts.avgTimeTask = new Chart(ctx.getContext('2d'), {
 							type: 'bar',
 							data: {
 								labels: data.map(d => d.Name || 'Unknown'),
@@ -848,26 +1005,27 @@ templ analyticsContent(currentProject *models.Project) {
 									tooltip: {
 										callbacks: {
 											label: function(context) {
-												return 'Avg: ' + formatDuration(data[context.dataIndex].AvgMs || 0);
+												return 'Avg: ' + formatDuration(data[context.dataIndex].AvgMs || 0) + ' · n=' + (data[context.dataIndex].Count || 0);
 											}
 										}
 									}
 								}
 							}
 						});
-						} catch (e) { console.error('loadAvgTimeByTask:', e); }
+						} catch (e) { console.error('loadAvgTimeByTask:', e); showAnalyticsError(e); }
 					}
 
 					// Load Avg Execution Time by Agent
 					async function loadAvgTimeByAgent() {
 						try {
-						const data = await fetchJSON(`/api/analytics/avg-execution-time-by-agent?project_id=${projectID}`);
-						if (data.length === 0) return;
-
-						if (charts.avgTimeAgent) charts.avgTimeAgent.destroy();
-						const ctx = document.getElementById('avgTimeAgentChart');
-						if (!ctx) return;
-						charts.avgTimeAgent = new Chart(ctx.getContext('2d'), {
+							const { dateFrom, dateTo } = getDateRange();
+							const params = new URLSearchParams({ project_id: projectID });
+							if (dateFrom) params.set('date_from', dateFrom);
+							if (dateTo) params.set('date_to', dateTo);
+							const data = await fetchJSON('/api/analytics/avg-execution-time-by-agent?' + params.toString());
+							const ctx = renderChartState('avgTimeAgent', 'avgTimeAgentChart', data, 'No model duration samples in this period');
+							if (!ctx) return;
+							charts.avgTimeAgent = new Chart(ctx.getContext('2d'), {
 							type: 'bar',
 							data: {
 								labels: data.map(d => d.Name || 'Unknown'),
@@ -887,27 +1045,28 @@ templ analyticsContent(currentProject *models.Project) {
 									tooltip: {
 										callbacks: {
 											label: function(context) {
-												return 'Avg: ' + formatDuration(data[context.dataIndex].AvgMs || 0);
+												return 'Avg: ' + formatDuration(data[context.dataIndex].AvgMs || 0) + ' · n=' + (data[context.dataIndex].Count || 0);
 											}
 										}
 									}
 								}
 							}
 						});
-						} catch (e) { console.error('loadAvgTimeByAgent:', e); }
+						} catch (e) { console.error('loadAvgTimeByAgent:', e); showAnalyticsError(e); }
 					}
 
 					// Load Agent Usage
 					async function loadAgentUsage() {
 						try {
-						const data = await fetchJSON(`/api/analytics/agent-usage-by-project?project_id=${projectID}`);
-						if (data.length === 0) return;
-
-						if (charts.agentUsage) charts.agentUsage.destroy();
-						const ctx = document.getElementById('agentUsageChart');
-						if (!ctx) return;
-						charts.agentUsage = new Chart(ctx.getContext('2d'), {
-							type: 'pie',
+							const { dateFrom, dateTo } = getDateRange();
+							const params = new URLSearchParams({ project_id: projectID });
+							if (dateFrom) params.set('date_from', dateFrom);
+							if (dateTo) params.set('date_to', dateTo);
+							const data = await fetchJSON('/api/analytics/agent-usage-by-project?' + params.toString());
+							const ctx = renderChartState('agentUsage', 'agentUsageChart', data, 'No model executions in this period');
+							if (!ctx) return;
+							charts.agentUsage = new Chart(ctx.getContext('2d'), {
+								type: 'bar',
 							data: {
 								labels: data.map(d => d.AgentName || 'Unknown'),
 								datasets: [{
@@ -928,13 +1087,17 @@ templ analyticsContent(currentProject *models.Project) {
 								plugins: { legend: { position: 'bottom' } }
 							}
 						});
-						} catch (e) { console.error('loadAgentUsage:', e); }
+						} catch (e) { console.error('loadAgentUsage:', e); showAnalyticsError(e); }
 					}
 
 					// Load Most Frequent Tasks
 					async function loadMostFrequentTasks() {
 						try {
-						const data = await fetchJSON(`/api/analytics/most-frequent-tasks?project_id=${projectID}&limit=10`);
+							const { dateFrom, dateTo } = getDateRange();
+							const params = new URLSearchParams({ project_id: projectID, limit: '10' });
+							if (dateFrom) params.set('date_from', dateFrom);
+							if (dateTo) params.set('date_to', dateTo);
+							const data = await fetchJSON('/api/analytics/most-frequent-tasks?' + params.toString());
 
 						const container = document.getElementById('frequentTasksList');
 						if (!container) return;
@@ -947,17 +1110,21 @@ templ analyticsContent(currentProject *models.Project) {
 								<div class="flex items-center justify-between gap-3 py-2 border-b border-base-300">
 									<div class="flex-1 min-w-0 pr-2">
 										<span class="font-mono text-sm opacity-50">${idx + 1}.</span>
-										<span class="ml-2 break-words">${task.TaskTitle || 'Unknown'}</span>
+										<span class="ml-2 break-words"><a class="link" href="/tasks/${encodeURIComponent(task.TaskID)}?project_id=${encodeURIComponent(projectID)}">${escapeHTML(task.TaskTitle || 'Unknown')}</a></span>
 									</div>
 									<span class="badge badge-primary shrink-0 inline-flex items-center justify-center whitespace-nowrap h-auto min-h-6 px-3 py-1 leading-none text-center">${task.ExecutionCount || 0} runs</span>
 								</div>
-							`).join('');						} catch (e) { console.error('loadMostFrequentTasks:', e); }
+							`).join('');						} catch (e) { console.error('loadMostFrequentTasks:', e); showAnalyticsError(e); }
 					}
 
 					// Load Failed Task Patterns
 					async function loadFailedTaskPatterns() {
 						try {
-						const data = await fetchJSON(`/api/analytics/failed-task-patterns?project_id=${projectID}&limit=10`);
+							const { dateFrom, dateTo } = getDateRange();
+							const params = new URLSearchParams({ project_id: projectID, limit: '10' });
+							if (dateFrom) params.set('date_from', dateFrom);
+							if (dateTo) params.set('date_to', dateTo);
+							const data = await fetchJSON('/api/analytics/failed-task-patterns?' + params.toString());
 
 						const tbody = document.querySelector('#failedPatternsTable tbody');
 						if (!tbody) return;
@@ -972,50 +1139,45 @@ templ analyticsContent(currentProject *models.Project) {
 							const lastFailedAt = pattern.LastFailedAt ? new Date(pattern.LastFailedAt).toLocaleString() : 'N/A';
 							return `
 								<tr>
-									<td>${pattern.TaskTitle || 'Unknown'}</td>
+									<td><a class="link" href="/tasks/${encodeURIComponent(pattern.TaskID)}?project_id=${encodeURIComponent(projectID)}">${escapeHTML(pattern.TaskTitle || 'Unknown')}</a></td>
 									<td><span class="badge badge-error">${pattern.FailureCount || 0}</span></td>
-									<td><span class="text-xs" title="${lastError}">${truncatedError}</span></td>
-									<td class="text-xs opacity-60">${lastFailedAt}</td>
+									<td><span class="text-xs" title="${escapeHTML(lastError)}">${escapeHTML(truncatedError)}</span></td>
+									<td class="text-xs opacity-60">${escapeHTML(lastFailedAt)}</td>
 								</tr>
 							`;
 						}).join('');
-						} catch (e) { console.error('loadFailedTaskPatterns:', e); }
+						} catch (e) { console.error('loadFailedTaskPatterns:', e); showAnalyticsError(e); }
 					}
 
-					// Load all data - use Promise.allSettled to prevent one failure from blocking others
+						// Load all data; each card clears stale state independently.
 						async function loadAllData(refreshUsage) {
-								await Promise.allSettled([
-									loadUsageAnalytics(refreshUsage),
-								loadSkillAnalytics(),
-								loadSuccessFailureRates(),
-							loadHourlyTrends(),
-							loadAvgTimeByTask(),
-							loadAvgTimeByAgent(),
-							loadAgentUsage(),
-							loadMostFrequentTasks(),
-							loadFailedTaskPatterns()
-						]);
-					}
+							document.getElementById('analyticsError').classList.add('hidden');
+							await Promise.allSettled([
+								loadDashboard(), loadUsageAnalytics(refreshUsage), loadSkillAnalytics(),
+								loadSuccessFailureRates(), loadHourlyTrends(), loadAvgTimeByTask(),
+								loadAvgTimeByAgent(), loadAgentUsage(), loadMostFrequentTasks(), loadFailedTaskPatterns()
+							]);
+						}
 
-						// Event listeners
-						document.getElementById('refreshBtn').addEventListener('click', function() { loadAllData(true); });
-						document.getElementById('dateRange').addEventListener('change', () => {
-							loadUsageAnalytics();
-							loadSkillAnalytics();
-							loadSuccessFailureRates();
-							loadHourlyTrends();
-						});
-							document.getElementById('groupBy').addEventListener('change', () => {
-								loadUsageAnalytics();
-								loadSkillAnalytics();
-								loadSuccessFailureRates();
-							});
-								const usageRateSelect = document.getElementById('usageRateModelSelect');
-								if (usageRateSelect) usageRateSelect.addEventListener('change', () => {
-									if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics);
-								});
-						// Initial load
-					loadAllData();
+						function restoreURLState() {
+							const params = new URLSearchParams(window.location.search);
+							const range = params.get('range') || '30d';
+							const rangeValue = range === 'all' ? 'all' : range.replace(/d$/, '');
+							if (Array.from(document.getElementById('dateRange').options).some(function(option) { return option.value === rangeValue; })) document.getElementById('dateRange').value = rangeValue;
+							const group = params.get('group_by') || 'day';
+							if (['day', 'week', 'month'].includes(group)) document.getElementById('groupBy').value = group;
+							document.getElementById('comparePeriod').checked = params.get('compare') !== '0' && range !== 'all';
+							applyView(params.get('view') || 'overview', false);
+						}
+						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.addEventListener('click', function() { applyView(button.dataset.analyticsView, true); }, { signal: eventSignal }); });
+						document.getElementById('refreshBtn').addEventListener('click', function() { history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(true); }, { signal: eventSignal });
+						['dateRange', 'groupBy', 'comparePeriod'].forEach(function(id) { document.getElementById(id).addEventListener('change', function() { if (document.getElementById('dateRange').value === 'all') document.getElementById('comparePeriod').checked = false; history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal }); });
+							document.getElementById('analyticsAgentFilter').addEventListener('change', function() { history.replaceState({}, '', analyticsURL(selectedView)); if (latestDashboard) renderAgentPerformance(latestDashboard.agents || []); }, { signal: eventSignal });
+							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { history.replaceState({}, '', analyticsURL(selectedView)); if (latestDashboard) renderWorkflowPerformance(latestDashboard.workflows || []); }, { signal: eventSignal });						const usageRateSelect = document.getElementById('usageRateModelSelect');
+						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });
+						window.addEventListener('popstate', function() { restoreURLState(); loadAllData(false); }, { signal: eventSignal });
+						restoreURLState();
+						loadAllData(false);
 				}
 
 				// Load Chart.js dynamically if not already loaded, then initialize.

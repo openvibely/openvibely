@@ -156,3 +156,55 @@ func TestAnalyticsContent_TokenUsageModelSelectStaysWithinCard(t *testing.T) {
 		t.Fatal("Token Usage model select should not force a fixed minimum width on mobile")
 	}
 }
+
+func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var buf bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	content := buf.String()
+	for _, expected := range []string{
+		`data-analytics-view="overview"`, `data-analytics-view="outcomes"`,
+		`data-analytics-view="agents"`, `data-analytics-view="workflows"`,
+		`data-analytics-view="learning"`, `data-analytics-view="usage"`,
+		`data-analytics-view="all"`, `data-analytics-section="overview"`,
+		`data-analytics-section="outcomes"`, `data-analytics-section="agents"`,
+		`data-analytics-section="workflows"`, `id="analyticsJumpLinks"`,
+		`Technical completion rate`, `Goal achievement rate`, `Technical first-pass rate`,
+		`Follow-up rate`, `Median task cycle time`, `Cost per achieved goal`,
+		`Recent outcomes`, `Outcome funnel`, `Task-level outcome evidence`, `Agent performance`, `Workflow performance`,
+		`Observed outcomes among tasks using skills`, `Current account state · not date-filtered`,
+		`Technical Execution Completion Over Time`, `Memory effectiveness unavailable`,
+		`history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `window.addEventListener('popstate'`,
+		`renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
+		`table.innerHTML = '<tr><td colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable</td></tr>'`,
+	} {
+		if !strings.Contains(content, expected) {
+			t.Errorf("analytics outcome dashboard missing %q", expected)
+		}
+	}
+	if strings.Contains(content, `>${task.TaskTitle || 'Unknown'}<`) || strings.Contains(content, `<td>${pattern.TaskTitle || 'Unknown'}</td>`) {
+		t.Fatal("dynamic task titles must be escaped before innerHTML insertion")
+	}
+}
+
+func TestAnalyticsContent_AllMetricsPreservesExistingMetrics(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var buf bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	content := buf.String()
+	for _, metric := range []string{
+		"Token Usage", "Model Breakdown by Tokens", "Token Usage Breakdown",
+		"Task Execution by Hour", "Average Execution Time by Task", "Average Execution Time by Model",
+		"Model Breakdown by Executions", "Most Frequently Run Tasks", "Skill Activity Over Time",
+		"Top Skills", "Follow-through / Selected Outcomes", "Top Agent/Skill Pairs",
+		"Least Active Enabled Skills", "Observed outcomes among tasks using skills", "Failed Task Patterns", "accountUsageCards",
+	} {
+		if !strings.Contains(content, metric) {
+			t.Errorf("All Metrics lost existing metric %q", metric)
+		}
+	}
+}

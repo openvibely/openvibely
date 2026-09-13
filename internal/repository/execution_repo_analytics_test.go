@@ -80,6 +80,16 @@ func TestExecutionRepo_GetSuccessFailureRates(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	exec4 := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecCancelled,
+		PromptSent:    "prompt4",
+	}
+	if err := repo.Create(ctx, exec4); err != nil {
+		t.Fatal(err)
+	}
+
 	// Get success/failure rates
 	rates, err := repo.GetSuccessFailureRates(ctx, project.ID, "day", "", "")
 	if err != nil {
@@ -92,8 +102,8 @@ func TestExecutionRepo_GetSuccessFailureRates(t *testing.T) {
 
 	// Check the rates
 	rate := rates[0]
-	if rate.TotalCount != 3 {
-		t.Errorf("Expected TotalCount=3, got %d", rate.TotalCount)
+	if rate.TotalCount != 4 {
+		t.Errorf("Expected TotalCount=4, got %d", rate.TotalCount)
 	}
 	if rate.SuccessCount != 2 {
 		t.Errorf("Expected SuccessCount=2, got %d", rate.SuccessCount)
@@ -101,7 +111,10 @@ func TestExecutionRepo_GetSuccessFailureRates(t *testing.T) {
 	if rate.FailureCount != 1 {
 		t.Errorf("Expected FailureCount=1, got %d", rate.FailureCount)
 	}
-	expectedRate := float64(2) / float64(3) * 100
+	if rate.CancelledCount != 1 {
+		t.Errorf("Expected CancelledCount=1, got %d", rate.CancelledCount)
+	}
+	expectedRate := float64(2) / float64(4) * 100
 	if rate.SuccessRate < expectedRate-0.1 || rate.SuccessRate > expectedRate+0.1 {
 		t.Errorf("Expected SuccessRate≈%.2f, got %.2f", expectedRate, rate.SuccessRate)
 	}

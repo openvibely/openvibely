@@ -1235,11 +1235,12 @@ func (r *ExecutionRepo) UpdateCliSessionID(ctx context.Context, id string, sessi
 
 // SuccessFailureRate represents success/failure rates for a time period
 type SuccessFailureRate struct {
-	Period       string
-	TotalCount   int
-	SuccessCount int
-	FailureCount int
-	SuccessRate  float64
+	Period         string
+	TotalCount     int
+	SuccessCount   int
+	FailureCount   int
+	CancelledCount int
+	SuccessRate    float64
 }
 
 // GetSuccessFailureRates returns success/failure rates grouped by time period
@@ -1263,10 +1264,11 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 			strftime(?, e.started_at, 'localtime') as period,
 			COUNT(*) as total_count,
 			SUM(CASE WHEN e.status = 'completed' THEN 1 ELSE 0 END) as success_count,
-			SUM(CASE WHEN e.status = 'failed' THEN 1 ELSE 0 END) as failure_count
+			SUM(CASE WHEN e.status = 'failed' THEN 1 ELSE 0 END) as failure_count,
+			SUM(CASE WHEN e.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE t.project_id = ? AND e.status IN ('completed', 'failed')
+		WHERE t.project_id = ? AND e.status IN ('completed', 'failed', 'cancelled')
 	`
 	args := []interface{}{dateFormat, projectID}
 
@@ -1275,7 +1277,7 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 		args = append(args, dateFrom)
 	}
 	if dateTo != "" {
-		query += ` AND e.started_at <= ?`
+		query += ` AND e.started_at < ?`
 		args = append(args, dateTo)
 	}
 
@@ -1290,7 +1292,7 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 	rates := []SuccessFailureRate{}
 	for rows.Next() {
 		var rate SuccessFailureRate
-		if err := rows.Scan(&rate.Period, &rate.TotalCount, &rate.SuccessCount, &rate.FailureCount); err != nil {
+		if err := rows.Scan(&rate.Period, &rate.TotalCount, &rate.SuccessCount, &rate.FailureCount, &rate.CancelledCount); err != nil {
 			return nil, fmt.Errorf("scanning success/failure rate: %w", err)
 		}
 		if rate.TotalCount > 0 {
@@ -1311,10 +1313,10 @@ type AvgExecutionTime struct {
 	MaxMs int64
 }
 
-// GetAvgExecutionTimeByTask returns average execution times per task
-func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID string, limit int) ([]AvgExecutionTime, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT
+// GetAvgExecutionTimeByTask returns average execution times per task.
+// Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
+func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID string, limit int, bounds ...string) ([]AvgExecutionTime, error) {
+	query := `SELECT
 			t.id,
 			t.title,
 			AVG(e.duration_ms) as avg_ms,
@@ -1323,10 +1325,12 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 			MAX(e.duration_ms) as max_ms
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0
-		GROUP BY t.id, t.title
-		ORDER BY avg_ms DESC
-		LIMIT ?`, projectID, limit)
+		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0`
+	args := []any{projectID}
+	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	query += ` GROUP BY t.id, t.title ORDER BY avg_ms DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting avg execution time by task: %w", err)
 	}
@@ -1343,10 +1347,10 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 	return times, rows.Err()
 }
 
-// GetAvgExecutionTimeByAgent returns average execution times per agent
-func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectID string) ([]AvgExecutionTime, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT
+// GetAvgExecutionTimeByAgent returns average execution times per model configuration.
+// Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
+func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectID string, bounds ...string) ([]AvgExecutionTime, error) {
+	query := `SELECT
 			ac.id,
 			ac.name,
 			AVG(e.duration_ms) as avg_ms,
@@ -1356,9 +1360,11 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
 		JOIN agent_configs ac ON ac.id = e.agent_config_id
-		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0
-		GROUP BY ac.id, ac.name
-		ORDER BY count DESC`, projectID)
+		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0`
+	args := []any{projectID}
+	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	query += ` GROUP BY ac.id, ac.name ORDER BY count DESC`
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting avg execution time by agent: %w", err)
 	}
@@ -1373,6 +1379,18 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 		times = append(times, t)
 	}
 	return times, rows.Err()
+}
+
+func appendAnalyticsStringBounds(query string, args []any, column string, bounds []string) (string, []any) {
+	if len(bounds) > 0 && strings.TrimSpace(bounds[0]) != "" {
+		query += " AND " + column + " >= ?"
+		args = append(args, bounds[0])
+	}
+	if len(bounds) > 1 && strings.TrimSpace(bounds[1]) != "" {
+		query += " AND " + column + " < ?"
+		args = append(args, bounds[1])
+	}
+	return query, args
 }
 
 // ExecutionTrend represents execution frequency data
@@ -1398,7 +1416,7 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 		args = append(args, dateFrom)
 	}
 	if dateTo != "" {
-		query += ` AND e.started_at <= ?`
+		query += ` AND e.started_at < ?`
 		args = append(args, dateTo)
 	}
 
@@ -1432,8 +1450,9 @@ type AgentUsage struct {
 	FailureCount   int
 }
 
-// GetAgentUsageByProject returns agent usage breakdown by project
-func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID string) ([]AgentUsage, error) {
+// GetAgentUsageByProject returns model-configuration usage breakdown by project.
+// Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
+func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID string, bounds ...string) ([]AgentUsage, error) {
 	query := `
 		SELECT
 			ac.id as agent_id,
@@ -1455,6 +1474,7 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 		query += ` AND t.project_id = ?`
 		args = append(args, projectID)
 	}
+	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
 
 	query += ` GROUP BY ac.id, ac.name, p.id, p.name ORDER BY execution_count DESC`
 
@@ -1483,20 +1503,22 @@ type TaskFrequency struct {
 	LastExecutedAt string
 }
 
-// GetMostFrequentTasks returns the most frequently executed tasks
-func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID string, limit int) ([]TaskFrequency, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT
+// GetMostFrequentTasks returns the most frequently executed tasks.
+// Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
+func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID string, limit int, bounds ...string) ([]TaskFrequency, error) {
+	query := `SELECT
 			t.id,
 			t.title,
 			COUNT(*) as execution_count,
 			MAX(e.started_at) as last_executed_at
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
-		WHERE t.project_id = ?
-		GROUP BY t.id, t.title
-		ORDER BY execution_count DESC
-		LIMIT ?`, projectID, limit)
+		WHERE t.project_id = ?`
+	args := []any{projectID}
+	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	query += ` GROUP BY t.id, t.title ORDER BY execution_count DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting most frequent tasks: %w", err)
 	}
@@ -1595,4 +1617,34 @@ func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID str
 		})
 	}
 	return patterns, nil
+}
+
+// GetFailedTaskPatternsInRange is the period-aware Analytics variant. The
+// unbounded shared query remains available to Insights with its existing semantics.
+func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projectID string, limit int, bounds ...string) ([]FailedTaskPattern, error) {
+	query := `WITH failed_executions AS (
+		SELECT t.id task_id,t.title task_title,e.error_message latest_error,e.started_at latest_started_at,
+			COUNT(*) OVER(PARTITION BY t.id) failure_count,
+			ROW_NUMBER() OVER(PARTITION BY t.id ORDER BY e.started_at DESC,e.rowid DESC) rn
+		FROM executions e JOIN tasks t ON t.id=e.task_id
+		WHERE t.project_id=? AND e.status='failed'`
+	args := []any{projectID}
+	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	query += `) SELECT task_id,task_title,failure_count,COALESCE(latest_error,''),strftime('%Y-%m-%dT%H:%M:%SZ',latest_started_at)
+		FROM failed_executions WHERE rn=1 ORDER BY failure_count DESC,latest_started_at DESC,task_id LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("getting period failed task patterns: %w", err)
+	}
+	defer rows.Close()
+	patterns := []FailedTaskPattern{}
+	for rows.Next() {
+		var pattern FailedTaskPattern
+		if err := rows.Scan(&pattern.TaskID, &pattern.TaskTitle, &pattern.FailureCount, &pattern.LastError, &pattern.LastFailedAt); err != nil {
+			return nil, err
+		}
+		patterns = append(patterns, pattern)
+	}
+	return patterns, rows.Err()
 }

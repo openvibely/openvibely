@@ -205,6 +205,111 @@ definitions:
       updated_at:
         type: string
     type: object
+  models.AgentPerformance:
+    properties:
+      agent_id:
+        type: string
+      agent_name:
+        type: string
+      first_pass:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      follow_up:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      known_cost_per_achieved_goal:
+        $ref: '#/definitions/models.CostCoverage'
+      median_duration_ms:
+        type: integer
+      most_used_model:
+        type: string
+      tasks_evaluated:
+        type: integer
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+    type: object
+  models.AnalyticsDashboard:
+    properties:
+      agents:
+        items:
+          $ref: '#/definitions/models.AgentPerformance'
+        type: array
+      current:
+        $ref: '#/definitions/models.OutcomeMetrics'
+      cycle_distribution:
+        items:
+          $ref: '#/definitions/models.AnalyticsDistributionPoint'
+        type: array
+      definitions:
+        items:
+          $ref: '#/definitions/models.MetricDefinition'
+        type: array
+      follow_up_distribution:
+        items:
+          $ref: '#/definitions/models.AnalyticsDistributionPoint'
+        type: array
+      funnel:
+        items:
+          $ref: '#/definitions/models.OutcomeFunnelStage'
+        type: array
+      insights:
+        items:
+          $ref: '#/definitions/models.AnalyticsInsight'
+        type: array
+      previous:
+        $ref: '#/definitions/models.OutcomeMetrics'
+      recent_outcomes:
+        items:
+          $ref: '#/definitions/models.EvidenceTaskRow'
+        type: array
+      skill_outcomes:
+        items:
+          $ref: '#/definitions/models.SkillOutcomePerformance'
+        type: array
+      workflows:
+        items:
+          $ref: '#/definitions/models.WorkflowPerformance'
+        type: array
+    type: object
+  models.AnalyticsDistributionPoint:
+    properties:
+      count:
+        type: integer
+      label:
+        type: string
+    type: object
+  models.AnalyticsInsight:
+    properties:
+      comparison_window:
+        type: string
+      current_percent:
+        type: number
+      detail:
+        type: string
+      evidence_view:
+        type: string
+      kind:
+        type: string
+      metric_key:
+        type: string
+      previous_percent:
+        type: number
+      sample_size:
+        type: integer
+      title:
+        type: string
+    type: object
+  models.AnalyticsMetric:
+    properties:
+      denominator:
+        type: integer
+      numerator:
+        type: integer
+      percent:
+        type: number
+      sample_size:
+        type: integer
+    type: object
   models.AnalyticsUsageViewModel:
     properties:
       account_limits:
@@ -240,6 +345,15 @@ definitions:
           $ref: '#/definitions/models.UsageRatePoint'
         type: array
     type: object
+  models.CostCoverage:
+    properties:
+      covered:
+        type: integer
+      eligible:
+        type: integer
+      value:
+        type: number
+    type: object
   models.DailyUsagePoint:
     properties:
       cached_input_tokens:
@@ -261,6 +375,33 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  models.EvidenceTaskRow:
+    properties:
+      agent_id:
+        type: string
+      agent_name:
+        type: string
+      cycle_time_ms:
+        type: integer
+      execution_count:
+        type: integer
+      follow_up_count:
+        type: integer
+      goal_result:
+        type: string
+      known_cost_usd:
+        type: number
+      merge_state:
+        type: string
+      model:
+        type: string
+      task_id:
+        type: string
+      task_title:
+        type: string
+      technical_result:
+        type: string
+    type: object
   models.MergeStatus:
     enum:
     - ""
@@ -275,6 +416,17 @@ definitions:
     - MergeStatusMerged
     - MergeStatusFailed
     - MergeStatusConflict
+  models.MetricDefinition:
+    properties:
+      definition:
+        type: string
+      denominator:
+        type: string
+      key:
+        type: string
+      label:
+        type: string
+    type: object
   models.ModelUsagePoint:
     properties:
       cached_input_tokens:
@@ -297,6 +449,42 @@ definitions:
         type: integer
       total_tokens:
         type: integer
+    type: object
+  models.OutcomeFunnelStage:
+    properties:
+      count:
+        type: integer
+      denominator:
+        type: integer
+      key:
+        type: string
+      label:
+        type: string
+    type: object
+  models.OutcomeMetrics:
+    properties:
+      first_pass:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      follow_up:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      known_cost_per_achieved_goal:
+        $ref: '#/definitions/models.CostCoverage'
+      known_cost_per_completed_task:
+        $ref: '#/definitions/models.CostCoverage'
+      known_failed_execution_cost:
+        type: number
+      median_cycle_time_ms:
+        type: integer
+      p90_cycle_time_ms:
+        type: integer
+      tasks_evaluated:
+        type: integer
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      tokens_per_achieved_goal:
+        $ref: '#/definitions/models.CostCoverage'
     type: object
   models.RepeatType:
     enum:
@@ -440,6 +628,19 @@ definitions:
         type: string
       skill_scope:
         type: string
+    type: object
+  models.SkillOutcomePerformance:
+    properties:
+      follow_up:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      skill_handle:
+        type: string
+      tasks_evaluated:
+        type: integer
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
     type: object
   models.SkillUsagePeriodMetric:
     properties:
@@ -685,6 +886,29 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  models.WorkflowPerformance:
+    properties:
+      average_duration_ms:
+        type: integer
+      blocked_count:
+        type: integer
+      completed_count:
+        type: integer
+      completion_rate:
+        type: number
+      failed_count:
+        type: integer
+      health:
+        type: string
+      invocation_count:
+        type: integer
+      waiting_count:
+        type: integer
+      workflow_id:
+        type: string
+      workflow_name:
+        type: string
+    type: object
   repository.AgentUsage:
     properties:
       agentID:
@@ -742,6 +966,8 @@ definitions:
     type: object
   repository.SuccessFailureRate:
     properties:
+      cancelledCount:
+        type: integer
       failureCount:
         type: integer
       period:
@@ -1066,6 +1292,52 @@ paths:
           schema:
             $ref: '#/definitions/handler.ErrorResponse'
       summary: Get average execution time by task
+      tags:
+      - analytics
+  /api/analytics/dashboard:
+    get:
+      description: Returns task-level outcome KPIs, definitions, comparisons, evidence,
+        reusable Agent performance, observed skill outcomes, and workflow performance
+        for one project.
+      parameters:
+      - description: Authoritative project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - default: 30d
+        description: 'Convenience range: 7d, 30d, 90d, 365d, month, all'
+        in: query
+        name: range
+        type: string
+      - description: Optional inclusive start datetime
+        in: query
+        name: date_from
+        type: string
+      - description: Optional exclusive end datetime
+        in: query
+        name: date_to
+        type: string
+      - description: Compare with the immediately preceding equivalent period
+        in: query
+        name: compare
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Outcome Analytics dashboard
+          schema:
+            $ref: '#/definitions/models.AnalyticsDashboard'
+        "400":
+          description: Missing project ID
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get outcome-oriented Analytics dashboard data
       tags:
       - analytics
   /api/analytics/execution-trends-by-hour:

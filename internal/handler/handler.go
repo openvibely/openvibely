@@ -729,6 +729,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Analytics API endpoints
 	e.GET("/api/analytics/usage", h.GetAnalyticsUsage)
 	e.GET("/api/analytics/skills", h.GetSkillAnalytics)
+	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
 	e.GET("/api/analytics/success-failure-rates", h.GetSuccessFailureRates)
 	e.GET("/api/analytics/avg-execution-time-by-task", h.GetAvgExecutionTimeByTask)
 	e.GET("/api/analytics/avg-execution-time-by-agent", h.GetAvgExecutionTimeByAgent)

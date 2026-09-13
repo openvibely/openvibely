@@ -1,0 +1,219 @@
+package repository
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
+)
+
+func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projects := NewProjectRepo(db)
+	tasks := NewTaskRepo(db, nil)
+	executions := NewExecutionRepo(db)
+	goals := NewTaskGoalRepo(db)
+	configs := NewLLMConfigRepo(db)
+	agents := NewAgentRepo(db)
+	usage := NewUsageRepo(db)
+	skills := NewSkillAnalyticsRepo(db)
+
+	project := &models.Project{Name: "Analytics project", RepoPath: "/analytics-project"}
+	other := &models.Project{Name: "Other project", RepoPath: "/analytics-other"}
+	if err := projects.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if err := projects.Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	configA := &models.LLMConfig{Name: "Model A", Provider: models.ProviderTest, Model: "model-a"}
+	configB := &models.LLMConfig{Name: "Model B", Provider: models.ProviderTest, Model: "model-b"}
+	if err := configs.Create(ctx, configA); err != nil {
+		t.Fatal(err)
+	}
+	if err := configs.Create(ctx, configB); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.Agent{Name: "Reusable Agent", Description: "outcome evaluator", SystemPrompt: "work", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := agents.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+
+	makeTask := func(projectID, title string, definitionID *string, worktree bool) *models.Task {
+		t.Helper()
+		task := &models.Task{ProjectID: projectID, Title: title, Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "work", AgentDefinitionID: definitionID}
+		if worktree {
+			task.WorktreePath = "/tmp/" + title
+			task.MergeStatus = models.MergeStatusMerged
+		}
+		if err := tasks.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		return task
+	}
+	makeExecution := func(task *models.Task, configID string, status models.ExecutionStatus, followup bool, started string, duration int64) *models.Execution {
+		t.Helper()
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: configID, Status: models.ExecRunning, PromptSent: "prompt", IsFollowup: followup}
+		if err := executions.Create(ctx, exec); err != nil {
+			t.Fatal(err)
+		}
+		if err := executions.Complete(ctx, exec.ID, status, "output", "failure", 10, duration); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at=?, completed_at=? WHERE id=?`, started, started, exec.ID); err != nil {
+			t.Fatal(err)
+		}
+		exec.StartedAt, _ = time.Parse("2006-01-02 15:04:05", started)
+		return exec
+	}
+	makeGoal := func(task *models.Task, status models.TaskGoalStatus) {
+		t.Helper()
+		goal := &models.TaskGoal{TaskID: task.ID, GoalID: "goal-" + task.ID, Objective: "finish", Status: status}
+		if err := goals.CreateOrReplace(ctx, goal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordCost := func(task *models.Task, exec *models.Execution, cost *float64, tokens int) {
+		t.Helper()
+		event := &models.LLMUsageEvent{Provider: "test", ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, AgentConfigID: exec.AgentConfigID, Model: "model", Operation: "task", Status: string(exec.Status), TotalTokens: tokens, CostUSD: cost, OccurredAt: exec.StartedAt, RawUsageJSON: "{}"}
+		if err := usage.RecordUsageEvent(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assignedID := agent.ID
+	achieved := makeTask(project.ID, "Achieved", &assignedID, true)
+	achievedExec := makeExecution(achieved, configA.ID, models.ExecCompleted, false, "2026-01-10 10:00:00", 1000)
+	makeGoal(achieved, models.TaskGoalStatusAchieved)
+	known := 2.0
+	recordCost(achieved, achievedExec, &known, 100)
+	outsideCost := 100.0
+	if err := usage.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "test", ProjectID: project.ID, TaskID: achieved.ID, ExecutionID: achievedExec.ID, AgentConfigID: achievedExec.AgentConfigID, Model: "model", Operation: "outside-period", Status: string(achievedExec.Status), TotalTokens: 1000, CostUSD: &outsideCost, OccurredAt: time.Date(2025, 12, 20, 0, 0, 0, 0, time.UTC), RawUsageJSON: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+
+	reworked := makeTask(project.ID, "Reworked", &assignedID, false)
+	failedExec := makeExecution(reworked, configB.ID, models.ExecFailed, false, "2026-01-11 10:00:00", 2000)
+	makeExecution(reworked, configB.ID, models.ExecCompleted, true, "2026-01-12 10:00:00", 3000)
+	makeGoal(reworked, models.TaskGoalStatusFailed)
+	failedCost := 0.5
+	recordCost(reworked, failedExec, &failedCost, 40)
+	for _, task := range []*models.Task{achieved, reworked} {
+		if err := skills.RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC), ProjectID: project.ID, TaskID: task.ID, SkillScope: models.SkillScopeProject, SkillHandle: "project:evaluator", EventType: models.SkillEventSelected}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cancelled := makeTask(project.ID, "Cancelled", nil, false)
+	cancelled.Status = models.StatusCancelled
+	if err := tasks.Update(ctx, cancelled); err != nil {
+		t.Fatal(err)
+	}
+	makeExecution(cancelled, configA.ID, models.ExecCancelled, false, "2026-01-13 10:00:00", 500)
+
+	foreign := makeTask(other.ID, "Foreign", &assignedID, false)
+	makeExecution(foreign, configA.ID, models.ExecCompleted, false, "2026-01-14 10:00:00", 900)
+	previousPeriod := makeTask(project.ID, "Previous failure, current retry", &assignedID, false)
+	makeExecution(previousPeriod, configA.ID, models.ExecFailed, false, "2025-12-15 10:00:00", 800)
+	makeExecution(previousPeriod, configA.ID, models.ExecCompleted, true, "2026-01-15 10:00:00", 900)
+	endBoundary := makeTask(project.ID, "Exclusive end boundary", &assignedID, false)
+	makeExecution(endBoundary, configA.ID, models.ExecCompleted, false, "2026-02-01 00:00:00", 700)
+
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Compare: true, Limit: 20})
+	if err != nil {
+		t.Fatalf("GetAnalyticsDashboard: %v", err)
+	}
+
+	if got := dashboard.Current.TechnicalCompletion; got.Numerator != 3 || got.Denominator != 5 || got.SampleSize != 5 {
+		t.Errorf("technical completion = %+v, want 3/5 including cancellation denominator", got)
+	}
+	if got := dashboard.Current.FirstPass; got.Numerator != 1 || got.Denominator != 4 {
+		t.Errorf("first pass = %+v, want 1/4 using each task's historical first terminal outcome", got)
+	}
+	if got := dashboard.Current.GoalAchievement; got.Numerator != 1 || got.Denominator != 2 {
+		t.Errorf("goal achievement = %+v, want achieved goals over evaluable goal-bearing tasks", got)
+	}
+	if got := dashboard.Current.FollowUp; got.Numerator != 2 || got.Denominator != 4 {
+		t.Errorf("follow-up = %+v, want tasks with follow-ups over executed tasks", got)
+	}
+	if dashboard.Current.KnownCostPerAchievedGoal == nil || dashboard.Current.KnownCostPerAchievedGoal.Covered != 1 || dashboard.Current.KnownCostPerAchievedGoal.Eligible != 1 || dashboard.Current.KnownCostPerAchievedGoal.Value != 2 {
+		t.Errorf("known cost per achieved goal = %+v", dashboard.Current.KnownCostPerAchievedGoal)
+	}
+	if dashboard.Current.KnownCostPerCompletedTask == nil || dashboard.Current.KnownCostPerCompletedTask.Covered != 2 || dashboard.Current.KnownCostPerCompletedTask.Eligible != 3 || dashboard.Current.KnownCostPerCompletedTask.Value != 1.25 {
+		t.Errorf("known cost per technically completed task = %+v", dashboard.Current.KnownCostPerCompletedTask)
+	}
+	if dashboard.Current.KnownFailedExecutionCost != 0.5 {
+		t.Errorf("failed known cost = %v", dashboard.Current.KnownFailedExecutionCost)
+	}
+	if len(dashboard.Agents) != 2 {
+		t.Fatalf("agents = %+v, want reusable Agent and Unassigned", dashboard.Agents)
+	}
+	if dashboard.Agents[0].AgentName != "Reusable Agent" || dashboard.Agents[0].TasksEvaluated != 3 {
+		t.Errorf("actual Agent-definition attribution missing: %+v", dashboard.Agents)
+	}
+	if dashboard.Agents[0].FirstPass.Numerator != 1 || dashboard.Agents[0].FirstPass.Denominator != 3 {
+		t.Errorf("agent first pass ignored historical attempts: %+v", dashboard.Agents[0].FirstPass)
+	}
+	if dashboard.Agents[0].TechnicalCompletion.Numerator != 3 || dashboard.Agents[0].TechnicalCompletion.Denominator != 4 {
+		t.Errorf("agent execution aggregation duplicated terminal rows: %+v", dashboard.Agents[0].TechnicalCompletion)
+	}
+	if dashboard.Agents[0].KnownCostPerAchievedGoal == nil || dashboard.Agents[0].KnownCostPerAchievedGoal.Covered != 1 || dashboard.Agents[0].KnownCostPerAchievedGoal.Value != 2 {
+		t.Errorf("agent achieved-goal cost coverage = %+v", dashboard.Agents[0].KnownCostPerAchievedGoal)
+	}
+	if len(dashboard.Funnel) < 4 || dashboard.Funnel[3].Denominator != 2 {
+		t.Errorf("goal funnel denominator = %+v, want two evaluable goal-bearing tasks", dashboard.Funnel)
+	}
+	if len(dashboard.SkillOutcomes) != 1 || dashboard.SkillOutcomes[0].TasksEvaluated != 2 || dashboard.SkillOutcomes[0].GoalAchievement.Numerator != 1 || dashboard.SkillOutcomes[0].GoalAchievement.Denominator != 2 {
+		t.Errorf("observed skill outcomes = %+v, want project-scoped task outcomes for selected skill", dashboard.SkillOutcomes)
+	}
+	if len(dashboard.RecentOutcomes) != 4 {
+		t.Errorf("recent project outcomes = %d, want 4", len(dashboard.RecentOutcomes))
+	}
+	if dashboard.Previous == nil {
+		t.Fatal("comparison requested but previous period missing")
+	}
+	if len(dashboard.Definitions) < 6 {
+		t.Errorf("metric definitions = %d, want centralized definitions", len(dashboard.Definitions))
+	}
+
+	fromSQL, toSQL := "2026-01-01 00:00:00", "2026-02-01 00:00:00"
+	if rows, err := executions.GetAvgExecutionTimeByTask(ctx, project.ID, 20, fromSQL, toSQL); err != nil || len(rows) != 3 {
+		t.Errorf("period task durations = %+v, err=%v, want three current tasks", rows, err)
+	}
+	if rows, err := executions.GetAvgExecutionTimeByAgent(ctx, project.ID, fromSQL, toSQL); err != nil || len(rows) != 2 {
+		t.Errorf("period model durations = %+v, err=%v, want two current models", rows, err)
+	}
+	if rows, err := executions.GetAgentUsageByProject(ctx, project.ID, fromSQL, toSQL); err != nil || len(rows) != 2 || rows[0].ExecutionCount+rows[1].ExecutionCount != 5 {
+		t.Errorf("period model execution share = %+v, err=%v, want five current executions", rows, err)
+	}
+	if rows, err := executions.GetMostFrequentTasks(ctx, project.ID, 20, fromSQL, toSQL); err != nil || len(rows) != 4 {
+		t.Errorf("period frequent tasks = %+v, err=%v, want four current tasks", rows, err)
+	}
+	if rows, err := executions.GetFailedTaskPatternsInRange(ctx, project.ID, 20, fromSQL, toSQL); err != nil || len(rows) != 1 || rows[0].TaskID != reworked.ID {
+		t.Errorf("period failed patterns = %+v, err=%v, want only reworked task", rows, err)
+	}
+}
+
+func TestExecutionRepo_GetAnalyticsDashboardAllTimeOmitsComparison(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewExecutionRepo(db)
+	project := &models.Project{Name: "All time", RepoPath: "/all-time"}
+	if err := NewProjectRepo(db).Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	dashboard, err := repo.GetAnalyticsDashboard(context.Background(), AnalyticsDashboardFilter{ProjectID: project.ID, Compare: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dashboard.Previous != nil {
+		t.Fatalf("all-time comparison must be omitted: %+v", dashboard.Previous)
+	}
+	if dashboard.CycleDistribution == nil || len(dashboard.CycleDistribution) != 0 || dashboard.FollowUpDistribution == nil || len(dashboard.FollowUpDistribution) != 0 {
+		t.Fatalf("empty distributions must be non-nil empty arrays: cycle=%+v followups=%+v", dashboard.CycleDistribution, dashboard.FollowUpDistribution)
+	}
+}
