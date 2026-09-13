@@ -805,6 +805,16 @@ window.addEventListener('DOMContentLoaded', function() {
   function port() { return document.getElementById('lifecycle-activity-scroll'); }
   function row(id) { return list().querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
   function ids() { return Array.prototype.map.call(list().querySelectorAll('[data-lifecycle-execution-id]'), function(item) { return item.getAttribute('data-lifecycle-execution-id'); }); }
+  async function waitForScrollRestoration(label) {
+    await new Promise(function(resolve) {
+      requestAnimationFrame(function() { requestAnimationFrame(resolve); });
+    });
+    await waitFor(function() {
+      var states = window._taskLifecycleActivityStates;
+      var state = states && states['project-lifecycle-anchor-browser:task-lifecycle-anchor-browser'];
+      return state && !state.restoring;
+    }, label);
+  }
   async function run() {
     await waitFor(function() { return row('event-0'); }, 'initial lifecycle rows');
     var lifecyclePort = port();
@@ -814,10 +824,12 @@ window.addEventListener('DOMContentLoaded', function() {
     var anchorBeforeLive = row('event-0').getBoundingClientRect().top;
     window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-anchor-browser', project_id:'project-lifecycle-anchor-browser'}}));
     await waitFor(function() { return row('event-24'); }, 'newer lifecycle rows');
+    await waitForScrollRestoration('newer lifecycle scroll restoration');
     var anchorBeforeRefresh = row('event-0').getBoundingClientRect().top;
     if (Math.abs(anchorBeforeRefresh - anchorBeforeLive) > 2) fail('live insert moved the reading anchor: before=' + anchorBeforeLive + ' after=' + anchorBeforeRefresh);
     await window.refreshLifecycleActivity('task-lifecycle-anchor-browser', 'project-lifecycle-anchor-browser');
     await waitFor(function() { return row('event-0'); }, 'preserved lifecycle anchor after refresh');
+    await waitForScrollRestoration('refreshed lifecycle scroll restoration');
     var anchorAfterRefresh = row('event-0').getBoundingClientRect().top;
     if (Math.abs(anchorAfterRefresh - anchorBeforeRefresh) > 2) fail('refresh moved the reading anchor beyond the latest window: before=' + anchorBeforeRefresh + ' after=' + anchorAfterRefresh);
     var rendered = ids();

@@ -339,7 +339,10 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 			}
 		}
 
-		browser.waitFor("Automation portfolio", `document.readyState + ':' + Boolean(document.getElementById('automations-container')) + ':' + document.querySelectorAll('[data-automation-url]').length`, "complete:true:2")
+		browser.waitFor("Automation portfolio", `(function() {
+			var root = document.getElementById('automations-container');
+			return document.readyState === 'complete' && root && root._openVibelyCardPaginationState && document.querySelector('[data-card-select-id="automation-active-browser"]') && document.querySelector('[data-card-select-id="automation-paused-browser"]') ? 'ready' : 'waiting';
+		})()`, "ready")
 		browser.evaluate(`window.htmx = {ajax: function() { return Promise.resolve(); }, process: function() {}}; window.__automationNavigations = []; window.openVibelyNavigate = function(url) { window.__automationNavigations.push(url); return Promise.resolve(); }; 'ready'`)
 		assertCard("automation-active-browser", "Active Delivery")
 		assertCard("automation-paused-browser", "Paused Delivery")
@@ -380,7 +383,16 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-paused-browser"),
 		})
 
-		browser.evaluate(`(function() { var root = document.getElementById('automations-container'); root.scrollTop = root.scrollHeight; root.dispatchEvent(new Event('scroll', {bubbles: true})); return 'scrolled'; })()`)
+		browser.evaluate(`(function() {
+			var root = document.getElementById('automations-container');
+			var state = root && root._openVibelyCardPaginationState;
+			var target = state && state.scrollTarget;
+			if (!target) return 'missing';
+			if (target === window) window.scrollTo(0, document.documentElement.scrollHeight);
+			else target.scrollTop = target.scrollHeight;
+			target.dispatchEvent(new Event('scroll', {bubbles: true}));
+			return 'scrolled';
+		})()`)
 		browser.waitFor("paginated Automation card", `document.querySelector('[data-card-select-id="automation-paginated-browser"]') ? 'true' : 'false'`, "true")
 		assertCard("automation-paginated-browser", "Paginated Delivery")
 		tabToCard("automation-paginated-browser")
