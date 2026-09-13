@@ -5,8 +5,7 @@
 - [OpenVibely Architecture](openvibely_architecture.md) - Go server/desktop architecture, SQLite/runtime state, storage, OAuth/hosted deployment, workers, schedules, reflection, logging, and repository/handler ownership.
 - [OpenVibely Update System](openvibely_update_system.md) - Signed packaged updates, standalone/desktop replacement, drain/admission, rollback/recovery, release trust, telemetry, and validation.
 - [Agent Lifecycle and Skills](agent_lifecycle_and_skills.md) - Built-in agents, skill catalogs/imports, lifecycle hooks, goals/loops, schedules, tool grants, and skill-maintenance boundaries.
-- [Provider Architecture](provider_architecture.md) - Provider adapters, normalized requests, model selection, OpenAI/Anthropic/Ollama/OpenAI-compatible support, mixtures, OAuth, provider-native tools, and runtime-tool exposure.
-- [Model Support Audit State](model_support_audit_state.md) - Latest successful model-support cutoff, supported release findings, current scope boundary, and duplicate-tracking references.
+- [Provider Architecture](provider_architecture.md) - Provider adapters, normalized requests, model selection and support audits, OpenAI/Anthropic/Ollama/OpenAI-compatible support, mixtures, OAuth, provider-native tools, and runtime-tool exposure.
 - [Chat and Task-Thread Behavior](chat_thread_system.md) - Chat/task-thread queueing, steering, attachments, admission, runtime actions, status controls, goals, cancellation, scheduling, capacity, and swarms.
 - [Realtime and Frontend Patterns](realtime_and_frontend_patterns.md) - Shared SSE, execution streams, diff invalidation, chat/thread rendering, composer UI, transcript safety, HTMX navigation, responsive UI, card search, and Automation YAML editor behavior.
 - [UI Theming](ui_theming.md) - Native OpenVibely palettes, imported VS Code themes, `/themes`, DOM/persistence contracts, early application, footer mode toggles, and theme-aware syntax highlighting.
