@@ -544,12 +544,13 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 	type pendingAccountFailure struct {
 		snapshot       models.AccountUsageSnapshot
 		message        string
+		accountKey     string
 		configID       string
 		configRevision int64
 		provider       models.LLMProvider
 	}
 	pendingFailures := map[string]pendingAccountFailure{}
-	var pendingFailureKeys []string
+	var pendingFailureOwnerKeys []string
 	for _, cfg := range configs {
 		if cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
 			continue
@@ -576,7 +577,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 				continue
 			}
 			seenAccounts[key] = true
-			delete(pendingFailures, key)
+			delete(pendingFailures, credentialOwnerKey)
 			continue
 		}
 		snapshot, err := s.accountFetcher(ctx, cfg)
@@ -585,11 +586,12 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			reason := accountRefreshFailureReason(err)
 			message := accountRefreshFailureMessage(reason)
 			applog.Infof("[usage] account usage refresh failed provider=%s reason=%s: %v", cfg.Provider, reason, sanitizeAccountUsageError(err))
-			if _, exists := pendingFailures[key]; !exists {
-				pendingFailureKeys = append(pendingFailureKeys, key)
-				pendingFailures[key] = pendingAccountFailure{
+			if _, exists := pendingFailures[credentialOwnerKey]; !exists {
+				pendingFailureOwnerKeys = append(pendingFailureOwnerKeys, credentialOwnerKey)
+				pendingFailures[credentialOwnerKey] = pendingAccountFailure{
 					snapshot:       accountRefreshFailureSnapshot(cfg, latest, reason),
 					message:        message,
+					accountKey:     key,
 					configID:       cfg.ID,
 					configRevision: cfg.OAuthConfigRevision,
 					provider:       cfg.Provider,
@@ -622,12 +624,12 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			continue
 		}
 		seenAccounts[key] = true
-		delete(pendingFailures, key)
+		delete(pendingFailures, credentialOwnerKey)
 		snapshots = append(snapshots, *snapshot)
 	}
-	for _, key := range pendingFailureKeys {
-		failure, ok := pendingFailures[key]
-		if !ok || seenAccounts[key] {
+	for _, ownerKey := range pendingFailureOwnerKeys {
+		failure, ok := pendingFailures[ownerKey]
+		if !ok {
 			continue
 		}
 		stored, err := s.usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(
@@ -641,7 +643,9 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			applog.Infof("[usage] skipped stale account usage refresh failure provider=%s", failure.snapshot.Provider)
 			continue
 		}
-		errorsByKey[key] = failure.message
+		if !seenAccounts[failure.accountKey] {
+			errorsByKey[failure.accountKey] = failure.message
+		}
 		snapshots = append(snapshots, failure.snapshot)
 	}
 	return snapshots, errorsByKey
