@@ -363,6 +363,42 @@ func TestRequestUsesChatStreamingTreatsFirstTurnChatAsChat(t *testing.T) {
 	}
 }
 
+func TestNativeCompactionCapabilityRequiresConcreteSupportedConfiguration(t *testing.T) {
+	if !providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol", AuthMethod: models.AuthMethodAPIKey}) {
+		t.Fatal("supported OpenAI configuration was rejected")
+	}
+	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "", AuthMethod: models.AuthMethodAPIKey}) {
+		t.Fatal("blank model must not advertise native compaction")
+	}
+	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodAPIKey, Transport: "chat_completions"}) {
+		t.Fatal("incompatible Anthropic transport must not advertise context management")
+	}
+	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodCLI}) {
+		t.Fatal("retired CLI auth must not advertise native compaction")
+	}
+}
+
+func TestProviderContextBudget_TestProviderFailsClosedWithoutArtifactReader(t *testing.T) {
+	calls := 0
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		return llmcontracts.AgentResult{}, nil
+	})
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationTask,
+		Message: strings.Repeat("!", 20000), ExecID: "test-provider-artifact", WorkDir: t.TempDir(),
+		Agent: models.LLMConfig{Provider: models.ProviderTest, Model: "test", ContextWindow: 4096},
+	}
+	_, err := svc.callProviderWithContextCompactionFallback(adapter, req)
+	if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorPendingInputInfeasible) {
+		t.Fatalf("error = %v, want pending input infeasible", err)
+	}
+	if calls != 0 {
+		t.Fatalf("provider calls = %d, want zero", calls)
+	}
+}
+
 func TestProviderContextBudget_OversizedPendingInputIsExternalizedWithoutCompactingSmallHistory(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("OPENVIBELY_APP_DATA_DIR", root)

@@ -278,6 +278,52 @@ func TestSendCompletionsPreservesReasoningAcrossRequests(t *testing.T) {
 	}
 }
 
+func TestSendCompletionsBoundsDenseToolOutputForModelButPreservesTranscript(t *testing.T) {
+	requests := 0
+	var modelToolResult string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if requests == 2 {
+			messages, _ := body["messages"].([]any)
+			for _, raw := range messages {
+				message, _ := raw.(map[string]any)
+				if message["role"] == "tool" && message["tool_call_id"] == "call_dense" {
+					modelToolResult, _ = message["content"].(string)
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_dense\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	full := strings.Repeat("!", 5000)
+	client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
+	_, err := client.SendCompletions(context.Background(), "question", &CompletionsOptions{
+		ToolOutputTokenLimit: 512,
+		ExtraTools:           []ToolDefinition{{Type: "function", Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		ToolExecutor:         func(context.Context, string, json.RawMessage) (string, bool, error) { return full, false, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(modelToolResult)) > 512 || !strings.Contains(modelToolResult, "truncated") {
+		t.Fatalf("model tool result was not conservatively bounded: runes=%d", len([]rune(modelToolResult)))
+	}
+	transcript := client.LastCompletionsTranscript()
+	if len(transcript) < 3 || transcript[2].ToolCallID != "call_dense" || transcript[2].Content != full {
+		t.Fatal("durable transcript did not preserve complete paired tool output")
+	}
+}
+
 func TestSendCompletionsCapturesCompleteToolTranscript(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

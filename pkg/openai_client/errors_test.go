@@ -4,7 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
+
+func TestCategorizeProviderErrorUsesStructuredOpenAIError(t *testing.T) {
+	contextErr := &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "opaque"}
+	if got := CategorizeProviderError(contextErr); !llmcontracts.ErrorIs(got, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("context category = %v", got)
+	}
+	unsupported := &APIError{StatusCode: 404, Code: "unsupported_feature", Message: "opaque"}
+	if got := CategorizeCompactionError(unsupported); !llmcontracts.ErrorIs(got, llmcontracts.ErrorNativeCompactionUnsupported) {
+		t.Fatalf("compaction category = %v", got)
+	}
+	oversized := &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "opaque"}
+	if got := CategorizeCompactionError(oversized); !llmcontracts.ErrorIs(got, llmcontracts.ErrorCompactionInputInfeasible) {
+		t.Fatalf("compaction input category = %v", got)
+	}
+}
 
 func TestAPIError(t *testing.T) {
 	t.Run("error string formatting", func(t *testing.T) {

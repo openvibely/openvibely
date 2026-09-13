@@ -306,7 +306,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
 		})
 		if err != nil {
-			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
+			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
 		result.InputTokens += turnResult.inputTokens
@@ -826,7 +826,10 @@ func truncateToolOutputForModelInput(output string, tokenLimit int) string {
 		return output
 	}
 
-	maxChars := limit * 4 // approximate token->char conversion
+	// The hard admission estimator uses one token per rune when no exact
+	// tokenizer is available. Use the same conservative conversion here so a
+	// dense symbol-heavy result cannot exceed its independent replay budget.
+	maxChars := limit
 	runes := []rune(output)
 	if len(runes) <= maxChars {
 		return output
@@ -896,7 +899,7 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
 	}
 
-	trimmedInput, err := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model)
+	trimmedInput, err := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model, opts.ContextWindow)
 	if err != nil {
 		return nil, "", err
 	}
@@ -961,14 +964,14 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 
 	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
 	if err != nil {
-		return nil, "", err
+		return nil, "", CategorizeCompactionError(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(resp.Body)
 		apiErr := parseAPIError(resp.StatusCode, errBody)
-		return nil, "", fmt.Errorf("POST %q (compaction): %w", endpoint, apiErr)
+		return nil, "", CategorizeCompactionError(fmt.Errorf("POST %q (compaction): %w", endpoint, apiErr))
 	}
 
 	var compacted struct {
@@ -1008,7 +1011,7 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 		return c.sendAgenticTurn(attemptCtx, compactionInput, tools, &compactionOpts, isOAuth)
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("compaction response: %w", err)
+		return nil, "", CategorizeCompactionError(fmt.Errorf("compaction response: %w", err))
 	}
 	compactionItems := make([]any, 0, 1)
 	for _, raw := range result.outputItems {
@@ -1272,9 +1275,18 @@ func compactionInstructions(opts *AgenticOptions) string {
 	return openAICompactionInstructions
 }
 
-func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string) ([]any, error) {
-	contextWindow, ok := openAIModelContextWindow(model)
-	if !ok || contextWindow <= 0 || len(inputItems) == 0 {
+func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string, configuredContextWindow ...int) ([]any, error) {
+	contextWindow := 0
+	if len(configuredContextWindow) > 0 {
+		contextWindow = configuredContextWindow[0]
+	}
+	if contextWindow <= 0 {
+		contextWindow, _ = openAIModelContextWindow(model)
+	}
+	if contextWindow <= 0 {
+		contextWindow = DefaultCompactionThreshold
+	}
+	if len(inputItems) == 0 {
 		return append([]any(nil), inputItems...), nil
 	}
 	safetyMargin := max(1024, contextWindow/50)

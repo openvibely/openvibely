@@ -53,6 +53,13 @@ func (d *retryingOllamaDoer) Do(*http.Request) (*http.Response, error) {
 	}, nil
 }
 
+func TestOllamaResponseErrorCategorizesContextWindow(t *testing.T) {
+	err := ollamaResponseError(http.StatusBadRequest, []byte(`{"error":"prompt exceeds context window"}`))
+	if !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("error = %v, want context-window category", err)
+	}
+}
+
 func TestCallDirectRetriesTransientHTTPStatus(t *testing.T) {
 	instantOllamaRetry(t)
 	doer := &retryingOllamaDoer{firstStatus: http.StatusServiceUnavailable}

@@ -401,7 +401,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 			}
 			if resp.StatusCode != http.StatusOK {
 				respBody, _ := io.ReadAll(resp.Body)
-				return nil, false, httpretry.NewResponseError(resp, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody)))
+				return nil, false, httpretry.NewResponseError(resp, categorizeAnthropicAPIError(resp.StatusCode, respBody, false))
 			}
 			observed := false
 			onDelta := func(text string) {
@@ -424,7 +424,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return result, err
 	})
 	if err != nil {
-		return nil, err
+		return nil, categorizeAnthropicProviderError(err)
 	}
 
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})

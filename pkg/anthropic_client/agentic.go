@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -26,8 +28,9 @@ const (
 	// Prefer the direct-call web tool versions for URL retrieval flows.
 	// Newer web tool versions can route through provider code_execution,
 	// which may hit per-turn tool budgets and cause fetch failures.
-	anthropicWebSearchToolType = "web_search_20250305"
-	anthropicWebFetchToolType  = "web_fetch_20250910"
+	anthropicWebSearchToolType    = "web_search_20250305"
+	anthropicWebFetchToolType     = "web_fetch_20250910"
+	anthropicToolOutputTokenLimit = 10000
 )
 
 // AgenticOptions configures an agentic send with tool use.
@@ -40,6 +43,9 @@ type AgenticOptions struct {
 	WorkDir       string // working directory for tool execution
 	MaxTurns      int    // max agentic loop iterations (default 25)
 	DisableTools  bool   // when true, no tools are sent (chat orchestrator mode)
+	// ToolOutputTokenLimit bounds each local tool result replayed to the model;
+	// callbacks and the returned ToolCalls retain the complete output.
+	ToolOutputTokenLimit int
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example runtime action tools) to be sent.
 	SkipDefaultTools bool
@@ -345,7 +351,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return c.sendAgenticTurn(attemptCtx, messages, tools, opts)
 		})
 		if err != nil {
-			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
+			return nil, categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
 		result.InputTokens += resp.inputTokens
@@ -461,7 +467,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			toolResults = append(toolResults, agenticBlock{
 				Type:      "tool_result",
 				ToolUseID: exec.block.ID,
-				Content:   anthropicStringContentRaw(exec.output),
+				Content:   anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit)),
 				IsError:   exec.isError,
 			})
 		}
@@ -566,6 +572,28 @@ func anthropicProviderToolResultName(block agenticBlock) string {
 		return strings.TrimSuffix(t, "_tool_result")
 	}
 	return ""
+}
+
+func truncateAnthropicToolOutputForModelInput(output string, tokenLimit int) string {
+	if output == "" {
+		return output
+	}
+	if tokenLimit <= 0 {
+		tokenLimit = anthropicToolOutputTokenLimit
+	}
+	runes := []rune(output)
+	if len(runes) <= tokenLimit {
+		return output
+	}
+	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
+	markerRunes := []rune(marker)
+	if len(markerRunes) >= tokenLimit {
+		return string(runes[:tokenLimit])
+	}
+	available := tokenLimit - len(markerRunes)
+	head := available / 2
+	tail := available - head
+	return string(runes[:head]) + marker + string(runes[len(runes)-tail:])
 }
 
 func anthropicStringContentRaw(s string) json.RawMessage {
@@ -894,6 +922,57 @@ func usesAdaptiveThinking(model string) bool {
 }
 
 // sendAgenticTurn sends a single streaming request and returns parsed content blocks.
+type anthropicProviderError struct {
+	StatusCode int
+	Type       string
+	Message    string
+}
+
+func (e *anthropicProviderError) Error() string {
+	return fmt.Sprintf("Anthropic API error %d (%s): %s", e.StatusCode, e.Type, e.Message)
+}
+
+func categorizeAnthropicAPIError(statusCode int, body []byte, nativeCompaction bool) error {
+	var envelope struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &envelope)
+	providerErr := &anthropicProviderError{StatusCode: statusCode, Type: strings.TrimSpace(envelope.Error.Type), Message: strings.TrimSpace(envelope.Error.Message)}
+	if providerErr.Message == "" {
+		providerErr.Message = strings.TrimSpace(string(body))
+	}
+	typ := strings.ToLower(providerErr.Type)
+	msg := strings.ToLower(providerErr.Message)
+	if typ == "request_too_large" || strings.Contains(msg, "context window") || strings.Contains(msg, "too many tokens") {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Anthropic Messages", providerErr)
+	}
+	if nativeCompaction && (typ == "unsupported_beta" || statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed || statusCode == http.StatusNotImplemented) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionUnsupported, "Anthropic context management", providerErr)
+	}
+	if nativeCompaction && (strings.Contains(msg, "context management") || strings.Contains(msg, "compaction")) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionFailed, "Anthropic context management", providerErr)
+	}
+	return providerErr
+}
+
+func categorizeAnthropicProviderError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var categorized *llmcontracts.CategorizedError
+	if errors.As(err, &categorized) {
+		return err
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorTransportFailure, "Anthropic transport", err)
+	}
+	return err
+}
+
 func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) error {
 	if opts == nil {
 		return nil
@@ -1149,7 +1228,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, httpretry.NewResponseError(resp, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody)))
+		return nil, httpretry.NewResponseError(resp, categorizeAnthropicAPIError(resp.StatusCode, respBody, opts.AutoCompaction))
 	}
 
 	result, err := c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
