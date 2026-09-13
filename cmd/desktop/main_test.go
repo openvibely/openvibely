@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -136,6 +137,67 @@ func TestDesktopPackagedUpdateHelperIntegrationTimeouts(t *testing.T) {
 	}
 	if appBundleCfg.ValidationTimeout != 7500*time.Millisecond {
 		t.Fatalf("app-bundle validation timeout = %s", appBundleCfg.ValidationTimeout)
+	}
+}
+
+func TestDesktopPackagedUpdateHelperIntegrationTimeoutsNilConfig(t *testing.T) {
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "not-a-duration")
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "not-a-duration")
+	if err := applyUpdateIntegrationTimeouts(nil); err != nil {
+		t.Fatalf("executable nil config error = %v", err)
+	}
+	if err := applyAppBundleUpdateIntegrationTimeouts(nil); err != nil {
+		t.Fatalf("app-bundle nil config error = %v", err)
+	}
+}
+
+func TestDesktopPackagedUpdateHelperInvalidTimeoutsReturnBeforeHelper(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		envName string
+		value   string
+		want    string
+	}{
+		{name: "executable wait timeout", command: update.ExecutableUpdateHelperCommand, envName: "OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", value: "not-a-duration", want: "parse update integration wait timeout"},
+		{name: "executable validation timeout", command: update.ExecutableUpdateHelperCommand, envName: "OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", value: "not-a-duration", want: "parse update integration validation timeout"},
+		{name: "app-bundle wait timeout", command: update.AppBundleUpdateHelperCommand, envName: "OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", value: "not-a-duration", want: "parse update integration wait timeout"},
+		{name: "app-bundle validation timeout", command: update.AppBundleUpdateHelperCommand, envName: "OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", value: "not-a-duration", want: "parse update integration validation timeout"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "")
+			t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "")
+			t.Setenv(test.envName, test.value)
+			root := t.TempDir()
+			metadata, err := json.Marshal(map[string]any{
+				"arguments":           []string{"fixture"},
+				"working_directory":   root,
+				"executable_relative": "Contents/MacOS/OpenVibely",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := filepath.Join(root, "current")
+			args := []string{
+				"openvibely-desktop", test.command,
+				"--parent-pid", "99999999",
+				"--current", current,
+				"--staged", current + ".openvibely-new",
+				"--backup", current + ".openvibely-backup",
+				"--health-url", "http://127.0.0.1:1/health",
+				"--expected-version", "0.6.0",
+				"--previous-version", "0.5.0",
+				"--outcome-id", "desktop-invalid-timeout",
+			}
+			handled, err := runPackagedUpdateHelperCommand(context.Background(), args, strings.NewReader(string(metadata)))
+			if !handled {
+				t.Fatal("packaged update helper command was not handled")
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("invalid timeout error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

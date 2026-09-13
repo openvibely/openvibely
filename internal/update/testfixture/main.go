@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/update"
 )
@@ -112,19 +111,8 @@ func runExecutableUpdateHelper() {
 			err = update.LoadExecutableUpdateHelperRelaunch(os.Stdin, &cfg)
 		}
 	}
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
-		milliseconds, parseErr := strconv.Atoi(value)
-		if parseErr != nil {
-			fatal(parseErr)
-		}
-		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
-	}
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
-		milliseconds, parseErr := strconv.Atoi(value)
-		if parseErr != nil {
-			fatal(parseErr)
-		}
-		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+	if err := update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout); err != nil {
+		fatal(err)
 	}
 	if err == nil {
 		err = update.RunExecutableUpdateHelper(context.Background(), cfg)
@@ -139,19 +127,8 @@ func runAppBundleUpdateHelper() {
 	if err == nil {
 		err = update.LoadAppBundleUpdateHelperRelaunch(os.Stdin, &cfg)
 	}
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
-		milliseconds, parseErr := strconv.Atoi(value)
-		if parseErr != nil {
-			fatal(parseErr)
-		}
-		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
-	}
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
-		milliseconds, parseErr := strconv.Atoi(value)
-		if parseErr != nil {
-			fatal(parseErr)
-		}
-		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+	if err := update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout); err != nil {
+		fatal(err)
 	}
 	if err == nil {
 		err = update.RunAppBundleUpdateHelper(context.Background(), cfg)

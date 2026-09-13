@@ -7908,7 +7908,7 @@ func TestHandler_TaskThreadSend_RejectsWhitespaceOnlyMessageBeforeAgentSelection
 	require.NoError(t, err)
 	assert.Equal(t, beforeTask.Status, afterTask.Status)
 	assert.Equal(t, beforeTask.Category, afterTask.Category)
-	assert.Nil(t, afterTask.AgentID)
+	assert.Equal(t, beforeTask.AgentID, afterTask.AgentID)
 }
 
 func TestHandler_TaskThreadSend_TrimsPaddedMessage(t *testing.T) {

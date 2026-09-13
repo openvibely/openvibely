@@ -162,7 +162,8 @@ func (r *LifecycleRepo) DeleteHook(ctx context.Context, id string) error {
 
 // listHooks executes one of the repository-owned lifecycle hook list queries and
 // assembles its rows into hook models. The caller supplies the fixed query and
-// retains responsibility for its projection, filters, ordering, and arguments.
+// retains responsibility for its projection, filters, ordering, arguments, and
+// method-specific query error context.
 func (r *LifecycleRepo) listHooks(ctx context.Context, query, queryErrorContext string, args ...any) ([]models.AgentLifecycleHook, error) {
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
