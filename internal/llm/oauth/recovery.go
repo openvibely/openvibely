@@ -31,8 +31,8 @@ type TokenSet struct {
 type RefreshFunc func(ctx context.Context, cfg models.LLMConfig) (TokenSet, error)
 
 // Manager coordinates OAuth refresh for provider adapters. It reloads the exact
-// selected config and serializes refresh-token rotation in-process and across
-// processes with a durable per-config lease.
+// selected model and serializes refresh-token rotation in-process and across
+// processes at the linked connection boundary.
 type Manager struct {
 	repo  *repository.LLMConfigRepo
 	group singleflight.Group
@@ -83,7 +83,11 @@ func (m *Manager) refreshSelected(ctx context.Context, cfg models.LLMConfig, tok
 		return cfg, fmt.Errorf("OAuth refresh not implemented for model config %q (provider=%s model=%s)", cfg.Name, cfg.Provider, cfg.Model)
 	}
 
-	key := string(cfg.Provider) + ":" + cfg.ID
+	ownerID := cfg.ID
+	if strings.TrimSpace(cfg.OAuthConnectionID) != "" {
+		ownerID = cfg.OAuthConnectionID
+	}
+	key := string(cfg.Provider) + ":" + ownerID
 	value, err, _ := m.group.Do(key, func() (any, error) {
 		return m.refreshSelectedLocked(ctx, cfg, tokenUsed, minTTL, refresh)
 	})
@@ -94,7 +98,20 @@ func (m *Manager) refreshSelected(ctx context.Context, cfg models.LLMConfig, tok
 	if !ok {
 		return cfg, fmt.Errorf("OAuth recovery internal type mismatch for model config %q", cfg.Name)
 	}
-	return fresh, nil
+	if strings.TrimSpace(cfg.OAuthConnectionID) == "" {
+		return fresh, nil
+	}
+	current, loadErr := m.repo.GetByID(ctx, cfg.ID)
+	if loadErr != nil {
+		return cfg, fmt.Errorf("reload selected OAuth config %q after shared refresh: %w", cfg.Name, loadErr)
+	}
+	if current == nil {
+		return cfg, fmt.Errorf("selected OAuth config %q no longer exists after shared refresh", cfg.Name)
+	}
+	if current.Provider != cfg.Provider || current.AuthMethod != models.AuthMethodOAuth || current.OAuthConnectionID != cfg.OAuthConnectionID {
+		return cfg, fmt.Errorf("selected OAuth config changed account connection for %q", cfg.Name)
+	}
+	return *current, nil
 }
 
 func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfig, tokenUsed string, minTTL time.Duration, refresh RefreshFunc) (models.LLMConfig, error) {
@@ -117,6 +134,9 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 		if loaded.Provider != cfg.Provider || loaded.AuthMethod != models.AuthMethodOAuth {
 			return cfg, fmt.Errorf("selected OAuth config changed authentication context for %q", cfg.Name)
 		}
+		if strings.TrimSpace(cfg.OAuthConnectionID) != "" && loaded.OAuthConnectionID != cfg.OAuthConnectionID {
+			return cfg, fmt.Errorf("selected OAuth config changed account connection for %q", cfg.Name)
+		}
 		if loaded.OAuthNeedsReauth {
 			return *loaded, ErrReauthenticationRequired
 		}
@@ -131,7 +151,11 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 			return *loaded, fmt.Errorf("OAuth refresh unavailable for model config %q (provider=%s model=%s): missing refresh token", loaded.Name, loaded.Provider, loaded.Model)
 		}
 
-		acquired, acquireErr := m.repo.TryAcquireOAuthRefreshLease(ctx, loaded.ID, owner, time.Now(), leaseDuration)
+		leaseID := loaded.ID
+		if loaded.OAuthConnectionID != "" {
+			leaseID = loaded.OAuthConnectionID
+		}
+		acquired, acquireErr := m.repo.TryAcquireOAuthRefreshLease(ctx, leaseID, owner, time.Now(), leaseDuration)
 		if acquireErr != nil {
 			return *loaded, fmt.Errorf("acquire OAuth refresh lease for model config %q: %w", loaded.Name, acquireErr)
 		}
@@ -146,13 +170,19 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 		defer func() {
 			releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_ = m.repo.ReleaseOAuthRefreshLease(releaseCtx, loaded.ID, owner)
+			_ = m.repo.ReleaseOAuthRefreshLease(releaseCtx, leaseID, owner)
 		}()
 
 		tokens, refreshErr := refresh(ctx, *loaded)
 		if refreshErr != nil {
 			if errors.Is(refreshErr, ErrReauthenticationRequired) {
-				changed, markErr := m.repo.MarkOAuthNeedsReauthIfRevision(ctx, loaded.ID, loaded.OAuthConfigRevision, loaded.Provider)
+				var changed bool
+				var markErr error
+				if loaded.OAuthConnectionID != "" {
+					changed, markErr = m.repo.MarkLinkedOAuthConnectionNeedsReauthIfRevision(ctx, loaded.ID, loaded.OAuthConnectionID, loaded.OAuthConfigRevision, loaded.Provider)
+				} else {
+					changed, markErr = m.repo.MarkOAuthNeedsReauthIfRevision(ctx, loaded.ID, loaded.OAuthConfigRevision, loaded.Provider)
+				}
 				if markErr != nil {
 					return *loaded, fmt.Errorf("persist OAuth reauthentication state for model config %q: %w", loaded.Name, markErr)
 				}
@@ -175,7 +205,13 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 		}
 
 		var changed bool
-		if tokens.AccountID != "" {
+		if loaded.OAuthConnectionID != "" {
+			if tokens.AccountID != "" {
+				changed, err = m.repo.UpdateLinkedOAuthConnectionTokensIfRevision(ctx, loaded.ID, loaded.OAuthConnectionID, loaded.OAuthConfigRevision, loaded.Provider, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, tokens.AccountID)
+			} else {
+				changed, err = m.repo.UpdateLinkedOAuthConnectionTokensIfRevision(ctx, loaded.ID, loaded.OAuthConnectionID, loaded.OAuthConfigRevision, loaded.Provider, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt)
+			}
+		} else if tokens.AccountID != "" {
 			changed, err = m.repo.UpdateStandardOAuthTokensIfRevision(ctx, loaded.ID, loaded.OAuthConfigRevision, loaded.Provider, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt, tokens.AccountID)
 		} else {
 			changed, err = m.repo.UpdateStandardOAuthTokensIfRevision(ctx, loaded.ID, loaded.OAuthConfigRevision, loaded.Provider, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt)

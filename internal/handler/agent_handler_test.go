@@ -1833,8 +1833,8 @@ func assertGenerateAgentLoadedFullDefaultModel(t *testing.T, statements []string
 	t.Helper()
 	for _, statement := range statements {
 		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
-		if strings.Contains(stmt, " from agent_configs where is_default = 1 limit 1") {
-			projection := strings.Split(stmt, " from agent_configs ")[0]
+		if strings.Contains(stmt, " from agent_configs where is_default = 1 limit 1") || strings.Contains(stmt, " from agent_configs a left join oauth_connections") && strings.Contains(stmt, " where a.is_default = 1 limit 1") {
+			projection := strings.Split(stmt, " from agent_configs")[0]
 			if strings.Contains(projection, "api_key") && strings.Contains(projection, "extra_body_json") {
 				return
 			}

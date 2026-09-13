@@ -600,6 +600,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		if snapshot.AgentConfigID == "" {
 			snapshot.AgentConfigID = cfg.ID
 		}
+		snapshot.OAuthConnectionID = cfg.OAuthConnectionID
 		if snapshot.AccountID == "" {
 			snapshot.AccountID = accountIDForConfig(cfg)
 		}
@@ -708,6 +709,7 @@ func accountRefreshFailureSnapshot(cfg models.LLMConfig, previous *models.Accoun
 		Provider:             string(cfg.Provider),
 		AccountID:            accountIDForConfig(cfg),
 		AgentConfigID:        cfg.ID,
+		OAuthConnectionID:    cfg.OAuthConnectionID,
 		RateLimitReachedType: reason,
 		RawJSON:              accountRefreshFailureRawPrefix + strconv.Quote(reason) + "}",
 	}
@@ -815,14 +817,21 @@ func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []model
 	return existing
 }
 
-func accountUsageSnapshotShouldRender(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) bool {
-	cfg, ok := configsByID[snapshot.AgentConfigID]
-	if !ok {
-		return false
+func configForAccountSnapshot(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) (models.LLMConfig, bool) {
+	if cfg, ok := configsByID[snapshot.AgentConfigID]; ok && snapshotMatchesConfigGeneration(snapshot, cfg) {
+		return cfg, true
 	}
-	return cfg.AuthMethod == models.AuthMethodOAuth &&
-		strings.TrimSpace(cfg.OAuthAccessToken) != "" &&
-		snapshotMatchesConfigGeneration(snapshot, cfg)
+	for _, cfg := range configsByID {
+		if snapshotMatchesConfigGeneration(snapshot, cfg) {
+			return cfg, true
+		}
+	}
+	return models.LLMConfig{}, false
+}
+
+func accountUsageSnapshotShouldRender(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) bool {
+	cfg, ok := configForAccountSnapshot(snapshot, configsByID)
+	return ok && cfg.AuthMethod == models.AuthMethodOAuth && strings.TrimSpace(cfg.OAuthAccessToken) != ""
 }
 
 func applyAccountErrors(accounts []models.AccountUsageView, errorsByKey map[string]string, configsByID map[string]models.LLMConfig) []models.AccountUsageView {
@@ -997,7 +1006,7 @@ func accountSnapshotHasParsedLimits(snapshot models.AccountUsageSnapshot) bool {
 }
 
 func sanitizeSnapshotAccountDisplay(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) models.AccountUsageSnapshot {
-	cfg, ok := configsByID[snapshot.AgentConfigID]
+	cfg, ok := configForAccountSnapshot(snapshot, configsByID)
 	if !ok {
 		return snapshot
 	}
@@ -1157,6 +1166,9 @@ func accountUsageKeyForConfig(cfg models.LLMConfig) string {
 	if strings.TrimSpace(cfg.OAuthAccountID) != "" {
 		return accountUsageKey(provider, cfg.OAuthAccountID, cfg.ID)
 	}
+	if strings.TrimSpace(cfg.OAuthConnectionID) != "" {
+		return provider + "\x00connection\x00" + strings.TrimSpace(cfg.OAuthConnectionID)
+	}
 	return accountUsageKey(provider, "", cfg.ID)
 }
 
@@ -1172,18 +1184,23 @@ func accountUsageKeyForViewWithConfigs(view models.AccountUsageView, configsByID
 }
 
 func accountUsageKeyForSnapshot(snapshot models.AccountUsageSnapshot) string {
+	if strings.TrimSpace(snapshot.AccountID) == "" && strings.TrimSpace(snapshot.OAuthConnectionID) != "" {
+		return snapshot.Provider + "\x00connection\x00" + strings.TrimSpace(snapshot.OAuthConnectionID)
+	}
 	return accountUsageKey(snapshot.Provider, snapshot.AccountID, snapshot.AgentConfigID)
 }
 
 func accountUsageKeyForSnapshotWithConfigs(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) string {
-	if cfg, ok := configsByID[snapshot.AgentConfigID]; ok {
+	if cfg, ok := configForAccountSnapshot(snapshot, configsByID); ok {
 		return accountUsageKeyForConfig(cfg)
 	}
 	return accountUsageKeyForSnapshot(snapshot)
 }
 
 func snapshotMatchesConfigGeneration(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
-	return snapshot.OAuthConfigRevision == cfg.OAuthConfigRevision &&
+	return strings.TrimSpace(snapshot.OAuthConnectionID) != "" &&
+		strings.TrimSpace(snapshot.OAuthConnectionID) == strings.TrimSpace(cfg.OAuthConnectionID) &&
+		snapshot.OAuthConfigRevision == cfg.OAuthConfigRevision &&
 		strings.TrimSpace(snapshot.Provider) == string(cfg.Provider)
 }
 
@@ -1194,10 +1211,7 @@ func snapshotMatchesConfigAccount(snapshot models.AccountUsageSnapshot, cfg mode
 	if strings.TrimSpace(snapshot.AccountID) != "" && strings.TrimSpace(cfg.OAuthAccountID) != "" {
 		return strings.TrimSpace(snapshot.AccountID) == strings.TrimSpace(cfg.OAuthAccountID)
 	}
-	if strings.TrimSpace(snapshot.AgentConfigID) != "" && strings.TrimSpace(snapshot.AgentConfigID) == strings.TrimSpace(cfg.ID) {
-		return true
-	}
-	return false
+	return true
 }
 
 type anthropicOAuthProfile struct {
@@ -1487,7 +1501,13 @@ func (s *UsageAnalyticsService) persistResolvedOAuthAccountID(ctx context.Contex
 	if s.llmConfigRepo == nil || strings.TrimSpace(cfg.ID) == "" {
 		return cfg, true
 	}
-	updated, err := s.llmConfigRepo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, accountID)
+	var updated bool
+	var err error
+	if cfg.OAuthConnectionID != "" {
+		updated, err = s.llmConfigRepo.UpdateLinkedOAuthConnectionAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConnectionID, cfg.OAuthConfigRevision, cfg.Provider, accountID)
+	} else {
+		updated, err = s.llmConfigRepo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, accountID)
+	}
 	if err != nil {
 		applog.Infof("[usage] persisting OAuth account id failed provider=%s: %v", cfg.Provider, err)
 		return abandonAccountUsageOAuthCandidate(cfg), false

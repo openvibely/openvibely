@@ -838,8 +838,8 @@ func TestChannelModelLoadingProjectionMeetsPerformanceBudget(t *testing.T) {
 	}
 	// The compact path hydrates one full selected model after the projection. Keep
 	// the guard tight while allowing the provider-aware compaction scalar fields
-	// now stored on the full model record.
-	if compact.NsPerOp() > (200*1000) || compact.AllocedBytesPerOp() > 304*1024 {
+	// and the bounded shared OAuth connection payload now stored on the full model record.
+	if compact.NsPerOp() > (200*1000) || compact.AllocedBytesPerOp() > 312*1024 {
 		t.Fatalf("compact channel model loading exceeded budget: %d ns/op, %d B/op", compact.NsPerOp(), compact.AllocedBytesPerOp())
 	}
 	if full.NsPerOp()/compact.NsPerOp() < 50 {
@@ -925,7 +925,7 @@ func assertChannelCompactStatement(t *testing.T, statements []string) {
 			compact++
 			continue
 		}
-		if !strings.Contains(statement, "where id = ?") {
+		if !strings.Contains(statement, "where id = ?") && !strings.Contains(statement, "where a.id = ?") {
 			t.Fatalf("unexpected model query: %s", statement)
 		}
 	}
@@ -951,7 +951,7 @@ func assertChannelVisionCompactStatement(t *testing.T, statements []string) {
 			}
 			continue
 		}
-		if !strings.Contains(statement, "where id = ?") {
+		if !strings.Contains(statement, "where id = ?") && !strings.Contains(statement, "where a.id = ?") {
 			t.Fatalf("unexpected model query: %s", statement)
 		}
 	}
