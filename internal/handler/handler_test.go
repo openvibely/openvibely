@@ -7737,7 +7737,6 @@ func TestHandler_TaskThreadSend_RejectsWhitespaceOnlyMessage(t *testing.T) {
 			task := createTask(t, h, project.ID, "Whitespace Follow-up Task", func(tk *models.Task) {
 				tk.Status = tt.status
 				tk.Category = tt.category
-				tk.AgentID = &agent.ID
 			})
 			var activeExecutionID string
 			if tt.name == "active" {
@@ -7757,6 +7756,7 @@ func TestHandler_TaskThreadSend_RejectsWhitespaceOnlyMessage(t *testing.T) {
 
 			form := url.Values{}
 			form.Set("message", tt.message)
+			form.Set("agent_id", "missing-agent")
 			rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
 			assertCode(t, rec, http.StatusBadRequest)
 			assertContains(t, rec, "message is required")
