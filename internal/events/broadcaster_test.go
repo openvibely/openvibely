@@ -2,9 +2,11 @@ package events
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestTaskEvent_ToSSE_IncludesTaskName(t *testing.T) {
@@ -213,4 +215,75 @@ func TestBroadcaster_ConcurrentSubscribeUnsubscribePublish(t *testing.T) {
 	if b.SubscriberCount() != 0 {
 		t.Errorf("expected 0 subscribers after concurrent test, got %d", b.SubscriberCount())
 	}
+}
+
+func BenchmarkBroadcasterScopedFanout(b *testing.B) {
+	for _, matching := range []int{1, 5, 10, 50} {
+		b.Run(fmt.Sprintf("%d_matching", matching), func(b *testing.B) {
+			benchmarkBroadcasterScopedFanout(b, matching, false)
+		})
+	}
+	b.Run("50_clients_10_projects_5_matching", func(b *testing.B) {
+		benchmarkBroadcasterScopedFanout(b, 5, true)
+	})
+}
+
+func benchmarkBroadcasterScopedFanout(b *testing.B, matching int, distributed bool) {
+	const (
+		clientCount  = 50
+		projectCount = 10
+	)
+
+	broadcaster := NewBroadcaster()
+	allSubscribers := make([]Subscriber, 0, clientCount)
+	matchingSubscribers := make([]Subscriber, 0, matching)
+	for i := 0; i < clientCount; i++ {
+		projectID := "project-0"
+		if distributed {
+			projectID = fmt.Sprintf("project-%d", i%projectCount)
+		} else if i >= matching {
+			projectID = "project-1"
+		}
+		sub, err := broadcaster.SubscribeProject(projectID)
+		if err != nil {
+			b.Fatalf("SubscribeProject #%d: %v", i, err)
+		}
+		allSubscribers = append(allSubscribers, sub)
+		if projectID == "project-0" {
+			matchingSubscribers = append(matchingSubscribers, sub)
+		}
+	}
+	b.Cleanup(func() {
+		for _, sub := range allSubscribers {
+			broadcaster.Unsubscribe(sub)
+		}
+	})
+
+	const publishBatchSize = 10
+	event := TaskEvent{Type: TaskStatusChanged, TaskID: "task-0", ProjectID: "project-0", Status: "running"}
+	var publisherNanos int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	for published := 0; published < b.N; {
+		batchSize := publishBatchSize
+		if remaining := b.N - published; remaining < batchSize {
+			batchSize = remaining
+		}
+		started := time.Now()
+		for i := 0; i < batchSize; i++ {
+			broadcaster.Publish(event)
+		}
+		publisherNanos += time.Since(started).Nanoseconds()
+
+		// Drain outside the manual publisher timing measurement so the next batch starts
+		// with every matching channel below its public buffer capacity.
+		for _, sub := range matchingSubscribers {
+			for i := 0; i < batchSize; i++ {
+				<-sub
+			}
+		}
+		published += batchSize
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(publisherNanos)/float64(b.N), "publisher-ns/op")
 }

@@ -83,6 +83,26 @@ func closeLiveSSETransportClient(t testing.TB, client *liveSSETransportClient) {
 	}
 }
 
+func closeLiveSSETransportClients(t testing.TB, clients []*liveSSETransportClient) {
+	t.Helper()
+	for _, client := range clients {
+		if err := client.response.Body.Close(); err != nil {
+			t.Errorf("close SSE response: %v", err)
+		}
+	}
+
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for _, client := range clients {
+		select {
+		case <-client.done:
+		case <-deadline.C:
+			t.Error("timed out waiting for SSE client readers to stop")
+			return
+		}
+	}
+}
+
 func waitForLiveSSEEvent(t testing.TB, client *liveSSETransportClient, want string) {
 	t.Helper()
 	deadline := time.NewTimer(3 * time.Second)
@@ -311,11 +331,13 @@ func benchmarkLiveEventsSSETransport(b *testing.B, clientCount int, scoped bool,
 		}
 		clients = append(clients, openLiveSSETransportClient(b, server.URL, path))
 	}
-	defer func() {
-		for _, client := range clients {
-			closeLiveSSETransportClient(b, client)
-		}
-	}()
+	for _, client := range clients {
+		go func(events <-chan string) {
+			for range events {
+			}
+		}(client.events)
+	}
+	defer closeLiveSSETransportClients(b, clients)
 
 	waitForLiveSubscriberCount(b, "task", taskBroadcaster.SubscriberCount, clientCount)
 	waitForLiveSubscriberCount(b, "chat", chatBroadcaster.SubscriberCount, clientCount)
