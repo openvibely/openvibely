@@ -802,11 +802,16 @@ func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []model
 		index[accountUsageKeyForViewWithConfigs(account, configsByID)] = i
 	}
 	for _, snapshot := range snapshots {
-		if !accountUsageSnapshotShouldRender(snapshot, configsByID) {
+		cfg, ok := configForAccountSnapshot(snapshot, configsByID)
+		if !ok || cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
 			continue
 		}
+		// The model that originally fetched this connection-bound snapshot may
+		// since have moved to another account. Attribute the rendered view to a
+		// model that still owns the snapshot's immutable connection generation.
+		snapshot.AgentConfigID = cfg.ID
 		view := accountViewFromSnapshot(sanitizeSnapshotAccountDisplay(snapshot, configsByID))
-		key := accountUsageKeyForSnapshotWithConfigs(snapshot, configsByID)
+		key := accountUsageKeyForConfig(cfg)
 		if i, ok := index[key]; ok {
 			existing[i] = preferAccountUsageView(existing[i], view)
 			continue
@@ -827,11 +832,6 @@ func configForAccountSnapshot(snapshot models.AccountUsageSnapshot, configsByID 
 		}
 	}
 	return models.LLMConfig{}, false
-}
-
-func accountUsageSnapshotShouldRender(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) bool {
-	cfg, ok := configForAccountSnapshot(snapshot, configsByID)
-	return ok && cfg.AuthMethod == models.AuthMethodOAuth && strings.TrimSpace(cfg.OAuthAccessToken) != ""
 }
 
 func applyAccountErrors(accounts []models.AccountUsageView, errorsByKey map[string]string, configsByID map[string]models.LLMConfig) []models.AccountUsageView {
@@ -1181,20 +1181,6 @@ func accountUsageKeyForViewWithConfigs(view models.AccountUsageView, configsByID
 		return accountUsageKeyForConfig(cfg)
 	}
 	return accountUsageKeyForView(view)
-}
-
-func accountUsageKeyForSnapshot(snapshot models.AccountUsageSnapshot) string {
-	if strings.TrimSpace(snapshot.AccountID) == "" && strings.TrimSpace(snapshot.OAuthConnectionID) != "" {
-		return snapshot.Provider + "\x00connection\x00" + strings.TrimSpace(snapshot.OAuthConnectionID)
-	}
-	return accountUsageKey(snapshot.Provider, snapshot.AccountID, snapshot.AgentConfigID)
-}
-
-func accountUsageKeyForSnapshotWithConfigs(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) string {
-	if cfg, ok := configForAccountSnapshot(snapshot, configsByID); ok {
-		return accountUsageKeyForConfig(cfg)
-	}
-	return accountUsageKeyForSnapshot(snapshot)
 }
 
 func snapshotMatchesConfigGeneration(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
