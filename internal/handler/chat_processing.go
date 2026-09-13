@@ -3605,54 +3605,89 @@ func (h *Handler) executeCreateAlertRequests(ctx context.Context, projectID stri
 	return "Alert Create Results:\n" + strings.Join(results, "\n")
 }
 
-// executeDeleteAlertRequests deletes alerts from typed runtime-tool requests.
-func (h *Handler) executeDeleteAlertRequests(ctx context.Context, projectID string, requests []service.DeleteAlertRequest) string {
-	if len(requests) == 0 {
+// executeAlertMutationRequests applies one alert mutation to each requested ID and formats the results.
+func (h *Handler) executeAlertMutationRequests(
+	ctx context.Context,
+	projectID string,
+	alertIDs []string,
+	mutate func(context.Context, string, string) error,
+	operationName string,
+	unavailableMessage string,
+	resultHeading string,
+	successMessage func(string) string,
+	errorMessage func(string, error) string,
+) string {
+	if len(alertIDs) == 0 {
 		return ""
 	}
 	if h.alertSvc == nil {
-		return "Alert Delete Results:\n- Alert service not available"
+		return unavailableMessage
 	}
 
 	var results []string
-	for _, req := range requests {
-		if err := h.alertSvc.Delete(ctx, projectID, req.AlertID); err != nil {
-			applog.Infof("[handler] executeDeleteAlertRequests error: %v", err)
-			results = append(results, fmt.Sprintf("- Error deleting alert %q: %v", req.AlertID, err))
+	for _, alertID := range alertIDs {
+		if err := mutate(ctx, projectID, alertID); err != nil {
+			applog.Infof("[handler] %s error: %v", operationName, err)
+			results = append(results, errorMessage(alertID, err))
 			continue
 		}
-		results = append(results, fmt.Sprintf("- Deleted alert `%s`", req.AlertID))
+		results = append(results, successMessage(alertID))
 	}
 
 	if len(results) == 0 {
 		return ""
 	}
-	return "Alert Delete Results:\n" + strings.Join(results, "\n")
+	return resultHeading + ":\n" + strings.Join(results, "\n")
+}
+
+// executeDeleteAlertRequests deletes alerts from typed runtime-tool requests.
+func (h *Handler) executeDeleteAlertRequests(ctx context.Context, projectID string, requests []service.DeleteAlertRequest) string {
+	alertIDs := make([]string, len(requests))
+	for i, req := range requests {
+		alertIDs[i] = req.AlertID
+	}
+	return h.executeAlertMutationRequests(
+		ctx,
+		projectID,
+		alertIDs,
+		func(ctx context.Context, projectID, alertID string) error {
+			return h.alertSvc.Delete(ctx, projectID, alertID)
+		},
+		"executeDeleteAlertRequests",
+		"Alert Delete Results:\n- Alert service not available",
+		"Alert Delete Results",
+		func(alertID string) string {
+			return fmt.Sprintf("- Deleted alert `%s`", alertID)
+		},
+		func(alertID string, err error) string {
+			return fmt.Sprintf("- Error deleting alert %q: %v", alertID, err)
+		},
+	)
 }
 
 // executeToggleAlertRequests marks alerts read from typed runtime-tool requests.
 func (h *Handler) executeToggleAlertRequests(ctx context.Context, projectID string, requests []service.ToggleAlertRequest) string {
-	if len(requests) == 0 {
-		return ""
+	alertIDs := make([]string, len(requests))
+	for i, req := range requests {
+		alertIDs[i] = req.AlertID
 	}
-	if h.alertSvc == nil {
-		return "Alert Toggle Results:\n- Alert service not available"
-	}
-
-	var results []string
-	for _, req := range requests {
-		if err := h.alertSvc.MarkRead(ctx, projectID, req.AlertID); err != nil {
-			applog.Infof("[handler] executeToggleAlertRequests error: %v", err)
-			results = append(results, fmt.Sprintf("- Error marking alert %q as read: %v", req.AlertID, err))
-			continue
-		}
-		results = append(results, fmt.Sprintf("- Marked alert `%s` as read", req.AlertID))
-	}
-
-	if len(results) == 0 {
-		return ""
-	}
-	return "Alert Toggle Results:\n" + strings.Join(results, "\n")
+	return h.executeAlertMutationRequests(
+		ctx,
+		projectID,
+		alertIDs,
+		func(ctx context.Context, projectID, alertID string) error {
+			return h.alertSvc.MarkRead(ctx, projectID, alertID)
+		},
+		"executeToggleAlertRequests",
+		"Alert Toggle Results:\n- Alert service not available",
+		"Alert Toggle Results",
+		func(alertID string) string {
+			return fmt.Sprintf("- Marked alert `%s` as read", alertID)
+		},
+		func(alertID string, err error) string {
+			return fmt.Sprintf("- Error marking alert %q as read: %v", alertID, err)
+		},
+	)
 }
 
 // buildChatContext builds the context string for chat prompts, including task, model, and schedule information.

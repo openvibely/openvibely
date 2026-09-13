@@ -830,6 +830,45 @@ func mustGithubToolJSON(t *testing.T, payload map[string]any) string {
 	return out
 }
 
+func TestChatAlertMutationRequestsPreserveResultContracts(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Alert mutation project").Build()
+	first := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "First alert", Message: "first"}
+	second := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "Second alert", Message: "second"}
+	require.NoError(t, tc.alertRepo.Create(ctx, first))
+	require.NoError(t, tc.alertRepo.Create(ctx, second))
+
+	require.Empty(t, tc.handler.executeDeleteAlertRequests(ctx, project.ID, nil))
+	require.Empty(t, tc.handler.executeToggleAlertRequests(ctx, project.ID, nil))
+	require.Equal(t, "Alert Delete Results:\n- Alert service not available", (&Handler{}).executeDeleteAlertRequests(ctx, project.ID, []service.DeleteAlertRequest{{AlertID: first.ID}}))
+	require.Equal(t, "Alert Toggle Results:\n- Alert service not available", (&Handler{}).executeToggleAlertRequests(ctx, project.ID, []service.ToggleAlertRequest{{AlertID: first.ID}}))
+
+	require.Equal(t, "Alert Toggle Results:\n- Marked alert `"+first.ID+"` as read", tc.handler.executeToggleAlertRequests(ctx, project.ID, []service.ToggleAlertRequest{{AlertID: first.ID}}))
+	require.Equal(t, "Alert Delete Results:\n- Deleted alert `"+second.ID+"`", tc.handler.executeDeleteAlertRequests(ctx, project.ID, []service.DeleteAlertRequest{{AlertID: second.ID}}))
+
+	mixedToggle := tc.handler.executeToggleAlertRequests(ctx, project.ID, []service.ToggleAlertRequest{{AlertID: "missing"}, {AlertID: first.ID}})
+	require.Contains(t, mixedToggle, "Error marking alert \"missing\" as read")
+	require.Contains(t, mixedToggle, "Marked alert `"+first.ID+"` as read")
+	mixedDelete := tc.handler.executeDeleteAlertRequests(ctx, project.ID, []service.DeleteAlertRequest{{AlertID: "missing"}, {AlertID: first.ID}})
+	require.Contains(t, mixedDelete, "Error deleting alert \"missing\"")
+	require.Contains(t, mixedDelete, "Deleted alert `"+first.ID+"`")
+
+	runtimeAlert := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "Runtime alert", Message: "runtime"}
+	require.NoError(t, tc.alertRepo.Create(ctx, runtimeAlert))
+	rt := tc.handler.buildChatActionToolRuntime(streamingResponseParams{ProjectID: project.ID}, nil)
+	out, handled, isErr, err := rt.Executor(ctx, "toggle_alert", json.RawMessage(" \n{\"alert_id\":\""+runtimeAlert.ID+"\"}\n "))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Equal(t, "Alert Toggle Results:\n- Marked alert `"+runtimeAlert.ID+"` as read", out)
+	out, handled, isErr, err = rt.Executor(ctx, "delete_alert", json.RawMessage("{\"alert_id\":\""+runtimeAlert.ID+"\"}"))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Equal(t, "Alert Delete Results:\n- Deleted alert `"+runtimeAlert.ID+"`", out)
+}
+
 func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
