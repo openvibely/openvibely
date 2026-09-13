@@ -94,6 +94,41 @@ return 'ready';
 	}
 }
 
+func installGatedTerminalBrowserRenderer(browser *composerFocusCDP) {
+	browser.t.Helper()
+	got := browser.evaluate(`(function(){
+var productionRenderer=window.renderLiveChatContent||window.renderStreamingContent;
+if(typeof productionRenderer!=='function')return 'missing';
+window.__terminalRenderStarted=0;
+window.__terminalRenderSettled=0;
+window.__terminalRenderQueue=[];
+window.__terminalSyncCalls=0;
+var productionSync=window.syncChatTranscriptRevision;
+window.syncChatTranscriptRevision=function(execID){window.__terminalSyncCalls++;return productionSync(execID);};
+window.renderLiveChatContent=function(el,text,yieldLarge){
+  window.__terminalRenderStarted++;
+  return new Promise(function(resolve,reject){
+    window.__terminalRenderQueue.push(function(){
+      Promise.resolve(productionRenderer(el,text,yieldLarge)).then(function(value){window.__terminalRenderSettled++;resolve(value);},reject);
+    });
+  });
+};
+window.__releaseTerminalRender=function(){var render=window.__terminalRenderQueue.shift();if(!render)return false;render();return true;};
+return 'ready';
+})()`)
+	if got != "ready" {
+		browser.t.Fatalf("install gated production terminal browser renderer: %s", got)
+	}
+}
+
+func releaseTerminalBrowserRender(browser *composerFocusCDP, label string) {
+	browser.t.Helper()
+	browser.waitFor(label+" queued", `String(!!(window.__terminalRenderQueue&&window.__terminalRenderQueue.length))`, "true")
+	if got := browser.evaluate(`String(window.__releaseTerminalRender())`); got != "true" {
+		browser.t.Fatalf("release %s: %s", label, got)
+	}
+}
+
 func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
@@ -345,7 +380,7 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 	returnTailJS := string(returnTailJSON)
 	runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id="+project.ID, "chat-live-created-terminal-wiring", func(browser *composerFocusCDP) {
 		browser.waitFor("production Chat page", `Boolean(document.getElementById('chat-page-root'))+':'+Boolean(document.getElementById('chat-messages'))`, "true:true")
-		installDelayedTerminalBrowserRenderer(browser, 2500)
+		installGatedTerminalBrowserRenderer(browser)
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + execID + `',message:'live Chat failure',source:'api'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch production Chat live event: %s", got)
 		}
@@ -354,6 +389,7 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 			t.Fatalf("stream page-level Chat partial output: %s", got)
 		}
 		browser.waitFor("long page-level Chat output render", `document.getElementById('streaming-message-`+execID+`').getAttribute('data-raw-content')===`+longOutputJS+`?'ready':'waiting'`, "ready")
+		releaseTerminalBrowserRender(browser, "initial page-level Chat render")
 		browser.waitFor("initial long page-level Chat render settled", `window.__terminalRenderSettled>=1?'ready':'waiting'`, "ready")
 		if got := browser.evaluate(`(function(){var messages=document.getElementById('chat-messages');messages.scrollTop=messages.scrollHeight;return 'pinned';})()`); got != "pinned" {
 			t.Fatalf("pin live Chat turn: %s", got)
@@ -371,7 +407,8 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){window.__terminalReaderTop=document.getElementById('chat-messages').scrollTop;return 'saved';})()`); got != "saved" {
 			t.Fatalf("save live Chat older-reader position: %s", got)
 		}
-		browser.waitFor("page-level Chat terminal alert behavior after delayed production render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+execID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>=window.__terminalSettledBeforeFailure+1&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: live Chat terminal <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1&&Math.abs(messages.scrollTop-window.__terminalReaderTop)<=2));})()`, "true")
+		releaseTerminalBrowserRender(browser, "failed page-level Chat render")
+		browser.waitFor("page-level Chat terminal alert behavior after gated production render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+execID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>=window.__terminalSettledBeforeFailure+1&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: live Chat terminal <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1&&Math.abs(messages.scrollTop-window.__terminalReaderTop)<=2));})()`, "true")
 
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-chat-live-event',{detail:{type:'chat_new_message',project_id:'` + project.ID + `',exec_id:'` + returnExecID + `',message:'live Chat return failure',source:'api'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch returning production Chat live event: %s", got)
@@ -380,6 +417,7 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){window.__returnInitialSettled=window.__terminalRenderSettled;window.__terminalStreamFor('` + returnExecID + `').emit('message',` + longOutputJS + `);return 'streamed';})()`); got != "streamed" {
 			t.Fatalf("stream returning page-level Chat partial output: %s", got)
 		}
+		releaseTerminalBrowserRender(browser, "initial returning page-level Chat render")
 		browser.waitFor("returning page-level Chat initial render settled", `window.__terminalRenderSettled>window.__returnInitialSettled?'ready':'waiting'`, "ready")
 		phase.Store(2)
 		if got := browser.evaluate(`(function(){var messages=document.getElementById('chat-messages');messages.style.overflowAnchor='none';if(messages._chatTranscriptMutationObserver)messages._chatTranscriptMutationObserver.disconnect();if(messages._chatTranscriptResizeObserver)messages._chatTranscriptResizeObserver.disconnect();messages.scrollTop=messages.scrollHeight;window.__returnSettledBeforeFailure=window.__terminalRenderSettled;window.__returnSyncBeforeFailure=window.__terminalSyncCalls;var stream=window.__terminalStreamFor('` + returnExecID + `');stream.emit('message',` + returnTailJS + `);stream.emit('error','live Chat return terminal');return String(!document.getElementById('chat-execution-` + returnExecID + `').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
@@ -389,6 +427,7 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		browser.waitFor("page-level Chat reader scrolls up during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
 		browser.wheel("#chat-messages", 12000)
 		browser.waitFor("page-level Chat reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker,pair=document.getElementById('chat-execution-`+returnExecID+`');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
+		releaseTerminalBrowserRender(browser, "failed returning page-level Chat render")
 		browser.waitFor("returning page-level Chat reader pinned after terminal render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+returnExecID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__returnSettledBeforeFailure&&window.__terminalSyncCalls>window.__returnSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 	})
 	if chatRequests.Load() < 3 {
