@@ -404,6 +404,136 @@ func TestHandler_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	}
 }
 
+func TestHandler_CancelTaskPulseRefreshesPulseAndKeepsTaskInBacklog(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithTitle("Pulse running task").
+		WithStatus(models.StatusRunning).
+		WithCategory(models.CategoryActive).
+		Build()
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?pulse=1&project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `id="upcoming-container"`)
+	require.NotContains(t, rec.Body.String(), task.Title)
+	var trigger struct {
+		Toast struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"openvibelyToast"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &trigger))
+	require.Equal(t, "Task stopped.", trigger.Toast.Message)
+	require.Equal(t, "success", trigger.Toast.Status)
+
+	updated, err := tc.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+	require.Equal(t, models.CategoryBacklog, updated.Category)
+}
+
+func TestHandler_CancelTaskPulseCancelsQueuedInputs(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).
+		WithTitle("Pulse queued task").
+		WithStatus(models.StatusQueued).
+		WithCategory(models.CategoryActive).
+		Build()
+	queuedInput := &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+		AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued follow-up",
+	}
+	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, queuedInput))
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?pulse=1&project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	storedInput, err := tc.handler.threadInputRepo.GetByID(ctx, queuedInput.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedInput)
+	require.Equal(t, models.ThreadInputCancelled, storedInput.InputStatus)
+
+	updated, err := tc.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+	require.Equal(t, models.CategoryBacklog, updated.Category)
+}
+
+func TestHandler_CancelTaskPulseDelegatesSwarmCascade(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Pulse Swarm Cancel")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
+		ProjectID: project.ID, Title: "Pulse swarm parent", Prompt: "Build it", Category: models.CategoryActive,
+		Priority: 2, AgentID: &agent.ID, MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true,
+	})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusRunning))
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+parent.ID+"/cancel?pulse=1&project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedParent.Status)
+	updatedPlanner, err := h.taskRepo.GetByID(ctx, planner.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedPlanner.Status)
+}
+func TestHandler_CancelTaskPulseRejectsStaleAndForeignCardsWithoutRefresh(t *testing.T) {
+	tests := []struct {
+		name       string
+		setup      func(*TestContext, *models.Project) *models.Task
+		wantStatus int
+		wantToast  string
+	}{
+		{
+			name: "stale task",
+			setup: func(tc *TestContext, project *models.Project) *models.Task {
+				return tc.CreateTask(project.ID).WithTitle("Pulse completed task").WithStatus(models.StatusCompleted).WithCategory(models.CategoryCompleted).Build()
+			},
+			wantStatus: http.StatusConflict,
+			wantToast:  "This task is no longer cancellable.",
+		},
+		{
+			name: "foreign task",
+			setup: func(tc *TestContext, project *models.Project) *models.Task {
+				foreign := tc.CreateProject().WithName("Foreign Pulse Project").Build()
+				return tc.CreateTask(foreign.ID).WithTitle("Foreign Pulse task").WithStatus(models.StatusRunning).WithCategory(models.CategoryActive).Build()
+			},
+			wantStatus: http.StatusNotFound,
+			wantToast:  "This task is not available in the selected project.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tt.setup(tc, project)
+			rec := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?pulse=1&project_id=" + project.ID).Execute()
+			require.Equal(t, tt.wantStatus, rec.Code, rec.Body.String())
+			require.Empty(t, rec.Body.String())
+			require.Contains(t, rec.Header().Get("HX-Trigger"), tt.wantToast)
+
+			unchanged, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+			require.NoError(t, err)
+			require.Equal(t, task.Status, unchanged.Status)
+			require.Equal(t, task.Category, unchanged.Category)
+		})
+	}
+}
 func TestHandler_CancelTask_RejectsBacklogPendingTask(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
