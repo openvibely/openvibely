@@ -7891,6 +7891,8 @@ func TestHandler_TaskThreadSend_RejectsWhitespaceOnlyMessageBeforeAgentSelection
 	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
 	assertCode(t, rec, http.StatusBadRequest)
 	assertContains(t, rec, "message is required")
+	assertNotContains(t, rec, "chat-bubble-assistant-msg")
+	assertNotContains(t, rec, "data-exec-id")
 
 	afterExecutions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
