@@ -140,21 +140,29 @@ type WorkflowPerformance struct {
 }
 
 type EvidenceTaskRow struct {
-	TaskID             string   `json:"task_id"`
-	TaskTitle          string   `json:"task_title"`
-	TechnicalResult    string   `json:"technical_result"`
-	GoalResult         string   `json:"goal_result,omitempty"`
-	MergeState         string   `json:"merge_state,omitempty"`
-	AgentID            string   `json:"agent_id,omitempty"`
-	AgentName          string   `json:"agent_name"`
-	Model              string   `json:"model"`
-	FirstPassCompleted bool     `json:"first_pass_completed"`
-	CreatedInPeriod    bool     `json:"created_in_period"`
-	LatestStartedAt    string   `json:"latest_started_at,omitempty"`
-	ExecutionCount     int      `json:"execution_count"`
-	FollowUpCount      int      `json:"follow_up_count"`
-	CycleTimeMs        int64    `json:"cycle_time_ms"`
-	KnownCostUSD       *float64 `json:"known_cost_usd,omitempty"`
+	TaskID                  string   `json:"task_id"`
+	TaskTitle               string   `json:"task_title"`
+	TechnicalResult         string   `json:"technical_result"`
+	GoalResult              string   `json:"goal_result,omitempty"`
+	MergeState              string   `json:"merge_state,omitempty"`
+	AgentID                 string   `json:"agent_id,omitempty"`
+	AgentName               string   `json:"agent_name"`
+	Model                   string   `json:"model"`
+	Category                string   `json:"category"`
+	FirstPassCompleted      bool     `json:"first_pass_completed"`
+	FirstPassEligible       bool     `json:"first_pass_eligible"`
+	GoalAchievementEligible bool     `json:"goal_achievement_eligible"`
+	GoalAchievedInPeriod    bool     `json:"goal_achieved_in_period"`
+	CreatedInPeriod         bool     `json:"created_in_period"`
+	LatestStartedAt         string   `json:"latest_started_at,omitempty"`
+	EvidencePeriod          string   `json:"evidence_period,omitempty"`
+	ExecutionCount          int      `json:"execution_count"`
+	PeriodCompletedCount    int      `json:"period_completed_count"`
+	PeriodFailedCount       int      `json:"period_failed_count"`
+	PeriodCancelledCount    int      `json:"period_cancelled_count"`
+	FollowUpCount           int      `json:"follow_up_count"`
+	CycleTimeMs             int64    `json:"cycle_time_ms"`
+	KnownCostUSD            *float64 `json:"known_cost_usd,omitempty"`
 }
 
 type AnalyticsInsight struct {
@@ -167,6 +175,7 @@ type AnalyticsInsight struct {
 	SampleSize       int     `json:"sample_size"`
 	ComparisonWindow string  `json:"comparison_window"`
 	EvidenceView     string  `json:"evidence_view"`
+	EvidenceID       string  `json:"evidence_id,omitempty"`
 }
 
 type AnalyticsDashboard struct {

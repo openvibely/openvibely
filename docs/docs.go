@@ -2033,6 +2033,9 @@ const docTemplate = `{
                 "detail": {
                     "type": "string"
                 },
+                "evidence_id": {
+                    "type": "string"
+                },
                 "evidence_view": {
                     "type": "string"
                 },
@@ -2277,11 +2280,17 @@ const docTemplate = `{
                 "agent_name": {
                     "type": "string"
                 },
+                "category": {
+                    "type": "string"
+                },
                 "created_in_period": {
                     "type": "boolean"
                 },
                 "cycle_time_ms": {
                     "type": "integer"
+                },
+                "evidence_period": {
+                    "type": "string"
                 },
                 "execution_count": {
                     "type": "integer"
@@ -2289,8 +2298,17 @@ const docTemplate = `{
                 "first_pass_completed": {
                     "type": "boolean"
                 },
+                "first_pass_eligible": {
+                    "type": "boolean"
+                },
                 "follow_up_count": {
                     "type": "integer"
+                },
+                "goal_achieved_in_period": {
+                    "type": "boolean"
+                },
+                "goal_achievement_eligible": {
+                    "type": "boolean"
                 },
                 "goal_result": {
                     "type": "string"
@@ -2306,6 +2324,15 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "period_cancelled_count": {
+                    "type": "integer"
+                },
+                "period_completed_count": {
+                    "type": "integer"
+                },
+                "period_failed_count": {
+                    "type": "integer"
                 },
                 "task_id": {
                     "type": "string"

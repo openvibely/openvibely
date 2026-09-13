@@ -142,15 +142,21 @@ func TestAnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
 	  var result=document.getElementById('reconnect-result'), urls=[], dashboardCalls=0, failDashboard=false, destroyed=0, chartsByID={};  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
-  function dashboard(url){var q=new URL(url,location.href).searchParams;return {definitions:[],current:{technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0},tasks_evaluated:1,cycle_sample_size:1,cancelled_execution_count:0},funnel:[],cycle_distribution:[{label:'< 1m',count:1}],follow_up_distribution:[{label:'0',count:1}],agents:[{agent_id:'agent-1',agent_name:'Agent One',tasks_evaluated:1,technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0}}],agent_detail:q.get('agent')?{outcome_trend:[{period:'today',completed:1,failed:0,cancelled:0,sample_size:1}],categories:[],model_mix:[],failures:[],skills:[],recent_tasks:[]}:null,skill_outcomes:[],model_categories:[],workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One',invocation_count:1,completed_count:1,failed_count:0}],workflow_detail:q.get('workflow')?{funnel:[],durations:[],failures:[],bottlenecks:[]}:null,recent_outcomes:[],insights:[]};}
-  window.fetch=function(url){var value=String(url);urls.push(value);if(value.indexOf('/api/analytics/dashboard')>=0){dashboardCalls++;if(failDashboard)return Promise.resolve({ok:false,status:500,json:function(){return Promise.resolve({});}});return Promise.resolve({ok:true,json:function(){return Promise.resolve(dashboard(value));}});}var payload=[];if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{},underused:[]};if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
+  function dashboard(url){var q=new URL(url,location.href).searchParams;return {definitions:[],current:{technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0},tasks_evaluated:1,cycle_sample_size:1,cancelled_execution_count:0},funnel:[],cycle_distribution:[{label:'< 1m',count:1}],follow_up_distribution:[{label:'0',count:1}],agents:[{agent_id:'agent-1',agent_name:'Agent One',tasks_evaluated:1,technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0}}],agent_detail:q.get('agent')?{outcome_trend:[{period:'today',completed:1,failed:0,cancelled:0,sample_size:1}],categories:[],model_mix:[],failures:[],skills:[],recent_tasks:[]}:null,skill_outcomes:[],model_categories:[{model:'Model One',category:'active',tasks_evaluated:1,technical_completion:{numerator:1,denominator:1,percent:100}}],workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One',invocation_count:1,completed_count:1,failed_count:0}],workflow_detail:q.get('workflow')?{funnel:[],durations:[],failures:[],bottlenecks:[]}:null,recent_outcomes:[],insights:[]};}
+  window.fetch=function(url){var value=String(url);urls.push(value);if(value.indexOf('/api/analytics/dashboard')>=0){dashboardCalls++;if(failDashboard)return Promise.resolve({ok:false,status:500,json:function(){return Promise.resolve({});}});return Promise.resolve({ok:true,json:function(){return Promise.resolve(dashboard(value));}});}var payload=[];if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{},underused:[]};if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(value.indexOf('/api/analytics/success-failure-rates')>=0)payload=[{Period:'2026-01-10',TotalCount:2,SuccessCount:1,FailureCount:1,CancelledCount:0,SuccessRate:50}];return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
 	  window.Chart=function(ctx,config){this.config=config;this.destroy=function(){destroyed++;};if(ctx&&ctx.canvas)chartsByID[ctx.canvas.id]=config;};  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out');setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
   window.addEventListener('load',function(){
-	    waitFor(function(){return dashboardCalls>0&&document.querySelector('#analyticsAgentFilter option[value="agent-1"]')&&chartsByID.cycleDistributionChart;},function(){
+	    waitFor(function(){return dashboardCalls>0&&document.querySelector('#analyticsAgentFilter option[value="agent-1"]')&&chartsByID.cycleDistributionChart&&chartsByID.successFailureChart&&document.querySelector('[data-model-evidence]');},function(){
 	      chartsByID.cycleDistributionChart.options.onClick({},[{index:0}]);
 	      var drilldown=new URLSearchParams(location.search);
 	      if(drilldown.get('view')!=='outcomes'||drilldown.get('evidence')!=='cycleDistribution'||drilldown.get('cycleDistribution')!=='< 1m')fail('chart drill-down did not persist evidence state');
 	      if(document.getElementById('outcomeEvidenceFilter').textContent.indexOf('cycleDistribution')<0)fail('chart drill-down did not render filtered evidence');
+	      document.querySelector('[data-model-evidence]').click();
+	      drilldown=new URLSearchParams(location.search);
+	      if(drilldown.get('model')!=='Model One'||drilldown.get('category')!=='active')fail('model/category drill-down omitted its selected subset');
+	      chartsByID.successFailureChart.options.onClick({},[{index:0,datasetIndex:3}]);
+	      drilldown=new URLSearchParams(location.search);
+	      if(drilldown.get('technical_status')!=='failed'||drilldown.get('period')!=='2026-01-10')fail('technical trend drill-down omitted status or period');
 	      var agent=document.getElementById('analyticsAgentFilter');agent.value='agent-1';agent.dispatchEvent(new Event('change'));      waitFor(function(){return urls.some(function(u){return u.indexOf('/api/analytics/dashboard')>=0&&u.indexOf('agent=agent-1')>=0;})&&urls.some(function(u){return u.indexOf('success-failure-rates')>=0&&u.indexOf('agent=agent-1')>=0;});},function(){
         var workflow=document.getElementById('analyticsWorkflowFilter');workflow.value='workflow-1';workflow.dispatchEvent(new Event('change'));
         waitFor(function(){return urls.some(function(u){return u.indexOf('/api/analytics/dashboard')>=0&&u.indexOf('workflow=workflow-1')>=0;});},function(){
@@ -165,6 +171,44 @@ func TestAnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T
   });
 })();
 </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestAnalyticsContent_DirectFilteredURLAppliesFirstRequestsInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+(function(){
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=agents&range=30d&agent=agent-1&workflow=workflow-1');
+  var result=document.getElementById('reconnect-result'),urls=[];
+  function dashboard(){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],skill_outcomes:[],model_categories:[],workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One'}],recent_outcomes:[],insights:[]};}
+  window.Chart=function(){this.destroy=function(){};};
+  window.fetch=function(url){var value=String(url);urls.push(value);result.setAttribute('data-observed-urls',urls.join('|'));var payload=[];if(value.indexOf('/api/analytics/dashboard')>=0)payload=dashboard();if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{},underused:[]};return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
+  function wait(){var required=['/api/analytics/dashboard','/api/analytics/usage','/api/analytics/skills','success-failure-rates'];var ready=required.every(function(path){return urls.some(function(url){return url.indexOf(path)>=0&&url.indexOf('agent=agent-1')>=0&&url.indexOf('workflow=workflow-1')>=0;});});if(ready&&document.getElementById('analyticsAgentFilter').value==='agent-1'&&document.getElementById('analyticsWorkflowFilter').value==='workflow-1'){result.setAttribute('data-test-result','pass');return;}setTimeout(wait,20);}
+  window.addEventListener('load',wait);
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestAnalyticsContent_DelayedChartLoaderInitializesNewestGenerationOnceInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	content := rendered.String()
+	fixture := `<main id="reconnect-result"></main><script>
+(function(){
+  var result=document.getElementById('reconnect-result'),loader=null,dashboardCalls=0,append=document.head.appendChild.bind(document.head);
+  document.head.appendChild=function(node){if(node&&node.matches&&node.matches('script[data-analytics-chart-loader]')){loader=node;node.removeAttribute('src');return append(node);}return append(node);};
+  window.fetch=function(url){if(String(url).indexOf('/api/analytics/dashboard')>=0)dashboardCalls++;var payload=[];if(String(url).indexOf('/api/analytics/dashboard')>=0)payload={definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],skill_outcomes:[],model_categories:[],workflows:[],recent_outcomes:[],insights:[]};if(String(url).indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(String(url).indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{},underused:[]};return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
+  window.__finishAnalyticsLoaderTest=function(){if(!loader){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error','loader missing');return;}window.Chart=function(){this.destroy=function(){};};loader.dispatchEvent(new Event('load'));setTimeout(function(){if(dashboardCalls!==1){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error','dashboard initialized '+dashboardCalls+' times');return;}if(document.querySelectorAll('script[data-analytics-chart-loader]').length!==1){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error','duplicate loaders');return;}result.setAttribute('data-test-result','pass');},100);};
+})();
+</script>` + content + content + `<script>window.__finishAnalyticsLoaderTest();</script>`
 	runReconnectChromeFixture(t, fixture)
 }
 

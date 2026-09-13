@@ -57,6 +57,13 @@ func TestAnalyticsDashboardPeriodDoesNotResurrectHistoricalOutcomes(t *testing.T
 	if dashboard.Current.FirstPass.Denominator != 0 || dashboard.Current.GoalAchievement.Denominator != 0 {
 		t.Fatalf("historical outcomes leaked into current period: first=%+v goal=%+v", dashboard.Current.FirstPass, dashboard.Current.GoalAchievement)
 	}
+	if len(dashboard.RecentOutcomes) != 1 {
+		t.Fatalf("recent evidence = %+v, want running task context", dashboard.RecentOutcomes)
+	}
+	evidence := dashboard.RecentOutcomes[0]
+	if evidence.FirstPassEligible || evidence.GoalAchievementEligible || evidence.GoalAchievedInPeriod || evidence.PeriodCompletedCount != 0 {
+		t.Fatalf("historical task context was incorrectly marked eligible for current KPI evidence: %+v", evidence)
+	}
 }
 
 func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *testing.T) {
@@ -97,7 +104,8 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 		if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "", "", 0, 100); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at=?,completed_at=? WHERE id=?`, now, now, exec.ID); err != nil {
+		started := now.Format("2006-01-02 15:04:05")
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at=?,completed_at=? WHERE id=?`, started, started, exec.ID); err != nil {
 			t.Fatal(err)
 		}
 		return task, exec
@@ -117,6 +125,64 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 	}
 	if dashboard.WorkflowDetail == nil || len(dashboard.WorkflowDetail.Funnel) != 2 || len(dashboard.WorkflowDetail.Durations) == 0 || len(dashboard.WorkflowDetail.Failures) == 0 || len(dashboard.WorkflowDetail.Bottlenecks) == 0 {
 		t.Fatalf("workflow node detail missing: %+v", dashboard.WorkflowDetail)
+	}
+	foundBlockedInsight := false
+	for _, insight := range dashboard.Insights {
+		if insight.MetricKey == "workflow_blocked" && insight.EvidenceID == fixture.AutomationID {
+			foundBlockedInsight = true
+		}
+	}
+	if !foundBlockedInsight {
+		t.Fatalf("blocked workflow insight does not identify supporting workflow: %+v", dashboard.Insights)
+	}
+}
+
+func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Agent categories", RepoPath: "/agent-categories"}
+	if err := NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.Agent{Name: "Category Agent", SystemPrompt: "work", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := NewAgentRepo(db).Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	config := &models.LLMConfig{Name: "Category Model", Provider: models.ProviderTest, Model: "category-model"}
+	if err := NewLLMConfigRepo(db).Create(ctx, config); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Active feature", Category: models.CategoryActive, Tag: models.TagFeature, Status: models.StatusRunning, Prompt: "work", AgentDefinitionID: &agent.ID}
+	if err := NewTaskRepo(db, nil).Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	executions := NewExecutionRepo(db)
+	for i, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCompleted} {
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "work", IsFollowup: i > 0}
+		if err := executions.Create(ctx, exec); err != nil {
+			t.Fatal(err)
+		}
+		if err := executions.Complete(ctx, exec.ID, status, "", "failed", 0, 100); err != nil {
+			t.Fatal(err)
+		}
+		started := time.Date(2026, 1, 10+i, 10, 0, 0, 0, time.UTC).Format("2006-01-02 15:04:05")
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at=?,completed_at=? WHERE id=?`, started, started, exec.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dashboard.AgentDetail == nil || len(dashboard.AgentDetail.Categories) != 1 {
+		t.Fatalf("Agent category detail missing: %+v", dashboard.AgentDetail)
+	}
+	category := dashboard.AgentDetail.Categories[0]
+	if category.Category != string(models.CategoryActive) || category.TechnicalCompletion.Numerator != 1 || category.TechnicalCompletion.Denominator != 2 {
+		t.Fatalf("category projection groups tags or uses task-level completion: %+v", category)
+	}
+	if len(dashboard.ModelCategories) != 1 || dashboard.ModelCategories[0].Category != string(models.CategoryActive) || dashboard.ModelCategories[0].TechnicalCompletion.Denominator != 2 {
+		t.Fatalf("model category projection is inconsistent: %+v", dashboard.ModelCategories)
 	}
 }
 

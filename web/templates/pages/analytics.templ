@@ -262,6 +262,8 @@ templ analyticsContent(currentProject *models.Project) {
 			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
 			<script type="text/javascript">
 				(function() {
+				window._analyticsGeneration = (window._analyticsGeneration || 0) + 1;
+				const analyticsGeneration = window._analyticsGeneration;
 				// Destroy any charts from a previous analytics page visit
 				if (window._analyticsCharts) {
 					Object.values(window._analyticsCharts).forEach(function(c) {
@@ -273,6 +275,7 @@ templ analyticsContent(currentProject *models.Project) {
 					window._analyticsAbortController = new AbortController();
 
 					function initAnalytics() {
+					if (analyticsGeneration !== window._analyticsGeneration) return;
 					var dataEl = document.getElementById('analytics-data');
 					if (!dataEl) return;
 					var projectID = dataEl.dataset.projectId;
@@ -328,7 +331,10 @@ templ analyticsContent(currentProject *models.Project) {
 						}
 
 						const validViews = ['overview', 'outcomes', 'agents', 'workflows', 'learning', 'usage', 'all'];
+						const initialURLParams = new URLSearchParams(window.location.search);
 						let selectedView = 'overview';
+						let selectedAgent = initialURLParams.get('agent') || '';
+						let selectedWorkflow = initialURLParams.get('workflow') || '';
 						function analyticsURL(view) {
 							const params = new URLSearchParams(window.location.search);
 							params.set('project_id', projectID);
@@ -336,17 +342,13 @@ templ analyticsContent(currentProject *models.Project) {
 							params.set('range', usageRangeParam());
 							params.set('group_by', document.getElementById('groupBy').value);
 								params.set('compare', document.getElementById('comparePeriod').checked ? '1' : '0');
-								const agent = document.getElementById('analyticsAgentFilter').value;
-								const workflow = document.getElementById('analyticsWorkflowFilter').value;
-								if (agent) params.set('agent', agent); else params.delete('agent');
-								if (workflow) params.set('workflow', workflow); else params.delete('workflow');
+								if (selectedAgent) params.set('agent', selectedAgent); else params.delete('agent');
+								if (selectedWorkflow) params.set('workflow', selectedWorkflow); else params.delete('workflow');
 								return '/analytics?' + params.toString();						}
 							function analyticsParams(initial) {
 								const params = new URLSearchParams(initial || {});
-								const agent = document.getElementById('analyticsAgentFilter').value;
-								const workflow = document.getElementById('analyticsWorkflowFilter').value;
-								if (agent) params.set('agent', agent);
-								if (workflow) params.set('workflow', workflow);
+								if (selectedAgent) params.set('agent', selectedAgent);
+								if (selectedWorkflow) params.set('workflow', selectedWorkflow);
 								return params;
 							}
 							function viewDetailElements(view) {							const ids = {
@@ -417,13 +419,15 @@ templ analyticsContent(currentProject *models.Project) {
 								const evidenceValue = evidenceParams.get('model') || evidenceParams.get('period') || '';
 								const evidence = recent.filter(function(row) {
 									if (evidenceParams.get('model') && row.model !== evidenceParams.get('model')) return false;
-									if (evidenceParams.get('period') && !(row.latest_started_at || '').startsWith(evidenceParams.get('period'))) return false;
+									if (evidenceParams.get('category') && row.category !== evidenceParams.get('category')) return false;
+									if (evidenceParams.get('period') && row.evidence_period !== evidenceParams.get('period')) return false;
 									switch (evidenceKey) {
-									case 'technical_completion': case 'technical_completed': return row.technical_result === 'completed';
-									case 'goal_achievement': case 'goal_achieved': return row.goal_result === 'achieved';
-									case 'first_pass': return row.first_pass_completed === true;
+									case 'technical_completion': case 'technical_completed': return Number(row.period_completed_count || 0) > 0;
+									case 'technical_status': return Number(row['period_' + evidenceParams.get('technical_status') + '_count'] || 0) > 0;
+									case 'goal_achievement': case 'goal_achieved': return row.goal_achievement_eligible === true && row.goal_achieved_in_period === true;
+									case 'first_pass': return row.first_pass_eligible === true && row.first_pass_completed === true;
 									case 'follow_up': return Number(row.follow_up_count || 0) > 0;
-									case 'cancelled_executions': return row.technical_result === 'cancelled';
+									case 'cancelled_executions': return Number(row.period_cancelled_count || 0) > 0;
 									case 'known_cost_per_achieved_goal': return row.goal_result === 'achieved' && row.known_cost_usd != null;
 									case 'created': return row.created_in_period === true;
 									case 'merged': return row.merge_state === 'merged';
@@ -434,9 +438,14 @@ templ analyticsContent(currentProject *models.Project) {
 								});
 								const evidenceLabel = document.getElementById('outcomeEvidenceFilter');
 								if (evidenceLabel) evidenceLabel.textContent = evidenceKey || evidenceValue ? 'Filtered recent supporting tasks: ' + (evidenceKey || 'selection') + (evidenceValue ? ' · ' + evidenceValue : '') + ' · n=' + evidence.length : 'Recent project-scoped task evidence for the selected filters · n=' + evidence.length;
+								const evidenceTechnicalResult = function(row) {
+									if (evidenceKey === 'technical_completion' || evidenceKey === 'technical_completed') return 'completed (' + Number(row.period_completed_count || 0) + ' executions)';
+									if (evidenceKey === 'technical_status') { const status=evidenceParams.get('technical_status') || ''; return status + ' (' + Number(row['period_' + status + '_count'] || 0) + ' executions)'; }
+									return row.technical_result;
+								};
 								document.getElementById('outcomeEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) {
 									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
-									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
+									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(evidenceTechnicalResult(row)) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
 								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { const params=new URLSearchParams(window.location.search); params.set('view','outcomes'); params.set('evidence',stage.key); return '<a class="card bg-base-200" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
 							renderDistributionChart('cycleDistribution', 'cycleDistributionChart', data.cycle_distribution || []);
 							renderDistributionChart('followupDistribution', 'followupDistributionChart', data.follow_up_distribution || []);
@@ -464,16 +473,18 @@ templ analyticsContent(currentProject *models.Project) {
 						}
 							function renderAgentPerformance(rows) {
 								const filter = document.getElementById('analyticsAgentFilter');
-								const selected = filter.value || new URLSearchParams(window.location.search).get('agent') || '';							filter.innerHTML = '<option value="">All Agents</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.agent_id || '__unassigned__') + '">' + escapeHTML(row.agent_name) + '</option>'; }).join(''); filter.value = selected;
-							const visible = rows.filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
+								const selected = selectedAgent;
+								filter.innerHTML = '<option value="">All Agents</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.agent_id || '__unassigned__') + '">' + escapeHTML(row.agent_name) + '</option>'; }).join('');
+								filter.value = selected;							const visible = rows.filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								document.getElementById('agentPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const name = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name); return '<tr><td>' + name + '</td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.first_pass)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td><td>' + escapeHTML(formatDuration(row.median_duration_ms || 0)) + '</td><td>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '</td><td>' + escapeHTML(row.most_used_model || 'Unavailable') + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="text-center opacity-50">No Agent evidence in this period</td></tr>';
 								const evidence = ((latestDashboard && latestDashboard.recent_outcomes) || []).filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								document.getElementById('agentEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) { const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'</a></td><td>'+escapeHTML(row.technical_result)+'</td><td>'+escapeHTML(row.goal_result||'Not goal-bearing')+'</td><td>'+escapeHTML(row.model)+'</td><td>'+row.execution_count+'</td><td>'+row.follow_up_count+'</td></tr>'; }).join('') : '<tr><td colspan="6" class="text-center opacity-50">No recent supporting tasks in this period</td></tr>';						}
-							function navigateEvidence(view, key, value) {
+							function navigateEvidence(view, key, value, extra) {
 								const params = new URLSearchParams(window.location.search);
 								params.set('view', view);
 								params.set('evidence', key);
 								if (value !== undefined && value !== null && value !== '') params.set(key, value); else params.delete(key);
+								Object.entries(extra || {}).forEach(function(entry) { if (entry[1]) params.set(entry[0], entry[1]); else params.delete(entry[0]); });
 								history.pushState({}, '', '/analytics?' + params.toString());
 								applyView(view, false);
 								renderDashboard(latestDashboard || {});
@@ -481,7 +492,7 @@ templ analyticsContent(currentProject *models.Project) {
 							function renderAgentDetail(detail) {
 								const trend = detail ? (detail.outcome_trend || []) : [];
 								let canvas = renderChartState('agentOutcomeTrend', 'agentOutcomeTrendChart', trend, 'Select an Agent to see its outcome trend');
-								if (canvas) charts.agentOutcomeTrend = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:trend.map(r=>r.period),datasets:[{label:'Completed',data:trend.map(r=>r.completed),backgroundColor:'rgba(34,197,94,.65)'},{label:'Failed',data:trend.map(r=>r.failed),backgroundColor:'rgba(239,68,68,.65)'},{label:'Cancelled',data:trend.map(r=>r.cancelled),backgroundColor:'rgba(245,158,11,.65)'}]},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','period',trend[items[0].index].period);},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+trend[items[0].dataIndex].sample_size:'';}}}},scales:{y:{beginAtZero:true}}}});
+								if (canvas) charts.agentOutcomeTrend = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:trend.map(r=>r.period),datasets:[{label:'Completed',data:trend.map(r=>r.completed),backgroundColor:'rgba(34,197,94,.65)'},{label:'Failed',data:trend.map(r=>r.failed),backgroundColor:'rgba(239,68,68,.65)'},{label:'Cancelled',data:trend.map(r=>r.cancelled),backgroundColor:'rgba(245,158,11,.65)'}]},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const item=items[0];const status=['completed','failed','cancelled'][item.datasetIndex];navigateEvidence('outcomes','technical_status',status,{period:trend[item.index].period});}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+trend[items[0].dataIndex].sample_size:'';}}}},scales:{y:{beginAtZero:true}}}});
 								const mix = detail ? (detail.model_mix || []) : [];
 								canvas = renderChartState('agentModelMix', 'agentModelMixChart', mix, 'Select an Agent to see its model mix');
 								if (canvas) charts.agentModelMix = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:mix.map(r=>r.model),datasets:[{label:'Executions',data:mix.map(r=>r.execution_count),backgroundColor:'rgba(59,130,246,.65)'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model',mix[items[0].index].model);},scales:{x:{beginAtZero:true}}}});
@@ -492,8 +503,8 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function renderModelCategories(rows) {
 								const table=document.getElementById('modelCategoryTable'); if(!table)return;
-								table.innerHTML=rows.length?rows.map(function(row){return '<tr data-model="'+escapeHTML(row.model)+'"><td><button class="link" type="button" data-model-evidence="'+escapeHTML(row.model)+'">'+escapeHTML(row.model)+'</button></td><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td></tr>';}).join(''):'<tr><td colspan="4" class="text-center opacity-50">No model/category evidence in this period</td></tr>';
-								table.querySelectorAll('[data-model-evidence]').forEach(function(button){button.addEventListener('click',function(){navigateEvidence('outcomes','model',button.dataset.modelEvidence);},{signal:eventSignal});});
+								table.innerHTML=rows.length?rows.map(function(row){return '<tr data-model="'+escapeHTML(row.model)+'"><td><button class="link" type="button" data-model-evidence="'+escapeHTML(row.model)+'" data-category-evidence="'+escapeHTML(row.category)+'">'+escapeHTML(row.model)+'</button></td><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td></tr>';}).join(''):'<tr><td colspan="4" class="text-center opacity-50">No model/category evidence in this period</td></tr>';
+								table.querySelectorAll('[data-model-evidence]').forEach(function(button){button.addEventListener('click',function(){navigateEvidence('outcomes','model',button.dataset.modelEvidence,{category:button.dataset.categoryEvidence});},{signal:eventSignal});});
 							}
 							function renderSkillOutcomes(rows) {
 								const table = document.getElementById('skillOutcomeTable');
@@ -503,8 +514,10 @@ templ analyticsContent(currentProject *models.Project) {
 								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
 							}
 							function renderWorkflowPerformance(rows) {
-								const filter = document.getElementById('analyticsWorkflowFilter'); const selected = filter.value || new URLSearchParams(window.location.search).get('workflow') || '';							filter.innerHTML = '<option value="">All Workflows</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.workflow_id) + '">' + escapeHTML(row.workflow_name) + '</option>'; }).join(''); filter.value = selected;
-							const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
+								const filter = document.getElementById('analyticsWorkflowFilter');
+								const selected = selectedWorkflow;
+								filter.innerHTML = '<option value="">All Workflows</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.workflow_id) + '">' + escapeHTML(row.workflow_name) + '</option>'; }).join('');
+								filter.value = selected;							const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
 							document.getElementById('workflowPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'</a></td><td>'+row.invocation_count+'</td><td>'+row.completed_count+' / '+(row.completed_count+row.failed_count)+' ('+Number(row.completion_rate||0).toFixed(1)+'%)</td><td>'+row.failed_count+'</td><td>'+escapeHTML(formatDuration(row.average_duration_ms||0))+'</td><td>'+row.waiting_count+' / '+row.blocked_count+'</td><td>Unavailable</td><td>'+escapeHTML(row.health)+'</td></tr>'; }).join('') : '<tr><td colspan="8" class="text-center"><span class="opacity-50">No automations in this project.</span> <a class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Inspect or create automations</a></td></tr>';
 						}
 						function renderWorkflowDetail(detail) {
@@ -514,7 +527,7 @@ templ analyticsContent(currentProject *models.Project) {
 							render('workflowFailureTable',detail?(detail.failures||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.count+'</td><td>'+escapeHTML(row.last_failure?new Date(row.last_failure).toLocaleString():'Unavailable')+'</td></tr>';},'No node failures in this period');
 							render('workflowBottleneckTable',detail?(detail.bottlenecks||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.waiting+'</td><td>'+row.blocked+'</td></tr>';},'No current bottlenecks');
 						}
-						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){const params=new URLSearchParams(window.location.search);params.set('view',row.evidence_view||'outcomes');params.set('evidence',row.metric_key);return '<a class="block link" href="/analytics?'+escapeHTML(params.toString())+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
+						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){const params=new URLSearchParams(window.location.search);params.set('view',row.evidence_view||'outcomes');params.set('evidence',row.metric_key);if(row.evidence_id&&row.metric_key==='workflow_blocked')params.set('workflow',row.evidence_id);return '<a class="block link" href="/analytics?'+escapeHTML(params.toString())+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
 
 						async function loadDashboard() {
 							const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, compare: document.getElementById('comparePeriod').checked ? '1' : '0' });
@@ -1022,6 +1035,20 @@ templ analyticsContent(currentProject *models.Project) {
 										yAxisID: 'y1'
 									},
 									{
+										label: 'Completed executions',
+										data: data.map(d => d.SuccessCount || 0),
+										borderColor: 'rgb(22, 163, 74)',
+										backgroundColor: 'rgba(22, 163, 74, 0.1)',
+										yAxisID: 'y1'
+									},
+									{
+										label: 'Failed executions',
+										data: data.map(d => d.FailureCount || 0),
+										borderColor: 'rgb(239, 68, 68)',
+										backgroundColor: 'rgba(239, 68, 68, 0.1)',
+										yAxisID: 'y1'
+									},
+									{
 										label: 'Cancelled executions',
 										data: data.map(d => d.CancelledCount || 0),
 										borderColor: 'rgb(245, 158, 11)',
@@ -1034,7 +1061,13 @@ templ analyticsContent(currentProject *models.Project) {
 								responsive: true,
 								maintainAspectRatio: false,
 									interaction: { mode: 'index', intersect: false },
-									onClick: function(_, items) { if (items.length) navigateEvidence('outcomes', 'period', data[items[0].index].Period || ''); },
+									onClick: function(_, items) {
+										if (!items.length) return;
+										const item = items[0];
+										const period = data[item.index].Period || '';
+										const status = ({0:'completed',2:'completed',3:'failed',4:'cancelled'})[item.datasetIndex];
+										if (status) navigateEvidence('outcomes', 'technical_status', status, {period:period}); else navigateEvidence('outcomes', 'period', period);
+									},
 									plugins: { tooltip: analyticsLineTooltipOptions() },								scales: {
 									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Technical completion rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }
@@ -1274,31 +1307,49 @@ templ analyticsContent(currentProject *models.Project) {
 							const group = params.get('group_by') || 'day';
 							if (['day', 'week', 'month'].includes(group)) document.getElementById('groupBy').value = group;
 							document.getElementById('comparePeriod').checked = params.get('compare') !== '0' && range !== 'all';
-							document.getElementById('analyticsAgentFilter').value = params.get('agent') || '';
-							document.getElementById('analyticsWorkflowFilter').value = params.get('workflow') || '';
-							applyView(params.get('view') || 'overview', false);
+								selectedAgent = params.get('agent') || '';
+								selectedWorkflow = params.get('workflow') || '';
+								document.getElementById('analyticsAgentFilter').value = selectedAgent;
+								document.getElementById('analyticsWorkflowFilter').value = selectedWorkflow;							applyView(params.get('view') || 'overview', false);
 						}
 						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.addEventListener('click', function() { applyView(button.dataset.analyticsView, true); }, { signal: eventSignal }); });
 						document.getElementById('refreshBtn').addEventListener('click', function() { history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(true); }, { signal: eventSignal });
 						['dateRange', 'groupBy', 'comparePeriod'].forEach(function(id) { document.getElementById(id).addEventListener('change', function() { if (document.getElementById('dateRange').value === 'all') document.getElementById('comparePeriod').checked = false; history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal }); });
-							document.getElementById('analyticsAgentFilter').addEventListener('change', function() { history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
-							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
-							const usageRateSelect = document.getElementById('usageRateModelSelect');						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });
+							document.getElementById('analyticsAgentFilter').addEventListener('change', function() { selectedAgent = document.getElementById('analyticsAgentFilter').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
+							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { selectedWorkflow = document.getElementById('analyticsWorkflowFilter').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });							const usageRateSelect = document.getElementById('usageRateModelSelect');						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });
 						window.addEventListener('popstate', function() { restoreURLState(); loadAllData(false); }, { signal: eventSignal });
 						restoreURLState();
 						loadAllData(false);
 				}
 
-				// Load Chart.js dynamically if not already loaded, then initialize.
-				// This fixes HTMX navigation: external <script src> tags load async during
-				// HTMX swaps, so the inline script would run before Chart.js was available.
+				// Share one Chart.js load across HTMX swaps. The generation fence above
+				// prevents stale page closures from initializing the current document.
 				if (typeof Chart !== 'undefined') {
 					setTimeout(initAnalytics, 0);
 				} else {
-					var script = document.createElement('script');
-					script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
-					script.onload = initAnalytics;
-					document.head.appendChild(script);
+					if (!window._analyticsChartLoader) {
+						window._analyticsChartLoader = new Promise(function(resolve, reject) {
+							var script = document.querySelector('script[data-analytics-chart-loader]');
+							var shouldAppend = false;
+							if (!script) {
+								script = document.createElement('script');
+								script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+								script.setAttribute('data-analytics-chart-loader', '');
+								shouldAppend = true;
+							}
+							script.addEventListener('load', resolve, { once: true });
+							script.addEventListener('error', reject, { once: true });
+							if (shouldAppend) document.head.appendChild(script);
+						});
+					}
+					window._analyticsChartLoader.then(initAnalytics).catch(function() {
+						if (analyticsGeneration !== window._analyticsGeneration) return;
+						var failedLoader = document.querySelector('script[data-analytics-chart-loader]');
+						if (failedLoader) failedLoader.remove();
+						window._analyticsChartLoader = null;
+						var box = document.getElementById('analyticsError');
+						if (box) { box.textContent = 'Analytics charts failed to load'; box.classList.remove('hidden'); }
+					});
 				}
 				})();
 			</script>
