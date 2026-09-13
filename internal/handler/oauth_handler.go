@@ -497,13 +497,20 @@ func (h *Handler) OAuthManualComplete(c echo.Context) error {
 
 	values := u.Query()
 	state := values.Get("state")
-	code := values.Get("code")
-	if state == "" || code == "" {
+	if state == "" {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "callback_url must include code and state"})
 	}
 
 	if oauthErr := values.Get("error"); oauthErr != "" {
+		if _, ok := takeOAuthFlow(state); !ok {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "oauth session expired or invalid state"})
+		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": publicOAuthProviderError})
+	}
+
+	code := values.Get("code")
+	if code == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "callback_url must include code and state"})
 	}
 
 	result := h.completeOAuthFlow(state, code)
