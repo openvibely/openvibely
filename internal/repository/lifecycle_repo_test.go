@@ -224,6 +224,60 @@ func TestLifecycleRepo_HookListPathsPreserveFiltersOrderingAndValues(t *testing.
 	}
 }
 
+func TestLifecycleRepo_HookListPathsPreserveQueryErrorContextAndCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLifecycleRepo(db)
+
+	listers := []struct {
+		name       string
+		list       func(context.Context) ([]models.AgentLifecycleHook, error)
+		queryError string
+	}{
+		{
+			name:       "by agent",
+			list:       func(ctx context.Context) ([]models.AgentLifecycleHook, error) { return repo.HooksByAgent(ctx, "agent") },
+			queryError: "listing hooks:",
+		},
+		{
+			name: "for when",
+			list: func(ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+			},
+			queryError: "listing hooks for before_run:",
+		},
+	}
+
+	for _, tc := range listers {
+		t.Run(tc.name+" cancellation", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			_, err := tc.list(ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("error = %v, want context.Canceled", err)
+			}
+			if !strings.HasPrefix(err.Error(), tc.queryError) {
+				t.Fatalf("error = %q, want prefix %q", err, tc.queryError)
+			}
+		})
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+	for _, tc := range listers {
+		t.Run(tc.name+" query error", func(t *testing.T) {
+			_, err := tc.list(context.Background())
+			if err == nil {
+				t.Fatal("expected query error")
+			}
+			if !strings.HasPrefix(err.Error(), tc.queryError) {
+				t.Fatalf("error = %q, want prefix %q", err, tc.queryError)
+			}
+		})
+	}
+}
+
 func containsHookID(hooks []models.AgentLifecycleHook, id string) bool {
 	for _, h := range hooks {
 		if h.ID == id {
