@@ -2591,6 +2591,81 @@ func TestLLMConfigRepo_Delete_WithExecutionReferences(t *testing.T) {
 	}
 }
 
+func TestLLMConfigRepo_DeleteResetsProtectedAgentOverridesAcrossPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		delete func(t *testing.T, repo *LLMConfigRepo, target, replacement *models.LLMConfig) error
+	}{
+		{
+			name: "single",
+			delete: func(t *testing.T, repo *LLMConfigRepo, target, _ *models.LLMConfig) error {
+				return repo.Delete(context.Background(), target.ID)
+			},
+		},
+		{
+			name: "bulk",
+			delete: func(t *testing.T, repo *LLMConfigRepo, target, _ *models.LLMConfig) error {
+				return repo.DeleteBulk(context.Background(), []string{target.ID})
+			},
+		},
+		{
+			name: "default transfer",
+			delete: func(t *testing.T, repo *LLMConfigRepo, target, replacement *models.LLMConfig) error {
+				return repo.TransferDefaultAndDelete(context.Background(), target.ID, replacement.ID)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			repo := NewLLMConfigRepo(db)
+			agentRepo := NewAgentRepo(db)
+			ctx := context.Background()
+
+			target, err := repo.GetDefault(ctx)
+			if err != nil || target == nil {
+				t.Fatalf("get default model: %v", err)
+			}
+			if tc.name != "default transfer" {
+				target = &models.LLMConfig{Name: "Agent override target", Provider: models.ProviderTest, Model: "target-model"}
+				if err := repo.Create(ctx, target); err != nil {
+					t.Fatalf("create target model: %v", err)
+				}
+			}
+			replacement := &models.LLMConfig{Name: "Replacement default", Provider: models.ProviderTest, Model: "replacement-model"}
+			if err := repo.Create(ctx, replacement); err != nil {
+				t.Fatalf("create replacement model: %v", err)
+			}
+
+			agents := []*models.Agent{
+				{Key: "goal_override_1168", Name: "Goal Agent Override", SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, Model: target.ID},
+				{Key: "skill_curator_override_1168", Name: "Skill Curator Override", SystemKind: models.AgentSystemKindSkillCurator, GeneratedStatus: models.AgentStatusProtected, Model: target.ID},
+				{Key: "memory_curator_override_1168", Name: "Memory Curator Override", SystemKind: models.AgentSystemKindMemoryCurator, GeneratedStatus: models.AgentStatusProtected, Model: target.ID},
+			}
+			for _, agent := range agents {
+				if err := agentRepo.Create(ctx, agent); err != nil {
+					t.Fatalf("create %s: %v", agent.Name, err)
+				}
+			}
+
+			if err := tc.delete(t, repo, target, replacement); err != nil {
+				t.Fatalf("delete path: %v", err)
+			}
+			for _, agent := range agents {
+				got, err := agentRepo.GetByID(ctx, agent.ID)
+				if err != nil {
+					t.Fatalf("get %s: %v", agent.Name, err)
+				}
+				if got == nil {
+					t.Fatalf("%s was not found after model deletion", agent.Name)
+				}
+				if got.Model != "inherit" {
+					t.Fatalf("%s model = %q, want inherit", agent.Name, got.Model)
+				}
+			}
+		})
+	}
+}
+
 func TestLLMConfigRepo_Count(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

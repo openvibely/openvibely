@@ -2095,6 +2095,93 @@ func TestHandler_DeleteModel_HTMX(t *testing.T) {
 	}
 }
 
+func TestHandler_ModelDeletionResetsProtectedAgentOverrides(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		delete func(t *testing.T, h *Handler, e *echo.Echo, target, replacement *models.LLMConfig) *httptest.ResponseRecorder
+	}{
+		{
+			name: "single",
+			delete: func(t *testing.T, _ *Handler, e *echo.Echo, target, _ *models.LLMConfig) *httptest.ResponseRecorder {
+				return htmxDelete(e, "/models/"+target.ID)
+			},
+		},
+		{
+			name: "bulk",
+			delete: func(t *testing.T, _ *Handler, e *echo.Echo, target, _ *models.LLMConfig) *httptest.ResponseRecorder {
+				return serveBulkDeleteRequest(t, e, "/models/bulk", bulkIDsRequest{IDs: []string{target.ID}})
+			},
+		},
+		{
+			name: "default transfer",
+			delete: func(t *testing.T, _ *Handler, e *echo.Echo, target, replacement *models.LLMConfig) *httptest.ResponseRecorder {
+				return htmxDelete(e, "/models/"+target.ID+"?new_default_id="+replacement.ID)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, repo, db := setupTestHandlerWithDB(t)
+			ctx := context.Background()
+			agentRepo := repository.NewAgentRepo(db)
+
+			target, err := repo.GetDefault(ctx)
+			if err != nil || target == nil {
+				t.Fatalf("get default model: %v", err)
+			}
+			if tc.name != "default transfer" {
+				target = createAgent(t, repo, func(a *models.LLMConfig) {
+					a.Name = "Protected override target"
+					a.Provider = models.ProviderTest
+					a.Model = "protected-override-target"
+					a.IsDefault = false
+				})
+			}
+			replacement := createAgent(t, repo, func(a *models.LLMConfig) {
+				a.Name = "Protected override replacement"
+				a.Provider = models.ProviderTest
+				a.Model = "protected-override-replacement"
+				a.IsDefault = false
+			})
+			protected := []*models.Agent{
+				{Key: "goal_override_handler_1168", Name: "Goal Agent Override", SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, Model: target.ID},
+				{Key: "skill_curator_override_handler_1168", Name: "Skill Curator Override", SystemKind: models.AgentSystemKindSkillCurator, GeneratedStatus: models.AgentStatusProtected, Model: target.ID},
+				{Key: "memory_curator_override_handler_1168", Name: "Memory Curator Override", SystemKind: models.AgentSystemKindMemoryCurator, GeneratedStatus: models.AgentStatusProtected, Model: target.ID},
+			}
+			for _, agent := range protected {
+				if err := agentRepo.Create(ctx, agent); err != nil {
+					t.Fatalf("create %s: %v", agent.Name, err)
+				}
+			}
+
+			rec := tc.delete(t, h, e, target, replacement)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("delete response status = %d, want %d", rec.Code, http.StatusOK)
+			}
+			if got, err := repo.GetByID(ctx, target.ID); err != nil || got != nil {
+				t.Fatalf("deleted model lookup = %#v, err=%v", got, err)
+			}
+			if tc.name == "default transfer" {
+				got, err := repo.GetDefault(ctx)
+				if err != nil || got == nil || got.ID != replacement.ID {
+					t.Fatalf("replacement default = %#v, err=%v; want %s", got, err, replacement.ID)
+				}
+			}
+			for _, agent := range protected {
+				got, err := agentRepo.GetByID(ctx, agent.ID)
+				if err != nil {
+					t.Fatalf("get %s: %v", agent.Name, err)
+				}
+				if got == nil {
+					t.Fatalf("%s was not found after model deletion", agent.Name)
+				}
+				if got.Model != "inherit" {
+					t.Fatalf("%s model = %q, want inherit", agent.Name, got.Model)
+				}
+			}
+		})
+	}
+}
+
 func TestHandler_DeleteModel_DefaultAgent_AutoReassignsWhenAnotherExists(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
