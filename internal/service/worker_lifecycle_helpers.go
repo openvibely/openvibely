@@ -6,15 +6,16 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func (w *WorkerService) buildSkillCatalog(ctx context.Context, task models.Task) *agentskills.Catalog {
+func (w *WorkerService) buildSkillCatalog(ctx context.Context, task models.Task, assignedAgent *models.Agent) *agentskills.Catalog {
 	projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID)
-	if agent := w.taskAgentDefinition(ctx, task); agent != nil && agent.Key != "" {
-		catalog, err := agentskills.BuildAgentCatalog(task.ID, w.globalSkillRoot, projectRoot, agent.Key)
+	if assignedAgent != nil && assignedAgent.Key != "" {
+		catalog, err := agentskills.BuildAgentCatalog(task.ID, w.globalSkillRoot, projectRoot, assignedAgent.Key)
 		if err != nil {
 			return agentskills.NewCatalog(task.ID, nil)
 		}
@@ -29,9 +30,9 @@ func (w *WorkerService) buildSkillCatalog(ctx context.Context, task models.Task)
 	return catalog
 }
 
-func (w *WorkerService) renderAvailableSkillsForTask(ctx context.Context, task models.Task, projectRoot string) string {
-	if agent := w.taskAgentDefinition(ctx, task); agent != nil && agent.Key != "" {
-		return agentskills.RenderAvailableAgentSkillsMarkdown(w.globalSkillRoot, projectRoot, agent.Key)
+func (w *WorkerService) renderAvailableSkillsForTask(ctx context.Context, task models.Task, projectRoot string, assignedAgent *models.Agent) string {
+	if assignedAgent != nil && assignedAgent.Key != "" {
+		return agentskills.RenderAvailableAgentSkillsMarkdown(w.globalSkillRoot, projectRoot, assignedAgent.Key)
 	}
 	return agentskills.RenderAvailableSkillsMarkdown(w.globalSkillRoot, projectRoot)
 }
@@ -94,6 +95,13 @@ func (w *WorkerService) taskAgentDefinition(ctx context.Context, task models.Tas
 	if task.AgentDefinitionID == nil || *task.AgentDefinitionID == "" || w == nil || w.agentRepo == nil {
 		return nil
 	}
+	if cache := lifecycle.AgentDefinitionCacheFromContext(ctx); cache != nil {
+		agent, err := cache.GetByID(ctx, *task.AgentDefinitionID)
+		if err != nil {
+			return nil
+		}
+		return agent
+	}
 	agent, err := w.agentRepo.GetByID(ctx, *task.AgentDefinitionID)
 	if err != nil {
 		return nil
@@ -101,7 +109,7 @@ func (w *WorkerService) taskAgentDefinition(ctx context.Context, task models.Tas
 	return agent
 }
 
-func (w *WorkerService) buildLifecycleRuntimeTools(task models.Task, catalog *agentskills.Catalog) *llmcontracts.RuntimeTools {
+func (w *WorkerService) buildLifecycleRuntimeTools(ctx context.Context, task models.Task, catalog *agentskills.Catalog, assignedAgent *models.Agent) *llmcontracts.RuntimeTools {
 	if catalog == nil {
 		return nil
 	}
@@ -115,7 +123,6 @@ func (w *WorkerService) buildLifecycleRuntimeTools(task models.Task, catalog *ag
 		recorder = w.mutationRecorder(task)
 	}
 	projectRoot := projectSkillRoot(context.Background(), w.projectRepo, task.ProjectID)
-	assignedAgent := w.taskAgentDefinition(context.Background(), task)
 	assignedAgentKey := ""
 	agentScope := "project"
 	if assignedAgent != nil {

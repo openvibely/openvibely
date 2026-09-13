@@ -414,6 +414,169 @@ func TestPrepareLifecycleTurn_RouteTaskNoValidSkillsKeepsAgentUnchanged(t *testi
 	}
 }
 
+func TestPrepareLifecycleTurn_AssignedAgentSetupReadsDefinitionOnce(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	counter.SetEnabled(true)
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{
+		ID:           "rich-task-agent",
+		Key:          "rich_task_agent",
+		Name:         "Rich Task Agent",
+		SystemPrompt: strings.Repeat("large prompt ", 2048),
+		Model:        "inherit",
+		Tools:        []string{"skill_view", "memory_view", "agent_view"},
+		Plugins:      []string{"plugin-a", "plugin-b"},
+		Skills:       []models.SkillConfig{{Name: "task_skill", Description: "skill"}},
+		SourceRefs:   []string{"source-a", "source-b"},
+	}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create rich task agent: %v", err)
+	}
+	counter.Reset()
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(t.TempDir())
+	worker.SetLifecycleAgentRepo(agentRepo)
+	task := models.Task{ID: "assigned-agent-setup", AgentDefinitionID: &agent.ID}
+	worker.PrepareLifecycleTurn(ctx, task)
+
+	lookups := 0
+	for _, statement := range counter.Statements() {
+		if strings.Contains(statement, "FROM agents WHERE id = ?") {
+			lookups++
+		}
+	}
+	if lookups != 1 {
+		t.Fatalf("assigned Agent full-row lookup count = %d; want 1, statements=%v", lookups, counter.Statements())
+	}
+}
+
+func BenchmarkPrepareLifecycleTurnAgentDefinitionReuse(b *testing.B) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{
+		ID:           "benchmark-rich-agent",
+		Key:          "benchmark_rich_agent",
+		Name:         "Benchmark Rich Agent",
+		SystemPrompt: strings.Repeat("production-shaped system prompt ", 1024),
+		Model:        "inherit",
+		Tools:        []string{"skill_view", "memory_view", "agent_view", "skill_manage"},
+		Plugins:      []string{"plugin-a", "plugin-b"},
+		Skills:       []models.SkillConfig{{Name: "skill-a", Description: "benchmark skill"}, {Name: "skill-b", Description: "another skill"}},
+		SourceRefs:   []string{"source-a", "source-b"},
+	}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		b.Fatalf("create benchmark Agent: %v", err)
+	}
+	task := models.Task{ID: "benchmark-lifecycle-turn", AgentDefinitionID: &agent.ID}
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleSkillRoot(b.TempDir())
+	worker.SetLifecycleAgentRepo(agentRepo)
+
+	setup := func(ctx context.Context, reuse bool) {
+		var assignedAgent *models.Agent
+		var setupCtx context.Context
+		if reuse {
+			setupCtx, assignedAgent, _ = worker.newLifecycleAgentContext(ctx, task)
+		} else {
+			setupCtx = ctx
+			assignedAgent = worker.taskAgentDefinition(setupCtx, task)
+		}
+		projectRoot := projectSkillRoot(setupCtx, worker.projectRepo, task.ProjectID)
+		catalog := worker.buildSkillCatalog(setupCtx, task, func() *models.Agent {
+			if reuse {
+				return assignedAgent
+			}
+			return worker.taskAgentDefinition(setupCtx, task)
+		}())
+		_ = worker.renderAvailableSkillsForTask(setupCtx, task, projectRoot, func() *models.Agent {
+			if reuse {
+				return assignedAgent
+			}
+			return worker.taskAgentDefinition(setupCtx, task)
+		}())
+		_ = worker.buildLifecycleReadRuntimeTools(task, catalog)
+		_ = worker.buildLifecycleRuntimeTools(setupCtx, task, catalog, func() *models.Agent {
+			if reuse {
+				return assignedAgent
+			}
+			return worker.taskAgentDefinition(setupCtx, task)
+		}())
+	}
+
+	b.Run("baseline_repeated_agent_setup", func(b *testing.B) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		setup(ctx, false)
+		counter.SetEnabled(false)
+		statements := counter.Statements()
+		if got := countAgentDefinitionLookups(statements); got != 4 {
+			b.Fatalf("baseline Agent lookup statements = %d; want 4, statements=%v", got, statements)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			setup(ctx, false)
+		}
+		b.StopTimer()
+		b.ReportMetric(4, "agent_lookups/op")
+		b.ReportMetric(float64(len(statements)), "sql_statements/op")
+	})
+
+	b.Run("optimized_turn_scoped_agent_setup", func(b *testing.B) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		setup(ctx, true)
+		counter.SetEnabled(false)
+		statements := counter.Statements()
+		if got := countAgentDefinitionLookups(statements); got != 1 {
+			b.Fatalf("optimized Agent lookup statements = %d; want 1, statements=%v", got, statements)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			setup(ctx, true)
+		}
+		b.StopTimer()
+		b.ReportMetric(1, "agent_lookups/op")
+		b.ReportMetric(float64(len(statements)), "sql_statements/op")
+	})
+}
+
+func countAgentDefinitionLookups(statements []string) int {
+	count := 0
+	for _, statement := range statements {
+		if strings.Contains(statement, "FROM agents WHERE id = ?") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestPrepareLifecycleTurn_UsesHandlerAgentHandoff(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	agent := &models.Agent{ID: "handed-off-agent", Key: "handed_off_agent", Name: "Handed Off Agent"}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create handed-off agent: %v", err)
+	}
+	counter.Reset()
+
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleAgentRepo(agentRepo)
+	ctx = lifecycle.WithAssignedAgentDefinition(ctx, agent)
+	worker.PrepareLifecycleTurn(ctx, models.Task{ID: "followup", AgentDefinitionID: &agent.ID})
+
+	for _, statement := range counter.Statements() {
+		if strings.Contains(statement, "FROM agents WHERE id = ?") {
+			t.Fatalf("handler-to-worker handoff reloaded assigned Agent: %v", counter.Statements())
+		}
+	}
+}
+
 func TestPrepareLifecycleTurn_AssignedAgentRoutesAgentOwnedSkills(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

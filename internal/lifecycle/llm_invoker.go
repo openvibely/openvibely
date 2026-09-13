@@ -151,8 +151,13 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 //  4. an empty config (so the caller's defaults apply)
 func (i *LLMHookInvoker) resolveLLMConfig(ctx context.Context, hook models.AgentLifecycleHook) (models.LLMConfig, *models.Agent, error) {
 	var agentDef *models.Agent
-	if i.agents != nil && hook.AgentID != "" {
-		if a, err := i.agents.GetByID(ctx, hook.AgentID); err == nil && a != nil {
+	agentLookup := i.agents
+	if cached := AgentDefinitionCacheFromContext(ctx); cached != nil {
+		cached.SetLookupIfMissing(i.agents)
+		agentLookup = cached
+	}
+	if agentLookup != nil && hook.AgentID != "" {
+		if a, err := agentLookup.GetByID(ctx, hook.AgentID); err == nil && a != nil {
 			agentDef = a
 			model := strings.TrimSpace(a.Model)
 			if model != "" && !strings.EqualFold(model, "inherit") {

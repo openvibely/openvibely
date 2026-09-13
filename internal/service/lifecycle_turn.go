@@ -43,6 +43,23 @@ type LifecycleTurn struct {
 	AfterComplete func(err error, chatContext llmcontracts.ChatContext)
 }
 
+func (w *WorkerService) newLifecycleAgentContext(ctx context.Context, task models.Task) (context.Context, *models.Agent, *lifecycle.AgentDefinitionCache) {
+	cache := lifecycle.NewAgentDefinitionCache(w.agentRepo)
+	assignedAgent := lifecycle.AssignedAgentDefinitionFromContext(ctx)
+	if assignedAgent != nil && (task.AgentDefinitionID == nil || strings.TrimSpace(*task.AgentDefinitionID) != assignedAgent.ID) {
+		assignedAgent = nil
+	}
+	if assignedAgent != nil {
+		cache.Seed(assignedAgent)
+	}
+	ctx = lifecycle.WithAgentDefinitionCache(ctx, cache)
+	if assignedAgent == nil {
+		assignedAgent = w.taskAgentDefinition(ctx, task)
+		cache.Seed(assignedAgent)
+	}
+	return ctx, assignedAgent, cache
+}
+
 // PrepareRecallOnlyLifecycleTurn runs only Memory Curator recall hooks for an
 // interactive chat turn. It deliberately skips skill selection, task runtime
 // tools, and after_complete so Chat can recall managed memory without letting
@@ -57,6 +74,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 	if incomingTurn.TurnPrompt != "" {
 		effectiveTask.Prompt = incomingTurn.TurnPrompt
 	}
+	ctx, assignedAgent, _ := w.newLifecycleAgentContext(ctx, task)
 	explicitMemoryEntries := w.explicitIndexedMemoryEntries(ctx, effectiveTask)
 	runID := newLifecycleTaskRunID(task.ID)
 	if projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); projectRoot != "" && w.agentRootSyncService != nil {
@@ -64,7 +82,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
 		}
 	}
-	catalog := w.buildSkillCatalog(ctx, task)
+	catalog := w.buildSkillCatalog(ctx, task, assignedAgent)
 	w.currentCatalog.Store(catalog)
 	hookCtx := ctx
 	if hookReadTools := w.buildLifecycleReadRuntimeTools(task, catalog); hookReadTools != nil {
@@ -115,16 +133,16 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 
 	runID := newLifecycleTaskRunID(task.ID)
 	incomingTurn := lifecycleTurnFromContext(ctx)
+	ctx, assignedAgent, agentCache := w.newLifecycleAgentContext(ctx, task)
 	projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID)
-	assignedAgent := w.taskAgentDefinition(ctx, task)
 	if w.agentRootSyncService != nil {
 		if err := w.agentRootSyncService.SyncRootDeclarationsForProject(ctx, projectRoot, task.ProjectID); err != nil {
 			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
 		}
 	}
-	catalog := w.buildSkillCatalog(ctx, task)
+	catalog := w.buildSkillCatalog(ctx, task, assignedAgent)
 	w.currentCatalog.Store(catalog)
-	fullSkillIndex := w.renderAvailableSkillsForTask(ctx, task, projectRoot)
+	fullSkillIndex := w.renderAvailableSkillsForTask(ctx, task, projectRoot, assignedAgent)
 	taskTurnRuntimeTools := llmcontracts.RuntimeToolsFromContext(ctx)
 	afterCompleteRuntimeTools := incomingTurn.AfterCompleteRuntimeTools
 	if w.afterCompleteRuntimeToolProvider != nil {
@@ -135,7 +153,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	if hookReadTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, hookReadTools)
 	}
-	hookMutationTools := w.buildLifecycleRuntimeTools(task, catalog)
+	hookMutationTools := w.buildLifecycleRuntimeTools(ctx, task, catalog, assignedAgent)
 	applog.Infof("[lifecycle-turn] prepared task=%s catalog_skills=%d runtime_tools=%t", task.ID, len(catalog.Entries()), hookReadTools != nil)
 	effectiveTask := task
 	if incomingTurn.TaskThreadTurn && incomingTurn.TurnPrompt != "" {
@@ -294,6 +312,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}()
 			bgCtx, cancel := context.WithTimeout(context.Background(), lifecycleHookExecutionTimeout)
 			defer cancel()
+			bgCtx = lifecycle.WithAgentDefinitionCache(bgCtx, agentCache)
 			bgCtx = withLifecycleTurnContext(bgCtx, turn)
 			if rt != nil {
 				bgCtx = llmcontracts.WithRuntimeTools(bgCtx, rt)

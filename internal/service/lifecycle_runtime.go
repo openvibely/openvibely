@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -95,7 +96,12 @@ func (r *CatalogSkillResolver) ResolveSkill(ctx context.Context, hook models.Age
 	agentKey := ""
 	projectID := ""
 	if r.agentRepo != nil && hook.AgentID != "" {
-		agent, err := r.agentRepo.GetByID(ctx, hook.AgentID)
+		agentLookup := lifecycle.AgentLookup(r.agentRepo)
+		if cached := lifecycle.AgentDefinitionCacheFromContext(ctx); cached != nil {
+			cached.SetLookupIfMissing(r.agentRepo)
+			agentLookup = cached
+		}
+		agent, err := agentLookup.GetByID(ctx, hook.AgentID)
 		if err != nil {
 			return "", err
 		}

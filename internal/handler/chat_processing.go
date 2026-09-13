@@ -14,6 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	"github.com/openvibely/openvibely/internal/models"
@@ -453,6 +454,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	if params.TaskID != "" {
 		if task, terr := h.taskRepo.GetByID(ctx, params.TaskID); terr == nil && task != nil {
 			if params.IsTaskFollowup && h.workerSvc != nil {
+				ctx = lifecycle.WithAssignedAgentDefinition(ctx, agentDef)
 				ctx = service.WithTaskThreadLifecycleTurnPrompt(ctx, params.Message)
 				turn := h.workerSvc.PrepareLifecycleTurn(ctx, *task)
 				ctx = turn.Ctx
