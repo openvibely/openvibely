@@ -405,6 +405,10 @@ func TestAnalyticsEvidenceMatchesFunnelCycleGoalCostAndModelCohorts(t *testing.T
 	if !analyticsContainsString(retryEvidence.TerminalPeriodStatuses, "2026-01-09|failed") || !analyticsContainsString(retryEvidence.TerminalPeriodStatuses, "2026-01-10|completed") {
 		t.Fatalf("multi-period terminal evidence lost grouped status attribution: %+v", retryEvidence.TerminalPeriodStatuses)
 	}
+	wantExecutionHour := time.Date(2026, 1, 10, 10, 0, 0, 0, time.UTC).In(time.Local).Hour()
+	if !analyticsContainsInt(retryEvidence.ExecutionHours, wantExecutionHour) {
+		t.Fatalf("execution-hour evidence lost supporting local hour %d: %+v", wantExecutionHour, retryEvidence.ExecutionHours)
+	}
 	agentDashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: from, DateTo: to, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
@@ -429,6 +433,15 @@ func TestAnalyticsEvidenceMatchesFunnelCycleGoalCostAndModelCohorts(t *testing.T
 	if !rows[goalOnlyTask.ID].GoalAchievementEligible || !rows[goalOnlyTask.ID].GoalAchievedInPeriod || rows[goalOnlyTask.ID].KnownCostEligible || rows[goalOnlyTask.ID].StartedInPeriod {
 		t.Fatalf("goal-event-only evidence does not match goal versus cost cohorts: %+v", rows[goalOnlyTask.ID])
 	}
+}
+
+func analyticsContainsInt(values []int, want int) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func analyticsContainsString(values []string, want string) bool {

@@ -164,6 +164,7 @@ type EvidenceTaskRow struct {
 	Model                    string   `json:"model"`
 	Category                 string   `json:"category"`
 	ModelConfigIDs           []string `json:"model_config_ids"`
+	ExecutionHours           []int    `json:"execution_hours"`
 	TerminalPeriodStatuses   []string `json:"terminal_period_statuses"`
 	FirstPassCompleted       bool     `json:"first_pass_completed"`
 	FirstPassEligible        bool     `json:"first_pass_eligible"`
