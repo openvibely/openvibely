@@ -63,25 +63,35 @@ func ErrorIs(err error, category ErrorCategory) bool {
 	return errors.As(err, &categorized) && categorized.Category == category
 }
 
+// ErrorCategoryOf returns the stable category carried by err, if any.
+func ErrorCategoryOf(err error) ErrorCategory {
+	var categorized *CategorizedError
+	if errors.As(err, &categorized) {
+		return categorized.Category
+	}
+	return ""
+}
+
 // AgentRequest is the canonical provider-agnostic request contract passed to adapters.
 type AgentRequest struct {
-	Ctx                 context.Context
-	Operation           Operation
-	Message             string
-	Attachments         []models.Attachment
-	Agent               models.LLMConfig
-	ExecID              string
-	ProjectID           string // Authoritative project scope for provider-side live events and attribution
-	TransportScope      string // Stable provider transport identity (for example task:<id> or chat:project:<id>)
-	ChatHistory         []models.Execution
-	ChatMode            models.ChatMode
-	ChatSystemContext   string
-	WorkDir             string
-	Followup            bool
-	ProjectInstructions string
-	AgentDefinition     *models.Agent // Optional agent definition (system prompt, skills, MCP)
-	DisableTools        bool          // Optional: suppress tool/plugin execution for this request
-	RawDirectPrompt     bool          // Optional: direct request message is already fully composed; skip OpenVibely task/system prompt wrapping
+	Ctx                    context.Context
+	Operation              Operation
+	Message                string
+	Attachments            []models.Attachment
+	Agent                  models.LLMConfig
+	ExecID                 string
+	RetrySourceExecutionID string // Failed execution retried by this request, for history/decision observability.
+	ProjectID              string // Authoritative project scope for provider-side live events and attribution
+	TransportScope         string // Stable provider transport identity (for example task:<id> or chat:project:<id>)
+	ChatHistory            []models.Execution
+	ChatMode               models.ChatMode
+	ChatSystemContext      string
+	WorkDir                string
+	Followup               bool
+	ProjectInstructions    string
+	AgentDefinition        *models.Agent // Optional agent definition (system prompt, skills, MCP)
+	DisableTools           bool          // Optional: suppress tool/plugin execution for this request
+	RawDirectPrompt        bool          // Optional: direct request message is already fully composed; skip OpenVibely task/system prompt wrapping
 	// LifecycleHookCall marks a direct call made on behalf of a lifecycle hook.
 	// Hooks are structured JSON steps, not coding turns: they keep their own
 	// agent prompt but skip the shared coding-agent system prompt, the
@@ -128,6 +138,7 @@ func LifecycleHookCallFromContext(ctx context.Context) bool {
 
 type transportScopeContextKey struct{}
 type nativeCompactionStateContextKey struct{}
+type retrySourceExecutionIDContextKey struct{}
 
 func WithNativeCompactionStateJSON(ctx context.Context, state string) context.Context {
 	if ctx == nil {
@@ -157,6 +168,21 @@ func TransportScopeFromContext(ctx context.Context) string {
 	}
 	scope, _ := ctx.Value(transportScopeContextKey{}).(string)
 	return scope
+}
+
+func WithRetrySourceExecutionID(ctx context.Context, executionID string) context.Context {
+	if ctx == nil || executionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, retrySourceExecutionIDContextKey{}, executionID)
+}
+
+func RetrySourceExecutionIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	executionID, _ := ctx.Value(retrySourceExecutionIDContextKey{}).(string)
+	return executionID
 }
 
 // Usage tracks provider usage in a canonical shape.

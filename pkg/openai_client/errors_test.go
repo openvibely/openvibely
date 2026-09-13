@@ -23,6 +23,22 @@ func TestCategorizeProviderErrorUsesStructuredOpenAIError(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamTerminalErrorPreservesStructuredCategory(t *testing.T) {
+	err := responsesStreamTerminalError("response.failed", map[string]any{
+		"response": map[string]any{"error": map[string]any{"code": "context_length_exceeded", "message": "opaque stream failure"}},
+	})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != "context_length_exceeded" || apiErr.Message != "opaque stream failure" {
+		t.Fatalf("stream error = %#v, want structured APIError", err)
+	}
+	if got := CategorizeProviderError(err); !llmcontracts.ErrorIs(got, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("normal stream category = %v", got)
+	}
+	if got := CategorizeCompactionError(err); !llmcontracts.ErrorIs(got, llmcontracts.ErrorCompactionInputInfeasible) {
+		t.Fatalf("compaction stream category = %v", got)
+	}
+}
+
 func TestAPIError(t *testing.T) {
 	t.Run("error string formatting", func(t *testing.T) {
 		tests := []struct {

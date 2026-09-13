@@ -60,6 +60,9 @@ func (e *APIError) Error() string {
 
 // Is implements error matching for sentinel errors.
 func (e *APIError) Is(target error) bool {
+	if e.Code == "context_length_exceeded" {
+		return target == ErrContextLengthExceeded
+	}
 	switch e.StatusCode {
 	case 401, 403:
 		return target == ErrNoAuth

@@ -1468,28 +1468,36 @@ func responsesStreamTerminalError(eventType string, ev map[string]any) error {
 		if errObj, ok := response["error"].(map[string]any); ok {
 			code := stringFromAny(errObj["code"])
 			message := stringFromAny(errObj["message"])
-			switch {
-			case code != "" && message != "":
-				return fmt.Errorf("stream error: %s: %s", code, message)
-			case code != "":
-				return fmt.Errorf("stream error: %s", code)
-			case message != "":
-				return fmt.Errorf("stream error: %s", message)
+			if code != "" || message != "" {
+				return &APIError{
+					StatusCode: intFromAny(response["status_code"]),
+					Type:       stringFromAny(errObj["type"]),
+					Code:       code,
+					Message:    firstNonEmpty(message, code, strings.TrimSpace(eventType)),
+					Param:      stringFromAny(errObj["param"]),
+				}
 			}
 		}
 		if msg := extractErrorMessage(response); msg != "" {
-			return fmt.Errorf("stream error: %s", msg)
+			return &APIError{StatusCode: intFromAny(response["status_code"]), Message: msg}
 		}
 		if details, ok := response["incomplete_details"].(map[string]any); ok {
 			if reason := stringFromAny(details["reason"]); reason != "" {
-				return fmt.Errorf("stream error: incomplete response: %s", reason)
+				return &APIError{StatusCode: intFromAny(response["status_code"]), Type: "incomplete_response", Code: reason, Message: "incomplete response: " + reason}
 			}
 		}
 	}
-	if msg := extractErrorMessage(ev); msg != "" {
-		return fmt.Errorf("stream error: %s", msg)
+	if errObj, ok := ev["error"].(map[string]any); ok {
+		code := stringFromAny(errObj["code"])
+		message := stringFromAny(errObj["message"])
+		if code != "" || message != "" {
+			return &APIError{Type: stringFromAny(errObj["type"]), Code: code, Message: firstNonEmpty(message, code, strings.TrimSpace(eventType)), Param: stringFromAny(errObj["param"])}
+		}
 	}
-	return fmt.Errorf("stream error: %s", strings.TrimSpace(eventType))
+	if msg := extractErrorMessage(ev); msg != "" {
+		return &APIError{Message: msg}
+	}
+	return &APIError{Message: strings.TrimSpace(eventType)}
 }
 
 func stringFromAny(v any) string {
