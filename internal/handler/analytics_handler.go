@@ -57,7 +57,7 @@ func (h *Handler) Analytics(c echo.Context) error {
 // @Description Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, account limit snapshots, and bounded supporting usage events for an exact chart selection.
 // @Tags analytics
 // @Produce json
-// @Param project_id query string false "Project ID filter"
+// @Param project_id query string false "Project ID filter; required when requesting supporting usage evidence"
 // @Param provider query string false "Provider filter"
 // @Param range query string false "Convenience range: 7d, 30d, 90d, 365d, month, all" default(30d)
 // @Param group_by query string false "Usage rate grouping: hour, day, week, month" default(day)
@@ -67,6 +67,7 @@ func (h *Handler) Analytics(c echo.Context) error {
 // @Param usage_provider query string false "Exact provider for supporting usage events"
 // @Param usage_model_name query string false "Exact model for supporting usage events"
 // @Success 200 {object} models.AnalyticsUsageViewModel "Usage analytics"
+// @Failure 400 {object} ErrorResponse "Supporting evidence requires project_id"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/usage [get]
 func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
@@ -74,6 +75,9 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "usage analytics service is not configured")
 	}
 	filter := parseUsageFilter(c)
+	if usageEvidenceRequested(filter) && strings.TrimSpace(filter.ProjectID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for supporting usage evidence")
+	}
 	view, err := h.usageAnalyticsSvc.BuildAnalyticsUsage(c.Request().Context(), filter)
 	if err != nil {
 		applog.Infof("[handler] GetAnalyticsUsage error: %v", err)
@@ -87,7 +91,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 // @Description Returns skill usage over time, top skills, selection follow-through, agent heatmap, underused skill metrics, and bounded supporting skill events for an exact chart selection.
 // @Tags analytics
 // @Produce json
-// @Param project_id query string false "Project ID filter"
+// @Param project_id query string false "Project ID filter; required when requesting supporting skill evidence"
 // @Param range query string false "Convenience range: 7d, 30d, 90d, 365d, all" default(30d)
 // @Param group_by query string false "Usage trend grouping: day, week, or month" default(day)
 // @Param agent_id query string false "Agent ID filter"
@@ -95,10 +99,11 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 // @Param skill_scope query string false "Skill scope filter"
 // @Param event_type query string false "Event type filter (selected, loaded, viewed, created, edited)"
 // @Param skill_period query string false "Exact grouped period for supporting skill events"
-// @Param skill_event query string false "Supporting event type (used, selected, loaded, viewed, created, edited)"
+// @Param skill_event query string false "Supporting event type (used, followed, ignored, selected, loaded, viewed, created, edited)"
 // @Param skill_agent query string false "Exact Agent ID or __unassigned__ for supporting skill events"
 // @Param skill_handle query string false "Exact skill handle for supporting skill events"
 // @Success 200 {object} models.SkillAnalyticsDashboard "Skill analytics"
+// @Failure 400 {object} ErrorResponse "Supporting evidence requires project_id"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/skills [get]
 func (h *Handler) GetSkillAnalytics(c echo.Context) error {
@@ -106,6 +111,9 @@ func (h *Handler) GetSkillAnalytics(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "skill analytics repository is not configured")
 	}
 	filter := parseSkillAnalyticsFilter(c)
+	if skillEvidenceRequested(filter) && strings.TrimSpace(filter.ProjectID) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for supporting skill evidence")
+	}
 	enabled := h.enabledSkillsForAnalytics(c)
 	view, err := h.skillAnalyticsRepo.BuildDashboard(c.Request().Context(), filter, enabled)
 	if err != nil {
@@ -149,6 +157,10 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 		filter.DateTo = now
 	}
 	return filter
+}
+
+func skillEvidenceRequested(filter repository.SkillAnalyticsFilter) bool {
+	return filter.EvidencePeriod != "" || filter.EvidenceEvent != "" || filter.EvidenceAgentID != "" || filter.EvidenceSkillHandle != ""
 }
 
 func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.EnabledSkillInfo {
@@ -222,6 +234,10 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 	filter.EvidenceModel = strings.TrimSpace(c.QueryParam("usage_model_name"))
 	filter.EvidenceLimit = 50
 	return filter
+}
+
+func usageEvidenceRequested(filter repository.UsageFilter) bool {
+	return filter.EvidencePeriod != "" || filter.EvidenceProvider != "" || filter.EvidenceModel != ""
 }
 
 // GetAnalyticsDashboard returns project-scoped task outcome, Agent, workflow,

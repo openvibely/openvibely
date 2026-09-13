@@ -353,12 +353,26 @@ func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyt
 	if filter.EvidencePeriod == "" && filter.EvidenceEvent == "" && filter.EvidenceAgentID == "" && filter.EvidenceSkillHandle == "" {
 		return []models.SkillAnalyticsEvidenceRow{}, 0, nil
 	}
+	if strings.TrimSpace(filter.ProjectID) == "" {
+		return nil, 0, fmt.Errorf("skill Analytics evidence project_id is required")
+	}
 	where, args := skillAnalyticsWhere(filter)
 	if filter.EvidencePeriod != "" {
 		where += " AND " + skillAnalyticsPeriodExpression(filter.GroupBy) + " = ?"
 		args = append(args, filter.EvidencePeriod)
 	}
-	if filter.EvidenceEvent == "used" {
+	if filter.EvidenceEvent == "followed" || filter.EvidenceEvent == "ignored" {
+		relatedWhere, relatedArgs := skillAnalyticsWhereAlias(filter, "related")
+		relatedTurn := "COALESCE(NULLIF(related.execution_id,''),NULLIF(related.thread_id,''),NULLIF(related.task_id,''),related.id)"
+		selectedTurn := "COALESCE(NULLIF(e.execution_id,''),NULLIF(e.thread_id,''),NULLIF(e.task_id,''),e.id)"
+		exists := "EXISTS (SELECT 1 FROM skill_analytics_events related " + relatedWhere + " AND related.skill_handle=e.skill_handle AND related.skill_scope=e.skill_scope AND " + relatedTurn + "=" + selectedTurn + " AND related.event_type IN ('loaded','viewed'))"
+		where += " AND e.event_type='selected' AND "
+		if filter.EvidenceEvent == "ignored" {
+			where += "NOT "
+		}
+		where += exists
+		args = append(args, relatedArgs...)
+	} else if filter.EvidenceEvent == "used" {
 		where += " AND e.event_type IN ('selected','loaded','viewed')"
 	} else if filter.EvidenceEvent != "" {
 		where += " AND e.event_type = ?"
@@ -433,40 +447,44 @@ func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAna
 }
 
 func skillAnalyticsWhere(filter SkillAnalyticsFilter) (string, []any) {
+	return skillAnalyticsWhereAlias(filter, "e")
+}
+
+func skillAnalyticsWhereAlias(filter SkillAnalyticsFilter, alias string) (string, []any) {
 	where := "WHERE 1=1"
 	args := []any{}
 	if !filter.DateFrom.IsZero() {
-		where += " AND e.created_at >= ?"
+		where += " AND " + alias + ".created_at >= ?"
 		args = append(args, formatSQLiteTime(filter.DateFrom.UTC()))
 	}
 	if !filter.DateTo.IsZero() {
-		where += " AND e.created_at < ?"
+		where += " AND " + alias + ".created_at < ?"
 		args = append(args, formatSQLiteTime(filter.DateTo.UTC()))
 	}
 	if filter.ProjectID != "" {
-		where += " AND e.project_id = ?"
+		where += " AND " + alias + ".project_id = ?"
 		args = append(args, filter.ProjectID)
 	}
 	if filter.AgentID == "__unassigned__" {
-		where += " AND (e.agent_id IS NULL OR e.agent_id = '')"
+		where += " AND (" + alias + ".agent_id IS NULL OR " + alias + ".agent_id = '')"
 	} else if filter.AgentID != "" {
-		where += " AND e.agent_id = ?"
+		where += " AND " + alias + ".agent_id = ?"
 		args = append(args, filter.AgentID)
 	}
 	if filter.WorkflowID != "" {
-		where += " AND EXISTS (SELECT 1 FROM automation_dispatch_outbox ado JOIN automation_invocations ai ON ai.id=ado.invocation_id WHERE ado.task_id=e.task_id AND ai.project_id=e.project_id AND ai.automation_id=?)"
+		where += " AND EXISTS (SELECT 1 FROM automation_dispatch_outbox ado JOIN automation_invocations ai ON ai.id=ado.invocation_id WHERE ado.task_id=" + alias + ".task_id AND ai.project_id=" + alias + ".project_id AND ai.automation_id=?)"
 		args = append(args, filter.WorkflowID)
 	}
 	if filter.Surface != "" {
-		where += " AND e.surface = ?"
+		where += " AND " + alias + ".surface = ?"
 		args = append(args, filter.Surface)
 	}
 	if filter.SkillScope != "" {
-		where += " AND e.skill_scope = ?"
+		where += " AND " + alias + ".skill_scope = ?"
 		args = append(args, filter.SkillScope)
 	}
 	if filter.EventType != "" {
-		where += " AND e.event_type = ?"
+		where += " AND " + alias + ".event_type = ?"
 		args = append(args, filter.EventType)
 	}
 	return where, args

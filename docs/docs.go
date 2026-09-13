@@ -434,7 +434,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Project ID filter",
+                        "description": "Project ID filter; required when requesting supporting skill evidence",
                         "name": "project_id",
                         "in": "query"
                     },
@@ -484,7 +484,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Supporting event type (used, selected, loaded, viewed, created, edited)",
+                        "description": "Supporting event type (used, followed, ignored, selected, loaded, viewed, created, edited)",
                         "name": "skill_event",
                         "in": "query"
                     },
@@ -506,6 +506,12 @@ const docTemplate = `{
                         "description": "Skill analytics",
                         "schema": {
                             "$ref": "#/definitions/models.SkillAnalyticsDashboard"
+                        }
+                    },
+                    "400": {
+                        "description": "Supporting evidence requires project_id",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
                         }
                     },
                     "500": {
@@ -586,7 +592,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Project ID filter",
+                        "description": "Project ID filter; required when requesting supporting usage evidence",
                         "name": "project_id",
                         "in": "query"
                     },
@@ -646,6 +652,12 @@ const docTemplate = `{
                         "description": "Usage analytics",
                         "schema": {
                             "$ref": "#/definitions/models.AnalyticsUsageViewModel"
+                        }
+                    },
+                    "400": {
+                        "description": "Supporting evidence requires project_id",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
                         }
                     },
                     "500": {

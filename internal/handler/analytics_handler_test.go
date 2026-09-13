@@ -55,6 +55,14 @@ func TestGetAnalyticsUsage_Default(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
+func TestAnalyticsSupportingEvidenceRequiresProject(t *testing.T) {
+	tc := NewTestContext(t)
+	usage := tc.HTTP().Get("/api/analytics/usage?usage_period=2026-01-10").Execute()
+	tc.Assert(usage).StatusCode(http.StatusBadRequest)
+	skill := tc.HTTP().Get("/api/analytics/skills?skill_period=2026-01-10&skill_event=created").Execute()
+	tc.Assert(skill).StatusCode(http.StatusBadRequest)
+}
+
 func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
