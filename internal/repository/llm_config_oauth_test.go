@@ -207,6 +207,87 @@ func TestLLMConfigRepo_SharedOAuthConnectionUpdatesLinkedModelsOnly(t *testing.T
 	}
 }
 
+func TestLLMConfigRepo_ListOAuthConnectionsReturnsSafeSummaries(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{
+		Name:              "Safe OAuth summary",
+		Provider:          models.ProviderAnthropic,
+		Model:             "claude",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "secret-access",
+		OAuthRefreshToken: "secret-refresh",
+		OAuthAccountID:    "secret-account-id",
+	}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	connections, err := repo.ListOAuthConnections(ctx, "")
+	if err != nil {
+		t.Fatalf("ListOAuthConnections: %v", err)
+	}
+	if len(connections) != 1 {
+		t.Fatalf("connection summaries = %#v", connections)
+	}
+	summary := connections[0]
+	if summary.AccessToken != "present" || summary.RefreshToken != "" || summary.AccountID != "" || summary.Revision != 0 {
+		t.Fatalf("OAuth connection summary exposed private state: %#v", summary)
+	}
+}
+
+func TestLLMConfigRepo_MoveModelsToOAuthConnectionIsAtomicAndProviderScoped(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	target := &models.LLMConfig{Name: "OpenAI target", Provider: models.ProviderOpenAI, Model: "gpt-target", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "target-access", OAuthRefreshToken: "target-refresh"}
+	first := &models.LLMConfig{Name: "OpenAI first move", Provider: models.ProviderOpenAI, Model: "gpt-one", AuthMethod: models.AuthMethodOAuth}
+	second := &models.LLMConfig{Name: "OpenAI second move", Provider: models.ProviderOpenAI, Model: "gpt-two", AuthMethod: models.AuthMethodOAuth}
+	third := &models.LLMConfig{Name: "OpenAI atomic control", Provider: models.ProviderOpenAI, Model: "gpt-three", AuthMethod: models.AuthMethodOAuth}
+	anthropic := &models.LLMConfig{Name: "Anthropic atomic control", Provider: models.ProviderAnthropic, Model: "claude", AuthMethod: models.AuthMethodOAuth}
+	for _, cfg := range []*models.LLMConfig{target, first, second, third, anthropic} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("Create(%s): %v", cfg.Name, err)
+		}
+	}
+
+	if err := repo.MoveModelsToOAuthConnection(ctx, []string{third.ID, anthropic.ID}, target.OAuthConnectionID); err == nil {
+		t.Fatal("mixed-provider bulk move succeeded")
+	}
+	for _, cfg := range []*models.LLMConfig{third, anthropic} {
+		loaded, err := repo.GetByID(ctx, cfg.ID)
+		if err != nil {
+			t.Fatalf("GetByID(%s): %v", cfg.Name, err)
+		}
+		if loaded.OAuthConnectionID != cfg.OAuthConnectionID {
+			t.Fatalf("failed bulk move partially changed %s: %#v", cfg.Name, loaded)
+		}
+	}
+
+	if err := repo.MoveModelsToOAuthConnection(ctx, []string{first.ID, second.ID, first.ID}, target.OAuthConnectionID); err != nil {
+		t.Fatalf("MoveModelsToOAuthConnection: %v", err)
+	}
+	for _, cfg := range []*models.LLMConfig{first, second} {
+		loaded, err := repo.GetByID(ctx, cfg.ID)
+		if err != nil {
+			t.Fatalf("GetByID(%s): %v", cfg.Name, err)
+		}
+		if loaded.OAuthConnectionID != target.OAuthConnectionID || loaded.OAuthAccessToken != "target-access" || loaded.OAuthRefreshToken != "target-refresh" {
+			t.Fatalf("moved model did not hydrate target account: %#v", loaded)
+		}
+	}
+	if err := repo.RenameOAuthConnection(ctx, target.OAuthConnectionID, "Team Account"); err != nil {
+		t.Fatalf("RenameOAuthConnection: %v", err)
+	}
+	connection, err := repo.GetOAuthConnectionByID(ctx, target.OAuthConnectionID)
+	if err != nil {
+		t.Fatalf("GetOAuthConnectionByID: %v", err)
+	}
+	if connection == nil || connection.Name != "Team Account" || connection.LinkedModels != 3 {
+		t.Fatalf("renamed target connection = %#v", connection)
+	}
+}
+
 func TestLLMConfigRepo_OAuthConnectionDeletionRequiresNoLinkedModels(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

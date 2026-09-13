@@ -46,6 +46,62 @@ func TestDisconnectModelOAuthConnectionAffectsAllLinkedModels(t *testing.T) {
 	}
 }
 
+func TestOAuthConnectionManagementRoutesRenameMoveAndDelete(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	target := &models.LLMConfig{Name: "Managed OpenAI target", Provider: models.ProviderOpenAI, Model: "gpt-target", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "target-access", OAuthRefreshToken: "target-refresh"}
+	moved := &models.LLMConfig{Name: "Managed OpenAI moved", Provider: models.ProviderOpenAI, Model: "gpt-moved", AuthMethod: models.AuthMethodOAuth}
+	for _, cfg := range []*models.LLMConfig{target, moved} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	abandonedConnectionID := moved.OAuthConnectionID
+
+	renameForm := url.Values{"name": {"Team OpenAI"}}
+	renameReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+target.OAuthConnectionID+"/rename", strings.NewReader(renameForm.Encode()))
+	renameReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	renameRec := httptest.NewRecorder()
+	e.ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusSeeOther {
+		t.Fatalf("rename status = %d, body=%s", renameRec.Code, renameRec.Body.String())
+	}
+
+	moveForm := url.Values{"model_ids": {moved.ID}}
+	moveReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+target.OAuthConnectionID+"/models", strings.NewReader(moveForm.Encode()))
+	moveReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	moveRec := httptest.NewRecorder()
+	e.ServeHTTP(moveRec, moveReq)
+	if moveRec.Code != http.StatusSeeOther {
+		t.Fatalf("move status = %d, body=%s", moveRec.Code, moveRec.Body.String())
+	}
+	loaded, err := repo.GetByID(ctx, moved.ID)
+	if err != nil {
+		t.Fatalf("load moved model: %v", err)
+	}
+	if loaded.OAuthConnectionID != target.OAuthConnectionID || loaded.OAuthConnectionName != "Team OpenAI" {
+		t.Fatalf("model did not move to renamed connection: %#v", loaded)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+abandonedConnectionID+"/delete", nil)
+	deleteRec := httptest.NewRecorder()
+	e.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusSeeOther {
+		t.Fatalf("delete unreferenced status = %d, body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	connection, err := repo.GetOAuthConnectionByID(ctx, abandonedConnectionID)
+	if err != nil || connection != nil {
+		t.Fatalf("unreferenced connection remained: %#v, %v", connection, err)
+	}
+
+	linkedDeleteReq := httptest.NewRequest(http.MethodPost, "/models/oauth-connections/"+target.OAuthConnectionID+"/delete", nil)
+	linkedDeleteRec := httptest.NewRecorder()
+	e.ServeHTTP(linkedDeleteRec, linkedDeleteReq)
+	if linkedDeleteRec.Code != http.StatusConflict {
+		t.Fatalf("delete linked status = %d, body=%s", linkedDeleteRec.Code, linkedDeleteRec.Body.String())
+	}
+}
+
 func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
 	_, e, repo := setupTestHandler(t)
 	ctx := context.Background()
@@ -61,8 +117,8 @@ func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
 		t.Fatalf("models status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "OAuth Account") || !strings.Contains(body, cfg.Name) || !strings.Contains(body, cfg.OAuthConnectionID) {
-		t.Fatalf("shared OAuth account selector/card missing: %s", body)
+	if !strings.Contains(body, "OAuth Account") || !strings.Contains(body, "OAuth Accounts") || !strings.Contains(body, cfg.Name) || !strings.Contains(body, cfg.OAuthConnectionID) || !strings.Contains(body, "Move selected models") || !strings.Contains(body, "/rename") {
+		t.Fatalf("shared OAuth account selector/management controls missing: %s", body)
 	}
 	if strings.Contains(body, "secret-access") || strings.Contains(body, "secret-refresh") {
 		t.Fatal("Models page exposed OAuth credentials")

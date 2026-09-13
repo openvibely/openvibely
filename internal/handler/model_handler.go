@@ -1006,6 +1006,97 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
+func (h *Handler) oauthConnectionActionResponse(c echo.Context) error {
+	if isHTMX(c) {
+		return h.renderRefreshedModels(c)
+	}
+	redirectURL := "/models"
+	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
+		redirectURL += "?project_id=" + url.QueryEscape(projectID)
+	}
+	return c.Redirect(http.StatusSeeOther, redirectURL)
+}
+
+func (h *Handler) RenameOAuthConnection(c echo.Context) error {
+	request := c.Request()
+	request.Body = http.MaxBytesReader(c.Response(), request.Body, 8<<10)
+	if err := request.ParseForm(); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid OAuth account name")
+	}
+	name := strings.TrimSpace(request.PostFormValue("name"))
+	if name == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "OAuth account name is required")
+	}
+	if len(name) > 200 {
+		return echo.NewHTTPError(http.StatusBadRequest, "OAuth account name must be at most 200 characters")
+	}
+	if err := h.llmConfigRepo.RenameOAuthConnection(c.Request().Context(), c.Param("id"), name); err != nil {
+		if errors.Is(err, repository.ErrOAuthConnectionNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "OAuth account not found")
+		}
+		return err
+	}
+	return h.oauthConnectionActionResponse(c)
+}
+
+func (h *Handler) MoveModelsToOAuthConnection(c echo.Context) error {
+	request := c.Request()
+	request.Body = http.MaxBytesReader(c.Response(), request.Body, 64<<10)
+	if err := request.ParseForm(); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid OAuth account move")
+	}
+	seen := make(map[string]struct{}, len(request.PostForm["model_ids"]))
+	modelIDs := make([]string, 0, len(request.PostForm["model_ids"]))
+	for _, modelID := range request.PostForm["model_ids"] {
+		modelID = strings.TrimSpace(modelID)
+		if modelID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "model identifiers must not be empty")
+		}
+		if _, ok := seen[modelID]; ok {
+			continue
+		}
+		seen[modelID] = struct{}{}
+		modelIDs = append(modelIDs, modelID)
+	}
+	if len(modelIDs) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "select at least one model")
+	}
+	if len(modelIDs) > bulkDeleteMaxItems {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("at most %d models may be moved at once", bulkDeleteMaxItems))
+	}
+	if err := h.llmConfigRepo.MoveModelsToOAuthConnection(c.Request().Context(), modelIDs, c.Param("id")); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrOAuthConnectionNotFound):
+			return echo.NewHTTPError(http.StatusNotFound, "OAuth account not found")
+		case errors.Is(err, repository.ErrOAuthConnectionInvalidMove):
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		default:
+			return err
+		}
+	}
+	return h.oauthConnectionActionResponse(c)
+}
+
+func (h *Handler) DeleteOAuthConnection(c echo.Context) error {
+	connection, err := h.llmConfigRepo.GetOAuthConnectionByID(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if connection == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "OAuth account not found")
+	}
+	if connection.LinkedModels != 0 {
+		return echo.NewHTTPError(http.StatusConflict, "OAuth account is still linked to models")
+	}
+	if err := h.llmConfigRepo.DeleteOAuthConnection(c.Request().Context(), connection.ID); err != nil {
+		if errors.Is(err, repository.ErrOAuthConnectionLinked) {
+			return echo.NewHTTPError(http.StatusConflict, "OAuth account is still linked to models")
+		}
+		return err
+	}
+	return h.oauthConnectionActionResponse(c)
+}
+
 func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
 	cfg, err := h.llmConfigRepo.GetByID(c.Request().Context(), c.Param("id"))
 	if err != nil {

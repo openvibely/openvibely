@@ -3,8 +3,10 @@ package pages
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -75,6 +77,36 @@ func oauthConnectionLinkedModels(connectionID string, connections []models.OAuth
 		}
 	}
 	return 1
+}
+
+func modelsOAuthAction(path, projectID string) string {
+	if strings.TrimSpace(projectID) == "" {
+		return path
+	}
+	return path + "?project_id=" + url.QueryEscape(projectID)
+}
+
+func oauthConnectionStatus(connection models.OAuthConnection) string {
+	if connection.NeedsReauth {
+		return "Reconnect required"
+	}
+	if connection.AccessToken == "" {
+		return "Not connected"
+	}
+	if connection.ExpiresAt > 0 && connection.ExpiresAt <= time.Now().UnixMilli() {
+		return "Token expired"
+	}
+	return "Connected"
+}
+
+func oauthModelOptionsForProvider(options []models.LLMConfig, provider models.LLMProvider) []models.LLMConfig {
+	filtered := make([]models.LLMConfig, 0, len(options))
+	for _, option := range options {
+		if option.Provider == provider && option.AuthMethod == models.AuthMethodOAuth {
+			filtered = append(filtered, option)
+		}
+	}
+	return filtered
 }
 
 func hasDefault(agents []models.LLMConfig) bool {
@@ -218,6 +250,56 @@ templ providerIcon(provider models.LLMProvider) {
 	}
 }
 
+templ oauthConnectionsManagement(connections []models.OAuthConnection, modelOptions []models.LLMConfig, projectID string) {
+	if len(connections) > 0 {
+		<section class="mb-6" aria-labelledby="oauth-accounts-heading">
+			<div class="mb-3 flex items-center justify-between">
+				<div>
+					<h3 id="oauth-accounts-heading" class="text-lg font-semibold">OAuth Accounts</h3>
+					<p class="text-sm opacity-70">Rename accounts, move compatible models together, or remove accounts that are no longer used.</p>
+				</div>
+			</div>
+			<div class="grid gap-3 lg:grid-cols-2">
+				for _, connection := range connections {
+					<div class="card border border-base-300 bg-base-100 shadow-sm">
+						<div class="card-body gap-3 p-4">
+							<div class="flex flex-wrap items-center gap-2">
+								@providerIcon(connection.Provider)
+								<strong>{ connection.Name }</strong>
+								<span class="badge badge-outline">{ string(connection.Provider) }</span>
+								<span class="badge">{ oauthConnectionStatus(connection) }</span>
+								<span class="text-xs opacity-60">{ fmt.Sprintf("%d linked model(s)", connection.LinkedModels) }</span>
+							</div>
+							<form method="post" action={ modelsOAuthAction(fmt.Sprintf("/models/oauth-connections/%s/rename", connection.ID), projectID) } class="flex gap-2">
+								<label class="sr-only" for={ "oauth-account-name-" + connection.ID }>Account name</label>
+								<input id={ "oauth-account-name-" + connection.ID } name="name" value={ connection.Name } maxlength="200" required class="input input-bordered input-sm min-w-0 flex-1"/>
+								<button type="submit" class="btn btn-sm">Rename</button>
+							</form>
+							if options := oauthModelOptionsForProvider(modelOptions, connection.Provider); len(options) > 0 {
+								<form method="post" action={ modelsOAuthAction(fmt.Sprintf("/models/oauth-connections/%s/models", connection.ID), projectID) } class="space-y-2" onsubmit="return window.confirm('Move the selected models to this OAuth account? Their future refresh and reconnect state will come from this account.')">
+									<label class="label py-0 text-sm font-medium" for={ "oauth-account-models-" + connection.ID }>Move models to this account</label>
+									<select id={ "oauth-account-models-" + connection.ID } name="model_ids" multiple required class="select select-bordered h-24 w-full text-sm">
+										for _, option := range options {
+											<option value={ option.ID }>{ option.Name } ({ option.Model })</option>
+										}
+									</select>
+									<button type="submit" class="btn btn-sm btn-primary">Move selected models</button>
+								</form>
+							}
+							if connection.LinkedModels == 0 {
+								<form method="post" action={ modelsOAuthAction(fmt.Sprintf("/models/oauth-connections/%s/delete", connection.ID), projectID) } onsubmit="return window.confirm('Delete this unreferenced OAuth account? This cannot be undone.')">
+									<button type="submit" class="btn btn-error btn-sm btn-outline">Delete account</button>
+								</form>
+							}
+						</div>
+					</div>
+				}
+			</div>
+		</section>
+	}
+}
+
+
 templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, oauthConnections []models.OAuthConnection, modelWorkerStats map[string]int, desktopMode bool, hasMore bool, state CardListState) {
 		<div id="models-container" data-search-container hx-history="false" data-card-pagination-root data-card-pagination-url={ CardListURL("models", state) } data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Models")
@@ -227,6 +309,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 				+ Add Model
 			</button>
 		</div>
+			@oauthConnectionsManagement(oauthConnections, modelOptions, state.ProjectID)
 			@CardListToolbar(collectionToolbarConfigWithState("models", state))
 
 			<div id="models-card-list" data-card-pagination-list>
