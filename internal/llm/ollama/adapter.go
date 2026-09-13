@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -29,7 +30,47 @@ type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-const defaultOllamaRequestTimeout = 10 * time.Minute
+const (
+	defaultOllamaRequestTimeout = 10 * time.Minute
+	// DefaultContextWindow is the conservative enforced window for arbitrary
+	// local models when no explicit model metadata is configured.
+	DefaultContextWindow = 8192
+)
+
+func ollamaContextWindow(agent models.LLMConfig) int {
+	if agent.ContextWindow > 0 {
+		return agent.ContextWindow
+	}
+	return DefaultContextWindow
+}
+
+func ollamaOutputTokens(agent models.LLMConfig) int {
+	window := ollamaContextWindow(agent)
+	reserved := agent.GetDefaultMaxTokens(4096)
+	if window < 32768 && reserved > window/4 {
+		reserved = window / 4
+	}
+	return max(1, reserved)
+}
+
+func ollamaRequestOptions(agent models.LLMConfig) *options {
+	return &options{
+		Temperature: &agent.Temperature,
+		NumPredict:  ollamaOutputTokens(agent),
+		NumCtx:      ollamaContextWindow(agent),
+	}
+}
+
+func ensureOllamaRequestFits(body []byte, agent models.LLMConfig) error {
+	window := ollamaContextWindow(agent)
+	reserved := ollamaOutputTokens(agent)
+	safe := window - reserved - max(64, window/50)
+	tokens := utf8.RuneCount(body)
+	if safe > 0 && tokens <= safe {
+		return nil
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Ollama request preflight", fmt.Errorf("complete request requires %d input tokens; safe limit is %d", tokens, max(0, safe)))
+}
 
 // DefaultHTTPClient is the default HTTP client for Ollama requests.
 var DefaultHTTPClient HTTPDoer = &http.Client{Timeout: defaultOllamaRequestTimeout}
@@ -104,7 +145,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callDirect model=%s base_url=%s prompt_len=%d attachments=%d", agent.Model, baseURL, len(prompt), len(attachments))
 
-	opts := &options{Temperature: &agent.Temperature}
+	opts := ollamaRequestOptions(agent)
 
 	userMsg := chatMessage{Role: "user", Content: prompt}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
@@ -127,6 +168,9 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", 0, fmt.Errorf("marshaling ollama request: %w", err)
+	}
+	if err := ensureOllamaRequestFits(body, agent); err != nil {
+		return "", 0, err
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/api/chat"
@@ -170,7 +214,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	}
 	messages = append(messages, userMsg)
 
-	opts := &options{Temperature: &agent.Temperature}
+	opts := ollamaRequestOptions(agent)
 
 	reqBody := chatRequest{
 		Model:    agent.Model,
@@ -182,6 +226,9 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", 0, fmt.Errorf("marshaling ollama chat request: %w", err)
+	}
+	if err := ensureOllamaRequestFits(body, agent); err != nil {
+		return "", 0, err
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/api/chat"
@@ -211,7 +258,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callStreaming model=%s base_url=%s prompt_len=%d attachments=%d exec=%s", agent.Model, baseURL, len(prompt), len(attachments), execID)
 
-	opts := &options{Temperature: &agent.Temperature}
+	opts := ollamaRequestOptions(agent)
 
 	var messages []chatMessage
 	// Inject system prompt with project instructions for task execution
@@ -235,6 +282,9 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("marshaling ollama streaming request: %w", err)
+	}
+	if err := ensureOllamaRequestFits(body, agent); err != nil {
+		return "", "", 0, err
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/api/chat"

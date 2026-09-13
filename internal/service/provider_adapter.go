@@ -323,6 +323,63 @@ func nativeCompactionSessionKey(agent models.LLMConfig) string {
 	return providerCompatibilityKey(agent)
 }
 
+func providerTransport(req llmcontracts.AgentRequest) string {
+	if transport := strings.TrimSpace(req.Agent.GetTransport()); transport != "" {
+		return transport
+	}
+	switch req.Agent.Provider {
+	case models.ProviderOpenAI:
+		switch strings.ToLower(strings.TrimSpace(req.Agent.Model)) {
+		case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+			return "responses_websocket_http_fallback"
+		default:
+			return "responses_http"
+		}
+	case models.ProviderAnthropic:
+		return "anthropic_messages_http"
+	case models.ProviderOllama:
+		return "ollama_http"
+	case models.ProviderTest:
+		return "test"
+	default:
+		return "unknown"
+	}
+}
+
+func historyRetentionCounts(original, final []models.Execution) (retained, removed int) {
+	matched := make([]bool, len(final))
+	for _, source := range original {
+		for i, candidate := range final {
+			if matched[i] {
+				continue
+			}
+			same := source.ID != "" && source.ID == candidate.ID
+			if source.ID == "" && candidate.ID == "" {
+				same = source.PromptSent == candidate.PromptSent && source.Output == candidate.Output && source.ReasoningContent == candidate.ReasoningContent
+			}
+			if same {
+				matched[i] = true
+				retained++
+				break
+			}
+		}
+	}
+	return retained, max(0, len(original)-retained)
+}
+
+func logContextFailure(req llmcontracts.AgentRequest, err error) {
+	category := llmcontracts.ErrorCategoryOf(err)
+	if category == "" {
+		return
+	}
+	budget := calculateRequestBudget(req)
+	externalized := false
+	if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt != nil {
+		externalized = rt.HasDefinition(oversizedInputReaderTool)
+	}
+	applog.Infof("[agent-svc] context failure provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=failed externalized=%t history_retained=%d history_removed=0 retry_source_execution_id=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, providerTransport(req), budget.ContextWindow, budget.SafeInputLimit, budget.FixedTokens, budget.HistoryTokens+budget.NativeStateTokens, budget.PendingTokens, budget.AttachmentTokens, budget.ReservedOutputTokens, budget.SafetyMargin, externalized, len(req.ChatHistory), req.RetrySourceExecutionID, category)
+}
+
 func compactionLimitsForAgent(agent models.LLMConfig) compactionLimits {
 	window := agent.ContextWindow
 	if window <= 0 {
@@ -333,6 +390,8 @@ func compactionLimitsForAgent(agent models.LLMConfig) compactionLimits {
 			window = defaultAnthropicContextWindow
 		case models.ProviderOpenAICompatible:
 			window = defaultOpenAICompatibleContextWindow
+		case models.ProviderOllama:
+			window = llmollama.DefaultContextWindow
 		default:
 			window = defaultOpenAIContextWindow
 		}
@@ -577,6 +636,8 @@ func openAIContextWindow(model string) int {
 	case "gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5-codex-mini":
 		// Keep this in sync with pkg/openai_client.openAIModelContextWindow.
 		return 272000
+	case "gpt-5.3-codex-spark":
+		return 128000
 	case "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano":
 		return 1047576
 	case "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-5", "gpt-5-mini", "gpt-5-nano":
@@ -747,7 +808,14 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return adapter.Call(req)
 	}
 	uncompactedReq := req
+	originalHistory := append([]models.Execution(nil), req.ChatHistory...)
 	req = s.restoreCompactionCheckpoint(req)
+	compactionStrategy := "none"
+	if req.NativeCompactionStateJSON != "" {
+		compactionStrategy = "provider_native_checkpoint"
+	} else if len(req.ChatHistory) != len(originalHistory) {
+		compactionStrategy = "textual_checkpoint"
+	}
 	lastResortBaseReq := req
 	locallyCompactedBeforeProvider := false
 	budget := calculateRequestBudget(req)
@@ -773,6 +841,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	if triggered && providerSupportsNativeCompaction(req.Agent) && !req.DisableNativeCompaction && !req.Agent.DisableNativeCompaction {
 		req.ForceNativeCompaction = true
 		req.Agent.ForceNativeCompaction = true
+		compactionStrategy = "provider_native"
 	}
 	if triggered && shouldUseLocalSummaryBeforeProvider(req) {
 		if req.NativeCompactionStateJSON != "" {
@@ -790,6 +859,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req = compacted
 		req.ForceNativeCompaction = false
 		req.Agent.ForceNativeCompaction = false
+		compactionStrategy = "local_summary"
 		locallyCompactedBeforeProvider = true
 		applog.Infof("[agent-svc] proactive local context compaction provider=%s model=%s tokens=%d trigger=%d history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, len(originalReq.ChatHistory), len(req.ChatHistory))
 	}
@@ -798,6 +868,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	var cleanupArtifact func()
 	req, externalized, cleanupArtifact, prepErr = s.preparePendingInput(req)
 	if prepErr != nil {
+		logContextFailure(req, prepErr)
 		return llmcontracts.AgentResult{}, prepErr
 	}
 	defer cleanupArtifact()
@@ -805,14 +876,21 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	openAIHistoryOnlyCompaction := req.Agent.Provider == models.ProviderOpenAI && (req.ForceNativeCompaction || req.Agent.ForceNativeCompaction)
 	if !openAIHistoryOnlyCompaction {
 		if err := ensureRequestFits(req, "provider request"); err != nil {
+			logContextFailure(req, err)
 			return llmcontracts.AgentResult{}, err
 		}
 	} else if pendingInputInfeasible(postBudget) {
-		return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "native compaction continuation", fmt.Errorf("pending request remains infeasible after preprocessing"))
+		err := llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "native compaction continuation", fmt.Errorf("pending request remains infeasible after preprocessing"))
+		logContextFailure(req, err)
+		return llmcontracts.AgentResult{}, err
 	}
-	applog.Infof("[agent-svc] context decision provider=%s model=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t", req.Agent.Provider, req.Agent.Model, postBudget.ContextWindow, postBudget.SafeInputLimit, postBudget.FixedTokens, postBudget.HistoryTokens+postBudget.NativeStateTokens, postBudget.PendingTokens, postBudget.AttachmentTokens, postBudget.ReservedOutputTokens, postBudget.SafetyMargin, map[bool]string{true: "native", false: "none"}[req.ForceNativeCompaction || req.Agent.ForceNativeCompaction], externalized)
+	historyRetained, historyRemoved := historyRetentionCounts(originalHistory, req.ChatHistory)
+	applog.Infof("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=none", req.Agent.Provider, req.Agent.Model, providerTransport(req), postBudget.ContextWindow, postBudget.SafeInputLimit, postBudget.FixedTokens, postBudget.HistoryTokens+postBudget.NativeStateTokens, postBudget.PendingTokens, postBudget.AttachmentTokens, postBudget.ReservedOutputTokens, postBudget.SafetyMargin, compactionStrategy, externalized, historyRetained, historyRemoved, req.RetrySourceExecutionID)
 	res, err := adapter.Call(req)
 	err = categorizeProviderError(err)
+	if err != nil {
+		logContextFailure(req, err)
+	}
 	if err == nil {
 		s.persistNativeCompactionCheckpoint(req, res)
 		return res, nil

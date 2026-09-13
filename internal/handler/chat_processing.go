@@ -56,6 +56,7 @@ var (
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
 	ExecID                      string
+	RetrySourceExecutionID      string
 	TaskID                      string
 	Message                     string
 	Agent                       models.LLMConfig
@@ -614,6 +615,7 @@ modelLoop:
 			break
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		requestCtx = llmcontracts.WithRetrySourceExecutionID(requestCtx, params.RetrySourceExecutionID)
 		requestCtx = service.WithDirectUsageProject(requestCtx, params.ProjectID)
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
@@ -1731,20 +1733,21 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:            exec.ID,
-		TaskID:            taskID,
-		Message:           failed.PromptSent,
-		Agent:             *agent,
-		AgentDefinition:   agentDef,
-		ChatHistory:       priorHistory,
-		ProjectID:         task.ProjectID,
-		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:           workDir,
-		IsTaskFollowup:    true,
-		InputOrigin:       models.TaskOriginWeb,
-		Task:              task,
-		AutomationContext: automationContext,
-		updateWorkDone:    updateWorkDone,
+		ExecID:                 exec.ID,
+		RetrySourceExecutionID: failed.ID,
+		TaskID:                 taskID,
+		Message:                failed.PromptSent,
+		Agent:                  *agent,
+		AgentDefinition:        agentDef,
+		ChatHistory:            priorHistory,
+		ProjectID:              task.ProjectID,
+		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                workDir,
+		IsTaskFollowup:         true,
+		InputOrigin:            models.TaskOriginWeb,
+		Task:                   task,
+		AutomationContext:      automationContext,
+		updateWorkDone:         updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil
@@ -1884,25 +1887,26 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:            exec.ID,
-		TaskID:            exec.TaskID,
-		Message:           input.Content,
-		Agent:             *agent,
-		AgentDefinition:   agentDef,
-		ChatHistory:       priorHistory,
-		ProjectID:         task.ProjectID,
-		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:           workDir,
-		ImageAttachments:  imageAttachments,
-		IsTaskFollowup:    true,
-		Surface:           surfaceForThreadInput(input),
-		ChannelReply:      channelReplyFromThreadInput(input),
-		RuntimeTools:      h.xRuntimeToolsForThreadInput(task.ID, input),
-		InputOrigin:       string(input.Source),
-		InputOriginAgent:  input.OriginAgent,
-		Task:              task,
-		AutomationContext: automationContext,
-		updateWorkDone:    updateWorkDone,
+		ExecID:                 exec.ID,
+		RetrySourceExecutionID: input.RetrySourceExecutionID,
+		TaskID:                 exec.TaskID,
+		Message:                input.Content,
+		Agent:                  *agent,
+		AgentDefinition:        agentDef,
+		ChatHistory:            priorHistory,
+		ProjectID:              task.ProjectID,
+		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                workDir,
+		ImageAttachments:       imageAttachments,
+		IsTaskFollowup:         true,
+		Surface:                surfaceForThreadInput(input),
+		ChannelReply:           channelReplyFromThreadInput(input),
+		RuntimeTools:           h.xRuntimeToolsForThreadInput(task.ID, input),
+		InputOrigin:            string(input.Source),
+		InputOriginAgent:       input.OriginAgent,
+		Task:                   task,
+		AutomationContext:      automationContext,
+		updateWorkDone:         updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil

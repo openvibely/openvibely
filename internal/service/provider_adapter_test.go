@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	"github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -1628,5 +1630,40 @@ func TestNativeCheckpointRequiresCompleteCompatibilityIdentity(t *testing.T) {
 	got := svc.restoreCompactionCheckpoint(req)
 	if got.NativeCompactionStateJSON != "" || len(got.ChatHistory) != 1 {
 		t.Fatalf("incompatible opaque state restored: %#v", got)
+	}
+}
+
+func TestProviderContextWindowsIncludeSparkAndConservativeOllamaDefault(t *testing.T) {
+	if got := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex-spark"}).ContextWindow; got != 128000 {
+		t.Fatalf("spark context window = %d, want 128000", got)
+	}
+	if got := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOllama, Model: "arbitrary-local"}).ContextWindow; got != llmollama.DefaultContextWindow {
+		t.Fatalf("default Ollama context window = %d, want %d", got, llmollama.DefaultContextWindow)
+	}
+}
+
+func TestContextDecisionObservabilityIncludesRequiredFields(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorTransportFailure, "fixture", errors.New("private failure detail"))
+	})
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Followup: true,
+		RetrySourceExecutionID: "failed-source", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "compatible", ContextWindow: 128000},
+		ChatHistory: []models.Execution{{ID: "older", PromptSent: "old", Output: "done"}},
+	}
+	_, _ = (&LLMService{}).callProviderWithCompaction(adapter, req)
+	got := logs.String()
+	for _, field := range []string{"transport=chat_completions", "history_retained=1", "history_removed=0", "retry_source_execution_id=failed-source", "failure_category=transport_failure"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("context observability missing %q: %s", field, got)
+		}
+	}
+	if strings.Contains(got, "private failure detail") {
+		t.Fatalf("context decision logs included raw provider error: %s", got)
 	}
 }

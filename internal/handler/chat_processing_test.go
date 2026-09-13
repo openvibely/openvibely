@@ -8234,6 +8234,7 @@ func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) 
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *queued))
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	req := mock.LastAgentRequest()
+	require.Equal(t, failed.ID, req.RetrySourceExecutionID)
 	for _, history := range req.ChatHistory {
 		require.NotEqual(t, failed.ID, history.ID)
 	}
