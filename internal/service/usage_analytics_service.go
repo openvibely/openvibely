@@ -562,12 +562,14 @@ func (index *accountUsageSnapshotIndex) upsert(snapshot models.AccountUsageSnaps
 	snapshotProvider := strings.TrimSpace(snapshot.Provider)
 	snapshotConfigID := strings.TrimSpace(snapshot.AgentConfigID)
 	snapshotAccountID := strings.TrimSpace(snapshot.AccountID)
+	snapshotConnectionID := strings.TrimSpace(snapshot.OAuthConnectionID)
 	for _, existing := range index.snapshots {
 		existingProvider := strings.TrimSpace(existing.Provider)
 		existingConfigID := strings.TrimSpace(existing.AgentConfigID)
 		existingAccountID := strings.TrimSpace(existing.AccountID)
-		sameConfig := snapshotConfigID != "" && existingConfigID == snapshotConfigID
-		sameIdentity := existingConfigID == snapshotConfigID && existingAccountID == snapshotAccountID
+		existingConnectionID := strings.TrimSpace(existing.OAuthConnectionID)
+		sameConfig := snapshotConfigID != "" && existingConfigID == snapshotConfigID && existingConnectionID == snapshotConnectionID
+		sameIdentity := existingConfigID == snapshotConfigID && existingAccountID == snapshotAccountID && existingConnectionID == snapshotConnectionID
 		if existingProvider == snapshotProvider && (sameConfig || sameIdentity) {
 			continue
 		}
@@ -1171,9 +1173,11 @@ func sanitizeSnapshotAccountDisplay(snapshot models.AccountUsageSnapshot, config
 	if !ok {
 		return snapshot
 	}
-	if strings.TrimSpace(cfg.OAuthAccountID) == "" && strings.TrimSpace(snapshot.AccountID) == strings.TrimSpace(snapshot.AgentConfigID) {
+	originConfigID := strings.TrimSpace(snapshot.AgentConfigID)
+	if strings.TrimSpace(cfg.OAuthAccountID) == "" && strings.TrimSpace(snapshot.AccountID) == originConfigID {
 		snapshot.AccountID = ""
 	}
+	snapshot.AgentConfigID = cfg.ID
 	return snapshot
 }
 

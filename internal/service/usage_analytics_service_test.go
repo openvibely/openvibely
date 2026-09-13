@@ -798,6 +798,135 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 	}
 }
 
+func TestUsageAnalyticsService_RequestSnapshotUpsertPreservesMovedConnectionHistory(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			moved := &models.LLMConfig{
+				Name:              "A Moved Model",
+				Provider:          provider,
+				Model:             "model-one",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "moved-access",
+				OAuthRefreshToken: "moved-refresh",
+			}
+			if err := configRepo.Create(ctx, moved); err != nil {
+				t.Fatalf("create moved config: %v", err)
+			}
+			connectionA := moved.OAuthConnectionID
+
+			sibling := &models.LLMConfig{
+				Name:       "B Connection A Sibling",
+				Provider:   provider,
+				Model:      "model-two",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			if err := configRepo.Create(ctx, sibling); err != nil {
+				t.Fatalf("create sibling config: %v", err)
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, sibling.ID, connectionA); err != nil {
+				t.Fatalf("link sibling to connection A: %v", err)
+			}
+
+			target := &models.LLMConfig{
+				Name:              "C Connection B",
+				Provider:          provider,
+				Model:             "model-three",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "target-access",
+				OAuthRefreshToken: "target-refresh",
+			}
+			if err := configRepo.Create(ctx, target); err != nil {
+				t.Fatalf("create target config: %v", err)
+			}
+			connectionB := target.OAuthConnectionID
+			if connectionA == connectionB {
+				t.Fatal("move fixture unexpectedly reused connection A")
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, moved.ID, connectionB); err != nil {
+				t.Fatalf("move config to connection B: %v", err)
+			}
+
+			movedCurrent, err := configRepo.GetByID(ctx, moved.ID)
+			if err != nil || movedCurrent == nil {
+				t.Fatalf("load moved config: %v", err)
+			}
+			siblingCurrent, err := configRepo.GetByID(ctx, sibling.ID)
+			if err != nil || siblingCurrent == nil {
+				t.Fatalf("load sibling config: %v", err)
+			}
+			configs := []models.LLMConfig{*movedCurrent, *siblingCurrent}
+			configsByID := map[string]models.LLMConfig{
+				movedCurrent.ID:   *movedCurrent,
+				siblingCurrent.ID: *siblingCurrent,
+			}
+
+			historicalPct := 41.0
+			snapshotState := &accountUsageSnapshotState{
+				index: newAccountUsageSnapshotIndex([]models.AccountUsageSnapshot{{
+					Provider:             string(provider),
+					AgentConfigID:        movedCurrent.ID,
+					OAuthConnectionID:    connectionA,
+					OAuthConfigRevision:  movedCurrent.OAuthConfigRevision,
+					SecondaryLabel:       "connection A weekly limit",
+					SecondaryUsedPercent: &historicalPct,
+					FetchedAt:            time.Now().UTC().Add(-time.Minute),
+				}}),
+				loaded: true,
+			}
+
+			calls := 0
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				calls++
+				if cfg.ID != movedCurrent.ID {
+					t.Fatalf("unexpected refresh for connection A sibling: %+v", cfg)
+				}
+				refreshedPct := 88.0
+				return &models.AccountUsageSnapshot{
+					Provider:             string(provider),
+					AgentConfigID:        cfg.ID,
+					SecondaryLabel:       "connection B weekly limit",
+					SecondaryUsedPercent: &refreshedPct,
+				}, nil
+			})
+
+			if _, errs := svc.refreshAccountSnapshotsWithState(ctx, configs, string(provider), false, snapshotState); len(errs) != 0 {
+				t.Fatalf("refresh errors = %v", errs)
+			}
+			if calls != 1 {
+				t.Fatalf("refresh calls = %d, want one moved-model refresh", calls)
+			}
+
+			view := &models.AnalyticsUsageViewModel{
+				AccountLimits: svc.oauthAccountPlaceholders(configs, string(provider)),
+			}
+			if err := svc.populateAnalyticsUsageViewWithSnapshots(ctx, repository.UsageFilter{Provider: string(provider)}, view, configsByID, nil, snapshotState); err != nil {
+				t.Fatalf("populateAnalyticsUsageViewWithSnapshots: %v", err)
+			}
+			var sawHistorical, sawRefreshed bool
+			for _, account := range view.AccountLimits {
+				if account.SecondaryLimit == nil || account.SecondaryLimit.UsedPercent == nil {
+					continue
+				}
+				switch *account.SecondaryLimit.UsedPercent {
+				case historicalPct:
+					sawHistorical = true
+				case 88:
+					sawRefreshed = true
+				}
+			}
+			if !sawHistorical || !sawRefreshed {
+				t.Fatalf("moved refresh did not preserve both connection histories: %+v", view.AccountLimits)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
