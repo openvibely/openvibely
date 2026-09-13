@@ -367,6 +367,7 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		}
 		browser.wheel("#chat-messages", -650)
 		browser.waitFor("native upward Chat reading intent during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
+		browser.waitFor("stable native Chat scroll position during terminal render", `(function(){var top=document.getElementById('chat-messages').scrollTop;if(window.__terminalChatLastTop===top)window.__terminalChatStable=(window.__terminalChatStable||0)+1;else{window.__terminalChatLastTop=top;window.__terminalChatStable=0;}return String(window.__terminalChatStable>=3);})()`, "true")
 		if got := browser.evaluate(`(function(){window.__terminalReaderTop=document.getElementById('chat-messages').scrollTop;return 'saved';})()`); got != "saved" {
 			t.Fatalf("save live Chat older-reader position: %s", got)
 		}
