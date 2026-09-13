@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -97,19 +96,8 @@ func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) {
 	if cfg == nil {
 		return
 	}
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
-		milliseconds, err := strconv.Atoi(value)
-		if err != nil {
-			log.Fatal(err)
-		}
-		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
-	}
-	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
-		milliseconds, err := strconv.Atoi(value)
-		if err != nil {
-			log.Fatal(err)
-		}
-		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+	if err := update.ApplyIntegrationTimeoutOverrides(&cfg.WaitTimeout, &cfg.ValidationTimeout); err != nil {
+		log.Fatal(err)
 	}
 }
 

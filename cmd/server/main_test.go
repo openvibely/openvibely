@@ -6,7 +6,27 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/update"
 )
+
+func TestApplyUpdateIntegrationTimeouts(t *testing.T) {
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "2500")
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "7500")
+	cfg := update.ExecutableUpdateHelperConfig{
+		WaitTimeout:       11 * time.Second,
+		ValidationTimeout: 22 * time.Second,
+	}
+
+	applyUpdateIntegrationTimeouts(&cfg)
+
+	if cfg.WaitTimeout != 2500*time.Millisecond {
+		t.Fatalf("wait timeout = %s, want %s", cfg.WaitTimeout, 2500*time.Millisecond)
+	}
+	if cfg.ValidationTimeout != 7500*time.Millisecond {
+		t.Fatalf("validation timeout = %s, want %s", cfg.ValidationTimeout, 7500*time.Millisecond)
+	}
+}
 
 func TestWaitForShutdownAcceptsBinaryUpdateHandoff(t *testing.T) {
 	requested := make(chan struct{})
