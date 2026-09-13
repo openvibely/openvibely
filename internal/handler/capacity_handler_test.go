@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -502,7 +503,7 @@ func TestHandler_ProjectCapacityCollectionAndDetailPreserveJSONBytes(t *testing.
 			detailRec := httptest.NewRecorder()
 			e.ServeHTTP(detailRec, detailReq)
 			require.Equal(t, http.StatusOK, detailRec.Code)
-			assert.Equal(t, string(collectionObject), strings.TrimSpace(detailRec.Body.String()), "collection and detail JSON object bytes must match")
+			assert.Equal(t, []byte(collectionObject), bytes.TrimSuffix(detailRec.Body.Bytes(), []byte("\n")), "collection and detail JSON object bytes must match")
 
 			var response ProjectCapacityResponse
 			require.NoError(t, json.Unmarshal(collectionObject, &response))
