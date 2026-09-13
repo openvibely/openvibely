@@ -478,6 +478,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					const backgroundRefreshPath = '/tasks?project_id=' + encodeURIComponent(projectID) + '&refresh_source=sse';
 					let refreshTimeout = null;
 					let backgroundRefreshXHR = null;
+					let foregroundBoardRequests = 0;
 					// Deferred-refresh flag: when a refresh would interrupt the user
 					// (modal, menu, action, drag, or hidden tab) we retain one
 					// invalidation and retry after the blocker clears. The same gate
@@ -488,6 +489,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						function isRefreshBlocked() {
 							if (window.isDragging) return 'drag';
 							if (window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()) return 'task move';
+							if (foregroundBoardRequests > 0) return 'board request';
 							if (document.hidden) return 'hidden';						if (window._taskCardActionRequest) return 'task action';
 						const board = document.getElementById('kanban-board');
 						if (board && board.getAttribute('data-open-kanban-menu-key')) return 'task menu';
@@ -501,12 +503,41 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 						return !!requestConfig && requestConfig.path === backgroundRefreshPath;
 					}
 
+					function isBoardRequestEvent(event) {
+						const target = event && event.detail && event.detail.target;
+						return !!target && target.id === 'kanban-board';
+					}
+
 					function handleBackgroundRefreshBeforeRequest(event) {
-						if (isBackgroundRefreshEvent(event)) backgroundRefreshXHR = event.detail.xhr;
+						if (isBackgroundRefreshEvent(event)) {
+							backgroundRefreshXHR = event.detail.xhr;
+							return;
+						}
+						if (!isBoardRequestEvent(event)) return;
+						foregroundBoardRequests++;
+						let interruptedRefresh = false;
+						if (refreshTimeout) {
+							clearTimeout(refreshTimeout);
+							refreshTimeout = null;
+							interruptedRefresh = true;
+						}
+						if (backgroundRefreshXHR) {
+							const xhr = backgroundRefreshXHR;
+							backgroundRefreshXHR = null;
+							xhr.abort();
+							interruptedRefresh = true;
+						}
+						if (interruptedRefresh) pendingRefresh = true;
 					}
 
 					function handleBackgroundRefreshAfterRequest(event) {
-						if (isBackgroundRefreshEvent(event) && event.detail.xhr === backgroundRefreshXHR) backgroundRefreshXHR = null;
+						if (isBackgroundRefreshEvent(event)) {
+							if (event.detail.xhr === backgroundRefreshXHR) backgroundRefreshXHR = null;
+							return;
+						}
+						if (!isBoardRequestEvent(event)) return;
+						foregroundBoardRequests = Math.max(0, foregroundBoardRequests - 1);
+						flushPendingRefresh();
 					}
 
 						function handleKanbanMoveStarted() {
