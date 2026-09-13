@@ -2081,6 +2081,9 @@ const docTemplate = `{
                 },
                 "model": {
                     "type": "string"
+                },
+                "model_config_id": {
+                    "type": "string"
                 }
             }
         },
@@ -2286,6 +2289,9 @@ const docTemplate = `{
                 "created_in_period": {
                     "type": "boolean"
                 },
+                "cycle_eligible": {
+                    "type": "boolean"
+                },
                 "cycle_time_ms": {
                     "type": "integer"
                 },
@@ -2304,6 +2310,21 @@ const docTemplate = `{
                 "follow_up_count": {
                     "type": "integer"
                 },
+                "funnel_goal_achieved": {
+                    "type": "boolean"
+                },
+                "funnel_goal_eligible": {
+                    "type": "boolean"
+                },
+                "funnel_merge_eligible": {
+                    "type": "boolean"
+                },
+                "funnel_merged": {
+                    "type": "boolean"
+                },
+                "funnel_technical_completed": {
+                    "type": "boolean"
+                },
                 "goal_achieved_in_period": {
                     "type": "boolean"
                 },
@@ -2312,6 +2333,9 @@ const docTemplate = `{
                 },
                 "goal_result": {
                     "type": "string"
+                },
+                "known_cost_eligible": {
+                    "type": "boolean"
                 },
                 "known_cost_usd": {
                     "type": "number"
@@ -2325,6 +2349,12 @@ const docTemplate = `{
                 "model": {
                     "type": "string"
                 },
+                "model_config_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "period_cancelled_count": {
                     "type": "integer"
                 },
@@ -2334,6 +2364,9 @@ const docTemplate = `{
                 "period_failed_count": {
                     "type": "integer"
                 },
+                "started_in_period": {
+                    "type": "boolean"
+                },
                 "task_id": {
                     "type": "string"
                 },
@@ -2342,6 +2375,12 @@ const docTemplate = `{
                 },
                 "technical_result": {
                     "type": "string"
+                },
+                "terminal_period_statuses": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -2386,6 +2425,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "model": {
+                    "type": "string"
+                },
+                "model_config_id": {
                     "type": "string"
                 },
                 "tasks_evaluated": {

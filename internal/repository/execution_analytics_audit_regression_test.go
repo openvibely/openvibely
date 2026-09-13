@@ -186,6 +186,232 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 	}
 }
 
+func TestAnalyticsEvidenceMatchesFunnelCycleGoalCostAndModelCohorts(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Evidence cohorts", RepoPath: "/evidence-cohorts"}
+	if err := NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	configA := &models.LLMConfig{Name: "Model A", Provider: models.ProviderTest, Model: "model-a"}
+	configB := &models.LLMConfig{Name: "Model B", Provider: models.ProviderTest, Model: "model-b"}
+	configs := NewLLMConfigRepo(db)
+	if err := configs.Create(ctx, configA); err != nil {
+		t.Fatal(err)
+	}
+	if err := configs.Create(ctx, configB); err != nil {
+		t.Fatal(err)
+	}
+	agent := &models.Agent{Name: "Evidence Agent", SystemPrompt: "work", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := NewAgentRepo(db).Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	tasks := NewTaskRepo(db, nil)
+	executions := NewExecutionRepo(db)
+	goals := NewTaskGoalRepo(db)
+	usage := NewUsageRepo(db)
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	createdOnly := &models.Task{ProjectID: project.ID, Title: "Created but unstarted", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "work"}
+	if err := tasks.Create(ctx, createdOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at='2026-01-05 09:00:00' WHERE id=?`, createdOnly.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	retried := &models.Task{ProjectID: project.ID, Title: "Cross-period multi-model retry", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "work", AgentDefinitionID: &agent.ID}
+	if err := tasks.Create(ctx, retried); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at='2025-12-01 09:00:00' WHERE id=?`, retried.ID); err != nil {
+		t.Fatal(err)
+	}
+	oldExec := &models.Execution{TaskID: retried.ID, AgentConfigID: configA.ID, Status: models.ExecRunning, PromptSent: "first"}
+	if err := executions.Create(ctx, oldExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := executions.Complete(ctx, oldExec.ID, models.ExecFailed, "", "failed", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2025-12-20 10:00:00',completed_at='2025-12-20 10:01:00' WHERE id=?`, oldExec.ID); err != nil {
+		t.Fatal(err)
+	}
+	periodFailed := &models.Execution{TaskID: retried.ID, AgentConfigID: configA.ID, Status: models.ExecRunning, PromptSent: "period attempt", IsFollowup: true}
+	if err := executions.Create(ctx, periodFailed); err != nil {
+		t.Fatal(err)
+	}
+	if err := executions.Complete(ctx, periodFailed.ID, models.ExecFailed, "", "failed", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2026-01-09 10:00:00',completed_at='2026-01-09 10:01:00' WHERE id=?`, periodFailed.ID); err != nil {
+		t.Fatal(err)
+	}
+	currentExec := &models.Execution{TaskID: retried.ID, AgentConfigID: configB.ID, Status: models.ExecRunning, PromptSent: "retry", IsFollowup: true}
+	if err := executions.Create(ctx, currentExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := executions.Complete(ctx, currentExec.ID, models.ExecCompleted, "", "", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2026-01-10 10:00:00',completed_at='2026-01-10 10:00:00' WHERE id=?`, currentExec.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	oldGoalTask := &models.Task{ProjectID: project.ID, Title: "Old achieved goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "work"}
+	if err := tasks.Create(ctx, oldGoalTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at='2025-12-01 09:00:00' WHERE id=?`, oldGoalTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	oldGoalExec := &models.Execution{TaskID: oldGoalTask.ID, AgentConfigID: configA.ID, Status: models.ExecRunning, PromptSent: "work"}
+	if err := executions.Create(ctx, oldGoalExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := executions.Complete(ctx, oldGoalExec.ID, models.ExecCompleted, "", "", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2026-01-11 10:00:00',completed_at='2026-01-11 10:01:00' WHERE id=?`, oldGoalExec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := goals.CreateOrReplace(ctx, &models.TaskGoal{TaskID: oldGoalTask.ID, GoalID: "old", Objective: "old", Status: models.TaskGoalStatusAchieved}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE task_goals SET achieved_at='2025-12-15 10:00:00',updated_at='2025-12-15 10:00:00' WHERE task_id=?`, oldGoalTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	oldCost := 99.0
+	if err := usage.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "test", ProjectID: project.ID, TaskID: oldGoalTask.ID, ExecutionID: oldGoalExec.ID, AgentConfigID: configA.ID, Model: "model-a", Operation: "task", Status: "completed", CostUSD: &oldCost, OccurredAt: time.Date(2026, 1, 11, 10, 0, 0, 0, time.UTC), RawUsageJSON: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+
+	currentGoalTask := &models.Task{ProjectID: project.ID, Title: "Current achieved goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "work"}
+	if err := tasks.Create(ctx, currentGoalTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at='2026-01-06 09:00:00' WHERE id=?`, currentGoalTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	currentGoalExec := &models.Execution{TaskID: currentGoalTask.ID, AgentConfigID: configA.ID, Status: models.ExecRunning, PromptSent: "work"}
+	if err := executions.Create(ctx, currentGoalExec); err != nil {
+		t.Fatal(err)
+	}
+	if err := executions.Complete(ctx, currentGoalExec.ID, models.ExecCompleted, "", "", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2026-01-12 10:00:00',completed_at='2026-01-12 10:01:00' WHERE id=?`, currentGoalExec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := goals.CreateOrReplace(ctx, &models.TaskGoal{TaskID: currentGoalTask.ID, GoalID: "current", Objective: "current", Status: models.TaskGoalStatusAchieved}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE task_goals SET achieved_at='2026-01-12 10:01:00',updated_at='2026-01-12 10:01:00' WHERE task_id=?`, currentGoalTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	currentCost := 2.0
+	if err := usage.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "test", ProjectID: project.ID, TaskID: currentGoalTask.ID, ExecutionID: currentGoalExec.ID, AgentConfigID: configA.ID, Model: "model-a", Operation: "task", Status: "completed", CostUSD: &currentCost, OccurredAt: time.Date(2026, 1, 12, 10, 0, 0, 0, time.UTC), RawUsageJSON: "{}"}); err != nil {
+		t.Fatal(err)
+	}
+
+	goalOnlyTask := &models.Task{ProjectID: project.ID, Title: "Current goal without current execution", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "work"}
+	if err := tasks.Create(ctx, goalOnlyTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at='2025-12-02 09:00:00' WHERE id=?`, goalOnlyTask.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := goals.CreateOrReplace(ctx, &models.TaskGoal{TaskID: goalOnlyTask.ID, GoalID: "goal-only", Objective: "current outcome", Status: models.TaskGoalStatusAchieved}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE task_goals SET achieved_at='2026-01-13 10:01:00',updated_at='2026-01-13 10:01:00' WHERE task_id=?`, goalOnlyTask.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dashboard.Current.KnownCostPerAchievedGoal == nil || dashboard.Current.KnownCostPerAchievedGoal.Value != 2 || dashboard.Current.KnownCostPerAchievedGoal.Covered != 1 || dashboard.Current.KnownCostPerAchievedGoal.Eligible != 1 {
+		t.Fatalf("achieved-goal cost includes out-of-period or uncovered goal: %+v", dashboard.Current.KnownCostPerAchievedGoal)
+	}
+	if dashboard.Current.GoalAchievement.Numerator != 2 || dashboard.Current.GoalAchievement.Denominator != 2 {
+		t.Fatalf("current goal-event cohort = %+v, want both in-period achievements", dashboard.Current.GoalAchievement)
+	}
+	stages := make(map[string]models.OutcomeFunnelStage, len(dashboard.Funnel))
+	for _, stage := range dashboard.Funnel {
+		stages[stage.Key] = stage
+	}
+	if stages["created"].Count != 2 || stages["started"].Count != 1 || stages["technical_completed"].Count != 1 || stages["goal_achieved"].Count != 1 || stages["goal_achieved"].Denominator != 1 {
+		t.Fatalf("funnel cohorts do not match created-period evidence: %+v", dashboard.Funnel)
+	}
+	rows := make(map[string]models.EvidenceTaskRow, len(dashboard.RecentOutcomes))
+	for _, row := range dashboard.RecentOutcomes {
+		rows[row.TaskID] = row
+	}
+	createdEvidence, ok := rows[createdOnly.ID]
+	if !ok || !createdEvidence.CreatedInPeriod || createdEvidence.StartedInPeriod || createdEvidence.FunnelTechnicalCompleted {
+		t.Fatalf("created-but-unstarted funnel evidence missing or ineligible: %+v", createdEvidence)
+	}
+	retryEvidence := rows[retried.ID]
+	wantCycle := (time.Date(2026, 1, 10, 10, 0, 0, 0, time.UTC).Sub(time.Date(2025, 12, 20, 10, 0, 0, 0, time.UTC))).Milliseconds()
+	if !retryEvidence.CycleEligible || retryEvidence.CycleTimeMs != wantCycle {
+		t.Fatalf("cross-period cycle = eligible %v duration %d, want %d", retryEvidence.CycleEligible, retryEvidence.CycleTimeMs, wantCycle)
+	}
+	foundModelA, foundModelB := false, false
+	for _, modelCategory := range dashboard.ModelCategories {
+		if modelCategory.ModelConfigID == configA.ID {
+			foundModelA = true
+		}
+		if modelCategory.ModelConfigID == configB.ID {
+			foundModelB = true
+		}
+	}
+	if !foundModelA || !foundModelB {
+		t.Fatalf("model/category aggregates do not expose stable execution attribution: %+v", dashboard.ModelCategories)
+	}
+	if !analyticsContainsString(retryEvidence.ModelConfigIDs, configA.ID) || !analyticsContainsString(retryEvidence.ModelConfigIDs, configB.ID) {
+		t.Fatalf("multi-model retry evidence lost execution attribution: %+v", retryEvidence.ModelConfigIDs)
+	}
+	if !analyticsContainsString(retryEvidence.TerminalPeriodStatuses, "2026-01-09|failed") || !analyticsContainsString(retryEvidence.TerminalPeriodStatuses, "2026-01-10|completed") {
+		t.Fatalf("multi-period terminal evidence lost grouped status attribution: %+v", retryEvidence.TerminalPeriodStatuses)
+	}
+	agentDashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: from, DateTo: to, Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agentDashboard.AgentDetail == nil || len(agentDashboard.AgentDetail.ModelMix) != 2 {
+		t.Fatalf("selected Agent model mix missing retry models: %+v", agentDashboard.AgentDetail)
+	}
+	foundAgentModelA, foundAgentModelB := false, false
+	for _, modelMix := range agentDashboard.AgentDetail.ModelMix {
+		foundAgentModelA = foundAgentModelA || modelMix.ModelConfigID == configA.ID
+		foundAgentModelB = foundAgentModelB || modelMix.ModelConfigID == configB.ID
+	}
+	if !foundAgentModelA || !foundAgentModelB {
+		t.Fatalf("selected Agent model mix lacks stable configuration IDs: %+v", agentDashboard.AgentDetail.ModelMix)
+	}
+	if rows[oldGoalTask.ID].GoalAchievedInPeriod || rows[oldGoalTask.ID].KnownCostEligible {
+		t.Fatalf("old goal incorrectly supports current achieved-cost KPI: %+v", rows[oldGoalTask.ID])
+	}
+	if !rows[currentGoalTask.ID].GoalAchievedInPeriod || !rows[currentGoalTask.ID].KnownCostEligible || !rows[currentGoalTask.ID].StartedInPeriod || !rows[currentGoalTask.ID].FunnelTechnicalCompleted || !rows[currentGoalTask.ID].FunnelGoalEligible || !rows[currentGoalTask.ID].FunnelGoalAchieved {
+		t.Fatalf("current achieved goal missing cost or funnel evidence eligibility: %+v", rows[currentGoalTask.ID])
+	}
+	if !rows[goalOnlyTask.ID].GoalAchievementEligible || !rows[goalOnlyTask.ID].GoalAchievedInPeriod || rows[goalOnlyTask.ID].KnownCostEligible || rows[goalOnlyTask.ID].StartedInPeriod {
+		t.Fatalf("goal-event-only evidence does not match goal versus cost cohorts: %+v", rows[goalOnlyTask.ID])
+	}
+}
+
+func analyticsContainsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAnalyticsDashboardFailedCostDisclosesCoverageOrUnavailable(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
