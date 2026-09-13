@@ -28,8 +28,15 @@ func TestApplyIntegrationTimeoutOverrides(t *testing.T) {
 			wantValidation:  7500 * time.Millisecond,
 		},
 		{
-			name:           "unset overrides preserve defaults",
-			wantWait:       11 * time.Second,
+			name:            "wait override unset",
+			validationValue: "7500",
+			wantWait:        11 * time.Second,
+			wantValidation:  7500 * time.Millisecond,
+		},
+		{
+			name:           "validation override unset",
+			waitValue:      "2500",
+			wantWait:       2500 * time.Millisecond,
 			wantValidation: 22 * time.Second,
 		},
 		{
