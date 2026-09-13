@@ -142,9 +142,13 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 	if existingCompletionsHistory != nil {
 		for _, msg := range existingCompletionsHistory {
+			content := msg.Content
+			if msg.Role == "tool" {
+				content = truncateToolOutputForModelInput(content, opts.ToolOutputTokenLimit)
+			}
 			messages = append(messages, completionsMessage{
 				Role:             msg.Role,
-				Content:          msg.Content,
+				Content:          content,
 				ReasoningContent: msg.ReasoningContent,
 				ToolCalls:        append([]CompletionsToolCall(nil), msg.ToolCalls...),
 				ToolCallID:       msg.ToolCallID,
@@ -152,9 +156,13 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 	} else {
 		for _, msg := range c.History {
+			content := msg.Content
+			if msg.Role == "tool" {
+				content = truncateToolOutputForModelInput(content, opts.ToolOutputTokenLimit)
+			}
 			messages = append(messages, completionsMessage{
 				Role:    msg.Role,
-				Content: msg.Content,
+				Content: content,
 			})
 		}
 	}

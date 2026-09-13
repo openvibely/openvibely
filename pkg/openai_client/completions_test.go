@@ -278,6 +278,42 @@ func TestSendCompletionsPreservesReasoningAcrossRequests(t *testing.T) {
 	}
 }
 
+func TestSendCompletionsBoundsDurableToolOutputWhenReplayingLaterTurn(t *testing.T) {
+	full := strings.Repeat("!", 5000)
+	var replayed string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		for _, raw := range body["messages"].([]any) {
+			message := raw.(map[string]any)
+			if message["role"] == "tool" && message["tool_call_id"] == "call_old" {
+				replayed, _ = message["content"].(string)
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
+	call := CompletionsToolCall{ID: "call_old", Type: "function"}
+	call.Function.Name = "lookup"
+	call.Function.Arguments = "{}"
+	client.SetCompletionsHistory([]CompletionsHistoryMessage{
+		{Role: "assistant", ToolCalls: []CompletionsToolCall{call}},
+		{Role: "tool", Content: full, ToolCallID: "call_old"},
+	})
+	_, err := client.SendCompletions(context.Background(), "next", &CompletionsOptions{DisableTools: true, ToolOutputTokenLimit: 512})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(replayed)) > 512 || !strings.Contains(replayed, "truncated") {
+		t.Fatalf("durable replay was not bounded for model input: runes=%d", len([]rune(replayed)))
+	}
+}
+
 func TestSendCompletionsBoundsDenseToolOutputForModelButPreservesTranscript(t *testing.T) {
 	requests := 0
 	var modelToolResult string

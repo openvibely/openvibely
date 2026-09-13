@@ -1299,9 +1299,9 @@ func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDe
 	for estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
 		objectiveIndex := compactionObjectiveIndex(trimmed)
 		recentIndex := compactionRecentContextIndex(trimmed)
-		trimIndex := nextCompactionTrimIndex(trimmed, objectiveIndex, recentIndex)
-		if trimIndex >= 0 {
-			trimmed = append(trimmed[:trimIndex], trimmed[trimIndex+1:]...)
+		trimIndexes := nextCompactionTrimIndexes(trimmed, objectiveIndex, recentIndex)
+		if len(trimIndexes) > 0 {
+			trimmed = removeCompactionInputIndexes(trimmed, trimIndexes)
 			continue
 		}
 
@@ -1378,9 +1378,9 @@ func compactionRecentContextIndex(items []any) int {
 	return len(items) - 1
 }
 
-func nextCompactionTrimIndex(items []any, protectedIndexes ...int) int {
+func nextCompactionTrimIndexes(items []any, protectedIndexes ...int) []int {
 	if len(items) == 0 {
-		return -1
+		return nil
 	}
 
 	isProtected := func(index int) bool {
@@ -1392,27 +1392,83 @@ func nextCompactionTrimIndex(items []any, protectedIndexes ...int) int {
 		return false
 	}
 
-	// First pass: trim oldest codex-generated/tool-heavy items.
+	// First pass: trim the oldest codex-generated/tool-heavy group. Calls and
+	// their outputs must be removed together so provider protocol pairing stays valid.
 	for i, raw := range items {
 		if isProtected(i) {
 			continue
 		}
 		item, ok := raw.(map[string]any)
 		if !ok {
-			return i
+			return []int{i}
 		}
-		if isCodexGeneratedInputItem(item) {
-			return i
+		if !isCodexGeneratedInputItem(item) {
+			continue
+		}
+		indexes := compactionToolPairIndexes(items, i)
+		blocked := false
+		for _, index := range indexes {
+			if isProtected(index) {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			return indexes
 		}
 	}
 
 	// Fallback: trim oldest non-protected item.
 	for i := range items {
 		if !isProtected(i) {
-			return i
+			return []int{i}
 		}
 	}
-	return -1
+	return nil
+}
+
+func compactionToolPairIndexes(items []any, selected int) []int {
+	item, ok := items[selected].(map[string]any)
+	if !ok {
+		return []int{selected}
+	}
+	itemType := strings.ToLower(strings.TrimSpace(stringFromAny(item["type"])))
+	if itemType != "function_call" && itemType != "function_call_output" && itemType != "custom_tool_call" && itemType != "custom_tool_call_output" {
+		return []int{selected}
+	}
+	callID := strings.TrimSpace(stringFromAny(item["call_id"]))
+	if callID == "" {
+		return []int{selected}
+	}
+	indexes := make([]int, 0, 2)
+	for i, raw := range items {
+		candidate, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(stringFromAny(candidate["call_id"])) != callID {
+			continue
+		}
+		candidateType := strings.ToLower(strings.TrimSpace(stringFromAny(candidate["type"])))
+		if candidateType == "function_call" || candidateType == "function_call_output" || candidateType == "custom_tool_call" || candidateType == "custom_tool_call_output" {
+			indexes = append(indexes, i)
+		}
+	}
+	if len(indexes) == 0 {
+		return []int{selected}
+	}
+	return indexes
+}
+
+func removeCompactionInputIndexes(items []any, indexes []int) []any {
+	remove := make(map[int]struct{}, len(indexes))
+	for _, index := range indexes {
+		remove[index] = struct{}{}
+	}
+	trimmed := make([]any, 0, len(items)-len(remove))
+	for i, item := range items {
+		if _, ok := remove[i]; !ok {
+			trimmed = append(trimmed, item)
+		}
+	}
+	return trimmed
 }
 
 func ensureOpenAIAgenticRequestFits(inputItems []any, tools []ToolDefinition, opts *AgenticOptions) error {

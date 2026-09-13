@@ -22,8 +22,13 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
-// errMaxTokens is returned when the API response was truncated due to max output tokens.
-var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)")
+// errMaxTokens is returned when a structured provider stop reason reports that
+// the output-token budget was exhausted.
+var errMaxTokens = llmcontracts.NewCategorizedError(
+	llmcontracts.ErrorOutputTokenLimitReached,
+	"OpenAI response",
+	fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)"),
+)
 
 const (
 	openAIDirectOutputBudget  = 4096

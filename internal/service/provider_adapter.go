@@ -90,9 +90,9 @@ func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err erro
 	if strings.TrimSpace(res.NativeCompactionSummary) != "" || strings.TrimSpace(res.NativeCompactionStateJSON) != "" {
 		res.Compacted = true
 	}
-	// Detect max_tokens errors from any provider adapter. Each provider package
-	// has its own errMaxTokens sentinel, so match on the error message prefix.
-	if err != nil && strings.HasPrefix(err.Error(), "response truncated: max") {
+	// Structured stop reasons are categorized by concrete provider adapters.
+	// Keep the legacy prefix check only for adapters that cannot expose structure.
+	if err != nil && (llmcontracts.ErrorIs(err, llmcontracts.ErrorOutputTokenLimitReached) || strings.HasPrefix(err.Error(), "response truncated: max")) {
 		res.StopReason = "max_tokens"
 	}
 	return res, err
