@@ -206,9 +206,10 @@ func (r *LifecycleRepo) HooksForWhen(ctx context.Context, when models.LifecycleW
         FROM agent_lifecycle_hooks h
         JOIN agents a ON a.id = h.agent_id
         WHERE h.when_slot = ?
-          AND h.enabled = 1
-          AND a.archived_at IS NULL
-          AND COALESCE(a.generated_status, 'user_edited') <> 'archived'
+	          AND h.enabled = 1
+	          AND COALESCE(a.enabled, 1) = 1
+	          AND a.archived_at IS NULL
+	          AND COALESCE(a.generated_status, 'user_edited') <> 'archived'
         ORDER BY h.agent_id ASC, h.created_at ASC`, fmt.Sprintf("listing hooks for %s", when), string(when))
 }
 

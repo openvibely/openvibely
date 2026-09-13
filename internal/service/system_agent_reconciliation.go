@@ -90,7 +90,8 @@ func applySystemAgentDeclaration(agent, want *models.Agent) bool {
 	set(agent.Name != want.Name, func() { agent.Name = want.Name })
 	set(agent.Description != want.Description, func() { agent.Description = want.Description })
 	set(agent.SystemPrompt != want.SystemPrompt, func() { agent.SystemPrompt = want.SystemPrompt })
-	set(agent.Model != want.Model, func() { agent.Model = want.Model })
+	// Model is user-managed for protected system agents so users can pick a
+	// concrete configured model without bundled declaration sync reverting it.
 	set(!sameAgentToolsList(agent.Tools, want.Tools), func() { agent.Tools = append([]string(nil), want.Tools...) })
 	set(!sameScopedToolConfig(agent.ToolConfig, want.ToolConfig), func() { agent.ToolConfig = want.ToolConfig })
 	set(!sameSkillConfigs(agent.Skills, want.Skills), func() { agent.Skills = append([]models.SkillConfig(nil), want.Skills...) })
@@ -99,7 +100,9 @@ func applySystemAgentDeclaration(agent, want *models.Agent) bool {
 	set(agent.Scope != want.Scope, func() { agent.Scope = want.Scope })
 	set(agent.ProjectID != want.ProjectID, func() { agent.ProjectID = want.ProjectID })
 	set(agent.SelectableAsPrimary != want.SelectableAsPrimary, func() { agent.SelectableAsPrimary = want.SelectableAsPrimary })
-	set(agent.Enabled != want.Enabled, func() { agent.Enabled = want.Enabled })
+	if IsRequiredSystemAgent(agent) {
+		set(!agent.Enabled, func() { agent.Enabled = true })
+	}
 	set(agent.GeneratedStatus != want.GeneratedStatus, func() { agent.GeneratedStatus = want.GeneratedStatus })
 	set(agent.CreatedBy == "" || agent.CreatedBy != want.CreatedBy, func() { agent.CreatedBy = want.CreatedBy })
 	set(!sameStringSlice(agent.SourceRefs, want.SourceRefs), func() { agent.SourceRefs = append([]string(nil), want.SourceRefs...) })

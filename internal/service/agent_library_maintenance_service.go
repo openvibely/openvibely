@@ -355,6 +355,11 @@ func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, proj
 	if err != nil {
 		return err
 	}
+	modelConfigID := explicitSystemAgentModelID(agent)
+	var taskModelConfigID *string
+	if modelConfigID != "" {
+		taskModelConfigID = &modelConfigID
+	}
 	if task == nil {
 		agentID := agent.ID
 		task = &models.Task{
@@ -364,6 +369,7 @@ func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, proj
 			Priority:          0,
 			Status:            models.StatusPending,
 			Prompt:            agentLibraryMaintenanceTaskPrompt,
+			AgentID:           taskModelConfigID,
 			AgentDefinitionID: &agentID,
 			Tag:               models.TagNone,
 			ChainConfig:       "{}",
@@ -379,11 +385,16 @@ func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, proj
 			}
 		}
 	}
-	if task.Prompt != agentLibraryMaintenanceTaskPrompt || task.Title != agentLibraryMaintenanceTaskTitle || task.Category != models.CategoryScheduled || task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent.ID {
+	currentModelConfigID := ""
+	if task.AgentID != nil {
+		currentModelConfigID = strings.TrimSpace(*task.AgentID)
+	}
+	if task.Prompt != agentLibraryMaintenanceTaskPrompt || task.Title != agentLibraryMaintenanceTaskTitle || task.Category != models.CategoryScheduled || task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent.ID || currentModelConfigID != modelConfigID {
 		agentID := agent.ID
 		task.Title = agentLibraryMaintenanceTaskTitle
 		task.Category = models.CategoryScheduled
 		task.Prompt = agentLibraryMaintenanceTaskPrompt
+		task.AgentID = taskModelConfigID
 		task.AgentDefinitionID = &agentID
 		task.Tag = models.TagNone
 		if task.ChainConfig == "" {
@@ -399,11 +410,20 @@ func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, proj
 	}
 	if len(schedules) > 0 {
 		for _, schedule := range schedules {
-			if schedule.ClearContextOnStart {
+			changed := false
+			if schedule.Enabled != agent.Enabled {
+				schedule.Enabled = agent.Enabled
+				changed = true
+			}
+			if !schedule.ClearContextOnStart {
+				schedule.ClearContextOnStart = true
+				changed = true
+			}
+			if !changed {
 				continue
 			}
-			if err := s.scheduleRepo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, true); err != nil {
-				return fmt.Errorf("repair skill library maintenance schedule clear context on start: %w", err)
+			if err := s.scheduleRepo.Update(ctx, &schedule); err != nil {
+				return fmt.Errorf("repair skill library maintenance schedule: %w", err)
 			}
 		}
 		return nil
@@ -414,7 +434,7 @@ func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, proj
 		RunAt:               runAt,
 		RepeatType:          models.RepeatDaily,
 		RepeatInterval:      1,
-		Enabled:             true,
+		Enabled:             agent.Enabled,
 		ClearContextOnStart: true,
 		NextRun:             &runAt,
 	})

@@ -23,6 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -193,13 +194,17 @@ func discoverLocalMCPServers(workDir string) []models.MCPServerConfig {
 }
 
 func buildAllowedAgentModels(configs []models.LLMConfig) map[string]struct{} {
-	allowed := make(map[string]struct{}, len(configs))
+	allowed := make(map[string]struct{}, len(configs)*2)
 	for _, cfg := range configs {
-		modelID := strings.TrimSpace(cfg.Model)
-		if modelID == "" {
-			continue
+		if id := strings.TrimSpace(cfg.ID); id != "" {
+			allowed[id] = struct{}{}
 		}
-		allowed[modelID] = struct{}{}
+		// Legacy Agent rows stored provider model slugs before this picker selected
+		// concrete model configurations. Keep those values accepted so old forms and
+		// generated drafts do not lose their explicit preference on save.
+		if modelID := strings.TrimSpace(cfg.Model); modelID != "" {
+			allowed[modelID] = struct{}{}
+		}
 	}
 	return allowed
 }
@@ -1461,7 +1466,7 @@ func buildAgentModelOptions(configs []models.LLMConfig) []models.AgentModelOptio
 	seen := make(map[string]struct{}, len(configs))
 	options := make([]models.AgentModelOption, 0, len(configs))
 	for _, cfg := range configs {
-		value := strings.TrimSpace(cfg.Model)
+		value := strings.TrimSpace(cfg.ID)
 		if value == "" {
 			continue
 		}
@@ -1469,6 +1474,12 @@ func buildAgentModelOptions(configs []models.LLMConfig) []models.AgentModelOptio
 			continue
 		}
 		label := strings.TrimSpace(cfg.Name)
+		model := strings.TrimSpace(cfg.Model)
+		if label == "" {
+			label = model
+		} else if model != "" {
+			label = fmt.Sprintf("%s (%s)", label, model)
+		}
 		if label == "" {
 			label = value
 		}
@@ -1696,6 +1707,37 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	return h.ListAgents(c)
 }
 
+func protectedSystemAgentLockedFieldsChanged(existing, candidate *models.Agent) bool {
+	if existing == nil || candidate == nil {
+		return true
+	}
+	if existing.Name != candidate.Name || existing.Description != candidate.Description || existing.SystemPrompt != candidate.SystemPrompt || existing.SystemKind != candidate.SystemKind || existing.Key != candidate.Key || existing.Scope != candidate.Scope || existing.ProjectID != candidate.ProjectID || existing.SelectableAsPrimary != candidate.SelectableAsPrimary || existing.CreatedBy != candidate.CreatedBy || existing.GeneratedStatus != candidate.GeneratedStatus || existing.AbsorbedInto != candidate.AbsorbedInto {
+		return true
+	}
+	if !sameStringSliceForAgentHandler(existing.Tools, candidate.Tools) || !sameStringSliceForAgentHandler(existing.Plugins, candidate.Plugins) || !sameStringSliceForAgentHandler(existing.SourceRefs, candidate.SourceRefs) {
+		return true
+	}
+	return !sameJSONForAgentHandler(existing.ToolConfig, candidate.ToolConfig) || !sameJSONForAgentHandler(existing.MCPServers, candidate.MCPServers) || !sameJSONForAgentHandler(existing.Skills, candidate.Skills) || !sameJSONForAgentHandler(existing.PermissionDefaults, candidate.PermissionDefaults) || !sameJSONForAgentHandler(existing.ModelDefaults, candidate.ModelDefaults)
+}
+
+func sameStringSliceForAgentHandler(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameJSONForAgentHandler(a, b any) bool {
+	left, _ := json.Marshal(a)
+	right, _ := json.Marshal(b)
+	return string(left) == string(right)
+}
+
 func (h *Handler) UpdateAgent(c echo.Context) error {
 	id := c.Param("id")
 	existing, err := h.agentRepo.GetByID(c.Request().Context(), id)
@@ -1706,10 +1748,22 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		return err
 	}
 	if existing.GeneratedStatus == models.AgentStatusProtected {
-		return echo.NewHTTPError(http.StatusForbidden, "protected system agents are read-only in the dialog")
-	}
-
-	if err := h.applyAgentDialogFormFields(c, existing, agentDialogFormOptions{operation: "UpdateAgent"}); err != nil {
+		candidate := *existing
+		if err := h.applyAgentDialogFormFields(c, &candidate, agentDialogFormOptions{operation: "UpdateAgent"}); err != nil {
+			return err
+		}
+		if service.IsRequiredSystemAgent(existing) && !candidate.Enabled {
+			return echo.NewHTTPError(http.StatusForbidden, "Goal Agent is required and cannot be disabled")
+		}
+		if !service.IsUserDisableableSystemAgent(existing) {
+			candidate.Enabled = existing.Enabled
+		}
+		if protectedSystemAgentLockedFieldsChanged(existing, &candidate) {
+			return echo.NewHTTPError(http.StatusForbidden, "protected system agents only allow model and eligible enabled-state changes")
+		}
+		existing.Model = candidate.Model
+		existing.Enabled = candidate.Enabled
+	} else if err := h.applyAgentDialogFormFields(c, existing, agentDialogFormOptions{operation: "UpdateAgent"}); err != nil {
 		return err
 	}
 
@@ -1722,10 +1776,11 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if existing.GeneratedStatus != models.AgentStatusProtected {
-		if err := h.saveAgentLifecycleHooksFromForm(c, existing.ID); err != nil {
-			return err
-		}
+	if existing.GeneratedStatus == models.AgentStatusProtected {
+		return h.ListAgents(c)
+	}
+	if err := h.saveAgentLifecycleHooksFromForm(c, existing.ID); err != nil {
+		return err
 	}
 	if err := h.materializeAgentToDisk(c, existing, h.projectSkillRootForAgent(c, existing)); err != nil {
 		return err

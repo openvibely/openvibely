@@ -23,6 +23,7 @@ func createLifecycleTestAgent(t testing.TB, agentRepo *AgentRepo) *models.Agent 
 		SystemPrompt: "You help with tests.",
 		Model:        "inherit",
 		Tools:        []string{"Read"},
+		Enabled:      true,
 	}
 	if err := agentRepo.Create(context.Background(), a); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -111,6 +112,7 @@ func TestLifecycleRepo_HookListPathsPreserveFiltersOrderingAndValues(t *testing.
 		Description:  "fixture",
 		SystemPrompt: "You help with tests.",
 		Model:        "inherit",
+		Enabled:      true,
 	}
 	if err := agentRepo.Create(ctx, otherAgent); err != nil {
 		t.Fatalf("create other agent: %v", err)
@@ -257,11 +259,16 @@ func TestLifecycleRepo_HooksForWhenExcludesArchivedAgentHooks(t *testing.T) {
 	ctx := context.Background()
 
 	live := createLifecycleTestAgent(t, agentRepo)
+	live.Enabled = true
+	if err := agentRepo.Update(ctx, live); err != nil {
+		t.Fatalf("enable live agent: %v", err)
+	}
 	archived := &models.Agent{
 		Name:         "Lifecycle Test Agent (archived)",
 		Description:  "fixture",
 		SystemPrompt: "x",
 		Model:        "inherit",
+		Enabled:      true,
 	}
 	if err := agentRepo.Create(ctx, archived); err != nil {
 		t.Fatalf("create archived agent: %v", err)
@@ -310,6 +317,18 @@ func TestLifecycleRepo_HooksForWhenExcludesArchivedAgentHooks(t *testing.T) {
 	}
 	if containsHookID(after, archivedHook.ID) {
 		t.Fatalf("expected archived hook filtered from HooksForWhen, got %+v", after)
+	}
+
+	live.Enabled = false
+	if err := agentRepo.Update(ctx, live); err != nil {
+		t.Fatalf("disable live agent: %v", err)
+	}
+	disabled, err := repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+	if err != nil {
+		t.Fatalf("hooks for when (disabled agent): %v", err)
+	}
+	if containsHookID(disabled, liveHook.ID) {
+		t.Fatalf("expected disabled agent hook filtered from HooksForWhen, got %+v", disabled)
 	}
 }
 

@@ -288,6 +288,11 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 	if err != nil {
 		return err
 	}
+	modelConfigID := explicitSystemAgentModelID(agent)
+	var taskModelConfigID *string
+	if modelConfigID != "" {
+		taskModelConfigID = &modelConfigID
+	}
 	if task == nil {
 		agentID := agent.ID
 		task = &models.Task{
@@ -297,6 +302,7 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 			Priority:          0,
 			Status:            models.StatusPending,
 			Prompt:            memoryConsolidationTaskPrompt,
+			AgentID:           taskModelConfigID,
 			AgentDefinitionID: &agentID,
 			Tag:               models.TagNone,
 			ChainConfig:       "{}",
@@ -312,11 +318,16 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 			}
 		}
 	}
-	if task.Prompt != memoryConsolidationTaskPrompt || task.Title != memoryConsolidationTaskTitle || task.Category != models.CategoryScheduled || task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent.ID {
+	currentModelConfigID := ""
+	if task.AgentID != nil {
+		currentModelConfigID = strings.TrimSpace(*task.AgentID)
+	}
+	if task.Prompt != memoryConsolidationTaskPrompt || task.Title != memoryConsolidationTaskTitle || task.Category != models.CategoryScheduled || task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent.ID || currentModelConfigID != modelConfigID {
 		agentID := agent.ID
 		task.Title = memoryConsolidationTaskTitle
 		task.Category = models.CategoryScheduled
 		task.Prompt = memoryConsolidationTaskPrompt
+		task.AgentID = taskModelConfigID
 		task.AgentDefinitionID = &agentID
 		task.Tag = models.TagNone
 		if task.ChainConfig == "" {
@@ -332,10 +343,19 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 	}
 	if len(schedules) > 0 {
 		for _, schedule := range schedules {
-			if schedule.ClearContextOnStart {
+			changed := false
+			if schedule.Enabled != agent.Enabled {
+				schedule.Enabled = agent.Enabled
+				changed = true
+			}
+			if !schedule.ClearContextOnStart {
+				schedule.ClearContextOnStart = true
+				changed = true
+			}
+			if !changed {
 				continue
 			}
-			if err := s.scheduleRepo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, true); err != nil {
+			if err := s.scheduleRepo.Update(ctx, &schedule); err != nil {
 				return err
 			}
 		}
@@ -347,7 +367,7 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 		RunAt:               runAt,
 		RepeatType:          models.RepeatDaily,
 		RepeatInterval:      1,
-		Enabled:             true,
+		Enabled:             agent.Enabled,
 		ClearContextOnStart: true,
 		NextRun:             &runAt,
 	})

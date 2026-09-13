@@ -709,6 +709,107 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 		t.Fatalf("expected idempotent hook repair, got %d hooks", len(hooks))
 	}
 }
+func TestAgentLibraryMaintenanceService_EnsureProjectPreservesSystemAgentModelAndEnabled(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	modelRepo := repository.NewLLMConfigRepo(db)
+	modelCfg := &models.LLMConfig{Name: "System Agent Model", Provider: models.ProviderAnthropic, Model: "claude-system-test", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key"}
+	if err := modelRepo.Create(ctx, modelCfg); err != nil {
+		t.Fatalf("create model config: %v", err)
+	}
+	agentsRoot := t.TempDir()
+	if err := builtinskills.SyncTo(agentsRoot); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "system-agent-controls", Description: "test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	svc := NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	svc.SetLifecycleRepo(lifecycleRepo)
+	svc.SetAgentsRootPath(agentsRoot)
+	if err := svc.EnsureProject(ctx, project.ID); err != nil {
+		t.Fatalf("initial EnsureProject: %v", err)
+	}
+	agent, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
+	if err != nil || agent == nil {
+		t.Fatalf("load skill curator: %v %#v", err, agent)
+	}
+	agent.Model = modelCfg.ID
+	agent.Enabled = false
+	if err := agentRepo.Update(ctx, agent); err != nil {
+		t.Fatalf("persist user system-agent controls: %v", err)
+	}
+	if err := svc.EnsureProject(ctx, project.ID); err != nil {
+		t.Fatalf("reconcile after user controls: %v", err)
+	}
+	reconciled, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindSkillCurator)
+	if err != nil || reconciled == nil {
+		t.Fatalf("reload reconciled skill curator: %v %#v", err, reconciled)
+	}
+	if reconciled.Model != modelCfg.ID || reconciled.Enabled {
+		t.Fatalf("system-agent controls not preserved: model=%q enabled=%v", reconciled.Model, reconciled.Enabled)
+	}
+	task, err := taskRepo.GetByProjectAndTitle(ctx, project.ID, agentLibraryMaintenanceTaskTitle)
+	if err != nil || task == nil {
+		t.Fatalf("load maintenance task: %v %#v", err, task)
+	}
+	if task.AgentID == nil || *task.AgentID != modelCfg.ID {
+		t.Fatalf("maintenance task model config = %v, want %s", task.AgentID, modelCfg.ID)
+	}
+	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list maintenance schedules: %v", err)
+	}
+	if len(schedules) != 1 || schedules[0].Enabled {
+		t.Fatalf("disabled Skill Curator should pause owned maintenance schedule, got %+v", schedules)
+	}
+}
+
+func TestAgentLibraryMaintenanceService_EnsureGlobalAgentsRepairsRequiredGoalEnabledButPreservesModel(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	modelRepo := repository.NewLLMConfigRepo(db)
+	modelCfg := &models.LLMConfig{Name: "Goal Model", Provider: models.ProviderOpenAI, Model: "gpt-goal-test", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key"}
+	if err := modelRepo.Create(ctx, modelCfg); err != nil {
+		t.Fatalf("create model config: %v", err)
+	}
+	svc := NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	if err := svc.EnsureGlobalAgents(ctx); err != nil {
+		t.Fatalf("initial EnsureGlobalAgents: %v", err)
+	}
+	goal, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil || goal == nil {
+		t.Fatalf("load goal agent: %v %#v", err, goal)
+	}
+	goal.Model = modelCfg.ID
+	goal.Enabled = false
+	if err := agentRepo.Update(ctx, goal); err != nil {
+		t.Fatalf("make goal stale: %v", err)
+	}
+	if err := svc.EnsureGlobalAgents(ctx); err != nil {
+		t.Fatalf("reconcile goal: %v", err)
+	}
+	repaired, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil || repaired == nil {
+		t.Fatalf("reload goal agent: %v %#v", err, repaired)
+	}
+	if !repaired.Enabled {
+		t.Fatal("required Goal Agent should be repaired to enabled")
+	}
+	if repaired.Model != modelCfg.ID {
+		t.Fatalf("Goal Agent model should remain user-managed, got %q want %s", repaired.Model, modelCfg.ID)
+	}
+}
+
 func TestAgentLibraryMaintenanceService_EnsureProjectSanitizesLegacySystemDeclarationGrants(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

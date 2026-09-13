@@ -67,6 +67,17 @@ func agentPermissionDefaultsJSON(perms models.AgentPermissionDefaults) string {
 	return string(b)
 }
 
+func agentSystemKindValue(agent models.Agent) string {
+	if agent.SystemKind != "" {
+		return agent.SystemKind
+	}
+	return agent.Key
+}
+
+func agentRequiredSystemControlLocked(agent models.Agent) bool {
+	return agentSystemKindValue(agent) == models.AgentSystemKindGoal
+}
+
 templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool, state CardListState) {
 		<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("agents", state) } data-card-pagination-list="#agents-card-list" data-card-pagination-card-selector="[data-agent-id]" data-card-pagination-key="data-agent-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Agents")
 		<div class="flex items-center justify-between mb-6">
@@ -106,7 +117,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						data-agent-enabled={ fmt.Sprintf("%t", agent.Enabled) }
 						data-agent-permission-defaults={ agentPermissionDefaultsJSON(agent.PermissionDefaults) }
 						data-agent-source-refs={ agentPluginsJSON(agent.SourceRefs) }
-						data-agent-generated-status={ string(agent.GeneratedStatus) }
+							data-agent-generated-status={ string(agent.GeneratedStatus) }
+							data-agent-system-kind={ agentSystemKindValue(agent) }
+							data-agent-required-system-agent={ boolString(agentRequiredSystemControlLocked(agent)) }
 						data-search-card
 						data-search-text={ agent.Name + " " + agent.Description + " " + agent.Model + " " + agent.SystemPrompt }
 						data-card-select-id={ agent.ID }
@@ -433,16 +446,17 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 										<input type="checkbox" id="advanced_selectable_as_primary" class="checkbox checkbox-sm"/>
 										<span class="label-text text-sm">Selectable as primary agent</span>
 									</label>
-									<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2">
-										<input type="checkbox" id="advanced_enabled" class="checkbox checkbox-sm" checked/>
-										<span class="label-text text-sm">Enabled</span>
-									</label>
+										<label class="label cursor-pointer gap-2 justify-start border border-base-300 rounded-lg px-3 py-2" id="advanced_enabled_label">
+											<input type="checkbox" id="advanced_enabled" class="checkbox checkbox-sm" checked/>
+											<span class="label-text text-sm">Enabled</span>
+										</label>
 								</div>
 								<div class="form-control">
 									<label class="label"><span class="label-text">Source evidence URLs (one per line)</span></label>
 									<textarea id="advanced_source_refs" class="textarea textarea-bordered h-16" placeholder="e.g. https://example.com/runbook"></textarea>
 								</div>
-								<p id="advanced_protected_notice" class="hidden alert alert-info text-sm">This is a built-in protected agent. Identity and scope fields are read-only.</p>
+									<p id="advanced_protected_notice" class="hidden alert alert-info text-sm">This is a built-in protected agent. Prompt, tools, skills, hooks, identity, and scope are repaired from bundled declarations; only the model and eligible enabled state can be changed.</p>
+									<p id="advanced_required_system_notice" class="hidden alert alert-warning text-sm">Goal Agent is required for goal evaluation and loop continuation safety, so it cannot be disabled.</p>
 							</div>
 						</div>
 					</div>
@@ -1554,9 +1568,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 							const el = document.getElementById(id); if (el) el.checked = true;
 						});				const enabledEl = document.getElementById('advanced_enabled');
 				if (enabledEl) enabledEl.checked = true;
-				const protectedNotice = document.getElementById('advanced_protected_notice');
-				if (protectedNotice) protectedNotice.classList.add('hidden');
-				const banner = document.getElementById('lifecycle_hooks_protected_banner');
+					const protectedNotice = document.getElementById('advanced_protected_notice');
+					if (protectedNotice) protectedNotice.classList.add('hidden');
+					const requiredNotice = document.getElementById('advanced_required_system_notice');
+					if (requiredNotice) requiredNotice.classList.add('hidden');
+					setProtectedAgentControlState(false, false);
+					const banner = document.getElementById('lifecycle_hooks_protected_banner');
 				if (banner) banner.classList.add('hidden');
 				const list = document.getElementById('lifecycle_hooks_list');
 				if (list) list.innerHTML = '';
@@ -1586,11 +1603,28 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						enabled: el.dataset.agentEnabled !== 'false',
 						permission_defaults: parseAgentCardJSON(el, 'agentPermissionDefaults', {}),
 						source_refs: parseAgentCardJSON(el, 'agentSourceRefs', []),
-						generated_status: el.dataset.agentGeneratedStatus || '',
+								generated_status: el.dataset.agentGeneratedStatus || '',
+								system_kind: el.dataset.agentSystemKind || '',
+								required_system_agent: el.dataset.agentRequiredSystemAgent === 'true',
 					});
 				}
 
-			function populateLifecycleFormFromAgent(data) {
+				function setProtectedAgentControlState(isProtected, requiredSystemAgent) {
+					['agent_name','agent_description','agent_system_prompt','advanced_key','advanced_scope','advanced_selectable_as_primary','advanced_source_refs'].forEach(id => {
+						const el = document.getElementById(id);
+						if (el) el.disabled = !!isProtected;
+					});
+					document.querySelectorAll('.agent-tool-checkbox').forEach(cb => { cb.disabled = !!isProtected; });
+					const enabled = document.getElementById('advanced_enabled');
+					if (enabled) {
+						enabled.disabled = !!requiredSystemAgent;
+						if (requiredSystemAgent) enabled.checked = true;
+					}
+					const enabledLabel = document.getElementById('advanced_enabled_label');
+					if (enabledLabel) enabledLabel.classList.toggle('opacity-60', !!requiredSystemAgent);
+				}
+
+				function populateLifecycleFormFromAgent(data) {
 				const perms = (data && data.permission_defaults) || {};
 				const setCheck = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
 				const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = (val == null ? '' : String(val)); };
@@ -1611,12 +1645,16 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					setCheck('advanced_selectable_as_primary', data ? data.selectable_as_primary !== false : true);				setCheck('advanced_enabled', data ? data.enabled : true);
 				setVal('advanced_source_refs', data && Array.isArray(data.source_refs) ? data.source_refs.join('\n') : '');
 
-				const protectedNotice = document.getElementById('advanced_protected_notice');
-				const banner = document.getElementById('lifecycle_hooks_protected_banner');
-				const isProtected = data && data.generated_status === 'protected';
-				if (protectedNotice) protectedNotice.classList.toggle('hidden', !isProtected);
-				if (banner) banner.classList.toggle('hidden', !isProtected);
-				lifecycleProtectedAgent = !!isProtected;
+					const protectedNotice = document.getElementById('advanced_protected_notice');
+					const requiredNotice = document.getElementById('advanced_required_system_notice');
+					const banner = document.getElementById('lifecycle_hooks_protected_banner');
+					const isProtected = data && data.generated_status === 'protected';
+					const requiredSystemAgent = isProtected && (data.required_system_agent === true || data.system_kind === 'goal' || data.key === 'goal');
+					if (protectedNotice) protectedNotice.classList.toggle('hidden', !isProtected);
+					if (requiredNotice) requiredNotice.classList.toggle('hidden', !requiredSystemAgent);
+					if (banner) banner.classList.toggle('hidden', !isProtected);
+					setProtectedAgentControlState(!!isProtected, !!requiredSystemAgent);
+					lifecycleProtectedAgent = !!isProtected;
 			}
 
 			let lifecycleHooksState = [];

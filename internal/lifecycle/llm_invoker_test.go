@@ -64,9 +64,18 @@ func (f *fakeAgentLookup) GetByID(_ context.Context, id string) (*models.Agent, 
 	return f.byID[id], nil
 }
 
-type fakeLLMConfig struct{ def *models.LLMConfig }
+type fakeLLMConfig struct {
+	def  *models.LLMConfig
+	byID map[string]*models.LLMConfig
+}
 
 func (f *fakeLLMConfig) GetDefault(_ context.Context) (*models.LLMConfig, error) { return f.def, nil }
+func (f *fakeLLMConfig) GetByID(_ context.Context, id string) (*models.LLMConfig, error) {
+	if f == nil || f.byID == nil {
+		return nil, nil
+	}
+	return f.byID[id], nil
+}
 
 func TestLLMHookInvoker_RenderAndCall(t *testing.T) {
 	caller := &fakeCaller{reply: `{"content":"hello","sources":["a"]}`}
@@ -122,6 +131,20 @@ func TestLLMHookInvoker_RenderAndCall(t *testing.T) {
 	// Validate the raw payload against the contract for sanity.
 	if err := ValidateOutput(hook.OutputContract, raw); err != nil {
 		t.Fatalf("raw payload should pass contract validation: %v", err)
+	}
+}
+
+func TestLLMHookInvoker_UsesConfiguredModelIDFromAgent(t *testing.T) {
+	caller := &fakeCaller{reply: `{"content":"hello"}`}
+	configured := &models.LLMConfig{ID: "cfg-1", Name: "Configured Hook Model", Provider: models.ProviderAnthropic, Model: "claude-sonnet-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token"}
+	agentDef := &models.Agent{Name: "Memory Curator", Model: configured.ID}
+	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"memory": agentDef}}, &fakeLLMConfig{byID: map[string]*models.LLMConfig{configured.ID: configured}})
+	_, err := inv.Invoke(context.Background(), models.AgentLifecycleHook{AgentID: "memory", OutputContract: models.OutputContractContextBlock}, HookInput{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if caller.lastConfig.ID != configured.ID || caller.lastConfig.Provider != configured.Provider || caller.lastConfig.Model != configured.Model || caller.lastConfig.AuthMethod != configured.AuthMethod {
+		t.Fatalf("expected hydrated configured model, got %#v", caller.lastConfig)
 	}
 }
 
