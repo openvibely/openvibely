@@ -798,6 +798,182 @@ func TestUsageAnalyticsService_DedupesStaleAnthropicSnapshotsByConfigOAuthAccoun
 	}
 }
 
+func TestUsageAnalyticsService_SharedConnectionFailureUsesOneRequestAndAllowsSeparateConnectionFallback(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+			first := &models.LLMConfig{
+				Name:              "A shared failed connection",
+				Provider:          provider,
+				Model:             "model-one",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "shared-access",
+				OAuthRefreshToken: "shared-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "same-provider-account",
+			}
+			second := &models.LLMConfig{
+				Name:       "B shared failed connection sibling",
+				Provider:   provider,
+				Model:      "model-two",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			for _, cfg := range []*models.LLMConfig{first, second} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+				t.Fatalf("link shared connection: %v", err)
+			}
+
+			calls := 0
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				calls++
+				return nil, accountUsageHTTPError{Method: http.MethodGet, URL: "https://provider.example/usage", StatusCode: http.StatusTooManyRequests}
+			})
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("BuildAnalyticsUsage failed connection: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("shared failed connection made %d requests, want 1", calls)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error == "" {
+				t.Fatalf("shared failed connection card = %+v", view.AccountLimits)
+			}
+
+			fallback := &models.LLMConfig{
+				Name:              "C separate healthy connection",
+				Provider:          provider,
+				Model:             "model-three",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "fallback-access",
+				OAuthRefreshToken: "fallback-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "same-provider-account",
+			}
+			if err := configRepo.Create(ctx, fallback); err != nil {
+				t.Fatalf("create separate fallback connection: %v", err)
+			}
+			var fetchedConfigIDs []string
+			svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				fetchedConfigIDs = append(fetchedConfigIDs, cfg.ID)
+				used := 6.0
+				return &models.AccountUsageSnapshot{
+					Provider:             string(provider),
+					AccountID:            cfg.OAuthAccountID,
+					AgentConfigID:        cfg.ID,
+					SecondaryLabel:       "weekly limit",
+					SecondaryUsedPercent: &used,
+				}, nil
+			})
+			view, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("BuildAnalyticsUsage fallback connection: %v", err)
+			}
+			if len(fetchedConfigIDs) != 1 || fetchedConfigIDs[0] != fallback.ID {
+				t.Fatalf("fallback fetch candidates = %v, want only %s", fetchedConfigIDs, fallback.ID)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].AgentConfigID != fallback.ID || view.AccountLimits[0].Error != "" || view.AccountLimits[0].SecondaryLimit == nil {
+				t.Fatalf("separate healthy connection did not replace shared failure: %+v", view.AccountLimits)
+			}
+		})
+	}
+}
+
+func TestUsageAnalyticsService_DistinctSameAccountConnectionFailuresPersistIndependentCooldowns(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			first := &models.LLMConfig{
+				Name:              "A failed connection",
+				Provider:          provider,
+				Model:             "model-one",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "first-access",
+				OAuthRefreshToken: "first-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "same-provider-account",
+			}
+			firstSibling := &models.LLMConfig{
+				Name:       "B failed connection sibling",
+				Provider:   provider,
+				Model:      "model-two",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			second := &models.LLMConfig{
+				Name:              "C independently failed connection",
+				Provider:          provider,
+				Model:             "model-three",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "second-access",
+				OAuthRefreshToken: "second-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "same-provider-account",
+			}
+			for _, cfg := range []*models.LLMConfig{first, firstSibling, second} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, firstSibling.ID, first.OAuthConnectionID); err != nil {
+				t.Fatalf("link shared connection: %v", err)
+			}
+
+			calls := 0
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			svc.SetAccountUsageFetcher(func(_ context.Context, _ models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				calls++
+				return nil, accountUsageHTTPError{Method: http.MethodGet, URL: "https://provider.example/usage", StatusCode: http.StatusTooManyRequests}
+			})
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("first BuildAnalyticsUsage: %v", err)
+			}
+			if calls != 2 {
+				t.Fatalf("distinct failed connections made %d requests, want 2", calls)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error == "" {
+				t.Fatalf("all-failed grouped account card = %+v", view.AccountLimits)
+			}
+			snapshots, err := usageRepo.GetLatestAccountUsageSnapshots(ctx, string(provider))
+			if err != nil {
+				t.Fatalf("load failure snapshots: %v", err)
+			}
+			gotConnections := map[string]bool{}
+			for _, snapshot := range snapshots {
+				if isAccountRefreshFailure(snapshot.RateLimitReachedType) {
+					gotConnections[snapshot.OAuthConnectionID] = true
+				}
+			}
+			if len(gotConnections) != 2 || !gotConnections[first.OAuthConnectionID] || !gotConnections[second.OAuthConnectionID] {
+				t.Fatalf("persisted failure connections = %v, snapshots=%+v", gotConnections, snapshots)
+			}
+
+			calls = 0
+			view, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("second BuildAnalyticsUsage: %v", err)
+			}
+			if calls != 0 {
+				t.Fatalf("cooled-down connections made %d requests, want 0", calls)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error == "" {
+				t.Fatalf("cooled-down grouped account card = %+v", view.AccountLimits)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
@@ -828,6 +1004,188 @@ func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t 
 			}
 			if calls != 1 || len(view.AccountLimits) != 1 || view.AccountLimits[0].SecondaryLimit == nil {
 				t.Fatalf("shared connection result calls=%d accounts=%+v", calls, view.AccountLimits)
+			}
+		})
+	}
+}
+
+func TestUsageAnalyticsService_MovedSnapshotOriginRemainsAttributedToOriginalConnection(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			origin := &models.LLMConfig{
+				Name:              "A snapshot origin",
+				Provider:          provider,
+				Model:             "model-origin",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-a-access",
+				OAuthRefreshToken: "account-a-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "account-a",
+			}
+			sibling := &models.LLMConfig{
+				Name:       "B account A sibling",
+				Provider:   provider,
+				Model:      "model-sibling",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			target := &models.LLMConfig{
+				Name:              "C account B target",
+				Provider:          provider,
+				Model:             "model-target",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-b-access",
+				OAuthRefreshToken: "account-b-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "account-b",
+			}
+			for _, cfg := range []*models.LLMConfig{origin, sibling, target} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
+				t.Fatalf("link sibling to account A: %v", err)
+			}
+
+			used := 37.0
+			snapshot := &models.AccountUsageSnapshot{
+				Provider:             string(provider),
+				AccountID:            "account-a",
+				AgentConfigID:        origin.ID,
+				OAuthConnectionID:    origin.OAuthConnectionID,
+				PlanType:             "Account A Plan",
+				SecondaryLabel:       "weekly limit",
+				SecondaryUsedPercent: &used,
+			}
+			stored, err := usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(
+				ctx, snapshot, origin.ID, origin.OAuthConfigRevision, provider,
+			)
+			if err != nil || !stored {
+				t.Fatalf("store account A snapshot = %v, %v", stored, err)
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
+				t.Fatalf("move snapshot origin to account B: %v", err)
+			}
+
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			view, err := svc.BuildLocalAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
+			}
+			if len(view.AccountLimits) != 2 {
+				t.Fatalf("account cards = %+v, want isolated account A and B cards", view.AccountLimits)
+			}
+			var accountA, accountB *models.AccountUsageView
+			for i := range view.AccountLimits {
+				account := &view.AccountLimits[i]
+				switch account.AccountID {
+				case "account-a":
+					accountA = account
+				case "account-b":
+					accountB = account
+				}
+			}
+			if accountA == nil || accountA.AgentConfigID != sibling.ID || accountA.PlanType != "Account A Plan" || accountA.SecondaryLimit == nil || accountA.SecondaryLimit.UsedPercent == nil || *accountA.SecondaryLimit.UsedPercent != used {
+				t.Fatalf("account A snapshot was not retained by its connection: %+v", view.AccountLimits)
+			}
+			if accountB == nil || accountB.PlanType == "Account A Plan" || accountB.SecondaryLimit != nil {
+				t.Fatalf("account A snapshot leaked into account B: %+v", view.AccountLimits)
+			}
+		})
+	}
+}
+
+func TestUsageAnalyticsService_MovedLegacySnapshotOriginRemainsAttributedToOriginalConnection(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			origin := &models.LLMConfig{
+				Name:              "A legacy snapshot origin",
+				Provider:          provider,
+				Model:             "model-origin",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-a-access",
+				OAuthRefreshToken: "account-a-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+			}
+			sibling := &models.LLMConfig{
+				Name:       "B account A sibling",
+				Provider:   provider,
+				Model:      "model-sibling",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			target := &models.LLMConfig{
+				Name:              "C account B target",
+				Provider:          provider,
+				Model:             "model-target",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-b-access",
+				OAuthRefreshToken: "account-b-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+			}
+			for _, cfg := range []*models.LLMConfig{origin, sibling, target} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
+				t.Fatalf("link sibling to account A: %v", err)
+			}
+
+			used := 41.0
+			snapshot := &models.AccountUsageSnapshot{
+				Provider:             string(provider),
+				AccountID:            origin.ID,
+				AgentConfigID:        origin.ID,
+				OAuthConnectionID:    origin.OAuthConnectionID,
+				PlanType:             "Legacy Account A Plan",
+				SecondaryLabel:       "weekly limit",
+				SecondaryUsedPercent: &used,
+			}
+			stored, err := usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(
+				ctx, snapshot, origin.ID, origin.OAuthConfigRevision, provider,
+			)
+			if err != nil || !stored {
+				t.Fatalf("store legacy account A snapshot = %v, %v", stored, err)
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
+				t.Fatalf("move snapshot origin to account B: %v", err)
+			}
+
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			view, err := svc.BuildLocalAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
+			}
+			if len(view.AccountLimits) != 2 {
+				t.Fatalf("account cards = %+v, want isolated account A and B cards", view.AccountLimits)
+			}
+			var accountA *models.AccountUsageView
+			for i := range view.AccountLimits {
+				account := &view.AccountLimits[i]
+				if account.AccountID == origin.ID {
+					t.Fatalf("legacy per-model account identity remained visible after owner move: %+v", account)
+				}
+				if account.AgentConfigID == sibling.ID {
+					accountA = account
+				}
+			}
+			if accountA == nil || accountA.AccountID != "" || accountA.PlanType != "Legacy Account A Plan" || accountA.SecondaryLimit == nil || accountA.SecondaryLimit.UsedPercent == nil || *accountA.SecondaryLimit.UsedPercent != used {
+				t.Fatalf("legacy account A snapshot was not retained by its connection: %+v", view.AccountLimits)
+			}
+			for _, account := range view.AccountLimits {
+				if account.AgentConfigID != sibling.ID && (account.PlanType == "Legacy Account A Plan" || account.SecondaryLimit != nil) {
+					t.Fatalf("legacy account A snapshot leaked into account B: %+v", view.AccountLimits)
+				}
 			}
 		})
 	}
@@ -934,8 +1292,21 @@ func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *t
 				if err != nil {
 					t.Fatalf("load account snapshots: %v", err)
 				}
-				if len(snapshots) != 1 || snapshots[0].AgentConfigID != second.ID || snapshots[0].RateLimitReachedType != "" {
-					t.Fatalf("shared account persisted a failed candidate snapshot: %+v", snapshots)
+				if len(snapshots) != 2 {
+					t.Fatalf("shared account snapshots = %+v, want independent failure cooldown and healthy success", snapshots)
+				}
+				var failedSnapshot, healthySnapshot *models.AccountUsageSnapshot
+				for i := range snapshots {
+					snapshot := &snapshots[i]
+					if snapshot.OAuthConnectionID == first.OAuthConnectionID && isAccountRefreshFailure(snapshot.RateLimitReachedType) {
+						failedSnapshot = snapshot
+					}
+					if snapshot.OAuthConnectionID == second.OAuthConnectionID && snapshot.RateLimitReachedType == "" {
+						healthySnapshot = snapshot
+					}
+				}
+				if failedSnapshot == nil || healthySnapshot == nil {
+					t.Fatalf("shared account did not preserve independent cooldown and healthy snapshot: %+v", snapshots)
 				}
 			})
 		}
