@@ -21,6 +21,12 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestMaxTokensErrorIsCategorized(t *testing.T) {
+	if !llmcontracts.ErrorIs(errMaxTokens, llmcontracts.ErrorOutputTokenLimitReached) {
+		t.Fatalf("errMaxTokens category missing: %v", errMaxTokens)
+	}
+}
+
 func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 	if got := applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}); got != "base" {
 		t.Fatalf("non-OAuth prompt changed: %q", got)

@@ -22,7 +22,11 @@ import (
 
 const defaultOutputBudget = 16384
 
-var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)")
+var errMaxTokens = llmcontracts.NewCategorizedError(
+	llmcontracts.ErrorOutputTokenLimitReached,
+	"OpenAI-compatible response",
+	fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)"),
+)
 
 type Adapter struct {
 	configRepo *repository.LLMConfigRepo

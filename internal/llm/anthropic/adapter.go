@@ -128,8 +128,13 @@ func applyAgentToSystemPrompt(base string, agent *models.Agent) string {
 	return strings.Join(parts, "\n\n---\n\n")
 }
 
-// errMaxTokens is returned when the API response was truncated due to max_tokens.
-var errMaxTokens = fmt.Errorf("response truncated: max_tokens limit reached (output budget exhausted before task completed)")
+// errMaxTokens is returned when a structured provider stop reason reports that
+// the output-token budget was exhausted.
+var errMaxTokens = llmcontracts.NewCategorizedError(
+	llmcontracts.ErrorOutputTokenLimitReached,
+	"Anthropic response",
+	fmt.Errorf("response truncated: max_tokens limit reached (output budget exhausted before task completed)"),
+)
 
 // errRefusal is returned when Anthropic returns HTTP 200 with stop_reason=refusal.
 var errRefusal = fmt.Errorf("model refused the request: Anthropic returned stop_reason=refusal")

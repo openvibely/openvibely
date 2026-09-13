@@ -3286,6 +3286,25 @@ func TestTrimCompactionInputItemsToFitContextWindow_UsesConfiguredWindowForUnkno
 	}
 }
 
+func TestTrimCompactionInputItemsToFitContextWindow_RemovesPairedFunctionCallAndOutput(t *testing.T) {
+	inputItems := []any{
+		agenticInputItem{"type": "message", "role": "user", "content": "Task objective"},
+		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 5000)},
+		agenticInputItem{"type": "function_call_output", "call_id": "call_pair", "output": "small result"},
+	}
+
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "unknown-model", 20000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range trimmed {
+		item, _ := raw.(map[string]any)
+		if item["call_id"] == "call_pair" {
+			t.Fatalf("paired tool item survived compaction trimming: %#v", trimmed)
+		}
+	}
+}
+
 func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{
