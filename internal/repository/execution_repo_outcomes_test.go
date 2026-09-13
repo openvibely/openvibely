@@ -69,10 +69,13 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 		exec.StartedAt, _ = time.Parse("2006-01-02 15:04:05", started)
 		return exec
 	}
-	makeGoal := func(task *models.Task, status models.TaskGoalStatus) {
+	makeGoal := func(task *models.Task, status models.TaskGoalStatus, eventAt string) {
 		t.Helper()
 		goal := &models.TaskGoal{TaskID: task.ID, GoalID: "goal-" + task.ID, Objective: "finish", Status: status}
 		if err := goals.CreateOrReplace(ctx, goal); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE task_goals SET achieved_at=CASE WHEN status='achieved' THEN ? ELSE NULL END, updated_at=? WHERE task_id=?`, eventAt, eventAt, task.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -87,7 +90,7 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	assignedID := agent.ID
 	achieved := makeTask(project.ID, "Achieved", &assignedID, true)
 	achievedExec := makeExecution(achieved, configA.ID, models.ExecCompleted, false, "2026-01-10 10:00:00", 1000)
-	makeGoal(achieved, models.TaskGoalStatusAchieved)
+	makeGoal(achieved, models.TaskGoalStatusAchieved, "2026-01-10 10:00:00")
 	known := 2.0
 	recordCost(achieved, achievedExec, &known, 100)
 	outsideCost := 100.0
@@ -98,7 +101,7 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	reworked := makeTask(project.ID, "Reworked", &assignedID, false)
 	failedExec := makeExecution(reworked, configB.ID, models.ExecFailed, false, "2026-01-11 10:00:00", 2000)
 	makeExecution(reworked, configB.ID, models.ExecCompleted, true, "2026-01-12 10:00:00", 3000)
-	makeGoal(reworked, models.TaskGoalStatusFailed)
+	makeGoal(reworked, models.TaskGoalStatusFailed, "2026-01-12 10:00:00")
 	failedCost := 0.5
 	recordCost(reworked, failedExec, &failedCost, 40)
 	for _, task := range []*models.Task{achieved, reworked} {
@@ -121,6 +124,11 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	makeExecution(previousPeriod, configA.ID, models.ExecCompleted, true, "2026-01-15 10:00:00", 900)
 	endBoundary := makeTask(project.ID, "Exclusive end boundary", &assignedID, false)
 	makeExecution(endBoundary, configA.ID, models.ExecCompleted, false, "2026-02-01 00:00:00", 700)
+	for _, task := range []*models.Task{achieved, reworked, cancelled, previousPeriod} {
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at='2026-01-05 00:00:00' WHERE id=?`, task.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
@@ -147,8 +155,8 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	if dashboard.Current.KnownCostPerCompletedTask == nil || dashboard.Current.KnownCostPerCompletedTask.Covered != 2 || dashboard.Current.KnownCostPerCompletedTask.Eligible != 3 || dashboard.Current.KnownCostPerCompletedTask.Value != 1.25 {
 		t.Errorf("known cost per technically completed task = %+v", dashboard.Current.KnownCostPerCompletedTask)
 	}
-	if dashboard.Current.KnownFailedExecutionCost != 0.5 {
-		t.Errorf("failed known cost = %v", dashboard.Current.KnownFailedExecutionCost)
+	if dashboard.Current.KnownFailedExecutionCost == nil || dashboard.Current.KnownFailedExecutionCost.Value != 0.5 || dashboard.Current.KnownFailedExecutionCost.Covered != 1 || dashboard.Current.KnownFailedExecutionCost.Eligible != 1 {
+		t.Errorf("failed known cost coverage = %+v", dashboard.Current.KnownFailedExecutionCost)
 	}
 	if len(dashboard.Agents) != 2 {
 		t.Fatalf("agents = %+v, want reusable Agent and Unassigned", dashboard.Agents)
@@ -177,8 +185,19 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	if dashboard.Previous == nil {
 		t.Fatal("comparison requested but previous period missing")
 	}
-	if len(dashboard.Definitions) < 6 {
-		t.Errorf("metric definitions = %d, want centralized definitions", len(dashboard.Definitions))
+	if len(dashboard.Definitions) < 12 {
+		t.Errorf("metric definitions = %d, want centralized definitions for outcome and detailed metrics", len(dashboard.Definitions))
+	}
+	filtered, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, AgentID: agent.ID, GroupBy: "day", Limit: 20})
+	if err != nil {
+		t.Fatalf("filtered Agent dashboard: %v", err)
+	}
+	if filtered.Current.TasksEvaluated != 3 || filtered.AgentDetail == nil || len(filtered.AgentDetail.OutcomeTrend) == 0 || len(filtered.AgentDetail.Categories) == 0 || len(filtered.AgentDetail.ModelMix) == 0 || len(filtered.AgentDetail.Failures) == 0 || len(filtered.AgentDetail.Skills) != 1 || len(filtered.AgentDetail.RecentTasks) != 3 {
+		t.Errorf("Agent filter/detail not applied consistently: current=%+v detail=%+v", filtered.Current, filtered.AgentDetail)
+	}
+	unassigned, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, AgentID: "__unassigned__", Limit: 20})
+	if err != nil || unassigned.Current.TasksEvaluated != 1 || len(unassigned.RecentOutcomes) != 1 || unassigned.RecentOutcomes[0].TaskID != cancelled.ID {
+		t.Errorf("unassigned filter = current %+v evidence %+v err=%v", unassigned.Current, unassigned.RecentOutcomes, err)
 	}
 
 	fromSQL, toSQL := "2026-01-01 00:00:00", "2026-02-01 00:00:00"
@@ -193,6 +212,20 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	}
 	if rows, err := executions.GetMostFrequentTasks(ctx, project.ID, 20, fromSQL, toSQL); err != nil || len(rows) != 4 {
 		t.Errorf("period frequent tasks = %+v, err=%v, want four current tasks", rows, err)
+	}
+	if rows, err := executions.GetMostFrequentTasks(ctx, project.ID, 20, fromSQL, toSQL, agent.ID, ""); err != nil || len(rows) != 3 {
+		t.Errorf("Agent-filtered frequent tasks = %+v, err=%v, want three assigned tasks", rows, err)
+	}
+	if rows, err := executions.GetSuccessFailureRates(ctx, project.ID, "day", fromSQL, toSQL, agent.ID, ""); err != nil || len(rows) == 0 {
+		t.Errorf("Agent-filtered technical trend = %+v, err=%v", rows, err)
+	} else {
+		total := 0
+		for _, row := range rows {
+			total += row.TotalCount
+		}
+		if total != 4 {
+			t.Errorf("Agent-filtered technical trend total=%d, want 4", total)
+		}
 	}
 	if rows, err := executions.GetFailedTaskPatternsInRange(ctx, project.ID, 20, fromSQL, toSQL); err != nil || len(rows) != 1 || rows[0].TaskID != reworked.ID {
 		t.Errorf("period failed patterns = %+v, err=%v, want only reworked task", rows, err)

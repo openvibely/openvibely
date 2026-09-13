@@ -1246,7 +1246,7 @@ type SuccessFailureRate struct {
 // GetSuccessFailureRates returns success/failure rates grouped by time period
 // groupBy: "day", "week", or "month"
 // dateFrom/dateTo: optional date range filters (RFC3339 format)
-func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID string, groupBy string, dateFrom, dateTo string) ([]SuccessFailureRate, error) {
+func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID string, groupBy string, dateFrom, dateTo string, dimensions ...string) ([]SuccessFailureRate, error) {
 	var dateFormat string
 	switch groupBy {
 	case "day":
@@ -1280,6 +1280,7 @@ func (r *ExecutionRepo) GetSuccessFailureRates(ctx context.Context, projectID st
 		query += ` AND e.started_at < ?`
 		args = append(args, dateTo)
 	}
+	query, args = appendAnalyticsDimensions(query, args, "t", dimensions)
 
 	query += ` GROUP BY period ORDER BY period ASC`
 
@@ -1328,6 +1329,9 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByTask(ctx context.Context, projectID
 		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	if len(bounds) > 2 {
+		query, args = appendAnalyticsDimensions(query, args, "t", bounds[2:])
+	}
 	query += ` GROUP BY t.id, t.title ORDER BY avg_ms DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -1363,6 +1367,9 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 		WHERE t.project_id = ? AND e.status = 'completed' AND e.duration_ms > 0`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	if len(bounds) > 2 {
+		query, args = appendAnalyticsDimensions(query, args, "t", bounds[2:])
+	}
 	query += ` GROUP BY ac.id, ac.name ORDER BY count DESC`
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1379,6 +1386,23 @@ func (r *ExecutionRepo) GetAvgExecutionTimeByAgent(ctx context.Context, projectI
 		times = append(times, t)
 	}
 	return times, rows.Err()
+}
+
+func appendAnalyticsDimensions(query string, args []any, taskAlias string, dimensions []string) (string, []any) {
+	if len(dimensions) > 0 {
+		agentID := strings.TrimSpace(dimensions[0])
+		if agentID == "__unassigned__" {
+			query += " AND " + taskAlias + ".agent_definition_id IS NULL"
+		} else if agentID != "" {
+			query += " AND " + taskAlias + ".agent_definition_id = ?"
+			args = append(args, agentID)
+		}
+	}
+	if len(dimensions) > 1 && strings.TrimSpace(dimensions[1]) != "" {
+		query += ` AND EXISTS (SELECT 1 FROM automation_dispatch_outbox ado JOIN automation_invocations ai ON ai.id=ado.invocation_id WHERE ado.task_id=` + taskAlias + `.id AND ai.project_id=` + taskAlias + `.project_id AND ai.automation_id=?)`
+		args = append(args, strings.TrimSpace(dimensions[1]))
+	}
+	return query, args
 }
 
 func appendAnalyticsStringBounds(query string, args []any, column string, bounds []string) (string, []any) {
@@ -1400,7 +1424,7 @@ type ExecutionTrend struct {
 }
 
 // GetExecutionTrendsByHour returns execution counts by hour of day
-func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID string, dateFrom, dateTo string) ([]ExecutionTrend, error) {
+func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID string, dateFrom, dateTo string, dimensions ...string) ([]ExecutionTrend, error) {
 	query := `
 		SELECT
 			CAST(strftime('%H', e.started_at, 'localtime') as INTEGER) as hour,
@@ -1419,6 +1443,7 @@ func (r *ExecutionRepo) GetExecutionTrendsByHour(ctx context.Context, projectID 
 		query += ` AND e.started_at < ?`
 		args = append(args, dateTo)
 	}
+	query, args = appendAnalyticsDimensions(query, args, "t", dimensions)
 
 	query += ` GROUP BY hour ORDER BY hour ASC`
 
@@ -1475,6 +1500,9 @@ func (r *ExecutionRepo) GetAgentUsageByProject(ctx context.Context, projectID st
 		args = append(args, projectID)
 	}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	if len(bounds) > 2 {
+		query, args = appendAnalyticsDimensions(query, args, "t", bounds[2:])
+	}
 
 	query += ` GROUP BY ac.id, ac.name, p.id, p.name ORDER BY execution_count DESC`
 
@@ -1516,6 +1544,9 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 		WHERE t.project_id = ?`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	if len(bounds) > 2 {
+		query, args = appendAnalyticsDimensions(query, args, "t", bounds[2:])
+	}
 	query += ` GROUP BY t.id, t.title ORDER BY execution_count DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -1630,6 +1661,9 @@ func (r *ExecutionRepo) GetFailedTaskPatternsInRange(ctx context.Context, projec
 		WHERE t.project_id=? AND e.status='failed'`
 	args := []any{projectID}
 	query, args = appendAnalyticsStringBounds(query, args, "e.started_at", bounds)
+	if len(bounds) > 2 {
+		query, args = appendAnalyticsDimensions(query, args, "t", bounds[2:])
+	}
 	query += `) SELECT task_id,task_title,failure_count,COALESCE(latest_error,''),strftime('%Y-%m-%dT%H:%M:%SZ',latest_started_at)
 		FROM failed_executions WHERE rn=1 ORDER BY failure_count DESC,latest_started_at DESC,task_id LIMIT ?`
 	args = append(args, limit)

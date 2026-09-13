@@ -13,6 +13,34 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestUsageRepo_TaskDimensionsAndExclusiveEnd(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewUsageRepo(db)
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id,name) VALUES ('usage-dim-project','Usage dimensions'); INSERT INTO agents (id,name,description,system_prompt,model,enabled,selectable_as_primary) VALUES ('usage-definition','Agent','','','inherit',1,1); INSERT INTO tasks (id,project_id,title,category,status,agent_definition_id) VALUES ('usage-assigned','usage-dim-project','Assigned','active','running','usage-definition'),('usage-unassigned','usage-dim-project','Unassigned','active','running',NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []*models.LLMUsageEvent{
+		{Provider: "test", ProjectID: "usage-dim-project", TaskID: "usage-assigned", Model: "model", Operation: "task", TotalTokens: 10, OccurredAt: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), RawUsageJSON: "{}"},
+		{Provider: "test", ProjectID: "usage-dim-project", TaskID: "usage-unassigned", Model: "model", Operation: "task", TotalTokens: 20, OccurredAt: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), RawUsageJSON: "{}"},
+		{Provider: "test", ProjectID: "usage-dim-project", TaskID: "usage-assigned", Model: "model", Operation: "boundary", TotalTokens: 100, OccurredAt: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), RawUsageJSON: "{}"},
+	} {
+		if err := repo.RecordUsageEvent(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	window := UsageFilter{ProjectID: "usage-dim-project", AgentID: "usage-definition", DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)}
+	totals, err := repo.GetUsageTotals(ctx, window)
+	if err != nil || totals.TotalTokens != 10 || totals.CallCount != 1 {
+		t.Fatalf("assigned usage filter/exclusive end = %+v, %v", totals, err)
+	}
+	window.AgentID = "__unassigned__"
+	totals, err = repo.GetUsageTotals(ctx, window)
+	if err != nil || totals.TotalTokens != 20 || totals.CallCount != 1 {
+		t.Fatalf("unassigned usage filter = %+v, %v", totals, err)
+	}
+}
+
 func TestUsageRepo_RecordUsageEventAndAggregate(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewUsageRepo(db)

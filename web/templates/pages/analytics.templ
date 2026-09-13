@@ -49,11 +49,34 @@ templ analyticsContent(currentProject *models.Project) {
 				<section id="analytics-overview" data-analytics-section="overview" class="space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Overview</h3><p class="text-sm opacity-60">Task outcomes with technical status kept separate from goal evidence.</p></div>
 					<div id="analyticsKpis" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></div>
+					<div class="collapse collapse-arrow bg-base-100 border border-base-300"><input type="checkbox" aria-label="Show metric definitions"/><div class="collapse-title font-semibold">Metric definitions and denominators</div><div class="collapse-content"><dl id="analyticsMetricDefinitions" class="grid grid-cols-1 lg:grid-cols-2 gap-3 text-sm"></dl></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-success">Notable improvements</h4><div id="analyticsImprovements"><p class="opacity-50">No supported comparison insight yet.</p></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-warning">Needs attention</h4><div id="analyticsAttention"><p class="opacity-50">No supported attention insight yet.</p></div></div></div></div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Recent outcomes</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Merge/review</th><th>Agent definition</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="recentOutcomesTable"></tbody></table></div></div></div>
 				</section>
-					<section id="analytics-outcomes" data-analytics-section="outcomes" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Outcomes</h3><p class="text-sm opacity-60">Execution completion is not proof that a goal was achieved.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Outcome funnel</h4><div id="outcomeFunnel" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Cycle-time distribution</h4><div class="h-64"><canvas id="cycleDistributionChart"></canvas></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Follow-up / rework distribution</h4><div class="h-64"><canvas id="followupDistributionChart"></canvas></div></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Task-level outcome evidence</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Agent</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="outcomeEvidenceTable"></tbody></table></div></div></div></section>					<section id="analytics-agents" data-analytics-section="agents" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Agent performance</h3><p class="text-sm opacity-60">Reusable Agent definitions, separate from model configurations.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Technical completion</th><th>Goal achievement</th><th>First pass</th><th>Follow-up</th><th>Duration</th><th>Cost / achieved goal</th><th>Most-used model</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Recent supporting tasks for selected Agent</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Model</th><th>Executions</th><th>Follow-ups</th></tr></thead><tbody id="agentEvidenceTable"></tbody></table></div></div></div></section>				<section id="analytics-workflows" data-analytics-section="workflows" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Workflow performance</h3><p class="text-sm opacity-60">Automation invocations use the selected period; waiting, blocked, and health are labeled current state.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Workflow</th><th>Invocations</th><th>Completion</th><th>Failures</th><th>Duration</th><th>Waiting / blocked</th><th>Known cost</th><th>Health</th></tr></thead><tbody id="workflowPerformanceTable"></tbody></table></div></div></div></section>
-					<section id="analytics-learning" data-analytics-section="learning" class="space-y-4"><div><h3 class="text-xl font-bold mt-6">Learning</h3><p class="text-sm opacity-60">Observed skill activity and task outcomes; association is not causation.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes among tasks using skills</h4><p class="text-sm opacity-60">Tasks where a skill was selected or loaded in the selected period. Small samples are descriptive only.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical task outcome</th><th>Goal achievement</th><th>Follow-up</th></tr></thead><tbody id="skillOutcomeTable"></tbody></table></div></div></div></section>				<div id="analytics-usage" data-analytics-section="usage"><h3 class="text-xl font-bold mt-6">Usage</h3><p class="text-sm opacity-60 mb-4">Local provider usage and available recorded cost.</p><div id="usageOutcomeContext" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div></div>
+					<section id="analytics-outcomes" data-analytics-section="outcomes" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Outcomes</h3><p class="text-sm opacity-60">Execution completion is not proof that a goal was achieved.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Outcome funnel</h4><div id="outcomeFunnel" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Cycle-time distribution</h4><div class="h-64"><canvas id="cycleDistributionChart"></canvas></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Follow-up / rework distribution</h4><div class="h-64"><canvas id="followupDistributionChart"></canvas></div></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Task-level outcome evidence</h4><p id="outcomeEvidenceFilter" class="text-sm opacity-60">Recent project-scoped task evidence for the selected filters.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Agent</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="outcomeEvidenceTable"></tbody></table></div></div></div></section>					<section id="analytics-agents" data-analytics-section="agents" class="space-y-6 mb-6">
+						<div><h3 class="text-xl font-bold">Agent performance</h3><p class="text-sm opacity-60">Reusable Agent definitions, separate from model configurations. Select an Agent for detailed evidence.</p></div>
+						<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Technical completion</th><th>Goal achievement</th><th>First pass</th><th>Follow-up</th><th>Duration</th><th>Cost / achieved goal</th><th>Most-used model</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div></div></div>
+						<div id="agentDetail" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Selected Agent outcome trend</h4><div class="h-64"><canvas id="agentOutcomeTrendChart"></canvas></div></div></div>
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Selected Agent model mix</h4><div class="h-64"><canvas id="agentModelMixChart"></canvas></div></div></div>
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Performance by task category</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Category</th><th>Tasks</th><th>Technical</th><th>Goal</th><th>Follow-up</th></tr></thead><tbody id="agentCategoryTable"></tbody></table></div></div></div>
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Recurring failures</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Failures</th><th>Last error</th></tr></thead><tbody id="agentFailureTable"></tbody></table></div></div></div>
+							<div class="card bg-base-100 border border-base-300 lg:col-span-2"><div class="card-body"><h4 class="card-title text-lg">Skills used by selected Agent</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical</th><th>Goal</th><th>Follow-up</th></tr></thead><tbody id="agentSkillTable"></tbody></table></div></div></div>
+						</div>
+						<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Recent supporting tasks for selected Agent</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Model</th><th>Executions</th><th>Follow-ups</th></tr></thead><tbody id="agentEvidenceTable"></tbody></table></div></div></div>
+					</section>
+					<section id="analytics-workflows" data-analytics-section="workflows" class="space-y-6 mb-6">
+						<div><h3 class="text-xl font-bold">Workflow performance</h3><p class="text-sm opacity-60">Automation invocations use the selected period; waiting, blocked, bottleneck, and health values are current state.</p></div>
+						<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Workflow</th><th>Invocations</th><th>Completion</th><th>Failures</th><th>Duration</th><th>Waiting / blocked</th><th>Known cost</th><th>Health</th></tr></thead><tbody id="workflowPerformanceTable"></tbody></table></div></div></div>
+						<div id="workflowDetail" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Node funnel</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Node</th><th>Entered</th><th>Conversion</th></tr></thead><tbody id="workflowFunnelTable"></tbody></table></div></div></div>
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Node durations</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Node</th><th>Samples</th><th>Average</th></tr></thead><tbody id="workflowDurationTable"></tbody></table></div></div></div>
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Node failures</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Node</th><th>Count</th><th>Last failure</th></tr></thead><tbody id="workflowFailureTable"></tbody></table></div></div></div>
+							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Current bottlenecks</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Node</th><th>Waiting</th><th>Blocked</th></tr></thead><tbody id="workflowBottleneckTable"></tbody></table></div></div></div>
+						</div>
+					</section>
+					<section id="analytics-learning" data-analytics-section="learning" class="space-y-4"><div><h3 class="text-xl font-bold mt-6">Learning</h3><p class="text-sm opacity-60">Observed skill activity and task outcomes; association is not causation.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes among tasks using skills</h4><p class="text-sm opacity-60">Tasks where a skill was selected or loaded in the selected period. Small samples are descriptive only.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical task outcome</th><th>Goal achievement</th><th>Follow-up</th></tr></thead><tbody id="skillOutcomeTable"></tbody></table></div></div></div></section>
+					<div id="analytics-usage" data-analytics-section="usage"><h3 class="text-xl font-bold mt-6">Usage</h3><p class="text-sm opacity-60 mb-4">Local provider usage and available recorded cost.</p><div id="usageOutcomeContext" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div><div class="card bg-base-100 border border-base-300 mb-6"><div class="card-body"><h4 class="card-title text-lg">Model performance by task category</h4><p class="text-sm opacity-60">Technical terminal outcomes only; every row shows its sample.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Model</th><th>Task category</th><th>Tasks</th><th>Technical completion</th></tr></thead><tbody id="modelCategoryTable"></tbody></table></div></div></div></div>
 					<!-- Provider Account Cards: current account state, intentionally independent of the date window. -->
 					<div class="mb-2"><h3 class="text-lg font-semibold">Provider account limits</h3><p class="text-xs opacity-60">Current account state · not date-filtered</p></div>
 					<div id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">					<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>
@@ -275,11 +298,11 @@ templ analyticsContent(currentProject *models.Project) {
 								const box = document.getElementById('analyticsError');
 								box.textContent = error && error.message ? error.message : 'Analytics request failed';
 								box.classList.remove('hidden');
-								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',9],['agentEvidenceTable',6],['workflowPerformanceTable',8],['skillOutcomeTable',5],['usageBreakdownTable',8],['underusedSkillsTable',4]].forEach(function(item) {
+								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',9],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',8],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillOutcomeTable',5],['modelCategoryTable',4],['usageBreakdownTable',8],['underusedSkillsTable',4]].forEach(function(item) {
 									const table = document.getElementById(item[0]);
 									if (table) table.innerHTML = '<tr><td colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable</td></tr>';
 								});
-								['analyticsKpis','outcomeFunnel','analyticsImprovements','analyticsAttention','usageOutcomeContext','accountUsageCards','frequentTasksList'].forEach(function(id) { const node=document.getElementById(id); if (node) node.textContent='Analytics unavailable'; });
+								['analyticsKpis','analyticsMetricDefinitions','outcomeFunnel','analyticsImprovements','analyticsAttention','usageOutcomeContext','accountUsageCards','frequentTasksList'].forEach(function(id) { const node=document.getElementById(id); if (node) node.textContent='Analytics unavailable'; });
 								const failedBody = document.querySelector('#failedPatternsTable tbody');
 								if (failedBody) failedBody.innerHTML = '<tr><td colspan="4" class="text-center opacity-50">Analytics unavailable</td></tr>';
 							}
@@ -287,7 +310,7 @@ templ analyticsContent(currentProject *models.Project) {
 							destroyChart(key);
 								const canvas = document.getElementById(canvasID);
 								if (!canvas) return null;
-								const chartLabels = { cycleDistributionChart: 'Cycle-time distribution', followupDistributionChart: 'Follow-up distribution', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', successFailureChart: 'Technical execution completion over time', hourlyTrendsChart: 'Task executions by hour', avgTimeTaskChart: 'Average execution duration by task', avgTimeAgentChart: 'Average execution duration by model', agentUsageChart: 'Model breakdown by executions' };
+								const chartLabels = { cycleDistributionChart: 'Cycle-time distribution', followupDistributionChart: 'Follow-up distribution', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', successFailureChart: 'Technical execution completion over time', hourlyTrendsChart: 'Task executions by hour', avgTimeTaskChart: 'Average execution duration by task', avgTimeAgentChart: 'Average execution duration by model', agentUsageChart: 'Model breakdown by executions', agentOutcomeTrendChart: 'Selected Agent technical outcomes over time', agentModelMixChart: 'Selected Agent model mix' };
 								canvas.setAttribute('role', 'img');
 								canvas.setAttribute('aria-label', chartLabels[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
 							if (old) old.remove();
@@ -318,8 +341,15 @@ templ analyticsContent(currentProject *models.Project) {
 								if (agent) params.set('agent', agent); else params.delete('agent');
 								if (workflow) params.set('workflow', workflow); else params.delete('workflow');
 								return '/analytics?' + params.toString();						}
-						function viewDetailElements(view) {
-							const ids = {
+							function analyticsParams(initial) {
+								const params = new URLSearchParams(initial || {});
+								const agent = document.getElementById('analyticsAgentFilter').value;
+								const workflow = document.getElementById('analyticsWorkflowFilter').value;
+								if (agent) params.set('agent', agent);
+								if (workflow) params.set('workflow', workflow);
+								return params;
+							}
+							function viewDetailElements(view) {							const ids = {
 								outcomes: ['successFailureChart', 'avgTimeTaskChart', 'failedPatternsTable'],
 								agents: ['avgTimeAgentChart', 'agentUsageChart'],
 									learning: ['skillUsageTrendChart', 'skillTopChart', 'skillFollowChart', 'skillAgentChart', 'underusedSkillsTable', 'memoryEffectivenessUnavailable'],								usage: ['accountUsageCards', 'usageRateChart', 'modelTokenBreakdownChart', 'usageBreakdownTable'],
@@ -347,24 +377,34 @@ templ analyticsContent(currentProject *models.Project) {
 								if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));						}
 
 						function ratioText(value) { return formatNumber(value.numerator) + ' / ' + formatNumber(value.denominator) + ' (' + Number(value.percent || 0).toFixed(1) + '%)'; }
+						function cycleBucket(value) { value=Number(value||0); if(value<60000)return '< 1m'; if(value<600000)return '1-10m'; if(value<3600000)return '10-60m'; if(value<86400000)return '1-24h'; return '>= 24h'; }
+						function followupBucket(value) { value=Number(value||0); return value>=3?'3+':String(value); }
 						function costCoverageText(value) { return value ? formatCost(value.value) + ' across ' + value.covered + ' of ' + value.eligible : 'Unavailable'; }
 						function renderDashboard(data) {
 							const current = data.current || {};
 							const previous = data.previous || null;
 							const definitions = new Map((data.definitions || []).map(function(item) { return [item.key, item]; }));
+							const definitionList = document.getElementById('analyticsMetricDefinitions');
+							if (definitionList) definitionList.innerHTML = (data.definitions || []).map(function(item) { return '<div><dt class="font-semibold">'+escapeHTML(item.label)+'</dt><dd class="opacity-70">'+escapeHTML(item.definition)+' <strong>Denominator:</strong> '+escapeHTML(item.denominator)+'</dd></div>'; }).join('') || '<p class="opacity-50">Metric definitions unavailable.</p>';
 							const cards = [
-								['technical_completion', 'Technical completion rate', ratioText(current.technical_completion || {})],
-								['goal_achievement', 'Goal achievement rate', ratioText(current.goal_achievement || {})],
-								['first_pass', 'Technical first-pass rate', ratioText(current.first_pass || {})],
-								['follow_up', 'Follow-up rate', ratioText(current.follow_up || {})],
-								['median_cycle_time', 'Median task cycle time', formatDuration(current.median_cycle_time_ms || 0)],
-								['known_cost_per_achieved_goal', 'Cost per achieved goal', costCoverageText(current.known_cost_per_achieved_goal)],
-								['sample_size', 'Sample size', formatNumber(current.tasks_evaluated || 0) + ' tasks']
+								{key:'technical_completion', label:'Technical completion rate', value:ratioText(current.technical_completion || {}), sample:(current.technical_completion || {}).denominator || 0, kind:'ratio'},
+								{key:'goal_achievement', label:'Goal achievement rate', value:ratioText(current.goal_achievement || {}), sample:(current.goal_achievement || {}).denominator || 0, kind:'ratio'},
+								{key:'first_pass', label:'Technical first-pass rate', value:ratioText(current.first_pass || {}), sample:(current.first_pass || {}).denominator || 0, kind:'ratio'},
+								{key:'follow_up', label:'Follow-up rate', value:ratioText(current.follow_up || {}), sample:(current.follow_up || {}).denominator || 0, kind:'ratio'},
+								{key:'median_cycle_time', label:'Median task cycle time', value:formatDuration(current.median_cycle_time_ms || 0), sample:current.cycle_sample_size || 0, kind:'duration'},
+								{key:'cycle_time_p90', label:'P90 task cycle time', value:formatDuration(current.p90_cycle_time_ms || 0), sample:current.cycle_sample_size || 0, kind:'p90'},
+								{key:'known_cost_per_achieved_goal', label:'Cost per achieved goal', value:costCoverageText(current.known_cost_per_achieved_goal), sample:current.known_cost_per_achieved_goal ? current.known_cost_per_achieved_goal.covered : 0, kind:'cost'},
+								{key:'cancelled_executions', label:'Cancelled executions', value:formatNumber(current.cancelled_execution_count || 0) + ' / ' + formatNumber((current.technical_completion || {}).denominator || 0), sample:(current.technical_completion || {}).denominator || 0, kind:'count'},
+								{key:'sample_size', label:'Sample size', value:formatNumber(current.tasks_evaluated || 0) + ' tasks', sample:current.tasks_evaluated || 0, kind:'count'}
 							];
 							document.getElementById('analyticsKpis').innerHTML = cards.map(function(card) {
-								const definition = definitions.get(card[0]);
+								const definition = definitions.get(card.key);
 								let delta = '';
-									if (previous && previous[card[0]] && current[card[0]] && typeof current[card[0]].percent === 'number') { const change = Number(current[card[0]].percent) - Number(previous[card[0]].percent || 0); delta = '<div class="text-xs opacity-60">' + (change >= 0 ? '+' : '') + change.toFixed(1) + ' percentage points · previous ' + Number(previous[card[0]].percent).toFixed(1) + '% · n=' + previous[card[0]].denominator + '</div>'; }								return '<a class="card bg-base-100 border border-base-300 hover:border-primary" href="' + escapeHTML(analyticsURL(card[0] === 'known_cost_per_achieved_goal' ? 'usage' : 'outcomes')) + '"><div class="card-body p-4"><div class="text-sm font-semibold">' + escapeHTML(card[1]) + '</div><div class="text-xl font-bold">' + escapeHTML(card[2]) + '</div>' + delta + '<div class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator</div></div></a>';
+								if (previous && card.kind === 'ratio' && previous[card.key] && current[card.key]) { const change = Number(current[card.key].percent || 0) - Number(previous[card.key].percent || 0); delta = (change >= 0 ? '+' : '') + change.toFixed(1) + ' percentage points; previous ' + Number(previous[card.key].percent || 0).toFixed(1) + '%; n=' + previous[card.key].denominator; }
+								if (previous && (card.kind === 'duration' || card.kind === 'p90')) { const field=card.kind==='p90'?'p90_cycle_time_ms':'median_cycle_time_ms'; const change = Number(current[field] || 0) - Number(previous[field] || 0); delta = (change >= 0 ? '+' : '-') + formatDuration(Math.abs(change)) + '; previous ' + formatDuration(previous[field] || 0) + '; n=' + (previous.cycle_sample_size || 0); }
+								if (previous && card.kind === 'cost') { delta = previous.known_cost_per_achieved_goal ? 'previous ' + costCoverageText(previous.known_cost_per_achieved_goal) : 'previous unavailable'; }
+								const params = new URLSearchParams(window.location.search); params.set('view', card.key === 'known_cost_per_achieved_goal' ? 'usage' : 'outcomes'); params.set('evidence', card.key);
+								return '<a class="card bg-base-100 border border-base-300 hover:border-primary" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-4"><div class="text-sm font-semibold">' + escapeHTML(card.label) + '</div><div class="text-xl font-bold">' + escapeHTML(card.value) + '</div><div class="text-xs opacity-60">sample n=' + card.sample + (delta ? ' · ' + escapeHTML(delta) : '') + '</div><div class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator</div></div></a>';
 							}).join('');
 							const recent = data.recent_outcomes || [];
 								document.getElementById('recentOutcomesTable').innerHTML = recent.length ? recent.map(function(row) {
@@ -372,15 +412,41 @@ templ analyticsContent(currentProject *models.Project) {
 									const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name);
 									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.merge_state || 'Not applicable') + '</td><td>' + agent + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
 								}).join('') : '<tr><td colspan="10" class="text-center opacity-50">No task outcomes in this period</td></tr>';
-								document.getElementById('outcomeEvidenceTable').innerHTML = recent.length ? recent.map(function(row) {
+								const evidenceParams = new URLSearchParams(window.location.search);
+								const evidenceKey = evidenceParams.get('evidence') || '';
+								const evidenceValue = evidenceParams.get('model') || evidenceParams.get('period') || '';
+								const evidence = recent.filter(function(row) {
+									if (evidenceParams.get('model') && row.model !== evidenceParams.get('model')) return false;
+									if (evidenceParams.get('period') && !(row.latest_started_at || '').startsWith(evidenceParams.get('period'))) return false;
+									switch (evidenceKey) {
+									case 'technical_completion': case 'technical_completed': return row.technical_result === 'completed';
+									case 'goal_achievement': case 'goal_achieved': return row.goal_result === 'achieved';
+									case 'first_pass': return row.first_pass_completed === true;
+									case 'follow_up': return Number(row.follow_up_count || 0) > 0;
+									case 'cancelled_executions': return row.technical_result === 'cancelled';
+									case 'known_cost_per_achieved_goal': return row.goal_result === 'achieved' && row.known_cost_usd != null;
+									case 'created': return row.created_in_period === true;
+									case 'merged': return row.merge_state === 'merged';
+									case 'cycleDistribution': return cycleBucket(row.cycle_time_ms || 0) === evidenceParams.get('cycleDistribution');
+									case 'followupDistribution': return followupBucket(row.follow_up_count || 0) === evidenceParams.get('followupDistribution');
+									default: return true;
+									}
+								});
+								const evidenceLabel = document.getElementById('outcomeEvidenceFilter');
+								if (evidenceLabel) evidenceLabel.textContent = evidenceKey || evidenceValue ? 'Filtered recent supporting tasks: ' + (evidenceKey || 'selection') + (evidenceValue ? ' · ' + evidenceValue : '') + ' · n=' + evidence.length : 'Recent project-scoped task evidence for the selected filters · n=' + evidence.length;
+								document.getElementById('outcomeEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) {
 									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
 									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
-								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { return '<a class="card bg-base-200" href="' + escapeHTML(analyticsURL('outcomes')) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
+								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { const params=new URLSearchParams(window.location.search); params.set('view','outcomes'); params.set('evidence',stage.key); return '<a class="card bg-base-200" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
 							renderDistributionChart('cycleDistribution', 'cycleDistributionChart', data.cycle_distribution || []);
 							renderDistributionChart('followupDistribution', 'followupDistributionChart', data.follow_up_distribution || []);
 								renderAgentPerformance(data.agents || []);
+								renderAgentDetail(data.agent_detail || null);
 								renderSkillOutcomes(data.skill_outcomes || []);
-								renderWorkflowPerformance(data.workflows || []);							renderInsights(data.insights || []);
+								renderModelCategories(data.model_categories || []);
+								renderWorkflowPerformance(data.workflows || []);
+								renderWorkflowDetail(data.workflow_detail || null);
+								renderInsights(data.insights || []);
 								renderUsageOutcomeContext(current, latestUsageAnalytics ? latestUsageAnalytics.totals : null);
 							}
 							function renderUsageOutcomeContext(current, totals) {
@@ -389,12 +455,12 @@ templ analyticsContent(currentProject *models.Project) {
 								const inputTokens = totals && totals.input_tokens ? Number(totals.input_tokens) : 0;
 								const cachedTokens = totals && totals.cached_input_tokens ? Number(totals.cached_input_tokens) : 0;
 								const cacheText = inputTokens > 0 ? formatNumber(cachedTokens) + ' / ' + formatNumber(inputTokens) + ' input tokens (' + (cachedTokens * 100 / inputTokens).toFixed(1) + '%)' : 'Unavailable';
-								usageContext.innerHTML = [['Known cost / achieved goal', costCoverageText(current.known_cost_per_achieved_goal)], ['Known cost / technical completion', costCoverageText(current.known_cost_per_completed_task)], ['Known failed execution cost', formatCost(current.known_failed_execution_cost || 0)], ['Tokens / achieved goal', current.tokens_per_achieved_goal ? formatNumber(current.tokens_per_achieved_goal.value) + ' across ' + current.tokens_per_achieved_goal.covered + ' of ' + current.tokens_per_achieved_goal.eligible : 'Unavailable'], ['Cache utilization', cacheText]].map(function(item) { return '<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">' + escapeHTML(item[0]) + '</span><strong>' + escapeHTML(item[1]) + '</strong></div></div>'; }).join('');
+								usageContext.innerHTML = [['Known cost / achieved goal', costCoverageText(current.known_cost_per_achieved_goal)], ['Known cost / technical completion', costCoverageText(current.known_cost_per_completed_task)], ['Known failed execution cost', current.known_failed_execution_cost ? formatCost(current.known_failed_execution_cost.value) + ' recorded across ' + current.known_failed_execution_cost.covered + ' of ' + current.known_failed_execution_cost.eligible + ' failed executions' : 'Unavailable'], ['Tokens / achieved goal', current.tokens_per_achieved_goal ? formatNumber(current.tokens_per_achieved_goal.value) + ' across ' + current.tokens_per_achieved_goal.covered + ' of ' + current.tokens_per_achieved_goal.eligible : 'Unavailable'], ['Cache utilization', cacheText]].map(function(item) { return '<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">' + escapeHTML(item[0]) + '</span><strong>' + escapeHTML(item[1]) + '</strong></div></div>'; }).join('');
 							}
 						function renderDistributionChart(key, canvasID, rows) {
 							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');
 							if (!canvas) return;
-							charts[key] = new Chart(canvas.getContext('2d'), { type: 'bar', data: { labels: rows.map(function(row) { return row.label; }), datasets: [{ label: 'Tasks (sample n=' + rows.reduce(function(sum, row) { return sum + row.count; }, 0) + ')', data: rows.map(function(row) { return row.count; }), backgroundColor: 'rgba(59, 130, 246, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } } });
+							charts[key] = new Chart(canvas.getContext('2d'), { type: 'bar', data: { labels: rows.map(function(row) { return row.label; }), datasets: [{ label: 'Tasks (sample n=' + rows.reduce(function(sum, row) { return sum + row.count; }, 0) + ')', data: rows.map(function(row) { return row.count; }), backgroundColor: 'rgba(59, 130, 246, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, onClick: function(_, items) { if (items.length) navigateEvidence('outcomes', key, rows[items[0].index].label); }, scales: { y: { beginAtZero: true } } } });
 						}
 							function renderAgentPerformance(rows) {
 								const filter = document.getElementById('analyticsAgentFilter');
@@ -403,11 +469,37 @@ templ analyticsContent(currentProject *models.Project) {
 								document.getElementById('agentPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const name = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name); return '<tr><td>' + name + '</td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.first_pass)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td><td>' + escapeHTML(formatDuration(row.median_duration_ms || 0)) + '</td><td>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '</td><td>' + escapeHTML(row.most_used_model || 'Unavailable') + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="text-center opacity-50">No Agent evidence in this period</td></tr>';
 								const evidence = ((latestDashboard && latestDashboard.recent_outcomes) || []).filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								document.getElementById('agentEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) { const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'</a></td><td>'+escapeHTML(row.technical_result)+'</td><td>'+escapeHTML(row.goal_result||'Not goal-bearing')+'</td><td>'+escapeHTML(row.model)+'</td><td>'+row.execution_count+'</td><td>'+row.follow_up_count+'</td></tr>'; }).join('') : '<tr><td colspan="6" class="text-center opacity-50">No recent supporting tasks in this period</td></tr>';						}
+							function navigateEvidence(view, key, value) {
+								const params = new URLSearchParams(window.location.search);
+								params.set('view', view);
+								params.set('evidence', key);
+								if (value !== undefined && value !== null && value !== '') params.set(key, value); else params.delete(key);
+								history.pushState({}, '', '/analytics?' + params.toString());
+								applyView(view, false);
+								renderDashboard(latestDashboard || {});
+							}
+							function renderAgentDetail(detail) {
+								const trend = detail ? (detail.outcome_trend || []) : [];
+								let canvas = renderChartState('agentOutcomeTrend', 'agentOutcomeTrendChart', trend, 'Select an Agent to see its outcome trend');
+								if (canvas) charts.agentOutcomeTrend = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:trend.map(r=>r.period),datasets:[{label:'Completed',data:trend.map(r=>r.completed),backgroundColor:'rgba(34,197,94,.65)'},{label:'Failed',data:trend.map(r=>r.failed),backgroundColor:'rgba(239,68,68,.65)'},{label:'Cancelled',data:trend.map(r=>r.cancelled),backgroundColor:'rgba(245,158,11,.65)'}]},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','period',trend[items[0].index].period);},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+trend[items[0].dataIndex].sample_size:'';}}}},scales:{y:{beginAtZero:true}}}});
+								const mix = detail ? (detail.model_mix || []) : [];
+								canvas = renderChartState('agentModelMix', 'agentModelMixChart', mix, 'Select an Agent to see its model mix');
+								if (canvas) charts.agentModelMix = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:mix.map(r=>r.model),datasets:[{label:'Executions',data:mix.map(r=>r.execution_count),backgroundColor:'rgba(59,130,246,.65)'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model',mix[items[0].index].model);},scales:{x:{beginAtZero:true}}}});
+								function rowsOrEmpty(id, rows, columns, render) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(render).join(''):'<tr><td colspan="'+columns+'" class="text-center opacity-50">'+(detail?'No evidence in this period':'Select an Agent to inspect evidence')+'</td></tr>'; }
+								rowsOrEmpty('agentCategoryTable',detail?(detail.categories||[]):[],5,function(row){return '<tr><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});
+								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.task_title)+'</a></td><td>'+row.failure_count+'</td><td>'+escapeHTML(row.last_error||'Unavailable')+'</td></tr>';});
+								rowsOrEmpty('agentSkillTable',detail?(detail.skills||[]):[],5,function(row){return '<tr><td><a class="link" href="/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(row.skill_handle)+'"><code>'+escapeHTML(row.skill_handle)+'</code></a></td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});
+							}
+							function renderModelCategories(rows) {
+								const table=document.getElementById('modelCategoryTable'); if(!table)return;
+								table.innerHTML=rows.length?rows.map(function(row){return '<tr data-model="'+escapeHTML(row.model)+'"><td><button class="link" type="button" data-model-evidence="'+escapeHTML(row.model)+'">'+escapeHTML(row.model)+'</button></td><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td></tr>';}).join(''):'<tr><td colspan="4" class="text-center opacity-50">No model/category evidence in this period</td></tr>';
+								table.querySelectorAll('[data-model-evidence]').forEach(function(button){button.addEventListener('click',function(){navigateEvidence('outcomes','model',button.dataset.modelEvidence);},{signal:eventSignal});});
+							}
 							function renderSkillOutcomes(rows) {
 								const table = document.getElementById('skillOutcomeTable');
 								if (!table) return;
 								table.innerHTML = rows.length ? rows.map(function(row) {
-									return '<tr><td><code>' + escapeHTML(row.skill_handle) + '</code></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';
+									return '<tr><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';
 								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
 							}
 							function renderWorkflowPerformance(rows) {
@@ -415,10 +507,17 @@ templ analyticsContent(currentProject *models.Project) {
 							const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
 							document.getElementById('workflowPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'</a></td><td>'+row.invocation_count+'</td><td>'+row.completed_count+' / '+(row.completed_count+row.failed_count)+' ('+Number(row.completion_rate||0).toFixed(1)+'%)</td><td>'+row.failed_count+'</td><td>'+escapeHTML(formatDuration(row.average_duration_ms||0))+'</td><td>'+row.waiting_count+' / '+row.blocked_count+'</td><td>Unavailable</td><td>'+escapeHTML(row.health)+'</td></tr>'; }).join('') : '<tr><td colspan="8" class="text-center"><span class="opacity-50">No automations in this project.</span> <a class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Inspect or create automations</a></td></tr>';
 						}
-						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){return '<a class="block link" href="'+escapeHTML(analyticsURL(row.evidence_view||'outcomes'))+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
+						function renderWorkflowDetail(detail) {
+							function render(id, rows, columns, formatter, empty) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(formatter).join(''):'<tr><td colspan="'+columns+'" class="text-center opacity-50">'+(detail?empty:'Select a workflow to inspect node metrics')+'</td></tr>'; }
+							render('workflowFunnelTable',detail?(detail.funnel||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.entered_count+'</td><td>'+Number(row.conversion_percent||0).toFixed(1)+'%</td></tr>';},'No node entries in this period');
+							render('workflowDurationTable',detail?(detail.durations||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.sample_count+'</td><td>'+escapeHTML(formatDuration(Number(row.average_seconds||0)*1000))+'</td></tr>';},'No completed node durations in this period');
+							render('workflowFailureTable',detail?(detail.failures||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.count+'</td><td>'+escapeHTML(row.last_failure?new Date(row.last_failure).toLocaleString():'Unavailable')+'</td></tr>';},'No node failures in this period');
+							render('workflowBottleneckTable',detail?(detail.bottlenecks||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.waiting+'</td><td>'+row.blocked+'</td></tr>';},'No current bottlenecks');
+						}
+						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){const params=new URLSearchParams(window.location.search);params.set('view',row.evidence_view||'outcomes');params.set('evidence',row.metric_key);return '<a class="block link" href="/analytics?'+escapeHTML(params.toString())+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
 
 						async function loadDashboard() {
-							const params = new URLSearchParams({ project_id: projectID, range: usageRangeParam(), compare: document.getElementById('comparePeriod').checked ? '1' : '0' });
+							const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, compare: document.getElementById('comparePeriod').checked ? '1' : '0' });
 							try { latestDashboard = await fetchJSON('/api/analytics/dashboard?' + params.toString()); renderDashboard(latestDashboard); }
 							catch (error) { showAnalyticsError(error); }
 						}
@@ -495,7 +594,7 @@ templ analyticsContent(currentProject *models.Project) {
 								async function loadSkillAnalytics() {
 									try {
 										const groupBy = document.getElementById('groupBy').value;
-									const params = new URLSearchParams({ project_id: projectID, range: skillRangeParam(), group_by: groupBy });
+									const params = analyticsParams({ project_id: projectID, range: skillRangeParam(), group_by: groupBy });
 										const data = await fetchJSON('/api/analytics/skills?' + params.toString());
 										renderSkillAnalytics(data);
 									} catch (e) { console.error('loadSkillAnalytics:', e); showAnalyticsError(e); }
@@ -644,7 +743,7 @@ templ analyticsContent(currentProject *models.Project) {
 												{ label: 'Created', data: chartRows.map(r => r.created_count || 0), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 },
 												{ label: 'Edited', data: chartRows.map(r => r.edited_count || 0), backgroundColor: 'rgba(147, 51, 234, 0.5)', borderColor: 'rgb(147, 51, 234)', borderWidth: 1 }
 											] },
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(items.length)window.location.href='/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(chartRows[items[0].index].skill_handle);}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 								}
@@ -659,7 +758,7 @@ templ analyticsContent(currentProject *models.Project) {
 												{ label: 'Used', data: chartRows.map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 												{ label: 'Ignored', data: chartRows.map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
 											] },
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(items.length)window.location.href='/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(chartRows[items[0].index].skill_handle);}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 								}
@@ -681,7 +780,7 @@ templ analyticsContent(currentProject *models.Project) {
 												labels: rows.map(row => skillLabel(row.agent_name + ' · ' + row.skill_handle)),
 												datasets: [{ label: 'Activity', data: rows.map(row => row.activity), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 }]
 											},
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(items.length)window.location.href='/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(rows[items[0].index].skill_handle);}, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 								}
@@ -882,7 +981,7 @@ templ analyticsContent(currentProject *models.Project) {
 								async function loadUsageAnalytics(refreshUsage) {
 									try {
 										const groupBy = document.getElementById('groupBy').value;
-										const params = new URLSearchParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy });
+										const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy });
 										if (refreshUsage) params.append('refresh', 'true');
 										latestUsageAnalytics = await fetchJSON('/api/analytics/usage?' + params.toString());
 										renderUsageAnalytics(latestUsageAnalytics);
@@ -894,7 +993,7 @@ templ analyticsContent(currentProject *models.Project) {
 						try {
 						const groupBy = document.getElementById('groupBy').value;
 						const { dateFrom, dateTo } = getDateRange();
-						const params = new URLSearchParams({ project_id: projectID, group_by: groupBy });
+						const params = analyticsParams({ project_id: projectID, group_by: groupBy });
 						if (dateFrom) params.append('date_from', dateFrom);
 						if (dateTo) params.append('date_to', dateTo);
 
@@ -916,10 +1015,17 @@ templ analyticsContent(currentProject *models.Project) {
 										yAxisID: 'y'
 									},
 									{
-										label: 'Total Executions',
+										label: 'Total terminal executions',
 										data: data.map(d => d.TotalCount || 0),
 										borderColor: 'rgb(59, 130, 246)',
 										backgroundColor: 'rgba(59, 130, 246, 0.1)',
+										yAxisID: 'y1'
+									},
+									{
+										label: 'Cancelled executions',
+										data: data.map(d => d.CancelledCount || 0),
+										borderColor: 'rgb(245, 158, 11)',
+										backgroundColor: 'rgba(245, 158, 11, 0.1)',
 										yAxisID: 'y1'
 									}
 								]
@@ -927,9 +1033,9 @@ templ analyticsContent(currentProject *models.Project) {
 							options: {
 								responsive: true,
 								maintainAspectRatio: false,
-								interaction: { mode: 'index', intersect: false },
-								plugins: { tooltip: analyticsLineTooltipOptions() },
-								scales: {
+									interaction: { mode: 'index', intersect: false },
+									onClick: function(_, items) { if (items.length) navigateEvidence('outcomes', 'period', data[items[0].index].Period || ''); },
+									plugins: { tooltip: analyticsLineTooltipOptions() },								scales: {
 									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Technical completion rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }
 								}
@@ -942,7 +1048,7 @@ templ analyticsContent(currentProject *models.Project) {
 					async function loadHourlyTrends() {
 						try {
 						const { dateFrom, dateTo } = getDateRange();
-						const params = new URLSearchParams({ project_id: projectID });
+						const params = analyticsParams({ project_id: projectID });
 						if (dateFrom) params.append('date_from', dateFrom);
 						if (dateTo) params.append('date_to', dateTo);
 
@@ -978,7 +1084,7 @@ templ analyticsContent(currentProject *models.Project) {
 					async function loadAvgTimeByTask() {
 						try {
 							const { dateFrom, dateTo } = getDateRange();
-							const params = new URLSearchParams({ project_id: projectID, limit: '10' });
+							const params = analyticsParams({ project_id: projectID, limit: '10' });
 							if (dateFrom) params.set('date_from', dateFrom);
 							if (dateTo) params.set('date_to', dateTo);
 							const data = await fetchJSON('/api/analytics/avg-execution-time-by-task?' + params.toString());
@@ -1000,6 +1106,7 @@ templ analyticsContent(currentProject *models.Project) {
 								responsive: true,
 								maintainAspectRatio: false,
 								indexAxis: 'y',
+								onClick:function(_,items){if(items.length)window.location.href='/tasks/'+encodeURIComponent(data[items[0].index].ID)+'?project_id='+encodeURIComponent(projectID);},
 								scales: { x: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },
 								plugins: {
 									tooltip: {
@@ -1019,7 +1126,7 @@ templ analyticsContent(currentProject *models.Project) {
 					async function loadAvgTimeByAgent() {
 						try {
 							const { dateFrom, dateTo } = getDateRange();
-							const params = new URLSearchParams({ project_id: projectID });
+							const params = analyticsParams({ project_id: projectID });
 							if (dateFrom) params.set('date_from', dateFrom);
 							if (dateTo) params.set('date_to', dateTo);
 							const data = await fetchJSON('/api/analytics/avg-execution-time-by-agent?' + params.toString());
@@ -1059,7 +1166,7 @@ templ analyticsContent(currentProject *models.Project) {
 					async function loadAgentUsage() {
 						try {
 							const { dateFrom, dateTo } = getDateRange();
-							const params = new URLSearchParams({ project_id: projectID });
+							const params = analyticsParams({ project_id: projectID });
 							if (dateFrom) params.set('date_from', dateFrom);
 							if (dateTo) params.set('date_to', dateTo);
 							const data = await fetchJSON('/api/analytics/agent-usage-by-project?' + params.toString());
@@ -1094,7 +1201,7 @@ templ analyticsContent(currentProject *models.Project) {
 					async function loadMostFrequentTasks() {
 						try {
 							const { dateFrom, dateTo } = getDateRange();
-							const params = new URLSearchParams({ project_id: projectID, limit: '10' });
+							const params = analyticsParams({ project_id: projectID, limit: '10' });
 							if (dateFrom) params.set('date_from', dateFrom);
 							if (dateTo) params.set('date_to', dateTo);
 							const data = await fetchJSON('/api/analytics/most-frequent-tasks?' + params.toString());
@@ -1121,7 +1228,7 @@ templ analyticsContent(currentProject *models.Project) {
 					async function loadFailedTaskPatterns() {
 						try {
 							const { dateFrom, dateTo } = getDateRange();
-							const params = new URLSearchParams({ project_id: projectID, limit: '10' });
+							const params = analyticsParams({ project_id: projectID, limit: '10' });
 							if (dateFrom) params.set('date_from', dateFrom);
 							if (dateTo) params.set('date_to', dateTo);
 							const data = await fetchJSON('/api/analytics/failed-task-patterns?' + params.toString());
@@ -1167,14 +1274,16 @@ templ analyticsContent(currentProject *models.Project) {
 							const group = params.get('group_by') || 'day';
 							if (['day', 'week', 'month'].includes(group)) document.getElementById('groupBy').value = group;
 							document.getElementById('comparePeriod').checked = params.get('compare') !== '0' && range !== 'all';
+							document.getElementById('analyticsAgentFilter').value = params.get('agent') || '';
+							document.getElementById('analyticsWorkflowFilter').value = params.get('workflow') || '';
 							applyView(params.get('view') || 'overview', false);
 						}
 						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.addEventListener('click', function() { applyView(button.dataset.analyticsView, true); }, { signal: eventSignal }); });
 						document.getElementById('refreshBtn').addEventListener('click', function() { history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(true); }, { signal: eventSignal });
 						['dateRange', 'groupBy', 'comparePeriod'].forEach(function(id) { document.getElementById(id).addEventListener('change', function() { if (document.getElementById('dateRange').value === 'all') document.getElementById('comparePeriod').checked = false; history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal }); });
-							document.getElementById('analyticsAgentFilter').addEventListener('change', function() { history.replaceState({}, '', analyticsURL(selectedView)); if (latestDashboard) renderAgentPerformance(latestDashboard.agents || []); }, { signal: eventSignal });
-							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { history.replaceState({}, '', analyticsURL(selectedView)); if (latestDashboard) renderWorkflowPerformance(latestDashboard.workflows || []); }, { signal: eventSignal });						const usageRateSelect = document.getElementById('usageRateModelSelect');
-						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });
+							document.getElementById('analyticsAgentFilter').addEventListener('change', function() { history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
+							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
+							const usageRateSelect = document.getElementById('usageRateModelSelect');						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });
 						window.addEventListener('popstate', function() { restoreURLState(); loadAllData(false); }, { signal: eventSignal });
 						restoreURLState();
 						loadAllData(false);

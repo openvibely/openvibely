@@ -24,6 +24,7 @@ type SkillAnalyticsFilter struct {
 	DateTo     time.Time
 	ProjectID  string
 	AgentID    string
+	WorkflowID string
 	Surface    string
 	SkillScope string
 	EventType  string
@@ -377,16 +378,22 @@ func skillAnalyticsWhere(filter SkillAnalyticsFilter) (string, []any) {
 		args = append(args, formatSQLiteTime(filter.DateFrom.UTC()))
 	}
 	if !filter.DateTo.IsZero() {
-		where += " AND e.created_at <= ?"
+		where += " AND e.created_at < ?"
 		args = append(args, formatSQLiteTime(filter.DateTo.UTC()))
 	}
 	if filter.ProjectID != "" {
 		where += " AND e.project_id = ?"
 		args = append(args, filter.ProjectID)
 	}
-	if filter.AgentID != "" {
+	if filter.AgentID == "__unassigned__" {
+		where += " AND (e.agent_id IS NULL OR e.agent_id = '')"
+	} else if filter.AgentID != "" {
 		where += " AND e.agent_id = ?"
 		args = append(args, filter.AgentID)
+	}
+	if filter.WorkflowID != "" {
+		where += " AND EXISTS (SELECT 1 FROM automation_dispatch_outbox ado JOIN automation_invocations ai ON ai.id=ado.invocation_id WHERE ado.task_id=e.task_id AND ai.project_id=e.project_id AND ai.automation_id=?)"
+		args = append(args, filter.WorkflowID)
 	}
 	if filter.Surface != "" {
 		where += " AND e.surface = ?"

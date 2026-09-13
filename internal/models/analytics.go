@@ -31,10 +31,12 @@ type OutcomeMetrics struct {
 	FollowUp                  AnalyticsMetric `json:"follow_up"`
 	MedianCycleTimeMs         int64           `json:"median_cycle_time_ms"`
 	P90CycleTimeMs            int64           `json:"p90_cycle_time_ms"`
+	CycleSampleSize           int             `json:"cycle_sample_size"`
+	CancelledExecutionCount   int             `json:"cancelled_execution_count"`
 	TasksEvaluated            int             `json:"tasks_evaluated"`
 	KnownCostPerAchievedGoal  *CostCoverage   `json:"known_cost_per_achieved_goal,omitempty"`
 	KnownCostPerCompletedTask *CostCoverage   `json:"known_cost_per_completed_task,omitempty"`
-	KnownFailedExecutionCost  float64         `json:"known_failed_execution_cost"`
+	KnownFailedExecutionCost  *CostCoverage   `json:"known_failed_execution_cost,omitempty"`
 	TokensPerAchievedGoal     *CostCoverage   `json:"tokens_per_achieved_goal,omitempty"`
 }
 
@@ -71,6 +73,59 @@ type SkillOutcomePerformance struct {
 	FollowUp            AnalyticsMetric `json:"follow_up"`
 }
 
+type AnalyticsTrendPoint struct {
+	Period     string `json:"period"`
+	Completed  int    `json:"completed"`
+	Failed     int    `json:"failed"`
+	Cancelled  int    `json:"cancelled"`
+	SampleSize int    `json:"sample_size"`
+}
+
+type AnalyticsCategoryPerformance struct {
+	Category            string          `json:"category"`
+	TasksEvaluated      int             `json:"tasks_evaluated"`
+	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
+	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`
+	FollowUp            AnalyticsMetric `json:"follow_up"`
+}
+
+type AnalyticsModelMix struct {
+	Model          string `json:"model"`
+	ExecutionCount int    `json:"execution_count"`
+}
+
+type AnalyticsFailurePattern struct {
+	TaskID       string `json:"task_id"`
+	TaskTitle    string `json:"task_title"`
+	FailureCount int    `json:"failure_count"`
+	LastError    string `json:"last_error"`
+}
+
+type AgentAnalyticsDetail struct {
+	AgentID      string                         `json:"agent_id"`
+	OutcomeTrend []AnalyticsTrendPoint          `json:"outcome_trend"`
+	Categories   []AnalyticsCategoryPerformance `json:"categories"`
+	ModelMix     []AnalyticsModelMix            `json:"model_mix"`
+	Failures     []AnalyticsFailurePattern      `json:"failures"`
+	Skills       []SkillOutcomePerformance      `json:"skills"`
+	RecentTasks  []EvidenceTaskRow              `json:"recent_tasks"`
+}
+
+type ModelCategoryPerformance struct {
+	Model               string          `json:"model"`
+	Category            string          `json:"category"`
+	TasksEvaluated      int             `json:"tasks_evaluated"`
+	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
+}
+
+type WorkflowAnalyticsDetail struct {
+	WorkflowID  string                        `json:"workflow_id"`
+	Funnel      []AutomationFunnelPoint       `json:"funnel"`
+	Durations   []AutomationDurationPoint     `json:"durations"`
+	Failures    []AutomationFailureSummary    `json:"failures"`
+	Bottlenecks []AutomationBottleneckSummary `json:"bottlenecks"`
+}
+
 type WorkflowPerformance struct {
 	WorkflowID        string  `json:"workflow_id"`
 	WorkflowName      string  `json:"workflow_name"`
@@ -85,18 +140,21 @@ type WorkflowPerformance struct {
 }
 
 type EvidenceTaskRow struct {
-	TaskID          string   `json:"task_id"`
-	TaskTitle       string   `json:"task_title"`
-	TechnicalResult string   `json:"technical_result"`
-	GoalResult      string   `json:"goal_result,omitempty"`
-	MergeState      string   `json:"merge_state,omitempty"`
-	AgentID         string   `json:"agent_id,omitempty"`
-	AgentName       string   `json:"agent_name"`
-	Model           string   `json:"model"`
-	ExecutionCount  int      `json:"execution_count"`
-	FollowUpCount   int      `json:"follow_up_count"`
-	CycleTimeMs     int64    `json:"cycle_time_ms"`
-	KnownCostUSD    *float64 `json:"known_cost_usd,omitempty"`
+	TaskID             string   `json:"task_id"`
+	TaskTitle          string   `json:"task_title"`
+	TechnicalResult    string   `json:"technical_result"`
+	GoalResult         string   `json:"goal_result,omitempty"`
+	MergeState         string   `json:"merge_state,omitempty"`
+	AgentID            string   `json:"agent_id,omitempty"`
+	AgentName          string   `json:"agent_name"`
+	Model              string   `json:"model"`
+	FirstPassCompleted bool     `json:"first_pass_completed"`
+	CreatedInPeriod    bool     `json:"created_in_period"`
+	LatestStartedAt    string   `json:"latest_started_at,omitempty"`
+	ExecutionCount     int      `json:"execution_count"`
+	FollowUpCount      int      `json:"follow_up_count"`
+	CycleTimeMs        int64    `json:"cycle_time_ms"`
+	KnownCostUSD       *float64 `json:"known_cost_usd,omitempty"`
 }
 
 type AnalyticsInsight struct {
@@ -119,8 +177,11 @@ type AnalyticsDashboard struct {
 	CycleDistribution    []AnalyticsDistributionPoint `json:"cycle_distribution"`
 	FollowUpDistribution []AnalyticsDistributionPoint `json:"follow_up_distribution"`
 	Agents               []AgentPerformance           `json:"agents"`
+	AgentDetail          *AgentAnalyticsDetail        `json:"agent_detail,omitempty"`
 	SkillOutcomes        []SkillOutcomePerformance    `json:"skill_outcomes"`
+	ModelCategories      []ModelCategoryPerformance   `json:"model_categories"`
 	Workflows            []WorkflowPerformance        `json:"workflows"`
+	WorkflowDetail       *WorkflowAnalyticsDetail     `json:"workflow_detail,omitempty"`
 	RecentOutcomes       []EvidenceTaskRow            `json:"recent_outcomes"`
 	Insights             []AnalyticsInsight           `json:"insights"`
 }

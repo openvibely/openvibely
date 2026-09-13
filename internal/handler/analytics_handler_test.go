@@ -269,6 +269,17 @@ func echoContext(rawURL string) echo.Context {
 	return e.NewContext(req, rec)
 }
 
+func TestParseUsageAndSkillFiltersIncludeAnalyticsDimensions(t *testing.T) {
+	usage := parseUsageFilter(echoContext("/api/analytics/usage?agent=agent-1&workflow=workflow-1"))
+	if usage.AgentID != "agent-1" || usage.WorkflowID != "workflow-1" {
+		t.Fatalf("usage dimensions = %+v", usage)
+	}
+	skill := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?agent=agent-1&workflow=workflow-1"))
+	if skill.AgentID != "agent-1" || skill.WorkflowID != "workflow-1" {
+		t.Fatalf("skill dimensions = %+v", skill)
+	}
+}
+
 func TestParseUsageFilter_Defaults(t *testing.T) {
 	filter := parseUsageFilter(echoContext("/api/analytics/usage"))
 	if filter.GroupBy != "day" {
