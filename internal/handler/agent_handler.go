@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -1720,6 +1722,64 @@ func protectedSystemAgentLockedFieldsChanged(existing, candidate *models.Agent) 
 	return !sameJSONForAgentHandler(existing.ToolConfig, candidate.ToolConfig) || !sameJSONForAgentHandler(existing.MCPServers, candidate.MCPServers) || !sameJSONForAgentHandler(existing.Skills, candidate.Skills) || !sameJSONForAgentHandler(existing.PermissionDefaults, candidate.PermissionDefaults) || !sameJSONForAgentHandler(existing.ModelDefaults, candidate.ModelDefaults)
 }
 
+func applyProtectedAgentControlFormFields(c echo.Context, agent *models.Agent, allowedModels map[string]struct{}) error {
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "agent is required")
+	}
+	if err := c.Request().ParseForm(); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid agent form")
+	}
+	form := c.Request().PostForm
+	if violatesProtectedAgentTextField(form, "name", agent.Name) || violatesProtectedAgentTextField(form, "description", agent.Description) || violatesProtectedAgentTextField(form, "system_prompt", agent.SystemPrompt) || violatesProtectedAgentTextField(form, "key", agent.Key) || violatesProtectedAgentTextField(form, "scope", string(agent.Scope)) || violatesProtectedAgentTextField(form, "project_id", agent.ProjectID) {
+		return echo.NewHTTPError(http.StatusForbidden, "protected system agents only allow model and eligible enabled-state changes")
+	}
+	if violatesProtectedAgentBoolField(form, "selectable_as_primary", agent.SelectableAsPrimary) {
+		return echo.NewHTTPError(http.StatusForbidden, "protected system agents only allow model and eligible enabled-state changes")
+	}
+	if violatesProtectedAgentJSONField(form, "tools_json", agent.Tools) || violatesProtectedAgentJSONField(form, "tool_config_json", agent.ToolConfig) || violatesProtectedAgentJSONField(form, "plugins_json", agent.Plugins) || violatesProtectedAgentJSONField(form, "skills_json", agent.Skills) || violatesProtectedAgentJSONField(form, "mcp_servers_json", agent.MCPServers) || violatesProtectedAgentJSONField(form, "permission_defaults_json", agent.PermissionDefaults) || violatesProtectedAgentJSONField(form, "source_refs_json", agent.SourceRefs) {
+		return echo.NewHTTPError(http.StatusForbidden, "protected system agents only allow model and eligible enabled-state changes")
+	}
+	agent.Model = normalizeAgentModel(form.Get("model"), allowedModels)
+	if _, ok := form["enabled"]; ok {
+		agent.Enabled = parseBoolFormValue(form.Get("enabled"))
+	}
+	return nil
+}
+
+func violatesProtectedAgentTextField(form url.Values, key, current string) bool {
+	if _, ok := form[key]; !ok {
+		return false
+	}
+	return strings.TrimSpace(form.Get(key)) != strings.TrimSpace(current)
+}
+
+func violatesProtectedAgentBoolField(form url.Values, key string, current bool) bool {
+	if _, ok := form[key]; !ok {
+		return false
+	}
+	return parseBoolFormValue(form.Get(key)) != current
+}
+
+func violatesProtectedAgentJSONField(form url.Values, key string, current any) bool {
+	raw := strings.TrimSpace(form.Get(key))
+	if raw == "" {
+		return false
+	}
+	currentType := reflect.TypeOf(current)
+	if currentType == nil {
+		var submitted any
+		if err := json.Unmarshal([]byte(raw), &submitted); err != nil {
+			return true
+		}
+		return !sameJSONForAgentHandler(submitted, current)
+	}
+	normalized := reflect.New(currentType)
+	if err := json.Unmarshal([]byte(raw), normalized.Interface()); err != nil {
+		return true
+	}
+	return !sameJSONForAgentHandler(normalized.Elem().Interface(), current)
+}
+
 func sameStringSliceForAgentHandler(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -1749,7 +1809,12 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 	}
 	if existing.GeneratedStatus == models.AgentStatusProtected {
 		candidate := *existing
-		if err := h.applyAgentDialogFormFields(c, &candidate, agentDialogFormOptions{operation: "UpdateAgent"}); err != nil {
+		modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
+		if err != nil {
+			applog.Infof("[handler] UpdateAgent listing model picker options failed: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		if err := applyProtectedAgentControlFormFields(c, &candidate, buildAllowedAgentModels(modelPickerOptions)); err != nil {
 			return err
 		}
 		if service.IsRequiredSystemAgent(existing) && !candidate.Enabled {

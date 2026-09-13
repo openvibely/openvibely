@@ -1916,16 +1916,23 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			document.body.addEventListener('htmx:responseError', function(event) {
 				if (!event.detail || !event.detail.target || event.detail.target.id !== 'agents-container') return;
 				const xhr = event.detail.xhr;
-				if (!xhr || xhr.status !== 400) return;
-				const message = String(xhr.responseText || '').trim();
-				if (!message.toLowerCase().includes('directory')) return;
-				event.preventDefault();
-				setAgentSection('details');
-				setScopedFilesDirectoryError(message);
+				if (!xhr) return;
+				const message = String(xhr.responseText || '').trim() || 'Could not save agent';
 				const modal = document.getElementById('agent_modal');
-				if (modal && !modal.open) modal.showModal();
-				const input = document.getElementById('scoped_files_directory');
-				if (input) input.focus();
+				if (xhr.status === 400 && message.toLowerCase().includes('directory')) {
+					event.preventDefault();
+					setAgentSection('details');
+					setScopedFilesDirectoryError(message);
+					if (modal && !modal.open) modal.showModal();
+					const input = document.getElementById('scoped_files_directory');
+					if (input) input.focus();
+					return;
+				}
+				if (xhr.status === 400 || xhr.status === 403) {
+					event.preventDefault();
+					if (modal && !modal.open) modal.showModal();
+					if (window.showToast) window.showToast(message, 'failed');
+				}
 			});
 			setTimeout(() => {
 				const form = document.getElementById('agent_form');
