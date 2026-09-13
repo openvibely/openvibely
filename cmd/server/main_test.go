@@ -32,6 +32,12 @@ func TestApplyUpdateIntegrationTimeouts(t *testing.T) {
 	}
 }
 
+func TestApplyUpdateIntegrationTimeoutsNilConfig(t *testing.T) {
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "not-a-duration")
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "not-a-duration")
+	applyUpdateIntegrationTimeouts(nil)
+}
+
 func TestServerInvalidTimeoutsFatalBeforeHelper(t *testing.T) {
 	tests := []struct {
 		name    string

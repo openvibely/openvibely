@@ -140,6 +140,17 @@ func TestDesktopPackagedUpdateHelperIntegrationTimeouts(t *testing.T) {
 	}
 }
 
+func TestDesktopPackagedUpdateHelperIntegrationTimeoutsNilConfig(t *testing.T) {
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "not-a-duration")
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "not-a-duration")
+	if err := applyUpdateIntegrationTimeouts(nil); err != nil {
+		t.Fatalf("executable nil config error = %v", err)
+	}
+	if err := applyAppBundleUpdateIntegrationTimeouts(nil); err != nil {
+		t.Fatalf("app-bundle nil config error = %v", err)
+	}
+}
+
 func TestDesktopPackagedUpdateHelperInvalidTimeoutsReturnBeforeHelper(t *testing.T) {
 	tests := []struct {
 		name    string
