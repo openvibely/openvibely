@@ -1174,6 +1174,70 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
+	requestCount := 0
+	var secondMessages []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		body, _ := io.ReadAll(r.Body)
+		if requestCount == 2 {
+			var payload struct {
+				Messages []map[string]any `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("decode second request: %v", err)
+			}
+			secondMessages = payload.Messages
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requestCount == 1 {
+			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":160000}}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"compaction\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"Durable native checkpoint.\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"first done\"}}\n\n")
+		} else {
+			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":100}}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"second done\"}}\n\n")
+		}
+		fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n")
+		fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	firstClient := NewWithAPIKey("test-key")
+	first, err := firstClient.SendAgentic(context.Background(), "first prompt", &AgenticOptions{Model: "claude-sonnet-4-20250514", MaxTokens: 1024, DisableTools: true, AutoCompaction: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(first.NativeCompactionStateJSON) == "" {
+		t.Fatal("native compaction state was not returned for durable persistence")
+	}
+
+	secondClient := NewWithAPIKey("test-key")
+	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-20250514", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
+		t.Fatal(err)
+	}
+	if len(secondMessages) < 2 || secondMessages[0]["role"] != "user" {
+		t.Fatalf("second request messages = %#v, want native compaction message then current user input", secondMessages)
+	}
+	blocks, ok := secondMessages[0]["content"].([]any)
+	if !ok || len(blocks) != 1 {
+		t.Fatalf("native state content = %#v, want one compaction block", secondMessages[0]["content"])
+	}
+	block, _ := blocks[0].(map[string]any)
+	if block["type"] != "compaction" || block["content"] != "Durable native checkpoint." {
+		t.Fatalf("replayed native block = %#v", block)
+	}
+}
+
 func TestSendAgentic_NoCompactionWhenDisabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify context management beta header is NOT present

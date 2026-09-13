@@ -367,6 +367,20 @@ func historyRetentionCounts(original, final []models.Execution) (retained, remov
 	return retained, max(0, len(original)-retained)
 }
 
+func contextFailureCategory(err error) string {
+	category := llmcontracts.ErrorCategoryOf(err)
+	if category == "" {
+		return "none"
+	}
+	return string(category)
+}
+
+func logContextDecision(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error) {
+	budget := calculateRequestBudget(req)
+	retained, removed := historyRetentionCounts(originalHistory, req.ChatHistory)
+	applog.Infof("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, providerTransport(req), budget.ContextWindow, budget.SafeInputLimit, budget.FixedTokens, budget.HistoryTokens+budget.NativeStateTokens, budget.PendingTokens, budget.AttachmentTokens, budget.ReservedOutputTokens, budget.SafetyMargin, strategy, externalized, retained, removed, req.RetrySourceExecutionID, contextFailureCategory(trigger))
+}
+
 func logContextFailure(req llmcontracts.AgentRequest, err error) {
 	category := llmcontracts.ErrorCategoryOf(err)
 	if category == "" {
@@ -851,7 +865,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		originalReq := req
 		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
 		if compactErr != nil {
-			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d: %v", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, compactErr)
+			applog.Infof("[agent-svc] proactive context compaction failed provider=%s model=%s tokens=%d trigger=%d failure_category=%s", req.Agent.Provider, req.Agent.Model, used, limits.TriggerLimit, contextFailureCategory(compactErr))
 			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
 		}
 		s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
@@ -884,8 +898,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		logContextFailure(req, err)
 		return llmcontracts.AgentResult{}, err
 	}
-	historyRetained, historyRemoved := historyRetentionCounts(originalHistory, req.ChatHistory)
-	applog.Infof("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=none", req.Agent.Provider, req.Agent.Model, providerTransport(req), postBudget.ContextWindow, postBudget.SafeInputLimit, postBudget.FixedTokens, postBudget.HistoryTokens+postBudget.NativeStateTokens, postBudget.PendingTokens, postBudget.AttachmentTokens, postBudget.ReservedOutputTokens, postBudget.SafetyMargin, compactionStrategy, externalized, historyRetained, historyRemoved, req.RetrySourceExecutionID)
+	logContextDecision(originalHistory, req, compactionStrategy, externalized, nil)
 	res, err := adapter.Call(req)
 	err = categorizeProviderError(err)
 	if err != nil {
@@ -903,7 +916,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.NativeCompactionStateJSON = ""
 	}
 	if locallyCompactedBeforeProvider && recognizedContextLengthError(err) {
-		applog.Infof("[agent-svc] compacted provider retry still exceeded context; trying last-resort truncation: %v", err)
+		applog.Infof("[agent-svc] compacted provider retry exceeded context; failure_category=%s", contextFailureCategory(err))
 		return s.callProviderWithLastResortTruncation(adapter, lastResortBaseReq, err)
 	}
 	if providerSupportsNativeCompaction(req.Agent) && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) && len(req.ChatHistory) > 0 {
@@ -913,24 +926,24 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		compactedReq := req
 		compactedReq.DisableNativeCompaction = true
 		compactedReq.Agent.DisableNativeCompaction = true
-		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, compactedReq)
+		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, compactedReq, err)
 		if compactErr != nil {
-			applog.Infof("[agent-svc] native-to-local context compaction fallback failed; trying last-resort truncation: %v", compactErr)
+			applog.Infof("[agent-svc] native-to-local context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
 			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
 		}
 		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
 		applog.Infof("[agent-svc] retrying provider call once after native-to-local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
-		return s.callCompactedRetryOrLastResort(adapter, req, compacted)
+		return s.callCompactedRetryOrLastResort(adapter, req, compacted, err)
 	}
 	if recognizedContextLengthError(err) && len(req.ChatHistory) > 0 {
-		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req)
+		compacted, compactErr := s.compactRequestHistoryWithLocalSummary(adapter, req, err)
 		if compactErr != nil {
-			applog.Infof("[agent-svc] context compaction fallback failed; trying last-resort truncation: %v", compactErr)
+			applog.Infof("[agent-svc] context compaction fallback failed; failure_category=%s", contextFailureCategory(compactErr))
 			return s.callProviderWithLastResortTruncation(adapter, req, compactErr)
 		}
 		s.persistCompactionCheckpoint(req, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
 		applog.Infof("[agent-svc] retrying provider call once after local context compaction provider=%s model=%s history=%d compacted_history=%d", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(compacted.ChatHistory))
-		return s.callCompactedRetryOrLastResort(adapter, req, compacted)
+		return s.callCompactedRetryOrLastResort(adapter, req, compacted, err)
 	}
 	return res, err
 }
@@ -1097,28 +1110,36 @@ func knownNativeCompactionUnsupported(agent models.LLMConfig) bool {
 	return ok
 }
 
-func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, originalReq, compactedReq llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, originalReq, compactedReq llmcontracts.AgentRequest, trigger error) (llmcontracts.AgentResult, error) {
 	compactedReq.ForceNativeCompaction = false
 	compactedReq.Agent.ForceNativeCompaction = false
-	prepared, _, cleanupArtifact, prepErr := s.preparePendingInput(compactedReq)
+	prepared, externalized, cleanupArtifact, prepErr := s.preparePendingInput(compactedReq)
 	if prepErr != nil {
+		logContextFailure(compactedReq, prepErr)
 		return llmcontracts.AgentResult{}, prepErr
 	}
 	defer cleanupArtifact()
 	if err := ensureRequestFits(prepared, "compacted retry"); err != nil {
+		logContextFailure(prepared, err)
 		return s.callProviderWithLastResortTruncation(adapter, originalReq, err)
 	}
+	logContextDecision(originalReq.ChatHistory, prepared, "local_summary_retry", externalized, trigger)
 	res, err := adapter.Call(prepared)
+	err = categorizeProviderError(err)
+	if err != nil {
+		logContextFailure(prepared, err)
+	}
 	if err == nil || !recognizedContextLengthError(err) {
 		return res, err
 	}
-	applog.Infof("[agent-svc] compacted provider retry still exceeded context; trying last-resort truncation: %v", err)
+	applog.Infof("[agent-svc] compacted provider retry exceeded context; failure_category=%s", contextFailureCategory(err))
 	return s.callProviderWithLastResortTruncation(adapter, originalReq, err)
 }
 
 func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapter, req llmcontracts.AgentRequest, cause error) (llmcontracts.AgentResult, error) {
-	truncated, _, cleanupArtifact, prepErr := s.preparePendingInput(req)
+	truncated, externalized, cleanupArtifact, prepErr := s.preparePendingInput(req)
 	if prepErr != nil {
+		logContextFailure(req, prepErr)
 		return llmcontracts.AgentResult{}, prepErr
 	}
 	defer cleanupArtifact()
@@ -1128,10 +1149,18 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 	truncated.Agent.DisableNativeCompaction = true
 	truncated.ChatHistory = historyWithinRequestBudget(truncated, llmprompt.LimitChatHistory(req.ChatHistory))
 	if err := ensureRequestFits(truncated, "last-resort request"); err != nil {
-		return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "last-resort request", fmt.Errorf("%v; original recovery error: %w", err, cause))
+		combined := llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "last-resort request", fmt.Errorf("%v; original recovery error: %w", err, cause))
+		logContextFailure(truncated, combined)
+		return llmcontracts.AgentResult{}, combined
 	}
-	applog.Infof("[agent-svc] WARNING: context compaction failed; using token-budgeted last-resort truncation provider=%s model=%s history=%d truncated_history=%d error=%v", req.Agent.Provider, req.Agent.Model, len(req.ChatHistory), len(truncated.ChatHistory), cause)
-	return adapter.Call(truncated)
+	logContextDecision(req.ChatHistory, truncated, "last_resort", externalized, cause)
+	applog.Infof("[agent-svc] using token-budgeted last-resort truncation provider=%s model=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, contextFailureCategory(cause))
+	res, err := adapter.Call(truncated)
+	err = categorizeProviderError(err)
+	if err != nil {
+		logContextFailure(truncated, err)
+	}
+	return res, err
 }
 
 func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.Execution) []models.Execution {
@@ -1165,8 +1194,12 @@ func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.
 	return out
 }
 
-func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
+func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest, triggerErrors ...error) (llmcontracts.AgentRequest, error) {
 	history := append([]models.Execution(nil), req.ChatHistory...)
+	var trigger error
+	if len(triggerErrors) > 0 {
+		trigger = triggerErrors[0]
+	}
 	summaryBase := req
 	summaryCtx := req.Ctx
 	if summaryCtx == nil {
@@ -1177,7 +1210,7 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 	defer cancelSummary()
 	summaryBase.TransportScope = fmt.Sprintf("compaction:%s:%d", req.ExecID, time.Now().UnixNano())
 	for len(history) > 0 {
-		summary, err := s.localSummaryCompaction(adapter, summaryBase, history)
+		summary, err := s.localSummaryCompaction(adapter, summaryBase, history, trigger)
 		if err == nil {
 			compacted := req
 			compacted.ChatHistory = buildCompactedReplacementHistory(history, summary)
@@ -1193,10 +1226,14 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 		}
 		history = history[1:]
 	}
-	return llmcontracts.AgentRequest{}, fmt.Errorf("no history remains to compact")
+	return llmcontracts.AgentRequest{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", fmt.Errorf("no history remains to compact"))
 }
 
-func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest, history []models.Execution) (string, error) {
+func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest, history []models.Execution, triggers ...error) (string, error) {
+	var trigger error
+	if len(triggers) > 0 {
+		trigger = triggers[0]
+	}
 	summaryReq := req
 	summaryReq.NativeCompactionStateJSON = ""
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
@@ -1226,9 +1263,11 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	if err := ensureRequestFits(summaryReq, "textual compaction request"); err != nil {
 		return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "textual compaction request", err)
 	}
+	logContextDecision(history, summaryReq, "textual_summary", false, trigger)
 	res, err := adapter.Call(summaryReq)
 	err = categorizeProviderError(err)
 	if err != nil {
+		logContextFailure(summaryReq, err)
 		if recognizedContextLengthError(err) {
 			return "", err
 		}
@@ -1239,7 +1278,7 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 		summary = strings.TrimSpace(res.Output)
 	}
 	if summary == "" {
-		return "", fmt.Errorf("local context compaction returned an empty summary")
+		return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorLocalCompactionFailed, "textual compaction", fmt.Errorf("provider returned an empty summary"))
 	}
 	return summary, nil
 }

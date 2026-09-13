@@ -611,8 +611,8 @@ func TestProviderContextCompactionFallback_CompactedRetryOverflowUsesLastResortO
 	if len(requests[3].ChatHistory) != 20 || requests[3].ChatHistory[0].PromptSent != "prompt-05" {
 		t.Fatalf("last resort history = %#v", requests[3].ChatHistory)
 	}
-	if got := logBuf.String(); !strings.Contains(got, "WARNING: context compaction failed; using token-budgeted last-resort truncation") {
-		t.Fatalf("last resort warning log missing: %s", got)
+	if got := logBuf.String(); !strings.Contains(got, "strategy=last_resort") || !strings.Contains(got, "failure_category=context_window_exceeded") {
+		t.Fatalf("structured last-resort decision log missing: %s", got)
 	}
 }
 
@@ -1639,6 +1639,78 @@ func TestProviderContextWindowsIncludeSparkAndConservativeOllamaDefault(t *testi
 	}
 	if got := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOllama, Model: "arbitrary-local"}).ContextWindow; got != llmollama.DefaultContextWindow {
 		t.Fatalf("default Ollama context window = %d, want %d", got, llmollama.DefaultContextWindow)
+	}
+}
+
+func TestLocalSummaryCompactionEmptyOutputIsCategorized(t *testing.T) {
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		return llmcontracts.AgentResult{}, nil
+	})
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "compatible"},
+	}
+	_, err := (&LLMService{}).localSummaryCompaction(adapter, req, []models.Execution{{PromptSent: "history"}}, nil)
+	if !llmcontracts.ErrorIs(err, llmcontracts.ErrorLocalCompactionFailed) {
+		t.Fatalf("empty summary error = %v, want %s", err, llmcontracts.ErrorLocalCompactionFailed)
+	}
+}
+
+func TestContextRecoveryDispatchesEmitCompleteStructuredDecisions(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey, APIKey: "fixture", ContextWindow: 50000}
+	knownUnsupportedNativeCompaction.Delete(nativeCompactionSessionKey(agent))
+	defer knownUnsupportedNativeCompaction.Delete(nativeCompactionSessionKey(agent))
+	calls := 0
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		switch calls {
+		case 1:
+			return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionUnsupported, "fixture native", errors.New("private native detail"))
+		case 2:
+			if req.Operation != llmcontracts.OperationDirect {
+				t.Fatalf("call 2 operation = %s, want textual summary", req.Operation)
+			}
+			return llmcontracts.AgentResult{Output: "bounded summary", TextOnlyOutput: "bounded summary"}, nil
+		case 3:
+			return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "fixture retry", errors.New("private retry detail"))
+		default:
+			return llmcontracts.AgentResult{Output: "recovered"}, nil
+		}
+	})
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "current", Followup: true,
+		RetrySourceExecutionID: "failed-source", Agent: agent, DisableTools: true,
+		ChatHistory: []models.Execution{{ID: "old", PromptSent: strings.Repeat("history", 7000), Output: "done", Status: models.ExecCompleted}},
+	}
+	if _, err := (&LLMService{}).callProviderWithCompaction(adapter, req); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 4 {
+		t.Fatalf("provider calls = %d, want native, summary, compacted retry, last resort", calls)
+	}
+	got := logs.String()
+	for _, fields := range [][]string{
+		{"strategy=textual_summary", "failure_category=native_compaction_unsupported"},
+		{"strategy=local_summary_retry", "failure_category=native_compaction_unsupported"},
+		{"strategy=last_resort", "failure_category=context_window_exceeded"},
+	} {
+		for _, field := range fields {
+			if !strings.Contains(got, field) {
+				t.Fatalf("recovery observability missing %q: %s", field, got)
+			}
+		}
+	}
+	for _, field := range []string{"transport=responses_http", "context_window=50000", "safe_input_limit=", "fixed_tokens=", "history_tokens=", "pending_tokens=", "attachment_tokens=", "reserved_output_tokens=", "safety_margin=", "externalized=false", "history_retained=", "history_removed=", "retry_source_execution_id=failed-source"} {
+		if !strings.Contains(got, field) {
+			t.Fatalf("recovery observability missing %q: %s", field, got)
+		}
+	}
+	if strings.Contains(got, "private native detail") || strings.Contains(got, "private retry detail") {
+		t.Fatalf("recovery observability leaked provider errors: %s", got)
 	}
 }
 

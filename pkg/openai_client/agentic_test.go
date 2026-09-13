@@ -3305,6 +3305,17 @@ func TestTrimCompactionInputItemsToFitContextWindow_RemovesPairedFunctionCallAnd
 	}
 }
 
+func TestNextCompactionTrimIndexes_DoesNotOrphanProtectedToolPairThroughFallback(t *testing.T) {
+	items := []any{
+		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 5000)},
+		agenticInputItem{"type": "function_call_output", "call_id": "call_pair", "output": "small result"},
+		agenticInputItem{"type": "function_call", "call_id": "trailing", "name": "bash", "arguments": `{}`},
+	}
+	if got := nextCompactionTrimIndexes(items, 0, 2); len(got) != 0 {
+		t.Fatalf("trim indexes = %v, want none because the only removable item belongs to protected call 0", got)
+	}
+}
+
 func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{
