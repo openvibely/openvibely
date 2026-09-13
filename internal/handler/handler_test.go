@@ -5203,7 +5203,7 @@ func TestHandler_Analytics_FullPage(t *testing.T) {
 	assertContains(t, rec, "/api/analytics/usage")
 	assertNotContains(t, rec, "daily_usage_by_model")
 	assertContains(t, rec, "usage_rate_by_model")
-	assertContains(t, rec, "new URLSearchParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy })")
+	assertContains(t, rec, "analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy })")
 	assertNotContains(t, rec, "new URLSearchParams({ range: usageRangeParam(), group_by: groupBy })")
 	assertContains(t, rec, "refresh', 'true'")
 	assertNotContains(t, rec, "usageReasoningTokens")
@@ -5252,7 +5252,7 @@ func TestHandler_Analytics_ModelUsagePageWiring(t *testing.T) {
 	assertContains(t, rec, `id="usageBreakdownTable"`)
 	assertContains(t, rec, `id="modelTokenBreakdownChart"`)
 	assertContains(t, rec, "model_breakdown")
-	assertContains(t, rec, "new URLSearchParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy })")
+	assertContains(t, rec, "analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: groupBy })")
 	if count := strings.Count(body, "const accounts = data.account_limits || []"); count != 1 {
 		t.Fatalf("expected one account limits declaration in analytics script, got %d", count)
 	}

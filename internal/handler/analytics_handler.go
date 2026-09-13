@@ -109,9 +109,14 @@ func (h *Handler) GetSkillAnalytics(c echo.Context) error {
 }
 
 func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
+	agentID := strings.TrimSpace(c.QueryParam("agent_id"))
+	if agentID == "" {
+		agentID = strings.TrimSpace(c.QueryParam("agent"))
+	}
 	filter := repository.SkillAnalyticsFilter{
 		ProjectID:  strings.TrimSpace(c.QueryParam("project_id")),
-		AgentID:    strings.TrimSpace(c.QueryParam("agent_id")),
+		AgentID:    agentID,
+		WorkflowID: strings.TrimSpace(c.QueryParam("workflow")),
 		Surface:    strings.TrimSpace(c.QueryParam("surface")),
 		SkillScope: strings.TrimSpace(c.QueryParam("skill_scope")),
 		EventType:  strings.TrimSpace(c.QueryParam("event_type")),
@@ -190,13 +195,15 @@ func serviceProjectSkillRoot(c echo.Context, h *Handler, projectID string) strin
 
 func parseUsageFilter(c echo.Context) repository.UsageFilter {
 	filter, _ := service.NormalizeUsageFilter(service.UsageFilterInput{
-		ProjectID: c.QueryParam("project_id"),
-		Provider:  c.QueryParam("provider"),
-		GroupBy:   c.QueryParam("group_by"),
-		Range:     c.QueryParam("range"),
-		DateFrom:  c.QueryParam("date_from"),
-		DateTo:    c.QueryParam("date_to"),
-		Refresh:   c.QueryParam("refresh") == "true" || c.QueryParam("refresh") == "1",
+		ProjectID:  c.QueryParam("project_id"),
+		Provider:   c.QueryParam("provider"),
+		AgentID:    c.QueryParam("agent"),
+		WorkflowID: c.QueryParam("workflow"),
+		GroupBy:    c.QueryParam("group_by"),
+		Range:      c.QueryParam("range"),
+		DateFrom:   c.QueryParam("date_from"),
+		DateTo:     c.QueryParam("date_to"),
+		Refresh:    c.QueryParam("refresh") == "true" || c.QueryParam("refresh") == "1",
 	})
 	return filter
 }
@@ -212,6 +219,9 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 // @Param date_from query string false "Optional inclusive start datetime"
 // @Param date_to query string false "Optional exclusive end datetime"
 // @Param compare query boolean false "Compare with the immediately preceding equivalent period"
+// @Param group_by query string false "Trend grouping: day, week, or month" default(day)
+// @Param agent query string false "Reusable Agent definition ID or __unassigned__"
+// @Param workflow query string false "Automation workflow ID"
 // @Success 200 {object} models.AnalyticsDashboard "Outcome Analytics dashboard"
 // @Failure 400 {object} ErrorResponse "Missing project ID"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -223,11 +233,14 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 	}
 	usageFilter := parseUsageFilter(c)
 	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), repository.AnalyticsDashboardFilter{
-		ProjectID: projectID,
-		DateFrom:  usageFilter.DateFrom,
-		DateTo:    usageFilter.DateTo,
-		Compare:   c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
-		Limit:     20,
+		ProjectID:  projectID,
+		DateFrom:   usageFilter.DateFrom,
+		DateTo:     usageFilter.DateTo,
+		Compare:    c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
+		Limit:      20,
+		GroupBy:    c.QueryParam("group_by"),
+		AgentID:    strings.TrimSpace(c.QueryParam("agent")),
+		WorkflowID: strings.TrimSpace(c.QueryParam("workflow")),
 	})
 	if err != nil {
 		applog.Infof("[handler] GetAnalyticsDashboard error: %v", err)
@@ -246,6 +259,10 @@ func analyticsSQLBound(value string) string {
 		return ""
 	}
 	return parsed.UTC().Format("2006-01-02 15:04:05.999999999")
+}
+
+func analyticsDimensionParams(c echo.Context) []string {
+	return []string{strings.TrimSpace(c.QueryParam("agent")), strings.TrimSpace(c.QueryParam("workflow"))}
 }
 
 // GetSuccessFailureRates returns success/failure rates data
@@ -269,7 +286,7 @@ func (h *Handler) GetSuccessFailureRates(c echo.Context) error {
 	dateFrom := analyticsSQLBound(c.QueryParam("date_from"))
 	dateTo := analyticsSQLBound(c.QueryParam("date_to"))
 
-	rates, err := h.execRepo.GetSuccessFailureRates(c.Request().Context(), projectID, groupBy, dateFrom, dateTo)
+	rates, err := h.execRepo.GetSuccessFailureRates(c.Request().Context(), projectID, groupBy, dateFrom, dateTo, analyticsDimensionParams(c)...)
 	if err != nil {
 		applog.Infof("[handler] GetSuccessFailureRates error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -298,7 +315,7 @@ func (h *Handler) GetAvgExecutionTimeByTask(c echo.Context) error {
 		}
 	}
 
-	times, err := h.execRepo.GetAvgExecutionTimeByTask(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
+	times, err := h.execRepo.GetAvgExecutionTimeByTask(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")), strings.TrimSpace(c.QueryParam("agent")), strings.TrimSpace(c.QueryParam("workflow")))
 	if err != nil {
 		applog.Infof("[handler] GetAvgExecutionTimeByTask error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -319,7 +336,7 @@ func (h *Handler) GetAvgExecutionTimeByTask(c echo.Context) error {
 func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
-	times, err := h.execRepo.GetAvgExecutionTimeByAgent(c.Request().Context(), projectID, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
+	times, err := h.execRepo.GetAvgExecutionTimeByAgent(c.Request().Context(), projectID, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")), strings.TrimSpace(c.QueryParam("agent")), strings.TrimSpace(c.QueryParam("workflow")))
 	if err != nil {
 		applog.Infof("[handler] GetAvgExecutionTimeByAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -344,7 +361,7 @@ func (h *Handler) GetExecutionTrendsByHour(c echo.Context) error {
 	dateFrom := analyticsSQLBound(c.QueryParam("date_from"))
 	dateTo := analyticsSQLBound(c.QueryParam("date_to"))
 
-	trends, err := h.execRepo.GetExecutionTrendsByHour(c.Request().Context(), projectID, dateFrom, dateTo)
+	trends, err := h.execRepo.GetExecutionTrendsByHour(c.Request().Context(), projectID, dateFrom, dateTo, analyticsDimensionParams(c)...)
 	if err != nil {
 		applog.Infof("[handler] GetExecutionTrendsByHour error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -365,7 +382,7 @@ func (h *Handler) GetExecutionTrendsByHour(c echo.Context) error {
 func (h *Handler) GetAgentUsageByProject(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
-	usage, err := h.execRepo.GetAgentUsageByProject(c.Request().Context(), projectID, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
+	usage, err := h.execRepo.GetAgentUsageByProject(c.Request().Context(), projectID, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")), strings.TrimSpace(c.QueryParam("agent")), strings.TrimSpace(c.QueryParam("workflow")))
 	if err != nil {
 		applog.Infof("[handler] GetAgentUsageByProject error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -394,7 +411,7 @@ func (h *Handler) GetMostFrequentTasks(c echo.Context) error {
 		}
 	}
 
-	frequencies, err := h.execRepo.GetMostFrequentTasks(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
+	frequencies, err := h.execRepo.GetMostFrequentTasks(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")), strings.TrimSpace(c.QueryParam("agent")), strings.TrimSpace(c.QueryParam("workflow")))
 	if err != nil {
 		applog.Infof("[handler] GetMostFrequentTasks error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -423,7 +440,7 @@ func (h *Handler) GetFailedTaskPatterns(c echo.Context) error {
 		}
 	}
 
-	patterns, err := h.execRepo.GetFailedTaskPatternsInRange(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
+	patterns, err := h.execRepo.GetFailedTaskPatternsInRange(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")), strings.TrimSpace(c.QueryParam("agent")), strings.TrimSpace(c.QueryParam("workflow")))
 	if err != nil {
 		applog.Infof("[handler] GetFailedTaskPatterns error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

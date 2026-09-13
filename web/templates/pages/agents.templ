@@ -2000,9 +2000,13 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						serializeAgentFormData();
 					});
 				}
-				if (document.querySelector('[data-agent-section-tab]') && document.querySelector('[data-agent-section-panel]')) {
-					setAgentSection(activeAgentSection);
-				}
-			}, 0);		</script>
-	</div>
+					if (document.querySelector('[data-agent-section-tab]') && document.querySelector('[data-agent-section-panel]')) {
+						setAgentSection(activeAgentSection);
+					}
+					const selectedAgentID = new URLSearchParams(window.location.search || '').get('agent_id');
+					if (selectedAgentID) {
+						const selectedCard = Array.from(document.querySelectorAll('[data-agent-id]')).find((card) => card.dataset.agentId === selectedAgentID && card.matches('.card'));
+						if (selectedCard) editAgentFromData(selectedCard);
+					}
+				}, 0);		</script>	</div>
 }

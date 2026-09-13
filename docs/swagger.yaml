@@ -205,6 +205,35 @@ definitions:
       updated_at:
         type: string
     type: object
+  models.AgentAnalyticsDetail:
+    properties:
+      agent_id:
+        type: string
+      categories:
+        items:
+          $ref: '#/definitions/models.AnalyticsCategoryPerformance'
+        type: array
+      failures:
+        items:
+          $ref: '#/definitions/models.AnalyticsFailurePattern'
+        type: array
+      model_mix:
+        items:
+          $ref: '#/definitions/models.AnalyticsModelMix'
+        type: array
+      outcome_trend:
+        items:
+          $ref: '#/definitions/models.AnalyticsTrendPoint'
+        type: array
+      recent_tasks:
+        items:
+          $ref: '#/definitions/models.EvidenceTaskRow'
+        type: array
+      skills:
+        items:
+          $ref: '#/definitions/models.SkillOutcomePerformance'
+        type: array
+    type: object
   models.AgentPerformance:
     properties:
       agent_id:
@@ -228,8 +257,23 @@ definitions:
       technical_completion:
         $ref: '#/definitions/models.AnalyticsMetric'
     type: object
+  models.AnalyticsCategoryPerformance:
+    properties:
+      category:
+        type: string
+      follow_up:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      tasks_evaluated:
+        type: integer
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+    type: object
   models.AnalyticsDashboard:
     properties:
+      agent_detail:
+        $ref: '#/definitions/models.AgentAnalyticsDetail'
       agents:
         items:
           $ref: '#/definitions/models.AgentPerformance'
@@ -256,6 +300,10 @@ definitions:
         items:
           $ref: '#/definitions/models.AnalyticsInsight'
         type: array
+      model_categories:
+        items:
+          $ref: '#/definitions/models.ModelCategoryPerformance'
+        type: array
       previous:
         $ref: '#/definitions/models.OutcomeMetrics'
       recent_outcomes:
@@ -266,6 +314,8 @@ definitions:
         items:
           $ref: '#/definitions/models.SkillOutcomePerformance'
         type: array
+      workflow_detail:
+        $ref: '#/definitions/models.WorkflowAnalyticsDetail'
       workflows:
         items:
           $ref: '#/definitions/models.WorkflowPerformance'
@@ -276,6 +326,17 @@ definitions:
       count:
         type: integer
       label:
+        type: string
+    type: object
+  models.AnalyticsFailurePattern:
+    properties:
+      failure_count:
+        type: integer
+      last_error:
+        type: string
+      task_id:
+        type: string
+      task_title:
         type: string
     type: object
   models.AnalyticsInsight:
@@ -307,6 +368,26 @@ definitions:
         type: integer
       percent:
         type: number
+      sample_size:
+        type: integer
+    type: object
+  models.AnalyticsModelMix:
+    properties:
+      execution_count:
+        type: integer
+      model:
+        type: string
+    type: object
+  models.AnalyticsTrendPoint:
+    properties:
+      cancelled:
+        type: integer
+      completed:
+        type: integer
+      failed:
+        type: integer
+      period:
+        type: string
       sample_size:
         type: integer
     type: object
@@ -345,6 +426,50 @@ definitions:
           $ref: '#/definitions/models.UsageRatePoint'
         type: array
     type: object
+  models.AutomationBottleneckSummary:
+    properties:
+      blocked:
+        type: integer
+      node_id:
+        type: string
+      node_name:
+        type: string
+      waiting:
+        type: integer
+    type: object
+  models.AutomationDurationPoint:
+    properties:
+      average_seconds:
+        type: number
+      node_id:
+        type: string
+      node_name:
+        type: string
+      sample_count:
+        type: integer
+    type: object
+  models.AutomationFailureSummary:
+    properties:
+      count:
+        type: integer
+      last_failure:
+        type: string
+      node_id:
+        type: string
+      node_name:
+        type: string
+    type: object
+  models.AutomationFunnelPoint:
+    properties:
+      conversion_percent:
+        type: number
+      entered_count:
+        type: integer
+      node_id:
+        type: string
+      node_name:
+        type: string
+    type: object
   models.CostCoverage:
     properties:
       covered:
@@ -381,16 +506,22 @@ definitions:
         type: string
       agent_name:
         type: string
+      created_in_period:
+        type: boolean
       cycle_time_ms:
         type: integer
       execution_count:
         type: integer
+      first_pass_completed:
+        type: boolean
       follow_up_count:
         type: integer
       goal_result:
         type: string
       known_cost_usd:
         type: number
+      latest_started_at:
+        type: string
       merge_state:
         type: string
       model:
@@ -426,6 +557,17 @@ definitions:
         type: string
       label:
         type: string
+    type: object
+  models.ModelCategoryPerformance:
+    properties:
+      category:
+        type: string
+      model:
+        type: string
+      tasks_evaluated:
+        type: integer
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
     type: object
   models.ModelUsagePoint:
     properties:
@@ -463,6 +605,10 @@ definitions:
     type: object
   models.OutcomeMetrics:
     properties:
+      cancelled_execution_count:
+        type: integer
+      cycle_sample_size:
+        type: integer
       first_pass:
         $ref: '#/definitions/models.AnalyticsMetric'
       follow_up:
@@ -474,7 +620,7 @@ definitions:
       known_cost_per_completed_task:
         $ref: '#/definitions/models.CostCoverage'
       known_failed_execution_cost:
-        type: number
+        $ref: '#/definitions/models.CostCoverage'
       median_cycle_time_ms:
         type: integer
       p90_cycle_time_ms:
@@ -885,6 +1031,27 @@ definitions:
         type: integer
       total_tokens:
         type: integer
+    type: object
+  models.WorkflowAnalyticsDetail:
+    properties:
+      bottlenecks:
+        items:
+          $ref: '#/definitions/models.AutomationBottleneckSummary'
+        type: array
+      durations:
+        items:
+          $ref: '#/definitions/models.AutomationDurationPoint'
+        type: array
+      failures:
+        items:
+          $ref: '#/definitions/models.AutomationFailureSummary'
+        type: array
+      funnel:
+        items:
+          $ref: '#/definitions/models.AutomationFunnelPoint'
+        type: array
+      workflow_id:
+        type: string
     type: object
   models.WorkflowPerformance:
     properties:
@@ -1322,6 +1489,19 @@ paths:
         in: query
         name: compare
         type: boolean
+      - default: day
+        description: 'Trend grouping: day, week, or month'
+        in: query
+        name: group_by
+        type: string
+      - description: Reusable Agent definition ID or __unassigned__
+        in: query
+        name: agent
+        type: string
+      - description: Automation workflow ID
+        in: query
+        name: workflow
+        type: string
       produces:
       - application/json
       responses:

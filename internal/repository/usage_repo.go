@@ -20,13 +20,15 @@ func NewUsageRepo(db *sql.DB) *UsageRepo {
 }
 
 type UsageFilter struct {
-	ProjectID string
-	Provider  string
-	AccountID string
-	DateFrom  time.Time
-	DateTo    time.Time
-	GroupBy   string
-	Refresh   bool
+	ProjectID  string
+	Provider   string
+	AccountID  string
+	AgentID    string
+	WorkflowID string
+	DateFrom   time.Time
+	DateTo     time.Time
+	GroupBy    string
+	Refresh    bool
 }
 
 func (r *UsageRepo) RecordUsageEvent(ctx context.Context, event *models.LLMUsageEvent) error {
@@ -718,12 +720,22 @@ func usageWhere(filter UsageFilter) (string, []any) {
 		clauses = append(clauses, "account_id = ?")
 		args = append(args, filter.AccountID)
 	}
+	if filter.AgentID == "__unassigned__" {
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM tasks usage_task WHERE usage_task.id=llm_usage_events.task_id AND usage_task.project_id=llm_usage_events.project_id AND usage_task.agent_definition_id IS NULL)")
+	} else if filter.AgentID != "" {
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM tasks usage_task WHERE usage_task.id=llm_usage_events.task_id AND usage_task.project_id=llm_usage_events.project_id AND usage_task.agent_definition_id=?)")
+		args = append(args, filter.AgentID)
+	}
+	if filter.WorkflowID != "" {
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM automation_dispatch_outbox ado JOIN automation_invocations ai ON ai.id=ado.invocation_id WHERE ado.task_id=llm_usage_events.task_id AND ai.project_id=llm_usage_events.project_id AND ai.automation_id=?)")
+		args = append(args, filter.WorkflowID)
+	}
 	if !filter.DateFrom.IsZero() {
 		clauses = append(clauses, "occurred_at >= ?")
 		args = append(args, formatSQLiteTime(filter.DateFrom))
 	}
 	if !filter.DateTo.IsZero() {
-		clauses = append(clauses, "occurred_at <= ?")
+		clauses = append(clauses, "occurred_at < ?")
 		args = append(args, formatSQLiteTime(filter.DateTo))
 	}
 	return "WHERE " + strings.Join(clauses, " AND "), args

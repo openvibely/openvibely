@@ -145,13 +145,15 @@ func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, fi
 }
 
 type UsageFilterInput struct {
-	ProjectID string
-	Provider  string
-	GroupBy   string
-	Range     string
-	DateFrom  string
-	DateTo    string
-	Refresh   bool
+	ProjectID  string
+	Provider   string
+	AgentID    string
+	WorkflowID string
+	GroupBy    string
+	Range      string
+	DateFrom   string
+	DateTo     string
+	Refresh    bool
 }
 
 // NormalizeUsageFilter applies the shared date, range, and grouping semantics
@@ -166,10 +168,12 @@ func normalizeUsageFilterAt(input UsageFilterInput, now time.Time) (repository.U
 		rangeValue = "30d"
 	}
 	filter := repository.UsageFilter{
-		ProjectID: strings.TrimSpace(input.ProjectID),
-		Provider:  strings.TrimSpace(input.Provider),
-		GroupBy:   strings.TrimSpace(input.GroupBy),
-		Refresh:   input.Refresh,
+		ProjectID:  strings.TrimSpace(input.ProjectID),
+		Provider:   strings.TrimSpace(input.Provider),
+		AgentID:    strings.TrimSpace(input.AgentID),
+		WorkflowID: strings.TrimSpace(input.WorkflowID),
+		GroupBy:    strings.TrimSpace(input.GroupBy),
+		Refresh:    input.Refresh,
 	}
 	if filter.GroupBy == "" {
 		filter.GroupBy = "day"

@@ -228,6 +228,25 @@ const docTemplate = `{
                         "description": "Compare with the immediately preceding equivalent period",
                         "name": "compare",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "day",
+                        "description": "Trend grouping: day, week, or month",
+                        "name": "group_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Reusable Agent definition ID or __unassigned__",
+                        "name": "agent",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Automation workflow ID",
+                        "name": "workflow",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1798,6 +1817,50 @@ const docTemplate = `{
                 }
             }
         },
+        "models.AgentAnalyticsDetail": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnalyticsCategoryPerformance"
+                    }
+                },
+                "failures": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnalyticsFailurePattern"
+                    }
+                },
+                "model_mix": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnalyticsModelMix"
+                    }
+                },
+                "outcome_trend": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnalyticsTrendPoint"
+                    }
+                },
+                "recent_tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.EvidenceTaskRow"
+                    }
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillOutcomePerformance"
+                    }
+                }
+            }
+        },
         "models.AgentPerformance": {
             "type": "object",
             "properties": {
@@ -1833,9 +1896,32 @@ const docTemplate = `{
                 }
             }
         },
+        "models.AnalyticsCategoryPerformance": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "follow_up": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "tasks_evaluated": {
+                    "type": "integer"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                }
+            }
+        },
         "models.AnalyticsDashboard": {
             "type": "object",
             "properties": {
+                "agent_detail": {
+                    "$ref": "#/definitions/models.AgentAnalyticsDetail"
+                },
                 "agents": {
                     "type": "array",
                     "items": {
@@ -1875,6 +1961,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/models.AnalyticsInsight"
                     }
                 },
+                "model_categories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelCategoryPerformance"
+                    }
+                },
                 "previous": {
                     "$ref": "#/definitions/models.OutcomeMetrics"
                 },
@@ -1889,6 +1981,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.SkillOutcomePerformance"
                     }
+                },
+                "workflow_detail": {
+                    "$ref": "#/definitions/models.WorkflowAnalyticsDetail"
                 },
                 "workflows": {
                     "type": "array",
@@ -1905,6 +2000,23 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "label": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.AnalyticsFailurePattern": {
+            "type": "object",
+            "properties": {
+                "failure_count": {
+                    "type": "integer"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "task_title": {
                     "type": "string"
                 }
             }
@@ -1952,6 +2064,37 @@ const docTemplate = `{
                 },
                 "percent": {
                     "type": "number"
+                },
+                "sample_size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.AnalyticsModelMix": {
+            "type": "object",
+            "properties": {
+                "execution_count": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.AnalyticsTrendPoint": {
+            "type": "object",
+            "properties": {
+                "cancelled": {
+                    "type": "integer"
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "period": {
+                    "type": "string"
                 },
                 "sample_size": {
                     "type": "integer"
@@ -2011,6 +2154,74 @@ const docTemplate = `{
                 }
             }
         },
+        "models.AutomationBottleneckSummary": {
+            "type": "object",
+            "properties": {
+                "blocked": {
+                    "type": "integer"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "node_name": {
+                    "type": "string"
+                },
+                "waiting": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.AutomationDurationPoint": {
+            "type": "object",
+            "properties": {
+                "average_seconds": {
+                    "type": "number"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "node_name": {
+                    "type": "string"
+                },
+                "sample_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.AutomationFailureSummary": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "last_failure": {
+                    "type": "string"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "node_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.AutomationFunnelPoint": {
+            "type": "object",
+            "properties": {
+                "conversion_percent": {
+                    "type": "number"
+                },
+                "entered_count": {
+                    "type": "integer"
+                },
+                "node_id": {
+                    "type": "string"
+                },
+                "node_name": {
+                    "type": "string"
+                }
+            }
+        },
         "models.CostCoverage": {
             "type": "object",
             "properties": {
@@ -2066,11 +2277,17 @@ const docTemplate = `{
                 "agent_name": {
                     "type": "string"
                 },
+                "created_in_period": {
+                    "type": "boolean"
+                },
                 "cycle_time_ms": {
                     "type": "integer"
                 },
                 "execution_count": {
                     "type": "integer"
+                },
+                "first_pass_completed": {
+                    "type": "boolean"
                 },
                 "follow_up_count": {
                     "type": "integer"
@@ -2080,6 +2297,9 @@ const docTemplate = `{
                 },
                 "known_cost_usd": {
                     "type": "number"
+                },
+                "latest_started_at": {
+                    "type": "string"
                 },
                 "merge_state": {
                     "type": "string"
@@ -2129,6 +2349,23 @@ const docTemplate = `{
                 },
                 "label": {
                     "type": "string"
+                }
+            }
+        },
+        "models.ModelCategoryPerformance": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "tasks_evaluated": {
+                    "type": "integer"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
                 }
             }
         },
@@ -2187,6 +2424,12 @@ const docTemplate = `{
         "models.OutcomeMetrics": {
             "type": "object",
             "properties": {
+                "cancelled_execution_count": {
+                    "type": "integer"
+                },
+                "cycle_sample_size": {
+                    "type": "integer"
+                },
                 "first_pass": {
                     "$ref": "#/definitions/models.AnalyticsMetric"
                 },
@@ -2203,7 +2446,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/models.CostCoverage"
                 },
                 "known_failed_execution_cost": {
-                    "type": "number"
+                    "$ref": "#/definitions/models.CostCoverage"
                 },
                 "median_cycle_time_ms": {
                     "type": "integer"
@@ -2787,6 +3030,38 @@ const docTemplate = `{
                 },
                 "total_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "models.WorkflowAnalyticsDetail": {
+            "type": "object",
+            "properties": {
+                "bottlenecks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AutomationBottleneckSummary"
+                    }
+                },
+                "durations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AutomationDurationPoint"
+                    }
+                },
+                "failures": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AutomationFailureSummary"
+                    }
+                },
+                "funnel": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AutomationFunnelPoint"
+                    }
+                },
+                "workflow_id": {
+                    "type": "string"
                 }
             }
         },
