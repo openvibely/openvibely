@@ -807,10 +807,12 @@ func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []model
 			continue
 		}
 		// The model that originally fetched this connection-bound snapshot may
-		// since have moved to another account. Attribute the rendered view to a
-		// model that still owns the snapshot's immutable connection generation.
+		// since have moved to another account. Sanitize legacy per-model account
+		// identities before attributing the rendered view to a model that still
+		// owns the snapshot's immutable connection generation.
+		snapshot = sanitizeSnapshotAccountDisplay(snapshot, configsByID)
 		snapshot.AgentConfigID = cfg.ID
-		view := accountViewFromSnapshot(sanitizeSnapshotAccountDisplay(snapshot, configsByID))
+		view := accountViewFromSnapshot(snapshot)
 		key := accountUsageKeyForConfig(cfg)
 		if i, ok := index[key]; ok {
 			existing[i] = preferAccountUsageView(existing[i], view)
