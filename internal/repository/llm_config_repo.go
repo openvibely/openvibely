@@ -669,12 +669,17 @@ func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor
 }
 
 func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx SQLExecutor, id string) error {
-	// Nullify FK references in tasks and executions before deleting
+	// Nullify FK references in tasks and executions before deleting. Agent model
+	// overrides are legacy string references, so reset them in the same transaction
+	// rather than leaving a protected or reusable Agent pointed at a deleted config.
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET agent_id = NULL WHERE agent_id = ?`, id); err != nil {
 		return fmt.Errorf("nullifying model config in tasks: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE executions SET agent_config_id = NULL WHERE agent_config_id = ?`, id); err != nil {
 		return fmt.Errorf("nullifying model config in executions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agents SET model = 'inherit', updated_at = datetime('now') WHERE model = ?`, id); err != nil {
+		return fmt.Errorf("resetting agent model overrides: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_configs WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("deleting model config: %w", err)
