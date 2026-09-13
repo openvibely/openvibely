@@ -80,6 +80,58 @@ func (r *UsageRepo) CreateAccountUsageSnapshot(ctx context.Context, snapshot *mo
 	if snapshot == nil {
 		return nil
 	}
+
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
+	if err != nil {
+		return fmt.Errorf("starting account usage snapshot transaction: %w", err)
+	}
+	defer cleanup()
+	if err := createAccountUsageSnapshotTx(ctx, tx, snapshot); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing account usage snapshot: %w", err)
+	}
+	return nil
+}
+
+// CreateAccountUsageSnapshotIfOAuthRevision stores a snapshot only while the
+// OAuth config generation that produced it remains authoritative. The immediate
+// transaction prevents reconnect or model-edit writers from interleaving between
+// the generation check and snapshot insertion.
+func (r *UsageRepo) CreateAccountUsageSnapshotIfOAuthRevision(ctx context.Context, snapshot *models.AccountUsageSnapshot, configID string, expectedRevision int64, provider models.LLMProvider) (bool, error) {
+	if snapshot == nil {
+		return false, nil
+	}
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
+	if err != nil {
+		return false, fmt.Errorf("starting conditional account usage snapshot transaction: %w", err)
+	}
+	defer cleanup()
+
+	var current bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM agent_configs
+			WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?
+		)`,
+		configID, expectedRevision, provider, models.AuthMethodOAuth,
+	).Scan(&current); err != nil {
+		return false, fmt.Errorf("checking account usage OAuth generation: %w", err)
+	}
+	if !current {
+		return false, nil
+	}
+	if err := createAccountUsageSnapshotTx(ctx, tx, snapshot); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("committing conditional account usage snapshot: %w", err)
+	}
+	return true, nil
+}
+
+func createAccountUsageSnapshotTx(ctx context.Context, tx SQLExecutor, snapshot *models.AccountUsageSnapshot) error {
 	if snapshot.RawJSON == "" {
 		snapshot.RawJSON = "{}"
 	}
@@ -88,20 +140,14 @@ func (r *UsageRepo) CreateAccountUsageSnapshot(ctx context.Context, snapshot *mo
 		fetchedAt = time.Now().UTC()
 	}
 
-	tx, cleanup, err := beginImmediateTx(ctx, r.db)
-	if err != nil {
-		return fmt.Errorf("starting account usage snapshot transaction: %w", err)
-	}
-	defer cleanup()
-
 	var fetchedRaw, createdRaw string
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 				INSERT INTO account_usage_snapshots (
 					id, provider, account_id, agent_config_id, plan_type, account_display_name, account_detail,
 					billing_label, subscription_status, extra_usage_label, extra_usage_monthly_limit_usd, extra_usage_used_usd, credits_remaining,
 					primary_label, primary_used_percent, primary_window_minutes, primary_resets_at,				secondary_label, secondary_used_percent, secondary_window_minutes, secondary_resets_at,
-				model_limit_label, model_limit_used_percent, model_limit_window_minutes, model_limit_resets_at,
-				rate_limit_reached_type, raw_json, fetched_at
+					model_limit_label, model_limit_used_percent, model_limit_window_minutes, model_limit_resets_at,
+					rate_limit_reached_type, raw_json, fetched_at
 				) VALUES (
 					lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 				)
@@ -117,9 +163,6 @@ func (r *UsageRepo) CreateAccountUsageSnapshot(ctx context.Context, snapshot *mo
 	}
 	if err := insertAccountUsageExtraLimits(ctx, tx, snapshot); err != nil {
 		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing account usage snapshot: %w", err)
 	}
 	snapshot.FetchedAt = parseSQLiteTime(fetchedRaw)
 	snapshot.CreatedAt = parseSQLiteTime(createdRaw)

@@ -1344,6 +1344,89 @@ func TestAccountUsageHTTPErrorDoesNotExposeResponseBody(t *testing.T) {
 	}
 }
 
+func TestUsageAnalyticsService_RejectsStaleSnapshotAfterFetchGenerationChange(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		for _, change := range []string{"reconnect", "model_edit"} {
+			t.Run(string(provider)+"/"+change, func(t *testing.T) {
+				db := testutil.NewTestDB(t)
+				usageRepo := repository.NewUsageRepo(db)
+				configRepo := repository.NewLLMConfigRepo(db)
+				ctx := context.Background()
+
+				config := &models.LLMConfig{
+					Name:              string(provider) + " stale snapshot",
+					Provider:          provider,
+					Model:             "model-one",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  "stale-access",
+					OAuthRefreshToken: "stale-refresh",
+					OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+					OAuthAccountID:    "known-account",
+				}
+				if err := configRepo.Create(ctx, config); err != nil {
+					t.Fatalf("create OAuth config: %v", err)
+				}
+
+				svc := NewUsageAnalyticsService(usageRepo, configRepo)
+				svc.SetAccountUsageFetcher(func(_ context.Context, stale models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+					switch change {
+					case "reconnect":
+						updated, err := configRepo.UpdateStandardOAuthConnectionIfRevision(
+							ctx, stale.ID, stale.OAuthConfigRevision, stale.Provider,
+							"current-access", "current-refresh", time.Now().Add(3*time.Hour).UnixMilli(), "current-account",
+						)
+						if err != nil || !updated {
+							t.Fatalf("reconnect config = %v, %v", updated, err)
+						}
+					case "model_edit":
+						edited := stale
+						edited.AuthMethod = models.AuthMethodAPIKey
+						edited.APIKey = "current-api-key"
+						edited.OAuthAccessToken = ""
+						edited.OAuthRefreshToken = ""
+						edited.OAuthExpiresAt = 0
+						edited.OAuthAccountID = ""
+						if err := configRepo.Update(ctx, &edited); err != nil {
+							t.Fatalf("edit config auth: %v", err)
+						}
+					}
+					pct := 17.0
+					return &models.AccountUsageSnapshot{
+						Provider:             string(stale.Provider),
+						AccountID:            stale.OAuthAccountID,
+						AgentConfigID:        stale.ID,
+						SecondaryLabel:       "weekly limit",
+						SecondaryUsedPercent: &pct,
+					}, nil
+				})
+
+				if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true}); err != nil {
+					t.Fatalf("BuildAnalyticsUsage: %v", err)
+				}
+				snapshots, err := usageRepo.GetLatestAccountUsageSnapshots(ctx, string(provider))
+				if err != nil {
+					t.Fatalf("load account snapshots: %v", err)
+				}
+				if len(snapshots) != 0 {
+					t.Fatalf("stale credential generation persisted account usage: %+v", snapshots)
+				}
+
+				current, err := configRepo.GetByID(ctx, config.ID)
+				if err != nil {
+					t.Fatalf("load authoritative config: %v", err)
+				}
+				if change == "reconnect" {
+					if current.AuthMethod != models.AuthMethodOAuth || current.OAuthAccessToken != "current-access" || current.OAuthRefreshToken != "current-refresh" || current.OAuthAccountID != "current-account" || current.OAuthConfigRevision != config.OAuthConfigRevision+1 {
+						t.Fatalf("reconnect state changed by stale snapshot: %+v", current)
+					}
+				} else if current.AuthMethod != models.AuthMethodAPIKey || current.APIKey != "current-api-key" || current.OAuthAccessToken != "" || current.OAuthRefreshToken != "" || current.OAuthConfigRevision != config.OAuthConfigRevision+1 {
+					t.Fatalf("model edit changed by stale snapshot: %+v", current)
+				}
+			})
+		}
+	}
+}
+
 func TestUsageAnalyticsService_StaleAccountIdentityResolutionReturnsAuthoritativeConfig(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, mutation := range []string{"reconnect", "model_edit"} {
