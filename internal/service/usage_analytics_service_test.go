@@ -1344,6 +1344,123 @@ func TestAccountUsageHTTPErrorDoesNotExposeResponseBody(t *testing.T) {
 	}
 }
 
+func TestUsageAnalyticsService_ReconnectDoesNotReusePriorGenerationSnapshot(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		for _, identity := range []string{"known", "unavailable"} {
+			t.Run(string(provider)+"/"+identity, func(t *testing.T) {
+				db := testutil.NewTestDB(t)
+				usageRepo := repository.NewUsageRepo(db)
+				configRepo := repository.NewLLMConfigRepo(db)
+				ctx := context.Background()
+
+				config := &models.LLMConfig{
+					Name:              string(provider) + " reconnect snapshot",
+					Provider:          provider,
+					Model:             "model-one",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  "old-access",
+					OAuthRefreshToken: "old-refresh",
+					OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+					OAuthAccountID:    "principal-a",
+				}
+				if err := configRepo.Create(ctx, config); err != nil {
+					t.Fatalf("create OAuth config: %v", err)
+				}
+				oldPct := 83.0
+				if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+					Provider:             string(provider),
+					AccountID:            "principal-a",
+					AgentConfigID:        config.ID,
+					PlanType:             "Principal A Plan",
+					SecondaryLabel:       "weekly limit",
+					SecondaryUsedPercent: &oldPct,
+				}); err != nil {
+					t.Fatalf("create prior-generation snapshot: %v", err)
+				}
+
+				newAccountID := ""
+				if identity == "known" {
+					newAccountID = "principal-b"
+				}
+				updated, err := configRepo.UpdateStandardOAuthConnectionIfRevision(
+					ctx, config.ID, config.OAuthConfigRevision, provider,
+					"new-access", "new-refresh", time.Now().Add(3*time.Hour).UnixMilli(), newAccountID,
+				)
+				if err != nil || !updated {
+					t.Fatalf("reconnect config = %v, %v", updated, err)
+				}
+
+				svc := NewUsageAnalyticsService(usageRepo, configRepo)
+				view, err := svc.BuildLocalAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+				if err != nil {
+					t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
+				}
+				if len(view.AccountLimits) != 1 {
+					t.Fatalf("account cards = %+v, want one current placeholder", view.AccountLimits)
+				}
+				account := view.AccountLimits[0]
+				if account.PlanType == "Principal A Plan" || account.SecondaryLimit != nil || len(account.Limits) != 0 {
+					t.Fatalf("prior principal snapshot rendered after reconnect: %+v", account)
+				}
+			})
+		}
+	}
+}
+
+func TestUsageAnalyticsService_PriorGenerationSnapshotDoesNotSuppressRefreshWithoutIdentity(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+			config := &models.LLMConfig{
+				Name:              string(provider) + " unknown identity reconnect",
+				Provider:          provider,
+				Model:             "model-one",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "old-access",
+				OAuthRefreshToken: "old-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "principal-a",
+			}
+			if err := configRepo.Create(ctx, config); err != nil {
+				t.Fatalf("create OAuth config: %v", err)
+			}
+			if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+				Provider:      string(provider),
+				AccountID:     "principal-a",
+				AgentConfigID: config.ID,
+				PlanType:      "Principal A Plan",
+			}); err != nil {
+				t.Fatalf("create prior-generation snapshot: %v", err)
+			}
+			updated, err := configRepo.UpdateStandardOAuthConnectionIfRevision(
+				ctx, config.ID, config.OAuthConfigRevision, provider,
+				"new-access", "new-refresh", time.Now().Add(3*time.Hour).UnixMilli(), "",
+			)
+			if err != nil || !updated {
+				t.Fatalf("reconnect config = %v, %v", updated, err)
+			}
+			current, err := configRepo.GetByID(ctx, config.ID)
+			if err != nil {
+				t.Fatalf("load reconnected config: %v", err)
+			}
+
+			calls := 0
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				calls++
+				return &models.AccountUsageSnapshot{Provider: string(provider), AgentConfigID: cfg.ID, PlanType: "Current Plan"}, nil
+			})
+			fetched, errs := svc.refreshAccountSnapshots(ctx, []models.LLMConfig{*current}, string(provider), false)
+			if calls != 1 || len(fetched) != 1 || len(errs) != 0 {
+				t.Fatalf("refresh result calls=%d fetched=%+v errors=%+v", calls, fetched, errs)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_RejectsStaleSnapshotAfterFetchGenerationChange(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		for _, change := range []string{"reconnect", "model_edit"} {

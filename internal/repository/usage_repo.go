@@ -122,6 +122,7 @@ func (r *UsageRepo) CreateAccountUsageSnapshotIfOAuthRevision(ctx context.Contex
 	if !current {
 		return false, nil
 	}
+	snapshot.OAuthConfigRevision = expectedRevision
 	if err := createAccountUsageSnapshotTx(ctx, tx, snapshot); err != nil {
 		return false, err
 	}
@@ -142,17 +143,19 @@ func createAccountUsageSnapshotTx(ctx context.Context, tx SQLExecutor, snapshot 
 
 	var fetchedRaw, createdRaw string
 	err := tx.QueryRowContext(ctx, `
-				INSERT INTO account_usage_snapshots (
-					id, provider, account_id, agent_config_id, plan_type, account_display_name, account_detail,
-					billing_label, subscription_status, extra_usage_label, extra_usage_monthly_limit_usd, extra_usage_used_usd, credits_remaining,
-					primary_label, primary_used_percent, primary_window_minutes, primary_resets_at,				secondary_label, secondary_used_percent, secondary_window_minutes, secondary_resets_at,
-					model_limit_label, model_limit_used_percent, model_limit_window_minutes, model_limit_resets_at,
-					rate_limit_reached_type, raw_json, fetched_at
-				) VALUES (
-					lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-				)
-				RETURNING id, fetched_at, created_at`,
-		snapshot.Provider, nullStringArg(snapshot.AccountID), nullStringArg(snapshot.AgentConfigID), snapshot.PlanType, snapshot.AccountDisplayName, snapshot.AccountDetail,
+		INSERT INTO account_usage_snapshots (
+			id, provider, account_id, agent_config_id, oauth_config_revision, plan_type, account_display_name, account_detail,
+			billing_label, subscription_status, extra_usage_label, extra_usage_monthly_limit_usd, extra_usage_used_usd, credits_remaining,
+			primary_label, primary_used_percent, primary_window_minutes, primary_resets_at,
+			secondary_label, secondary_used_percent, secondary_window_minutes, secondary_resets_at,
+			model_limit_label, model_limit_used_percent, model_limit_window_minutes, model_limit_resets_at,
+			rate_limit_reached_type, raw_json, fetched_at
+		) VALUES (
+			lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+		)
+		RETURNING id, fetched_at, created_at`,
+		snapshot.Provider, nullStringArg(snapshot.AccountID), nullStringArg(snapshot.AgentConfigID), snapshot.OAuthConfigRevision,
+		snapshot.PlanType, snapshot.AccountDisplayName, snapshot.AccountDetail,
 		snapshot.BillingLabel, snapshot.SubscriptionStatus, snapshot.ExtraUsageLabel, snapshot.ExtraUsageMonthlyUSD, snapshot.ExtraUsageUsedUSD, snapshot.CreditsRemaining,
 		snapshot.PrimaryLabel, snapshot.PrimaryUsedPercent, snapshot.PrimaryWindowMinutes, snapshot.PrimaryResetsAt, snapshot.SecondaryLabel, snapshot.SecondaryUsedPercent, snapshot.SecondaryWindowMinutes, snapshot.SecondaryResetsAt,
 		snapshot.ModelLimitLabel, snapshot.ModelLimitUsedPercent, snapshot.ModelLimitWindowMinutes, snapshot.ModelLimitResetsAt,
@@ -177,7 +180,7 @@ func (r *UsageRepo) GetLatestAccountUsageSnapshots(ctx context.Context, provider
 		args = append(args, provider)
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT s.id, s.provider, COALESCE(s.account_id, ''), COALESCE(s.agent_config_id, ''), s.plan_type,
+		SELECT s.id, s.provider, COALESCE(s.account_id, ''), COALESCE(s.agent_config_id, ''), s.oauth_config_revision, s.plan_type,
 		       COALESCE(s.account_display_name, ''), COALESCE(s.account_detail, ''), COALESCE(s.billing_label, ''),
 		       COALESCE(s.subscription_status, ''), COALESCE(s.extra_usage_label, ''), s.extra_usage_monthly_limit_usd, s.extra_usage_used_usd,
 		       s.credits_remaining,
@@ -836,7 +839,7 @@ func scanAccountUsageSnapshot(scanner interface{ Scan(dest ...any) error }) (mod
 	var primaryReset, secondaryReset, modelReset sql.NullString
 	var fetchedRaw, createdRaw string
 	if err := scanner.Scan(
-		&snapshot.ID, &snapshot.Provider, &snapshot.AccountID, &snapshot.AgentConfigID, &snapshot.PlanType,
+		&snapshot.ID, &snapshot.Provider, &snapshot.AccountID, &snapshot.AgentConfigID, &snapshot.OAuthConfigRevision, &snapshot.PlanType,
 		&snapshot.AccountDisplayName, &snapshot.AccountDetail, &snapshot.BillingLabel, &snapshot.SubscriptionStatus, &snapshot.ExtraUsageLabel, &extraMonthly, &extraUsed,
 		&credits,
 		&snapshot.PrimaryLabel, &primaryUsed, &primaryWindow, &primaryReset, &snapshot.SecondaryLabel, &secondaryUsed, &secondaryWindow, &secondaryReset,
