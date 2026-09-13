@@ -88,6 +88,7 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 	var oauthAccounts []models.AccountUsageView
 	configsByID := map[string]models.LLMConfig{}
 	refreshErrors := map[string]string{}
+	var snapshotState *accountUsageSnapshotState
 	if s.llmConfigRepo != nil {
 		configs, err := s.llmConfigRepo.List(ctx)
 		if err != nil {
@@ -99,8 +100,9 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 			}
 			oauthAccounts = s.oauthAccountPlaceholders(configs, filter.Provider)
 			view.AccountLimits = append(view.AccountLimits, oauthAccounts...)
-			if fetched, errs := s.refreshAccountSnapshots(ctx, configs, filter.Provider, filter.Refresh); len(fetched) > 0 || len(errs) > 0 {
-				view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, fetched, configsByID)
+
+			snapshotState = s.loadAccountUsageSnapshotState(ctx, filter.Provider)
+			if fetched, errs := s.refreshAccountSnapshotsWithState(ctx, configs, filter.Provider, filter.Refresh, snapshotState); len(fetched) > 0 || len(errs) > 0 {
 				for key, value := range errs {
 					refreshErrors[key] = value
 				}
@@ -108,7 +110,11 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 		}
 	}
 
-	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, refreshErrors); err != nil {
+	if snapshotState != nil {
+		if err := s.populateAnalyticsUsageViewWithSnapshots(ctx, filter, view, configsByID, refreshErrors, snapshotState); err != nil {
+			return nil, err
+		}
+	} else if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, refreshErrors); err != nil {
 		return nil, err
 	}
 	return view, nil
@@ -477,11 +483,115 @@ func compactUsageAnalyticsAccountRows(accounts []models.AccountUsageView) []usag
 	return out
 }
 
+type accountUsageSnapshotIndexKey struct {
+	provider string
+	revision int64
+	value    string
+}
+
+type accountUsageSnapshotIndex struct {
+	snapshots         []models.AccountUsageSnapshot
+	byAccount         map[accountUsageSnapshotIndexKey][]int
+	byConfig          map[accountUsageSnapshotIndexKey][]int
+	byConfigNoAccount map[accountUsageSnapshotIndexKey][]int
+}
+
+type accountUsageSnapshotState struct {
+	index  accountUsageSnapshotIndex
+	err    error
+	loaded bool
+}
+
+func newAccountUsageSnapshotIndex(snapshots []models.AccountUsageSnapshot) accountUsageSnapshotIndex {
+	index := accountUsageSnapshotIndex{
+		snapshots:         snapshots,
+		byAccount:         make(map[accountUsageSnapshotIndexKey][]int),
+		byConfig:          make(map[accountUsageSnapshotIndexKey][]int),
+		byConfigNoAccount: make(map[accountUsageSnapshotIndexKey][]int),
+	}
+	for i := range snapshots {
+		index.addSnapshotIndex(i)
+	}
+	return index
+}
+
+func (index *accountUsageSnapshotIndex) addSnapshotIndex(i int) {
+	snapshot := index.snapshots[i]
+	base := accountUsageSnapshotIndexKey{provider: strings.TrimSpace(snapshot.Provider), revision: snapshot.OAuthConfigRevision}
+	if accountID := strings.TrimSpace(snapshot.AccountID); accountID != "" {
+		key := base
+		key.value = accountID
+		index.byAccount[key] = append(index.byAccount[key], i)
+	}
+	if configID := strings.TrimSpace(snapshot.AgentConfigID); configID != "" {
+		key := base
+		key.value = configID
+		index.byConfig[key] = append(index.byConfig[key], i)
+		if strings.TrimSpace(snapshot.AccountID) == "" {
+			index.byConfigNoAccount[key] = append(index.byConfigNoAccount[key], i)
+		}
+	}
+}
+
+func (index *accountUsageSnapshotIndex) upsert(snapshot models.AccountUsageSnapshot) {
+	index.snapshots = append([]models.AccountUsageSnapshot{snapshot}, index.snapshots...)
+	*index = newAccountUsageSnapshotIndex(index.snapshots)
+}
+
+func (index accountUsageSnapshotIndex) candidatesForConfig(cfg models.LLMConfig) []int {
+	base := accountUsageSnapshotIndexKey{provider: string(cfg.Provider), revision: cfg.OAuthConfigRevision}
+	configKey := base
+	configKey.value = strings.TrimSpace(cfg.ID)
+	if strings.TrimSpace(cfg.OAuthAccountID) == "" {
+		return append([]int(nil), index.byConfig[configKey]...)
+	}
+
+	accountKey := base
+	accountKey.value = strings.TrimSpace(cfg.OAuthAccountID)
+	accountCandidates := index.byAccount[accountKey]
+	configCandidates := index.byConfigNoAccount[configKey]
+	if len(configCandidates) == 0 {
+		return append([]int(nil), accountCandidates...)
+	}
+	if len(accountCandidates) == 0 {
+		return append([]int(nil), configCandidates...)
+	}
+	merged := make([]int, 0, len(accountCandidates)+len(configCandidates))
+	accountPos, configPos := 0, 0
+	for accountPos < len(accountCandidates) || configPos < len(configCandidates) {
+		if configPos >= len(configCandidates) || (accountPos < len(accountCandidates) && accountCandidates[accountPos] < configCandidates[configPos]) {
+			merged = append(merged, accountCandidates[accountPos])
+			accountPos++
+			continue
+		}
+		merged = append(merged, configCandidates[configPos])
+		configPos++
+	}
+	return merged
+}
+
+func (s *UsageAnalyticsService) loadAccountUsageSnapshotState(ctx context.Context, provider string) *accountUsageSnapshotState {
+	state := &accountUsageSnapshotState{loaded: true}
+	state.index.snapshots, state.err = s.usageRepo.GetLatestAccountUsageSnapshots(ctx, provider)
+	if state.err == nil {
+		state.index = newAccountUsageSnapshotIndex(state.index.snapshots)
+	}
+	return state
+}
+
 func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
-	snapshots, err := s.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
-	if err != nil {
-		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
-	} else {
+	return s.populateAnalyticsUsageViewWithSnapshots(ctx, filter, view, configsByID, refreshErrors, s.loadAccountUsageSnapshotState(ctx, filter.Provider))
+}
+
+func (s *UsageAnalyticsService) populateAnalyticsUsageViewWithSnapshots(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string, snapshotState *accountUsageSnapshotState) error {
+	if snapshotState == nil || !snapshotState.loaded {
+		snapshotState = s.loadAccountUsageSnapshotState(ctx, filter.Provider)
+	}
+	if snapshotState.err != nil {
+		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", snapshotState.err))
+	}
+	if snapshotState.err == nil || len(snapshotState.index.snapshots) > 0 {
+		snapshots := snapshotState.index.snapshots
 		view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, snapshots, configsByID)
 		view.AccountLimits = dedupeAccountUsageViews(view.AccountLimits, configsByID)
 		view.AccountLimits = applyAccountErrors(view.AccountLimits, refreshErrors, configsByID)
@@ -537,6 +647,16 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 	if s.accountFetcher == nil {
 		return nil, nil
 	}
+	return s.refreshAccountSnapshotsWithState(ctx, configs, provider, force, s.loadAccountUsageSnapshotState(ctx, provider))
+}
+
+func (s *UsageAnalyticsService) refreshAccountSnapshotsWithState(ctx context.Context, configs []models.LLMConfig, provider string, force bool, snapshotState *accountUsageSnapshotState) ([]models.AccountUsageSnapshot, map[string]string) {
+	if s.accountFetcher == nil {
+		return nil, nil
+	}
+	if snapshotState == nil || !snapshotState.loaded {
+		snapshotState = s.loadAccountUsageSnapshotState(ctx, provider)
+	}
 	var snapshots []models.AccountUsageSnapshot
 	errorsByKey := map[string]string{}
 	seenAccounts := map[string]bool{}
@@ -563,7 +683,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		if seenAccounts[key] {
 			continue
 		}
-		latest, shouldRefresh := latestAccountSnapshotForConfig(ctx, s.usageRepo, cfg, force)
+		latest, shouldRefresh := latestAccountSnapshotForConfig(snapshotState.index, cfg, force)
 		if !shouldRefresh {
 			if latest != nil && isAccountRefreshFailure(latest.RateLimitReachedType) {
 				// Failure cooldown belongs to the credential/config that produced it.
@@ -614,6 +734,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			applog.Infof("[usage] skipped stale account usage snapshot provider=%s", cfg.Provider)
 			continue
 		}
+		snapshotState.index.upsert(*snapshot)
 		seenAccounts[key] = true
 		delete(pendingFailures, key)
 		snapshots = append(snapshots, *snapshot)
@@ -634,22 +755,16 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			applog.Infof("[usage] skipped stale account usage refresh failure provider=%s", failure.snapshot.Provider)
 			continue
 		}
+		snapshotState.index.upsert(failure.snapshot)
 		errorsByKey[key] = failure.message
 		snapshots = append(snapshots, failure.snapshot)
 	}
 	return snapshots, errorsByKey
 }
 
-func latestAccountSnapshotForConfig(ctx context.Context, usageRepo *repository.UsageRepo, cfg models.LLMConfig, force bool) (*models.AccountUsageSnapshot, bool) {
-	if usageRepo == nil {
-		return nil, false
-	}
-	snapshots, err := usageRepo.GetLatestAccountUsageSnapshots(ctx, string(cfg.Provider))
-	if err != nil {
-		return nil, true
-	}
-	for i := range snapshots {
-		snapshot := &snapshots[i]
+func latestAccountSnapshotForConfig(index accountUsageSnapshotIndex, cfg models.LLMConfig, force bool) (*models.AccountUsageSnapshot, bool) {
+	for _, snapshotIndex := range index.candidatesForConfig(cfg) {
+		snapshot := &index.snapshots[snapshotIndex]
 		if !snapshotMatchesConfigAccount(*snapshot, cfg) {
 			continue
 		}

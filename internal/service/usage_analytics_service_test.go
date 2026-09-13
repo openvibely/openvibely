@@ -2472,6 +2472,264 @@ func TestOpenAIUsageEndpointMatchesRunbookPathStyles(t *testing.T) {
 	}
 }
 
+func TestUsageAnalyticsService_BatchesLatestSnapshotsPerRequest(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		t.Run(fmt.Sprintf("refresh=%t", refresh), func(t *testing.T) {
+			db, counter := testutil.NewStatementCountingTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+			const configCount = 20
+			for i := 0; i < configCount; i++ {
+				config := &models.LLMConfig{
+					Name:             fmt.Sprintf("OpenAI OAuth %02d", i),
+					Provider:         models.ProviderOpenAI,
+					Model:            "gpt-5.3-codex",
+					AuthMethod:       models.AuthMethodOAuth,
+					OAuthAccessToken: fmt.Sprintf("token-%02d", i),
+					OAuthAccountID:   fmt.Sprintf("account-%02d", i),
+				}
+				if err := configRepo.Create(ctx, config); err != nil {
+					t.Fatalf("create config %d: %v", i, err)
+				}
+				pct := float64(i)
+				if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+					Provider:            string(models.ProviderOpenAI),
+					AccountID:           config.OAuthAccountID,
+					AgentConfigID:       config.ID,
+					OAuthConfigRevision: config.OAuthConfigRevision,
+					PlanType:            "pro",
+					PrimaryLabel:        "5-hour session",
+					PrimaryUsedPercent:  &pct,
+					ExtraLimits: []models.AccountUsageExtraLimit{{
+						Provider:    string(models.ProviderOpenAI),
+						AccountID:   config.OAuthAccountID,
+						LimitKey:    "weekly",
+						Label:       "Weekly limit",
+						UsedPercent: &pct,
+					}},
+				}); err != nil {
+					t.Fatalf("create snapshot %d: %v", i, err)
+				}
+			}
+
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			if refresh {
+				svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+					pct := 80.0
+					return &models.AccountUsageSnapshot{
+						Provider:            string(cfg.Provider),
+						AccountID:           cfg.OAuthAccountID,
+						AgentConfigID:       cfg.ID,
+						OAuthConfigRevision: cfg.OAuthConfigRevision,
+						PlanType:            "pro",
+						PrimaryLabel:        "5-hour session",
+						PrimaryUsedPercent:  &pct,
+						RawJSON:             `{"refresh":true}`,
+					}, nil
+				})
+			}
+
+			counter.Reset()
+			counter.SetEnabled(true)
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: refresh})
+			counter.SetEnabled(false)
+			if err != nil {
+				t.Fatalf("BuildAnalyticsUsage: %v", err)
+			}
+			latestQueries, extraLimitQueries := countAccountSnapshotQueries(counter.Statements())
+			if latestQueries != 1 || extraLimitQueries != 1 {
+				t.Fatalf("snapshot query counts = latest %d, extra limits %d, want 1 each; statements=%v", latestQueries, extraLimitQueries, counter.Statements())
+			}
+			if len(view.AccountLimits) != configCount {
+				t.Fatalf("account limit count = %d, want %d", len(view.AccountLimits), configCount)
+			}
+			if refresh {
+				for _, account := range view.AccountLimits {
+					if account.PrimaryLimit == nil || account.PrimaryLimit.UsedPercent == nil || *account.PrimaryLimit.UsedPercent != 80 {
+						t.Fatalf("refreshed snapshot did not win for account %+v", account)
+					}
+				}
+			}
+		})
+	}
+}
+
+func countAccountSnapshotQueries(statements []string) (latest, extraLimits int) {
+	for _, statement := range statements {
+		if strings.Contains(statement, "FROM account_usage_snapshots s") {
+			latest++
+		}
+		if strings.Contains(statement, "FROM account_usage_extra_limits") {
+			extraLimits++
+		}
+	}
+	return latest, extraLimits
+}
+
+func BenchmarkUsageAnalyticsServiceRequestScopedSnapshots(b *testing.B) {
+	for _, configCount := range []int{1, 5, 20, 50} {
+		for _, refresh := range []bool{false, true} {
+			name := fmt.Sprintf("optimized/configs=%d/refresh=%t", configCount, refresh)
+			b.Run(name, func(b *testing.B) {
+				db, counter, svc, ctx, filter := setupUsageAnalyticsSnapshotBenchmark(b, configCount, refresh)
+				counter.SetEnabled(false)
+				_ = db
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if _, err := svc.BuildAnalyticsUsage(ctx, filter); err != nil {
+						b.Fatalf("BuildAnalyticsUsage: %v", err)
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(1, "latest-snapshot-queries/op")
+				b.ReportMetric(1, "extra-limit-queries/op")
+			})
+
+			name = fmt.Sprintf("baseline/configs=%d/refresh=%t", configCount, refresh)
+			b.Run(name, func(b *testing.B) {
+				db, counter, svc, ctx, filter := setupUsageAnalyticsSnapshotBenchmark(b, configCount, refresh)
+				counter.SetEnabled(false)
+				_ = db
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if err := buildAnalyticsUsageSnapshotBaseline(ctx, svc, filter); err != nil {
+						b.Fatalf("buildAnalyticsUsageSnapshotBaseline: %v", err)
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(configCount+1), "latest-snapshot-queries/op")
+				b.ReportMetric(float64(configCount+1), "extra-limit-queries/op")
+			})
+		}
+	}
+}
+
+func setupUsageAnalyticsSnapshotBenchmark(tb testing.TB, configCount int, refresh bool) (*sql.DB, *testutil.SQLStatementCounter, *UsageAnalyticsService, context.Context, repository.UsageFilter) {
+	tb.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(tb)
+	usageRepo := repository.NewUsageRepo(db)
+	configRepo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	for i := 0; i < configCount; i++ {
+		config := &models.LLMConfig{
+			Name:             fmt.Sprintf("OpenAI OAuth %02d", i),
+			Provider:         models.ProviderOpenAI,
+			Model:            "gpt-5.3-codex",
+			AuthMethod:       models.AuthMethodOAuth,
+			OAuthAccessToken: fmt.Sprintf("token-%02d", i),
+			OAuthAccountID:   fmt.Sprintf("account-%02d", i),
+		}
+		if err := configRepo.Create(ctx, config); err != nil {
+			tb.Fatalf("create config %d: %v", i, err)
+		}
+		pct := float64(i)
+		if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+			Provider:            string(models.ProviderOpenAI),
+			AccountID:           config.OAuthAccountID,
+			AgentConfigID:       config.ID,
+			OAuthConfigRevision: config.OAuthConfigRevision,
+			PlanType:            "pro",
+			PrimaryLabel:        "5-hour session",
+			PrimaryUsedPercent:  &pct,
+			ExtraLimits: []models.AccountUsageExtraLimit{{
+				Provider:    string(models.ProviderOpenAI),
+				AccountID:   config.OAuthAccountID,
+				LimitKey:    "weekly",
+				Label:       "Weekly limit",
+				UsedPercent: &pct,
+			}},
+		}); err != nil {
+			tb.Fatalf("create snapshot %d: %v", i, err)
+		}
+	}
+	svc := NewUsageAnalyticsService(usageRepo, configRepo)
+	if refresh {
+		svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+			pct := 80.0
+			return &models.AccountUsageSnapshot{
+				Provider:            string(cfg.Provider),
+				AccountID:           cfg.OAuthAccountID,
+				AgentConfigID:       cfg.ID,
+				OAuthConfigRevision: cfg.OAuthConfigRevision,
+				PlanType:            "pro",
+				PrimaryLabel:        "5-hour session",
+				PrimaryUsedPercent:  &pct,
+				RawJSON:             `{"refresh":true}`,
+			}, nil
+		})
+	}
+	return db, counter, svc, ctx, repository.UsageFilter{Refresh: refresh}
+}
+
+func buildAnalyticsUsageSnapshotBaseline(ctx context.Context, svc *UsageAnalyticsService, filter repository.UsageFilter) error {
+	configs, err := svc.llmConfigRepo.List(ctx)
+	if err != nil {
+		return err
+	}
+	configsByID := make(map[string]models.LLMConfig, len(configs))
+	for i := range configs {
+		configs[i] = svc.resolveAccountUsageOAuthAccountID(ctx, configs[i])
+		configsByID[configs[i].ID] = configs[i]
+	}
+	view := &models.AnalyticsUsageViewModel{
+		AccountLimits: svc.oauthAccountPlaceholders(configs, filter.Provider),
+	}
+	seenAccounts := make(map[string]bool)
+	var fetched []models.AccountUsageSnapshot
+	for _, cfg := range configs {
+		if cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" || (cfg.Provider != models.ProviderAnthropic && cfg.Provider != models.ProviderOpenAI) || (filter.Provider != "" && string(cfg.Provider) != filter.Provider) {
+			continue
+		}
+		key := accountUsageKeyForConfig(cfg)
+		if seenAccounts[key] {
+			continue
+		}
+		storedSnapshots, err := svc.usageRepo.GetLatestAccountUsageSnapshots(ctx, string(cfg.Provider))
+		if err != nil {
+			return err
+		}
+		latest, shouldRefresh := latestAccountSnapshotForConfig(newAccountUsageSnapshotIndex(storedSnapshots), cfg, filter.Refresh)
+		if !shouldRefresh || svc.accountFetcher == nil {
+			seenAccounts[key] = true
+			continue
+		}
+		snapshot, err := svc.accountFetcher(ctx, cfg)
+		if err != nil || snapshot == nil {
+			continue
+		}
+		if snapshot.Provider == "" {
+			snapshot.Provider = string(cfg.Provider)
+		}
+		if snapshot.AgentConfigID == "" {
+			snapshot.AgentConfigID = cfg.ID
+		}
+		if snapshot.AccountID == "" {
+			snapshot.AccountID = accountIDForConfig(cfg)
+		}
+		stored, err := svc.usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(ctx, snapshot, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider)
+		if err != nil {
+			return err
+		}
+		if stored {
+			seenAccounts[key] = true
+			fetched = append(fetched, *snapshot)
+		}
+		_ = latest
+	}
+	finalSnapshots, err := svc.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
+	if err != nil {
+		return err
+	}
+	view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, fetched, configsByID)
+	return svc.populateAnalyticsUsageViewWithSnapshots(ctx, filter, view, configsByID, nil, &accountUsageSnapshotState{
+		index:  newAccountUsageSnapshotIndex(finalSnapshots),
+		loaded: true,
+	})
+}
+
 func BenchmarkUsageAnalyticsServiceBuildAnalyticsUsage50K(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	ctx := context.Background()
