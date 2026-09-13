@@ -20,6 +20,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -261,6 +262,19 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	var allText strings.Builder
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
+			if turn == 0 || !opts.AutoCompaction {
+				return nil, err
+			}
+			var compactErr error
+			inputItems, compactErr = compactIfNeeded(inputItems, compactionThreshold, true)
+			if compactErr != nil {
+				return nil, fmt.Errorf("turn %d preflight compaction: %w", turn+1, compactErr)
+			}
+			if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
+				return nil, err
+			}
+		}
 		var turnResult *agenticTurnResult
 		overflowRecovered := false
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
@@ -880,7 +894,10 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
 	}
 
-	trimmedInput := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model)
+	trimmedInput, err := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model)
+	if err != nil {
+		return nil, "", err
+	}
 	if len(trimmedInput) == 0 {
 		return nil, "", fmt.Errorf("compaction input is empty after trimming")
 	}
@@ -1253,26 +1270,53 @@ func compactionInstructions(opts *AgenticOptions) string {
 	return openAICompactionInstructions
 }
 
-func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string) []any {
+func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string) ([]any, error) {
 	contextWindow, ok := openAIModelContextWindow(model)
 	if !ok || contextWindow <= 0 || len(inputItems) == 0 {
-		return append([]any(nil), inputItems...)
+		return append([]any(nil), inputItems...), nil
+	}
+	safetyMargin := max(1024, contextWindow/50)
+	safeInputBudget := contextWindow - 16384 - safetyMargin
+	if safeInputBudget <= 0 {
+		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("context window %d cannot reserve output and safety margin", contextWindow))
 	}
 
 	trimmed := append([]any(nil), inputItems...)
-	for estimateCompactionRequestTokens(trimmed, tools, instructions) > contextWindow {
+	for estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
 		objectiveIndex := compactionObjectiveIndex(trimmed)
 		recentIndex := compactionRecentContextIndex(trimmed)
 		trimIndex := nextCompactionTrimIndex(trimmed, objectiveIndex, recentIndex)
-		if trimIndex < 0 {
-			break
+		if trimIndex >= 0 {
+			trimmed = append(trimmed[:trimIndex], trimmed[trimIndex+1:]...)
+			continue
 		}
-		trimmed = append(trimmed[:trimIndex], trimmed[trimIndex+1:]...)
-		if len(trimmed) == 0 {
-			break
+
+		// A protected objective or recent message can itself exceed the budget.
+		// Bound the larger protected message and retry the complete estimate.
+		candidate := objectiveIndex
+		if recentIndex >= 0 && inputItemTokenEstimate(trimmed[recentIndex]) > inputItemTokenEstimate(trimmed[candidate]) {
+			candidate = recentIndex
 		}
+		item, ok := trimmed[candidate].(map[string]any)
+		if !ok {
+			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item cannot be bounded"))
+		}
+		overhead := estimateCompactionRequestTokens(trimmed, tools, instructions) - inputItemTokenEstimate(item) + 32
+		messageBudget := safeInputBudget - overhead - 256
+		bounded, ok := truncateRetainedMessageForOpenAIRemoteCompactionV2(item, messageBudget)
+		if !ok || inputItemTokenEstimate(bounded) >= inputItemTokenEstimate(item) {
+			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item exceeds safe compaction budget %d", safeInputBudget))
+		}
+		trimmed[candidate] = bounded
 	}
-	return trimmed
+	if estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
+		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("trimmed compaction request exceeds safe budget %d", safeInputBudget))
+	}
+	return trimmed, nil
+}
+
+func inputItemTokenEstimate(item any) int {
+	return estimateInputItemsTokens([]any{item})
 }
 
 func compactionObjectiveIndex(items []any) int {
@@ -1351,6 +1395,27 @@ func nextCompactionTrimIndex(items []any, protectedIndexes ...int) int {
 		}
 	}
 	return -1
+}
+
+func ensureOpenAIAgenticRequestFits(inputItems []any, tools []ToolDefinition, opts *AgenticOptions) error {
+	if opts == nil {
+		return nil
+	}
+	window, ok := openAIModelContextWindow(opts.Model)
+	if !ok || window <= 0 {
+		return nil
+	}
+	reserved := opts.MaxOutputTokens
+	if reserved <= 0 {
+		reserved = 16384
+	}
+	safety := max(1024, window/50)
+	safe := window - reserved - safety
+	tokens := estimateCompactionRequestTokens(inputItems, tools, opts.System) + 32
+	if tokens <= safe {
+		return nil
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "OpenAI Responses preflight", fmt.Errorf("complete request requires %d input tokens; safe limit is %d", tokens, safe))
 }
 
 func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, instructions string) int {

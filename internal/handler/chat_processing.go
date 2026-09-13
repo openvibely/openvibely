@@ -1707,7 +1707,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	h.resumeUserStoppedGoalForManualStart(ctx, taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(ctx, taskID, models.TaskOriginWeb, "")
 	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, taskThreadHistoryLimit)
-	priorHistory := filterChatHistory(priorExecs, exec.ID)
+	priorHistory := filterRetryChatHistory(priorExecs, exec.ID, failed.ID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
 		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
@@ -2502,6 +2502,18 @@ func filterChatHistory(executions []models.Execution, currentExecID string) []mo
 		result = append(result, executions[i])
 	}
 	return result
+}
+
+func filterRetryChatHistory(executions []models.Execution, currentExecID, failedSourceExecID string) []models.Execution {
+	history := filterChatHistory(executions, currentExecID)
+	filtered := make([]models.Execution, 0, len(history))
+	for _, exec := range history {
+		if exec.ID == failedSourceExecID {
+			continue
+		}
+		filtered = append(filtered, exec)
+	}
+	return filtered
 }
 
 // selectAgent handles agent selection with vision-awareness for both chat and task thread.

@@ -3276,7 +3276,10 @@ func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t 
 		},
 	}
 
-	trimmed := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(trimmed) != 1 {
 		t.Fatalf("trimmed len = %d, want 1", len(trimmed))
 	}
@@ -3286,6 +3289,23 @@ func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t 
 	}
 	if got := first["type"]; got != "message" {
 		t.Fatalf("trimmed[0].type = %v, want message", got)
+	}
+}
+
+func TestTrimCompactionInputItemsToFitContextWindow_BoundsSingleProtectedMessage(t *testing.T) {
+	input := []any{agenticInputItem{"type": "message", "role": "user", "content": strings.Repeat("!", 2_664_043)}}
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(input, nil, strings.Repeat("system", 1000), "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := 272000 - 16384 - max(1024, 272000/50)
+	if got := estimateCompactionRequestTokens(trimmed, nil, strings.Repeat("system", 1000)) + 32; got > limit {
+		t.Fatalf("compaction request tokens = %d, safe limit = %d", got, limit)
+	}
+	item := trimmed[0].(map[string]any)
+	content := item["content"].(string)
+	if !strings.Contains(content, "tokens truncated") {
+		t.Fatal("bounded protected message lacks visible omission marker")
 	}
 }
 
@@ -3314,7 +3334,10 @@ func TestTrimCompactionInputItemsToFitContextWindow_PreservesObjectiveAndRecentC
 		},
 	}
 
-	trimmed := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(trimmed) >= len(inputItems) {
 		t.Fatalf("expected compaction input to be trimmed; len=%d original=%d", len(trimmed), len(inputItems))
 	}
