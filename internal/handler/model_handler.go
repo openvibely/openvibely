@@ -86,16 +86,21 @@ func (h *Handler) ListModels(c echo.Context) error {
 		applog.Infof("[handler] ListModels model options error: %v", err)
 		return err
 	}
+	oauthConnections, err := h.llmConfigRepo.ListOAuthConnections(ctx, "")
+	if err != nil {
+		applog.Infof("[handler] ListModels OAuth connections error: %v", err)
+		return err
+	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	listState := modelCardListState(currentProjectID, filter)
 	if htmxRequest || page.IsFragment {
 		setCardPageResponse(c, hasMore)
-		return render(c, http.StatusOK, pages.ModelsContentPageWithPaginationAndState(agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore, listState))
+		return render(c, http.StatusOK, pages.ModelsContentPageWithOAuthConnectionsAndState(agents, modelOptions, oauthConnections, modelWorkerStats, h.desktopMode, hasMore, listState))
 	}
 
 	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.ModelsPageWithPaginationAndState(projects, currentProjectID, agents, modelOptions, modelWorkerStats, h.desktopMode, hasMore, listState))
+	return render(c, http.StatusOK, pages.ModelsPageWithOAuthConnectionsAndState(projects, currentProjectID, agents, modelOptions, oauthConnections, modelWorkerStats, h.desktopMode, hasMore, listState))
 }
 
 type modelEditDetails struct {
@@ -108,6 +113,7 @@ type modelEditDetails struct {
 	IsDefault             bool               `json:"is_default"`
 	APIKey                string             `json:"api_key"`
 	AuthMethod            models.AuthMethod  `json:"auth_method"`
+	OAuthConnectionID     string             `json:"oauth_connection_id"`
 	MaxWorkers            int                `json:"max_workers"`
 	WorkerTimeout         int                `json:"worker_timeout"`
 	OAuthClientID         string             `json:"oauth_client_id"`
@@ -142,7 +148,8 @@ func (h *Handler) GetModelEditDetails(c echo.Context) error {
 		ID: config.ID, Name: config.Name, Provider: config.Provider, Model: config.Model,
 		ReasoningEffort: config.ReasoningEffort, Temperature: config.Temperature,
 		IsDefault: config.IsDefault, APIKey: config.APIKey, AuthMethod: config.AuthMethod,
-		MaxWorkers: config.MaxWorkers, WorkerTimeout: config.WorkerTimeout,
+		OAuthConnectionID: config.OAuthConnectionID,
+		MaxWorkers:        config.MaxWorkers, WorkerTimeout: config.WorkerTimeout,
 		OAuthClientID: config.OAuthClientID, OAuthAuthorizeURL: config.OAuthAuthorizeURL,
 		OAuthTokenURL: config.OAuthTokenURL, OAuthScopes: config.OAuthScopes,
 		OllamaBaseURL: config.OllamaBaseURL, BaseURL: config.BaseURL,
@@ -748,6 +755,21 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 	agent.Name = normalizedName
 	agent.Provider = provider
 	agent.AuthMethod = authMethod
+	if agent.AuthMethod == models.AuthMethodOAuth && (agent.Provider == models.ProviderOpenAI || agent.Provider == models.ProviderAnthropic) {
+		if connectionID, ok := formValueIfPresent(c, "oauth_connection_id"); ok {
+			if connectionID == "new" {
+				connectionID = ""
+				agent.OAuthAccessToken = ""
+				agent.OAuthRefreshToken = ""
+				agent.OAuthExpiresAt = 0
+				agent.OAuthAccountID = ""
+				agent.OAuthNeedsReauth = false
+				agent.OAuthConnectionName = ""
+				agent.OAuthConfigRevision = 0
+			}
+			agent.OAuthConnectionID = strings.TrimSpace(connectionID)
+		}
+	}
 
 	agent.Model = c.FormValue("model")
 	if agent.Provider == models.ProviderOpenAI {
@@ -984,6 +1006,30 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
+func (h *Handler) DisconnectModelOAuthConnection(c echo.Context) error {
+	cfg, err := h.llmConfigRepo.GetByID(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "model not found")
+	}
+	if cfg.OAuthConnectionID == "" || cfg.AuthMethod != models.AuthMethodOAuth || (cfg.Provider != models.ProviderOpenAI && cfg.Provider != models.ProviderAnthropic) {
+		return echo.NewHTTPError(http.StatusBadRequest, "model does not use a shared OAuth account")
+	}
+	disconnected, err := h.llmConfigRepo.DisconnectLinkedOAuthConnection(c.Request().Context(), cfg.ID, cfg.OAuthConnectionID, cfg.OAuthConfigRevision, cfg.Provider)
+	if err != nil {
+		return err
+	}
+	if !disconnected {
+		return echo.NewHTTPError(http.StatusConflict, "OAuth account changed; reload and try again")
+	}
+	if isHTMX(c) {
+		return h.renderRefreshedModels(c)
+	}
+	return c.Redirect(http.StatusSeeOther, "/models")
+}
+
 func (h *Handler) SetDefaultModel(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] SetDefaultModel id=%s", id)
@@ -1133,11 +1179,15 @@ func (h *Handler) renderRefreshedModels(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	oauthConnections, err := h.llmConfigRepo.ListOAuthConnections(ctx, "")
+	if err != nil {
+		return err
+	}
 	if page.IsFragment {
 		setCardPageResponse(c, hasMore)
 	}
 	projectID, _ := h.getCurrentProjectID(c)
-	return render(c, http.StatusOK, pages.ModelsContentPageWithPaginationAndState(agents, modelOptions, h.buildModelWorkerStats(agents), h.desktopMode, hasMore, modelCardListState(projectID, filter)))
+	return render(c, http.StatusOK, pages.ModelsContentPageWithOAuthConnectionsAndState(agents, modelOptions, oauthConnections, h.buildModelWorkerStats(agents), h.desktopMode, hasMore, modelCardListState(projectID, filter)))
 }
 
 // buildModelWorkerStats returns a map of agent config ID -> running worker count.

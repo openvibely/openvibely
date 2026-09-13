@@ -54,6 +54,7 @@ const (
 // oauthPendingFlow stores the PKCE verifier and model config ID for an in-progress OAuth flow.
 type oauthPendingFlow struct {
 	ConfigID       string
+	ConnectionID   string
 	Verifier       string
 	State          string
 	RedirectURI    string
@@ -250,8 +251,12 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		agent.OAuthConfigRevision = revision
 	}
 
-	// Cancel any previous callback server for this config before starting a new one.
-	shutdownPreviousOAuthServer(id)
+	// Cancel any previous callback server for this credential owner before starting a new one.
+	oauthOwnerID := id
+	if agent.OAuthConnectionID != "" {
+		oauthOwnerID = agent.OAuthConnectionID
+	}
+	shutdownPreviousOAuthServer(oauthOwnerID)
 
 	modelsURL := h.modelsReturnURL(c, c.QueryParam("project_id"))
 	// Redirect paths must match what the OAuth providers accept for their
@@ -307,12 +312,12 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 			serverCtx, serverCancel := context.WithTimeout(context.Background(), oauthServerTimeout)
 			serverID := state // reuse the unique state token as server ID
 			oauthServersMu.Lock()
-			oauthServers[id] = &oauthRunningServer{ConfigID: id, ServerID: serverID, Cancel: serverCancel}
+			oauthServers[oauthOwnerID] = &oauthRunningServer{ConfigID: oauthOwnerID, ServerID: serverID, Cancel: serverCancel}
 			oauthServersMu.Unlock()
 			go func() {
-				h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, id, localPath)
+				h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, oauthOwnerID, localPath)
 				// Clean up tracking after the server exits.
-				untrackOAuthServer(id, serverID)
+				untrackOAuthServer(oauthOwnerID, serverID)
 			}()
 		}
 	}
@@ -321,12 +326,17 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	oauthFlowsMu.Lock()
 	// Clean up expired flows and invalidate any prior attempt for this config.
 	for k, v := range oauthFlows {
-		if oauthFlowExpired(v, time.Now()) || v.ConfigID == id {
+		flowOwnerID := v.ConfigID
+		if v.ConnectionID != "" {
+			flowOwnerID = v.ConnectionID
+		}
+		if oauthFlowExpired(v, time.Now()) || flowOwnerID == oauthOwnerID {
 			delete(oauthFlows, k)
 		}
 	}
 	oauthFlows[state] = &oauthPendingFlow{
 		ConfigID:       id,
+		ConnectionID:   agent.OAuthConnectionID,
 		Verifier:       verifier,
 		State:          state,
 		RedirectURI:    redirectURI,
@@ -667,10 +677,18 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	}
 
 	bgCtx := context.Background()
-	updated, err := h.llmConfigRepo.UpdateStandardOAuthConnectionIfRevision(
-		bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider,
-		tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID,
-	)
+	var updated bool
+	if flow.ConnectionID != "" {
+		updated, err = h.llmConfigRepo.ReplaceLinkedOAuthConnectionIfRevision(
+			bgCtx, flow.ConfigID, flow.ConnectionID, flow.ConfigRevision, flow.Provider,
+			tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID,
+		)
+	} else {
+		updated, err = h.llmConfigRepo.UpdateStandardOAuthConnectionIfRevision(
+			bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider,
+			tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID,
+		)
+	}
 	if err != nil {
 		return 0, err
 	}

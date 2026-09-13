@@ -358,7 +358,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 					}
 				}
 			}
-			if strings.Contains(stmt, "from agent_configs where id = ?") {
+			if strings.Contains(stmt, "from agent_configs where id = ?") || strings.Contains(stmt, "from agent_configs a left join oauth_connections") && strings.Contains(stmt, "where a.id = ?") {
 				detailQueries++
 			}
 		}
@@ -500,7 +500,7 @@ func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreami
 				}
 			}
 		}
-		if strings.Contains(stmt, "from agent_configs where id = ?") {
+		if strings.Contains(stmt, "from agent_configs where id = ?") || strings.Contains(stmt, "from agent_configs a left join oauth_connections") && strings.Contains(stmt, "where a.id = ?") {
 			detailQueries++
 		}
 	}
@@ -647,7 +647,7 @@ func assertCompactVisionSelectionStatement(t *testing.T, statements []string) {
 	}
 	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
 	projection := strings.Split(stmt, " from agent_configs ")[0]
-	wantProjection := "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '') != '' then 1 else 0 end, case when coalesce(oauth_access_token, '') != '' then 1 else 0 end"
+	wantProjection := "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '') != '' then 1 else 0 end, case when coalesce(oauth_connection_id, '') != '' then exists(select 1 from oauth_connections c where c.id = oauth_connection_id and c.oauth_access_token != '') else coalesce(oauth_access_token, '') != '' end"
 	if projection != wantProjection {
 		t.Fatalf("vision selection projection = %q, want %q", projection, wantProjection)
 	}
