@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1340,6 +1341,174 @@ func TestAccountUsageHTTPErrorDoesNotExposeResponseBody(t *testing.T) {
 	}
 	if !strings.Contains(message, "HTTP 403") {
 		t.Fatalf("sanitized account usage error should include status code, got %s", message)
+	}
+}
+
+func TestUsageAnalyticsService_StaleAccountIdentityResolutionReturnsAuthoritativeConfig(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		for _, mutation := range []string{"reconnect", "model_edit"} {
+			t.Run(string(provider)+"/"+mutation, func(t *testing.T) {
+				db := testutil.NewTestDB(t)
+				usageRepo := repository.NewUsageRepo(db)
+				configRepo := repository.NewLLMConfigRepo(db)
+				ctx := context.Background()
+
+				oldAccess := "old-access"
+				if provider == models.ProviderOpenAI {
+					claims := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"old-account"}}`))
+					oldAccess = "header." + claims + ".signature"
+				}
+				config := &models.LLMConfig{
+					Name:              "OAuth identity race",
+					Provider:          provider,
+					Model:             "test-model",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  oldAccess,
+					OAuthRefreshToken: "old-refresh",
+					OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				}
+				if err := configRepo.Create(ctx, config); err != nil {
+					t.Fatalf("create config: %v", err)
+				}
+				stale, err := configRepo.GetByID(ctx, config.ID)
+				if err != nil {
+					t.Fatalf("load stale config: %v", err)
+				}
+
+				if mutation == "reconnect" {
+					updated, updateErr := configRepo.UpdateStandardOAuthConnectionIfRevision(
+						ctx, config.ID, stale.OAuthConfigRevision, provider,
+						"current-access", "current-refresh", time.Now().Add(3*time.Hour).UnixMilli(), "current-account",
+					)
+					if updateErr != nil || !updated {
+						t.Fatalf("reconnect config = %v, %v", updated, updateErr)
+					}
+				} else {
+					edited := *stale
+					edited.AuthMethod = models.AuthMethodAPIKey
+					edited.APIKey = "current-api-key"
+					edited.OAuthAccessToken = ""
+					edited.OAuthRefreshToken = ""
+					edited.OAuthExpiresAt = 0
+					if err := configRepo.Update(ctx, &edited); err != nil {
+						t.Fatalf("edit config: %v", err)
+					}
+				}
+
+				if provider == models.ProviderAnthropic {
+					oldHost := anthropicclient.AnthropicAPIHost
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if r.URL.Path != "/api/oauth/profile" {
+							t.Fatalf("unexpected Anthropic path %s", r.URL.Path)
+						}
+						if got := r.Header.Get("Authorization"); got != "Bearer "+oldAccess {
+							t.Fatalf("profile authorization = %q, want stale token", got)
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"organization": map[string]any{"uuid": "old-account"}})
+					}))
+					defer server.Close()
+					anthropicclient.AnthropicAPIHost = server.URL
+					defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
+				}
+
+				svc := NewUsageAnalyticsService(usageRepo, configRepo)
+				resolved := svc.resolveAccountUsageOAuthAccountID(ctx, *stale)
+				fetches := 0
+				svc.SetAccountUsageFetcher(func(_ context.Context, candidate models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+					fetches++
+					if candidate.OAuthAccessToken != "current-access" || candidate.OAuthAccountID != "current-account" || candidate.OAuthConfigRevision != stale.OAuthConfigRevision+1 {
+						t.Fatalf("account fetch received stale config: %+v", candidate)
+					}
+					pct := 1.0
+					return &models.AccountUsageSnapshot{
+						Provider:             string(candidate.Provider),
+						AccountID:            candidate.OAuthAccountID,
+						AgentConfigID:        candidate.ID,
+						SecondaryUsedPercent: &pct,
+					}, nil
+				})
+				snapshots, refreshErrors := svc.refreshAccountSnapshots(ctx, []models.LLMConfig{resolved}, string(provider), true)
+				if mutation == "reconnect" {
+					if resolved.AuthMethod != models.AuthMethodOAuth || resolved.OAuthAccessToken != "current-access" || resolved.OAuthRefreshToken != "current-refresh" || resolved.OAuthAccountID != "current-account" || resolved.OAuthConfigRevision != stale.OAuthConfigRevision+1 {
+						t.Fatalf("resolved stale reconnect config: %+v", resolved)
+					}
+					if fetches != 1 || len(snapshots) != 1 || len(refreshErrors) != 0 {
+						t.Fatalf("authoritative account fetch = calls %d, snapshots %+v, errors %+v", fetches, snapshots, refreshErrors)
+					}
+				} else {
+					if resolved.AuthMethod != models.AuthMethodAPIKey || resolved.OAuthAccessToken != "" || resolved.OAuthAccountID != "" {
+						t.Fatalf("resolved stale edited config: %+v", resolved)
+					}
+					if fetches != 0 || len(snapshots) != 0 || len(refreshErrors) != 0 {
+						t.Fatalf("edited config reached account fetch = calls %d, snapshots %+v, errors %+v", fetches, snapshots, refreshErrors)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestUsageAnalyticsService_AnthropicProfileRaceAbandonsStaleUsageRequest(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	usageRepo := repository.NewUsageRepo(db)
+	configRepo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	config := &models.LLMConfig{
+		Name:              "Anthropic profile race",
+		Provider:          models.ProviderAnthropic,
+		Model:             "claude-sonnet",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "old-access",
+		OAuthRefreshToken: "old-refresh",
+		OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+		OAuthAccountID:    "initial-account",
+	}
+	if err := configRepo.Create(ctx, config); err != nil {
+		t.Fatalf("create config: %v", err)
+	}
+	stale, err := configRepo.GetByID(ctx, config.ID)
+	if err != nil {
+		t.Fatalf("load stale config: %v", err)
+	}
+
+	usageCalls := 0
+	oldHost := anthropicclient.AnthropicAPIHost
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/oauth/profile":
+			updated, updateErr := configRepo.UpdateStandardOAuthConnectionIfRevision(
+				ctx, stale.ID, stale.OAuthConfigRevision, stale.Provider,
+				"current-access", "current-refresh", time.Now().Add(3*time.Hour).UnixMilli(), "current-account",
+			)
+			if updateErr != nil || !updated {
+				t.Fatalf("reconnect during profile request = %v, %v", updated, updateErr)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"organization": map[string]any{"uuid": "stale-profile-account"}})
+		case "/api/oauth/usage":
+			usageCalls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"seven_day": map[string]any{"utilization": 1.0}})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
+
+	svc := NewUsageAnalyticsService(usageRepo, configRepo)
+	snapshot, err := svc.fetchAnthropicOAuthUsage(ctx, *stale)
+	if err != nil {
+		t.Fatalf("fetchAnthropicOAuthUsage: %v", err)
+	}
+	if snapshot != nil || usageCalls != 0 {
+		t.Fatalf("stale profile continued to usage request: snapshot %+v, calls %d", snapshot, usageCalls)
+	}
+	current, err := configRepo.GetByID(ctx, config.ID)
+	if err != nil {
+		t.Fatalf("load current config: %v", err)
+	}
+	if current.OAuthAccessToken != "current-access" || current.OAuthRefreshToken != "current-refresh" || current.OAuthAccountID != "current-account" || current.OAuthConfigRevision != stale.OAuthConfigRevision+1 {
+		t.Fatalf("current reconnect was changed by stale profile: %+v", current)
 	}
 }
 
