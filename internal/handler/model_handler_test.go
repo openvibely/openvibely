@@ -105,9 +105,16 @@ func TestOAuthConnectionManagementRoutesRenameMoveAndDelete(t *testing.T) {
 func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
 	_, e, repo := setupTestHandler(t)
 	ctx := context.Background()
-	cfg := &models.LLMConfig{Name: "Shared Anthropic model", Provider: models.ProviderAnthropic, Model: "claude", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+	cfg := &models.LLMConfig{Name: "Shared Anthropic model", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
 	if err := repo.Create(ctx, cfg); err != nil {
 		t.Fatalf("create OAuth model: %v", err)
+	}
+	sibling := &models.LLMConfig{Name: "Shared Anthropic sibling", Provider: models.ProviderAnthropic, Model: "claude-opus", AuthMethod: models.AuthMethodOAuth}
+	if err := repo.Create(ctx, sibling); err != nil {
+		t.Fatalf("create sibling OAuth model: %v", err)
+	}
+	if err := repo.LinkOAuthConnection(ctx, sibling.ID, cfg.OAuthConnectionID); err != nil {
+		t.Fatalf("link sibling OAuth model: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/models", nil)
@@ -119,6 +126,10 @@ func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "OAuth Account") || !strings.Contains(body, "OAuth Accounts") || !strings.Contains(body, cfg.Name) || !strings.Contains(body, cfg.OAuthConnectionID) || !strings.Contains(body, "Move selected models") || !strings.Contains(body, "/rename") {
 		t.Fatalf("shared OAuth account selector/management controls missing: %s", body)
+	}
+	wantDisconnectConfirmation := `hx-confirm="Disconnect this OAuth account? Linked models: Shared Anthropic model (claude-sonnet), Shared Anthropic sibling (claude-opus). All will require reconnecting."`
+	if !strings.Contains(body, wantDisconnectConfirmation) {
+		t.Fatalf("disconnect confirmation does not identify every affected model: %s", body)
 	}
 	if strings.Contains(body, "secret-access") || strings.Contains(body, "secret-refresh") {
 		t.Fatal("Models page exposed OAuth credentials")
