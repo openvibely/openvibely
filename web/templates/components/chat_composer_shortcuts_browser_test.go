@@ -22,7 +22,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 		Form url.Values
 	}
 	var mu sync.Mutex
-	var records []requestRecord
+	records := make([]requestRecord, 0)
 
 	renderForm := func(config ChatInputFormConfig) string {
 		var buf bytes.Buffer
@@ -166,7 +166,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   if (activeInput.value !== '') fail('successful active-to-idle fallbacks did not clear the draft');
   document.getElementById('browser-result').textContent = 'PASS';
   document.body.setAttribute('data-test-result', 'pass');
-})();
+})().catch(function(error) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', error && error.stack || error && error.message || String(error)); });
 </script></body></html>`, idle, active)
 		default:
 			http.NotFound(w, r)
@@ -179,7 +179,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 		t.Logf("composer shortcut requests: %+v", records)
 	})
 
-	runHeadlessChromeFixture(t, chrome, server.URL+"/", "composer shortcuts", 10000, 25*time.Second)
+	runHeadlessChromeCDPFixture(t, chrome, server.URL+"/", "composer shortcuts", 1200, 700, 25*time.Second)
 
 	mu.Lock()
 	defer mu.Unlock()
