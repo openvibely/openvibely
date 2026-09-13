@@ -48,6 +48,7 @@ const (
 	oauthRedirectModeLocalhostManual = "localhost_manual"
 	anthropicManualOAuthPort         = 53692
 	oauthFlowLifetime                = 10 * time.Minute
+	publicOAuthProviderError         = "Authorization was denied or cancelled. Please try again."
 )
 
 // oauthPendingFlow stores the PKCE verifier and model config ID for an in-progress OAuth flow.
@@ -502,11 +503,7 @@ func (h *Handler) OAuthManualComplete(c echo.Context) error {
 	}
 
 	if oauthErr := values.Get("error"); oauthErr != "" {
-		errDesc := values.Get("error_description")
-		if errDesc == "" {
-			errDesc = oauthErr
-		}
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": errDesc})
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": publicOAuthProviderError})
 	}
 
 	result := h.completeOAuthFlow(state, code)
@@ -550,17 +547,13 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 			</body></html>`)
 			return
 		}
-		errDesc := r.URL.Query().Get("error_description")
-		if errDesc == "" {
-			errDesc = oauthErr
-		}
-		applog.Infof("[handler] OAuthCallback error: %s - %s", oauthErr, errDesc)
+		applog.Infof("[handler] OAuthCallback provider rejected authorization provider=%s", flow.Provider)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<html><body>
 				<h2>OAuth Failed</h2>
 				<p>%s</p>
 				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, htmltemplate.HTMLEscapeString(errDesc), htmltemplate.HTMLEscapeString(modelsURL))
+			</body></html>`, publicOAuthProviderError, htmltemplate.HTMLEscapeString(modelsURL))
 		return
 	}
 
@@ -667,12 +660,10 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	}
 
 	bgCtx := context.Background()
-	updated := false
-	if openAIAccountID != "" {
-		updated, err = h.llmConfigRepo.UpdateStandardOAuthConnectionIfRevision(bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID)
-	} else {
-		updated, err = h.llmConfigRepo.UpdateStandardOAuthConnectionIfRevision(bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt)
-	}
+	updated, err := h.llmConfigRepo.UpdateStandardOAuthConnectionIfRevision(
+		bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider,
+		tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID,
+	)
 	if err != nil {
 		return 0, err
 	}
