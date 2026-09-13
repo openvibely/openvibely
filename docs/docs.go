@@ -2359,6 +2359,12 @@ const docTemplate = `{
                 "execution_count": {
                     "type": "integer"
                 },
+                "execution_hours": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "first_pass_completed": {
                     "type": "boolean"
                 },

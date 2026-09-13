@@ -551,6 +551,10 @@ definitions:
         type: string
       execution_count:
         type: integer
+      execution_hours:
+        items:
+          type: integer
+        type: array
       first_pass_completed:
         type: boolean
       first_pass_eligible:

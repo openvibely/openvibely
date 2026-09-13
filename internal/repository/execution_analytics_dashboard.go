@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -812,7 +813,8 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 		CASE WHEN ct.task_id IS NOT NULL AND t.worktree_path<>'' THEN 1 ELSE 0 END,
 		CASE WHEN ct.task_id IS NOT NULL AND t.worktree_path<>'' AND t.merge_status='merged' THEN 1 ELSE 0 END,
 		CASE WHEN pt.task_id IS NOT NULL AND hs.first_started_at IS NOT NULL THEN 1 ELSE 0 END,
-		u.cost,u.known,COALESCE(mi.ids,''),COALESCE(te.statuses,'')
+		u.cost,u.known,COALESCE(mi.ids,''),COALESCE(te.statuses,''),
+		COALESCE(GROUP_CONCAT(DISTINCT CAST(strftime('%H',p.started_at,'localtime') AS INTEGER)),'')
 	FROM scoped_tasks t JOIN evidence_task_ids eti ON eti.task_id=t.id
 	LEFT JOIN period_exec p ON p.task_id=t.id
 	LEFT JOIN period_terminal_task_ids pt ON pt.task_id=t.id
@@ -842,8 +844,8 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 		var row models.EvidenceTaskRow
 		var cost sql.NullFloat64
 		var known sql.NullInt64
-		var firstTerminalStatus, createdAt, modelIDs, terminalStatuses string
-		if err := rows.Scan(&row.TaskID, &row.TaskTitle, &row.TechnicalResult, &row.GoalResult, &row.MergeState, &row.AgentID, &row.AgentName, &row.Model, &row.Category, &firstTerminalStatus, &createdAt, &row.LatestStartedAt, &row.EvidencePeriod, &row.ExecutionCount, &row.PeriodCompletedCount, &row.PeriodFailedCount, &row.PeriodCancelledCount, &row.FollowUpCount, &row.CycleTimeMs, &row.FirstPassEligible, &row.GoalAchievementEligible, &row.GoalAchievedInPeriod, &row.StartedInPeriod, &row.FunnelTechnicalCompleted, &row.FunnelGoalEligible, &row.FunnelGoalAchieved, &row.FunnelMergeEligible, &row.FunnelMerged, &row.CycleEligible, &cost, &known, &modelIDs, &terminalStatuses); err != nil {
+		var firstTerminalStatus, createdAt, modelIDs, terminalStatuses, executionHours string
+		if err := rows.Scan(&row.TaskID, &row.TaskTitle, &row.TechnicalResult, &row.GoalResult, &row.MergeState, &row.AgentID, &row.AgentName, &row.Model, &row.Category, &firstTerminalStatus, &createdAt, &row.LatestStartedAt, &row.EvidencePeriod, &row.ExecutionCount, &row.PeriodCompletedCount, &row.PeriodFailedCount, &row.PeriodCancelledCount, &row.FollowUpCount, &row.CycleTimeMs, &row.FirstPassEligible, &row.GoalAchievementEligible, &row.GoalAchievedInPeriod, &row.StartedInPeriod, &row.FunnelTechnicalCompleted, &row.FunnelGoalEligible, &row.FunnelGoalAchieved, &row.FunnelMergeEligible, &row.FunnelMerged, &row.CycleEligible, &cost, &known, &modelIDs, &terminalStatuses, &executionHours); err != nil {
 			return nil, err
 		}
 		row.FirstPassCompleted = row.FirstPassEligible && firstTerminalStatus == "completed"
@@ -858,6 +860,13 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 			row.TerminalPeriodStatuses = strings.Split(terminalStatuses, ",")
 		} else {
 			row.TerminalPeriodStatuses = []string{}
+		}
+		row.ExecutionHours = []int{}
+		for _, value := range strings.Split(executionHours, ",") {
+			hour, parseErr := strconv.Atoi(value)
+			if parseErr == nil {
+				row.ExecutionHours = append(row.ExecutionHours, hour)
+			}
 		}
 		if known.Valid && known.Int64 > 0 && cost.Valid {
 			value := cost.Float64

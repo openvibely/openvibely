@@ -75,8 +75,8 @@ templ analyticsContent(currentProject *models.Project) {
 							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Current bottlenecks</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Node</th><th>Waiting</th><th>Blocked</th></tr></thead><tbody id="workflowBottleneckTable"></tbody></table></div></div></div>
 						</div>
 					</section>
-					<section id="analytics-learning" data-analytics-section="learning" class="space-y-4"><div><h3 class="text-xl font-bold mt-6">Learning</h3><p class="text-sm opacity-60">Observed skill activity and task outcomes; association is not causation.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes among tasks using skills</h4><p class="text-sm opacity-60">Tasks where a skill was selected or loaded in the selected period. Small samples are descriptive only.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical task outcome</th><th>Goal achievement</th><th>Follow-up</th></tr></thead><tbody id="skillOutcomeTable"></tbody></table></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes by Agent and skill</h4><p class="text-sm opacity-60">Agent-definition and skill combinations observed on tasks; association is not causation.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Skill</th><th>Tasks</th><th>Technical</th><th>Goal</th><th>Follow-up</th></tr></thead><tbody id="agentSkillOutcomeTable"></tbody></table></div></div></div></section>
-					<div id="analytics-usage" data-analytics-section="usage"><h3 class="text-xl font-bold mt-6">Usage</h3><p class="text-sm opacity-60 mb-4">Local provider usage and available recorded cost.</p><div id="usageOutcomeContext" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div><div class="card bg-base-100 border border-base-300 mb-6"><div class="card-body"><h4 class="card-title text-lg">Model performance by task category</h4><p class="text-sm opacity-60">Technical terminal outcomes only; every row shows its sample.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Model</th><th>Task category</th><th>Tasks</th><th>Technical completion</th></tr></thead><tbody id="modelCategoryTable"></tbody></table></div></div></div></div>
+					<section id="analytics-learning" data-analytics-section="learning" class="space-y-4"><div><h3 class="text-xl font-bold mt-6">Learning</h3><p class="text-sm opacity-60">Observed skill activity and task outcomes; association is not causation.</p><p id="skillEvidenceSelection" class="text-sm font-medium hidden"></p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes among tasks using skills</h4><p class="text-sm opacity-60">Tasks where a skill was selected or loaded in the selected period. Small samples are descriptive only.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical task outcome</th><th>Goal achievement</th><th>Follow-up</th></tr></thead><tbody id="skillOutcomeTable"></tbody></table></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes by Agent and skill</h4><p class="text-sm opacity-60">Agent-definition and skill combinations observed on tasks; association is not causation.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Skill</th><th>Tasks</th><th>Technical</th><th>Goal</th><th>Follow-up</th></tr></thead><tbody id="agentSkillOutcomeTable"></tbody></table></div></div></div></section>
+					<div id="analytics-usage" data-analytics-section="usage"><h3 class="text-xl font-bold mt-6">Usage</h3><p class="text-sm opacity-60 mb-4">Local provider usage and available recorded cost.</p><p id="usageEvidenceSelection" class="text-sm font-medium hidden mb-4"></p><div id="usageOutcomeContext" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div><div class="card bg-base-100 border border-base-300 mb-6"><div class="card-body"><h4 class="card-title text-lg">Model performance by task category</h4><p class="text-sm opacity-60">Technical terminal outcomes only; every row shows its sample.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Model</th><th>Task category</th><th>Tasks</th><th>Technical completion</th></tr></thead><tbody id="modelCategoryTable"></tbody></table></div></div></div></div>
 					<!-- Provider Account Cards: current account state, intentionally independent of the date window. -->
 					<div class="mb-2"><h3 class="text-lg font-semibold">Provider account limits</h3><p class="text-xs opacity-60">Current account state · not date-filtered</p></div>
 					<div id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">					<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>
@@ -273,6 +273,7 @@ templ analyticsContent(currentProject *models.Project) {
 					window._analyticsCharts = {};
 					if (window._analyticsAbortController) window._analyticsAbortController.abort();
 					window._analyticsAbortController = new AbortController();
+					if (window._analyticsDataAbortController) window._analyticsDataAbortController.abort();
 
 					function initAnalytics() {
 					if (analyticsGeneration !== window._analyticsGeneration) return;
@@ -284,21 +285,35 @@ templ analyticsContent(currentProject *models.Project) {
 							var latestUsageAnalytics = null;
 							var latestDashboard = null;
 							var evidencePageLoading = false;
-						// Fetch JSON or surface a controlled error. Never preserve stale data.
-						async function fetchJSON(url) {
-							const response = await fetch(url);
-							if (!response.ok) throw new Error('Analytics request failed (' + response.status + ')');
-							return await response.json();
-						}
-
+							var dataGeneration = 0;
+							var dataAbortController = null;
+							function beginDataGeneration() {
+								dataGeneration++;
+								if (dataAbortController) dataAbortController.abort();
+								dataAbortController = new AbortController();
+								window._analyticsDataAbortController = dataAbortController;
+								evidencePageLoading = false;
+								const loadMore = document.getElementById('loadMoreEvidence');
+								if (loadMore) { loadMore.disabled = false; loadMore.removeAttribute('aria-busy'); }
+							}
+							// Fetch JSON for the current filter generation only. Never preserve stale data.
+							async function fetchJSON(url) {
+								const requestGeneration = dataGeneration;
+								const controller = dataAbortController;
+								const response = await fetch(url, controller ? { signal: controller.signal } : undefined);
+								if (!response.ok) throw new Error('Analytics request failed (' + response.status + ')');
+								const data = await response.json();
+								if (requestGeneration !== dataGeneration || (controller && controller.signal.aborted)) throw new DOMException('Stale Analytics response', 'AbortError');
+								return data;
+							}
 						function destroyChart(key) {
 							if (!charts[key]) return;
 							try { charts[key].destroy(); } catch (e) {}
 							delete charts[key];
 						}
 							function showAnalyticsError(error) {
-								Object.keys(charts).forEach(destroyChart);
-								const box = document.getElementById('analyticsError');
+								if (error && error.name === 'AbortError') return;
+								Object.keys(charts).forEach(destroyChart);								const box = document.getElementById('analyticsError');
 								box.textContent = error && error.message ? error.message : 'Analytics request failed';
 								box.classList.remove('hidden');
 								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',9],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',8],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillOutcomeTable',5],['agentSkillOutcomeTable',6],['modelCategoryTable',4],['usageBreakdownTable',8],['underusedSkillsTable',4]].forEach(function(item) {
@@ -379,8 +394,32 @@ templ analyticsContent(currentProject *models.Project) {
 								if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));						}
 
 						function clearEvidenceParams(params) {
-							['evidence','model','model_id','category','period','technical_status','cycleDistribution','followupDistribution'].forEach(function(key) { params.delete(key); });
+							['evidence','model','model_id','category','period','technical_status','cycleDistribution','followupDistribution','execution_hour','skill_period','skill_event','skill_agent','skill_handle','usage_period','usage_model'].forEach(function(key) { params.delete(key); });
 							return params;
+						}
+						function showAggregateSelection(view, values, labelID, text) {
+							const params = clearEvidenceParams(new URLSearchParams(window.location.search));
+							params.set('view', view);
+							Object.entries(values).forEach(function(entry) { if (entry[1] !== undefined && entry[1] !== null && entry[1] !== '') params.set(entry[0], String(entry[1])); });
+							history.pushState({}, '', '/analytics?' + params.toString());
+							applyView(view, false);
+							const label = document.getElementById(labelID);
+							if (label) { label.textContent = text; label.classList.remove('hidden'); label.scrollIntoView({block:'nearest'}); }
+						}
+						function restoreAggregateSelectionState() {
+							const params = new URLSearchParams(window.location.search);
+							const skillLabel = document.getElementById('skillEvidenceSelection');
+							const usageLabel = document.getElementById('usageEvidenceSelection');
+							if (skillLabel) {
+								const skillText = params.get('skill_handle') ? (params.get('skill_agent') || 'Unassigned') + ' · ' + params.get('skill_handle') : (params.get('skill_event') && params.get('skill_period') ? params.get('skill_event') + ' · ' + params.get('skill_period') : '');
+								skillLabel.textContent = skillText ? 'Selected skill activity · ' + skillText : '';
+								skillLabel.classList.toggle('hidden', !skillText);
+							}
+							if (usageLabel) {
+								const usageText = params.get('usage_period') ? params.get('usage_period') + ' · ' + (params.get('usage_model') || 'combined') : '';
+								usageLabel.textContent = usageText ? 'Selected token usage · ' + usageText : '';
+								usageLabel.classList.toggle('hidden', !usageText);
+							}
 						}
 						function ratioText(value) { return formatNumber(value.numerator) + ' / ' + formatNumber(value.denominator) + ' (' + Number(value.percent || 0).toFixed(1) + '%)'; }
 						function cycleBucket(value) { value=Number(value||0); if(value<60000)return '< 1m'; if(value<600000)return '1-10m'; if(value<3600000)return '10-60m'; if(value<86400000)return '1-24h'; return '>= 24h'; }
@@ -442,6 +481,7 @@ templ analyticsContent(currentProject *models.Project) {
 									case 'known_cost_per_achieved_goal': return row.known_cost_eligible === true;
 									case 'median_cycle_time': case 'cycle_time_p90': return row.cycle_eligible === true;
 									case 'sample_size': return row.started_in_period === true;
+									case 'execution_hour': return (row.execution_hours || []).includes(Number(evidenceParams.get('execution_hour')));
 									case 'created': return row.created_in_period === true;
 									case 'started': return row.created_in_period === true && row.started_in_period === true;
 									case 'merged': return row.funnel_merge_eligible === true && row.funnel_merged === true;
@@ -777,7 +817,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(){window.location.href='/skills?project_id='+encodeURIComponent(projectID);}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(_,items){if(!items.length)return;const item=items[0];const eventType=['used','created','edited'][item.datasetIndex]||'used';const period=labels[item.index]||'';showAggregateSelection('learning',{skill_period:period,skill_event:eventType},'skillEvidenceSelection',(datasets[item.datasetIndex]?.label||'Skill activity')+' · '+period+' · events '+Number(datasets[item.datasetIndex]?.data[item.index]||0));}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -835,7 +875,7 @@ templ analyticsContent(currentProject *models.Project) {
 												labels: rows.map(row => skillLabel(row.agent_name + ' · ' + row.skill_handle)),
 												datasets: [{ label: 'Activity', data: rows.map(row => row.activity), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 }]
 											},
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(items.length)window.location.href='/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(rows[items[0].index].skill_handle);}, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const row=rows[items[0].index];showAggregateSelection('learning',{skill_agent:row.agent_id||'__unassigned__',skill_handle:row.skill_handle},'skillEvidenceSelection',row.agent_name+' · '+row.skill_handle+' · activity '+row.activity);}, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 								}
@@ -932,6 +972,11 @@ templ analyticsContent(currentProject *models.Project) {
 										if (target) { target.classList.add('bg-primary/10'); target.scrollIntoView({block:'nearest'}); }
 									} else table.scrollIntoView({block:'nearest'});
 								}
+								function showUsageSelection(period, modelKey, tokens, row) {
+									const modelLabel = modelKey === 'combined' ? 'All models combined' : usageModelLabel(modelKey);
+									showAggregateSelection('usage',{usage_period:period,usage_model:modelKey},'usageEvidenceSelection','Token usage · '+period+' · '+modelLabel+' · '+formatNumber(tokens)+' tokens');
+									focusUsageEvidence(row || null);
+								}
 
 								function renderUsageRateChart(data) {
 									const rate = data?.usage_rate || [];
@@ -958,7 +1003,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(_,items){if(!items.length)return;const label=datasets[items[0].datasetIndex]?.label||'';const row=rateByModel.find(function(candidate){return usageModelLabel(candidate)===label;});focusUsageEvidence(row||null);}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(_,items){if(!items.length)return;const item=items[0];const period=labels[item.index]||'';let modelKey='combined';let row=null;if(choice!=='combined'&&rateByModel.length){const visibleKeys=choice==='all'?rateKeys:[choice];modelKey=visibleKeys[item.datasetIndex]||choice;row=rateByModel.find(function(candidate){return candidate.period===period&&usageModelKey(candidate)===modelKey;})||null;}showUsageSelection(period,modelKey,Number(datasets[item.datasetIndex]?.data[item.index]||0),row);}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -1160,7 +1205,7 @@ templ analyticsContent(currentProject *models.Project) {
 							options: {
 								responsive: true,
 									maintainAspectRatio: false,
-									onClick:function(){window.location.href='/tasks?project_id='+encodeURIComponent(projectID);},
+									onClick:function(_,items){if(items.length)navigateEvidence('outcomes','execution_hour',items[0].index);},
 									scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' } } }							}
 						});
 						} catch (e) { console.error('loadHourlyTrends:', e); showAnalyticsError(e); }
@@ -1344,6 +1389,7 @@ templ analyticsContent(currentProject *models.Project) {
 
 						// Load all data; each card clears stale state independently.
 						async function loadAllData(refreshUsage) {
+							beginDataGeneration();
 							document.getElementById('analyticsError').classList.add('hidden');
 							await Promise.allSettled([
 								loadDashboard(), loadUsageAnalytics(refreshUsage), loadSkillAnalytics(),
@@ -1363,7 +1409,9 @@ templ analyticsContent(currentProject *models.Project) {
 								selectedAgent = params.get('agent') || '';
 								selectedWorkflow = params.get('workflow') || '';
 								document.getElementById('analyticsAgentFilter').value = selectedAgent;
-								document.getElementById('analyticsWorkflowFilter').value = selectedWorkflow;							applyView(params.get('view') || 'overview', false);
+								document.getElementById('analyticsWorkflowFilter').value = selectedWorkflow;
+								applyView(params.get('view') || 'overview', false);
+								restoreAggregateSelectionState();
 						}
 						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.addEventListener('click', function() { applyView(button.dataset.analyticsView, true); }, { signal: eventSignal }); });
 						document.getElementById('refreshBtn').addEventListener('click', function() { history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(true); }, { signal: eventSignal });
