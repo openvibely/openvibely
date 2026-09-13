@@ -222,6 +222,8 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 // @Param group_by query string false "Trend grouping: day, week, or month" default(day)
 // @Param agent query string false "Reusable Agent definition ID or __unassigned__"
 // @Param workflow query string false "Automation workflow ID"
+// @Param evidence_limit query int false "Evidence rows per page, 1-100" default(20)
+// @Param evidence_offset query int false "Evidence rows to skip" default(0)
 // @Success 200 {object} models.AnalyticsDashboard "Outcome Analytics dashboard"
 // @Failure 400 {object} ErrorResponse "Missing project ID"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -232,15 +234,24 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
 	}
 	usageFilter := parseUsageFilter(c)
+	evidenceLimit := 20
+	if parsed, err := strconv.Atoi(c.QueryParam("evidence_limit")); err == nil && parsed > 0 && parsed <= 100 {
+		evidenceLimit = parsed
+	}
+	evidenceOffset := 0
+	if parsed, err := strconv.Atoi(c.QueryParam("evidence_offset")); err == nil && parsed > 0 {
+		evidenceOffset = parsed
+	}
 	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), repository.AnalyticsDashboardFilter{
-		ProjectID:  projectID,
-		DateFrom:   usageFilter.DateFrom,
-		DateTo:     usageFilter.DateTo,
-		Compare:    c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
-		Limit:      20,
-		GroupBy:    c.QueryParam("group_by"),
-		AgentID:    strings.TrimSpace(c.QueryParam("agent")),
-		WorkflowID: strings.TrimSpace(c.QueryParam("workflow")),
+		ProjectID:      projectID,
+		DateFrom:       usageFilter.DateFrom,
+		DateTo:         usageFilter.DateTo,
+		Compare:        c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
+		Limit:          evidenceLimit,
+		EvidenceOffset: evidenceOffset,
+		GroupBy:        c.QueryParam("group_by"),
+		AgentID:        strings.TrimSpace(c.QueryParam("agent")),
+		WorkflowID:     strings.TrimSpace(c.QueryParam("workflow")),
 	})
 	if err != nil {
 		applog.Infof("[handler] GetAnalyticsDashboard error: %v", err)

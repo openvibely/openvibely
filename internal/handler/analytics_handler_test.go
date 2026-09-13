@@ -149,7 +149,7 @@ func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T)
 	tc.Assert(missing).StatusCode(http.StatusBadRequest)
 
 	project := tc.CreateProject().Build()
-	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&range=all&compare=1").Execute()
+	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&range=all&compare=1&evidence_limit=1&evidence_offset=2").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 	var dashboard models.AnalyticsDashboard
 	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
@@ -161,8 +161,11 @@ func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T)
 	if dashboard.Previous != nil {
 		t.Fatalf("all-time dashboard must omit nonsensical previous comparison: %+v", dashboard.Previous)
 	}
-	if dashboard.Agents == nil || dashboard.Workflows == nil || dashboard.RecentOutcomes == nil {
+	if dashboard.Agents == nil || dashboard.Workflows == nil || dashboard.RecentOutcomes == nil || dashboard.AgentSkillOutcomes == nil {
 		t.Fatalf("empty dashboard collections must encode as arrays: %+v", dashboard)
+	}
+	if dashboard.EvidenceLimit != 1 || dashboard.EvidenceOffset != 2 {
+		t.Fatalf("evidence pagination was not parsed: limit=%d offset=%d", dashboard.EvidenceLimit, dashboard.EvidenceOffset)
 	}
 }
 
