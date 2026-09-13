@@ -210,6 +210,63 @@ func TestUsageRepo_GetLatestAccountUsageSnapshotsBreaksTimestampTiesByInsertOrde
 	}
 }
 
+func TestUsageRepo_GetLatestAccountUsageSnapshotsPartitionsExplicitOAuthConnections(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	configRepo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO agent_configs (id, name, provider, model, auth_method) VALUES (?, ?, ?, ?, ?)`, "moved-model", "Moved model", "openai", "gpt-test", "oauth"); err != nil {
+		t.Fatalf("create originating model: %v", err)
+	}
+
+	connectionIDs := make([]string, 0, 2)
+	for _, connectionID := range []string{"connection-a", "connection-b"} {
+		connection := &models.OAuthConnection{
+			ID:       connectionID,
+			Provider: models.ProviderOpenAI,
+			Name:     connectionID,
+			Revision: 4,
+		}
+		if err := configRepo.CreateOAuthConnection(ctx, connection); err != nil {
+			t.Fatalf("create %s: %v", connectionID, err)
+		}
+		connectionIDs = append(connectionIDs, connection.ID)
+	}
+
+	fetchedAt := time.Date(2026, 6, 3, 17, 0, 0, 0, time.UTC)
+	for _, snapshot := range []models.AccountUsageSnapshot{
+		{Provider: "openai", AgentConfigID: "moved-model", OAuthConnectionID: connectionIDs[0], OAuthConfigRevision: 4, PrimaryLabel: "connection A", FetchedAt: fetchedAt},
+		{Provider: "openai", AgentConfigID: "moved-model", OAuthConnectionID: connectionIDs[1], OAuthConfigRevision: 4, PrimaryLabel: "connection B", FetchedAt: fetchedAt.Add(time.Minute)},
+		{Provider: "openai", AgentConfigID: "moved-model", OAuthConfigRevision: 4, PrimaryLabel: "legacy older", FetchedAt: fetchedAt},
+		{Provider: "openai", AgentConfigID: "moved-model", OAuthConfigRevision: 4, PrimaryLabel: "legacy newer", FetchedAt: fetchedAt.Add(time.Minute)},
+	} {
+		if err := repo.CreateAccountUsageSnapshot(ctx, &snapshot); err != nil {
+			t.Fatalf("create %s snapshot: %v", snapshot.PrimaryLabel, err)
+		}
+	}
+
+	snapshots, err := repo.GetLatestAccountUsageSnapshots(ctx, "openai")
+	if err != nil {
+		t.Fatalf("GetLatestAccountUsageSnapshots: %v", err)
+	}
+	if len(snapshots) != 3 {
+		t.Fatalf("expected one latest snapshot per explicit connection plus one legacy row, got %+v", snapshots)
+	}
+	labels := make(map[string]bool, len(snapshots))
+	for _, snapshot := range snapshots {
+		labels[snapshot.PrimaryLabel] = true
+	}
+	for _, label := range []string{"connection A", "connection B", "legacy newer"} {
+		if !labels[label] {
+			t.Fatalf("missing latest snapshot %q in %+v", label, snapshots)
+		}
+	}
+	if labels["legacy older"] {
+		t.Fatalf("older legacy snapshot should be superseded: %+v", snapshots)
+	}
+}
+
 // TestUsageRepo_LocaltimeDayBucketing verifies that GetDailyUsage, GetDailyUsageByModel,
 // and GetUsageRateBuckets group events by the server's local calendar day rather than
 // the UTC calendar day. This is the Analytics-page equivalent of the Schedules page using

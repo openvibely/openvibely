@@ -204,6 +204,7 @@ func (r *UsageRepo) GetLatestAccountUsageSnapshots(ctx context.Context, provider
 			  AND NOT EXISTS (
 			    SELECT 1 FROM account_usage_snapshots newer
 			    WHERE newer.provider = s.provider
+			      AND COALESCE(newer.oauth_connection_id, '') = COALESCE(s.oauth_connection_id, '')
 			      AND COALESCE(newer.account_id, '') = COALESCE(s.account_id, '')
 			      AND COALESCE(newer.agent_config_id, '') = COALESCE(s.agent_config_id, '')
 			      AND (
