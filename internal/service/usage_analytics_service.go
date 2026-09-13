@@ -540,6 +540,12 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 	var snapshots []models.AccountUsageSnapshot
 	errorsByKey := map[string]string{}
 	seenAccounts := map[string]bool{}
+	type pendingAccountFailure struct {
+		snapshot models.AccountUsageSnapshot
+		message  string
+	}
+	pendingFailures := map[string]pendingAccountFailure{}
+	var pendingFailureKeys []string
 	for _, cfg := range configs {
 		if cfg.AuthMethod != models.AuthMethodOAuth || strings.TrimSpace(cfg.OAuthAccessToken) == "" {
 			continue
@@ -554,9 +560,10 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		if seenAccounts[key] {
 			continue
 		}
-		seenAccounts[key] = true
 		latest, shouldRefresh := latestAccountSnapshotForConfig(ctx, s.usageRepo, cfg, force)
 		if !shouldRefresh {
+			seenAccounts[key] = true
+			delete(pendingFailures, key)
 			continue
 		}
 		snapshot, err := s.accountFetcher(ctx, cfg)
@@ -564,18 +571,20 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			reason := accountRefreshFailureReason(err)
 			message := accountRefreshFailureMessage(reason)
 			applog.Infof("[usage] account usage refresh failed provider=%s reason=%s: %v", cfg.Provider, reason, sanitizeAccountUsageError(err))
-			errorsByKey[accountUsageKeyForConfig(cfg)] = message
-			failure := accountRefreshFailureSnapshot(cfg, latest, reason)
-			if storeErr := s.usageRepo.CreateAccountUsageSnapshot(ctx, &failure); storeErr != nil {
-				applog.Infof("[usage] storing account usage refresh failure failed provider=%s: %v", cfg.Provider, storeErr)
-				continue
+			if _, exists := pendingFailures[key]; !exists {
+				pendingFailureKeys = append(pendingFailureKeys, key)
+				pendingFailures[key] = pendingAccountFailure{
+					snapshot: accountRefreshFailureSnapshot(cfg, latest, reason),
+					message:  message,
+				}
 			}
-			snapshots = append(snapshots, failure)
 			continue
 		}
 		if snapshot == nil {
 			continue
 		}
+		seenAccounts[key] = true
+		delete(pendingFailures, key)
 		if snapshot.Provider == "" {
 			snapshot.Provider = string(cfg.Provider)
 		}
@@ -590,6 +599,18 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			continue
 		}
 		snapshots = append(snapshots, *snapshot)
+	}
+	for _, key := range pendingFailureKeys {
+		failure, ok := pendingFailures[key]
+		if !ok || seenAccounts[key] {
+			continue
+		}
+		errorsByKey[key] = failure.message
+		if err := s.usageRepo.CreateAccountUsageSnapshot(ctx, &failure.snapshot); err != nil {
+			applog.Infof("[usage] storing account usage refresh failure failed provider=%s: %v", failure.snapshot.Provider, err)
+			continue
+		}
+		snapshots = append(snapshots, failure.snapshot)
 	}
 	return snapshots, errorsByKey
 }
