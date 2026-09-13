@@ -2124,32 +2124,74 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, compose
 	return result, nil
 }
 
+func (h *Handler) renderPulseCancelError(c echo.Context, status int, taskID, message string) error {
+	if isHTMX(c) {
+		setHTMXToastWithOptions(c, message, "failed", "", "", "", "pulse-stop-error:"+taskID, "")
+		return c.NoContent(status)
+	}
+	return echo.NewHTTPError(status, message)
+}
+
 func (h *Handler) CancelTask(c echo.Context) error {
 	taskID := c.Param("taskId")
+	pulseRequest := c.QueryParam("pulse") == "1"
+	pulseProjectID := strings.TrimSpace(c.QueryParam("project_id"))
 	applog.Infof("[handler] CancelTask task=%s", taskID)
+
+	if pulseRequest && pulseProjectID == "" {
+		return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task without a project context.")
+	}
 
 	// Fetch task to get projectID for kanban board response
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil {
 		applog.Infof("[handler] CancelTask fetch error: %v", err)
+		if pulseRequest {
+			return h.renderPulseCancelError(c, http.StatusInternalServerError, taskID, "Unable to stop this task. Try again.")
+		}
 		return err
 	}
 	if task == nil {
 		applog.Infof("[handler] CancelTask not found id=%s", taskID)
+		if pulseRequest {
+			return h.renderPulseCancelError(c, http.StatusNotFound, taskID, "This task is no longer available.")
+		}
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if pulseRequest && task.ProjectID != pulseProjectID {
+		applog.Infof("[handler] CancelTask pulse project mismatch task=%s task_project=%s requested_project=%s", taskID, task.ProjectID, pulseProjectID)
+		return h.renderPulseCancelError(c, http.StatusNotFound, taskID, "This task is not available in the selected project.")
 	}
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
 	result, err := h.cancelTaskWork(c.Request().Context(), task, composerStop, "CancelTask")
 	if err != nil {
+		if pulseRequest {
+			return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task. Try again.")
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if result != nil && !result.Accepted {
 		applog.Infof("[handler] CancelTask not cancellable task=%s status=%s category=%s", taskID, task.Status, task.Category)
+		if pulseRequest {
+			return h.renderPulseCancelError(c, http.StatusConflict, taskID, "This task is no longer cancellable.")
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, result.Message)
 	}
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
+
+	// Return the full Pulse fragment for its in-place Stop action. The established
+	// board and task-thread response paths remain unchanged for other callers.
+	if pulseRequest && isHTMX(c) {
+		upcoming, err := h.upcomingSvc.GenerateUpcoming(c.Request().Context(), pulseProjectID)
+		if err != nil {
+			applog.Infof("[handler] CancelTask Pulse refresh error project=%s: %v", pulseProjectID, err)
+			return h.renderPulseCancelError(c, http.StatusInternalServerError, taskID, "Task stopped, but Pulse could not refresh. Try again.")
+		}
+		setHTMXToastWithOptions(c, "Task stopped.", "success", "", "", "", "pulse-stop-success:"+taskID, "")
+		return render(c, http.StatusOK, pages.UpcomingContent(upcoming, pulseProjectID))
+	}
 
 	// Return the full kanban board for HTMX requests
 	if isHTMX(c) {
