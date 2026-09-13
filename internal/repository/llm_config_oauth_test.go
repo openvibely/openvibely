@@ -147,6 +147,96 @@ func TestLLMConfigRepo_UpdateStandardOAuthConnectionAdvancesGenerationAtomically
 	}
 }
 
+func TestLLMConfigRepo_SharedOAuthConnectionUpdatesLinkedModelsOnly(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	first := &models.LLMConfig{Name: "OpenAI first", Provider: models.ProviderOpenAI, Model: "gpt-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "shared-old-access", OAuthRefreshToken: "shared-old-refresh", OAuthExpiresAt: 1}
+	second := &models.LLMConfig{Name: "OpenAI second", Provider: models.ProviderOpenAI, Model: "gpt-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "private-access", OAuthRefreshToken: "private-refresh", OAuthExpiresAt: 2}
+	other := &models.LLMConfig{Name: "OpenAI other account", Provider: models.ProviderOpenAI, Model: "gpt-three", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "other-access", OAuthRefreshToken: "other-refresh", OAuthExpiresAt: 3}
+	anthropic := &models.LLMConfig{Name: "Anthropic account", Provider: models.ProviderAnthropic, Model: "claude", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "anthropic-access", OAuthRefreshToken: "anthropic-refresh", OAuthExpiresAt: 4}
+	for _, cfg := range []*models.LLMConfig{first, second, other, anthropic} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("Create(%s): %v", cfg.Name, err)
+		}
+	}
+	var legacyOwners int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM agent_configs
+		WHERE id IN (?, ?, ?, ?) AND (
+			oauth_access_token != '' OR oauth_refresh_token != '' OR oauth_expires_at != 0 OR
+			oauth_account_id != '' OR oauth_needs_reauth != 0
+		)`, first.ID, second.ID, other.ID, anthropic.ID).Scan(&legacyOwners); err != nil {
+		t.Fatalf("count legacy OAuth credential owners: %v", err)
+	}
+	if legacyOwners != 0 {
+		t.Fatalf("standard OAuth credentials remained on %d model rows", legacyOwners)
+	}
+	if first.OAuthConnectionID == "" || first.OAuthConnectionID == second.OAuthConnectionID {
+		t.Fatalf("new OAuth models did not start with private connections: %q/%q", first.OAuthConnectionID, second.OAuthConnectionID)
+	}
+	if err := repo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+		t.Fatalf("LinkOAuthConnection: %v", err)
+	}
+	if err := repo.LinkOAuthConnection(ctx, anthropic.ID, first.OAuthConnectionID); err == nil {
+		t.Fatal("cross-provider OAuth connection link succeeded")
+	}
+
+	updated, err := repo.UpdateStandardOAuthTokensIfRevision(ctx, second.ID, first.OAuthConfigRevision, models.ProviderOpenAI, "shared-new-access", "shared-new-refresh", 1900000000000, "workspace-a")
+	if err != nil || !updated {
+		t.Fatalf("UpdateStandardOAuthTokensIfRevision = %v, %v", updated, err)
+	}
+	for _, cfg := range []*models.LLMConfig{first, second} {
+		loaded, loadErr := repo.GetByID(ctx, cfg.ID)
+		if loadErr != nil {
+			t.Fatalf("GetByID(%s): %v", cfg.Name, loadErr)
+		}
+		if loaded.OAuthConnectionID != first.OAuthConnectionID || loaded.OAuthAccessToken != "shared-new-access" || loaded.OAuthRefreshToken != "shared-new-refresh" || loaded.OAuthAccountID != "workspace-a" {
+			t.Fatalf("linked model %s did not hydrate shared connection: %#v", cfg.Name, loaded)
+		}
+	}
+	for _, cfg := range []*models.LLMConfig{other, anthropic} {
+		loaded, loadErr := repo.GetByID(ctx, cfg.ID)
+		if loadErr != nil {
+			t.Fatalf("GetByID(%s): %v", cfg.Name, loadErr)
+		}
+		if loaded.OAuthAccessToken != cfg.OAuthAccessToken || loaded.OAuthRefreshToken != cfg.OAuthRefreshToken || loaded.OAuthConnectionID != cfg.OAuthConnectionID {
+			t.Fatalf("independent account %s changed: %#v", cfg.Name, loaded)
+		}
+	}
+}
+
+func TestLLMConfigRepo_OAuthConnectionDeletionRequiresNoLinkedModels(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{Name: "Deletable OAuth model", Provider: models.ProviderOpenAI, Model: "gpt-test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access", OAuthRefreshToken: "refresh"}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.DeleteOAuthConnection(ctx, cfg.OAuthConnectionID); err == nil {
+		t.Fatal("deleted OAuth connection while model was still linked")
+	}
+	if err := repo.Delete(ctx, cfg.ID); err != nil {
+		t.Fatalf("Delete model: %v", err)
+	}
+	connection, err := repo.GetOAuthConnectionByID(ctx, cfg.OAuthConnectionID)
+	if err != nil {
+		t.Fatalf("GetOAuthConnectionByID: %v", err)
+	}
+	if connection == nil {
+		t.Fatal("deleting model also deleted its OAuth connection")
+	}
+	if err := repo.DeleteOAuthConnection(ctx, cfg.OAuthConnectionID); err != nil {
+		t.Fatalf("DeleteOAuthConnection after unlink: %v", err)
+	}
+	connection, err = repo.GetOAuthConnectionByID(ctx, cfg.OAuthConnectionID)
+	if err != nil || connection != nil {
+		t.Fatalf("deleted OAuth connection = %#v, %v", connection, err)
+	}
+}
+
 func TestLLMConfigRepo_UpdateOAuthTokens(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

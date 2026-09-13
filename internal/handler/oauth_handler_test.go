@@ -45,9 +45,18 @@ func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavail
 			require.NoError(t, repo.Create(context.Background(), config))
 			current, err := repo.GetByID(context.Background(), config.ID)
 			require.NoError(t, err)
+			sibling := &models.LLMConfig{
+				Name:       string(provider) + " reconnect sibling",
+				Provider:   provider,
+				Model:      "test-model-two",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			require.NoError(t, repo.Create(context.Background(), sibling))
+			require.NoError(t, repo.LinkOAuthConnection(context.Background(), sibling.ID, current.OAuthConnectionID))
 
 			_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
 				ConfigID:       current.ID,
+				ConnectionID:   current.OAuthConnectionID,
 				Provider:       provider,
 				TokenURL:       tokenServer.URL,
 				ConfigRevision: current.OAuthConfigRevision,
@@ -58,6 +67,12 @@ func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavail
 			require.NoError(t, err)
 			require.Empty(t, stored.OAuthAccountID, "reconnect must not retain identity from the previous OAuth principal")
 			require.Equal(t, current.OAuthConfigRevision+1, stored.OAuthConfigRevision)
+			storedSibling, err := repo.GetByID(context.Background(), sibling.ID)
+			require.NoError(t, err)
+			require.Equal(t, "new-access", storedSibling.OAuthAccessToken)
+			require.Equal(t, "new-refresh", storedSibling.OAuthRefreshToken)
+			require.Empty(t, storedSibling.OAuthAccountID)
+			require.Equal(t, stored.OAuthConfigRevision, storedSibling.OAuthConfigRevision)
 		})
 	}
 }
@@ -127,6 +142,46 @@ func TestOAuthManualCompleteSanitizesNoCodeProviderDenialAndConsumesState(t *tes
 	require.Contains(t, replay.Body.String(), "oauth session expired or invalid state")
 	require.NotContains(t, replay.Body.String(), "Authorization was denied or cancelled")
 	require.NotContains(t, replay.Body.String(), "private@example.com")
+}
+
+func TestStandardOAuthCallbackRejectsModelReassignedToAnotherConnection(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"access_token":"callback-access","refresh_token":"callback-refresh","expires_in":7200}`))
+			}))
+			defer tokenServer.Close()
+
+			h, _, repo := setupTestHandler(t)
+			first := &models.LLMConfig{Name: string(provider) + " first", Provider: provider, Model: "model-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "first-access", OAuthRefreshToken: "first-refresh"}
+			second := &models.LLMConfig{Name: string(provider) + " second", Provider: provider, Model: "model-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "second-access", OAuthRefreshToken: "second-refresh"}
+			require.NoError(t, repo.Create(context.Background(), first))
+			require.NoError(t, repo.Create(context.Background(), second))
+			started, err := repo.GetByID(context.Background(), first.ID)
+			require.NoError(t, err)
+			require.NoError(t, repo.LinkOAuthConnection(context.Background(), first.ID, second.OAuthConnectionID))
+
+			_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
+				ConfigID:       started.ID,
+				ConnectionID:   started.OAuthConnectionID,
+				Provider:       provider,
+				TokenURL:       tokenServer.URL,
+				ConfigRevision: started.OAuthConfigRevision,
+			}, "code", "state")
+			require.ErrorContains(t, err, "changed while authorization was in progress")
+
+			oldConnection, err := repo.GetOAuthConnectionByID(context.Background(), started.OAuthConnectionID)
+			require.NoError(t, err)
+			require.Equal(t, "first-access", oldConnection.AccessToken)
+			require.Equal(t, "first-refresh", oldConnection.RefreshToken)
+			current, err := repo.GetByID(context.Background(), first.ID)
+			require.NoError(t, err)
+			require.Equal(t, second.OAuthConnectionID, current.OAuthConnectionID)
+			require.Equal(t, "second-access", current.OAuthAccessToken)
+			require.Equal(t, "second-refresh", current.OAuthRefreshToken)
+		})
+	}
 }
 
 func TestStandardOAuthCallbackFencesConcurrentRefreshWrites(t *testing.T) {

@@ -121,6 +121,69 @@ func TestManagerEnsureFreshSingleflightsConcurrentRefresh(t *testing.T) {
 	}
 }
 
+func TestManagerEnsureFreshSingleflightPreservesEachLinkedModel(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	first := createOAuthConfig(t, repo, models.LLMConfig{ID: "shared-first", Name: "Shared First", Model: "model-first", Provider: models.ProviderOpenAI})
+	second := createOAuthConfig(t, repo, models.LLMConfig{ID: "shared-second", Name: "Shared Second", Model: "model-second", Provider: models.ProviderOpenAI})
+	if err := repo.LinkOAuthConnection(context.Background(), second.ID, first.OAuthConnectionID); err != nil {
+		t.Fatalf("LinkOAuthConnection: %v", err)
+	}
+	second.OAuthConnectionID = first.OAuthConnectionID
+	mgr := NewManager(repo)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	calls := 0
+	var mu sync.Mutex
+	refresh := func(context.Context, models.LLMConfig) (TokenSet, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		close(started)
+		<-release
+		return TokenSet{AccessToken: "shared-access", RefreshToken: "shared-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+	}
+
+	type result struct {
+		cfg models.LLMConfig
+		err error
+	}
+	firstDone := make(chan result, 1)
+	secondDone := make(chan result, 1)
+	go func() {
+		cfg, err := mgr.EnsureFresh(context.Background(), first, time.Hour, refresh)
+		firstDone <- result{cfg: cfg, err: err}
+	}()
+	<-started
+	go func() {
+		cfg, err := mgr.EnsureFresh(context.Background(), second, time.Hour, refresh)
+		secondDone <- result{cfg: cfg, err: err}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+
+	firstResult := <-firstDone
+	secondResult := <-secondDone
+	if firstResult.err != nil || secondResult.err != nil {
+		t.Fatalf("EnsureFresh errors: first=%v second=%v", firstResult.err, secondResult.err)
+	}
+	if firstResult.cfg.ID != first.ID || firstResult.cfg.Model != first.Model {
+		t.Fatalf("first result used another linked model: %#v", firstResult.cfg)
+	}
+	if secondResult.cfg.ID != second.ID || secondResult.cfg.Model != second.Model {
+		t.Fatalf("second result used another linked model: %#v", secondResult.cfg)
+	}
+	if firstResult.cfg.OAuthAccessToken != "shared-access" || secondResult.cfg.OAuthAccessToken != "shared-access" {
+		t.Fatalf("linked models did not receive shared credentials: first=%q second=%q", firstResult.cfg.OAuthAccessToken, secondResult.cfg.OAuthAccessToken)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", calls)
+	}
+}
+
 func TestManagerEnsureFreshUsesDurableLeaseAcrossManagers(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
@@ -226,32 +289,35 @@ func TestManagerEnsureFreshDoesNotSkipChangedButStillExpiringToken(t *testing.T)
 	}
 }
 
-func TestManagerRefreshRejectsStaleConfigRevision(t *testing.T) {
+func TestManagerRefreshRejectsConnectionReassignment(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
 	cfg := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-stale", Provider: models.ProviderOpenAI})
+	other := createOAuthConfig(t, repo, models.LLMConfig{ID: "cfg-other", Name: "Other account", Provider: models.ProviderOpenAI, OAuthAccessToken: "other-access", OAuthRefreshToken: "other-refresh"})
 	mgr := NewManager(repo)
 
 	_, err := mgr.EnsureFresh(context.Background(), cfg, time.Hour, func(ctx context.Context, refreshing models.LLMConfig) (TokenSet, error) {
-		current, loadErr := repo.GetByID(ctx, refreshing.ID)
-		if loadErr != nil {
-			return TokenSet{}, loadErr
-		}
-		current.Model = "changed-model"
-		if updateErr := repo.Update(ctx, current); updateErr != nil {
+		if updateErr := repo.LinkOAuthConnection(ctx, refreshing.ID, other.OAuthConnectionID); updateErr != nil {
 			return TokenSet{}, updateErr
 		}
 		return TokenSet{AccessToken: "stale-access", RefreshToken: "stale-refresh", ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "changed while OAuth refresh was in progress") {
-		t.Fatalf("EnsureFresh error = %v, want stale revision rejection", err)
+		t.Fatalf("EnsureFresh error = %v, want stale connection rejection", err)
 	}
 	loaded, loadErr := repo.GetByID(context.Background(), cfg.ID)
 	if loadErr != nil {
 		t.Fatalf("GetByID: %v", loadErr)
 	}
-	if loaded.OAuthAccessToken == "stale-access" || loaded.OAuthRefreshToken == "stale-refresh" {
-		t.Fatalf("stale refresh overwrote edited config: %#v", loaded)
+	if loaded.OAuthConnectionID != other.OAuthConnectionID || loaded.OAuthAccessToken != "other-access" || loaded.OAuthRefreshToken != "other-refresh" {
+		t.Fatalf("stale refresh changed reassigned model: %#v", loaded)
+	}
+	oldConnection, loadErr := repo.GetOAuthConnectionByID(context.Background(), cfg.OAuthConnectionID)
+	if loadErr != nil {
+		t.Fatalf("GetOAuthConnectionByID: %v", loadErr)
+	}
+	if oldConnection.AccessToken == "stale-access" || oldConnection.RefreshToken == "stale-refresh" {
+		t.Fatalf("stale refresh overwrote previous connection: %#v", oldConnection)
 	}
 }
 

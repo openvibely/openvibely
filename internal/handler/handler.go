@@ -883,6 +883,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// OAuth for model providers
 	e.GET("/models/:id/oauth/initiate", h.OAuthInitiate)
+	e.POST("/models/:id/oauth/disconnect", h.DisconnectModelOAuthConnection)
 	e.POST("/models/oauth/manual-complete", h.OAuthManualComplete)
 	e.GET("/callback", h.OAuthCallback)              // Anthropic public-mode callback
 	e.GET("/auth/callback", h.OAuthCallback)         // OpenAI public-mode callback

@@ -25,18 +25,33 @@ func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
 	return &LLMConfigRepo{db: db}
 }
 
-const llmConfigColumns = `id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_needs_reauth, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, context_window, compaction_threshold, token_exchange_format, token_refresh_format, custom_auth_config_json, custom_auth_state_json, oauth_config_revision, mixture_config_json, auto_start_tasks`
+const llmConfigColumns = `a.id, a.name, a.provider, a.model, a.reasoning_effort, a.api_key, a.max_tokens, a.temperature, a.is_default, a.created_at, a.updated_at, a.auth_method,
+	a.oauth_access_token, a.oauth_refresh_token, a.oauth_expires_at, a.oauth_account_id, a.oauth_needs_reauth,
+	a.max_workers, a.worker_timeout, a.oauth_client_id, a.oauth_client_secret, a.oauth_authorize_url, a.oauth_token_url, a.oauth_scopes, a.ollama_base_url, a.base_url, a.transport, a.preset_slug, a.models_url, a.auth_header_name, a.auth_header_value_prefix, a.extra_headers_json, a.extra_body_json, a.default_max_tokens, a.context_window, a.compaction_threshold, a.token_exchange_format, a.token_refresh_format, a.custom_auth_config_json, a.custom_auth_state_json, a.oauth_config_revision, a.mixture_config_json, a.auto_start_tasks,
+	COALESCE(a.oauth_connection_id, ''), COALESCE(c.name, ''), COALESCE(c.provider, ''),
+	COALESCE(c.oauth_access_token, ''), COALESCE(c.oauth_refresh_token, ''), COALESCE(c.oauth_expires_at, 0),
+	COALESCE(c.oauth_account_id, ''), COALESCE(c.oauth_needs_reauth, 1), COALESCE(c.oauth_revision, -1)`
 
 // llmConfigCardColumns is the bounded Models-page projection. Credential bodies,
 // edit-only endpoint settings, request JSON, custom-auth JSON, and full mixture
 // JSON are deliberately excluded from the initial response path.
 const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
-		CASE WHEN api_key != '' THEN 1 ELSE 0 END, temperature, is_default, auth_method,
-		CASE WHEN oauth_access_token != '' THEN 1 ELSE 0 END, oauth_expires_at, oauth_needs_reauth,
-		max_workers, worker_timeout, substr(ollama_base_url, 1, 512), substr(base_url, 1, 512),
-		CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.agent_config_id'), ''), 1, 128) ELSE '' END,
-		CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
-		CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END`
+			CASE WHEN api_key != '' THEN 1 ELSE 0 END, temperature, is_default, auth_method,
+			CASE WHEN COALESCE(oauth_connection_id, '') != ''
+				THEN EXISTS(SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id AND c.oauth_access_token != '')
+				ELSE oauth_access_token != '' END,
+			CASE WHEN COALESCE(oauth_connection_id, '') != ''
+				THEN COALESCE((SELECT c.oauth_expires_at FROM oauth_connections c WHERE c.id = oauth_connection_id), 0)
+				ELSE oauth_expires_at END,
+			CASE WHEN COALESCE(oauth_connection_id, '') != ''
+				THEN COALESCE((SELECT c.oauth_needs_reauth FROM oauth_connections c WHERE c.id = oauth_connection_id), 1)
+				ELSE oauth_needs_reauth END,
+			max_workers, worker_timeout, substr(ollama_base_url, 1, 512), substr(base_url, 1, 512),
+			CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.agent_config_id'), ''), 1, 128) ELSE '' END,
+			CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
+			CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END,
+			COALESCE(oauth_connection_id, ''),
+			COALESCE((SELECT c.name FROM oauth_connections c WHERE c.id = oauth_connection_id), '')`
 
 // llmConfigPickerColumns is the render-only model picker projection for Chat
 // and Agent dialogs. It deliberately excludes provider identity, credentials,
@@ -53,8 +68,10 @@ const llmConfigChatSelectionColumns = `id, name, provider, model, is_default`
 // preserves only the fields used by SelectLLMWithVision and non-secret
 // credential-presence sentinels needed to exclude legacy Anthropic CLI rows.
 const llmConfigVisionSelectionColumns = `id, name, provider, model, auth_method, is_default,
-		CASE WHEN COALESCE(api_key, '') != '' THEN 1 ELSE 0 END,
-		CASE WHEN COALESCE(oauth_access_token, '') != '' THEN 1 ELSE 0 END`
+			CASE WHEN COALESCE(api_key, '') != '' THEN 1 ELSE 0 END,
+			CASE WHEN COALESCE(oauth_connection_id, '') != ''
+				THEN EXISTS(SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id AND c.oauth_access_token != '')
+				ELSE COALESCE(oauth_access_token, '') != '' END`
 
 // llmConfigTaskCreationSelectionColumns is the compact runtime create_task
 // selection/category projection. It adds auto_start_tasks to the Chat selection
@@ -82,7 +99,11 @@ const llmConfigRuntimeSummaryColumns = `id, name, provider, model, is_default, a
 const llmConfigWorkerCapacityColumns = `id, name, model, max_workers`
 
 func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
-	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
+	var connectionProvider models.LLMProvider
+	var connectionAccessToken, connectionRefreshToken, connectionAccountID string
+	var connectionExpiresAt, connectionRevision int64
+	var connectionNeedsReauth bool
+	if err := row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
 		&a.MaxTokens, &a.Temperature, &a.IsDefault, &a.CreatedAt, &a.UpdatedAt,
 		&a.AuthMethod, &a.OAuthAccessToken, &a.OAuthRefreshToken, &a.OAuthExpiresAt,
 		&a.OAuthAccountID, &a.OAuthNeedsReauth,
@@ -90,7 +111,32 @@ func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig
 		&a.OAuthClientID, &a.OAuthClientSecret, &a.OAuthAuthorizeURL, &a.OAuthTokenURL, &a.OAuthScopes,
 		&a.OllamaBaseURL, &a.BaseURL, &a.Transport, &a.PresetSlug, &a.ModelsURL,
 		&a.AuthHeaderName, &a.AuthHeaderValuePrefix, &a.ExtraHeadersJSON, &a.ExtraBodyJSON,
-		&a.DefaultMaxTokens, &a.ContextWindow, &a.CompactionThreshold, &a.TokenExchangeFormat, &a.TokenRefreshFormat, &a.CustomAuthConfigJSON, &a.CustomAuthStateJSON, &a.OAuthConfigRevision, &a.MixtureConfigJSON, &a.AutoStartTasks)
+		&a.DefaultMaxTokens, &a.ContextWindow, &a.CompactionThreshold, &a.TokenExchangeFormat, &a.TokenRefreshFormat, &a.CustomAuthConfigJSON, &a.CustomAuthStateJSON, &a.OAuthConfigRevision, &a.MixtureConfigJSON, &a.AutoStartTasks,
+		&a.OAuthConnectionID, &a.OAuthConnectionName, &connectionProvider,
+		&connectionAccessToken, &connectionRefreshToken, &connectionExpiresAt,
+		&connectionAccountID, &connectionNeedsReauth, &connectionRevision); err != nil {
+		return err
+	}
+	if a.OAuthConnectionID == "" {
+		return nil
+	}
+	if a.AuthMethod != models.AuthMethodOAuth || connectionProvider != a.Provider {
+		a.OAuthAccessToken = ""
+		a.OAuthRefreshToken = ""
+		a.OAuthExpiresAt = 0
+		a.OAuthAccountID = ""
+		a.OAuthNeedsReauth = true
+		a.OAuthConfigRevision = -1
+		a.OAuthConnectionName = ""
+		return nil
+	}
+	a.OAuthAccessToken = connectionAccessToken
+	a.OAuthRefreshToken = connectionRefreshToken
+	a.OAuthExpiresAt = connectionExpiresAt
+	a.OAuthAccountID = connectionAccountID
+	a.OAuthNeedsReauth = connectionNeedsReauth
+	a.OAuthConfigRevision = connectionRevision
+	return nil
 }
 
 func normalizeLLMConfigName(name string) (string, error) {
@@ -143,7 +189,9 @@ func (r *LLMConfigRepo) ValidateNameAvailable(ctx context.Context, name, exclude
 func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+llmConfigColumns+`
-			 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+			 FROM agent_configs a
+			 LEFT JOIN oauth_connections c ON c.id = a.oauth_connection_id AND c.provider = a.provider AND a.auth_method = ?
+		 ORDER BY a.is_default DESC, a.name ASC`, models.AuthMethodOAuth)
 	if err != nil {
 		return nil, fmt.Errorf("listing models: %w", err)
 	}
@@ -157,20 +205,32 @@ func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
 		}
 		configs = append(configs, a)
 	}
-	return configs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return configs, nil
 }
 
 func (r *LLMConfigRepo) ListRefreshableOAuth(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, provider, model, auth_method, oauth_access_token, oauth_refresh_token,
-		        oauth_expires_at, oauth_account_id, oauth_needs_reauth, oauth_config_revision
-		 FROM agent_configs
-		 WHERE auth_method = ? AND provider IN (?, ?)
-		   AND oauth_access_token != '' AND oauth_refresh_token != '' AND oauth_needs_reauth = 0
-		 ORDER BY oauth_expires_at ASC, id ASC`,
+		`SELECT a.id, a.name, a.provider, a.model, a.auth_method,
+		        c.oauth_access_token, c.oauth_refresh_token, c.oauth_expires_at,
+		        c.oauth_account_id, c.oauth_needs_reauth, c.oauth_revision, c.id
+		 FROM oauth_connections c
+		 JOIN agent_configs a ON a.id = (
+		   SELECT linked.id FROM agent_configs linked
+		   WHERE linked.oauth_connection_id = c.id AND linked.auth_method = ? AND linked.provider = c.provider
+		   ORDER BY linked.id LIMIT 1
+		 )
+		 WHERE c.provider IN (?, ?)
+		   AND c.oauth_access_token != '' AND c.oauth_refresh_token != '' AND c.oauth_needs_reauth = 0
+		 ORDER BY c.oauth_expires_at ASC, c.id ASC`,
 		models.AuthMethodOAuth, models.ProviderOpenAI, models.ProviderAnthropic)
 	if err != nil {
-		return nil, fmt.Errorf("listing refreshable OAuth models: %w", err)
+		return nil, fmt.Errorf("listing refreshable OAuth connections: %w", err)
 	}
 	defer rows.Close()
 	var configs []models.LLMConfig
@@ -178,8 +238,8 @@ func (r *LLMConfigRepo) ListRefreshableOAuth(ctx context.Context) ([]models.LLMC
 		var cfg models.LLMConfig
 		if err := rows.Scan(&cfg.ID, &cfg.Name, &cfg.Provider, &cfg.Model, &cfg.AuthMethod,
 			&cfg.OAuthAccessToken, &cfg.OAuthRefreshToken, &cfg.OAuthExpiresAt,
-			&cfg.OAuthAccountID, &cfg.OAuthNeedsReauth, &cfg.OAuthConfigRevision); err != nil {
-			return nil, fmt.Errorf("scanning refreshable OAuth model: %w", err)
+			&cfg.OAuthAccountID, &cfg.OAuthNeedsReauth, &cfg.OAuthConfigRevision, &cfg.OAuthConnectionID); err != nil {
+			return nil, fmt.Errorf("scanning refreshable OAuth connection: %w", err)
 		}
 		configs = append(configs, cfg)
 	}
@@ -218,7 +278,7 @@ func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, erro
 			&hasAPIKey, &a.Temperature, &a.IsDefault, &a.AuthMethod,
 			&hasOAuthKey, &a.OAuthExpiresAt, &a.OAuthNeedsReauth, &a.MaxWorkers, &a.WorkerTimeout,
 			&a.OllamaBaseURL, &a.BaseURL, &a.MixtureAggregatorID,
-			&a.MixtureAggregatorLabel, &a.MixtureReferenceCount); err != nil {
+			&a.MixtureAggregatorLabel, &a.MixtureReferenceCount, &a.OAuthConnectionID, &a.OAuthConnectionName); err != nil {
 			return nil, fmt.Errorf("scanning model card: %w", err)
 		}
 		if hasAPIKey {
@@ -249,16 +309,22 @@ func (r *LLMConfigRepo) ListCardsPage(ctx context.Context, limit, offset int, se
 
 func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset int, filter ModelCardListFilter) ([]models.LLMConfig, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
-	query := `SELECT ` + llmConfigCardColumns + ` FROM agent_configs WHERE 1=1`
+	query := `SELECT ` + llmConfigCardColumns + ` FROM agent_configs AS configs WHERE 1=1`
 	args := make([]any, 0, 8)
 	if search := strings.TrimSpace(filter.Search); search != "" {
 		query += ` AND INSTR(LOWER(
 			COALESCE(name, '') || ' ' || COALESCE(provider, '') || ' ' ||
 			COALESCE(model, '') || ' ' ||
 			CASE WHEN is_default = 1 THEN 'default' ELSE 'active' END || ' ' ||
-				CASE WHEN auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND COALESCE(oauth_needs_reauth, 0) = 0 AND COALESCE(oauth_access_token, '') != '' AND (
-					(provider = 'openai_compatible' AND COALESCE(oauth_expires_at, 0) = 0) OR
-					COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+				CASE WHEN auth_method = 'oauth' AND (
+					(provider IN ('anthropic', 'openai') AND EXISTS(
+						SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id
+						AND c.provider = configs.provider AND c.oauth_needs_reauth = 0 AND c.oauth_access_token != ''
+						AND c.oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+					)) OR
+					(provider = 'openai_compatible' AND COALESCE(oauth_needs_reauth, 0) = 0 AND COALESCE(oauth_access_token, '') != '' AND (
+						COALESCE(oauth_expires_at, 0) = 0 OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+					))
 				) THEN 'connected'
 				ELSE CASE WHEN auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') THEN 'not connected' ELSE '' END END
 		), ?) > 0`
@@ -274,9 +340,25 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 	}
 	switch filter.AuthStatus {
 	case "connected":
-		query += ` AND auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND COALESCE(oauth_needs_reauth, 0) = 0 AND COALESCE(oauth_access_token, '') != '' AND ((provider = 'openai_compatible' AND COALESCE(oauth_expires_at, 0) = 0) OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000)`
+		query += ` AND auth_method = 'oauth' AND (
+			(provider IN ('anthropic', 'openai') AND EXISTS(
+				SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id
+				AND c.provider = configs.provider AND c.oauth_needs_reauth = 0 AND c.oauth_access_token != ''
+				AND c.oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+			)) OR
+			(provider = 'openai_compatible' AND COALESCE(oauth_needs_reauth, 0) = 0 AND COALESCE(oauth_access_token, '') != ''
+				AND (COALESCE(oauth_expires_at, 0) = 0 OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000))
+		)`
 	case "not_connected":
-		query += ` AND auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND (COALESCE(oauth_needs_reauth, 0) = 1 OR COALESCE(oauth_access_token, '') = '' OR NOT ((provider = 'openai_compatible' AND COALESCE(oauth_expires_at, 0) = 0) OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000))`
+		query += ` AND auth_method = 'oauth' AND provider IN ('anthropic', 'openai', 'openai_compatible') AND NOT (
+			(provider IN ('anthropic', 'openai') AND EXISTS(
+				SELECT 1 FROM oauth_connections c WHERE c.id = oauth_connection_id
+				AND c.provider = configs.provider AND c.oauth_needs_reauth = 0 AND c.oauth_access_token != ''
+				AND c.oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
+			)) OR
+			(provider = 'openai_compatible' AND COALESCE(oauth_needs_reauth, 0) = 0 AND COALESCE(oauth_access_token, '') != ''
+				AND (COALESCE(oauth_expires_at, 0) = 0 OR COALESCE(oauth_expires_at, 0) > CAST(strftime('%s', 'now') AS INTEGER) * 1000))
+		)`
 	case "not_required":
 		query += ` AND (auth_method != 'oauth' OR provider NOT IN ('anthropic', 'openai', 'openai_compatible'))`
 	}
@@ -314,7 +396,7 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 			&hasAPIKey, &a.Temperature, &a.IsDefault, &a.AuthMethod,
 			&hasOAuthKey, &a.OAuthExpiresAt, &a.OAuthNeedsReauth, &a.MaxWorkers, &a.WorkerTimeout,
 			&a.OllamaBaseURL, &a.BaseURL, &a.MixtureAggregatorID,
-			&a.MixtureAggregatorLabel, &a.MixtureReferenceCount); err != nil {
+			&a.MixtureAggregatorLabel, &a.MixtureReferenceCount, &a.OAuthConnectionID, &a.OAuthConnectionName); err != nil {
 			return nil, fmt.Errorf("scanning model card page: %w", err)
 		}
 		if hasAPIKey {
@@ -613,7 +695,9 @@ func (r *LLMConfigRepo) GetByID(ctx context.Context, id string) (*models.LLMConf
 	var a models.LLMConfig
 	err := scanLLMConfig(r.db.QueryRowContext(ctx,
 		`SELECT `+llmConfigColumns+`
-		 FROM agent_configs WHERE id = ?`, id), &a)
+		 FROM agent_configs a
+		 LEFT JOIN oauth_connections c ON c.id = a.oauth_connection_id AND c.provider = a.provider AND a.auth_method = ?
+		 WHERE a.id = ?`, models.AuthMethodOAuth, id), &a)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -627,7 +711,9 @@ func (r *LLMConfigRepo) GetDefault(ctx context.Context) (*models.LLMConfig, erro
 	var a models.LLMConfig
 	err := scanLLMConfig(r.db.QueryRowContext(ctx,
 		`SELECT `+llmConfigColumns+`
-		 FROM agent_configs WHERE is_default = 1 LIMIT 1`), &a)
+		 FROM agent_configs a
+		 LEFT JOIN oauth_connections c ON c.id = a.oauth_connection_id AND c.provider = a.provider AND a.auth_method = ?
+		 WHERE a.is_default = 1 LIMIT 1`, models.AuthMethodOAuth), &a)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -718,16 +804,33 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 	if a.AuthMethod == "" {
 		a.AuthMethod = models.AuthMethodAPIKey
 	}
+	if a.AuthMethod == models.AuthMethodOAuth && (a.Provider == models.ProviderOpenAI || a.Provider == models.ProviderAnthropic) {
+		if a.OAuthConnectionID == "" {
+			if err := createPrivateOAuthConnectionTx(ctx, tx, a); err != nil {
+				return fmt.Errorf("creating private OAuth connection: %w", err)
+			}
+		} else if err := validateOAuthConnectionLinkTx(ctx, tx, a.OAuthConnectionID, a.Provider); err != nil {
+			return err
+		}
+	} else {
+		a.OAuthConnectionID = ""
+	}
+	legacyAccessToken, legacyRefreshToken := a.OAuthAccessToken, a.OAuthRefreshToken
+	legacyExpiresAt, legacyAccountID := a.OAuthExpiresAt, a.OAuthAccountID
+	if a.OAuthConnectionID != "" {
+		legacyAccessToken, legacyRefreshToken = "", ""
+		legacyExpiresAt, legacyAccountID = 0, ""
+	}
 	err = tx.QueryRowContext(ctx,
-		`INSERT INTO agent_configs (id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, context_window, compaction_threshold, token_exchange_format, token_refresh_format, custom_auth_config_json, custom_auth_state_json, mixture_config_json, auto_start_tasks)
-			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO agent_configs (id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, context_window, compaction_threshold, token_exchange_format, token_refresh_format, custom_auth_config_json, custom_auth_state_json, mixture_config_json, auto_start_tasks, oauth_connection_id)
+			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 RETURNING id, created_at, updated_at`,
 		a.Name, a.Provider, a.Model, a.ReasoningEffort, a.APIKey, a.MaxTokens, a.Temperature, a.IsDefault,
-		a.AuthMethod, a.OAuthAccessToken, a.OAuthRefreshToken, a.OAuthExpiresAt, a.OAuthAccountID, a.MaxWorkers, a.WorkerTimeout,
+		a.AuthMethod, legacyAccessToken, legacyRefreshToken, legacyExpiresAt, legacyAccountID, a.MaxWorkers, a.WorkerTimeout,
 		a.OAuthClientID, a.OAuthClientSecret, a.OAuthAuthorizeURL, a.OAuthTokenURL, a.OAuthScopes,
 		a.OllamaBaseURL, a.BaseURL, a.Transport, a.PresetSlug, a.ModelsURL,
 		a.AuthHeaderName, a.AuthHeaderValuePrefix, a.ExtraHeadersJSON, a.ExtraBodyJSON,
-		a.DefaultMaxTokens, a.ContextWindow, a.CompactionThreshold, a.TokenExchangeFormat, a.TokenRefreshFormat, a.CustomAuthConfigJSON, a.CustomAuthStateJSON, a.MixtureConfigJSON, a.AutoStartTasks).
+		a.DefaultMaxTokens, a.ContextWindow, a.CompactionThreshold, a.TokenExchangeFormat, a.TokenRefreshFormat, a.CustomAuthConfigJSON, a.CustomAuthStateJSON, a.MixtureConfigJSON, a.AutoStartTasks, nullStringArg(a.OAuthConnectionID)).
 		Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating model config: %w", err)
@@ -766,6 +869,33 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 	if a.AuthMethod == "" {
 		a.AuthMethod = models.AuthMethodAPIKey
 	}
+	if a.AuthMethod == models.AuthMethodOAuth && (a.Provider == models.ProviderOpenAI || a.Provider == models.ProviderAnthropic) {
+		if a.OAuthConnectionID != "" {
+			var currentProvider models.LLMProvider
+			var currentConnectionID string
+			if err := tx.QueryRowContext(ctx, `SELECT provider, COALESCE(oauth_connection_id, '') FROM agent_configs WHERE id = ?`, a.ID).Scan(&currentProvider, &currentConnectionID); err != nil {
+				return fmt.Errorf("loading current OAuth connection: %w", err)
+			}
+			if currentProvider != a.Provider && currentConnectionID == a.OAuthConnectionID {
+				a.OAuthConnectionID = ""
+			}
+		}
+		if a.OAuthConnectionID == "" {
+			if err := createPrivateOAuthConnectionTx(ctx, tx, a); err != nil {
+				return fmt.Errorf("creating private OAuth connection: %w", err)
+			}
+		} else if err := validateOAuthConnectionLinkTx(ctx, tx, a.OAuthConnectionID, a.Provider); err != nil {
+			return err
+		}
+	} else {
+		a.OAuthConnectionID = ""
+	}
+	legacyAccessToken, legacyRefreshToken := a.OAuthAccessToken, a.OAuthRefreshToken
+	legacyExpiresAt, legacyAccountID, legacyNeedsReauth := a.OAuthExpiresAt, a.OAuthAccountID, a.OAuthNeedsReauth
+	if a.OAuthConnectionID != "" {
+		legacyAccessToken, legacyRefreshToken = "", ""
+		legacyExpiresAt, legacyAccountID, legacyNeedsReauth = 0, "", false
+	}
 	_, err = tx.ExecContext(ctx,
 		`UPDATE agent_configs SET name = ?, provider = ?, model = ?, reasoning_effort = ?, api_key = ?,
 		 max_tokens = ?, temperature = ?, is_default = ?,
@@ -775,17 +905,18 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		 ollama_base_url = ?, base_url = ?, transport = ?, preset_slug = ?, models_url = ?,
 		 auth_header_name = ?, auth_header_value_prefix = ?, extra_headers_json = ?, extra_body_json = ?,
 		 default_max_tokens = ?, context_window = ?, compaction_threshold = ?, token_exchange_format = ?, token_refresh_format = ?, custom_auth_config_json = ?, custom_auth_state_json = ?, mixture_config_json = ?, auto_start_tasks = ?,
+		 oauth_connection_id = ?,
 		 oauth_config_revision = oauth_config_revision + 1,
 		 updated_at = datetime('now')
 		 WHERE id = ?`,
 		a.Name, a.Provider, a.Model, a.ReasoningEffort, a.APIKey, a.MaxTokens, a.Temperature, a.IsDefault,
-		a.AuthMethod, a.OAuthAccessToken, a.OAuthRefreshToken, a.OAuthExpiresAt, a.OAuthAccountID, a.OAuthNeedsReauth,
+		a.AuthMethod, legacyAccessToken, legacyRefreshToken, legacyExpiresAt, legacyAccountID, legacyNeedsReauth,
 		a.MaxWorkers, a.WorkerTimeout,
 		a.OAuthClientID, a.OAuthClientSecret, a.OAuthAuthorizeURL, a.OAuthTokenURL, a.OAuthScopes,
 		a.OllamaBaseURL, a.BaseURL, a.Transport, a.PresetSlug, a.ModelsURL,
 		a.AuthHeaderName, a.AuthHeaderValuePrefix, a.ExtraHeadersJSON, a.ExtraBodyJSON,
 		a.DefaultMaxTokens, a.ContextWindow, a.CompactionThreshold, a.TokenExchangeFormat, a.TokenRefreshFormat, a.CustomAuthConfigJSON, a.CustomAuthStateJSON, a.MixtureConfigJSON, a.AutoStartTasks,
-		a.ID)
+		nullStringArg(a.OAuthConnectionID), a.ID)
 	if err != nil {
 		return fmt.Errorf("updating model config: %w", err)
 	}
@@ -795,25 +926,40 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit update model config tx: %w", err)
 	}
-	a.OAuthConfigRevision++
+	if a.OAuthConnectionID == "" {
+		a.OAuthConfigRevision++
+	}
 	return nil
 }
 
-// UpdateOAuthTokens updates only the OAuth token fields for a config.
+// UpdateOAuthTokens updates the owning OAuth credential record for a config.
 func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, accessToken, refreshToken string, expiresAt int64, accountID ...string) error {
-	var (
-		result sql.Result
-		err    error
-	)
-	if len(accountID) > 0 {
+	var connectionID string
+	err := r.db.QueryRowContext(ctx, `SELECT COALESCE(oauth_connection_id, '') FROM agent_configs WHERE id = ?`, id).Scan(&connectionID)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("updating OAuth tokens: model config not found")
+	}
+	if err != nil {
+		return fmt.Errorf("loading OAuth token owner: %w", err)
+	}
+	var result sql.Result
+	if connectionID != "" {
+		if len(accountID) > 0 {
+			result, err = execBoundSQLite(ctx, r.db,
+				`UPDATE oauth_connections SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, oauth_needs_reauth = 0, updated_at = datetime('now') WHERE id = ?`,
+				accessToken, refreshToken, expiresAt, accountID[0], connectionID)
+		} else {
+			result, err = execBoundSQLite(ctx, r.db,
+				`UPDATE oauth_connections SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_needs_reauth = 0, updated_at = datetime('now') WHERE id = ?`,
+				accessToken, refreshToken, expiresAt, connectionID)
+		}
+	} else if len(accountID) > 0 {
 		result, err = execBoundSQLite(ctx, r.db,
-			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, oauth_needs_reauth = 0, updated_at = datetime('now')
-			 WHERE id = ?`,
+			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, oauth_needs_reauth = 0, updated_at = datetime('now') WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, accountID[0], id)
 	} else {
 		result, err = execBoundSQLite(ctx, r.db,
-			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_needs_reauth = 0, updated_at = datetime('now')
-			 WHERE id = ?`,
+			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_needs_reauth = 0, updated_at = datetime('now') WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, id)
 	}
 	if err != nil {
@@ -824,18 +970,19 @@ func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, access
 		return fmt.Errorf("checking OAuth token update: %w", err)
 	}
 	if changed != 1 {
-		return fmt.Errorf("updating OAuth tokens: model config not found")
+		return fmt.Errorf("updating OAuth tokens: credential owner not found")
 	}
 	return nil
 }
 
 func (r *LLMConfigRepo) UpdateStandardOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID string) (bool, error) {
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE agent_configs
+		`UPDATE oauth_connections
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
-		     oauth_needs_reauth = 0, oauth_config_revision = oauth_config_revision + 1, updated_at = datetime('now')
-		 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-		accessToken, refreshToken, expiresAt, accountID, id, expectedRevision, provider, models.AuthMethodOAuth)
+		     oauth_needs_reauth = 0, oauth_revision = oauth_revision + 1, updated_at = datetime('now')
+		 WHERE id = (SELECT oauth_connection_id FROM agent_configs WHERE id = ? AND provider = ? AND auth_method = ?)
+		   AND provider = ? AND oauth_revision = ?`,
+		accessToken, refreshToken, expiresAt, accountID, id, provider, models.AuthMethodOAuth, provider, expectedRevision)
 	if err != nil {
 		return false, fmt.Errorf("conditionally updating OAuth connection: %w", err)
 	}
@@ -847,23 +994,19 @@ func (r *LLMConfigRepo) UpdateStandardOAuthConnectionIfRevision(ctx context.Cont
 }
 
 func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID ...string) (bool, error) {
-	var (
-		result sql.Result
-		err    error
-	)
+	identityAssignment := ""
+	args := []any{accessToken, refreshToken, expiresAt}
 	if len(accountID) > 0 {
-		result, err = execBoundSQLite(ctx, r.db,
-			`UPDATE agent_configs
-			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, oauth_needs_reauth = 0, updated_at = datetime('now')
-			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-			accessToken, refreshToken, expiresAt, accountID[0], id, expectedRevision, provider, models.AuthMethodOAuth)
-	} else {
-		result, err = execBoundSQLite(ctx, r.db,
-			`UPDATE agent_configs
-			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_needs_reauth = 0, updated_at = datetime('now')
-			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-			accessToken, refreshToken, expiresAt, id, expectedRevision, provider, models.AuthMethodOAuth)
+		identityAssignment = ", oauth_account_id = ?"
+		args = append(args, accountID[0])
 	}
+	args = append(args, id, provider, models.AuthMethodOAuth, provider, expectedRevision)
+	result, err := execBoundSQLite(ctx, r.db,
+		`UPDATE oauth_connections
+		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?`+identityAssignment+`,
+		     oauth_needs_reauth = 0, updated_at = datetime('now')
+		 WHERE id = (SELECT oauth_connection_id FROM agent_configs WHERE id = ? AND provider = ? AND auth_method = ?)
+		   AND provider = ? AND oauth_revision = ?`, args...)
 	if err != nil {
 		return false, fmt.Errorf("conditionally updating OAuth tokens: %w", err)
 	}
@@ -876,10 +1019,10 @@ func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context,
 
 func (r *LLMConfigRepo) UpdateOAuthAccountIDIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accountID string) (bool, error) {
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE agent_configs
-		 SET oauth_account_id = ?, updated_at = datetime('now')
-		 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-		accountID, id, expectedRevision, provider, models.AuthMethodOAuth)
+		`UPDATE oauth_connections SET oauth_account_id = ?, updated_at = datetime('now')
+		 WHERE id = (SELECT oauth_connection_id FROM agent_configs WHERE id = ? AND provider = ? AND auth_method = ?)
+		   AND provider = ? AND oauth_revision = ?`,
+		accountID, id, provider, models.AuthMethodOAuth, provider, expectedRevision)
 	if err != nil {
 		return false, fmt.Errorf("conditionally updating OAuth account identity: %w", err)
 	}
@@ -892,10 +1035,10 @@ func (r *LLMConfigRepo) UpdateOAuthAccountIDIfRevision(ctx context.Context, id s
 
 func (r *LLMConfigRepo) MarkOAuthNeedsReauthIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider) (bool, error) {
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE agent_configs
-		 SET oauth_needs_reauth = 1, updated_at = datetime('now')
-		 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
-		id, expectedRevision, provider, models.AuthMethodOAuth)
+		`UPDATE oauth_connections SET oauth_needs_reauth = 1, updated_at = datetime('now')
+		 WHERE id = (SELECT oauth_connection_id FROM agent_configs WHERE id = ? AND provider = ? AND auth_method = ?)
+		   AND provider = ? AND oauth_revision = ?`,
+		id, provider, models.AuthMethodOAuth, provider, expectedRevision)
 	if err != nil {
 		return false, fmt.Errorf("marking OAuth reauthentication required: %w", err)
 	}
@@ -998,7 +1141,25 @@ func (r *LLMConfigRepo) TryAcquireOAuthRefreshLease(ctx context.Context, configI
 	if configID == "" || ownerToken == "" || leaseDuration <= 0 {
 		return false, fmt.Errorf("complete OAuth refresh lease identity is required")
 	}
+	var connectionID string
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(
+		(SELECT id FROM oauth_connections WHERE id = ?),
+		(SELECT oauth_connection_id FROM agent_configs WHERE id = ?), '')`, configID, configID).Scan(&connectionID); err != nil {
+		return false, fmt.Errorf("loading OAuth refresh lease owner: %w", err)
+	}
 	nowMillis := now.UTC().UnixMilli()
+	if connectionID != "" {
+		result, err := execBoundSQLite(ctx, r.db,
+			`UPDATE oauth_connections
+			 SET refresh_lease_owner = ?, refresh_lease_until = ?, updated_at = CURRENT_TIMESTAMP
+			 WHERE id = ? AND (refresh_lease_until <= ? OR refresh_lease_owner = ?)`,
+			ownerToken, now.UTC().Add(leaseDuration).UnixMilli(), connectionID, nowMillis, ownerToken)
+		if err != nil {
+			return false, fmt.Errorf("acquiring OAuth connection refresh lease: %w", err)
+		}
+		changed, err := result.RowsAffected()
+		return changed == 1, err
+	}
 	result, err := execBoundSQLite(ctx, r.db,
 		`INSERT INTO oauth_refresh_leases (config_id, owner_token, lease_expires_at)
 		 VALUES (?, ?, ?)
@@ -1019,6 +1180,21 @@ func (r *LLMConfigRepo) TryAcquireOAuthRefreshLease(ctx context.Context, configI
 }
 
 func (r *LLMConfigRepo) ReleaseOAuthRefreshLease(ctx context.Context, configID, ownerToken string) error {
+	var connectionID string
+	configID = strings.TrimSpace(configID)
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(
+		(SELECT id FROM oauth_connections WHERE id = ?),
+		(SELECT oauth_connection_id FROM agent_configs WHERE id = ?), '')`, configID, configID).Scan(&connectionID); err != nil {
+		return fmt.Errorf("loading OAuth refresh lease owner: %w", err)
+	}
+	if connectionID != "" {
+		if _, err := execBoundSQLite(ctx, r.db,
+			`UPDATE oauth_connections SET refresh_lease_owner = '', refresh_lease_until = 0
+			 WHERE id = ? AND refresh_lease_owner = ?`, connectionID, strings.TrimSpace(ownerToken)); err != nil {
+			return fmt.Errorf("releasing OAuth connection refresh lease: %w", err)
+		}
+		return nil
+	}
 	if _, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM oauth_refresh_leases WHERE config_id = ? AND owner_token = ?`,
 		strings.TrimSpace(configID), strings.TrimSpace(ownerToken)); err != nil {
@@ -1078,7 +1254,9 @@ func (r *LLMConfigRepo) GetByIDs(ctx context.Context, ids []string) (map[string]
 	}
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+llmConfigColumns+`
-		 FROM agent_configs WHERE id IN (`+string(placeholders)+`)`, args...)
+		 FROM agent_configs a
+		 LEFT JOIN oauth_connections c ON c.id = a.oauth_connection_id AND c.provider = a.provider AND a.auth_method = ?
+		 WHERE a.id IN (`+string(placeholders)+`)`, append([]interface{}{models.AuthMethodOAuth}, args...)...)
 	if err != nil {
 		return nil, fmt.Errorf("batch getting model configs: %w", err)
 	}
@@ -1092,7 +1270,13 @@ func (r *LLMConfigRepo) GetByIDs(ctx context.Context, ids []string) (map[string]
 		}
 		result[a.ID] = &a
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (r *LLMConfigRepo) DeleteBulk(ctx context.Context, ids []string) error {
