@@ -886,6 +886,94 @@ func TestUsageAnalyticsService_SharedConnectionFailureUsesOneRequestAndAllowsSep
 	}
 }
 
+func TestUsageAnalyticsService_DistinctSameAccountConnectionFailuresPersistIndependentCooldowns(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			first := &models.LLMConfig{
+				Name:              "A failed connection",
+				Provider:          provider,
+				Model:             "model-one",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "first-access",
+				OAuthRefreshToken: "first-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "same-provider-account",
+			}
+			firstSibling := &models.LLMConfig{
+				Name:       "B failed connection sibling",
+				Provider:   provider,
+				Model:      "model-two",
+				AuthMethod: models.AuthMethodOAuth,
+			}
+			second := &models.LLMConfig{
+				Name:              "C independently failed connection",
+				Provider:          provider,
+				Model:             "model-three",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "second-access",
+				OAuthRefreshToken: "second-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "same-provider-account",
+			}
+			for _, cfg := range []*models.LLMConfig{first, firstSibling, second} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, firstSibling.ID, first.OAuthConnectionID); err != nil {
+				t.Fatalf("link shared connection: %v", err)
+			}
+
+			calls := 0
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			svc.SetAccountUsageFetcher(func(_ context.Context, _ models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				calls++
+				return nil, accountUsageHTTPError{Method: http.MethodGet, URL: "https://provider.example/usage", StatusCode: http.StatusTooManyRequests}
+			})
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("first BuildAnalyticsUsage: %v", err)
+			}
+			if calls != 2 {
+				t.Fatalf("distinct failed connections made %d requests, want 2", calls)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error == "" {
+				t.Fatalf("all-failed grouped account card = %+v", view.AccountLimits)
+			}
+			snapshots, err := usageRepo.GetLatestAccountUsageSnapshots(ctx, string(provider))
+			if err != nil {
+				t.Fatalf("load failure snapshots: %v", err)
+			}
+			gotConnections := map[string]bool{}
+			for _, snapshot := range snapshots {
+				if isAccountRefreshFailure(snapshot.RateLimitReachedType) {
+					gotConnections[snapshot.OAuthConnectionID] = true
+				}
+			}
+			if len(gotConnections) != 2 || !gotConnections[first.OAuthConnectionID] || !gotConnections[second.OAuthConnectionID] {
+				t.Fatalf("persisted failure connections = %v, snapshots=%+v", gotConnections, snapshots)
+			}
+
+			calls = 0
+			view, err = svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)})
+			if err != nil {
+				t.Fatalf("second BuildAnalyticsUsage: %v", err)
+			}
+			if calls != 0 {
+				t.Fatalf("cooled-down connections made %d requests, want 0", calls)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].Error == "" {
+				t.Fatalf("cooled-down grouped account card = %+v", view.AccountLimits)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_SharedConnectionDedupesWithoutProviderIdentity(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
@@ -1204,8 +1292,21 @@ func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *t
 				if err != nil {
 					t.Fatalf("load account snapshots: %v", err)
 				}
-				if len(snapshots) != 1 || snapshots[0].AgentConfigID != second.ID || snapshots[0].RateLimitReachedType != "" {
-					t.Fatalf("shared account persisted a failed candidate snapshot: %+v", snapshots)
+				if len(snapshots) != 2 {
+					t.Fatalf("shared account snapshots = %+v, want independent failure cooldown and healthy success", snapshots)
+				}
+				var failedSnapshot, healthySnapshot *models.AccountUsageSnapshot
+				for i := range snapshots {
+					snapshot := &snapshots[i]
+					if snapshot.OAuthConnectionID == first.OAuthConnectionID && isAccountRefreshFailure(snapshot.RateLimitReachedType) {
+						failedSnapshot = snapshot
+					}
+					if snapshot.OAuthConnectionID == second.OAuthConnectionID && snapshot.RateLimitReachedType == "" {
+						healthySnapshot = snapshot
+					}
+				}
+				if failedSnapshot == nil || healthySnapshot == nil {
+					t.Fatalf("shared account did not preserve independent cooldown and healthy snapshot: %+v", snapshots)
 				}
 			})
 		}
