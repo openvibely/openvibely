@@ -182,6 +182,98 @@ func TestUsageRepo_CreateAccountUsageSnapshotPersistsExtraLimits(t *testing.T) {
 	}
 }
 
+func TestUsageRepo_GetLatestAccountUsageSnapshotsKeepsDistinctOAuthConnectionsAfterModelMove(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := NewUsageRepo(db)
+			configRepo := NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			origin := &models.LLMConfig{
+				Name:              string(provider) + " snapshot origin",
+				Provider:          provider,
+				Model:             "model-origin",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-a-access",
+				OAuthRefreshToken: "account-a-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+			}
+			sibling := &models.LLMConfig{Name: string(provider) + " account A sibling", Provider: provider, Model: "model-sibling", AuthMethod: models.AuthMethodOAuth}
+			target := &models.LLMConfig{
+				Name:              string(provider) + " account B target",
+				Provider:          provider,
+				Model:             "model-target",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "account-b-access",
+				OAuthRefreshToken: "account-b-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+			}
+			for _, cfg := range []*models.LLMConfig{origin, sibling, target} {
+				if err := configRepo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, sibling.ID, origin.OAuthConnectionID); err != nil {
+				t.Fatalf("link sibling to account A: %v", err)
+			}
+
+			first := &models.AccountUsageSnapshot{
+				Provider:          string(provider),
+				AgentConfigID:     origin.ID,
+				OAuthConnectionID: origin.OAuthConnectionID,
+				PlanType:          "Account A Plan",
+				FetchedAt:         time.Now().Add(-time.Minute),
+			}
+			stored, err := usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(ctx, first, origin.ID, origin.OAuthConfigRevision, provider)
+			if err != nil || !stored {
+				t.Fatalf("store account A snapshot = %v, %v", stored, err)
+			}
+			if err := configRepo.LinkOAuthConnection(ctx, origin.ID, target.OAuthConnectionID); err != nil {
+				t.Fatalf("move origin to account B: %v", err)
+			}
+			current, err := configRepo.GetByID(ctx, origin.ID)
+			if err != nil {
+				t.Fatalf("load moved origin: %v", err)
+			}
+			second := &models.AccountUsageSnapshot{
+				Provider:          string(provider),
+				AgentConfigID:     origin.ID,
+				OAuthConnectionID: current.OAuthConnectionID,
+				PlanType:          "Account B Plan",
+				FetchedAt:         time.Now(),
+			}
+			stored, err = usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(ctx, second, current.ID, current.OAuthConfigRevision, provider)
+			if err != nil || !stored {
+				t.Fatalf("store account B snapshot = %v, %v", stored, err)
+			}
+			third := &models.AccountUsageSnapshot{
+				Provider:          string(provider),
+				AgentConfigID:     sibling.ID,
+				OAuthConnectionID: first.OAuthConnectionID,
+				PlanType:          "Current Account A Plan",
+				FetchedAt:         time.Now().Add(time.Minute),
+			}
+			stored, err = usageRepo.CreateAccountUsageSnapshotIfOAuthRevision(ctx, third, sibling.ID, sibling.OAuthConfigRevision, provider)
+			if err != nil || !stored {
+				t.Fatalf("store current account A snapshot = %v, %v", stored, err)
+			}
+
+			snapshots, err := usageRepo.GetLatestAccountUsageSnapshots(ctx, string(provider))
+			if err != nil {
+				t.Fatalf("GetLatestAccountUsageSnapshots: %v", err)
+			}
+			seen := map[string]string{}
+			for _, snapshot := range snapshots {
+				seen[snapshot.OAuthConnectionID] = snapshot.PlanType
+			}
+			if len(snapshots) != 2 || seen[first.OAuthConnectionID] != "Current Account A Plan" || seen[second.OAuthConnectionID] != "Account B Plan" {
+				t.Fatalf("latest snapshots were not partitioned by connection: %+v", snapshots)
+			}
+		})
+	}
+}
+
 func TestUsageRepo_GetLatestAccountUsageSnapshotsBreaksTimestampTiesByInsertOrder(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewUsageRepo(db)
