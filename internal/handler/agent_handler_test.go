@@ -3375,6 +3375,66 @@ func TestHandler_UpdateAgent_AllowsEligibleSystemAgentModelAndEnabledControls(t 
 	}
 }
 
+func TestHandler_UpdateAgent_AllowsProtectedSystemAgentSaveWithDisabledFieldsOmitted(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	modelCfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Browser System Control Model"
+		a.Provider = models.ProviderTest
+		a.Model = "browser-system-control-model"
+	})
+
+	agent := &models.Agent{
+		Name:            "System: Skill Curator",
+		Key:             "test_skill_curator_browser",
+		SystemKind:      models.AgentSystemKindSkillCurator,
+		SystemPrompt:    "original prompt",
+		Model:           "inherit",
+		Tools:           []string{"Read"},
+		GeneratedStatus: models.AgentStatusProtected,
+		CreatedBy:       models.AgentCreatedBySystem,
+		Enabled:         true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create protected agent: %v", err)
+	}
+
+	form := url.Values{}
+	// Browser-shaped protected-agent save: disabled text fields such as name and
+	// system_prompt are omitted, while hidden serializer fields are submitted.
+	form.Set("model", modelCfg.ID)
+	form.Set("tools_json", `["Read"]`)
+	form.Set("tool_config_json", `{}`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("permission_defaults_json", `{"read_task_prompt":false,"read_task_execution":false,"read_project_memory":false,"write_project_memory":false,"read_agents":false,"write_agents":false,"read_skills":false,"write_skills":false,"read_repository_files":false,"write_repository_files":false,"use_shell_or_tools":false}`)
+	form.Set("source_refs_json", `[]`)
+	form.Set("key", "test_skill_curator_browser")
+	form.Set("scope", "global")
+	form.Set("selectable_as_primary", "false")
+	form.Set("enabled", "false")
+
+	req := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("reload protected agent: %v %#v", err, stored)
+	}
+	if stored.Model != modelCfg.ID || stored.Enabled {
+		t.Fatalf("expected browser-shaped protected save to persist controls, got model=%q enabled=%v", stored.Model, stored.Enabled)
+	}
+	if stored.Name != agent.Name || stored.SystemPrompt != agent.SystemPrompt {
+		t.Fatalf("protected fields changed: %+v", stored)
+	}
+}
+
 func TestHandler_UpdateAgent_RejectsRequiredGoalAgentDisable(t *testing.T) {
 	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	agentRepo := repository.NewAgentRepo(db)
