@@ -198,12 +198,12 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					Tasks using this agent will be unlinked.
 				}
 
-			<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">			<div class="modal-box max-w-4xl p-0 overflow-hidden">
+			<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost(); invalidateAgentModalHydration()">			<div class="modal-box max-w-4xl p-0 overflow-hidden">
 				@ModalCloseButton("agent_modal", "Close agent dialog")
 				<div class="px-6 pt-6 pb-2 pr-14">
 					<h3 id="agent_modal_title" class="font-bold text-lg">New Agent</h3>
 				</div>
-				<form id="agent_form" method="post" action="/agents" class="flex flex-col h-[78vh]">
+				<form id="agent_form" method="post" action="/agents" class="flex flex-col h-[78vh]" onsubmit="return canSubmitAgentForm()">
 					<div class="px-6 pb-3 border-b border-base-300">
 						<div role="tablist" class="tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap">
 							<button type="button" role="tab" class="tab tab-active" data-agent-section-tab="details" aria-selected="true" onclick="setAgentSection('details')">Agent Details</button>
@@ -475,7 +475,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 					<div class="modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3">
 						<button type="button" class="btn" onclick="agent_modal.close()">Cancel</button>
-						<button type="submit" class="btn btn-primary" onclick="serializeAgentFormData()">Save</button>
+						<button type="submit" id="agent_save_btn" class="btn btn-primary" onclick="return serializeAgentFormData()">Save</button>
 					</div>
 				</form>
 			</div>
@@ -510,8 +510,10 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					let agentOwnedSkillsState = { routed_skills: [], can_manage: false, protected: false };
 				let editingAgentSkillOriginalHandle = '';
 				let activeAgentSection = 'details';
-					let activeAgentID = '';
-					var deleteAgentID = '';
+				let activeAgentID = '';
+				let agentModalGeneration = 0;
+				let agentModalHydration = { generation: 0, agentID: '', detailLoaded: true, hooksLoaded: true };
+				var deleteAgentID = '';
 		let installingPluginIDs = new Set();
 		let uninstallingPluginIDs = new Set();
 		let pendingUninstalledPluginIDs = new Set();
@@ -1378,8 +1380,46 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		}
 
 
-		function openNewAgentModal() {
-			activeAgentID = '';
+			function setAgentSaveAvailability() {
+				const saveButton = document.getElementById('agent_save_btn');
+				if (!saveButton) return;
+				const ready = canSubmitAgentForm();
+				saveButton.disabled = !ready;
+				saveButton.setAttribute('aria-busy', ready ? 'false' : 'true');
+			}
+
+			function canSubmitAgentForm() {
+				return agentModalHydration.generation === agentModalGeneration &&
+					agentModalHydration.agentID === activeAgentID &&
+					agentModalHydration.detailLoaded &&
+					agentModalHydration.hooksLoaded;
+			}
+
+			function beginAgentModalHydration(agentID, detailLoaded, hooksLoaded) {
+				activeAgentID = String(agentID || '').trim();
+				agentModalGeneration += 1;
+				agentModalHydration = {
+					generation: agentModalGeneration,
+					agentID: activeAgentID,
+					detailLoaded: Boolean(detailLoaded),
+					hooksLoaded: Boolean(hooksLoaded),
+				};
+				setAgentSaveAvailability();
+				return agentModalGeneration;
+			}
+
+			function invalidateAgentModalHydration() {
+				agentModalGeneration += 1;
+				agentModalHydration = { generation: agentModalGeneration, agentID: activeAgentID, detailLoaded: false, hooksLoaded: false };
+				setAgentSaveAvailability();
+			}
+
+			function isCurrentAgentModalLoad(agentID, generation) {
+				return String(agentID || '').trim() === activeAgentID && generation === agentModalGeneration;
+			}
+
+			function openNewAgentModal() {
+				beginAgentModalHydration('', true, true);
 			document.getElementById('agent_modal_title').textContent = 'New Agent';
 			const form = document.getElementById('agent_form');
 			form.action = withCurrentAgentListState('/agents');
@@ -1406,8 +1446,8 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				document.getElementById('agent_modal').showModal();		}
 
 		function editAgentFromData(el) {
-			const id = el.dataset.agentId;
-			activeAgentID = String(id || '').trim();
+			const id = String(el.dataset.agentId || '').trim();
+			const modalGeneration = beginAgentModalHydration(id, false, false);
 			document.getElementById('agent_modal_title').textContent = 'Edit Agent';
 			const form = document.getElementById('agent_form');
 			form.action = withCurrentAgentListState('/agents/' + id);
@@ -1431,25 +1471,29 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 
 			resetLifecycleFormFields();
 			populateLifecycleFormFromCardData(el);
-			loadAgentLifecycleFromServer(activeAgentID);
+			loadAgentLifecycleFromServer(id, modalGeneration);
 
 				setAgentSection('details');
 				loadAgentSkillsForAgent(activeAgentID);
 				loadPluginState(false);
 				document.getElementById('agent_modal').showModal();		}
 
-		async function loadAgentLifecycleFromServer(agentID) {
-			if (!agentID) return;
+		async function loadAgentLifecycleFromServer(agentID, generation) {
+			if (!agentID || !isCurrentAgentModalLoad(agentID, generation)) return;
 			try {
 				const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(agentID) + '/json'), { headers: { 'Accept': 'application/json' }});
 				if (response.ok) {
 					const data = await response.json();
+					if (!isCurrentAgentModalLoad(agentID, generation)) return;
 					populateLifecycleFormFromAgent(data);
+					agentModalHydration.detailLoaded = true;
+					setAgentSaveAvailability();
 				}
 			} catch (err) {
 				console.error('loadAgentLifecycleFromServer', err);
 			}
-			loadLifecycleHooksForAgent(agentID);
+			if (!isCurrentAgentModalLoad(agentID, generation)) return;
+			loadLifecycleHooksForAgent(agentID, generation);
 		}
 
 		function fillAgentFormFromGenerated(data) {
@@ -1512,6 +1556,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 		}
 
 			function serializeAgentFormData() {
+				if (!canSubmitAgentForm()) return false;
 				validateScopedFilesDirectoryInput();
 				const tools = [];
 				document.querySelectorAll('.agent-tool-checkbox:checked').forEach(cb => tools.push(cb.value));
@@ -1531,6 +1576,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				document.getElementById('agent_scope_field').value = (document.getElementById('advanced_scope').value || '').trim();
 				document.getElementById('agent_selectable_as_primary_field').value = document.getElementById('advanced_selectable_as_primary').checked ? 'true' : 'false';
 				document.getElementById('agent_enabled_field').value = document.getElementById('advanced_enabled').checked ? 'true' : 'false';
+				return true;
 			}
 
 			function splitLines(value) {
@@ -1660,19 +1706,23 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			let lifecycleHooksState = [];
 			let lifecycleProtectedAgent = false;
 
-			async function loadLifecycleHooksForAgent(agentID) {
+			async function loadLifecycleHooksForAgent(agentID, generation) {
+				if (!isCurrentAgentModalLoad(agentID, generation)) return;
 				lifecycleHooksState = [];
 				document.getElementById('lifecycle_hooks_list').innerHTML = '';
-				if (!agentID) return;
 				try {
 					const response = await fetch(withCurrentProject('/agents/' + encodeURIComponent(agentID) + '/lifecycle-hooks'), { headers: { 'Accept': 'application/json' }});
 					if (!response.ok) {
 						throw new Error('failed to load hooks: ' + response.status);
 					}
 					const hooks = await response.json();
+					if (!isCurrentAgentModalLoad(agentID, generation)) return;
 					lifecycleHooksState = Array.isArray(hooks) ? hooks : [];
+					agentModalHydration.hooksLoaded = true;
+					setAgentSaveAvailability();
 					renderLifecycleHooks();
 				} catch (err) {
+					if (!isCurrentAgentModalLoad(agentID, generation)) return;
 					console.error('loadLifecycleHooksForAgent', err);
 					const status = document.getElementById('lifecycle_hooks_status');
 					if (status) { status.textContent = String(err.message || err); status.classList.remove('hidden'); status.classList.add('text-error'); }
