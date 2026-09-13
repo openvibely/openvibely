@@ -105,6 +105,48 @@ func TestLLMConfigRepo_UpdateOAuthAccountIDPreservesCredentialsAndReauthState(t 
 	}
 }
 
+func TestLLMConfigRepo_UpdateStandardOAuthConnectionAdvancesGenerationAtomically(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{
+		Name:              "OAuth reconnect",
+		Provider:          models.ProviderOpenAI,
+		Model:             "gpt",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "old-access",
+		OAuthRefreshToken: "old-refresh",
+		OAuthExpiresAt:    1,
+		OAuthNeedsReauth:  true,
+	}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	updated, err := repo.UpdateStandardOAuthConnectionIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, "new-access", "new-refresh", 1900000000000, "workspace")
+	if err != nil || !updated {
+		t.Fatalf("UpdateStandardOAuthConnectionIfRevision = %v, %v", updated, err)
+	}
+	staleUpdated, err := repo.UpdateStandardOAuthTokensIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, "stale-access", "stale-refresh", 1900000000001)
+	if err != nil {
+		t.Fatalf("stale UpdateStandardOAuthTokensIfRevision: %v", err)
+	}
+	if staleUpdated {
+		t.Fatal("prior credential generation updated after reconnect")
+	}
+
+	loaded, err := repo.GetByID(ctx, cfg.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if loaded.OAuthAccessToken != "new-access" || loaded.OAuthRefreshToken != "new-refresh" || loaded.OAuthExpiresAt != 1900000000000 {
+		t.Fatalf("reconnected credentials = %#v", loaded)
+	}
+	if loaded.OAuthNeedsReauth || loaded.OAuthAccountID != "workspace" || loaded.OAuthConfigRevision != cfg.OAuthConfigRevision+1 {
+		t.Fatalf("reconnected state = account %q, reauth %v, revision %d", loaded.OAuthAccountID, loaded.OAuthNeedsReauth, loaded.OAuthConfigRevision)
+	}
+}
+
 func TestLLMConfigRepo_UpdateOAuthTokens(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

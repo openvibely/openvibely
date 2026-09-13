@@ -15,9 +15,88 @@ import (
 
 	"github.com/labstack/echo/v4"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
+	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStandardOAuthCallbackFencesConcurrentRefreshWrites(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		for _, permanentFailure := range []bool{false, true} {
+			name := string(provider) + "/refresh_success"
+			if permanentFailure {
+				name = string(provider) + "/invalid_grant"
+			}
+			t.Run(name, func(t *testing.T) {
+				tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"access_token":"callback-access","refresh_token":"callback-refresh","expires_in":7200}`))
+				}))
+				defer tokenServer.Close()
+
+				h, _, repo := setupTestHandler(t)
+				config := &models.LLMConfig{
+					Name:              name,
+					Provider:          provider,
+					Model:             "test-model",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  "old-access",
+					OAuthRefreshToken: "old-refresh",
+					OAuthExpiresAt:    time.Now().Add(-time.Minute).UnixMilli(),
+				}
+				require.NoError(t, repo.Create(context.Background(), config))
+				current, err := repo.GetByID(context.Background(), config.ID)
+				require.NoError(t, err)
+
+				refreshStarted := make(chan struct{})
+				releaseRefresh := make(chan struct{})
+				t.Cleanup(func() {
+					select {
+					case <-releaseRefresh:
+					default:
+						close(releaseRefresh)
+					}
+				})
+				refreshDone := make(chan error, 1)
+				manager := llmoauth.NewManager(repo)
+				go func() {
+					_, refreshErr := manager.EnsureFresh(context.Background(), *current, time.Hour, func(context.Context, models.LLMConfig) (llmoauth.TokenSet, error) {
+						close(refreshStarted)
+						<-releaseRefresh
+						if permanentFailure {
+							return llmoauth.TokenSet{}, llmoauth.ErrReauthenticationRequired
+						}
+						return llmoauth.TokenSet{
+							AccessToken:  "refresh-access",
+							RefreshToken: "refresh-refresh",
+							ExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+						}, nil
+					})
+					refreshDone <- refreshErr
+				}()
+				<-refreshStarted
+
+				flow := &oauthPendingFlow{
+					ConfigID:       current.ID,
+					Provider:       provider,
+					TokenURL:       tokenServer.URL,
+					ConfigRevision: current.OAuthConfigRevision,
+				}
+				_, err = h.exchangeOAuthCodeAndSaveTokens(flow, "code", "state")
+				require.NoError(t, err)
+				close(releaseRefresh)
+				require.Error(t, <-refreshDone, "stale refresh must be rejected after callback advances the credential generation")
+
+				stored, err := repo.GetByID(context.Background(), current.ID)
+				require.NoError(t, err)
+				require.Equal(t, "callback-access", stored.OAuthAccessToken)
+				require.Equal(t, "callback-refresh", stored.OAuthRefreshToken)
+				require.False(t, stored.OAuthNeedsReauth)
+				require.Equal(t, current.OAuthConfigRevision+1, stored.OAuthConfigRevision)
+			})
+		}
+	}
+}
 
 func TestExchangeCustomOAuthRejectsMissingRequiredProfileMetadata(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
