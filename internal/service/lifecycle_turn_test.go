@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -452,107 +454,281 @@ func TestPrepareLifecycleTurn_AssignedAgentSetupReadsDefinitionOnce(t *testing.T
 	}
 }
 
-func BenchmarkPrepareLifecycleTurnAgentDefinitionReuse(b *testing.B) {
+const (
+	lifecyclePreparationPerformanceSamples = 11
+	lifecyclePreparationBatchSize          = 5
+)
+
+type lifecyclePreparationSample struct {
+	elapsed       time.Duration
+	bytes         uint64
+	allocs        uint64
+	agentLookups  int
+	sqlStatements int
+}
+
+type benchmarkLifecycleStore struct {
+	hooks []models.AgentLifecycleHook
+}
+
+func (s *benchmarkLifecycleStore) HooksForWhen(_ context.Context, when models.LifecycleWhen) ([]models.AgentLifecycleHook, error) {
+	out := make([]models.AgentLifecycleHook, 0, len(s.hooks))
+	for _, hook := range s.hooks {
+		if hook.When == when && hook.Enabled {
+			out = append(out, hook)
+		}
+	}
+	return out, nil
+}
+
+func (s *benchmarkLifecycleStore) CreateExecution(_ context.Context, execution *models.LifecycleExecution) error {
+	execution.ID = "benchmark-" + execution.TaskRunID + "-" + execution.SkillKey
+	return nil
+}
+
+func (s *benchmarkLifecycleStore) UpdateExecution(_ context.Context, _ *models.LifecycleExecution) error {
+	return nil
+}
+
+func (s *benchmarkLifecycleStore) FindExecutionByIdempotencyKey(_ context.Context, _ string) (*models.LifecycleExecution, error) {
+	return nil, sql.ErrNoRows
+}
+
+type lifecycleAgentReuseBenchmarkFixture struct {
+	ctx       context.Context
+	task      models.Task
+	counter   *testutil.SQLStatementCounter
+	baseline  *WorkerService
+	candidate *WorkerService
+}
+
+func newLifecycleAgentReuseBenchmarkFixture(tb testing.TB) *lifecycleAgentReuseBenchmarkFixture {
+	tb.Helper()
 	ctx := context.Background()
-	db, counter := testutil.NewStatementCountingTestDB(b)
+	db, counter := testutil.NewStatementCountingTestDB(tb)
 	agentRepo := repository.NewAgentRepo(db)
 	agent := &models.Agent{
 		ID:           "benchmark-rich-agent",
 		Key:          "benchmark_rich_agent",
 		Name:         "Benchmark Rich Agent",
-		SystemPrompt: strings.Repeat("production-shaped system prompt ", 1024),
+		Description:  "A production-shaped rich Agent definition",
+		SystemPrompt: strings.Repeat("production-shaped system prompt ", 8192),
 		Model:        "inherit",
 		Tools:        []string{"skill_view", "memory_view", "agent_view", "skill_manage"},
-		Plugins:      []string{"plugin-a", "plugin-b"},
-		Skills:       []models.SkillConfig{{Name: "skill-a", Description: "benchmark skill"}, {Name: "skill-b", Description: "another skill"}},
-		SourceRefs:   []string{"source-a", "source-b"},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles: []models.ScopedFilesConfig{{Directory: ".openvibely", Permissions: []string{"read", "write"}}},
+		},
+		Plugins: []string{"plugin-a", "plugin-b"},
+		MCPServers: []models.MCPServerConfig{{
+			Name:    "benchmark-mcp",
+			Type:    "stdio",
+			Command: []string{"benchmark-mcp", "--stdio"},
+			Env:     map[string]string{"BENCHMARK": "1"},
+		}},
+		Skills: []models.SkillConfig{
+			{Name: "skill-a", Description: "benchmark skill", Content: strings.Repeat("skill content ", 256)},
+			{Name: "skill-b", Description: "another skill", Content: strings.Repeat("another skill content ", 256)},
+		},
+		PermissionDefaults: models.AgentPermissionDefaults{
+			ReadTaskPrompt:    true,
+			ReadTaskExecution: true,
+			ReadProjectMemory: true,
+			ReadAgents:        true,
+			ReadSkills:        true,
+			UseShellOrTools:   true,
+		},
+		ModelDefaults: models.AgentModelDefaults{Model: "inherit", Temperature: 0.2, MaxTokens: 4096},
+		SourceRefs:    []string{"source-a", "source-b"},
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {
-		b.Fatalf("create benchmark Agent: %v", err)
-	}
-	task := models.Task{ID: "benchmark-lifecycle-turn", AgentDefinitionID: &agent.ID}
-	worker := NewWorkerService(nil, 0, nil)
-	worker.SetLifecycleSkillRoot(b.TempDir())
-	worker.SetLifecycleAgentRepo(agentRepo)
-
-	setup := func(ctx context.Context, reuse bool) {
-		var assignedAgent *models.Agent
-		var setupCtx context.Context
-		if reuse {
-			setupCtx, assignedAgent, _ = worker.newLifecycleAgentContext(ctx, task)
-		} else {
-			setupCtx = ctx
-			assignedAgent = worker.taskAgentDefinition(setupCtx, task)
-		}
-		projectRoot := projectSkillRoot(setupCtx, worker.projectRepo, task.ProjectID)
-		catalog := worker.buildSkillCatalog(setupCtx, task, func() *models.Agent {
-			if reuse {
-				return assignedAgent
-			}
-			return worker.taskAgentDefinition(setupCtx, task)
-		}())
-		_ = worker.renderAvailableSkillsForTask(setupCtx, task, projectRoot, func() *models.Agent {
-			if reuse {
-				return assignedAgent
-			}
-			return worker.taskAgentDefinition(setupCtx, task)
-		}())
-		_ = worker.buildLifecycleReadRuntimeTools(task, catalog)
-		_ = worker.buildLifecycleRuntimeTools(setupCtx, task, catalog, func() *models.Agent {
-			if reuse {
-				return assignedAgent
-			}
-			return worker.taskAgentDefinition(setupCtx, task)
-		}())
+		tb.Fatalf("create benchmark Agent: %v", err)
 	}
 
-	b.Run("baseline_repeated_agent_setup", func(b *testing.B) {
-		counter.Reset()
-		counter.SetEnabled(true)
-		setup(ctx, false)
-		counter.SetEnabled(false)
-		statements := counter.Statements()
-		if got := countAgentDefinitionLookups(statements); got != 4 {
-			b.Fatalf("baseline Agent lookup statements = %d; want 4, statements=%v", got, statements)
+	runner := lifecycle.NewRunner(&benchmarkLifecycleStore{hooks: []models.AgentLifecycleHook{
+		{ID: "benchmark-route", When: models.LifecycleRouteTask, SkillKey: "route_task", OutputContract: models.OutputContractSelectedSkills, Blocking: true, Enabled: true},
+		{ID: "benchmark-before", When: models.LifecycleBeforeRun, SkillKey: "before_run", OutputContract: models.OutputContractContextBlock, Blocking: true, Enabled: true},
+	}}, routeHookInvokerFunc(func(_ context.Context, hook models.AgentLifecycleHook, _ lifecycle.HookInput) (json.RawMessage, error) {
+		switch hook.When {
+		case models.LifecycleRouteTask:
+			return routePayload(nil, 0.9), nil
+		case models.LifecycleBeforeRun:
+			return memoryContextBlockPayload("benchmark context"), nil
+		default:
+			return nil, fmt.Errorf("unexpected benchmark hook %s", hook.When)
 		}
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			setup(ctx, false)
+	}), nil)
+
+	root := tb.TempDir()
+	newWorker := func() *WorkerService {
+		worker := NewWorkerService(nil, 0, nil)
+		worker.SetLifecycleRunner(runner)
+		worker.SetLifecycleSkillRoot(root)
+		worker.SetLifecycleAgentRepo(agentRepo)
+		return worker
+	}
+	return &lifecycleAgentReuseBenchmarkFixture{
+		ctx:       ctx,
+		task:      models.Task{ID: "benchmark-lifecycle-turn", AgentDefinitionID: &agent.ID},
+		counter:   counter,
+		baseline:  newWorker(),
+		candidate: newWorker(),
+	}
+}
+
+func measureLifecyclePreparation(tb testing.TB, counter *testutil.SQLStatementCounter, prepare func() LifecycleTurn) lifecyclePreparationSample {
+	tb.Helper()
+	agentLookups := 0
+	sqlStatements := 0
+	counter.Reset()
+	counter.SetEnabled(false)
+	counter.SetObserver(func(_ context.Context, statement string) {
+		sqlStatements++
+		if strings.Contains(statement, "FROM agents WHERE id = ?") {
+			agentLookups++
 		}
-		b.StopTimer()
-		b.ReportMetric(4, "agent_lookups/op")
-		b.ReportMetric(float64(len(statements)), "sql_statements/op")
 	})
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	started := time.Now()
+	var turn LifecycleTurn
+	for i := 0; i < lifecyclePreparationBatchSize; i++ {
+		turn = prepare()
+	}
+	elapsed := time.Since(started)
+	runtime.KeepAlive(turn)
+	runtime.ReadMemStats(&after)
+	return lifecyclePreparationSample{
+		elapsed:       elapsed / lifecyclePreparationBatchSize,
+		bytes:         (after.TotalAlloc - before.TotalAlloc) / lifecyclePreparationBatchSize,
+		allocs:        (after.Mallocs - before.Mallocs) / lifecyclePreparationBatchSize,
+		agentLookups:  agentLookups / lifecyclePreparationBatchSize,
+		sqlStatements: sqlStatements / lifecyclePreparationBatchSize,
+	}
+}
 
-	b.Run("optimized_turn_scoped_agent_setup", func(b *testing.B) {
-		counter.Reset()
-		counter.SetEnabled(true)
-		setup(ctx, true)
-		counter.SetEnabled(false)
-		statements := counter.Statements()
-		if got := countAgentDefinitionLookups(statements); got != 1 {
-			b.Fatalf("optimized Agent lookup statements = %d; want 1, statements=%v", got, statements)
+func collectLifecyclePreparationSamples(tb testing.TB, fixture *lifecycleAgentReuseBenchmarkFixture, worker *WorkerService, reuse bool) []lifecyclePreparationSample {
+	tb.Helper()
+	samples := make([]lifecyclePreparationSample, 0, lifecyclePreparationPerformanceSamples)
+	defer fixture.counter.SetObserver(nil)
+	for i := 0; i < lifecyclePreparationPerformanceSamples; i++ {
+		samples = append(samples, measureLifecyclePreparation(tb, fixture.counter, func() LifecycleTurn {
+			if reuse {
+				return worker.PrepareLifecycleTurn(fixture.ctx, fixture.task)
+			}
+			return worker.prepareLifecycleTurn(fixture.ctx, fixture.task, false)
+		}))
+	}
+	return samples
+}
+
+func medianLifecyclePreparationDuration(samples []lifecyclePreparationSample) time.Duration {
+	values := make([]time.Duration, 0, len(samples))
+	for _, sample := range samples {
+		values = append(values, sample.elapsed)
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	return values[len(values)/2]
+}
+
+func medianLifecyclePreparationUint64(samples []lifecyclePreparationSample, value func(lifecyclePreparationSample) uint64) uint64 {
+	values := make([]uint64, 0, len(samples))
+	for _, sample := range samples {
+		values = append(values, value(sample))
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	return values[len(values)/2]
+}
+
+func medianLifecyclePreparationInt(samples []lifecyclePreparationSample, value func(lifecyclePreparationSample) int) int {
+	values := make([]int, 0, len(samples))
+	for _, sample := range samples {
+		values = append(values, value(sample))
+	}
+	sort.Ints(values)
+	return values[len(values)/2]
+}
+
+func assertLifecyclePreparationCounts(tb testing.TB, samples []lifecyclePreparationSample, wantAgentLookups, wantSQLStatements int) {
+	tb.Helper()
+	for i, sample := range samples {
+		if sample.agentLookups != wantAgentLookups || sample.sqlStatements != wantSQLStatements {
+			tb.Fatalf("sample %d counts = Agent lookups %d, SQL statements %d; want %d, %d", i, sample.agentLookups, sample.sqlStatements, wantAgentLookups, wantSQLStatements)
 		}
+	}
+}
+
+func reportLifecyclePreparationMetrics(b *testing.B, samples []lifecyclePreparationSample) {
+	b.ReportMetric(float64(medianLifecyclePreparationDuration(samples).Nanoseconds()), "median_ns/op")
+	b.ReportMetric(float64(medianLifecyclePreparationUint64(samples, func(sample lifecyclePreparationSample) uint64 { return sample.bytes })), "median_bytes/op")
+	b.ReportMetric(float64(medianLifecyclePreparationUint64(samples, func(sample lifecyclePreparationSample) uint64 { return sample.allocs })), "median_allocs/op")
+	b.ReportMetric(float64(medianLifecyclePreparationInt(samples, func(sample lifecyclePreparationSample) int { return sample.agentLookups })), "agent_lookups/op")
+	b.ReportMetric(float64(medianLifecyclePreparationInt(samples, func(sample lifecyclePreparationSample) int { return sample.sqlStatements })), "sql_statements/op")
+}
+
+func assertLifecyclePreparationPerformanceReduction(tb testing.TB, baseline, candidate []lifecyclePreparationSample) {
+	tb.Helper()
+	baselineDuration := medianLifecyclePreparationDuration(baseline)
+	candidateDuration := medianLifecyclePreparationDuration(candidate)
+	baselineBytes := medianLifecyclePreparationUint64(baseline, func(sample lifecyclePreparationSample) uint64 { return sample.bytes })
+	candidateBytes := medianLifecyclePreparationUint64(candidate, func(sample lifecyclePreparationSample) uint64 { return sample.bytes })
+	if float64(candidateDuration) > float64(baselineDuration)*0.4 {
+		tb.Fatalf("median setup latency reduction is below 60%%: baseline=%s candidate=%s", baselineDuration, candidateDuration)
+	}
+	if float64(candidateBytes) > float64(baselineBytes)*0.4 {
+		tb.Fatalf("median setup allocation-byte reduction is below 60%%: baseline=%d candidate=%d", baselineBytes, candidateBytes)
+	}
+	if candidateBytes >= baselineBytes {
+		tb.Fatalf("candidate median allocation bytes did not improve: baseline=%d candidate=%d", baselineBytes, candidateBytes)
+	}
+	baselineAllocs := medianLifecyclePreparationUint64(baseline, func(sample lifecyclePreparationSample) uint64 { return sample.allocs })
+	candidateAllocs := medianLifecyclePreparationUint64(candidate, func(sample lifecyclePreparationSample) uint64 { return sample.allocs })
+	if candidateAllocs >= baselineAllocs {
+		tb.Fatalf("candidate median allocation count did not improve: baseline=%d candidate=%d", baselineAllocs, candidateAllocs)
+	}
+}
+
+func BenchmarkPrepareLifecycleTurnAgentDefinitionReuse(b *testing.B) {
+	fixture := newLifecycleAgentReuseBenchmarkFixture(b)
+	baseline := collectLifecyclePreparationSamples(b, fixture, fixture.baseline, false)
+	candidate := collectLifecyclePreparationSamples(b, fixture, fixture.candidate, true)
+	assertLifecyclePreparationCounts(b, baseline, 4, 4)
+	assertLifecyclePreparationCounts(b, candidate, 1, 1)
+	assertLifecyclePreparationPerformanceReduction(b, baseline, candidate)
+	b.Run("baseline_repeated_agent_setup_with_route_and_before_hooks", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			setup(ctx, true)
+			fixture.baseline.prepareLifecycleTurn(fixture.ctx, fixture.task, false)
 		}
 		b.StopTimer()
-		b.ReportMetric(1, "agent_lookups/op")
-		b.ReportMetric(float64(len(statements)), "sql_statements/op")
+		reportLifecyclePreparationMetrics(b, baseline)
+	})
+	b.Run("optimized_turn_scoped_agent_setup_with_route_and_before_hooks", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			fixture.candidate.PrepareLifecycleTurn(fixture.ctx, fixture.task)
+		}
+		b.StopTimer()
+		reportLifecyclePreparationMetrics(b, candidate)
 	})
 }
 
-func countAgentDefinitionLookups(statements []string) int {
-	count := 0
-	for _, statement := range statements {
-		if strings.Contains(statement, "FROM agents WHERE id = ?") {
-			count++
-		}
-	}
-	return count
+func TestPrepareLifecycleTurnAgentDefinitionReusePerformanceGate(t *testing.T) {
+	fixture := newLifecycleAgentReuseBenchmarkFixture(t)
+	baseline := collectLifecyclePreparationSamples(t, fixture, fixture.baseline, false)
+	candidate := collectLifecyclePreparationSamples(t, fixture, fixture.candidate, true)
+	assertLifecyclePreparationCounts(t, baseline, 4, 4)
+	assertLifecyclePreparationCounts(t, candidate, 1, 1)
+
+	baselineDuration := medianLifecyclePreparationDuration(baseline)
+	candidateDuration := medianLifecyclePreparationDuration(candidate)
+	baselineBytes := medianLifecyclePreparationUint64(baseline, func(sample lifecyclePreparationSample) uint64 { return sample.bytes })
+	candidateBytes := medianLifecyclePreparationUint64(candidate, func(sample lifecyclePreparationSample) uint64 { return sample.bytes })
+	t.Logf("baseline median: latency=%s bytes=%d allocs=%d Agent lookups=%d SQL statements=%d", baselineDuration, baselineBytes, medianLifecyclePreparationUint64(baseline, func(sample lifecyclePreparationSample) uint64 { return sample.allocs }), medianLifecyclePreparationInt(baseline, func(sample lifecyclePreparationSample) int { return sample.agentLookups }), medianLifecyclePreparationInt(baseline, func(sample lifecyclePreparationSample) int { return sample.sqlStatements }))
+	t.Logf("candidate median: latency=%s bytes=%d allocs=%d Agent lookups=%d SQL statements=%d", candidateDuration, candidateBytes, medianLifecyclePreparationUint64(candidate, func(sample lifecyclePreparationSample) uint64 { return sample.allocs }), medianLifecyclePreparationInt(candidate, func(sample lifecyclePreparationSample) int { return sample.agentLookups }), medianLifecyclePreparationInt(candidate, func(sample lifecyclePreparationSample) int { return sample.sqlStatements }))
+	assertLifecyclePreparationPerformanceReduction(t, baseline, candidate)
 }
 
 func TestPrepareLifecycleTurn_UsesHandlerAgentHandoff(t *testing.T) {

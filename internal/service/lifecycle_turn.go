@@ -127,22 +127,41 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 // skill runtime tools, and any recall outputs are consistently delivered to the
 // model per runbook §Lifecycle Slots line 296.
 func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Task) LifecycleTurn {
+	return w.prepareLifecycleTurn(ctx, task, true)
+}
+
+// prepareLifecycleTurn keeps the old repeated Agent lookup strategy available
+// only to the production-shaped performance comparison. Normal callers always
+// use the turn-scoped reuse strategy through PrepareLifecycleTurn.
+func (w *WorkerService) prepareLifecycleTurn(ctx context.Context, task models.Task, reuseAgentDefinitions bool) LifecycleTurn {
 	if w == nil {
 		return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: func(error, llmcontracts.ChatContext) {}}
 	}
 
 	runID := newLifecycleTaskRunID(task.ID)
 	incomingTurn := lifecycleTurnFromContext(ctx)
-	ctx, assignedAgent, agentCache := w.newLifecycleAgentContext(ctx, task)
+	var assignedAgent *models.Agent
+	var agentCache *lifecycle.AgentDefinitionCache
+	if reuseAgentDefinitions {
+		ctx, assignedAgent, agentCache = w.newLifecycleAgentContext(ctx, task)
+	} else {
+		assignedAgent = w.taskAgentDefinition(ctx, task)
+	}
 	projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID)
 	if w.agentRootSyncService != nil {
 		if err := w.agentRootSyncService.SyncRootDeclarationsForProject(ctx, projectRoot, task.ProjectID); err != nil {
 			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
 		}
 	}
-	catalog := w.buildSkillCatalog(ctx, task, assignedAgent)
+	setupAgent := func() *models.Agent {
+		if reuseAgentDefinitions {
+			return assignedAgent
+		}
+		return w.taskAgentDefinition(ctx, task)
+	}
+	catalog := w.buildSkillCatalog(ctx, task, setupAgent())
 	w.currentCatalog.Store(catalog)
-	fullSkillIndex := w.renderAvailableSkillsForTask(ctx, task, projectRoot, assignedAgent)
+	fullSkillIndex := w.renderAvailableSkillsForTask(ctx, task, projectRoot, setupAgent())
 	taskTurnRuntimeTools := llmcontracts.RuntimeToolsFromContext(ctx)
 	afterCompleteRuntimeTools := incomingTurn.AfterCompleteRuntimeTools
 	if w.afterCompleteRuntimeToolProvider != nil {
@@ -153,7 +172,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	if hookReadTools != nil {
 		ctx = llmcontracts.WithRuntimeTools(ctx, hookReadTools)
 	}
-	hookMutationTools := w.buildLifecycleRuntimeTools(ctx, task, catalog, assignedAgent)
+	hookMutationTools := w.buildLifecycleRuntimeTools(ctx, task, catalog, setupAgent())
 	applog.Infof("[lifecycle-turn] prepared task=%s catalog_skills=%d runtime_tools=%t", task.ID, len(catalog.Entries()), hookReadTools != nil)
 	effectiveTask := task
 	if incomingTurn.TaskThreadTurn && incomingTurn.TurnPrompt != "" {
@@ -312,7 +331,9 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			}()
 			bgCtx, cancel := context.WithTimeout(context.Background(), lifecycleHookExecutionTimeout)
 			defer cancel()
-			bgCtx = lifecycle.WithAgentDefinitionCache(bgCtx, agentCache)
+			if agentCache != nil {
+				bgCtx = lifecycle.WithAgentDefinitionCache(bgCtx, agentCache)
+			}
 			bgCtx = withLifecycleTurnContext(bgCtx, turn)
 			if rt != nil {
 				bgCtx = llmcontracts.WithRuntimeTools(bgCtx, rt)
