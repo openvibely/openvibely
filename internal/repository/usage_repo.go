@@ -86,6 +86,17 @@ func (r *UsageRepo) CreateAccountUsageSnapshot(ctx context.Context, snapshot *mo
 		return fmt.Errorf("starting account usage snapshot transaction: %w", err)
 	}
 	defer cleanup()
+	if snapshot.OAuthConnectionID == "" && snapshot.AgentConfigID != "" {
+		err := tx.QueryRowContext(ctx, `
+			SELECT c.id, c.oauth_revision
+			FROM agent_configs a JOIN oauth_connections c ON c.id = a.oauth_connection_id
+			WHERE a.id = ? AND a.provider = c.provider AND a.auth_method = ?`,
+			snapshot.AgentConfigID, models.AuthMethodOAuth,
+		).Scan(&snapshot.OAuthConnectionID, &snapshot.OAuthConfigRevision)
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("resolving account usage snapshot OAuth connection: %w", err)
+		}
+	}
 	if err := createAccountUsageSnapshotTx(ctx, tx, snapshot); err != nil {
 		return err
 	}
@@ -109,19 +120,20 @@ func (r *UsageRepo) CreateAccountUsageSnapshotIfOAuthRevision(ctx context.Contex
 	}
 	defer cleanup()
 
-	var current bool
+	var connectionID string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(
-			SELECT 1 FROM agent_configs
-			WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?
-		)`,
-		configID, expectedRevision, provider, models.AuthMethodOAuth,
-	).Scan(&current); err != nil {
+		`SELECT c.id
+		 FROM agent_configs a
+		 JOIN oauth_connections c ON c.id = a.oauth_connection_id
+		 WHERE a.id = ? AND a.provider = ? AND a.auth_method = ? AND a.oauth_connection_id = ?
+		   AND c.provider = ? AND c.oauth_revision = ?`,
+		configID, provider, models.AuthMethodOAuth, snapshot.OAuthConnectionID, provider, expectedRevision,
+	).Scan(&connectionID); err == sql.ErrNoRows {
+		return false, nil
+	} else if err != nil {
 		return false, fmt.Errorf("checking account usage OAuth generation: %w", err)
 	}
-	if !current {
-		return false, nil
-	}
+	snapshot.OAuthConnectionID = connectionID
 	snapshot.OAuthConfigRevision = expectedRevision
 	if err := createAccountUsageSnapshotTx(ctx, tx, snapshot); err != nil {
 		return false, err
@@ -144,18 +156,17 @@ func createAccountUsageSnapshotTx(ctx context.Context, tx SQLExecutor, snapshot 
 	var fetchedRaw, createdRaw string
 	err := tx.QueryRowContext(ctx, `
 		INSERT INTO account_usage_snapshots (
-			id, provider, account_id, agent_config_id, oauth_config_revision, plan_type, account_display_name, account_detail,
+			id, provider, account_id, agent_config_id, oauth_connection_id, oauth_config_revision, plan_type, account_display_name, account_detail,
 			billing_label, subscription_status, extra_usage_label, extra_usage_monthly_limit_usd, extra_usage_used_usd, credits_remaining,
 			primary_label, primary_used_percent, primary_window_minutes, primary_resets_at,
 			secondary_label, secondary_used_percent, secondary_window_minutes, secondary_resets_at,
 			model_limit_label, model_limit_used_percent, model_limit_window_minutes, model_limit_resets_at,
 			rate_limit_reached_type, raw_json, fetched_at
 		) VALUES (
-			lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 		RETURNING id, fetched_at, created_at`,
-		snapshot.Provider, nullStringArg(snapshot.AccountID), nullStringArg(snapshot.AgentConfigID), snapshot.OAuthConfigRevision,
-		snapshot.PlanType, snapshot.AccountDisplayName, snapshot.AccountDetail,
+		snapshot.Provider, nullStringArg(snapshot.AccountID), nullStringArg(snapshot.AgentConfigID), nullStringArg(snapshot.OAuthConnectionID), snapshot.OAuthConfigRevision, snapshot.PlanType, snapshot.AccountDisplayName, snapshot.AccountDetail,
 		snapshot.BillingLabel, snapshot.SubscriptionStatus, snapshot.ExtraUsageLabel, snapshot.ExtraUsageMonthlyUSD, snapshot.ExtraUsageUsedUSD, snapshot.CreditsRemaining,
 		snapshot.PrimaryLabel, snapshot.PrimaryUsedPercent, snapshot.PrimaryWindowMinutes, snapshot.PrimaryResetsAt, snapshot.SecondaryLabel, snapshot.SecondaryUsedPercent, snapshot.SecondaryWindowMinutes, snapshot.SecondaryResetsAt,
 		snapshot.ModelLimitLabel, snapshot.ModelLimitUsedPercent, snapshot.ModelLimitWindowMinutes, snapshot.ModelLimitResetsAt,
@@ -180,9 +191,9 @@ func (r *UsageRepo) GetLatestAccountUsageSnapshots(ctx context.Context, provider
 		args = append(args, provider)
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT s.id, s.provider, COALESCE(s.account_id, ''), COALESCE(s.agent_config_id, ''), s.oauth_config_revision, s.plan_type,
-		       COALESCE(s.account_display_name, ''), COALESCE(s.account_detail, ''), COALESCE(s.billing_label, ''),
-		       COALESCE(s.subscription_status, ''), COALESCE(s.extra_usage_label, ''), s.extra_usage_monthly_limit_usd, s.extra_usage_used_usd,
+		SELECT s.id, s.provider, COALESCE(s.account_id, ''), COALESCE(s.agent_config_id, ''),
+		       COALESCE(s.oauth_connection_id, ''), s.oauth_config_revision, s.plan_type,
+		       COALESCE(s.account_display_name, ''), COALESCE(s.account_detail, ''), COALESCE(s.billing_label, ''),		       COALESCE(s.subscription_status, ''), COALESCE(s.extra_usage_label, ''), s.extra_usage_monthly_limit_usd, s.extra_usage_used_usd,
 		       s.credits_remaining,
 		       s.primary_label, s.primary_used_percent, s.primary_window_minutes, s.primary_resets_at,
 		       s.secondary_label, s.secondary_used_percent, s.secondary_window_minutes, s.secondary_resets_at,
@@ -839,7 +850,7 @@ func scanAccountUsageSnapshot(scanner interface{ Scan(dest ...any) error }) (mod
 	var primaryReset, secondaryReset, modelReset sql.NullString
 	var fetchedRaw, createdRaw string
 	if err := scanner.Scan(
-		&snapshot.ID, &snapshot.Provider, &snapshot.AccountID, &snapshot.AgentConfigID, &snapshot.OAuthConfigRevision, &snapshot.PlanType,
+		&snapshot.ID, &snapshot.Provider, &snapshot.AccountID, &snapshot.AgentConfigID, &snapshot.OAuthConnectionID, &snapshot.OAuthConfigRevision, &snapshot.PlanType,
 		&snapshot.AccountDisplayName, &snapshot.AccountDetail, &snapshot.BillingLabel, &snapshot.SubscriptionStatus, &snapshot.ExtraUsageLabel, &extraMonthly, &extraUsed,
 		&credits,
 		&snapshot.PrimaryLabel, &primaryUsed, &primaryWindow, &primaryReset, &snapshot.SecondaryLabel, &secondaryUsed, &secondaryWindow, &secondaryReset,
