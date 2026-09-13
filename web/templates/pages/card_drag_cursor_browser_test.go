@@ -261,6 +261,22 @@ window.addEventListener('DOMContentLoaded', function() {
     var targetIsOffscreen = axis === 'y'
       ? (targetRect.bottom <= containerRect.top || targetRect.top >= containerRect.bottom)
       : (targetRect.right <= containerRect.left || targetRect.left >= containerRect.right);
+    // A status card lives inside its own scrollable lane. Depending on layout
+    // timing, scrollIntoView() may scroll that lane instead of the outer board,
+    // leaving the running lane visible and never exercising board auto-scroll.
+    // Explicitly park the outer scroller at the source end before asserting the
+    // fixture geometry.
+    if (!targetIsOffscreen && containerSelector === '#kanban-board') {
+      if (axis === 'y') container.scrollTop = targetRect.top < cardRect.top ? container.scrollHeight : 0;
+      else container.scrollLeft = targetRect.left < cardRect.left ? container.scrollWidth : 0;
+      await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+      cardRect = card.getBoundingClientRect();
+      containerRect = container.getBoundingClientRect();
+      targetRect = target.getBoundingClientRect();
+      targetIsOffscreen = axis === 'y'
+        ? (targetRect.bottom <= containerRect.top || targetRect.top >= containerRect.bottom)
+        : (targetRect.right <= containerRect.left || targetRect.left >= containerRect.right);
+    }
     if (!targetIsOffscreen && containerSelector !== '#schedule-timeline-container') fail(label + ': target must begin outside the scroll viewport');
     var forward = axis === 'y' ? targetRect.top >= containerRect.bottom : targetRect.left >= containerRect.right;
     var edgeX = axis === 'x' ? (forward ? containerRect.right - 4 : containerRect.left + 4) : Math.max(containerRect.left + 8, Math.min(containerRect.right - 8, cardRect.left + 12));
