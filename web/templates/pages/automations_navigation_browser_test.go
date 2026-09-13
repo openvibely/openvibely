@@ -396,16 +396,21 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-paused-browser"),
 		})
 
-		browser.evaluate(`(function() {
+		if got := browser.evaluate(`(function() {
 			var root = document.getElementById('automations-container');
 			var state = root && root._openVibelyCardPaginationState;
 			var target = state && state.scrollTarget;
-			if (!target) return 'missing';
+			if (document.querySelector('[data-card-select-id="automation-paginated-browser"]')) return 'loaded';
+			if (!target || !state.sentinel || typeof state.scrollHandler !== 'function') return 'missing';
+			state.sentinel.scrollIntoView({block: 'end'});
 			if (target === window) window.scrollTo(0, document.documentElement.scrollHeight);
 			else target.scrollTop = target.scrollHeight;
 			target.dispatchEvent(new Event('scroll', {bubbles: true}));
+			state.scrollHandler();
 			return 'scrolled';
-		})()`)
+		})()`); got != "scrolled" && got != "loaded" {
+			t.Fatalf("trigger Automation card pagination: %s", got)
+		}
 		browser.waitFor("paginated Automation card", `document.querySelector('[data-card-select-id="automation-paginated-browser"]') ? 'true' : 'false'`, "true")
 		assertCard("automation-paginated-browser", "Paginated Delivery")
 		tabToCard("automation-paginated-browser")
