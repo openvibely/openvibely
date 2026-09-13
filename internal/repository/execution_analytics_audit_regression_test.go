@@ -57,6 +57,12 @@ func TestAnalyticsDashboardPeriodDoesNotResurrectHistoricalOutcomes(t *testing.T
 	if dashboard.Current.FirstPass.Denominator != 0 || dashboard.Current.GoalAchievement.Denominator != 0 {
 		t.Fatalf("historical outcomes leaked into current period: first=%+v goal=%+v", dashboard.Current.FirstPass, dashboard.Current.GoalAchievement)
 	}
+	if len(dashboard.CycleDistribution) != 0 {
+		t.Fatalf("running task must not enter cycle distribution: %+v", dashboard.CycleDistribution)
+	}
+	if len(dashboard.FollowUpDistribution) != 4 || dashboard.FollowUpDistribution[0].Count != 1 {
+		t.Fatalf("follow-up distribution must use all executed-task KPI cohort: %+v", dashboard.FollowUpDistribution)
+	}
 	if len(dashboard.RecentOutcomes) != 1 {
 		t.Fatalf("recent evidence = %+v, want running task context", dashboard.RecentOutcomes)
 	}
@@ -82,7 +88,7 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 	if _, err := db.ExecContext(ctx, `INSERT INTO automation_work_item_positions (project_id,automation_id,version_id,work_item_id,node_id,state) VALUES (?,?,?,?,?,'blocked')`, fixture.ProjectID, fixture.AutomationID, fixture.VersionID, "analytics-work", fixture.Nodes["task"]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE automation_invocations SET created_at=? WHERE id='analytics-invocation'`, now); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE automation_invocations SET created_at=? WHERE id='inv-1'`, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,6 +132,9 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 	if dashboard.WorkflowDetail == nil || len(dashboard.WorkflowDetail.Funnel) != 2 || len(dashboard.WorkflowDetail.Durations) == 0 || len(dashboard.WorkflowDetail.Failures) == 0 || len(dashboard.WorkflowDetail.Bottlenecks) == 0 {
 		t.Fatalf("workflow node detail missing: %+v", dashboard.WorkflowDetail)
 	}
+	if len(dashboard.Workflows) != 1 || dashboard.Workflows[0].DurationSampleSize != 1 {
+		t.Fatalf("workflow duration sample size is not disclosed: %+v", dashboard.Workflows)
+	}
 	foundBlockedInsight := false
 	for _, insight := range dashboard.Insights {
 		if insight.MetricKey == "workflow_blocked" && insight.EvidenceID == fixture.AutomationID {
@@ -157,6 +166,16 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 		t.Fatal(err)
 	}
 	executions := NewExecutionRepo(db)
+	historical := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "historical"}
+	if err := executions.Create(ctx, historical); err != nil {
+		t.Fatal(err)
+	}
+	if err := executions.Complete(ctx, historical.ID, models.ExecFailed, "", "failed", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2025-12-20 10:00:00',completed_at='2025-12-20 10:01:00' WHERE id=?`, historical.ID); err != nil {
+		t.Fatal(err)
+	}
 	for i, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCompleted} {
 		exec := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "work", IsFollowup: i > 0}
 		if err := executions.Create(ctx, exec); err != nil {
@@ -169,6 +188,9 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at=?,completed_at=? WHERE id=?`, started, started, exec.ID); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := NewSkillAnalyticsRepo(db).RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC), ProjectID: project.ID, TaskID: task.ID, AgentID: agent.ID, SkillScope: models.SkillScopeProject, SkillHandle: "project:category", EventType: models.SkillEventSelected}); err != nil {
+		t.Fatal(err)
 	}
 	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
@@ -183,6 +205,12 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 	}
 	if len(dashboard.ModelCategories) != 1 || dashboard.ModelCategories[0].Category != string(models.CategoryActive) || dashboard.ModelCategories[0].TechnicalCompletion.Denominator != 2 {
 		t.Fatalf("model category projection is inconsistent: %+v", dashboard.ModelCategories)
+	}
+	if len(dashboard.Agents) != 1 || dashboard.Agents[0].DurationSampleSize != 1 || dashboard.Agents[0].MedianDurationMs < int64(20*24*time.Hour/time.Millisecond) {
+		t.Fatalf("Agent duration must use historical first start and disclose one sample: %+v", dashboard.Agents)
+	}
+	if len(dashboard.AgentSkillOutcomes) != 1 || dashboard.AgentSkillOutcomes[0].AgentID != agent.ID || dashboard.AgentSkillOutcomes[0].SkillHandle != "project:category" || dashboard.AgentSkillOutcomes[0].TasksEvaluated != 1 {
+		t.Fatalf("Agent/skill outcome association missing: %+v", dashboard.AgentSkillOutcomes)
 	}
 }
 
@@ -463,5 +491,48 @@ func TestAnalyticsDashboardFailedCostDisclosesCoverageOrUnavailable(t *testing.T
 	}
 	if dashboard.Current.KnownFailedExecutionCost != nil {
 		t.Fatalf("period without recorded failed cost must be unavailable: %+v", dashboard.Current.KnownFailedExecutionCost)
+	}
+}
+
+func TestAnalyticsDashboardEvidenceIsBoundedPaginatedAndDisclosed(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Evidence pagination", RepoPath: "/evidence-pagination"}
+	if err := NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	tasks := NewTaskRepo(db, nil)
+	other := &models.Project{Name: "Other evidence project", RepoPath: "/other-evidence-pagination"}
+	if err := NewProjectRepo(db).Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	foreign := &models.Task{ProjectID: other.ID, Title: "Foreign evidence", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "work"}
+	if err := tasks.Create(ctx, foreign); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		task := &models.Task{ProjectID: project.ID, Title: "Evidence " + string(rune('A'+i)), Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "work"}
+		if err := tasks.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at=? WHERE id=?`, time.Date(2026, 1, 5+i, 10, 0, 0, 0, time.UTC).Format("2006-01-02 15:04:05"), task.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	filter := AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 2}
+	first, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter.EvidenceOffset = 2
+	second, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.EvidenceTotal != 5 || first.EvidenceLimit != 2 || first.EvidenceOffset != 0 || len(first.RecentOutcomes) != 2 {
+		t.Fatalf("first evidence page metadata = total %d limit %d offset %d rows %d", first.EvidenceTotal, first.EvidenceLimit, first.EvidenceOffset, len(first.RecentOutcomes))
+	}
+	if second.EvidenceTotal != 5 || second.EvidenceOffset != 2 || len(second.RecentOutcomes) != 2 || first.RecentOutcomes[0].TaskID == second.RecentOutcomes[0].TaskID {
+		t.Fatalf("second evidence page is not distinct and disclosed: %+v", second)
 	}
 }

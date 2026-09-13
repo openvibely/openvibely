@@ -247,6 +247,20 @@ const docTemplate = `{
                         "description": "Automation workflow ID",
                         "name": "workflow",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Evidence rows per page, 1-100",
+                        "name": "evidence_limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Evidence rows to skip",
+                        "name": "evidence_offset",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -1870,6 +1884,9 @@ const docTemplate = `{
                 "agent_name": {
                     "type": "string"
                 },
+                "duration_sample_size": {
+                    "type": "integer"
+                },
                 "first_pass": {
                     "$ref": "#/definitions/models.AnalyticsMetric"
                 },
@@ -1886,6 +1903,32 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "most_used_model": {
+                    "type": "string"
+                },
+                "tasks_evaluated": {
+                    "type": "integer"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                }
+            }
+        },
+        "models.AgentSkillOutcomePerformance": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_name": {
+                    "type": "string"
+                },
+                "follow_up": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "skill_handle": {
                     "type": "string"
                 },
                 "tasks_evaluated": {
@@ -1922,6 +1965,12 @@ const docTemplate = `{
                 "agent_detail": {
                     "$ref": "#/definitions/models.AgentAnalyticsDetail"
                 },
+                "agent_skill_outcomes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AgentSkillOutcomePerformance"
+                    }
+                },
                 "agents": {
                     "type": "array",
                     "items": {
@@ -1942,6 +1991,15 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.MetricDefinition"
                     }
+                },
+                "evidence_limit": {
+                    "type": "integer"
+                },
+                "evidence_offset": {
+                    "type": "integer"
+                },
+                "evidence_total": {
+                    "type": "integer"
                 },
                 "follow_up_distribution": {
                     "type": "array",
@@ -3148,6 +3206,9 @@ const docTemplate = `{
                 },
                 "completion_rate": {
                     "type": "number"
+                },
+                "duration_sample_size": {
+                    "type": "integer"
                 },
                 "failed_count": {
                     "type": "integer"

@@ -53,7 +53,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-success">Notable improvements</h4><div id="analyticsImprovements"><p class="opacity-50">No supported comparison insight yet.</p></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-warning">Needs attention</h4><div id="analyticsAttention"><p class="opacity-50">No supported attention insight yet.</p></div></div></div></div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Recent outcomes</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Merge/review</th><th>Agent definition</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="recentOutcomesTable"></tbody></table></div></div></div>
 				</section>
-					<section id="analytics-outcomes" data-analytics-section="outcomes" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Outcomes</h3><p class="text-sm opacity-60">Execution completion is not proof that a goal was achieved.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Outcome funnel</h4><div id="outcomeFunnel" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Cycle-time distribution</h4><div class="h-64"><canvas id="cycleDistributionChart"></canvas></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Follow-up / rework distribution</h4><div class="h-64"><canvas id="followupDistributionChart"></canvas></div></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Task-level outcome evidence</h4><p id="outcomeEvidenceFilter" class="text-sm opacity-60">Recent project-scoped task evidence for the selected filters.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Agent</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="outcomeEvidenceTable"></tbody></table></div></div></div></section>					<section id="analytics-agents" data-analytics-section="agents" class="space-y-6 mb-6">
+					<section id="analytics-outcomes" data-analytics-section="outcomes" class="space-y-6 mb-6"><div><h3 class="text-xl font-bold">Outcomes</h3><p class="text-sm opacity-60">Execution completion is not proof that a goal was achieved.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Outcome funnel</h4><div id="outcomeFunnel" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3"></div></div></div><div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Cycle-time distribution</h4><div class="h-64"><canvas id="cycleDistributionChart"></canvas></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Follow-up / rework distribution</h4><div class="h-64"><canvas id="followupDistributionChart"></canvas></div></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Task-level outcome evidence</h4><p id="outcomeEvidenceFilter" class="text-sm opacity-60">Project-scoped task evidence for the selected filters.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Technical result</th><th>Goal result</th><th>Agent</th><th>Model</th><th>Executions</th><th>Follow-ups</th><th>Cycle time</th><th>Known cost</th></tr></thead><tbody id="outcomeEvidenceTable"></tbody></table></div><div class="card-actions justify-center mt-3"><button id="loadMoreEvidence" type="button" class="btn btn-sm btn-outline hidden">Load more evidence</button></div></div></div></section>					<section id="analytics-agents" data-analytics-section="agents" class="space-y-6 mb-6">
 						<div><h3 class="text-xl font-bold">Agent performance</h3><p class="text-sm opacity-60">Reusable Agent definitions, separate from model configurations. Select an Agent for detailed evidence.</p></div>
 						<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Technical completion</th><th>Goal achievement</th><th>First pass</th><th>Follow-up</th><th>Duration</th><th>Cost / achieved goal</th><th>Most-used model</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div></div></div>
 						<div id="agentDetail" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -75,7 +75,7 @@ templ analyticsContent(currentProject *models.Project) {
 							<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Current bottlenecks</h4><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Node</th><th>Waiting</th><th>Blocked</th></tr></thead><tbody id="workflowBottleneckTable"></tbody></table></div></div></div>
 						</div>
 					</section>
-					<section id="analytics-learning" data-analytics-section="learning" class="space-y-4"><div><h3 class="text-xl font-bold mt-6">Learning</h3><p class="text-sm opacity-60">Observed skill activity and task outcomes; association is not causation.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes among tasks using skills</h4><p class="text-sm opacity-60">Tasks where a skill was selected or loaded in the selected period. Small samples are descriptive only.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical task outcome</th><th>Goal achievement</th><th>Follow-up</th></tr></thead><tbody id="skillOutcomeTable"></tbody></table></div></div></div></section>
+					<section id="analytics-learning" data-analytics-section="learning" class="space-y-4"><div><h3 class="text-xl font-bold mt-6">Learning</h3><p class="text-sm opacity-60">Observed skill activity and task outcomes; association is not causation.</p></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes among tasks using skills</h4><p class="text-sm opacity-60">Tasks where a skill was selected or loaded in the selected period. Small samples are descriptive only.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Skill</th><th>Tasks</th><th>Technical task outcome</th><th>Goal achievement</th><th>Follow-up</th></tr></thead><tbody id="skillOutcomeTable"></tbody></table></div></div></div><div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title text-lg">Observed outcomes by Agent and skill</h4><p class="text-sm opacity-60">Agent-definition and skill combinations observed on tasks; association is not causation.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Skill</th><th>Tasks</th><th>Technical</th><th>Goal</th><th>Follow-up</th></tr></thead><tbody id="agentSkillOutcomeTable"></tbody></table></div></div></div></section>
 					<div id="analytics-usage" data-analytics-section="usage"><h3 class="text-xl font-bold mt-6">Usage</h3><p class="text-sm opacity-60 mb-4">Local provider usage and available recorded cost.</p><div id="usageOutcomeContext" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6"></div><div class="card bg-base-100 border border-base-300 mb-6"><div class="card-body"><h4 class="card-title text-lg">Model performance by task category</h4><p class="text-sm opacity-60">Technical terminal outcomes only; every row shows its sample.</p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Model</th><th>Task category</th><th>Tasks</th><th>Technical completion</th></tr></thead><tbody id="modelCategoryTable"></tbody></table></div></div></div></div>
 					<!-- Provider Account Cards: current account state, intentionally independent of the date window. -->
 					<div class="mb-2"><h3 class="text-lg font-semibold">Provider account limits</h3><p class="text-xs opacity-60">Current account state · not date-filtered</p></div>
@@ -281,9 +281,9 @@ templ analyticsContent(currentProject *models.Project) {
 					var projectID = dataEl.dataset.projectId;
 						var charts = window._analyticsCharts;
 						var eventSignal = window._analyticsAbortController.signal;
-						var latestUsageAnalytics = null;
-						var latestDashboard = null;
-
+							var latestUsageAnalytics = null;
+							var latestDashboard = null;
+							var evidencePageLoading = false;
 						// Fetch JSON or surface a controlled error. Never preserve stale data.
 						async function fetchJSON(url) {
 							const response = await fetch(url);
@@ -301,7 +301,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const box = document.getElementById('analyticsError');
 								box.textContent = error && error.message ? error.message : 'Analytics request failed';
 								box.classList.remove('hidden');
-								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',9],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',8],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillOutcomeTable',5],['modelCategoryTable',4],['usageBreakdownTable',8],['underusedSkillsTable',4]].forEach(function(item) {
+								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',9],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',8],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillOutcomeTable',5],['agentSkillOutcomeTable',6],['modelCategoryTable',4],['usageBreakdownTable',8],['underusedSkillsTable',4]].forEach(function(item) {
 									const table = document.getElementById(item[0]);
 									if (table) table.innerHTML = '<tr><td colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable</td></tr>';
 								});
@@ -354,7 +354,7 @@ templ analyticsContent(currentProject *models.Project) {
 							function viewDetailElements(view) {							const ids = {
 								outcomes: ['successFailureChart', 'avgTimeTaskChart', 'failedPatternsTable'],
 								agents: ['avgTimeAgentChart', 'agentUsageChart'],
-									learning: ['skillUsageTrendChart', 'skillTopChart', 'skillFollowChart', 'skillAgentChart', 'underusedSkillsTable', 'memoryEffectivenessUnavailable'],								usage: ['accountUsageCards', 'usageRateChart', 'modelTokenBreakdownChart', 'usageBreakdownTable'],
+									learning: ['skillUsageTrendChart', 'skillTopChart', 'skillFollowChart', 'skillAgentChart', 'underusedSkillsTable', 'memoryEffectivenessUnavailable'],								usage: ['accountUsageCards', 'usageRateChart', 'modelTokenBreakdownChart', 'agentUsageChart', 'usageBreakdownTable'],
 								activity: ['hourlyTrendsChart', 'frequentTasksList']
 							};
 							return (ids[view] || []).map(function(id) {
@@ -417,7 +417,7 @@ templ analyticsContent(currentProject *models.Project) {
 								document.getElementById('recentOutcomesTable').innerHTML = recentStarted.length ? recentStarted.map(function(row) {
 									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
 									const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name);
-									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.merge_state || 'Not applicable') + '</td><td>' + agent + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
+									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.merge_state || 'Not applicable') + '</td><td>' + agent + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(row.cycle_eligible ? formatDuration(row.cycle_time_ms || 0) : 'Unavailable') + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
 								}).join('') : '<tr><td colspan="10" class="text-center opacity-50">No task outcomes in this period</td></tr>';
 								const evidenceParams = new URLSearchParams(window.location.search);
 								const evidenceKey = evidenceParams.get('evidence') || '';
@@ -446,27 +446,30 @@ templ analyticsContent(currentProject *models.Project) {
 									case 'started': return row.created_in_period === true && row.started_in_period === true;
 									case 'merged': return row.funnel_merge_eligible === true && row.funnel_merged === true;
 									case 'cycleDistribution': return row.cycle_eligible === true && cycleBucket(row.cycle_time_ms || 0) === evidenceParams.get('cycleDistribution');
-									case 'followupDistribution': return row.cycle_eligible === true && followupBucket(row.follow_up_count || 0) === evidenceParams.get('followupDistribution');
+									case 'followupDistribution': return row.started_in_period === true && followupBucket(row.follow_up_count || 0) === evidenceParams.get('followupDistribution');
 									default: return true;
 									}
 								});
-								const evidenceLabel = document.getElementById('outcomeEvidenceFilter');
-								if (evidenceLabel) evidenceLabel.textContent = evidenceKey || evidenceValue ? 'Filtered recent supporting tasks: ' + (evidenceKey || 'selection') + (evidenceValue ? ' · ' + evidenceValue : '') + ' · n=' + evidence.length : 'Recent project-scoped task evidence for the selected filters · n=' + evidence.length;
-								const evidenceTechnicalResult = function(row) {
+									const evidenceLabel = document.getElementById('outcomeEvidenceFilter');
+									const evidenceTotal = Number(data.evidence_total || recent.length);
+									const coverage = 'loaded ' + recent.length + ' of ' + evidenceTotal + ' project-scoped tasks';
+									if (evidenceLabel) evidenceLabel.textContent = evidenceKey || evidenceValue ? 'Filtered supporting tasks: ' + (evidenceKey || 'selection') + (evidenceValue ? ' · ' + evidenceValue : '') + ' · matching loaded rows n=' + evidence.length + ' · ' + coverage : 'Task evidence · ' + coverage;
+									const loadMore = document.getElementById('loadMoreEvidence');
+									if (loadMore) { loadMore.classList.toggle('hidden', recent.length >= evidenceTotal); loadMore.textContent = 'Load more evidence (' + recent.length + ' of ' + evidenceTotal + ')'; loadMore.dataset.nextOffset = String(recent.length); }								const evidenceTechnicalResult = function(row) {
 									if (evidenceKey === 'technical_completion' || evidenceKey === 'technical_completed') return 'completed (' + Number(row.period_completed_count || 0) + ' executions)';
 									if (evidenceKey === 'technical_status') { const status=evidenceParams.get('technical_status') || ''; return status + ' (' + Number(row['period_' + status + '_count'] || 0) + ' executions)'; }
 									return row.technical_result;
 								};
 								document.getElementById('outcomeEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) {
 									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
-									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(evidenceTechnicalResult(row)) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
+									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(evidenceTechnicalResult(row)) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(row.cycle_eligible ? formatDuration(row.cycle_time_ms || 0) : 'Unavailable') + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
 								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { const params=clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view','outcomes'); params.set('evidence',stage.key); return '<a class="card bg-base-200" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
 							renderDistributionChart('cycleDistribution', 'cycleDistributionChart', data.cycle_distribution || []);
 							renderDistributionChart('followupDistribution', 'followupDistributionChart', data.follow_up_distribution || []);
 								renderAgentPerformance(data.agents || []);
 								renderAgentDetail(data.agent_detail || null);
-								renderSkillOutcomes(data.skill_outcomes || []);
-								renderModelCategories(data.model_categories || []);
+									renderSkillOutcomes(data.skill_outcomes || []);
+									renderAgentSkillOutcomes(data.agent_skill_outcomes || []);								renderModelCategories(data.model_categories || []);
 								renderWorkflowPerformance(data.workflows || []);
 								renderWorkflowDetail(data.workflow_detail || null);
 								renderInsights(data.insights || []);
@@ -490,7 +493,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const selected = selectedAgent;
 								filter.innerHTML = '<option value="">All Agents</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.agent_id || '__unassigned__') + '">' + escapeHTML(row.agent_name) + '</option>'; }).join('');
 								filter.value = selected;							const visible = rows.filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
-								document.getElementById('agentPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const name = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name); return '<tr><td>' + name + '</td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.first_pass)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td><td>' + escapeHTML(formatDuration(row.median_duration_ms || 0)) + '</td><td>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '</td><td>' + escapeHTML(row.most_used_model || 'Unavailable') + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="text-center opacity-50">No Agent evidence in this period</td></tr>';
+								document.getElementById('agentPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const name = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name); return '<tr><td>' + name + '</td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.first_pass)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td><td>' + escapeHTML(row.duration_sample_size ? formatDuration(row.median_duration_ms || 0) + ' · n=' + row.duration_sample_size : 'Unavailable · n=0') + '</td><td>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '</td><td>' + escapeHTML(row.most_used_model || 'Unavailable') + '</td></tr>'; }).join('') : '<tr><td colspan="9" class="text-center opacity-50">No Agent evidence in this period</td></tr>';
 								const evidence = ((latestDashboard && latestDashboard.recent_outcomes) || []).filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								document.getElementById('agentEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) { const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'</a></td><td>'+escapeHTML(row.technical_result)+'</td><td>'+escapeHTML(row.goal_result||'Not goal-bearing')+'</td><td>'+escapeHTML(row.model)+'</td><td>'+row.execution_count+'</td><td>'+row.follow_up_count+'</td></tr>'; }).join('') : '<tr><td colspan="6" class="text-center opacity-50">No recent supporting tasks in this period</td></tr>';						}
 							function navigateEvidence(view, key, value, extra) {
@@ -527,12 +530,19 @@ templ analyticsContent(currentProject *models.Project) {
 									return '<tr><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';
 								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
 							}
-							function renderWorkflowPerformance(rows) {
-								const filter = document.getElementById('analyticsWorkflowFilter');
+								function renderAgentSkillOutcomes(rows) {
+									const table = document.getElementById('agentSkillOutcomeTable');
+									if (!table) return;
+									table.innerHTML = rows.length ? rows.map(function(row) {
+										const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name);
+										return '<tr><td>' + agent + '</td><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';
+									}).join('') : '<tr><td colspan="6" class="text-center opacity-50">No Agent and skill combinations have outcome evidence in this period</td></tr>';
+								}
+								function renderWorkflowPerformance(rows) {								const filter = document.getElementById('analyticsWorkflowFilter');
 								const selected = selectedWorkflow;
 								filter.innerHTML = '<option value="">All Workflows</option>' + rows.map(function(row) { return '<option value="' + escapeHTML(row.workflow_id) + '">' + escapeHTML(row.workflow_name) + '</option>'; }).join('');
 								filter.value = selected;							const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
-							document.getElementById('workflowPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'</a></td><td>'+row.invocation_count+'</td><td>'+row.completed_count+' / '+(row.completed_count+row.failed_count)+' ('+Number(row.completion_rate||0).toFixed(1)+'%)</td><td>'+row.failed_count+'</td><td>'+escapeHTML(formatDuration(row.average_duration_ms||0))+'</td><td>'+row.waiting_count+' / '+row.blocked_count+'</td><td>Unavailable</td><td>'+escapeHTML(row.health)+'</td></tr>'; }).join('') : '<tr><td colspan="8" class="text-center"><span class="opacity-50">No automations in this project.</span> <a class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Inspect or create automations</a></td></tr>';
+							document.getElementById('workflowPerformanceTable').innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'</a></td><td>'+row.invocation_count+'</td><td>'+row.completed_count+' / '+(row.completed_count+row.failed_count)+' ('+Number(row.completion_rate||0).toFixed(1)+'%)</td><td>'+row.failed_count+'</td><td>'+escapeHTML(row.duration_sample_size ? formatDuration(row.average_duration_ms||0)+' · n='+row.duration_sample_size : 'Unavailable · n=0')+'</td><td>'+row.waiting_count+' / '+row.blocked_count+'</td><td>Unavailable</td><td>'+escapeHTML(row.health)+'</td></tr>'; }).join('') : '<tr><td colspan="8" class="text-center"><span class="opacity-50">No automations in this project.</span> <a class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Inspect or create automations</a></td></tr>';
 						}
 						function renderWorkflowDetail(detail) {
 							function render(id, rows, columns, formatter, empty) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(formatter).join(''):'<tr><td colspan="'+columns+'" class="text-center opacity-50">'+(detail?empty:'Select a workflow to inspect node metrics')+'</td></tr>'; }
@@ -543,13 +553,31 @@ templ analyticsContent(currentProject *models.Project) {
 						}
 						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){const params=clearEvidenceParams(new URLSearchParams(window.location.search));params.set('view',row.evidence_view||'outcomes');params.set('evidence',row.metric_key);if(row.evidence_id&&row.metric_key==='workflow_blocked')params.set('workflow',row.evidence_id);return '<a class="block link" href="/analytics?'+escapeHTML(params.toString())+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
 
-						async function loadDashboard() {
-							const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, compare: document.getElementById('comparePeriod').checked ? '1' : '0' });
-							try { latestDashboard = await fetchJSON('/api/analytics/dashboard?' + params.toString()); renderDashboard(latestDashboard); }
-							catch (error) { showAnalyticsError(error); }
-						}
-
-						function formatNumber(value) {
+							async function loadDashboard(offset, appendEvidence) {
+								if (appendEvidence && evidencePageLoading) return;
+								const evidenceOffset = Number(offset || 0);
+								const loadMore = document.getElementById('loadMoreEvidence');
+								if (appendEvidence) {
+									evidencePageLoading = true;
+									if (loadMore) { loadMore.disabled = true; loadMore.setAttribute('aria-busy', 'true'); }
+								}
+								const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, compare: document.getElementById('comparePeriod').checked ? '1' : '0', evidence_limit: '20', evidence_offset: String(evidenceOffset) });
+								try {
+									const data = await fetchJSON('/api/analytics/dashboard?' + params.toString());
+									if (appendEvidence && latestDashboard) {
+										data.recent_outcomes = (latestDashboard.recent_outcomes || []).concat(data.recent_outcomes || []);
+										data.evidence_offset = 0;
+									}
+									latestDashboard = data;
+									renderDashboard(latestDashboard);
+								} catch (error) { showAnalyticsError(error); }
+								finally {
+									if (appendEvidence) {
+										evidencePageLoading = false;
+										if (loadMore) { loadMore.disabled = false; loadMore.removeAttribute('aria-busy'); }
+									}
+								}
+							}						function formatNumber(value) {
 							return new Intl.NumberFormat().format(value || 0);
 						}
 
@@ -749,7 +777,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(){window.location.href='/skills?project_id='+encodeURIComponent(projectID);}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -894,6 +922,17 @@ templ analyticsContent(currentProject *models.Project) {
 						};
 					}
 
+								function focusUsageEvidence(row) {
+									const table = document.getElementById('usageBreakdownTable');
+									if (!table) return;
+									table.querySelectorAll('[data-usage-model]').forEach(function(node) { node.classList.remove('bg-primary/10'); });
+									if (row) {
+										const key = usageModelKey(row);
+										const target = Array.from(table.querySelectorAll('[data-usage-model]')).find(function(node) { return node.dataset.usageModel === key; });
+										if (target) { target.classList.add('bg-primary/10'); target.scrollIntoView({block:'nearest'}); }
+									} else table.scrollIntoView({block:'nearest'});
+								}
+
 								function renderUsageRateChart(data) {
 									const rate = data?.usage_rate || [];
 									const rateByModel = data?.usage_rate_by_model || [];
@@ -919,7 +958,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(_,items){if(!items.length)return;const label=datasets[items[0].datasetIndex]?.label||'';const row=rateByModel.find(function(candidate){return usageModelLabel(candidate)===label;});focusUsageEvidence(row||null);}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -936,7 +975,7 @@ templ analyticsContent(currentProject *models.Project) {
 										if (breakdown.length === 0 && (totals.call_count || 0) === 0) {
 											table.innerHTML = '<tr><td colspan="8" class="text-center opacity-50">No usage recorded yet</td></tr>';
 										} else {
-											const rows = breakdown.map(row => '<tr><td>' + escapeHTML(row.provider || 'unknown') + '</td><td>' + escapeHTML(row.model || 'unknown') + '</td><td>' + formatNumber(row.input_tokens) + '</td><td>' + formatNumber(row.output_tokens) + '</td><td>' + formatNumber(row.cached_input_tokens) + '</td><td>' + formatNumber(row.reasoning_output_tokens) + '</td><td>' + formatNumber(row.total_tokens) + '</td><td>' + formatCost(row.cost_usd) + '</td></tr>');
+											const rows = breakdown.map(row => '<tr data-usage-model="' + escapeHTML(usageModelKey(row)) + '"><td>' + escapeHTML(row.provider || 'unknown') + '</td><td>' + escapeHTML(row.model || 'unknown') + '</td><td>' + formatNumber(row.input_tokens) + '</td><td>' + formatNumber(row.output_tokens) + '</td><td>' + formatNumber(row.cached_input_tokens) + '</td><td>' + formatNumber(row.reasoning_output_tokens) + '</td><td>' + formatNumber(row.total_tokens) + '</td><td>' + formatCost(row.cost_usd) + '</td></tr>');
 											const totalCost = totals.cost_available ? formatCost(totals.cost_usd) : 'cost unavailable';
 											rows.push('<tr class="font-semibold border-t border-base-300"><td>Total</td><td>All models</td><td>' + formatNumber(totals.input_tokens) + '</td><td>' + formatNumber(totals.output_tokens) + '</td><td>' + formatNumber(totals.cached_input_tokens) + '</td><td>' + formatNumber(totals.reasoning_output_tokens) + '</td><td>' + formatNumber(totals.total_tokens) + '</td><td>' + totalCost + '</td></tr>');
 											table.innerHTML = rows.join('');
@@ -960,14 +999,14 @@ templ analyticsContent(currentProject *models.Project) {
 													]
 												}]
 											},
-											options: {
-												responsive: true,
-												maintainAspectRatio: false,
-												plugins: { legend: { position: 'bottom' } }
-											}
-										});
-									}
-									const accountContainer = document.getElementById('accountUsageCards');
+												options: {
+													responsive: true,
+													maintainAspectRatio: false,
+													onClick:function(_,items){if(items.length)focusUsageEvidence(breakdown[items[0].index]);},
+													plugins: { legend: { position: 'bottom' } }
+												}
+											});
+										}									const accountContainer = document.getElementById('accountUsageCards');
 									const accounts = data.account_limits || [];
 									if (accountContainer) {
 										if (accounts.length === 0) {
@@ -1120,9 +1159,9 @@ templ analyticsContent(currentProject *models.Project) {
 							},
 							options: {
 								responsive: true,
-								maintainAspectRatio: false,
-								scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' } } }
-							}
+									maintainAspectRatio: false,
+									onClick:function(){window.location.href='/tasks?project_id='+encodeURIComponent(projectID);},
+									scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' } } }							}
 						});
 						} catch (e) { console.error('loadHourlyTrends:', e); showAnalyticsError(e); }
 					}
@@ -1193,9 +1232,9 @@ templ analyticsContent(currentProject *models.Project) {
 							},
 							options: {
 								responsive: true,
-								maintainAspectRatio: false,
-								scales: { y: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },
-								plugins: {
+									maintainAspectRatio: false,
+									onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model_id',data[items[0].index].ID);},
+									scales: { y: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },								plugins: {
 									tooltip: {
 										callbacks: {
 											label: function(context) {
@@ -1236,10 +1275,10 @@ templ analyticsContent(currentProject *models.Project) {
 								}]
 							},
 							options: {
-								responsive: true,
-								maintainAspectRatio: false,
-								plugins: { legend: { position: 'bottom' } }
-							}
+									responsive: true,
+									maintainAspectRatio: false,
+									onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model_id',data[items[0].index].AgentID);},
+									plugins: { legend: { position: 'bottom' } }							}
 						});
 						} catch (e) { console.error('loadAgentUsage:', e); showAnalyticsError(e); }
 					}
@@ -1330,7 +1369,10 @@ templ analyticsContent(currentProject *models.Project) {
 						document.getElementById('refreshBtn').addEventListener('click', function() { history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(true); }, { signal: eventSignal });
 						['dateRange', 'groupBy', 'comparePeriod'].forEach(function(id) { document.getElementById(id).addEventListener('change', function() { if (document.getElementById('dateRange').value === 'all') document.getElementById('comparePeriod').checked = false; history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal }); });
 							document.getElementById('analyticsAgentFilter').addEventListener('change', function() { selectedAgent = document.getElementById('analyticsAgentFilter').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
-							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { selectedWorkflow = document.getElementById('analyticsWorkflowFilter').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });							const usageRateSelect = document.getElementById('usageRateModelSelect');						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });
+							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { selectedWorkflow = document.getElementById('analyticsWorkflowFilter').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
+							const loadMoreEvidence = document.getElementById('loadMoreEvidence');
+							if (loadMoreEvidence) loadMoreEvidence.addEventListener('click', function() { loadDashboard(Number(loadMoreEvidence.dataset.nextOffset || 0), true); }, { signal: eventSignal });
+							const usageRateSelect = document.getElementById('usageRateModelSelect');						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });
 						window.addEventListener('popstate', function() { restoreURLState(); loadAllData(false); }, { signal: eventSignal });
 						restoreURLState();
 						loadAllData(false);

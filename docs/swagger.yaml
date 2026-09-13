@@ -240,6 +240,8 @@ definitions:
         type: string
       agent_name:
         type: string
+      duration_sample_size:
+        type: integer
       first_pass:
         $ref: '#/definitions/models.AnalyticsMetric'
       follow_up:
@@ -251,6 +253,23 @@ definitions:
       median_duration_ms:
         type: integer
       most_used_model:
+        type: string
+      tasks_evaluated:
+        type: integer
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+    type: object
+  models.AgentSkillOutcomePerformance:
+    properties:
+      agent_id:
+        type: string
+      agent_name:
+        type: string
+      follow_up:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      skill_handle:
         type: string
       tasks_evaluated:
         type: integer
@@ -274,6 +293,10 @@ definitions:
     properties:
       agent_detail:
         $ref: '#/definitions/models.AgentAnalyticsDetail'
+      agent_skill_outcomes:
+        items:
+          $ref: '#/definitions/models.AgentSkillOutcomePerformance'
+        type: array
       agents:
         items:
           $ref: '#/definitions/models.AgentPerformance'
@@ -288,6 +311,12 @@ definitions:
         items:
           $ref: '#/definitions/models.MetricDefinition'
         type: array
+      evidence_limit:
+        type: integer
+      evidence_offset:
+        type: integer
+      evidence_total:
+        type: integer
       follow_up_distribution:
         items:
           $ref: '#/definitions/models.AnalyticsDistributionPoint'
@@ -1109,6 +1138,8 @@ definitions:
         type: integer
       completion_rate:
         type: number
+      duration_sample_size:
+        type: integer
       failed_count:
         type: integer
       health:
@@ -1548,6 +1579,16 @@ paths:
         in: query
         name: workflow
         type: string
+      - default: 20
+        description: Evidence rows per page, 1-100
+        in: query
+        name: evidence_limit
+        type: integer
+      - default: 0
+        description: Evidence rows to skip
+        in: query
+        name: evidence_offset
+        type: integer
       produces:
       - application/json
       responses:

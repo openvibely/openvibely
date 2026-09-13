@@ -61,11 +61,22 @@ type AgentPerformance struct {
 	FirstPass                AnalyticsMetric `json:"first_pass"`
 	FollowUp                 AnalyticsMetric `json:"follow_up"`
 	MedianDurationMs         int64           `json:"median_duration_ms"`
+	DurationSampleSize       int             `json:"duration_sample_size"`
 	KnownCostPerAchievedGoal *CostCoverage   `json:"known_cost_per_achieved_goal,omitempty"`
 	MostUsedModel            string          `json:"most_used_model,omitempty"`
 }
 
 type SkillOutcomePerformance struct {
+	SkillHandle         string          `json:"skill_handle"`
+	TasksEvaluated      int             `json:"tasks_evaluated"`
+	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
+	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`
+	FollowUp            AnalyticsMetric `json:"follow_up"`
+}
+
+type AgentSkillOutcomePerformance struct {
+	AgentID             string          `json:"agent_id,omitempty"`
+	AgentName           string          `json:"agent_name"`
 	SkillHandle         string          `json:"skill_handle"`
 	TasksEvaluated      int             `json:"tasks_evaluated"`
 	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
@@ -129,16 +140,17 @@ type WorkflowAnalyticsDetail struct {
 }
 
 type WorkflowPerformance struct {
-	WorkflowID        string  `json:"workflow_id"`
-	WorkflowName      string  `json:"workflow_name"`
-	InvocationCount   int     `json:"invocation_count"`
-	CompletedCount    int     `json:"completed_count"`
-	FailedCount       int     `json:"failed_count"`
-	CompletionRate    float64 `json:"completion_rate"`
-	AverageDurationMs int64   `json:"average_duration_ms"`
-	WaitingCount      int     `json:"waiting_count"`
-	BlockedCount      int     `json:"blocked_count"`
-	Health            string  `json:"health"`
+	WorkflowID         string  `json:"workflow_id"`
+	WorkflowName       string  `json:"workflow_name"`
+	InvocationCount    int     `json:"invocation_count"`
+	CompletedCount     int     `json:"completed_count"`
+	FailedCount        int     `json:"failed_count"`
+	CompletionRate     float64 `json:"completion_rate"`
+	AverageDurationMs  int64   `json:"average_duration_ms"`
+	DurationSampleSize int     `json:"duration_sample_size"`
+	WaitingCount       int     `json:"waiting_count"`
+	BlockedCount       int     `json:"blocked_count"`
+	Health             string  `json:"health"`
 }
 
 type EvidenceTaskRow struct {
@@ -191,18 +203,22 @@ type AnalyticsInsight struct {
 }
 
 type AnalyticsDashboard struct {
-	Definitions          []MetricDefinition           `json:"definitions"`
-	Current              OutcomeMetrics               `json:"current"`
-	Previous             *OutcomeMetrics              `json:"previous,omitempty"`
-	Funnel               []OutcomeFunnelStage         `json:"funnel"`
-	CycleDistribution    []AnalyticsDistributionPoint `json:"cycle_distribution"`
-	FollowUpDistribution []AnalyticsDistributionPoint `json:"follow_up_distribution"`
-	Agents               []AgentPerformance           `json:"agents"`
-	AgentDetail          *AgentAnalyticsDetail        `json:"agent_detail,omitempty"`
-	SkillOutcomes        []SkillOutcomePerformance    `json:"skill_outcomes"`
-	ModelCategories      []ModelCategoryPerformance   `json:"model_categories"`
-	Workflows            []WorkflowPerformance        `json:"workflows"`
-	WorkflowDetail       *WorkflowAnalyticsDetail     `json:"workflow_detail,omitempty"`
-	RecentOutcomes       []EvidenceTaskRow            `json:"recent_outcomes"`
-	Insights             []AnalyticsInsight           `json:"insights"`
+	Definitions          []MetricDefinition             `json:"definitions"`
+	Current              OutcomeMetrics                 `json:"current"`
+	Previous             *OutcomeMetrics                `json:"previous,omitempty"`
+	Funnel               []OutcomeFunnelStage           `json:"funnel"`
+	CycleDistribution    []AnalyticsDistributionPoint   `json:"cycle_distribution"`
+	FollowUpDistribution []AnalyticsDistributionPoint   `json:"follow_up_distribution"`
+	Agents               []AgentPerformance             `json:"agents"`
+	AgentDetail          *AgentAnalyticsDetail          `json:"agent_detail,omitempty"`
+	SkillOutcomes        []SkillOutcomePerformance      `json:"skill_outcomes"`
+	AgentSkillOutcomes   []AgentSkillOutcomePerformance `json:"agent_skill_outcomes"`
+	ModelCategories      []ModelCategoryPerformance     `json:"model_categories"`
+	Workflows            []WorkflowPerformance          `json:"workflows"`
+	WorkflowDetail       *WorkflowAnalyticsDetail       `json:"workflow_detail,omitempty"`
+	RecentOutcomes       []EvidenceTaskRow              `json:"recent_outcomes"`
+	EvidenceTotal        int                            `json:"evidence_total"`
+	EvidenceLimit        int                            `json:"evidence_limit"`
+	EvidenceOffset       int                            `json:"evidence_offset"`
+	Insights             []AnalyticsInsight             `json:"insights"`
 }
