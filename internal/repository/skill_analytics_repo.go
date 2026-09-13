@@ -20,16 +20,21 @@ func NewSkillAnalyticsRepo(db *sql.DB) *SkillAnalyticsRepo {
 }
 
 type SkillAnalyticsFilter struct {
-	DateFrom   time.Time
-	DateTo     time.Time
-	ProjectID  string
-	AgentID    string
-	WorkflowID string
-	Surface    string
-	SkillScope string
-	EventType  string
-	Limit      int
-	GroupBy    string
+	DateFrom            time.Time
+	DateTo              time.Time
+	ProjectID           string
+	AgentID             string
+	WorkflowID          string
+	Surface             string
+	SkillScope          string
+	EventType           string
+	Limit               int
+	GroupBy             string
+	EvidencePeriod      string
+	EvidenceEvent       string
+	EvidenceAgentID     string
+	EvidenceSkillHandle string
+	EvidenceLimit       int
 }
 
 type EnabledSkillInfo struct {
@@ -344,6 +349,59 @@ func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter Skil
 	return out, nil
 }
 
+func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillAnalyticsEvidenceRow, int, error) {
+	if filter.EvidencePeriod == "" && filter.EvidenceEvent == "" && filter.EvidenceAgentID == "" && filter.EvidenceSkillHandle == "" {
+		return []models.SkillAnalyticsEvidenceRow{}, 0, nil
+	}
+	where, args := skillAnalyticsWhere(filter)
+	if filter.EvidencePeriod != "" {
+		where += " AND " + skillAnalyticsPeriodExpression(filter.GroupBy) + " = ?"
+		args = append(args, filter.EvidencePeriod)
+	}
+	if filter.EvidenceEvent == "used" {
+		where += " AND e.event_type IN ('selected','loaded','viewed')"
+	} else if filter.EvidenceEvent != "" {
+		where += " AND e.event_type = ?"
+		args = append(args, filter.EvidenceEvent)
+	}
+	if filter.EvidenceAgentID == "__unassigned__" {
+		where += " AND (e.agent_id IS NULL OR e.agent_id = '')"
+	} else if filter.EvidenceAgentID != "" {
+		where += " AND e.agent_id = ?"
+		args = append(args, filter.EvidenceAgentID)
+	}
+	if filter.EvidenceSkillHandle != "" {
+		where += " AND e.skill_handle = ?"
+		args = append(args, filter.EvidenceSkillHandle)
+	}
+	var total int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM skill_analytics_events e "+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting skill Analytics evidence: %w", err)
+	}
+	limit := filter.EvidenceLimit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT e.id,e.created_at,COALESCE(e.project_id,''),COALESCE(e.task_id,''),COALESCE(e.execution_id,''),COALESCE(e.agent_id,''),
+		COALESCE(a.name,CASE WHEN e.agent_id IS NULL OR e.agent_id='' THEN 'Unassigned' ELSE e.agent_id END),e.skill_handle,e.event_type,e.source,e.surface
+		FROM skill_analytics_events e LEFT JOIN agents a ON a.id=e.agent_id `+where+` ORDER BY e.created_at DESC,e.id DESC LIMIT ?`, append(args, limit)...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("getting skill Analytics evidence: %w", err)
+	}
+	defer rows.Close()
+	out := []models.SkillAnalyticsEvidenceRow{}
+	for rows.Next() {
+		var row models.SkillAnalyticsEvidenceRow
+		var createdAt string
+		if err := rows.Scan(&row.ID, &createdAt, &row.ProjectID, &row.TaskID, &row.ExecutionID, &row.AgentID, &row.AgentName, &row.SkillHandle, &row.EventType, &row.Source, &row.Surface); err != nil {
+			return nil, 0, err
+		}
+		row.CreatedAt = parseSQLiteTime(createdAt)
+		out = append(out, row)
+	}
+	return out, total, rows.Err()
+}
+
 func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAnalyticsFilter, enabledSkills []EnabledSkillInfo) (*models.SkillAnalyticsDashboard, error) {
 	usage, err := r.GetUsageOverTime(ctx, filter)
 	if err != nil {
@@ -367,7 +425,11 @@ func (r *SkillAnalyticsRepo) BuildDashboard(ctx context.Context, filter SkillAna
 	if err != nil {
 		return nil, err
 	}
-	return &models.SkillAnalyticsDashboard{UsageOverTime: usage, TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused}, nil
+	evidence, evidenceTotal, err := r.GetEvidence(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return &models.SkillAnalyticsDashboard{UsageOverTime: usage, TopSkills: top, FollowThrough: follow, AgentUsage: agent, Underused: underused, Evidence: evidence, EvidenceTotal: evidenceTotal}, nil
 }
 
 func skillAnalyticsWhere(filter SkillAnalyticsFilter) (string, []any) {

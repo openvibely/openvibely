@@ -534,6 +534,12 @@ func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, 
 		return err
 	}
 	view.ModelBreakdown = breakdown
+	evidence, evidenceTotal, err := s.usageRepo.GetEvidence(ctx, filter)
+	if err != nil {
+		return err
+	}
+	view.Evidence = evidence
+	view.EvidenceTotal = evidenceTotal
 	return nil
 }
 

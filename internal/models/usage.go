@@ -167,6 +167,22 @@ type AnalyticsUsageViewModel struct {
 	UsageRate         []UsageRatePoint   `json:"usage_rate"`
 	UsageRateByModel  []UsageRatePoint   `json:"usage_rate_by_model,omitempty"`
 	ModelBreakdown    []ModelUsagePoint  `json:"model_breakdown"`
+	Evidence          []UsageEvidenceRow `json:"evidence"`
+	EvidenceTotal     int                `json:"evidence_total"`
 	LastUpdatedAt     *time.Time         `json:"last_updated_at,omitempty"`
 	Errors            []string           `json:"errors,omitempty"`
+}
+
+type UsageEvidenceRow struct {
+	ID          string    `json:"id"`
+	OccurredAt  time.Time `json:"occurred_at"`
+	ProjectID   string    `json:"project_id"`
+	TaskID      string    `json:"task_id,omitempty"`
+	ExecutionID string    `json:"execution_id,omitempty"`
+	Provider    string    `json:"provider"`
+	Model       string    `json:"model"`
+	Operation   string    `json:"operation"`
+	Status      string    `json:"status"`
+	TotalTokens int       `json:"total_tokens"`
+	CostUSD     *float64  `json:"cost_usd,omitempty"`
 }

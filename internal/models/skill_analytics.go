@@ -49,6 +49,22 @@ type SkillAnalyticsDashboard struct {
 	FollowThrough []SkillFollowThroughMetric  `json:"follow_through"`
 	AgentUsage    SkillAgentUsageHeatmap      `json:"agent_usage"`
 	Underused     []UnderusedSkillMetric      `json:"underused"`
+	Evidence      []SkillAnalyticsEvidenceRow `json:"evidence"`
+	EvidenceTotal int                         `json:"evidence_total"`
+}
+
+type SkillAnalyticsEvidenceRow struct {
+	ID          string    `json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	ProjectID   string    `json:"project_id"`
+	TaskID      string    `json:"task_id,omitempty"`
+	ExecutionID string    `json:"execution_id,omitempty"`
+	AgentID     string    `json:"agent_id,omitempty"`
+	AgentName   string    `json:"agent_name"`
+	SkillHandle string    `json:"skill_handle"`
+	EventType   string    `json:"event_type"`
+	Source      string    `json:"source"`
+	Surface     string    `json:"surface"`
 }
 
 type SkillUsagePeriodMetric struct {

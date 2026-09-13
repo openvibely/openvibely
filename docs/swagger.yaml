@@ -442,6 +442,12 @@ definitions:
         items:
           type: string
         type: array
+      evidence:
+        items:
+          $ref: '#/definitions/models.UsageEvidenceRow'
+        type: array
+      evidence_total:
+        type: integer
       last_updated_at:
         type: string
       model_breakdown:
@@ -801,6 +807,12 @@ definitions:
     properties:
       agent_usage:
         $ref: '#/definitions/models.SkillAgentUsageHeatmap'
+      evidence:
+        items:
+          $ref: '#/definitions/models.SkillAnalyticsEvidenceRow'
+        type: array
+      evidence_total:
+        type: integer
       follow_through:
         items:
           $ref: '#/definitions/models.SkillFollowThroughMetric'
@@ -817,6 +829,31 @@ definitions:
         items:
           $ref: '#/definitions/models.SkillUsagePeriodMetric'
         type: array
+    type: object
+  models.SkillAnalyticsEvidenceRow:
+    properties:
+      agent_id:
+        type: string
+      agent_name:
+        type: string
+      created_at:
+        type: string
+      event_type:
+        type: string
+      execution_id:
+        type: string
+      id:
+        type: string
+      project_id:
+        type: string
+      skill_handle:
+        type: string
+      source:
+        type: string
+      surface:
+        type: string
+      task_id:
+        type: string
     type: object
   models.SkillAnalyticsSkillMetric:
     properties:
@@ -1073,6 +1110,31 @@ definitions:
       skill_scope:
         type: string
       viewed_count:
+        type: integer
+    type: object
+  models.UsageEvidenceRow:
+    properties:
+      cost_usd:
+        type: number
+      execution_id:
+        type: string
+      id:
+        type: string
+      model:
+        type: string
+      occurred_at:
+        type: string
+      operation:
+        type: string
+      project_id:
+        type: string
+      provider:
+        type: string
+      status:
+        type: string
+      task_id:
+        type: string
+      total_tokens:
         type: integer
     type: object
   models.UsageRatePoint:
@@ -1608,7 +1670,6 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/handler.ErrorResponse'
-      summary: Get outcome-oriented Analytics dashboard data
       tags:
       - analytics
   /api/analytics/execution-trends-by-hour:
@@ -1704,7 +1765,8 @@ paths:
   /api/analytics/skills:
     get:
       description: Returns skill usage over time, top skills, selection follow-through,
-        agent heatmap, and underused skill metrics.
+        agent heatmap, underused skill metrics, and bounded supporting skill events
+        for an exact chart selection.
       parameters:
       - description: Project ID filter
         in: query
@@ -1735,6 +1797,23 @@ paths:
       - description: Event type filter (selected, loaded, viewed, created, edited)
         in: query
         name: event_type
+        type: string
+      - description: Exact grouped period for supporting skill events
+        in: query
+        name: skill_period
+        type: string
+      - description: Supporting event type (used, selected, loaded, viewed, created,
+          edited)
+        in: query
+        name: skill_event
+        type: string
+      - description: Exact Agent ID or __unassigned__ for supporting skill events
+        in: query
+        name: skill_agent
+        type: string
+      - description: Exact skill handle for supporting skill events
+        in: query
+        name: skill_handle
         type: string
       produces:
       - application/json
@@ -1791,7 +1870,8 @@ paths:
   /api/analytics/usage:
     get:
       description: Returns token/cache/reasoning/cost totals, daily usage, usage rate,
-        model breakdowns, and account limit snapshots.
+        model breakdowns, account limit snapshots, and bounded supporting usage events
+        for an exact chart selection.
       parameters:
       - description: Project ID filter
         in: query
@@ -1818,6 +1898,18 @@ paths:
       - description: Optional end datetime filter
         in: query
         name: date_to
+        type: string
+      - description: Exact grouped period for supporting usage events
+        in: query
+        name: usage_period
+        type: string
+      - description: Exact provider for supporting usage events
+        in: query
+        name: usage_provider
+        type: string
+      - description: Exact model for supporting usage events
+        in: query
+        name: usage_model_name
         type: string
       produces:
       - application/json
