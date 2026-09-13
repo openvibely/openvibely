@@ -435,6 +435,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
 		Model:                    agent.Model,
+		ContextWindow:            agent.ContextWindow,
 		MaxTokens:                maxTokens,
 		Effort:                   agent.ReasoningEffort,
 		System:                   systemPrompt,
@@ -507,6 +508,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
 		Model:                    agent.Model,
+		ContextWindow:            agent.ContextWindow,
 		MaxTokens:                maxTokens,
 		Effort:                   agent.ReasoningEffort,
 		EnableThinking:           true,
@@ -606,6 +608,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
 		Model:                    agent.Model,
+		ContextWindow:            agent.ContextWindow,
 		MaxTokens:                maxTokens,
 		Effort:                   agent.ReasoningEffort,
 		EnableThinking:           true,

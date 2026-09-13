@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -52,6 +53,7 @@ Return only the summary text.`
 type AgenticOptions struct {
 	Model           string
 	MaxOutputTokens int
+	ContextWindow   int
 	System          string
 	// CompactionPrompt overrides the instruction text used for API-key /responses/compact.
 	// ChatGPT OAuth compaction mirrors Codex v2 and uses the base system instructions.
@@ -1170,7 +1172,7 @@ func truncateTextToOpenAITokenBudget(text string, maxTokens int) string {
 	if maxTokens <= 0 || text == "" {
 		return ""
 	}
-	maxBytes := approxOpenAIBytesForTokens(maxTokens)
+	maxBytes := maxTokens // conservative hard-bound: at most one UTF-8/ASCII rune per token
 	if len(text) <= maxBytes {
 		return text
 	}
@@ -1316,7 +1318,11 @@ func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDe
 }
 
 func inputItemTokenEstimate(item any) int {
-	return estimateInputItemsTokens([]any{item})
+	estimate := estimateInputItemsTokens([]any{item})
+	if encoded, err := json.Marshal(item); err == nil {
+		estimate = max(estimate, utf8.RuneCount(encoded))
+	}
+	return estimate
 }
 
 func compactionObjectiveIndex(items []any) int {
@@ -1401,9 +1407,13 @@ func ensureOpenAIAgenticRequestFits(inputItems []any, tools []ToolDefinition, op
 	if opts == nil {
 		return nil
 	}
-	window, ok := openAIModelContextWindow(opts.Model)
-	if !ok || window <= 0 {
-		return nil
+	window := opts.ContextWindow
+	if window <= 0 {
+		var ok bool
+		window, ok = openAIModelContextWindow(opts.Model)
+		if !ok || window <= 0 {
+			window = 200000
+		}
 	}
 	reserved := opts.MaxOutputTokens
 	if reserved <= 0 {
@@ -1427,6 +1437,16 @@ func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, i
 		if encoded, err := json.Marshal(tools); err == nil {
 			total += approxOpenAITokensFromByteCount(len(encoded))
 		}
+	}
+	// The byte/4 estimate is useful for trigger heuristics but cannot enforce a
+	// hard admission boundary for source, JSON, logs, or tool arguments. Treat
+	// every serialized rune as a token when that is more conservative.
+	if encoded, err := json.Marshal(struct {
+		Input        []any            `json:"input"`
+		Tools        []ToolDefinition `json:"tools,omitempty"`
+		Instructions string           `json:"instructions,omitempty"`
+	}{inputItems, tools, instructions}); err == nil {
+		total = max(total, utf8.RuneCount(encoded))
 	}
 	return total
 }
