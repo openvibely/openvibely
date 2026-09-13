@@ -494,6 +494,7 @@ type accountUsageSnapshotIndex struct {
 	byAccount         map[accountUsageSnapshotIndexKey][]int
 	byConfig          map[accountUsageSnapshotIndexKey][]int
 	byConfigNoAccount map[accountUsageSnapshotIndexKey][]int
+	byConnection      map[accountUsageSnapshotIndexKey][]int
 }
 
 type accountUsageSnapshotState struct {
@@ -525,6 +526,7 @@ func newAccountUsageSnapshotIndex(snapshots []models.AccountUsageSnapshot) accou
 		byAccount:         make(map[accountUsageSnapshotIndexKey][]int),
 		byConfig:          make(map[accountUsageSnapshotIndexKey][]int),
 		byConfigNoAccount: make(map[accountUsageSnapshotIndexKey][]int),
+		byConnection:      make(map[accountUsageSnapshotIndexKey][]int),
 	}
 	for i := range canonical {
 		index.addSnapshotIndex(i)
@@ -547,6 +549,11 @@ func (index *accountUsageSnapshotIndex) addSnapshotIndex(i int) {
 		if strings.TrimSpace(snapshot.AccountID) == "" {
 			index.byConfigNoAccount[key] = append(index.byConfigNoAccount[key], i)
 		}
+	}
+	if connectionID := strings.TrimSpace(snapshot.OAuthConnectionID); connectionID != "" {
+		key := base
+		key.value = connectionID
+		index.byConnection[key] = append(index.byConnection[key], i)
 	}
 }
 
@@ -574,19 +581,20 @@ func (index accountUsageSnapshotIndex) candidatesForConfig(cfg models.LLMConfig)
 	base := accountUsageSnapshotIndexKey{provider: string(cfg.Provider), revision: cfg.OAuthConfigRevision}
 	configKey := base
 	configKey.value = strings.TrimSpace(cfg.ID)
-	if strings.TrimSpace(cfg.OAuthAccountID) == "" {
-		return append([]int(nil), index.byConfig[configKey]...)
-	}
+	connectionKey := base
+	connectionKey.value = strings.TrimSpace(cfg.OAuthConnectionID)
 
-	accountKey := base
-	accountKey.value = strings.TrimSpace(cfg.OAuthAccountID)
-	accountCandidates := index.byAccount[accountKey]
-	configCandidates := index.byConfigNoAccount[configKey]
-	legacyConfigCandidates := index.byAccount[configKey]
-	candidates := make([]int, 0, len(accountCandidates)+len(configCandidates)+len(legacyConfigCandidates))
-	candidates = append(candidates, accountCandidates...)
-	candidates = append(candidates, configCandidates...)
-	candidates = append(candidates, legacyConfigCandidates...)
+	candidates := make([]int, 0)
+	candidates = append(candidates, index.byConnection[connectionKey]...)
+	if strings.TrimSpace(cfg.OAuthAccountID) == "" {
+		candidates = append(candidates, index.byConfig[configKey]...)
+	} else {
+		accountKey := base
+		accountKey.value = strings.TrimSpace(cfg.OAuthAccountID)
+		candidates = append(candidates, index.byAccount[accountKey]...)
+		candidates = append(candidates, index.byConfigNoAccount[configKey]...)
+		candidates = append(candidates, index.byAccount[configKey]...)
+	}
 	if len(candidates) == 0 {
 		return nil
 	}

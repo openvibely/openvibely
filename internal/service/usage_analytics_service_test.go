@@ -893,6 +893,59 @@ func TestUsageAnalyticsService_RefreshFailureCooldownUsesOAuthConnection(t *test
 				}
 			})
 
+			t.Run("shared_connection_without_account_identity_survives_model_removal", func(t *testing.T) {
+				db := testutil.NewTestDB(t)
+				usageRepo := repository.NewUsageRepo(db)
+				configRepo := repository.NewLLMConfigRepo(db)
+				ctx := context.Background()
+
+				first := &models.LLMConfig{
+					Name:              "A Identity Pending",
+					Provider:          provider,
+					Model:             "model-one",
+					AuthMethod:        models.AuthMethodOAuth,
+					OAuthAccessToken:  "shared-access",
+					OAuthRefreshToken: "shared-refresh",
+				}
+				if err := configRepo.Create(ctx, first); err != nil {
+					t.Fatalf("create first config: %v", err)
+				}
+				second := &models.LLMConfig{
+					Name:       "B Identity Pending",
+					Provider:   provider,
+					Model:      "model-two",
+					AuthMethod: models.AuthMethodOAuth,
+				}
+				if err := configRepo.Create(ctx, second); err != nil {
+					t.Fatalf("create second config: %v", err)
+				}
+				if err := configRepo.LinkOAuthConnection(ctx, second.ID, first.OAuthConnectionID); err != nil {
+					t.Fatalf("link shared connection: %v", err)
+				}
+
+				calls := 0
+				svc := NewUsageAnalyticsService(usageRepo, configRepo)
+				svc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+					calls++
+					return nil, errors.New("shared connection unavailable")
+				})
+				if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider), Refresh: true}); err != nil {
+					t.Fatalf("forced BuildAnalyticsUsage: %v", err)
+				}
+				if calls != 1 {
+					t.Fatalf("shared connection provider calls = %d, want 1", calls)
+				}
+				if err := configRepo.Delete(ctx, first.ID); err != nil {
+					t.Fatalf("delete original model: %v", err)
+				}
+				if _, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Provider: string(provider)}); err != nil {
+					t.Fatalf("persisted cooldown BuildAnalyticsUsage: %v", err)
+				}
+				if calls != 1 {
+					t.Fatalf("persisted shared connection cooldown calls = %d, want 1", calls)
+				}
+			})
+
 			t.Run("separate_connections_same_account", func(t *testing.T) {
 				db := testutil.NewTestDB(t)
 				usageRepo := repository.NewUsageRepo(db)
@@ -2979,6 +3032,7 @@ func buildAnalyticsUsageSnapshotBaseline(ctx context.Context, svc *UsageAnalytic
 		if snapshot.AgentConfigID == "" {
 			snapshot.AgentConfigID = cfg.ID
 		}
+		snapshot.OAuthConnectionID = cfg.OAuthConnectionID
 		if snapshot.AccountID == "" {
 			snapshot.AccountID = accountIDForConfig(cfg)
 		}
