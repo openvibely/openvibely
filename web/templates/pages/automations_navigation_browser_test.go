@@ -180,6 +180,7 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 	}
 	initialPage := strings.Replace(base.String(), "</body>", renderFragment(cards, true)+"</body>", 1)
 	for _, external := range []string{
+		"https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css",
 		"https://cdn.tailwindcss.com",
 		"https://unpkg.com/htmx.org@2.0.4",
 		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
@@ -187,20 +188,31 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
 		"wails://wails/runtime.js",
 	} {
-		initialPage = strings.ReplaceAll(initialPage, external, "/empty.js")
+		replacement := "/empty.js"
+		if strings.HasSuffix(external, ".css") {
+			replacement = "/empty.css"
+		}
+		initialPage = strings.ReplaceAll(initialPage, external, replacement)
 	}
 	initialPage = strings.Replace(initialPage, "</head>", `<style>
+.hidden { display: none !important; }
 [data-card-select-id] { position: relative; display: block; width: 720px; min-height: 120px; margin: 16px; }
 [data-card-select-id] > .card-body { position: relative; min-height: 88px; padding: 16px; }
 [data-card-select-id] [data-automation-card-action] { position: absolute; top: 16px; right: 16px; z-index: 20; }
 [data-card-select-id] [data-automation-card-action] .dropdown { position: relative; }
-[data-card-select-id] [data-automation-card-action] .dropdown-content { position: absolute; top: 100%; right: 0; z-index: 100; display: block; min-width: 192px; margin: 0; padding: 8px; }
+[data-card-select-id] [data-automation-card-action] label { position: relative; display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; }
+[data-card-select-id] [data-automation-card-action] label svg { width: 16px; height: 16px; }
+[data-card-select-id] [data-automation-card-action] .dropdown-content { position: absolute; top: 100%; right: 0; z-index: 100; display: block; min-width: 192px; margin: 0; padding: 8px; visibility: hidden; pointer-events: none; }
+[data-card-select-id] [data-automation-card-action] .dropdown:focus-within > .dropdown-content { visibility: visible; pointer-events: auto; }
 [data-card-select-id] [data-automation-card-action] .dropdown-content li { display: block; }
 [data-card-select-id] [data-automation-card-action] .dropdown-content button { display: block; width: 100%; min-height: 32px; }
 </style></head>`, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/empty.css":
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+			_, _ = w.Write([]byte(""))
 		case "/empty.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write([]byte(""))
