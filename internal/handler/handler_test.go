@@ -7780,6 +7780,71 @@ func TestHandler_TaskThreadSend_RejectsWhitespaceOnlyMessage(t *testing.T) {
 	}
 }
 
+func TestHandler_TaskThreadSend_RejectsWhitespaceOnlyMessageWithValidAgent(t *testing.T) {
+	tests := []struct {
+		name     string
+		message  string
+		status   models.TaskStatus
+		category models.TaskCategory
+	}{
+		{name: "idle", message: "   \t\n   ", status: models.StatusCompleted, category: models.CategoryCompleted},
+		{name: "active", message: "\n\r \t", status: models.StatusRunning, category: models.CategoryActive},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, llmConfigRepo := setupTestHandler(t)
+			ctx := context.Background()
+			agent := createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "Valid Agent Whitespace Follow-up Project")
+			task := createTask(t, h, project.ID, "Valid Agent Whitespace Follow-up Task", func(tk *models.Task) {
+				tk.Status = tt.status
+				tk.Category = tt.category
+				tk.AgentID = &agent.ID
+			})
+			var activeExecutionID string
+			if tt.name == "active" {
+				active := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+					ex.Status = models.ExecRunning
+					ex.PromptSent = "active task turn"
+				})
+				activeExecutionID = active.ID
+			}
+
+			beforeTask, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			beforeExecutions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+			require.NoError(t, err)
+			beforeInputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+			require.NoError(t, err)
+
+			form := url.Values{}
+			form.Set("message", tt.message)
+			form.Set("agent_id", agent.ID)
+			rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+			assertCode(t, rec, http.StatusBadRequest)
+			assertContains(t, rec, "message is required")
+			assertNotContains(t, rec, "chat-bubble-assistant-msg")
+			assertNotContains(t, rec, "data-exec-id")
+
+			afterExecutions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, afterExecutions, len(beforeExecutions))
+			if activeExecutionID != "" {
+				require.Equal(t, activeExecutionID, afterExecutions[0].ID)
+			}
+			afterInputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, afterInputs, len(beforeInputs))
+			afterTask, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			assert.Equal(t, beforeTask.Status, afterTask.Status)
+			assert.Equal(t, beforeTask.Category, afterTask.Category)
+			assert.Equal(t, beforeTask.AgentID, afterTask.AgentID)
+		})
+	}
+}
+
 func TestHandler_TaskThreadSend_TrimsPaddedMessage(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
