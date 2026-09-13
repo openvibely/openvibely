@@ -1242,8 +1242,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 185 {
-		t.Fatalf("max goose version = %d, want 185", maxVersion)
+	if maxVersion != 186 {
+		t.Fatalf("max goose version = %d, want 186", maxVersion)
 	}
 }
 
@@ -1810,8 +1810,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 185 {
-		t.Fatalf("max goose version = %d, want 185", maxVersion)
+	if maxVersion != 186 {
+		t.Fatalf("max goose version = %d, want 186", maxVersion)
 	}
 }
 
@@ -2259,8 +2259,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 185 {
-		t.Fatalf("max goose version = %d, want 185", maxVersion)
+	if maxVersion != 186 {
+		t.Fatalf("max goose version = %d, want 186", maxVersion)
 	}
 }
 
@@ -2595,8 +2595,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 185 {
-		t.Fatalf("max goose version = %d, want 185", maxVersion)
+	if maxVersion != 186 {
+		t.Fatalf("max goose version = %d, want 186", maxVersion)
 	}
 }
 
@@ -2614,6 +2614,36 @@ func TestMigration095_AllowsCreatedSkillAnalyticsEvents(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO skill_analytics_events (skill_scope, skill_handle, event_type, source, surface) VALUES ('global', 'created_skill', 'created', 'manual', 'task_thread')`); err != nil {
 		t.Fatalf("created skill analytics event rejected: %v", err)
+	}
+}
+
+func TestMigration186MarksExistingAccountSnapshotsAsUnbound(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "account-snapshot-revision.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 185); err != nil {
+		t.Fatalf("migrate to 185: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO agent_configs (id, name, provider, model, auth_method)
+		VALUES ('oauth-generation-config', 'OAuth generation', 'openai', 'gpt-test', 'oauth');
+		INSERT INTO account_usage_snapshots (id, provider, account_id, agent_config_id, raw_json)
+		VALUES ('legacy-oauth-snapshot', 'openai', 'principal-a', 'oauth-generation-config', '{}');
+	`); err != nil {
+		t.Fatalf("seed pre-186 snapshot: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 186); err != nil {
+		t.Fatalf("migrate to 186: %v", err)
+	}
+	var revision int64
+	if err := db.QueryRow(`SELECT oauth_config_revision FROM account_usage_snapshots WHERE id = 'legacy-oauth-snapshot'`).Scan(&revision); err != nil {
+		t.Fatalf("read migrated snapshot revision: %v", err)
+	}
+	if revision != -1 {
+		t.Fatalf("legacy snapshot revision = %d, want -1", revision)
 	}
 }
 

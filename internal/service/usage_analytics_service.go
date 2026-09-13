@@ -816,10 +816,13 @@ func mergeAccountSnapshots(existing []models.AccountUsageView, snapshots []model
 }
 
 func accountUsageSnapshotShouldRender(snapshot models.AccountUsageSnapshot, configsByID map[string]models.LLMConfig) bool {
-	if cfg, ok := configsByID[snapshot.AgentConfigID]; ok {
-		return cfg.AuthMethod == models.AuthMethodOAuth && strings.TrimSpace(cfg.OAuthAccessToken) != ""
+	cfg, ok := configsByID[snapshot.AgentConfigID]
+	if !ok {
+		return false
 	}
-	return true
+	return cfg.AuthMethod == models.AuthMethodOAuth &&
+		strings.TrimSpace(cfg.OAuthAccessToken) != "" &&
+		snapshotMatchesConfigGeneration(snapshot, cfg)
 }
 
 func applyAccountErrors(accounts []models.AccountUsageView, errorsByKey map[string]string, configsByID map[string]models.LLMConfig) []models.AccountUsageView {
@@ -1179,8 +1182,13 @@ func accountUsageKeyForSnapshotWithConfigs(snapshot models.AccountUsageSnapshot,
 	return accountUsageKeyForSnapshot(snapshot)
 }
 
+func snapshotMatchesConfigGeneration(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
+	return snapshot.OAuthConfigRevision == cfg.OAuthConfigRevision &&
+		strings.TrimSpace(snapshot.Provider) == string(cfg.Provider)
+}
+
 func snapshotMatchesConfigAccount(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
-	if strings.TrimSpace(snapshot.Provider) != string(cfg.Provider) {
+	if !snapshotMatchesConfigGeneration(snapshot, cfg) {
 		return false
 	}
 	if strings.TrimSpace(snapshot.AccountID) != "" && strings.TrimSpace(cfg.OAuthAccountID) != "" {

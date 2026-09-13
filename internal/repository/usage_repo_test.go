@@ -150,10 +150,11 @@ func TestUsageRepo_CreateAccountUsageSnapshotPersistsExtraLimits(t *testing.T) {
 	second := 44.0
 	reset := "2026-06-08T05:00:00Z"
 	snapshot := &models.AccountUsageSnapshot{
-		Provider:      "openai",
-		AccountID:     "acct-extra",
-		AgentConfigID: "agent-extra",
-		PrimaryLabel:  "5-hour session",
+		Provider:            "openai",
+		AccountID:           "acct-extra",
+		AgentConfigID:       "agent-extra",
+		OAuthConfigRevision: 7,
+		PrimaryLabel:        "5-hour session",
 		ExtraLimits: []models.AccountUsageExtraLimit{
 			{LimitKey: "gpt-5.3-codex-spark", Label: "GPT-5.3-Codex-Spark limit", UsedPercent: &first, ResetAt: &reset, RawJSON: `{"metered_feature":"gpt-5.3-codex-spark"}`},
 			{LimitKey: "gpt-5.3-codex-pro", Label: "GPT-5.3-Codex-Pro limit", UsedPercent: &second, RawJSON: `{"metered_feature":"gpt-5.3-codex-pro"}`},
@@ -169,6 +170,9 @@ func TestUsageRepo_CreateAccountUsageSnapshotPersistsExtraLimits(t *testing.T) {
 	}
 	if len(snapshots) != 1 {
 		t.Fatalf("expected one snapshot, got %+v", snapshots)
+	}
+	if snapshots[0].OAuthConfigRevision != 7 {
+		t.Fatalf("snapshot OAuth revision = %d, want 7", snapshots[0].OAuthConfigRevision)
 	}
 	if len(snapshots[0].ExtraLimits) != 2 {
 		t.Fatalf("expected two extra limits, got %+v", snapshots[0].ExtraLimits)

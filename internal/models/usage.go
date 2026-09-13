@@ -40,6 +40,7 @@ type AccountUsageSnapshot struct {
 	Provider                string                   `json:"provider"`
 	AccountID               string                   `json:"account_id,omitempty"`
 	AgentConfigID           string                   `json:"agent_config_id,omitempty"`
+	OAuthConfigRevision     int64                    `json:"-"`
 	PlanType                string                   `json:"plan_type,omitempty"`
 	AccountDisplayName      string                   `json:"account_display_name,omitempty"`
 	AccountDetail           string                   `json:"account_detail,omitempty"`
