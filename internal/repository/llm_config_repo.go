@@ -411,11 +411,12 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 }
 
 // ListModelCardOptions returns the small set of fields needed by Models-page
-// dialogs. It is separate from the paged card rows so modal option semantics do
-// not force provider credentials or card payloads into every page response.
+// dialogs and shared OAuth account actions. It is separate from the paged card
+// rows so modal option semantics do not force provider credentials or card
+// payloads into every page response.
 func (r *LLMConfigRepo) ListModelCardOptions(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, provider, model, is_default, auth_method
+		`SELECT id, name, provider, model, is_default, auth_method, COALESCE(oauth_connection_id, '')
 		 FROM agent_configs AS configs ORDER BY is_default DESC, name ASC, id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing model card options: %w", err)
@@ -425,7 +426,7 @@ func (r *LLMConfigRepo) ListModelCardOptions(ctx context.Context) ([]models.LLMC
 	var configs []models.LLMConfig
 	for rows.Next() {
 		var a models.LLMConfig
-		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AuthMethod); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AuthMethod, &a.OAuthConnectionID); err != nil {
 			return nil, fmt.Errorf("scanning model card option: %w", err)
 		}
 		configs = append(configs, a)

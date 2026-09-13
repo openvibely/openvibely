@@ -70,13 +70,14 @@ templ ModelsPageWithOAuthConnectionsAndState(projects []models.Project, currentP
 	}
 }
 
-func oauthConnectionLinkedModels(connectionID string, connections []models.OAuthConnection) int {
-	for _, connection := range connections {
-		if connection.ID == connectionID {
-			return connection.LinkedModels
+func oauthConnectionLinkedModelLabels(connectionID string, modelOptions []models.LLMConfig) string {
+	labels := make([]string, 0)
+	for _, option := range modelOptions {
+		if option.OAuthConnectionID == connectionID {
+			labels = append(labels, fmt.Sprintf("%s (%s)", option.Name, option.Model))
 		}
 	}
-	return 1
+	return strings.Join(labels, ", ")
 }
 
 func modelsOAuthAction(path, projectID string) string {
@@ -463,7 +464,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 												hx-post={ fmt.Sprintf("/models/%s/oauth/disconnect", agent.ID) }
 												hx-target="#models-content"
 												hx-swap="outerHTML"
-												hx-confirm={ fmt.Sprintf("Disconnect this OAuth account? %d linked model(s) will require reconnecting.", oauthConnectionLinkedModels(agent.OAuthConnectionID, oauthConnections)) }
+												hx-confirm={ fmt.Sprintf("Disconnect this OAuth account? Linked models: %s. All will require reconnecting.", oauthConnectionLinkedModelLabels(agent.OAuthConnectionID, modelOptions)) }
 												onclick="event.stopPropagation()"
 											>Disconnect account</button>
 										}

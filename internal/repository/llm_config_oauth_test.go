@@ -234,6 +234,23 @@ func TestLLMConfigRepo_ListOAuthConnectionsReturnsSafeSummaries(t *testing.T) {
 	if summary.AccessToken != "present" || summary.RefreshToken != "" || summary.AccountID != "" || summary.Revision != 0 {
 		t.Fatalf("OAuth connection summary exposed private state: %#v", summary)
 	}
+	options, err := repo.ListModelCardOptions(ctx)
+	if err != nil {
+		t.Fatalf("ListModelCardOptions: %v", err)
+	}
+	var option *models.LLMConfig
+	for i := range options {
+		if options[i].ID == cfg.ID {
+			option = &options[i]
+			break
+		}
+	}
+	if option == nil || option.OAuthConnectionID != cfg.OAuthConnectionID {
+		t.Fatalf("model card option omitted OAuth connection link: %#v", options)
+	}
+	if option.OAuthAccessToken != "" || option.OAuthRefreshToken != "" || option.OAuthAccountID != "" {
+		t.Fatalf("model card option exposed private OAuth state: %#v", option)
+	}
 }
 
 func TestLLMConfigRepo_MoveModelsToOAuthConnectionIsAtomicAndProviderScoped(t *testing.T) {
