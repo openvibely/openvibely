@@ -92,17 +92,41 @@ func TestStandardOAuthProviderErrorsAreNotExposedOrLogged(t *testing.T) {
 	require.NotContains(t, logs.String(), providerSecret)
 }
 
-func TestOAuthManualCompleteDoesNotExposeProviderErrorDescription(t *testing.T) {
+func TestOAuthManualCompleteSanitizesNoCodeProviderDenialAndConsumesState(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
-	payload := `{"callback_url":"http://localhost/callback?state=state&code=code&error=access_denied&error_description=private%40example.com"}`
-	req := httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	state := fmt.Sprintf("manual-provider-denial-%d", time.Now().UnixNano())
+	oauthFlowsMu.Lock()
+	oauthFlows[state] = &oauthPendingFlow{
+		State:     state,
+		CreatedAt: time.Now(),
+		Provider:  models.ProviderOpenAI,
+	}
+	oauthFlowsMu.Unlock()
+	t.Cleanup(func() {
+		oauthFlowsMu.Lock()
+		delete(oauthFlows, state)
+		oauthFlowsMu.Unlock()
+	})
 
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Contains(t, rec.Body.String(), "Authorization was denied or cancelled")
-	require.NotContains(t, rec.Body.String(), "private@example.com")
+	payload := fmt.Sprintf(`{"callback_url":"http://localhost/callback?state=%s&error=access_denied&error_description=private%%40example.com"}`, url.QueryEscape(state))
+	request := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		return rec
+	}
+
+	first := request()
+	require.Equal(t, http.StatusBadRequest, first.Code)
+	require.Contains(t, first.Body.String(), "Authorization was denied or cancelled")
+	require.NotContains(t, first.Body.String(), "private@example.com")
+
+	replay := request()
+	require.Equal(t, http.StatusBadRequest, replay.Code)
+	require.Contains(t, replay.Body.String(), "oauth session expired or invalid state")
+	require.NotContains(t, replay.Body.String(), "Authorization was denied or cancelled")
+	require.NotContains(t, replay.Body.String(), "private@example.com")
 }
 
 func TestStandardOAuthCallbackFencesConcurrentRefreshWrites(t *testing.T) {
