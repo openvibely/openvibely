@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,11 @@ import (
 // AnthropicAPIHost is the base URL for the Anthropic Messages API.
 // It is a variable (not a constant) to allow overriding in tests.
 var AnthropicAPIHost = "https://api.anthropic.com"
+
+var oauthHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+// ErrOAuthReauthenticationRequired marks a permanently invalid refresh grant.
+var ErrOAuthReauthenticationRequired = errors.New("OAuth reauthentication required")
 
 // OAuthTokenURL is the Anthropic OAuth token endpoint used for refresh.
 // It is a variable (not a constant) to allow overriding in tests.
@@ -569,6 +575,11 @@ func SaveAuth(auth *StoredAuth) error {
 
 // RefreshToken exchanges a refresh token for new credentials.
 func RefreshToken(refreshTok string) (*StoredAuth, error) {
+	return RefreshTokenContext(context.Background(), refreshTok)
+}
+
+// RefreshTokenContext exchanges a refresh token with caller cancellation.
+func RefreshTokenContext(ctx context.Context, refreshTok string) (*StoredAuth, error) {
 	reqBody, _ := json.Marshal(map[string]any{
 		"grant_type":    "refresh_token",
 		"client_id":     oauthClientID,
@@ -576,18 +587,27 @@ func RefreshToken(refreshTok string) (*StoredAuth, error) {
 		"scope":         oauthScope,
 	})
 
-	req, _ := http.NewRequest("POST", OAuthTokenURL, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", OAuthTokenURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("create refresh request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", AnthropicAPIVersion)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		var providerError struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &providerError) == nil && providerError.Error == "invalid_grant" {
+			return nil, fmt.Errorf("%w: refresh failed with HTTP %d", ErrOAuthReauthenticationRequired, resp.StatusCode)
+		}
 		return nil, fmt.Errorf("refresh failed with HTTP %d", resp.StatusCode)
 	}
 

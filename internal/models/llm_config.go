@@ -44,6 +44,7 @@ type LLMConfig struct {
 	OAuthRefreshToken string     `json:"-"` // Never serialized
 	OAuthExpiresAt    int64      `json:"oauth_expires_at,omitempty"`
 	OAuthAccountID    string     `json:"-"` // ChatGPT workspace/account id for OpenAI OAuth
+	OAuthNeedsReauth  bool       `json:"oauth_needs_reauth,omitempty"`
 
 	// Per-model worker pool configuration
 	MaxWorkers    int `json:"max_workers"`    // 0 = use global default; positive values have no product-level maximum
@@ -123,7 +124,7 @@ func (c *LLMConfig) IsAnthropicCLI() bool {
 
 // HasValidOAuthToken returns true if the OAuth token is present and not expired.
 func (c *LLMConfig) HasValidOAuthToken() bool {
-	if !c.IsOAuth() || c.OAuthAccessToken == "" {
+	if !c.IsOAuth() || c.OAuthAccessToken == "" || c.OAuthNeedsReauth {
 		return false
 	}
 	if c.OAuthExpiresAt == 0 {

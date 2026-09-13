@@ -1100,7 +1100,8 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 	t.Run("classifies token exchange failure and consumes state", func(t *testing.T) {
 		h, _, _ := setupTestHandler(t)
 		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "exchange rejected", http.StatusBadGateway)
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant","access_token":"secret-access","email":"private@example.com"}`))
 		}))
 		defer tokenServer.Close()
 
@@ -1118,6 +1119,10 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 		require.Equal(t, oauthCompletionExchangeFailed, result.Outcome)
 		require.NotNil(t, result.Flow)
 		require.Error(t, result.Err)
+		for _, forbidden := range []string{"invalid_grant", "secret-access", "private@example.com", "access_token"} {
+			require.NotContains(t, result.Err.Error(), forbidden)
+		}
+		require.Contains(t, result.Err.Error(), "status 502")
 
 		replay := h.completeOAuthFlow(state, "code")
 		require.Equal(t, oauthCompletionInvalidState, replay.Outcome)

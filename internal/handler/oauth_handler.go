@@ -643,8 +643,8 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	defer tokenResp.Body.Close()
 
 	if tokenResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(tokenResp.Body)
-		return 0, fmt.Errorf("provider returned status %d: %s", tokenResp.StatusCode, string(body))
+		_, _ = io.Copy(io.Discard, io.LimitReader(tokenResp.Body, 1<<20))
+		return 0, fmt.Errorf("provider returned status %d", tokenResp.StatusCode)
 	}
 
 	var tokenResult struct {

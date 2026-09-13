@@ -669,13 +669,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 }
 
 func (a *Adapter) anthropicRefreshFunc() llmoauth.RefreshFunc {
-	return func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
-		auth, err := anthropicclient.RefreshToken(cfg.OAuthRefreshToken)
-		if err != nil {
-			return llmoauth.TokenSet{}, err
-		}
-		return llmoauth.TokenSet{AccessToken: auth.Token, RefreshToken: auth.RefreshToken, ExpiresAt: auth.ExpiresAt}, nil
-	}
+	return llmoauth.AnthropicRefreshFunc()
 }
 
 func (a *Adapter) ensureFreshOAuth(ctx context.Context, agent models.LLMConfig) (models.LLMConfig, error) {

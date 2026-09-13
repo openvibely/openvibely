@@ -63,6 +63,48 @@ func TestLLMConfigRepo_CreateDefaultAuthMethod(t *testing.T) {
 	}
 }
 
+func TestLLMConfigRepo_UpdateOAuthAccountIDPreservesCredentialsAndReauthState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{Name: "OAuth", Provider: models.ProviderOpenAI, Model: "gpt", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access", OAuthRefreshToken: "refresh", OAuthExpiresAt: 1900000000000}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	marked, err := repo.MarkOAuthNeedsReauthIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider)
+	if err != nil || !marked {
+		t.Fatalf("MarkOAuthNeedsReauthIfRevision = %v, %v", marked, err)
+	}
+	updated, err := repo.UpdateOAuthAccountIDIfRevision(ctx, cfg.ID, cfg.OAuthConfigRevision, cfg.Provider, "workspace")
+	if err != nil || !updated {
+		t.Fatalf("UpdateOAuthAccountIDIfRevision = %v, %v", updated, err)
+	}
+	loaded, err := repo.GetByID(ctx, cfg.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if loaded.OAuthAccessToken != "access" || loaded.OAuthRefreshToken != "refresh" || loaded.OAuthExpiresAt != 1900000000000 {
+		t.Fatalf("account identity update changed credentials: %#v", loaded)
+	}
+	if !loaded.OAuthNeedsReauth || loaded.OAuthAccountID != "workspace" {
+		t.Fatalf("account identity/re-auth state = %q/%v", loaded.OAuthAccountID, loaded.OAuthNeedsReauth)
+	}
+	cards, err := repo.ListCards(ctx)
+	if err != nil {
+		t.Fatalf("ListCards: %v", err)
+	}
+	var card *models.LLMConfig
+	for i := range cards {
+		if cards[i].ID == cfg.ID {
+			card = &cards[i]
+			break
+		}
+	}
+	if card == nil || !card.OAuthNeedsReauth || card.HasValidOAuthToken() {
+		t.Fatalf("model card did not retain reconnect-required state: %#v", cards)
+	}
+}
+
 func TestLLMConfigRepo_UpdateOAuthTokens(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

@@ -75,6 +75,9 @@ func oauthStatusText(agent models.LLMConfig) string {
 	if !agent.IsOAuth() {
 		return ""
 	}
+	if agent.OAuthNeedsReauth {
+		return "Reconnect Required"
+	}
 	if agent.HasValidOAuthToken() {
 		return "Connected"
 	}
@@ -87,6 +90,9 @@ func oauthStatusText(agent models.LLMConfig) string {
 func oauthStatusClass(agent models.LLMConfig) string {
 	if !agent.IsOAuth() {
 		return ""
+	}
+	if agent.OAuthNeedsReauth {
+		return "badge-error"
 	}
 	if agent.HasValidOAuthToken() {
 		return "badge-success"

@@ -48,6 +48,8 @@ var OpenAIChatGPTAPIBaseURL = "https://chatgpt.com/backend-api/codex/"
 // It is a variable so tests can override it.
 var OpenAIOAuthTokenURL = "https://auth.openai.com/oauth/token"
 
+var oauthHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 var defaultHTTPClient = &http.Client{
 	Timeout: defaultModelRequestTimeout,
 	Transport: &loggingRoundTripper{
@@ -422,25 +424,36 @@ func (c *Client) EnsureValidToken() error {
 
 // RefreshToken refreshes an OAuth access token using a refresh token.
 func RefreshToken(refreshToken string) (*StoredAuth, error) {
+	return RefreshTokenContext(context.Background(), refreshToken)
+}
+
+// RefreshTokenContext refreshes an OAuth access token with caller cancellation.
+func RefreshTokenContext(ctx context.Context, refreshToken string) (*StoredAuth, error) {
 	values := url.Values{}
 	values.Set("grant_type", "refresh_token")
 	values.Set("refresh_token", refreshToken)
 	values.Set("client_id", openAIOAuthClientID)
 
-	req, err := http.NewRequest(http.MethodPost, OpenAIOAuthTokenURL, strings.NewReader(values.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, OpenAIOAuthTokenURL, strings.NewReader(values.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create refresh request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := defaultHTTPClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", wrapNetworkError(err))
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		var providerError struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &providerError) == nil && providerError.Error == "invalid_grant" {
+			return nil, fmt.Errorf("%w: OAuth refresh failed with HTTP %d", ErrOAuthReauthenticationRequired, resp.StatusCode)
+		}
 		if resp.StatusCode == 401 || resp.StatusCode == 403 {
 			return nil, fmt.Errorf("%w: OAuth refresh failed with HTTP %d", ErrTokenExpired, resp.StatusCode)
 		}

@@ -688,13 +688,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 }
 
 func (a *Adapter) openAIRefreshFunc() llmoauth.RefreshFunc {
-	return func(ctx context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
-		auth, err := openaiclient.RefreshToken(cfg.OAuthRefreshToken)
-		if err != nil {
-			return llmoauth.TokenSet{}, err
-		}
-		return llmoauth.TokenSet{AccessToken: auth.Token, RefreshToken: auth.RefreshToken, ExpiresAt: auth.ExpiresAt, AccountID: cfg.OAuthAccountID}, nil
-	}
+	return llmoauth.OpenAIRefreshFunc()
 }
 
 func (a *Adapter) ensureFreshOAuth(ctx context.Context, agent models.LLMConfig) (models.LLMConfig, error) {
