@@ -562,6 +562,11 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		}
 		latest, shouldRefresh := latestAccountSnapshotForConfig(ctx, s.usageRepo, cfg, force)
 		if !shouldRefresh {
+			if latest != nil && isAccountRefreshFailure(latest.RateLimitReachedType) {
+				// Failure cooldown belongs to the credential/config that produced it.
+				// Let a healthy sibling for the same account remain eligible.
+				continue
+			}
 			seenAccounts[key] = true
 			delete(pendingFailures, key)
 			continue
@@ -626,6 +631,11 @@ func latestAccountSnapshotForConfig(ctx context.Context, usageRepo *repository.U
 	for i := range snapshots {
 		snapshot := &snapshots[i]
 		if !snapshotMatchesConfigAccount(*snapshot, cfg) {
+			continue
+		}
+		if isAccountRefreshFailure(snapshot.RateLimitReachedType) && strings.TrimSpace(snapshot.AgentConfigID) != strings.TrimSpace(cfg.ID) {
+			// Account identity is shared, but a refresh failure is config-scoped.
+			// Ignore sibling failures when deciding this config's cooldown.
 			continue
 		}
 		age := time.Since(snapshot.FetchedAt)

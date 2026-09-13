@@ -905,6 +905,96 @@ func TestUsageAnalyticsService_SharedAccountFailureFallsBackToHealthyConfig(t *t
 	}
 }
 
+func TestUsageAnalyticsService_SharedAccountRecentFailureDoesNotSuppressHealthyConfig(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			first := &models.LLMConfig{
+				Name:              "A Reconnect Required",
+				Provider:          provider,
+				Model:             "model-one",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "failed-access",
+				OAuthRefreshToken: "failed-refresh",
+				OAuthExpiresAt:    time.Now().Add(-time.Hour).UnixMilli(),
+				OAuthAccountID:    "shared-account",
+			}
+			if err := configRepo.Create(ctx, first); err != nil {
+				t.Fatalf("create reconnect-required config: %v", err)
+			}
+			marked, err := configRepo.MarkOAuthNeedsReauthIfRevision(ctx, first.ID, first.OAuthConfigRevision, first.Provider)
+			if err != nil || !marked {
+				t.Fatalf("mark reconnect-required config = %v, %v", marked, err)
+			}
+			second := &models.LLMConfig{
+				Name:              "B Healthy",
+				Provider:          provider,
+				Model:             "model-two",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "healthy-access",
+				OAuthRefreshToken: "healthy-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "shared-account",
+			}
+			if err := configRepo.Create(ctx, second); err != nil {
+				t.Fatalf("create healthy config: %v", err)
+			}
+			if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+				Provider:             string(provider),
+				AccountID:            "shared-account",
+				AgentConfigID:        first.ID,
+				RateLimitReachedType: "refresh_failed_reauthentication_required",
+				RawJSON:              `{"error":"refresh_failed_reauthentication_required"}`,
+			}); err != nil {
+				t.Fatalf("create recent failed snapshot: %v", err)
+			}
+
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			var fetchedConfigIDs []string
+			svc.SetAccountUsageFetcher(func(_ context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				fetchedConfigIDs = append(fetchedConfigIDs, cfg.ID)
+				pct := 9.0
+				return &models.AccountUsageSnapshot{
+					Provider:             string(provider),
+					AccountID:            cfg.OAuthAccountID,
+					AgentConfigID:        cfg.ID,
+					SecondaryLabel:       "weekly limit",
+					SecondaryUsedPercent: &pct,
+				}, nil
+			})
+
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+			if err != nil {
+				t.Fatalf("BuildAnalyticsUsage: %v", err)
+			}
+			if len(fetchedConfigIDs) != 1 || fetchedConfigIDs[0] != second.ID {
+				t.Fatalf("account refresh candidates = %v, want only healthy sibling %s", fetchedConfigIDs, second.ID)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].AgentConfigID != second.ID || view.AccountLimits[0].Error != "" {
+				t.Fatalf("healthy sibling did not replace recent shared-account failure: %+v", view.AccountLimits)
+			}
+			loadedFirst, err := configRepo.GetByID(ctx, first.ID)
+			if err != nil {
+				t.Fatalf("load reconnect-required config: %v", err)
+			}
+			if !loadedFirst.OAuthNeedsReauth || loadedFirst.OAuthAccessToken != "failed-access" || loadedFirst.OAuthRefreshToken != "failed-refresh" {
+				t.Fatalf("reconnect-required credentials/state changed: %+v", loadedFirst)
+			}
+			loadedSecond, err := configRepo.GetByID(ctx, second.ID)
+			if err != nil {
+				t.Fatalf("load healthy config: %v", err)
+			}
+			if loadedSecond.OAuthNeedsReauth || loadedSecond.OAuthAccessToken != "healthy-access" || loadedSecond.OAuthRefreshToken != "healthy-refresh" {
+				t.Fatalf("healthy sibling credentials/state changed: %+v", loadedSecond)
+			}
+		})
+	}
+}
+
 func TestUsageAnalyticsService_RefreshKeepsDuplicateAccountCredentialsIsolated(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
