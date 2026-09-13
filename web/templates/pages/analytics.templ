@@ -378,6 +378,10 @@ templ analyticsContent(currentProject *models.Project) {
 							document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.classList.toggle('btn-primary', button.dataset.analyticsView === selectedView); });
 								if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));						}
 
+						function clearEvidenceParams(params) {
+							['evidence','model','model_id','category','period','technical_status','cycleDistribution','followupDistribution'].forEach(function(key) { params.delete(key); });
+							return params;
+						}
 						function ratioText(value) { return formatNumber(value.numerator) + ' / ' + formatNumber(value.denominator) + ' (' + Number(value.percent || 0).toFixed(1) + '%)'; }
 						function cycleBucket(value) { value=Number(value||0); if(value<60000)return '< 1m'; if(value<600000)return '1-10m'; if(value<3600000)return '10-60m'; if(value<86400000)return '1-24h'; return '>= 24h'; }
 						function followupBucket(value) { value=Number(value||0); return value>=3?'3+':String(value); }
@@ -405,34 +409,44 @@ templ analyticsContent(currentProject *models.Project) {
 								if (previous && card.kind === 'ratio' && previous[card.key] && current[card.key]) { const change = Number(current[card.key].percent || 0) - Number(previous[card.key].percent || 0); delta = (change >= 0 ? '+' : '') + change.toFixed(1) + ' percentage points; previous ' + Number(previous[card.key].percent || 0).toFixed(1) + '%; n=' + previous[card.key].denominator; }
 								if (previous && (card.kind === 'duration' || card.kind === 'p90')) { const field=card.kind==='p90'?'p90_cycle_time_ms':'median_cycle_time_ms'; const change = Number(current[field] || 0) - Number(previous[field] || 0); delta = (change >= 0 ? '+' : '-') + formatDuration(Math.abs(change)) + '; previous ' + formatDuration(previous[field] || 0) + '; n=' + (previous.cycle_sample_size || 0); }
 								if (previous && card.kind === 'cost') { delta = previous.known_cost_per_achieved_goal ? 'previous ' + costCoverageText(previous.known_cost_per_achieved_goal) : 'previous unavailable'; }
-								const params = new URLSearchParams(window.location.search); params.set('view', card.key === 'known_cost_per_achieved_goal' ? 'usage' : 'outcomes'); params.set('evidence', card.key);
+								const params = clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view', 'outcomes'); params.set('evidence', card.key);
 								return '<a class="card bg-base-100 border border-base-300 hover:border-primary" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-4"><div class="text-sm font-semibold">' + escapeHTML(card.label) + '</div><div class="text-xl font-bold">' + escapeHTML(card.value) + '</div><div class="text-xs opacity-60">sample n=' + card.sample + (delta ? ' · ' + escapeHTML(delta) : '') + '</div><div class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator</div></div></a>';
 							}).join('');
-							const recent = data.recent_outcomes || [];
-								document.getElementById('recentOutcomesTable').innerHTML = recent.length ? recent.map(function(row) {
+								const recent = data.recent_outcomes || [];
+								const recentStarted = recent.filter(function(row) { return row.started_in_period === true; });
+								document.getElementById('recentOutcomesTable').innerHTML = recentStarted.length ? recentStarted.map(function(row) {
 									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
 									const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name);
 									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(row.technical_result) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.merge_state || 'Not applicable') + '</td><td>' + agent + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
 								}).join('') : '<tr><td colspan="10" class="text-center opacity-50">No task outcomes in this period</td></tr>';
 								const evidenceParams = new URLSearchParams(window.location.search);
 								const evidenceKey = evidenceParams.get('evidence') || '';
-								const evidenceValue = evidenceParams.get('model') || evidenceParams.get('period') || '';
+								const evidenceValue = evidenceParams.get('model_id') || evidenceParams.get('model') || evidenceParams.get('period') || '';
 								const evidence = recent.filter(function(row) {
-									if (evidenceParams.get('model') && row.model !== evidenceParams.get('model')) return false;
+									if (evidenceParams.get('model_id') && !(row.model_config_ids || []).includes(evidenceParams.get('model_id'))) return false;
+									if (!evidenceParams.get('model_id') && evidenceParams.get('model') && row.model !== evidenceParams.get('model')) return false;
 									if (evidenceParams.get('category') && row.category !== evidenceParams.get('category')) return false;
-									if (evidenceParams.get('period') && row.evidence_period !== evidenceParams.get('period')) return false;
+									const selectedPeriod = evidenceParams.get('period') || '';
+									const terminalEvidence = row.terminal_period_statuses || [];
+									if (selectedPeriod && evidenceKey === 'technical_status' && !terminalEvidence.includes(selectedPeriod + '|' + evidenceParams.get('technical_status'))) return false;
+									if (selectedPeriod && evidenceKey === 'period' && !terminalEvidence.some(function(value) { return value.startsWith(selectedPeriod + '|'); })) return false;
 									switch (evidenceKey) {
-									case 'technical_completion': case 'technical_completed': return Number(row.period_completed_count || 0) > 0;
+									case 'technical_completion': return Number(row.period_completed_count || 0) > 0;
+									case 'technical_completed': return row.created_in_period === true && row.funnel_technical_completed === true;
 									case 'technical_status': return Number(row['period_' + evidenceParams.get('technical_status') + '_count'] || 0) > 0;
-									case 'goal_achievement': case 'goal_achieved': return row.goal_achievement_eligible === true && row.goal_achieved_in_period === true;
+									case 'goal_achievement': return row.goal_achievement_eligible === true && row.goal_achieved_in_period === true;
+									case 'goal_achieved': return row.created_in_period === true && row.funnel_goal_eligible === true && row.funnel_goal_achieved === true;
 									case 'first_pass': return row.first_pass_eligible === true && row.first_pass_completed === true;
-									case 'follow_up': return Number(row.follow_up_count || 0) > 0;
+									case 'follow_up': return row.started_in_period === true && Number(row.follow_up_count || 0) > 0;
 									case 'cancelled_executions': return Number(row.period_cancelled_count || 0) > 0;
-									case 'known_cost_per_achieved_goal': return row.goal_result === 'achieved' && row.known_cost_usd != null;
+									case 'known_cost_per_achieved_goal': return row.known_cost_eligible === true;
+									case 'median_cycle_time': case 'cycle_time_p90': return row.cycle_eligible === true;
+									case 'sample_size': return row.started_in_period === true;
 									case 'created': return row.created_in_period === true;
-									case 'merged': return row.merge_state === 'merged';
-									case 'cycleDistribution': return cycleBucket(row.cycle_time_ms || 0) === evidenceParams.get('cycleDistribution');
-									case 'followupDistribution': return followupBucket(row.follow_up_count || 0) === evidenceParams.get('followupDistribution');
+									case 'started': return row.created_in_period === true && row.started_in_period === true;
+									case 'merged': return row.funnel_merge_eligible === true && row.funnel_merged === true;
+									case 'cycleDistribution': return row.cycle_eligible === true && cycleBucket(row.cycle_time_ms || 0) === evidenceParams.get('cycleDistribution');
+									case 'followupDistribution': return row.cycle_eligible === true && followupBucket(row.follow_up_count || 0) === evidenceParams.get('followupDistribution');
 									default: return true;
 									}
 								});
@@ -446,7 +460,7 @@ templ analyticsContent(currentProject *models.Project) {
 								document.getElementById('outcomeEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) {
 									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
 									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(evidenceTechnicalResult(row)) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(formatDuration(row.cycle_time_ms || 0)) + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
-								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { const params=new URLSearchParams(window.location.search); params.set('view','outcomes'); params.set('evidence',stage.key); return '<a class="card bg-base-200" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
+								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { const params=clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view','outcomes'); params.set('evidence',stage.key); return '<a class="card bg-base-200" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
 							renderDistributionChart('cycleDistribution', 'cycleDistributionChart', data.cycle_distribution || []);
 							renderDistributionChart('followupDistribution', 'followupDistributionChart', data.follow_up_distribution || []);
 								renderAgentPerformance(data.agents || []);
@@ -480,7 +494,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const evidence = ((latestDashboard && latestDashboard.recent_outcomes) || []).filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								document.getElementById('agentEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) { const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID); return '<tr><td><a class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'</a></td><td>'+escapeHTML(row.technical_result)+'</td><td>'+escapeHTML(row.goal_result||'Not goal-bearing')+'</td><td>'+escapeHTML(row.model)+'</td><td>'+row.execution_count+'</td><td>'+row.follow_up_count+'</td></tr>'; }).join('') : '<tr><td colspan="6" class="text-center opacity-50">No recent supporting tasks in this period</td></tr>';						}
 							function navigateEvidence(view, key, value, extra) {
-								const params = new URLSearchParams(window.location.search);
+								const params = clearEvidenceParams(new URLSearchParams(window.location.search));
 								params.set('view', view);
 								params.set('evidence', key);
 								if (value !== undefined && value !== null && value !== '') params.set(key, value); else params.delete(key);
@@ -495,7 +509,7 @@ templ analyticsContent(currentProject *models.Project) {
 								if (canvas) charts.agentOutcomeTrend = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:trend.map(r=>r.period),datasets:[{label:'Completed',data:trend.map(r=>r.completed),backgroundColor:'rgba(34,197,94,.65)'},{label:'Failed',data:trend.map(r=>r.failed),backgroundColor:'rgba(239,68,68,.65)'},{label:'Cancelled',data:trend.map(r=>r.cancelled),backgroundColor:'rgba(245,158,11,.65)'}]},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const item=items[0];const status=['completed','failed','cancelled'][item.datasetIndex];navigateEvidence('outcomes','technical_status',status,{period:trend[item.index].period});}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+trend[items[0].dataIndex].sample_size:'';}}}},scales:{y:{beginAtZero:true}}}});
 								const mix = detail ? (detail.model_mix || []) : [];
 								canvas = renderChartState('agentModelMix', 'agentModelMixChart', mix, 'Select an Agent to see its model mix');
-								if (canvas) charts.agentModelMix = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:mix.map(r=>r.model),datasets:[{label:'Executions',data:mix.map(r=>r.execution_count),backgroundColor:'rgba(59,130,246,.65)'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model',mix[items[0].index].model);},scales:{x:{beginAtZero:true}}}});
+								if (canvas) charts.agentModelMix = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:mix.map(r=>r.model),datasets:[{label:'Executions',data:mix.map(r=>r.execution_count),backgroundColor:'rgba(59,130,246,.65)'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model_id',mix[items[0].index].model_config_id);},scales:{x:{beginAtZero:true}}}});
 								function rowsOrEmpty(id, rows, columns, render) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(render).join(''):'<tr><td colspan="'+columns+'" class="text-center opacity-50">'+(detail?'No evidence in this period':'Select an Agent to inspect evidence')+'</td></tr>'; }
 								rowsOrEmpty('agentCategoryTable',detail?(detail.categories||[]):[],5,function(row){return '<tr><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});
 								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.task_title)+'</a></td><td>'+row.failure_count+'</td><td>'+escapeHTML(row.last_error||'Unavailable')+'</td></tr>';});
@@ -503,8 +517,8 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function renderModelCategories(rows) {
 								const table=document.getElementById('modelCategoryTable'); if(!table)return;
-								table.innerHTML=rows.length?rows.map(function(row){return '<tr data-model="'+escapeHTML(row.model)+'"><td><button class="link" type="button" data-model-evidence="'+escapeHTML(row.model)+'" data-category-evidence="'+escapeHTML(row.category)+'">'+escapeHTML(row.model)+'</button></td><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td></tr>';}).join(''):'<tr><td colspan="4" class="text-center opacity-50">No model/category evidence in this period</td></tr>';
-								table.querySelectorAll('[data-model-evidence]').forEach(function(button){button.addEventListener('click',function(){navigateEvidence('outcomes','model',button.dataset.modelEvidence,{category:button.dataset.categoryEvidence});},{signal:eventSignal});});
+								table.innerHTML=rows.length?rows.map(function(row){return '<tr data-model-id="'+escapeHTML(row.model_config_id)+'"><td><button class="link" type="button" data-model-evidence="'+escapeHTML(row.model_config_id)+'" data-category-evidence="'+escapeHTML(row.category)+'">'+escapeHTML(row.model)+'</button></td><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td></tr>';}).join(''):'<tr><td colspan="4" class="text-center opacity-50">No model/category evidence in this period</td></tr>';
+								table.querySelectorAll('[data-model-evidence]').forEach(function(button){button.addEventListener('click',function(){navigateEvidence('outcomes','model_id',button.dataset.modelEvidence,{category:button.dataset.categoryEvidence});},{signal:eventSignal});});
 							}
 							function renderSkillOutcomes(rows) {
 								const table = document.getElementById('skillOutcomeTable');
@@ -527,7 +541,7 @@ templ analyticsContent(currentProject *models.Project) {
 							render('workflowFailureTable',detail?(detail.failures||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.count+'</td><td>'+escapeHTML(row.last_failure?new Date(row.last_failure).toLocaleString():'Unavailable')+'</td></tr>';},'No node failures in this period');
 							render('workflowBottleneckTable',detail?(detail.bottlenecks||[]):[],3,function(row){return '<tr><td>'+escapeHTML(row.node_name)+'</td><td>'+row.waiting+'</td><td>'+row.blocked+'</td></tr>';},'No current bottlenecks');
 						}
-						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){const params=new URLSearchParams(window.location.search);params.set('view',row.evidence_view||'outcomes');params.set('evidence',row.metric_key);if(row.evidence_id&&row.metric_key==='workflow_blocked')params.set('workflow',row.evidence_id);return '<a class="block link" href="/analytics?'+escapeHTML(params.toString())+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
+						function renderInsights(rows) { ['improvement', 'attention'].forEach(function(kind) { const target=document.getElementById(kind === 'improvement' ? 'analyticsImprovements' : 'analyticsAttention'); const items=rows.filter(function(row){return row.kind===kind;}); target.innerHTML=items.length?items.map(function(row){const params=clearEvidenceParams(new URLSearchParams(window.location.search));params.set('view',row.evidence_view||'outcomes');params.set('evidence',row.metric_key);if(row.evidence_id&&row.metric_key==='workflow_blocked')params.set('workflow',row.evidence_id);return '<a class="block link" href="/analytics?'+escapeHTML(params.toString())+'"><strong>'+escapeHTML(row.title)+'</strong><br><span>'+escapeHTML(row.detail)+' n='+row.sample_size+' · '+escapeHTML(row.comparison_window)+'</span></a>';}).join(''):'<p class="opacity-50">No supported '+(kind==='improvement'?'improvement':'attention')+' insight at the minimum sample size.</p>'; }); }
 
 						async function loadDashboard() {
 							const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, compare: document.getElementById('comparePeriod').checked ? '1' : '0' });

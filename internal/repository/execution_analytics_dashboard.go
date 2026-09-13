@@ -30,12 +30,12 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "goal_achievement", Label: "Goal achievement rate", Definition: "Tasks with an achieved persisted goal divided by goal-bearing tasks that reached an evaluable task or goal state.", Denominator: "Non-cleared goal-bearing tasks whose task is terminal or whose goal is achieved or failed."},
 	{Key: "first_pass", Label: "Technical first-pass rate", Definition: "Tasks whose first terminal execution completed divided by tasks with at least one terminal execution.", Denominator: "Tasks with a completed, failed, or cancelled execution in the selected period."},
 	{Key: "follow_up", Label: "Follow-up rate", Definition: "Tasks with at least one follow-up execution divided by tasks with at least one execution.", Denominator: "Tasks with an execution in the selected period."},
-	{Key: "median_cycle_time", Label: "Median task cycle time", Definition: "Median elapsed time from a task's first execution start to its latest terminal execution in the selected period.", Denominator: "Tasks with both a first start and a terminal execution in the selected period."},
-	{Key: "known_cost_per_achieved_goal", Label: "Known cost per achieved goal", Definition: "Recorded cost associated with achieved-goal tasks divided only by achieved-goal tasks represented by that cost.", Denominator: "Achieved-goal tasks with at least one usage event containing recorded cost; coverage is disclosed separately."},
+	{Key: "median_cycle_time", Label: "Median task cycle time", Definition: "Median elapsed time from a task's historical first execution start to its latest terminal execution in the selected period.", Denominator: "Tasks with a terminal execution in the selected period and a persisted historical first execution start."},
+	{Key: "known_cost_per_achieved_goal", Label: "Known cost per achieved goal", Definition: "Selected-period recorded cost associated with tasks whose goal was achieved in the period, divided only by achieved-goal tasks represented by that cost.", Denominator: "Tasks with a selected-period execution, an achieved goal event in the period, and at least one selected-period usage event containing recorded cost; coverage is disclosed separately."},
 	{Key: "known_cost_per_completed_task", Label: "Known cost per technical completion", Definition: "Recorded task cost divided by technically completed tasks represented by that cost.", Denominator: "Technically completed tasks with recorded cost; cost coverage is disclosed."},
 	{Key: "known_failed_execution_cost", Label: "Known failed-execution cost", Definition: "Sum of recorded cost attached to failed executions.", Denominator: "Failed executions with recorded cost out of all failed executions; unavailable when none have recorded cost."},
 	{Key: "cancelled_executions", Label: "Cancelled executions", Definition: "Terminal executions explicitly cancelled in the selected period.", Denominator: "All terminal executions in the selected period."},
-	{Key: "cycle_time_p90", Label: "P90 task cycle time", Definition: "90th percentile elapsed time from first execution start to latest terminal execution.", Denominator: "Tasks with both a start and terminal execution in the selected period."},
+	{Key: "cycle_time_p90", Label: "P90 task cycle time", Definition: "90th percentile elapsed time from historical first execution start to latest terminal execution in the selected period.", Denominator: "Tasks with a terminal execution in the selected period and a persisted historical first execution start."},
 	{Key: "tokens_per_achieved_goal", Label: "Tokens per achieved goal", Definition: "Recorded tokens associated with achieved-goal tasks divided by represented achieved goals.", Denominator: "Achieved-goal tasks with usage records; coverage is disclosed."},
 	{Key: "agent_performance", Label: "Agent performance", Definition: "Task and execution outcomes attributed through tasks.agent_definition_id.", Denominator: "Selected-period tasks assigned to each reusable Agent definition, with unassigned work separate."},
 	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations.", Denominator: "Selected-period workflow invocations; waiting and blocked values are explicitly current state."},
@@ -268,10 +268,18 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 	out.GoalAchievement = metric(achieved, evaluable)
 	out.TasksEvaluated = tasks
 
-	cycleQuery := `SELECT COALESCE(CAST(MAX(0, (julianday(MAX(CASE WHEN e.status IN ('completed','failed','cancelled') THEN COALESCE(e.completed_at,e.started_at) END))-julianday(MIN(e.started_at)))*86400000) AS INTEGER),0),
-		SUM(CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END)
-		FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + ` GROUP BY e.task_id
-		HAVING MAX(CASE WHEN e.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END)=1`
+	cycleQuery := `WITH period_exec AS (
+		SELECT e.* FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + `
+	), terminal_tasks AS (
+		SELECT task_id,MAX(COALESCE(completed_at,started_at)) terminal_at FROM period_exec
+		WHERE status IN ('completed','failed','cancelled') GROUP BY task_id
+	), historical_start AS (
+		SELECT e.task_id,MIN(e.started_at) first_started_at FROM executions e JOIN terminal_tasks p ON p.task_id=e.task_id GROUP BY e.task_id
+	), period_followups AS (
+		SELECT task_id,SUM(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followups FROM period_exec GROUP BY task_id
+	)
+	SELECT COALESCE(CAST(MAX(0,(julianday(p.terminal_at)-julianday(h.first_started_at))*86400000) AS INTEGER),0),COALESCE(f.followups,0)
+	FROM terminal_tasks p JOIN historical_start h ON h.task_id=p.task_id LEFT JOIN period_followups f ON f.task_id=p.task_id`
 	cycleArgs := append([]any{filter.ProjectID}, dimensionArgs...)
 	cycleArgs = append(cycleArgs, windowArgs...)
 	rows, err := r.db.QueryContext(ctx, cycleQuery, cycleArgs...)
@@ -637,30 +645,75 @@ func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter Ana
 
 func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.EvidenceTaskRow, error) {
 	window, windowArgs := analyticsWindowClause("e", filter)
+	taskWindow, taskWindowArgs := analyticsTaskWindowClause("t", filter)
 	goalWindow, goalWindowArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	usageWindow, usageWindowArgs := analyticsEventWindowClause("llm_usage_events", "occurred_at", filter)
-	dimension, dimensionArgs := analyticsTaskDimensionClause("x", filter)
+	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
 	periodExpr := analyticsPeriodExpression(filter.GroupBy, "MAX(p.started_at)")
-	query := `WITH period_exec AS (SELECT e.* FROM executions e JOIN tasks x ON x.id=e.task_id WHERE x.project_id=?` + dimension + window + `),
-		period_task_ids AS (SELECT DISTINCT task_id FROM period_exec),
+	terminalPeriodExpr := analyticsPeriodExpression(filter.GroupBy, "started_at")
+	query := `WITH scoped_tasks AS (
+			SELECT t.* FROM tasks t WHERE t.project_id=?` + dimension + `
+		), period_exec AS (
+			SELECT e.* FROM executions e JOIN scoped_tasks t ON t.id=e.task_id WHERE 1=1` + window + `
+		), period_task_ids AS (SELECT DISTINCT task_id FROM period_exec),
+		created_task_ids AS (SELECT t.id task_id FROM scoped_tasks t WHERE 1=1` + taskWindow + `),
 		period_terminal_task_ids AS (SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')),
-		historical_terminal AS (SELECT e.task_id,e.status,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn FROM executions e JOIN period_task_ids p ON p.task_id=e.task_id WHERE e.status IN ('completed','failed','cancelled')),
-		evaluable_goals AS (
+		historical_terminal AS (
+			SELECT e.task_id,e.status,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn
+			FROM executions e JOIN period_terminal_task_ids p ON p.task_id=e.task_id WHERE e.status IN ('completed','failed','cancelled')
+		), historical_start AS (
+			SELECT e.task_id,MIN(e.started_at) first_started_at FROM executions e JOIN period_terminal_task_ids p ON p.task_id=e.task_id GROUP BY e.task_id
+		), evaluable_goals AS (
 			SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
 			UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_task_ids p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
-		),
-		usage AS (SELECT task_id,SUM(cost_usd) cost,MAX(CASE WHEN cost_usd IS NOT NULL THEN 1 ELSE 0 END) known FROM llm_usage_events WHERE project_id=?` + usageWindow + ` GROUP BY task_id)
-	SELECT t.id,t.title,COALESCE((SELECT pe.status FROM period_exec pe WHERE pe.task_id=t.id ORDER BY pe.started_at DESC,pe.history_order DESC,pe.id DESC LIMIT 1),t.status),COALESCE(g.status,''),t.merge_status,COALESCE(a.id,''),COALESCE(a.name,'Unassigned / Auto-routed'),
-		COALESCE((SELECT ac.name || ' (' || ac.model || ')' FROM period_exec pe LEFT JOIN agent_configs ac ON ac.id=pe.agent_config_id WHERE pe.task_id=t.id ORDER BY pe.started_at DESC,pe.history_order DESC LIMIT 1),'Unknown'),t.category,
-		COALESCE((SELECT ht.status FROM historical_terminal ht WHERE ht.task_id=t.id AND ht.rn=1),'') first_terminal_status,t.created_at,MAX(p.started_at),` + periodExpr + `,
-		COUNT(p.id),SUM(CASE WHEN p.status='completed' THEN 1 ELSE 0 END),SUM(CASE WHEN p.status='failed' THEN 1 ELSE 0 END),SUM(CASE WHEN p.status='cancelled' THEN 1 ELSE 0 END),SUM(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END),
-		COALESCE(CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(MIN(p.started_at)))*86400000) AS INTEGER),0),
-		CASE WHEN MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END)=1 THEN 1 ELSE 0 END,
-		CASE WHEN eg.task_id IS NOT NULL THEN 1 ELSE 0 END,CASE WHEN eg.status='achieved' THEN 1 ELSE 0 END,u.cost,u.known
-	FROM tasks t JOIN period_exec p ON p.task_id=t.id LEFT JOIN task_goals g ON g.task_id=t.id LEFT JOIN evaluable_goals eg ON eg.task_id=t.id LEFT JOIN agents a ON a.id=t.agent_definition_id LEFT JOIN usage u ON u.task_id=t.id
-	GROUP BY t.id ORDER BY MAX(p.started_at) DESC,t.id DESC LIMIT ?`
+		), evidence_task_ids AS (
+			SELECT task_id FROM period_task_ids UNION SELECT task_id FROM created_task_ids UNION SELECT task_id FROM evaluable_goals
+		), usage AS (
+			SELECT task_id,SUM(cost_usd) cost,MAX(CASE WHEN cost_usd IS NOT NULL THEN 1 ELSE 0 END) known
+			FROM llm_usage_events WHERE project_id=?` + usageWindow + ` GROUP BY task_id
+		), model_ids AS (
+			SELECT task_id,GROUP_CONCAT(DISTINCT agent_config_id) ids FROM period_exec GROUP BY task_id
+		), terminal_evidence AS (
+			SELECT task_id,GROUP_CONCAT(DISTINCT (` + terminalPeriodExpr + ` || '|' || status)) statuses
+			FROM period_exec WHERE status IN ('completed','failed','cancelled') GROUP BY task_id
+		)
+	SELECT t.id,t.title,
+		COALESCE((SELECT pe.status FROM period_exec pe WHERE pe.task_id=t.id ORDER BY pe.started_at DESC,pe.history_order DESC,pe.id DESC LIMIT 1),t.status),
+		COALESCE(g.status,''),t.merge_status,COALESCE(a.id,''),COALESCE(a.name,'Unassigned / Auto-routed'),
+		COALESCE((SELECT ac.name || ' (' || ac.model || ')' FROM period_exec pe LEFT JOIN agent_configs ac ON ac.id=pe.agent_config_id WHERE pe.task_id=t.id ORDER BY pe.started_at DESC,pe.history_order DESC LIMIT 1),'Unknown'),
+		t.category,COALESCE((SELECT ht.status FROM historical_terminal ht WHERE ht.task_id=t.id AND ht.rn=1),''),t.created_at,
+		COALESCE(MAX(p.started_at),''),COALESCE(` + periodExpr + `,''),COUNT(p.id),
+		COALESCE(SUM(CASE WHEN p.status='completed' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN p.status='failed' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN p.status='cancelled' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END),0),
+		COALESCE(CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(hs.first_started_at))*86400000) AS INTEGER),0),
+		CASE WHEN pt.task_id IS NOT NULL THEN 1 ELSE 0 END,
+		CASE WHEN eg.task_id IS NOT NULL THEN 1 ELSE 0 END,
+		CASE WHEN eg.status='achieved' THEN 1 ELSE 0 END,
+		CASE WHEN COUNT(p.id)>0 THEN 1 ELSE 0 END,
+		CASE WHEN ct.task_id IS NOT NULL AND SUM(CASE WHEN p.status='completed' THEN 1 ELSE 0 END)>0 THEN 1 ELSE 0 END,
+		CASE WHEN ct.task_id IS NOT NULL AND g.task_id IS NOT NULL AND g.status<>'cleared' THEN 1 ELSE 0 END,
+		CASE WHEN ct.task_id IS NOT NULL AND eg.status='achieved' THEN 1 ELSE 0 END,
+		CASE WHEN ct.task_id IS NOT NULL AND t.worktree_path<>'' THEN 1 ELSE 0 END,
+		CASE WHEN ct.task_id IS NOT NULL AND t.worktree_path<>'' AND t.merge_status='merged' THEN 1 ELSE 0 END,
+		CASE WHEN pt.task_id IS NOT NULL AND hs.first_started_at IS NOT NULL THEN 1 ELSE 0 END,
+		u.cost,u.known,COALESCE(mi.ids,''),COALESCE(te.statuses,'')
+	FROM scoped_tasks t JOIN evidence_task_ids eti ON eti.task_id=t.id
+	LEFT JOIN period_exec p ON p.task_id=t.id
+	LEFT JOIN period_terminal_task_ids pt ON pt.task_id=t.id
+	LEFT JOIN created_task_ids ct ON ct.task_id=t.id
+	LEFT JOIN historical_start hs ON hs.task_id=t.id
+	LEFT JOIN task_goals g ON g.task_id=t.id
+	LEFT JOIN evaluable_goals eg ON eg.task_id=t.id
+	LEFT JOIN agents a ON a.id=t.agent_definition_id
+	LEFT JOIN usage u ON u.task_id=t.id
+	LEFT JOIN model_ids mi ON mi.task_id=t.id
+	LEFT JOIN terminal_evidence te ON te.task_id=t.id
+	GROUP BY t.id ORDER BY COALESCE(MAX(p.started_at),t.created_at) DESC,t.id DESC LIMIT ?`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, windowArgs...)
+	args = append(args, taskWindowArgs...)
 	args = append(args, goalWindowArgs...)
 	args = append(args, filter.ProjectID)
 	args = append(args, usageWindowArgs...)
@@ -675,17 +728,28 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 		var row models.EvidenceTaskRow
 		var cost sql.NullFloat64
 		var known sql.NullInt64
-		var firstTerminalStatus, createdAt string
-		if err := rows.Scan(&row.TaskID, &row.TaskTitle, &row.TechnicalResult, &row.GoalResult, &row.MergeState, &row.AgentID, &row.AgentName, &row.Model, &row.Category, &firstTerminalStatus, &createdAt, &row.LatestStartedAt, &row.EvidencePeriod, &row.ExecutionCount, &row.PeriodCompletedCount, &row.PeriodFailedCount, &row.PeriodCancelledCount, &row.FollowUpCount, &row.CycleTimeMs, &row.FirstPassEligible, &row.GoalAchievementEligible, &row.GoalAchievedInPeriod, &cost, &known); err != nil {
+		var firstTerminalStatus, createdAt, modelIDs, terminalStatuses string
+		if err := rows.Scan(&row.TaskID, &row.TaskTitle, &row.TechnicalResult, &row.GoalResult, &row.MergeState, &row.AgentID, &row.AgentName, &row.Model, &row.Category, &firstTerminalStatus, &createdAt, &row.LatestStartedAt, &row.EvidencePeriod, &row.ExecutionCount, &row.PeriodCompletedCount, &row.PeriodFailedCount, &row.PeriodCancelledCount, &row.FollowUpCount, &row.CycleTimeMs, &row.FirstPassEligible, &row.GoalAchievementEligible, &row.GoalAchievedInPeriod, &row.StartedInPeriod, &row.FunnelTechnicalCompleted, &row.FunnelGoalEligible, &row.FunnelGoalAchieved, &row.FunnelMergeEligible, &row.FunnelMerged, &row.CycleEligible, &cost, &known, &modelIDs, &terminalStatuses); err != nil {
 			return nil, err
 		}
 		row.FirstPassCompleted = row.FirstPassEligible && firstTerminalStatus == "completed"
 		created := parseSQLiteTime(createdAt)
 		row.CreatedInPeriod = (filter.DateFrom.IsZero() || !created.Before(filter.DateFrom)) && (filter.DateTo.IsZero() || created.Before(filter.DateTo))
+		if modelIDs != "" {
+			row.ModelConfigIDs = strings.Split(modelIDs, ",")
+		} else {
+			row.ModelConfigIDs = []string{}
+		}
+		if terminalStatuses != "" {
+			row.TerminalPeriodStatuses = strings.Split(terminalStatuses, ",")
+		} else {
+			row.TerminalPeriodStatuses = []string{}
+		}
 		if known.Valid && known.Int64 > 0 && cost.Valid {
 			value := cost.Float64
 			row.KnownCostUSD = &value
 		}
+		row.KnownCostEligible = row.StartedInPeriod && row.GoalAchievedInPeriod && row.KnownCostUSD != nil
 		result = append(result, row)
 	}
 	return result, rows.Err()
@@ -694,11 +758,11 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.ModelCategoryPerformance, error) {
 	window, windowArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
-	query := `SELECT COALESCE(ac.name || ' (' || ac.model || ')',e.agent_config_id,'Unknown'),COALESCE(t.category,''),
+	query := `SELECT COALESCE(e.agent_config_id,''),COALESCE(ac.name || ' (' || ac.model || ')',e.agent_config_id,'Unknown'),COALESCE(t.category,''),
 		COUNT(DISTINCT e.task_id),SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN e.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END)
 		FROM executions e JOIN tasks t ON t.id=e.task_id LEFT JOIN agent_configs ac ON ac.id=e.agent_config_id
-		WHERE t.project_id=?` + dimension + window + ` GROUP BY 1,2 HAVING COUNT(*)>0 ORDER BY COUNT(*) DESC,1,2 LIMIT 50`
+		WHERE t.project_id=?` + dimension + window + ` GROUP BY e.agent_config_id,2,3 HAVING COUNT(*)>0 ORDER BY COUNT(*) DESC,2,3 LIMIT 50`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, windowArgs...)
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -710,7 +774,7 @@ func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filte
 	for rows.Next() {
 		var row models.ModelCategoryPerformance
 		var completed, terminal int
-		if err := rows.Scan(&row.Model, &row.Category, &row.TasksEvaluated, &completed, &terminal); err != nil {
+		if err := rows.Scan(&row.ModelConfigID, &row.Model, &row.Category, &row.TasksEvaluated, &completed, &terminal); err != nil {
 			return nil, err
 		}
 		if row.Category == "" {
@@ -785,7 +849,7 @@ func (r *ExecutionRepo) queryAgentAnalyticsDetail(ctx context.Context, filter An
 		return nil, err
 	}
 
-	query = `SELECT COALESCE(ac.name || ' (' || ac.model || ')',e.agent_config_id,'Unknown'),COUNT(*) FROM executions e JOIN tasks t ON t.id=e.task_id LEFT JOIN agent_configs ac ON ac.id=e.agent_config_id WHERE t.project_id=?` + dimension + window + ` GROUP BY 1 ORDER BY COUNT(*) DESC,1 LIMIT 20`
+	query = `SELECT COALESCE(e.agent_config_id,''),COALESCE(ac.name || ' (' || ac.model || ')',e.agent_config_id,'Unknown'),COUNT(*) FROM executions e JOIN tasks t ON t.id=e.task_id LEFT JOIN agent_configs ac ON ac.id=e.agent_config_id WHERE t.project_id=?` + dimension + window + ` GROUP BY e.agent_config_id,2 ORDER BY COUNT(*) DESC,2 LIMIT 20`
 	args = append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, windowArgs...)
 	rows, err = r.db.QueryContext(ctx, query, args...)
@@ -794,7 +858,7 @@ func (r *ExecutionRepo) queryAgentAnalyticsDetail(ctx context.Context, filter An
 	}
 	for rows.Next() {
 		var row models.AnalyticsModelMix
-		if err := rows.Scan(&row.Model, &row.ExecutionCount); err != nil {
+		if err := rows.Scan(&row.ModelConfigID, &row.Model, &row.ExecutionCount); err != nil {
 			rows.Close()
 			return nil, err
 		}

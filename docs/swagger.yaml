@@ -379,6 +379,8 @@ definitions:
         type: integer
       model:
         type: string
+      model_config_id:
+        type: string
     type: object
   models.AnalyticsTrendPoint:
     properties:
@@ -512,6 +514,8 @@ definitions:
         type: string
       created_in_period:
         type: boolean
+      cycle_eligible:
+        type: boolean
       cycle_time_ms:
         type: integer
       evidence_period:
@@ -524,12 +528,24 @@ definitions:
         type: boolean
       follow_up_count:
         type: integer
+      funnel_goal_achieved:
+        type: boolean
+      funnel_goal_eligible:
+        type: boolean
+      funnel_merge_eligible:
+        type: boolean
+      funnel_merged:
+        type: boolean
+      funnel_technical_completed:
+        type: boolean
       goal_achieved_in_period:
         type: boolean
       goal_achievement_eligible:
         type: boolean
       goal_result:
         type: string
+      known_cost_eligible:
+        type: boolean
       known_cost_usd:
         type: number
       latest_started_at:
@@ -538,18 +554,28 @@ definitions:
         type: string
       model:
         type: string
+      model_config_ids:
+        items:
+          type: string
+        type: array
       period_cancelled_count:
         type: integer
       period_completed_count:
         type: integer
       period_failed_count:
         type: integer
+      started_in_period:
+        type: boolean
       task_id:
         type: string
       task_title:
         type: string
       technical_result:
         type: string
+      terminal_period_statuses:
+        items:
+          type: string
+        type: array
     type: object
   models.MergeStatus:
     enum:
@@ -581,6 +607,8 @@ definitions:
       category:
         type: string
       model:
+        type: string
+      model_config_id:
         type: string
       tasks_evaluated:
         type: integer
