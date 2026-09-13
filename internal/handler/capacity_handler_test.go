@@ -438,6 +438,85 @@ func TestHandler_ProjectCapacityCollectionAndDetailUseIdenticalMapping(t *testin
 	assertMatchingResponses(false, 0)
 }
 
+func TestHandler_ProjectCapacityCollectionAndDetailPreserveJSONBytes(t *testing.T) {
+	intPtr := func(value int) *int { return &value }
+	tests := []struct {
+		name            string
+		initialLimit    *int
+		updatedLimit    *int
+		running         int
+		wantMaxWorkers  *int
+		wantHasCapacity bool
+		wantSlots       *int
+	}{
+		{name: "nil limit", wantHasCapacity: true},
+		{name: "explicit zero limit", updatedLimit: intPtr(0), wantMaxWorkers: intPtr(0), wantHasCapacity: true},
+		{name: "spare finite limit", initialLimit: intPtr(3), running: 1, wantMaxWorkers: intPtr(3), wantHasCapacity: true, wantSlots: intPtr(2)},
+		{name: "at finite limit", initialLimit: intPtr(2), running: 2, wantMaxWorkers: intPtr(2), wantHasCapacity: false, wantSlots: intPtr(0)},
+		{name: "over finite limit", initialLimit: intPtr(2), updatedLimit: intPtr(1), running: 2, wantMaxWorkers: intPtr(1), wantHasCapacity: false, wantSlots: intPtr(0)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			project := &models.Project{Name: "Exact capacity " + tt.name, MaxWorkers: tt.initialLimit}
+			require.NoError(t, h.projectSvc.Create(ctx, project))
+			h.workerSvc.SetProjectRepo(h.projectRepo)
+
+			for i := 0; i < tt.running; i++ {
+				require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+			}
+			if tt.running > 0 {
+				defer func() {
+					for i := 0; i < tt.running; i++ {
+						h.workerSvc.ReleaseProjectSlot(project.ID)
+					}
+				}()
+			}
+
+			if tt.updatedLimit != nil {
+				project.MaxWorkers = tt.updatedLimit
+				require.NoError(t, h.projectRepo.Update(ctx, project))
+			}
+
+			collectionReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil)
+			collectionRec := httptest.NewRecorder()
+			e.ServeHTTP(collectionRec, collectionReq)
+			require.Equal(t, http.StatusOK, collectionRec.Code)
+
+			var collection []json.RawMessage
+			require.NoError(t, json.Unmarshal(collectionRec.Body.Bytes(), &collection))
+			var collectionObject json.RawMessage
+			for _, raw := range collection {
+				var fields map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(raw, &fields))
+				if string(fields["id"]) == `"`+project.ID+`"` {
+					collectionObject = raw
+					break
+				}
+			}
+			require.NotNil(t, collectionObject)
+
+			detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/projects/"+project.ID, nil)
+			detailRec := httptest.NewRecorder()
+			e.ServeHTTP(detailRec, detailReq)
+			require.Equal(t, http.StatusOK, detailRec.Code)
+			assert.Equal(t, string(collectionObject), strings.TrimSpace(detailRec.Body.String()), "collection and detail JSON object bytes must match")
+
+			var response ProjectCapacityResponse
+			require.NoError(t, json.Unmarshal(collectionObject, &response))
+			assert.Equal(t, project.ID, response.ID)
+			assert.Equal(t, project.Name, response.Name)
+			assert.Equal(t, tt.running, response.Running)
+			assert.Zero(t, response.QueueSize)
+			assert.Equal(t, tt.wantMaxWorkers, response.MaxWorkers)
+			assert.Equal(t, tt.wantHasCapacity, response.HasCapacity)
+			assert.Equal(t, tt.wantSlots, response.AvailableSlots)
+		})
+	}
+}
+
 func TestHandler_ProjectCapacityInheritedLimitsOmitAvailableSlots(t *testing.T) {
 	tests := []struct {
 		name       string
