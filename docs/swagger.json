@@ -2031,6 +2031,9 @@
                 "detail": {
                     "type": "string"
                 },
+                "evidence_id": {
+                    "type": "string"
+                },
                 "evidence_view": {
                     "type": "string"
                 },
@@ -2275,11 +2278,17 @@
                 "agent_name": {
                     "type": "string"
                 },
+                "category": {
+                    "type": "string"
+                },
                 "created_in_period": {
                     "type": "boolean"
                 },
                 "cycle_time_ms": {
                     "type": "integer"
+                },
+                "evidence_period": {
+                    "type": "string"
                 },
                 "execution_count": {
                     "type": "integer"
@@ -2287,8 +2296,17 @@
                 "first_pass_completed": {
                     "type": "boolean"
                 },
+                "first_pass_eligible": {
+                    "type": "boolean"
+                },
                 "follow_up_count": {
                     "type": "integer"
+                },
+                "goal_achieved_in_period": {
+                    "type": "boolean"
+                },
+                "goal_achievement_eligible": {
+                    "type": "boolean"
                 },
                 "goal_result": {
                     "type": "string"
@@ -2304,6 +2322,15 @@
                 },
                 "model": {
                     "type": "string"
+                },
+                "period_cancelled_count": {
+                    "type": "integer"
+                },
+                "period_completed_count": {
+                    "type": "integer"
+                },
+                "period_failed_count": {
+                    "type": "integer"
                 },
                 "task_id": {
                     "type": "string"
