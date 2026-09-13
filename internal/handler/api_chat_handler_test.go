@@ -47,6 +47,245 @@ func TestAPIChatMessage_MissingMessage(t *testing.T) {
 	assert.Equal(t, "message is required", resp["error"])
 }
 
+func TestAPIChatMessage_RejectsWhitespaceOnlyMessageBeforeIdleAdmission(t *testing.T) {
+	whitespaceMessages := []struct {
+		name    string
+		message string
+	}{
+		{name: "spaces", message: "   "},
+		{name: "tabs", message: "\t\t"},
+		{name: "newlines", message: "\n\r\n"},
+		{name: "mixed", message: " \t\n\r "},
+	}
+
+	for _, tc := range whitespaceMessages {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, llmConfigRepo := setupTestHandler(t)
+			ctx := context.Background()
+			createAgent(t, llmConfigRepo)
+			project := createProject(t, h, "API Chat Whitespace Project")
+			mock := testutil.NewMockLLMCaller()
+			h.llmSvc.SetLLMCaller(mock)
+
+			form := url.Values{}
+			form.Set("message", tc.message)
+			form.Set("project_id", project.ID)
+			req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assertAPIChatMessageRequired(t, rec)
+			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+			require.NoError(t, err)
+			assert.Empty(t, tasks)
+			executions, err := h.execRepo.ListByProject(ctx, project.ID, 50)
+			require.NoError(t, err)
+			assert.Empty(t, executions)
+			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+			require.NoError(t, err)
+			assert.Empty(t, inputs)
+			assert.Zero(t, mock.CallCount())
+		})
+	}
+}
+
+func TestAPIChatMessage_RejectsWhitespaceOnlyMultipartWithoutStagingAttachments(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Multipart Whitespace Project")
+	activeTask := createTask(t, h, project.ID, "Active Multipart API Chat", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "active multipart API chat"
+	})
+	mock := testutil.NewMockLLMCaller()
+	h.llmSvc.SetLLMCaller(mock)
+	beforeTasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	beforeExecutions, err := h.execRepo.ListByProject(ctx, project.ID, 50)
+	require.NoError(t, err)
+	beforeInputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+
+	whitespaceMessages := []struct {
+		name    string
+		message string
+	}{
+		{name: "spaces", message: "   "},
+		{name: "tabs", message: "\t\t"},
+		{name: "newlines", message: "\n\r\n"},
+		{name: "mixed", message: " \t\n\r "},
+	}
+	for _, tc := range whitespaceMessages {
+		t.Run(tc.name, func(t *testing.T) {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			require.NoError(t, writer.WriteField("message", tc.message))
+			require.NoError(t, writer.WriteField("project_id", project.ID))
+			part, err := writer.CreateFormFile("attachments", "should-not-stage.txt")
+			require.NoError(t, err)
+			_, err = part.Write([]byte("attachment content"))
+			require.NoError(t, err)
+			require.NoError(t, writer.Close())
+
+			req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &body)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assertAPIChatMessageRequired(t, rec)
+			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+			require.NoError(t, err)
+			assert.Equal(t, beforeTasks, tasks)
+			executions, err := h.execRepo.ListByProject(ctx, project.ID, 50)
+			require.NoError(t, err)
+			assert.Equal(t, beforeExecutions, executions)
+			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+			require.NoError(t, err)
+			assert.Equal(t, beforeInputs, inputs)
+			active, err := h.execRepo.FindLatestActiveChatExecution(ctx, project.ID)
+			require.NoError(t, err)
+			require.NotNil(t, active)
+			assert.Equal(t, activeExec.ID, active.ID)
+			assert.Equal(t, models.ExecRunning, active.Status)
+			assert.Equal(t, "active multipart API chat", active.PromptSent)
+			assert.Zero(t, mock.CallCount())
+			assert.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending"))
+		})
+	}
+}
+
+func TestAPIChatMessage_RejectsWhitespaceOnlyMessageWithActiveTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Active Whitespace Project")
+	activeTask := createTask(t, h, project.ID, "Active API Chat", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "active API chat"
+	})
+	existingInput := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeChat,
+		ProjectID:      project.ID,
+		RunExecutionID: activeExec.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "existing queued input",
+		ChatMode:       models.ChatModeOrchestrate,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, existingInput))
+	mock := testutil.NewMockLLMCaller()
+	h.llmSvc.SetLLMCaller(mock)
+
+	beforeTasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	beforeExecutions, err := h.execRepo.ListByProject(ctx, project.ID, 50)
+	require.NoError(t, err)
+	beforeInputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+
+	whitespaceMessages := []struct {
+		name    string
+		message string
+	}{
+		{name: "spaces", message: "   "},
+		{name: "tabs", message: "\t\t"},
+		{name: "newlines", message: "\n\r\n"},
+		{name: "mixed", message: " \t\n\r "},
+	}
+	for _, tc := range whitespaceMessages {
+		t.Run(tc.name, func(t *testing.T) {
+			form := url.Values{}
+			form.Set("message", tc.message)
+			form.Set("project_id", project.ID)
+			req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			assertAPIChatMessageRequired(t, rec)
+			tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+			require.NoError(t, err)
+			assert.Equal(t, beforeTasks, tasks)
+			executions, err := h.execRepo.ListByProject(ctx, project.ID, 50)
+			require.NoError(t, err)
+			assert.Equal(t, beforeExecutions, executions)
+			inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+			require.NoError(t, err)
+			assert.Equal(t, beforeInputs, inputs)
+			active, err := h.execRepo.FindLatestActiveChatExecution(ctx, project.ID)
+			require.NoError(t, err)
+			require.NotNil(t, active)
+			assert.Equal(t, activeExec.ID, active.ID)
+			assert.Equal(t, models.ExecRunning, active.Status)
+			assert.Equal(t, "active API chat", active.PromptSent)
+			assert.Zero(t, mock.CallCount())
+		})
+	}
+}
+
+func TestAPIChatMessage_AllowsPaddedNonWhitespaceMessage(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Padded Message Project")
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	message := " \tvalid API chat message\n "
+	form := url.Values{}
+	form.Set("message", message)
+	form.Set("project_id", project.ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var response ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	assert.Equal(t, "processing", response.Status)
+	assert.False(t, response.Queued)
+
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for padded message to reach the provider")
+	}
+	execution, err := h.execRepo.GetByID(ctx, response.MessageID)
+	require.NoError(t, err)
+	require.NotNil(t, execution)
+	assert.Equal(t, message, execution.PromptSent)
+	task, err := h.taskRepo.GetByID(ctx, execution.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	assert.Equal(t, message, task.Prompt)
+}
+
+func assertAPIChatMessageRequired(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	var response map[string]string
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	assert.Equal(t, "message is required", response["error"])
+}
+
 func TestAPIChatMessage_MissingProjectID(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
