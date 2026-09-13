@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -990,6 +991,105 @@ func TestUsageAnalyticsService_SharedAccountRecentFailureDoesNotSuppressHealthyC
 			}
 			if loadedSecond.OAuthNeedsReauth || loadedSecond.OAuthAccessToken != "healthy-access" || loadedSecond.OAuthRefreshToken != "healthy-refresh" {
 				t.Fatalf("healthy sibling credentials/state changed: %+v", loadedSecond)
+			}
+		})
+	}
+}
+
+func TestUsageAnalyticsService_SharedAccountNewerFailureDoesNotOverrideHealthyCachedSuccess(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			usageRepo := repository.NewUsageRepo(db)
+			configRepo := repository.NewLLMConfigRepo(db)
+			ctx := context.Background()
+
+			failed := &models.LLMConfig{
+				Name:              "A Reconnect Required",
+				Provider:          provider,
+				Model:             "model-one",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "failed-access",
+				OAuthRefreshToken: "failed-refresh",
+				OAuthExpiresAt:    time.Now().Add(-time.Hour).UnixMilli(),
+				OAuthAccountID:    "shared-account",
+			}
+			if err := configRepo.Create(ctx, failed); err != nil {
+				t.Fatalf("create reconnect-required config: %v", err)
+			}
+			marked, err := configRepo.MarkOAuthNeedsReauthIfRevision(ctx, failed.ID, failed.OAuthConfigRevision, failed.Provider)
+			if err != nil || !marked {
+				t.Fatalf("mark reconnect-required config = %v, %v", marked, err)
+			}
+			healthy := &models.LLMConfig{
+				Name:              "B Healthy",
+				Provider:          provider,
+				Model:             "model-two",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "healthy-access",
+				OAuthRefreshToken: "healthy-refresh",
+				OAuthExpiresAt:    time.Now().Add(2 * time.Hour).UnixMilli(),
+				OAuthAccountID:    "shared-account",
+			}
+			if err := configRepo.Create(ctx, healthy); err != nil {
+				t.Fatalf("create healthy config: %v", err)
+			}
+
+			pct := 17.0
+			if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+				Provider:             string(provider),
+				AccountID:            "shared-account",
+				AgentConfigID:        healthy.ID,
+				SecondaryLabel:       "weekly limit",
+				SecondaryUsedPercent: &pct,
+				FetchedAt:            time.Now().Add(-30 * time.Minute),
+			}); err != nil {
+				t.Fatalf("create healthy cached snapshot: %v", err)
+			}
+			if err := usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+				Provider:             string(provider),
+				AccountID:            "shared-account",
+				AgentConfigID:        failed.ID,
+				RateLimitReachedType: "refresh_failed_reauthentication_required",
+				RawJSON:              `{"error":"refresh_failed_reauthentication_required"}`,
+				FetchedAt:            time.Now().Add(-time.Minute),
+			}); err != nil {
+				t.Fatalf("create newer failed snapshot: %v", err)
+			}
+
+			svc := NewUsageAnalyticsService(usageRepo, configRepo)
+			fetchCalls := 0
+			svc.SetAccountUsageFetcher(func(context.Context, models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+				fetchCalls++
+				return nil, errors.New("unexpected account usage fetch")
+			})
+
+			view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{})
+			if err != nil {
+				t.Fatalf("BuildAnalyticsUsage: %v", err)
+			}
+			if fetchCalls != 0 {
+				t.Fatalf("fresh healthy cached success triggered %d provider fetches", fetchCalls)
+			}
+			if len(view.AccountLimits) != 1 || view.AccountLimits[0].AgentConfigID != healthy.ID || view.AccountLimits[0].Error != "" {
+				t.Fatalf("newer config-scoped failure overrode healthy cached success: %+v", view.AccountLimits)
+			}
+			if view.AccountLimits[0].SecondaryLimit == nil || view.AccountLimits[0].SecondaryLimit.UsedPercent == nil || *view.AccountLimits[0].SecondaryLimit.UsedPercent != pct {
+				t.Fatalf("healthy cached limits were not preserved: %+v", view.AccountLimits[0])
+			}
+			loadedFailed, err := configRepo.GetByID(ctx, failed.ID)
+			if err != nil {
+				t.Fatalf("load reconnect-required config: %v", err)
+			}
+			if !loadedFailed.OAuthNeedsReauth || loadedFailed.OAuthAccessToken != "failed-access" || loadedFailed.OAuthRefreshToken != "failed-refresh" {
+				t.Fatalf("reconnect-required credentials/state changed: %+v", loadedFailed)
+			}
+			loadedHealthy, err := configRepo.GetByID(ctx, healthy.ID)
+			if err != nil {
+				t.Fatalf("load healthy config: %v", err)
+			}
+			if loadedHealthy.OAuthNeedsReauth || loadedHealthy.OAuthAccessToken != "healthy-access" || loadedHealthy.OAuthRefreshToken != "healthy-refresh" {
+				t.Fatalf("healthy sibling credentials/state changed: %+v", loadedHealthy)
 			}
 		})
 	}
