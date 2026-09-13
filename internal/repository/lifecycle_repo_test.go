@@ -412,6 +412,7 @@ type lifecycleHookListTestRows struct {
 	ctx                 context.Context
 	closed              chan struct{}
 	closeOnce           sync.Once
+	nextStartedOnce     sync.Once
 }
 
 func (r *lifecycleHookListTestRows) Columns() []string {
@@ -435,8 +436,7 @@ func (r *lifecycleHookListTestRows) Close() error {
 func (r *lifecycleHookListTestRows) Next(dest []driver.Value) error {
 	if r.waitForCancellation {
 		if r.nextStarted != nil {
-			close(r.nextStarted)
-			r.nextStarted = nil
+			r.nextStartedOnce.Do(func() { close(r.nextStarted) })
 		}
 		select {
 		case <-r.ctx.Done():
