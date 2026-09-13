@@ -887,8 +887,103 @@ func TestResolveAgentRuntime_PerAgentPluginIsolation(t *testing.T) {
 	}
 }
 
-// TestResolveAgentRuntime_NilAgentDefinition verifies that a nil agent
-// definition produces zero plugin context (no skills, no dirs, no MCP).
+func TestPrepareAgentRuntimeRequest_NilAgentPreservesRequest(t *testing.T) {
+	origResolve := resolvePluginRuntimeBundleFn
+	defer func() { resolvePluginRuntimeBundleFn = origResolve }()
+
+	called := false
+	resolvePluginRuntimeBundleFn = func(ctx context.Context, pluginIDs []string) (*agentplugins.RuntimeBundle, error) {
+		called = true
+		return &agentplugins.RuntimeBundle{}, nil
+	}
+
+	req := llmcontracts.AgentRequest{
+		Ctx:                 context.Background(),
+		ChatSystemContext:   "chat context",
+		ProjectInstructions: "project instructions",
+	}
+	got := prepareAgentRuntimeRequest(req)
+	if got.AgentDefinition != nil {
+		t.Fatalf("AgentDefinition = %#v, want nil", got.AgentDefinition)
+	}
+	if got.ChatSystemContext != req.ChatSystemContext || got.ProjectInstructions != req.ProjectInstructions {
+		t.Fatalf("prompt contexts changed: got chat=%q project=%q", got.ChatSystemContext, got.ProjectInstructions)
+	}
+	if called {
+		t.Fatal("plugin resolver should not be called for a nil agent definition")
+	}
+}
+
+func TestPrepareAgentRuntimeRequest_MergesRuntimeAndInjectsBothContexts(t *testing.T) {
+	origResolve := resolvePluginRuntimeBundleFn
+	defer func() { resolvePluginRuntimeBundleFn = origResolve }()
+
+	resolvePluginRuntimeBundleFn = func(ctx context.Context, pluginIDs []string) (*agentplugins.RuntimeBundle, error) {
+		if len(pluginIDs) != 1 || pluginIDs[0] != "selected-plugin@market" {
+			t.Fatalf("plugin IDs = %v, want selected-plugin@market", pluginIDs)
+		}
+		return &agentplugins.RuntimeBundle{
+			Skills: []models.SkillConfig{{Name: "selected-skill", Content: "selected skill content"}},
+		}, nil
+	}
+
+	agentDef := &models.Agent{
+		Name:         "runtime-agent",
+		SystemPrompt: "agent system prompt",
+		Skills:       []models.SkillConfig{{Name: "saved-skill", Content: "saved skill content"}},
+		Plugins:      []string{"selected-plugin@market"},
+	}
+	req := llmcontracts.AgentRequest{
+		Ctx:                 context.Background(),
+		AgentDefinition:     agentDef,
+		ChatSystemContext:   "chat context",
+		ProjectInstructions: "project instructions",
+	}
+
+	got := prepareAgentRuntimeRequest(req)
+	if got.AgentDefinition == agentDef {
+		t.Fatal("expected runtime resolution to provide a merged agent definition")
+	}
+	if got.AgentDefinition == nil || len(got.AgentDefinition.Skills) != 2 || got.AgentDefinition.Skills[1].Name != "selected-skill" {
+		t.Fatalf("merged AgentDefinition = %#v", got.AgentDefinition)
+	}
+
+	wantChat := "agent system prompt\n\n---\n\n## Skill: saved-skill\n\nsaved skill content\n\n---\n\n## Skill: selected-skill\n\nselected skill content\n\n---\n\nchat context"
+	wantProject := "agent system prompt\n\n---\n\n## Skill: saved-skill\n\nsaved skill content\n\n---\n\n## Skill: selected-skill\n\nselected skill content\n\n---\n\nproject instructions"
+	if got.ChatSystemContext != wantChat {
+		t.Fatalf("ChatSystemContext = %q, want %q", got.ChatSystemContext, wantChat)
+	}
+	if got.ProjectInstructions != wantProject {
+		t.Fatalf("ProjectInstructions = %q, want %q", got.ProjectInstructions, wantProject)
+	}
+}
+
+func TestPrepareAgentRuntimeRequest_ResolverErrorKeepsRawAgent(t *testing.T) {
+	origResolve := resolvePluginRuntimeBundleFn
+	defer func() { resolvePluginRuntimeBundleFn = origResolve }()
+
+	resolvePluginRuntimeBundleFn = func(ctx context.Context, pluginIDs []string) (*agentplugins.RuntimeBundle, error) {
+		return nil, fmt.Errorf("resolver unavailable")
+	}
+
+	agentDef := &models.Agent{
+		SystemPrompt: "raw system prompt",
+		Plugins:      []string{"selected-plugin@market"},
+	}
+	got := prepareAgentRuntimeRequest(llmcontracts.AgentRequest{
+		Ctx:                 context.Background(),
+		AgentDefinition:     agentDef,
+		ChatSystemContext:   "chat context",
+		ProjectInstructions: "project instructions",
+	})
+	if got.AgentDefinition != agentDef {
+		t.Fatalf("AgentDefinition = %#v, want raw agent definition", got.AgentDefinition)
+	}
+	if got.ChatSystemContext != "raw system prompt\n\n---\n\nchat context" || got.ProjectInstructions != "raw system prompt\n\n---\n\nproject instructions" {
+		t.Fatalf("resolver-error prompt contexts = chat=%q project=%q", got.ChatSystemContext, got.ProjectInstructions)
+	}
+}
+
 func TestResolveAgentRuntime_NilAgentDefinition(t *testing.T) {
 	origResolve := resolvePluginRuntimeBundleFn
 	defer func() { resolvePluginRuntimeBundleFn = origResolve }()
