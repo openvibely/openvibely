@@ -102,6 +102,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 // @Param skill_event query string false "Supporting event type (used, followed, ignored, selected, loaded, viewed, created, edited)"
 // @Param skill_agent query string false "Exact Agent ID or __unassigned__ for supporting skill events"
 // @Param skill_handle query string false "Exact skill handle for supporting skill events"
+// @Param skill_evidence_scope query string false "Exact skill scope for supporting skill events (global, project, agent_owned)"
 // @Success 200 {object} models.SkillAnalyticsDashboard "Skill analytics"
 // @Failure 400 {object} ErrorResponse "Supporting evidence requires project_id"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -141,6 +142,7 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 		EvidenceEvent:       strings.TrimSpace(c.QueryParam("skill_event")),
 		EvidenceAgentID:     strings.TrimSpace(c.QueryParam("skill_agent")),
 		EvidenceSkillHandle: strings.TrimSpace(c.QueryParam("skill_handle")),
+		EvidenceSkillScope:  strings.TrimSpace(c.QueryParam("skill_evidence_scope")),
 		EvidenceLimit:       50,
 	}
 	if filter.GroupBy == "" {
@@ -160,7 +162,7 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 }
 
 func skillEvidenceRequested(filter repository.SkillAnalyticsFilter) bool {
-	return filter.EvidencePeriod != "" || filter.EvidenceEvent != "" || filter.EvidenceAgentID != "" || filter.EvidenceSkillHandle != ""
+	return filter.EvidencePeriod != "" || filter.EvidenceEvent != "" || filter.EvidenceAgentID != "" || filter.EvidenceSkillHandle != "" || filter.EvidenceSkillScope != ""
 }
 
 func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.EnabledSkillInfo {

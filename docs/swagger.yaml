@@ -848,6 +848,8 @@ definitions:
         type: string
       skill_handle:
         type: string
+      skill_scope:
+        type: string
       source:
         type: string
       surface:
@@ -1815,6 +1817,11 @@ paths:
       - description: Exact skill handle for supporting skill events
         in: query
         name: skill_handle
+        type: string
+      - description: Exact skill scope for supporting skill events (global, project,
+          agent_owned)
+        in: query
+        name: skill_evidence_scope
         type: string
       produces:
       - application/json

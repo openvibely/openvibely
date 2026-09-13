@@ -34,6 +34,7 @@ type SkillAnalyticsFilter struct {
 	EvidenceEvent       string
 	EvidenceAgentID     string
 	EvidenceSkillHandle string
+	EvidenceSkillScope  string
 	EvidenceLimit       int
 }
 
@@ -350,7 +351,7 @@ func (r *SkillAnalyticsRepo) GetUnderusedSkills(ctx context.Context, filter Skil
 }
 
 func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyticsFilter) ([]models.SkillAnalyticsEvidenceRow, int, error) {
-	if filter.EvidencePeriod == "" && filter.EvidenceEvent == "" && filter.EvidenceAgentID == "" && filter.EvidenceSkillHandle == "" {
+	if filter.EvidencePeriod == "" && filter.EvidenceEvent == "" && filter.EvidenceAgentID == "" && filter.EvidenceSkillHandle == "" && filter.EvidenceSkillScope == "" {
 		return []models.SkillAnalyticsEvidenceRow{}, 0, nil
 	}
 	if strings.TrimSpace(filter.ProjectID) == "" {
@@ -388,6 +389,10 @@ func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyt
 		where += " AND e.skill_handle = ?"
 		args = append(args, filter.EvidenceSkillHandle)
 	}
+	if filter.EvidenceSkillScope != "" {
+		where += " AND e.skill_scope = ?"
+		args = append(args, filter.EvidenceSkillScope)
+	}
 	var total int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM skill_analytics_events e "+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("counting skill Analytics evidence: %w", err)
@@ -397,7 +402,7 @@ func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyt
 		limit = 50
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT e.id,e.created_at,COALESCE(e.project_id,''),COALESCE(e.task_id,''),COALESCE(e.execution_id,''),COALESCE(e.agent_id,''),
-		COALESCE(a.name,CASE WHEN e.agent_id IS NULL OR e.agent_id='' THEN 'Unassigned' ELSE e.agent_id END),e.skill_handle,e.event_type,e.source,e.surface
+		COALESCE(a.name,CASE WHEN e.agent_id IS NULL OR e.agent_id='' THEN 'Unassigned' ELSE e.agent_id END),e.skill_handle,e.skill_scope,e.event_type,e.source,e.surface
 		FROM skill_analytics_events e LEFT JOIN agents a ON a.id=e.agent_id `+where+` ORDER BY e.created_at DESC,e.id DESC LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("getting skill Analytics evidence: %w", err)
@@ -407,7 +412,7 @@ func (r *SkillAnalyticsRepo) GetEvidence(ctx context.Context, filter SkillAnalyt
 	for rows.Next() {
 		var row models.SkillAnalyticsEvidenceRow
 		var createdAt string
-		if err := rows.Scan(&row.ID, &createdAt, &row.ProjectID, &row.TaskID, &row.ExecutionID, &row.AgentID, &row.AgentName, &row.SkillHandle, &row.EventType, &row.Source, &row.Surface); err != nil {
+		if err := rows.Scan(&row.ID, &createdAt, &row.ProjectID, &row.TaskID, &row.ExecutionID, &row.AgentID, &row.AgentName, &row.SkillHandle, &row.SkillScope, &row.EventType, &row.Source, &row.Surface); err != nil {
 			return nil, 0, err
 		}
 		row.CreatedAt = parseSQLiteTime(createdAt)

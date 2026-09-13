@@ -32,8 +32,11 @@ func TestSkillAnalyticsEvidenceFiltersExactSupportingRecords(t *testing.T) {
 	occurred := time.Date(2026, 1, 10, 15, 0, 0, 0, time.UTC)
 	followedSelected := &models.SkillAnalyticsEvent{ProjectID: project.ID, AgentID: agent.ID, SkillHandle: "project:review", SkillScope: models.SkillScopeProject, EventType: models.SkillEventSelected, Source: models.SkillEventSourceManual, Surface: models.SkillSurfaceTaskThread, ThreadID: "followed-turn", CreatedAt: occurred}
 	ignoredSelected := &models.SkillAnalyticsEvent{ProjectID: project.ID, AgentID: agent.ID, SkillHandle: "project:review", SkillScope: models.SkillScopeProject, EventType: models.SkillEventSelected, Source: models.SkillEventSourceManual, Surface: models.SkillSurfaceTaskThread, ThreadID: "ignored-turn", CreatedAt: occurred}
+	globalIgnoredSelected := &models.SkillAnalyticsEvent{ProjectID: project.ID, AgentID: agent.ID, SkillHandle: "project:review", SkillScope: models.SkillScopeGlobal, EventType: models.SkillEventSelected, Source: models.SkillEventSourceManual, Surface: models.SkillSurfaceTaskThread, ThreadID: "global-ignored-turn", CreatedAt: occurred}
 	for _, event := range []*models.SkillAnalyticsEvent{
 		{ProjectID: project.ID, AgentID: agent.ID, SkillHandle: "project:review", SkillScope: models.SkillScopeProject, EventType: models.SkillEventCreated, Source: models.SkillEventSourceManual, Surface: models.SkillSurfaceTaskThread, CreatedAt: occurred},
+		{ProjectID: project.ID, AgentID: agent.ID, SkillHandle: "project:review", SkillScope: models.SkillScopeGlobal, EventType: models.SkillEventCreated, Source: models.SkillEventSourceManual, Surface: models.SkillSurfaceTaskThread, CreatedAt: occurred},
+		globalIgnoredSelected,
 		followedSelected,
 		{ProjectID: project.ID, AgentID: agent.ID, SkillHandle: "project:review", SkillScope: models.SkillScopeProject, EventType: models.SkillEventLoaded, Source: models.SkillEventSourceManual, Surface: models.SkillSurfaceTaskThread, ThreadID: "followed-turn", CreatedAt: occurred},
 		ignoredSelected,
@@ -45,33 +48,40 @@ func TestSkillAnalyticsEvidenceFiltersExactSupportingRecords(t *testing.T) {
 		}
 	}
 	period := occurred.In(time.Local).Format("2006-01-02")
-	rows, total, err := repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "created", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceLimit: 20})
+	rows, total, err := repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "created", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceSkillScope: models.SkillScopeProject, EvidenceLimit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 1 || len(rows) != 1 || rows[0].ProjectID != project.ID || rows[0].AgentID != agent.ID || rows[0].AgentName != agent.Name || rows[0].SkillHandle != "project:review" || rows[0].EventType != models.SkillEventCreated {
-		t.Fatalf("skill evidence did not preserve exact project/period/event/Agent/skill subset: total=%d rows=%+v", total, rows)
+	if total != 1 || len(rows) != 1 || rows[0].ProjectID != project.ID || rows[0].AgentID != agent.ID || rows[0].AgentName != agent.Name || rows[0].SkillHandle != "project:review" || rows[0].SkillScope != models.SkillScopeProject || rows[0].EventType != models.SkillEventCreated {
+		t.Fatalf("skill evidence did not preserve exact project/period/event/Agent/skill/scope subset: total=%d rows=%+v", total, rows)
 	}
-	rows, total, err = repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "used", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceLimit: 20})
+	rows, total, err = repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "used", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceSkillScope: models.SkillScopeProject, EvidenceLimit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if total != 3 || len(rows) != 3 {
 		t.Fatalf("used Agent-skill evidence must include selected, loaded, and viewed events: total=%d rows=%+v", total, rows)
 	}
-	rows, total, err = repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "followed", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceLimit: 20})
+	rows, total, err = repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "followed", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceSkillScope: models.SkillScopeProject, EvidenceLimit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if total != 1 || len(rows) != 1 || rows[0].EventType != models.SkillEventSelected || rows[0].ID != followedSelected.ID {
 		t.Fatalf("followed evidence must expose the selected event from a turn with loaded/viewed activity: total=%d rows=%+v", total, rows)
 	}
-	rows, total, err = repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "ignored", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceLimit: 20})
+	rows, total, err = repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "ignored", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceSkillScope: models.SkillScopeProject, EvidenceLimit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if total != 1 || len(rows) != 1 || rows[0].EventType != models.SkillEventSelected || rows[0].ID != ignoredSelected.ID {
 		t.Fatalf("ignored evidence must expose the selected event from a turn without loaded/viewed activity: total=%d rows=%+v", total, rows)
+	}
+	rows, total, err = repo.GetEvidence(ctx, SkillAnalyticsFilter{ProjectID: project.ID, GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "ignored", EvidenceAgentID: agent.ID, EvidenceSkillHandle: "project:review", EvidenceSkillScope: models.SkillScopeGlobal, EvidenceLimit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ID != globalIgnoredSelected.ID || rows[0].SkillScope != models.SkillScopeGlobal {
+		t.Fatalf("same-handle follow-through evidence mixed skill scopes: total=%d rows=%+v", total, rows)
 	}
 	if _, _, err := repo.GetEvidence(ctx, SkillAnalyticsFilter{GroupBy: "day", EvidencePeriod: period, EvidenceEvent: "created", EvidenceLimit: 20}); err == nil {
 		t.Fatal("supporting skill evidence must reject a missing project ID")

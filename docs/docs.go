@@ -499,6 +499,12 @@ const docTemplate = `{
                         "description": "Exact skill handle for supporting skill events",
                         "name": "skill_handle",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact skill scope for supporting skill events (global, project, agent_owned)",
+                        "name": "skill_evidence_scope",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -2851,6 +2857,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "skill_handle": {
+                    "type": "string"
+                },
+                "skill_scope": {
                     "type": "string"
                 },
                 "source": {
