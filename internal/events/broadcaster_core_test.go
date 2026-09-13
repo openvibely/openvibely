@@ -61,6 +61,7 @@ func TestBroadcasterCore_RepeatedScopedPublishesReuseSubscriberSnapshot(t *testi
 		name            string
 		subscriberCount int
 	}{
+		{name: "one matching", subscriberCount: 1},
 		{name: "five matching", subscriberCount: 5},
 		{name: "fifty matching", subscriberCount: MaxSubscribers},
 	}
