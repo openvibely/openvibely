@@ -23,6 +23,9 @@ type CompletionsOptions struct {
 	Model           string
 	MaxOutputTokens int
 	ContextWindow   int
+	// ToolOutputTokenLimit bounds each tool result replayed to the model while
+	// callbacks and durable transcripts retain the complete output.
+	ToolOutputTokenLimit int
 	// Temperature preserves explicit zero, which many providers treat
 	// differently from their default. Use OmittedTemperature for models that
 	// do not accept the parameter.
@@ -220,7 +223,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			return c.sendCompletionsTurn(attemptCtx, messages, tools, opts)
 		})
 		if err != nil {
-			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
+			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
 		result.InputTokens += turnResult.inputTokens
@@ -314,10 +317,11 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				Error:  isError,
 			})
 
-			// Add tool result message
+			// Add a bounded tool result to model-facing history. The complete output
+			// remains in result.ToolCalls and currentTranscript for durability.
 			messages = append(messages, completionsMessage{
 				Role:       "tool",
-				Content:    output,
+				Content:    truncateToolOutputForModelInput(output, opts.ToolOutputTokenLimit),
 				ToolCallID: tc.ID,
 			})
 			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{

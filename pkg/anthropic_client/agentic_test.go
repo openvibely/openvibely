@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -21,6 +23,17 @@ type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
 func (f anthropicRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 type failingAnthropicBody struct{}
+
+func TestCategorizeAnthropicAPIErrorUsesStructuredEnvelope(t *testing.T) {
+	contextBody := []byte(`{"error":{"type":"request_too_large","message":"opaque"}}`)
+	if got := categorizeAnthropicAPIError(http.StatusBadRequest, contextBody, false); !llmcontracts.ErrorIs(got, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("context category = %v", got)
+	}
+	unsupportedBody := []byte(`{"error":{"type":"unsupported_beta","message":"opaque"}}`)
+	if got := categorizeAnthropicAPIError(http.StatusBadRequest, unsupportedBody, true); !llmcontracts.ErrorIs(got, llmcontracts.ErrorNativeCompactionUnsupported) {
+		t.Fatalf("native category = %v", got)
+	}
+}
 
 func TestAnthropicContinuationPreflightConservativelyCountsToolPayload(t *testing.T) {
 	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("{}", 4000)}}
@@ -398,6 +411,22 @@ func TestAgenticBlockMarshal_ToolUseEmptyInputIncludesObject(t *testing.T) {
 				t.Fatalf("input = %#v, want empty object", input)
 			}
 		})
+	}
+}
+
+func TestAnthropicToolResultReplayBoundsDenseOutputAndPreservesPairing(t *testing.T) {
+	full := strings.Repeat("!", 5000)
+	bounded := truncateAnthropicToolOutputForModelInput(full, 512)
+	if len([]rune(bounded)) > 512 || !strings.Contains(bounded, "truncated") {
+		t.Fatalf("bounded output runes=%d content=%q", len([]rune(bounded)), bounded)
+	}
+	block := agenticBlock{Type: "tool_result", ToolUseID: "toolu_dense", Content: anthropicStringContentRaw(bounded)}
+	encoded, err := json.Marshal(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"tool_use_id":"toolu_dense"`) || !strings.Contains(string(encoded), "truncated") {
+		t.Fatalf("bounded tool result lost structural pairing: %s", encoded)
 	}
 }
 

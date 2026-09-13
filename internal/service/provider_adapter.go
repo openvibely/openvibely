@@ -286,8 +286,23 @@ func nativeCompactionUnsupportedError(err error) bool {
 	return strings.Contains(msg, "unsupported") || strings.Contains(msg, "unknown beta") || strings.Contains(msg, "beta feature") || strings.Contains(msg, "not available")
 }
 
-func providerHasNativeCompaction(provider models.LLMProvider) bool {
-	return provider == models.ProviderOpenAI || provider == models.ProviderAnthropic
+func providerSupportsNativeCompaction(agent models.LLMConfig) bool {
+	if strings.TrimSpace(agent.Model) == "" || agent.AuthMethod == models.AuthMethodCLI {
+		return false
+	}
+	if agent.AuthMethod != "" && agent.AuthMethod != models.AuthMethodAPIKey && agent.AuthMethod != models.AuthMethodOAuth {
+		return false
+	}
+	switch agent.Provider {
+	case models.ProviderOpenAI:
+		return true
+	case models.ProviderAnthropic:
+		// Anthropic context management is a Messages capability. A transport
+		// override denotes a different concrete protocol and must not inherit it.
+		return strings.TrimSpace(agent.Transport) == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "claude-")
+	default:
+		return false
+	}
 }
 
 func providerCompatibilityKey(agent models.LLMConfig) string {
@@ -437,7 +452,7 @@ func providerSupportsArtifactReader(req llmcontracts.AgentRequest) bool {
 		return false
 	}
 	switch req.Agent.Provider {
-	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible, models.ProviderTest:
+	case models.ProviderOpenAI, models.ProviderAnthropic, models.ProviderOpenAICompatible:
 		return true
 	default:
 		return false
@@ -751,11 +766,11 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.NativeCompactionTokenThreshold = limits.TriggerLimit
 		req.Agent.CompactionThreshold = limits.TriggerLimit
 	}
-	if providerHasNativeCompaction(req.Agent.Provider) && knownNativeCompactionUnsupported(req.Agent) {
+	if providerSupportsNativeCompaction(req.Agent) && knownNativeCompactionUnsupported(req.Agent) {
 		req.DisableNativeCompaction = true
 		req.Agent.DisableNativeCompaction = true
 	}
-	if triggered && providerHasNativeCompaction(req.Agent.Provider) && !req.DisableNativeCompaction && !req.Agent.DisableNativeCompaction {
+	if triggered && providerSupportsNativeCompaction(req.Agent) && !req.DisableNativeCompaction && !req.Agent.DisableNativeCompaction {
 		req.ForceNativeCompaction = true
 		req.Agent.ForceNativeCompaction = true
 	}
@@ -813,7 +828,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		applog.Infof("[agent-svc] compacted provider retry still exceeded context; trying last-resort truncation: %v", err)
 		return s.callProviderWithLastResortTruncation(adapter, lastResortBaseReq, err)
 	}
-	if providerHasNativeCompaction(req.Agent.Provider) && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) && len(req.ChatHistory) > 0 {
+	if providerSupportsNativeCompaction(req.Agent) && (nativeCompactionFailure(err) || recognizedContextLengthError(err)) && len(req.ChatHistory) > 0 {
 		if nativeCompactionUnsupportedError(err) {
 			knownUnsupportedNativeCompaction.Store(nativeCompactionSessionKey(req.Agent), true)
 		}
@@ -987,7 +1002,7 @@ func shouldUseLocalSummaryBeforeProvider(req llmcontracts.AgentRequest) bool {
 	if len(req.ChatHistory) == 0 {
 		return false
 	}
-	if !providerHasNativeCompaction(req.Agent.Provider) {
+	if !providerSupportsNativeCompaction(req.Agent) {
 		return true
 	}
 	if req.Agent.Provider == models.ProviderAnthropic && calculateRequestBudget(req).TotalInputTokens() > calculateRequestBudget(req).SafeInputLimit {

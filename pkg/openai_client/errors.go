@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // Common sentinel errors
@@ -85,6 +86,49 @@ func (e *APIError) Is(target error) bool {
 // Temporary returns true if the error is likely temporary and retryable.
 func (e *APIError) Temporary() bool {
 	return httpretry.IsRetryableStatus(e.StatusCode)
+}
+
+func CategorizeProviderError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var categorized *llmcontracts.CategorizedError
+	if errors.As(err, &categorized) {
+		return err
+	}
+	if errors.Is(err, ErrContextLengthExceeded) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "OpenAI provider request", err)
+	}
+	if isNetworkError(err) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorTransportFailure, "OpenAI provider transport", err)
+	}
+	return err
+}
+
+// CategorizeCompactionError distinguishes input feasibility from protocol
+// capability. Structured status/code data is preferred; message parsing remains
+// confined to this provider boundary for endpoints that omit codes.
+func CategorizeCompactionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrContextLengthExceeded) || llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI native compaction", err)
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		code := strings.ToLower(strings.TrimSpace(apiErr.Code))
+		typ := strings.ToLower(strings.TrimSpace(apiErr.Type))
+		if apiErr.StatusCode == 404 || apiErr.StatusCode == 405 || apiErr.StatusCode == 501 ||
+			code == "unsupported_feature" || code == "model_not_supported" || typ == "unsupported_feature" {
+			return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionUnsupported, "OpenAI native compaction", err)
+		}
+	}
+	classified := CategorizeProviderError(err)
+	if llmcontracts.ErrorIs(classified, llmcontracts.ErrorTransportFailure) {
+		return classified
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionFailed, "OpenAI native compaction", err)
 }
 
 // parseAPIError attempts to parse an API error from the response body.

@@ -3262,6 +3262,30 @@ func TestIsCodexGeneratedInputItem_CoversToolCallTypes(t *testing.T) {
 	}
 }
 
+func TestTrimCompactionInputItemsToFitContextWindow_UsesConfiguredWindowForUnknownModel(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "must not be called", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	old := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = old }()
+
+	client := NewWithAPIKey("sk-test")
+	items := []any{map[string]any{"type": "message", "role": "user", "content": strings.Repeat("dense!", 2000)}}
+	_, _, err := client.compactAgenticInputItems(context.Background(), items, nil, &AgenticOptions{
+		Model: "unknown-first-party-model", ContextWindow: 4096, MaxOutputTokens: 1024,
+	}, false)
+	if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorCompactionInputInfeasible) {
+		t.Fatalf("error = %v, want typed compaction infeasibility", err)
+	}
+	if calls != 0 {
+		t.Fatalf("legacy compact HTTP calls = %d, want zero", calls)
+	}
+}
+
 func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{

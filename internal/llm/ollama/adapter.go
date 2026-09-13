@@ -136,11 +136,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	}
 
 	if buffered.statusCode != http.StatusOK {
-		var errResp errorResponse
-		if json.Unmarshal(buffered.body, &errResp) == nil && errResp.Error != "" {
-			return "", 0, fmt.Errorf("ollama API error (%d): %s", buffered.statusCode, errResp.Error)
-		}
-		return "", 0, fmt.Errorf("ollama API error (%d): %s", buffered.statusCode, string(buffered.body))
+		return "", 0, ollamaResponseError(buffered.statusCode, buffered.body)
 	}
 
 	var chatResp chatResponse
@@ -383,10 +379,16 @@ func (a *Adapter) streamWithRetry(ctx context.Context, url string, body []byte, 
 
 func ollamaResponseError(statusCode int, body []byte) error {
 	var errResp errorResponse
-	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
-		return fmt.Errorf("ollama API error (%d): %s", statusCode, errResp.Error)
+	message := strings.TrimSpace(string(body))
+	if json.Unmarshal(body, &errResp) == nil && strings.TrimSpace(errResp.Error) != "" {
+		message = strings.TrimSpace(errResp.Error)
 	}
-	return fmt.Errorf("ollama API error (%d): %s", statusCode, string(body))
+	err := fmt.Errorf("ollama API error (%d): %s", statusCode, message)
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "context length") || strings.Contains(lower, "context window") || strings.Contains(lower, "too many tokens") || strings.Contains(lower, "input is too long") {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Ollama provider request", err)
+	}
+	return err
 }
 
 func (a *Adapter) doWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {
