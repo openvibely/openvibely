@@ -201,8 +201,51 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 	return filter
 }
 
+// GetAnalyticsDashboard returns project-scoped task outcome, Agent, workflow,
+// evidence, and comparison metrics for the Analytics evaluation views.
+// @Summary Get outcome-oriented Analytics dashboard data
+// @Description Returns task-level outcome KPIs, definitions, comparisons, evidence, reusable Agent performance, observed skill outcomes, and workflow performance for one project.
+// @Tags analytics
+// @Produce json
+// @Param project_id query string true "Authoritative project ID"
+// @Param range query string false "Convenience range: 7d, 30d, 90d, 365d, month, all" default(30d)
+// @Param date_from query string false "Optional inclusive start datetime"
+// @Param date_to query string false "Optional exclusive end datetime"
+// @Param compare query boolean false "Compare with the immediately preceding equivalent period"
+// @Success 200 {object} models.AnalyticsDashboard "Outcome Analytics dashboard"
+// @Failure 400 {object} ErrorResponse "Missing project ID"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/analytics/dashboard [get]
+func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+	usageFilter := parseUsageFilter(c)
+	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), repository.AnalyticsDashboardFilter{
+		ProjectID: projectID,
+		DateFrom:  usageFilter.DateFrom,
+		DateTo:    usageFilter.DateTo,
+		Compare:   c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
+		Limit:     20,
+	})
+	if err != nil {
+		applog.Infof("[handler] GetAnalyticsDashboard error: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, dashboard)
+}
+
 func parseAnalyticsTime(value string) time.Time {
 	return service.ParseUsageAnalyticsTime(value)
+}
+
+func analyticsSQLBound(value string) string {
+	parsed := parseAnalyticsTime(value)
+	if parsed.IsZero() {
+		return ""
+	}
+	return parsed.UTC().Format("2006-01-02 15:04:05.999999999")
 }
 
 // GetSuccessFailureRates returns success/failure rates data
@@ -223,8 +266,8 @@ func (h *Handler) GetSuccessFailureRates(c echo.Context) error {
 	if groupBy == "" {
 		groupBy = "day"
 	}
-	dateFrom := c.QueryParam("date_from")
-	dateTo := c.QueryParam("date_to")
+	dateFrom := analyticsSQLBound(c.QueryParam("date_from"))
+	dateTo := analyticsSQLBound(c.QueryParam("date_to"))
 
 	rates, err := h.execRepo.GetSuccessFailureRates(c.Request().Context(), projectID, groupBy, dateFrom, dateTo)
 	if err != nil {
@@ -255,7 +298,7 @@ func (h *Handler) GetAvgExecutionTimeByTask(c echo.Context) error {
 		}
 	}
 
-	times, err := h.execRepo.GetAvgExecutionTimeByTask(c.Request().Context(), projectID, limit)
+	times, err := h.execRepo.GetAvgExecutionTimeByTask(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
 	if err != nil {
 		applog.Infof("[handler] GetAvgExecutionTimeByTask error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -276,7 +319,7 @@ func (h *Handler) GetAvgExecutionTimeByTask(c echo.Context) error {
 func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
-	times, err := h.execRepo.GetAvgExecutionTimeByAgent(c.Request().Context(), projectID)
+	times, err := h.execRepo.GetAvgExecutionTimeByAgent(c.Request().Context(), projectID, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
 	if err != nil {
 		applog.Infof("[handler] GetAvgExecutionTimeByAgent error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -298,8 +341,8 @@ func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
 // @Router /api/analytics/execution-trends-by-hour [get]
 func (h *Handler) GetExecutionTrendsByHour(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
-	dateFrom := c.QueryParam("date_from")
-	dateTo := c.QueryParam("date_to")
+	dateFrom := analyticsSQLBound(c.QueryParam("date_from"))
+	dateTo := analyticsSQLBound(c.QueryParam("date_to"))
 
 	trends, err := h.execRepo.GetExecutionTrendsByHour(c.Request().Context(), projectID, dateFrom, dateTo)
 	if err != nil {
@@ -322,7 +365,7 @@ func (h *Handler) GetExecutionTrendsByHour(c echo.Context) error {
 func (h *Handler) GetAgentUsageByProject(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
-	usage, err := h.execRepo.GetAgentUsageByProject(c.Request().Context(), projectID)
+	usage, err := h.execRepo.GetAgentUsageByProject(c.Request().Context(), projectID, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
 	if err != nil {
 		applog.Infof("[handler] GetAgentUsageByProject error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -351,7 +394,7 @@ func (h *Handler) GetMostFrequentTasks(c echo.Context) error {
 		}
 	}
 
-	frequencies, err := h.execRepo.GetMostFrequentTasks(c.Request().Context(), projectID, limit)
+	frequencies, err := h.execRepo.GetMostFrequentTasks(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
 	if err != nil {
 		applog.Infof("[handler] GetMostFrequentTasks error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -380,7 +423,7 @@ func (h *Handler) GetFailedTaskPatterns(c echo.Context) error {
 		}
 	}
 
-	patterns, err := h.execRepo.GetFailedTaskPatterns(c.Request().Context(), projectID, limit)
+	patterns, err := h.execRepo.GetFailedTaskPatternsInRange(c.Request().Context(), projectID, limit, analyticsSQLBound(c.QueryParam("date_from")), analyticsSQLBound(c.QueryParam("date_to")))
 	if err != nil {
 		applog.Infof("[handler] GetFailedTaskPatterns error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())

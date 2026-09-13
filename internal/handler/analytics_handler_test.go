@@ -143,6 +143,29 @@ func TestGetAnalyticsUsage_WithDateRange(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
+func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T) {
+	tc := NewTestContext(t)
+	missing := tc.HTTP().Get("/api/analytics/dashboard?range=30d").Execute()
+	tc.Assert(missing).StatusCode(http.StatusBadRequest)
+
+	project := tc.CreateProject().Build()
+	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&range=all&compare=1").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	var dashboard models.AnalyticsDashboard
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if len(dashboard.Definitions) < 6 {
+		t.Fatalf("definitions = %d, want centralized metric definitions", len(dashboard.Definitions))
+	}
+	if dashboard.Previous != nil {
+		t.Fatalf("all-time dashboard must omit nonsensical previous comparison: %+v", dashboard.Previous)
+	}
+	if dashboard.Agents == nil || dashboard.Workflows == nil || dashboard.RecentOutcomes == nil {
+		t.Fatalf("empty dashboard collections must encode as arrays: %+v", dashboard)
+	}
+}
+
 func TestGetSuccessFailureRates(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/success-failure-rates").Execute()
