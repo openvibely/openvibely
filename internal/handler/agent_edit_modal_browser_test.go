@@ -147,18 +147,37 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		await release(agentA + '/json');
 		await sleep(100);
 
-		const key = document.getElementById('advanced_key').value;
-		const scope = document.getElementById('advanced_scope').value;
-		const enabled = document.getElementById('advanced_enabled').checked;
-		const selectable = document.getElementById('advanced_selectable_as_primary').checked;
-		const writeSkills = document.getElementById('perm_write_skills').checked;
-		const readAgents = document.getElementById('perm_read_agents').checked;
-		const sourceRefs = document.getElementById('advanced_source_refs').value;
-		const protectedVisible = !document.getElementById('advanced_protected_notice').classList.contains('hidden');
-		const hookKeys = Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).map(input => input.value).join(',');
-		if (key !== 'agent_b_key' || scope !== 'global' || enabled || selectable || !writeSkills || readAgents || sourceRefs !== 'https://example.test/agent-b' || protectedVisible || !hookKeys.includes('agent_b_hook')) {
-			throw new Error('B modal state was overwritten: ' + JSON.stringify({key, scope, enabled, selectable, writeSkills, readAgents, sourceRefs, protectedVisible, hookKeys}));
-		}
+		const assertBModalState = () => {
+			const key = document.getElementById('advanced_key').value;
+			const scope = document.getElementById('advanced_scope').value;
+			const enabled = document.getElementById('advanced_enabled').checked;
+			const selectable = document.getElementById('advanced_selectable_as_primary').checked;
+			const writeSkills = document.getElementById('perm_write_skills').checked;
+			const readAgents = document.getElementById('perm_read_agents').checked;
+			const sourceRefs = document.getElementById('advanced_source_refs').value;
+			const protectedVisible = !document.getElementById('advanced_protected_notice').classList.contains('hidden');
+			const hookKeys = Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).map(input => input.value).join(',');
+			if (key !== 'agent_b_key' || scope !== 'global' || enabled || selectable || !writeSkills || readAgents || sourceRefs !== 'https://example.test/agent-b' || protectedVisible || !hookKeys.includes('agent_b_hook')) {
+				throw new Error('B modal state was overwritten: ' + JSON.stringify({key, scope, enabled, selectable, writeSkills, readAgents, sourceRefs, protectedVisible, hookKeys}));
+			}
+		};
+		assertBModalState();
+
+		gate.requests = {};
+		gate.queued = {};
+		clickCard(agentA);
+		await waitForRequest(agentA + '/json');
+		await release(agentA + '/json');
+		await waitForRequest(agentA + '/lifecycle-hooks');
+		clickCard(agentB);
+		await waitForRequest(agentB + '/json');
+		await release(agentB + '/json');
+		await waitForRequest(agentB + '/lifecycle-hooks');
+		await release(agentB + '/lifecycle-hooks');
+		await release(agentA + '/lifecycle-hooks');
+		await sleep(100);
+		assertBModalState();
+
 		const save = document.getElementById('agent_save_btn');
 		if (save.disabled || save.getAttribute('aria-busy') !== 'false') throw new Error('Save remained unavailable after B hydration');
 		gate.active = false;
