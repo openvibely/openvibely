@@ -1280,8 +1280,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var request = data.input_request || {};
 							var requestId = request.id || '';
 							if (!requestId) return;
+							var execId = data.exec_id || request.exec_id || '';
+							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
 							var existing = document.getElementById('chat-input-request-' + requestId);
 							if (existing) {
+								if (executionPair && existing.parentElement !== executionPair) executionPair.appendChild(existing);
 								if (request.completed) completeChatInputRequest(existing, request);
 								return;
 							}
@@ -1394,8 +1397,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							body.appendChild(navigation);
 							body.appendChild(status);
 							card.appendChild(body);
-							var execId = data.exec_id || request.exec_id || '';
-							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
 							(executionPair || chatMessages).appendChild(card);
 							showChatInputQuestion(card, 0);
 							if (request.completed) completeChatInputRequest(card, request);

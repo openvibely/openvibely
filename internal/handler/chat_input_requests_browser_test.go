@@ -97,6 +97,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 		}
 		try {
 			var eventData = %s;
+			await waitFor(function() { return document.querySelector('[data-chat-input-request-id="%s"]'); }, 'startup reconciliation did not render the input request card');
 			var executionPair = document.createElement('div');
 			executionPair.id = 'chat-execution-exec-browser';
 			executionPair.setAttribute('data-execution-pair', 'true');
@@ -146,7 +147,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 			await report('fail', String(error && error.stack || error));
 		}
 	})();
-	</script>`, string(eventJSON), pending.ID)
+	</script>`, string(eventJSON), pending.ID, pending.ID)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/browser-result" {
