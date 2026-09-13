@@ -3,11 +3,14 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -222,6 +225,253 @@ func TestLifecycleRepo_HookListPathsPreserveFiltersOrderingAndValues(t *testing.
 	if !reflect.DeepEqual(*gotBefore, *expectedBefore) {
 		t.Fatalf("hook decoded differently across list paths:\nby agent: %+v\nfor when: %+v", *expectedBefore, *gotBefore)
 	}
+}
+
+func TestLifecycleRepo_HookListPathsReturnScanErrorsUnwrapped(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	hook := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "project_context/load",
+		OutputContract: models.OutputContractContextBlock,
+		Enabled:        true,
+	}
+	if err := repo.CreateHook(ctx, hook); err != nil {
+		t.Fatalf("create hook: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE agent_lifecycle_hooks SET blocking = ? WHERE id = ?`, "not-an-integer", hook.ID); err != nil {
+		t.Fatalf("corrupt hook blocking value: %v", err)
+	}
+
+	listers := []struct {
+		name string
+		list func(context.Context) ([]models.AgentLifecycleHook, error)
+	}{
+		{
+			name: "by agent",
+			list: func(ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksByAgent(ctx, agent.ID)
+			},
+		},
+		{
+			name: "for when",
+			list: func(ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+			},
+		},
+	}
+	for _, tc := range listers {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.list(ctx)
+			if err == nil {
+				t.Fatal("expected scan error")
+			}
+			if strings.HasPrefix(err.Error(), "listing hooks") {
+				t.Fatalf("scan error unexpectedly wrapped with query context: %v", err)
+			}
+		})
+	}
+}
+
+func TestLifecycleRepo_HookListPathsReturnPostQueryErrorsUnwrapped(t *testing.T) {
+	listers := []struct {
+		name string
+		list func(*LifecycleRepo, context.Context) ([]models.AgentLifecycleHook, error)
+	}{
+		{
+			name: "by agent",
+			list: func(repo *LifecycleRepo, ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksByAgent(ctx, "agent")
+			},
+		},
+		{
+			name: "for when",
+			list: func(repo *LifecycleRepo, ctx context.Context) ([]models.AgentLifecycleHook, error) {
+				return repo.HooksForWhen(ctx, models.LifecycleBeforeRun)
+			},
+		},
+	}
+
+	for _, tc := range listers {
+		t.Run(tc.name+" iteration error", func(t *testing.T) {
+			iterationErr := errors.New("iteration failed")
+			db := newLifecycleHookListTestDB(t, &lifecycleHookListTestRows{
+				values:  [][]driver.Value{validLifecycleHookListRow()},
+				nextErr: iterationErr,
+			})
+			repo := NewLifecycleRepo(db)
+
+			_, err := tc.list(repo, context.Background())
+			if !errors.Is(err, iterationErr) {
+				t.Fatalf("error = %v, want iteration error", err)
+			}
+			if strings.HasPrefix(err.Error(), "listing hooks") {
+				t.Fatalf("iteration error unexpectedly wrapped with query context: %v", err)
+			}
+		})
+
+		t.Run(tc.name+" post-query cancellation", func(t *testing.T) {
+			rows := &lifecycleHookListTestRows{
+				waitForCancellation: true,
+				nextStarted:         make(chan struct{}),
+			}
+			db := newLifecycleHookListTestDB(t, rows)
+			repo := NewLifecycleRepo(db)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			type listResult struct {
+				err error
+			}
+			result := make(chan listResult, 1)
+			go func() {
+				_, err := tc.list(repo, ctx)
+				result <- listResult{err: err}
+			}()
+
+			select {
+			case <-rows.nextStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for rows.Next")
+			}
+			cancel()
+
+			select {
+			case got := <-result:
+				if !errors.Is(got.err, context.Canceled) {
+					t.Fatalf("error = %v, want context.Canceled", got.err)
+				}
+				if strings.HasPrefix(got.err.Error(), "listing hooks") {
+					t.Fatalf("post-query cancellation unexpectedly wrapped with query context: %v", got.err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for hook list cancellation")
+			}
+		})
+	}
+}
+
+func validLifecycleHookListRow() []driver.Value {
+	return []driver.Value{
+		"hook-id", "agent-id", "before_run", "skill-key", "prompt", "context_block",
+		int64(1), int64(1), "{}", "{}", nil, `{"blocks":["task_context"]}`,
+		time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC),
+	}
+}
+
+type lifecycleHookListTestConnector struct {
+	rows *lifecycleHookListTestRows
+}
+
+func (c lifecycleHookListTestConnector) Connect(context.Context) (driver.Conn, error) {
+	return &lifecycleHookListTestConn{rows: c.rows}, nil
+}
+
+func (c lifecycleHookListTestConnector) Driver() driver.Driver {
+	return lifecycleHookListTestDriver{}
+}
+
+type lifecycleHookListTestDriver struct{}
+
+func (lifecycleHookListTestDriver) Open(string) (driver.Conn, error) {
+	return nil, errors.New("lifecycle hook list test driver does not support named databases")
+}
+
+type lifecycleHookListTestConn struct {
+	rows *lifecycleHookListTestRows
+}
+
+func (c *lifecycleHookListTestConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("lifecycle hook list test connection does not support prepared statements")
+}
+
+func (*lifecycleHookListTestConn) Close() error {
+	return nil
+}
+
+func (*lifecycleHookListTestConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("lifecycle hook list test connection does not support transactions")
+}
+
+func (c *lifecycleHookListTestConn) QueryContext(ctx context.Context, _ string, _ []driver.NamedValue) (driver.Rows, error) {
+	c.rows.ctx = ctx
+	return c.rows, nil
+}
+
+type lifecycleHookListTestRows struct {
+	values              [][]driver.Value
+	nextErr             error
+	waitForCancellation bool
+	nextStarted         chan struct{}
+	ctx                 context.Context
+	closed              chan struct{}
+	closeOnce           sync.Once
+}
+
+func (r *lifecycleHookListTestRows) Columns() []string {
+	return []string{
+		"id", "agent_id", "when_slot", "skill_key", "prompt_override", "output_contract",
+		"blocking", "enabled", "permissions_json", "run_policy_json", "schedule_json",
+		"payload_json", "created_at", "updated_at",
+	}
+}
+
+func (r *lifecycleHookListTestRows) Close() error {
+	r.closeOnce.Do(func() {
+		if r.closed == nil {
+			r.closed = make(chan struct{})
+		}
+		close(r.closed)
+	})
+	return nil
+}
+
+func (r *lifecycleHookListTestRows) Next(dest []driver.Value) error {
+	if r.waitForCancellation {
+		if r.nextStarted != nil {
+			close(r.nextStarted)
+			r.nextStarted = nil
+		}
+		select {
+		case <-r.ctx.Done():
+			return r.ctx.Err()
+		case <-r.closed:
+			if err := r.ctx.Err(); err != nil {
+				return err
+			}
+			return io.EOF
+		}
+	}
+	if len(r.values) > 0 {
+		copy(dest, r.values[0])
+		r.values = r.values[1:]
+		return nil
+	}
+	if r.nextErr != nil {
+		err := r.nextErr
+		r.nextErr = nil
+		return err
+	}
+	return io.EOF
+}
+
+func newLifecycleHookListTestDB(t *testing.T, rows *lifecycleHookListTestRows) *sql.DB {
+	t.Helper()
+	if rows.closed == nil {
+		rows.closed = make(chan struct{})
+	}
+	db := sql.OpenDB(lifecycleHookListTestConnector{rows: rows})
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+	return db
 }
 
 func TestLifecycleRepo_HookListPathsPreserveQueryErrorContextAndCancellation(t *testing.T) {
