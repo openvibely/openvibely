@@ -299,6 +299,7 @@ templ upcomingTaskCard(bt models.UpcomingTask, currentProjectID string) {
 
 templ upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, order int) {
 	<div class="card bg-base-100 shadow-sm border border-base-300 hover:shadow-md transition-shadow cursor-pointer"
+		data-upcoming-task-id={ bt.Task.ID }
 		onclick={ openUpcomingTaskDialog(bt.Task.ID) }
 	>
 		<div class="card-body p-4">
@@ -324,6 +325,22 @@ templ upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string,
 						<span class={ "badge badge-sm", components.TagBadgeClass(bt.Task.Tag) }>{ components.TagLabel(bt.Task.Tag) }</span>
 					}
 					<span class="text-xs opacity-50">{ bt.AgentName }</span>
+					if upcomingTaskCanBeStopped(bt, currentProjectID) {
+						<button
+							type="button"
+							class="btn btn-ghost btn-xs text-error"
+							data-upcoming-stop
+							aria-label={ "Stop task " + bt.Task.Title }
+							hx-post={ fmt.Sprintf("/tasks/%s/cancel?pulse=1&project_id=%s", bt.Task.ID, currentProjectID) }
+							hx-target="#upcoming-container"
+							hx-swap="outerHTML"
+							hx-confirm={ upcomingTaskStopConfirmation(bt.Task.Status) }
+							hx-disabled-elt="this"
+							onclick="event.stopPropagation()"
+						>
+							Stop
+						</button>
+					}
 				</div>
 			</div>
 			if bt.Task.Prompt != "" {
@@ -372,6 +389,27 @@ templ AISummaryResult(summary string, err error) {
 			</div>
 		</div>
 	}
+}
+
+func upcomingTaskCanBeStopped(bt models.UpcomingTask, currentProjectID string) bool {
+	if bt.Task.ProjectID != currentProjectID || bt.Task.Category == models.CategoryChat {
+		return false
+	}
+	switch bt.Task.Status {
+	case models.StatusRunning:
+		return true
+	case models.StatusPending, models.StatusQueued:
+		return bt.Task.Category == models.CategoryActive
+	default:
+		return false
+	}
+}
+
+func upcomingTaskStopConfirmation(status models.TaskStatus) string {
+	if status == models.StatusRunning {
+		return "Stop this running task?"
+	}
+	return "Stop this waiting task?"
 }
 
 func truncatePrompt(prompt string, maxLen int) string {

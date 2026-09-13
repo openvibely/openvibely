@@ -2701,6 +2701,7 @@ func TestMigration187RollbackRestoresSharedOAuthConnectionState(t *testing.T) {
 		VALUES
 			('rollback-one', 'Rollback One', 'openai', 'gpt-one', 'oauth', 'old-one', 'old-refresh-one', 111, 'old-account-one', 0, 2),
 			('rollback-two', 'Rollback Two', 'openai', 'gpt-two', 'oauth', 'old-two', 'old-refresh-two', 222, 'old-account-two', 0, 3),
+			('rollback-three', 'Rollback Three', 'openai', 'gpt-three', 'oauth', 'old-four', 'old-refresh-four', 444, 'old-account-four', 0, 5),
 			('rollback-anthropic', 'Rollback Anthropic', 'anthropic', 'claude', 'oauth', 'old-three', 'old-refresh-three', 333, 'old-account-three', 0, 4);`); err != nil {
 		t.Fatalf("seed pre-187 OAuth configs: %v", err)
 	}
@@ -2709,14 +2710,23 @@ func TestMigration187RollbackRestoresSharedOAuthConnectionState(t *testing.T) {
 	}
 	if _, err := db.Exec(`
 		UPDATE agent_configs SET oauth_connection_id = 'rollback-one' WHERE id = 'rollback-two';
+		UPDATE agent_configs SET oauth_connection_id = 'rollback-three' WHERE id = 'rollback-one';
 		UPDATE oauth_connections
 		SET oauth_access_token = 'shared-access', oauth_refresh_token = 'shared-refresh', oauth_expires_at = 999,
-			oauth_account_id = 'shared-account', oauth_needs_reauth = 1, oauth_revision = 12
+			oauth_account_id = '', oauth_needs_reauth = 1, oauth_revision = 12
 		WHERE id = 'rollback-one';
+		UPDATE oauth_connections
+		SET oauth_access_token = 'moved-access', oauth_refresh_token = 'moved-refresh', oauth_expires_at = 555,
+			oauth_account_id = '', oauth_needs_reauth = 0, oauth_revision = 12
+		WHERE id = 'rollback-three';
 		UPDATE oauth_connections
 		SET oauth_access_token = 'anthropic-access', oauth_refresh_token = 'anthropic-refresh', oauth_expires_at = 777,
 			oauth_account_id = 'anthropic-account', oauth_needs_reauth = 0, oauth_revision = 8
-		WHERE id = 'rollback-anthropic';`); err != nil {
+		WHERE id = 'rollback-anthropic';
+		INSERT INTO account_usage_snapshots (id, provider, account_id, agent_config_id, oauth_connection_id, oauth_config_revision, raw_json)
+		VALUES
+			('moved-origin-snapshot', 'openai', 'rollback-one', 'rollback-one', 'rollback-one', 12, '{}'),
+			('orphaned-connection-snapshot', 'openai', 'rollback-two', 'rollback-two', 'rollback-two', 3, '{}');`); err != nil {
 		t.Fatalf("prepare shared connection state: %v", err)
 	}
 	if err := goose.DownTo(db, ".", 186); err != nil {
@@ -2725,7 +2735,7 @@ func TestMigration187RollbackRestoresSharedOAuthConnectionState(t *testing.T) {
 
 	rows, err := db.Query(`
 		SELECT id, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_needs_reauth, oauth_config_revision
-		FROM agent_configs WHERE id IN ('rollback-one', 'rollback-two', 'rollback-anthropic') ORDER BY id`)
+		FROM agent_configs WHERE id IN ('rollback-one', 'rollback-two', 'rollback-three', 'rollback-anthropic') ORDER BY id`)
 	if err != nil {
 		t.Fatalf("query rolled-back OAuth state: %v", err)
 	}
@@ -2740,12 +2750,33 @@ func TestMigration187RollbackRestoresSharedOAuthConnectionState(t *testing.T) {
 		}
 		seen[id] = fmt.Sprintf("%s|%s|%d|%s|%t|%d", access, refresh, expires, account, needsReauth, revision)
 	}
-	shared := "shared-access|shared-refresh|999|shared-account|true|12"
-	if seen["rollback-one"] != shared || seen["rollback-two"] != shared {
-		t.Fatalf("shared OpenAI state not restored to both models: %+v", seen)
+	shared := "shared-access|shared-refresh|999||true|12"
+	if seen["rollback-two"] != shared {
+		t.Fatalf("shared OpenAI state not restored to remaining model: %+v", seen)
+	}
+	moved := "moved-access|moved-refresh|555||false|12"
+	if seen["rollback-one"] != moved || seen["rollback-three"] != moved {
+		t.Fatalf("moved OpenAI state not restored to both linked models: %+v", seen)
 	}
 	if seen["rollback-anthropic"] != "anthropic-access|anthropic-refresh|777|anthropic-account|false|8" {
 		t.Fatalf("Anthropic state not restored: %+v", seen)
+	}
+	var reboundOwner string
+	var reboundAccount sql.NullString
+	var reboundRevision int64
+	if err := db.QueryRow(`SELECT agent_config_id, account_id, oauth_config_revision FROM account_usage_snapshots WHERE id = 'moved-origin-snapshot'`).Scan(&reboundOwner, &reboundAccount, &reboundRevision); err != nil {
+		t.Fatalf("query rebound snapshot: %v", err)
+	}
+	if reboundOwner != "rollback-two" || reboundAccount.Valid || reboundRevision != 12 {
+		t.Fatalf("moved-origin snapshot rollback = owner %q account %+v revision %d, want rollback-two/null/12", reboundOwner, reboundAccount, reboundRevision)
+	}
+	var orphanOwner sql.NullString
+	var orphanRevision int64
+	if err := db.QueryRow(`SELECT agent_config_id, oauth_config_revision FROM account_usage_snapshots WHERE id = 'orphaned-connection-snapshot'`).Scan(&orphanOwner, &orphanRevision); err != nil {
+		t.Fatalf("query orphaned snapshot: %v", err)
+	}
+	if orphanOwner.Valid || orphanRevision != -1 {
+		t.Fatalf("orphaned snapshot rollback = owner %+v revision %d, want null/-1", orphanOwner, orphanRevision)
 	}
 	if testColumnExists(t, db, "agent_configs", "oauth_connection_id") {
 		t.Fatal("agent_configs.oauth_connection_id remained after rollback")
@@ -2756,6 +2787,24 @@ func TestMigration187RollbackRestoresSharedOAuthConnectionState(t *testing.T) {
 	}
 	if connectionTableCount != 0 {
 		t.Fatal("oauth_connections remained after rollback")
+	}
+
+	if err := goose.UpTo(db, ".", 187); err != nil {
+		t.Fatalf("re-upgrade migration 187 after rollback: %v", err)
+	}
+	var reboundConnectionID string
+	if err := db.QueryRow(`SELECT oauth_connection_id FROM account_usage_snapshots WHERE id = 'moved-origin-snapshot'`).Scan(&reboundConnectionID); err != nil {
+		t.Fatalf("query re-upgraded rebound snapshot: %v", err)
+	}
+	if reboundConnectionID != "rollback-two" {
+		t.Fatalf("re-upgraded rebound snapshot connection = %q, want rollback-two", reboundConnectionID)
+	}
+	var orphanConnectionID sql.NullString
+	if err := db.QueryRow(`SELECT oauth_connection_id FROM account_usage_snapshots WHERE id = 'orphaned-connection-snapshot'`).Scan(&orphanConnectionID); err != nil {
+		t.Fatalf("query re-upgraded orphan snapshot: %v", err)
+	}
+	if orphanConnectionID.Valid {
+		t.Fatalf("re-upgraded orphan snapshot connection = %+v, want null", orphanConnectionID)
 	}
 }
 
