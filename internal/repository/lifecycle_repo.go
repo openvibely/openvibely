@@ -162,11 +162,12 @@ func (r *LifecycleRepo) DeleteHook(ctx context.Context, id string) error {
 
 // listHooks executes one of the repository-owned lifecycle hook list queries and
 // assembles its rows into hook models. The caller supplies the fixed query and
-// retains responsibility for its projection, filters, ordering, and arguments.
-func (r *LifecycleRepo) listHooks(ctx context.Context, query, queryErrorContext string, args ...any) ([]models.AgentLifecycleHook, error) {
+// retains responsibility for its projection, filters, ordering, arguments, and
+// method-specific error context.
+func (r *LifecycleRepo) listHooks(ctx context.Context, query string, args ...any) ([]models.AgentLifecycleHook, error) {
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", queryErrorContext, err)
+		return nil, err
 	}
 	defer rows.Close()
 	var out []models.AgentLifecycleHook
@@ -182,11 +183,15 @@ func (r *LifecycleRepo) listHooks(ctx context.Context, query, queryErrorContext 
 
 // HooksByAgent returns all hooks configured for one agent, ordered by `when` value.
 func (r *LifecycleRepo) HooksByAgent(ctx context.Context, agentID string) ([]models.AgentLifecycleHook, error) {
-	return r.listHooks(ctx, `
+	hooks, err := r.listHooks(ctx, `
         SELECT `+hookCols+`
         FROM agent_lifecycle_hooks
         WHERE agent_id = ?
-        ORDER BY when_slot ASC, created_at ASC`, "listing hooks", agentID)
+        ORDER BY when_slot ASC, created_at ASC`, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing hooks: %w", err)
+	}
+	return hooks, nil
 }
 
 // HooksForWhen returns enabled hooks across all agents for one `when` value.
@@ -201,7 +206,7 @@ func (r *LifecycleRepo) HooksByAgent(ctx context.Context, agentID string) ([]mod
 // task run records duplicate before_run/after_complete executions per
 // archived copy.
 func (r *LifecycleRepo) HooksForWhen(ctx context.Context, when models.LifecycleWhen) ([]models.AgentLifecycleHook, error) {
-	return r.listHooks(ctx, `
+	hooks, err := r.listHooks(ctx, `
         SELECT `+prefixedHookCols("h")+`
         FROM agent_lifecycle_hooks h
         JOIN agents a ON a.id = h.agent_id
@@ -210,7 +215,11 @@ func (r *LifecycleRepo) HooksForWhen(ctx context.Context, when models.LifecycleW
 	          AND COALESCE(a.enabled, 1) = 1
 	          AND a.archived_at IS NULL
 	          AND COALESCE(a.generated_status, 'user_edited') <> 'archived'
-        ORDER BY h.agent_id ASC, h.created_at ASC`, fmt.Sprintf("listing hooks for %s", when), string(when))
+        ORDER BY h.agent_id ASC, h.created_at ASC`, string(when))
+	if err != nil {
+		return nil, fmt.Errorf("listing hooks for %s: %w", when, err)
+	}
+	return hooks, nil
 }
 
 const execCols = `id, task_id, task_run_id, agent_id, when_slot, lifecycle_hook_id,
