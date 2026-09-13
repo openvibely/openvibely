@@ -836,9 +836,10 @@ func dedupeAccountUsageViews(accounts []models.AccountUsageView, configsByID map
 func preferAccountUsageView(existing, next models.AccountUsageView) models.AccountUsageView {
 	winner := existing
 	other := next
-	if next.UpdatedAt.After(existing.UpdatedAt) {
-		winner = next
-		other = existing
+	if existing.Error != "" && next.Error == "" {
+		winner, other = next, existing
+	} else if (existing.Error == "") == (next.Error == "") && next.UpdatedAt.After(existing.UpdatedAt) {
+		winner, other = next, existing
 	}
 	return mergeAccountUsageViewMetadata(winner, other)
 }
