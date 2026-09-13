@@ -540,6 +540,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 	var snapshots []models.AccountUsageSnapshot
 	errorsByKey := map[string]string{}
 	seenAccounts := map[string]bool{}
+	failedCredentialOwners := map[string]bool{}
 	type pendingAccountFailure struct {
 		snapshot       models.AccountUsageSnapshot
 		message        string
@@ -559,6 +560,10 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		if provider != "" && string(cfg.Provider) != provider {
 			continue
 		}
+		credentialOwnerKey := accountUsageCredentialOwnerKeyForConfig(cfg)
+		if failedCredentialOwners[credentialOwnerKey] {
+			continue
+		}
 		key := accountUsageKeyForConfig(cfg)
 		if seenAccounts[key] {
 			continue
@@ -576,6 +581,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		}
 		snapshot, err := s.accountFetcher(ctx, cfg)
 		if err != nil {
+			failedCredentialOwners[credentialOwnerKey] = true
 			reason := accountRefreshFailureReason(err)
 			message := accountRefreshFailureMessage(reason)
 			applog.Infof("[usage] account usage refresh failed provider=%s reason=%s: %v", cfg.Provider, reason, sanitizeAccountUsageError(err))
@@ -654,9 +660,9 @@ func latestAccountSnapshotForConfig(ctx context.Context, usageRepo *repository.U
 		if !snapshotMatchesConfigAccount(*snapshot, cfg) {
 			continue
 		}
-		if isAccountRefreshFailure(snapshot.RateLimitReachedType) && strings.TrimSpace(snapshot.AgentConfigID) != strings.TrimSpace(cfg.ID) {
-			// Account identity is shared, but a refresh failure is config-scoped.
-			// Ignore sibling failures when deciding this config's cooldown.
+		if isAccountRefreshFailure(snapshot.RateLimitReachedType) && !snapshotHasSameOAuthCredentialOwner(*snapshot, cfg) {
+			// Provider account identity is shared for display, but a failure cooldown
+			// applies only to the explicit OAuth connection that produced it.
 			continue
 		}
 		age := time.Since(snapshot.FetchedAt)
@@ -1161,6 +1167,23 @@ func accountUsageKey(provider, accountID, agentConfigID string) string {
 		return provider + "\x00account\x00" + strings.TrimSpace(accountID)
 	}
 	return provider + "\x00config\x00" + strings.TrimSpace(agentConfigID)
+}
+
+func accountUsageCredentialOwnerKeyForConfig(cfg models.LLMConfig) string {
+	provider := string(cfg.Provider)
+	if connectionID := strings.TrimSpace(cfg.OAuthConnectionID); connectionID != "" {
+		return provider + "\x00connection\x00" + connectionID
+	}
+	return provider + "\x00config\x00" + strings.TrimSpace(cfg.ID)
+}
+
+func snapshotHasSameOAuthCredentialOwner(snapshot models.AccountUsageSnapshot, cfg models.LLMConfig) bool {
+	snapshotConnectionID := strings.TrimSpace(snapshot.OAuthConnectionID)
+	configConnectionID := strings.TrimSpace(cfg.OAuthConnectionID)
+	if snapshotConnectionID != "" || configConnectionID != "" {
+		return snapshotConnectionID != "" && snapshotConnectionID == configConnectionID
+	}
+	return strings.TrimSpace(snapshot.AgentConfigID) == strings.TrimSpace(cfg.ID)
 }
 
 func accountUsageKeyForConfig(cfg models.LLMConfig) string {
