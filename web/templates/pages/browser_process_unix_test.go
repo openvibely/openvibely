@@ -4,16 +4,31 @@ package pages
 
 import (
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+var browserProcessSlots sync.Map
+
 func startBrowserProcess(cmd *exec.Cmd) error {
+	slot, err := testutil.AcquireBrowserSlot()
+	if err != nil {
+		return err
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		slot.Release()
+		return err
+	}
+	browserProcessSlots.Store(cmd, slot)
+	return nil
 }
 
 func stopBrowserProcess(cmd *exec.Cmd) {
+	defer releaseBrowserProcessSlot(cmd)
 	if cmd.Process == nil {
 		return
 	}
@@ -35,4 +50,10 @@ func stopBrowserProcess(cmd *exec.Cmd) {
 	}
 	_ = syscall.Kill(processGroup, syscall.SIGKILL)
 	<-waited
+}
+
+func releaseBrowserProcessSlot(cmd *exec.Cmd) {
+	if slot, ok := browserProcessSlots.LoadAndDelete(cmd); ok {
+		slot.(*testutil.BrowserSlot).Release()
+	}
 }
