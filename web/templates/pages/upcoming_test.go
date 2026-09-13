@@ -97,6 +97,58 @@ func TestUpcomingContentRendersQueuedTaskAsQueued(t *testing.T) {
 	}
 }
 
+func TestUpcomingTaskCardsRenderStopOnlyForEligibleTasks(t *testing.T) {
+	currentProjectID := "project-1"
+	tests := []struct {
+		name       string
+		status     models.TaskStatus
+		category   models.TaskCategory
+		projectID  string
+		wantStop   bool
+		wantPrompt string
+	}{
+		{name: "running", status: models.StatusRunning, category: models.CategoryActive, projectID: currentProjectID, wantStop: true, wantPrompt: "Stop this running task?"},
+		{name: "active pending", status: models.StatusPending, category: models.CategoryActive, projectID: currentProjectID, wantStop: true, wantPrompt: "Stop this waiting task?"},
+		{name: "active queued", status: models.StatusQueued, category: models.CategoryActive, projectID: currentProjectID, wantStop: true, wantPrompt: "Stop this waiting task?"},
+		{name: "scheduled", status: models.StatusPending, category: models.CategoryScheduled, projectID: currentProjectID, wantStop: false},
+		{name: "completed", status: models.StatusCompleted, category: models.CategoryCompleted, projectID: currentProjectID, wantStop: false},
+		{name: "failed", status: models.StatusFailed, category: models.CategoryBacklog, projectID: currentProjectID, wantStop: false},
+		{name: "cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, projectID: currentProjectID, wantStop: false},
+		{name: "backlog pending", status: models.StatusPending, category: models.CategoryBacklog, projectID: currentProjectID, wantStop: false},
+		{name: "chat", status: models.StatusRunning, category: models.CategoryChat, projectID: currentProjectID, wantStop: false},
+		{name: "foreign", status: models.StatusRunning, category: models.CategoryActive, projectID: "project-foreign", wantStop: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			bt := models.UpcomingTask{Task: models.Task{
+				ID: "task-" + tt.name, ProjectID: tt.projectID, Title: "Task " + tt.name,
+				Status: tt.status, Category: tt.category,
+			}, AgentName: "Test Agent"}
+			var rendered bytes.Buffer
+			if err := upcomingTaskCardWithOrder(bt, currentProjectID, 1).Render(context.Background(), &rendered); err != nil {
+				t.Fatalf("render task card: %v", err)
+			}
+			body := rendered.String()
+			if got := strings.Contains(body, `data-upcoming-stop`); got != tt.wantStop {
+				t.Fatalf("stop control present=%v, want %v: %s", got, tt.wantStop, body)
+			}
+			if tt.wantStop {
+				for _, want := range []string{
+					`aria-label="Stop task Task ` + tt.name + `"`,
+					`hx-post="/tasks/task-` + tt.name + `/cancel?pulse=1&amp;project_id=project-1"`,
+					`hx-confirm="` + tt.wantPrompt + `"`,
+					`hx-disabled-elt="this"`,
+					`onclick="event.stopPropagation()"`,
+				} {
+					if !strings.Contains(body, want) {
+						t.Fatalf("eligible card missing %q: %s", want, body)
+					}
+				}
+			}
+		})
+	}
+}
 func TestUpcomingTaskWithoutTagRendersNoTagBadge(t *testing.T) {
 	upcoming := &models.Upcoming{
 		GeneratedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
