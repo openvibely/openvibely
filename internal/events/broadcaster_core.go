@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 )
 
-// subscriberGuard protects a subscriber channel from concurrent send/close races.
+// subscriberGuard serializes subscriber channel closure and records its terminal state.
 type subscriberGuard struct {
 	mu     sync.Mutex
 	closed bool
@@ -26,6 +26,7 @@ type broadcaster[T any, S ~chan T] struct {
 	mu                sync.RWMutex
 	subscribers       map[S]broadcasterSubscription
 	scopedSubscribers map[string]map[S]*subscriberGuard
+	scopedSnapshots   map[string][]broadcasterEntry[T, S]
 	bufferSize        int
 	deliveryAttempts  atomic.Uint64
 }
@@ -34,6 +35,7 @@ func newBroadcaster[T any, S ~chan T](bufferSize int) broadcaster[T, S] {
 	return broadcaster[T, S]{
 		subscribers:       make(map[S]broadcasterSubscription),
 		scopedSubscribers: make(map[string]map[S]*subscriberGuard),
+		scopedSnapshots:   make(map[string][]broadcasterEntry[T, S]),
 		bufferSize:        bufferSize,
 	}
 }
@@ -62,7 +64,26 @@ func (b *broadcaster[T, S]) SubscribeScoped(scope string) (S, error) {
 		b.scopedSubscribers[scope] = make(map[S]*subscriberGuard)
 	}
 	b.scopedSubscribers[scope][sub] = guard
+	b.rebuildScopedSnapshotLocked(scope)
 	return sub, nil
+}
+
+// rebuildScopedSnapshotLocked replaces one scope's immutable subscriber snapshot.
+// Callers must hold b.mu for writing. Existing snapshots are never modified; publishers
+// hold b.mu for reading through their nonblocking sends so a channel cannot close while
+// it is being offered an event.
+func (b *broadcaster[T, S]) rebuildScopedSnapshotLocked(scope string) {
+	members := b.scopedSubscribers[scope]
+	if len(members) == 0 {
+		delete(b.scopedSnapshots, scope)
+		return
+	}
+
+	snapshot := make([]broadcasterEntry[T, S], 0, len(members))
+	for sub, guard := range members {
+		snapshot = append(snapshot, broadcasterEntry[T, S]{ch: sub, guard: guard})
+	}
+	b.scopedSnapshots[scope] = snapshot
 }
 
 // Unsubscribe removes a subscriber and closes its channel.
@@ -75,15 +96,14 @@ func (b *broadcaster[T, S]) Unsubscribe(sub S) {
 		if len(b.scopedSubscribers[subscription.scope]) == 0 {
 			delete(b.scopedSubscribers, subscription.scope)
 		}
-	}
-	b.mu.Unlock()
+		b.rebuildScopedSnapshotLocked(subscription.scope)
 
-	if exists {
 		subscription.guard.mu.Lock()
 		subscription.guard.closed = true
 		close(sub)
 		subscription.guard.mu.Unlock()
 	}
+	b.mu.Unlock()
 }
 
 // Publish sends an event to deliberate global subscribers without blocking the publisher.
@@ -92,27 +112,20 @@ func (b *broadcaster[T, S]) Publish(event T) {
 }
 
 // PublishScoped sends an event to global subscribers and subscribers for the matching
-// scope without blocking the publisher.
+// scope without blocking the publisher. The read lock remains held during fan-out so
+// Unsubscribe cannot close a channel until all in-flight sends have completed.
 func (b *broadcaster[T, S]) PublishScoped(scope string, event T) {
 	b.mu.RLock()
-	capacity := len(b.scopedSubscribers[""])
-	if scope != "" {
-		capacity += len(b.scopedSubscribers[scope])
-	}
-	subs := make([]broadcasterEntry[T, S], 0, capacity)
-	for sub, guard := range b.scopedSubscribers[""] {
-		subs = append(subs, broadcasterEntry[T, S]{ch: sub, guard: guard})
-	}
-	if scope != "" {
-		for sub, guard := range b.scopedSubscribers[scope] {
-			subs = append(subs, broadcasterEntry[T, S]{ch: sub, guard: guard})
-		}
-	}
-	b.mu.RUnlock()
+	globalSnapshot := b.scopedSnapshots[""]
+	scopedSnapshot := b.scopedSnapshots[scope]
 
-	b.deliveryAttempts.Add(uint64(len(subs)))
-	for _, entry := range subs {
-		entry.guard.mu.Lock()
+	deliveryAttempts := len(globalSnapshot)
+	if scope != "" {
+		deliveryAttempts += len(scopedSnapshot)
+	}
+	b.deliveryAttempts.Add(uint64(deliveryAttempts))
+
+	for _, entry := range globalSnapshot {
 		if !entry.guard.closed {
 			select {
 			case entry.ch <- event:
@@ -120,8 +133,19 @@ func (b *broadcaster[T, S]) PublishScoped(scope string, event T) {
 				// Drop events for slow subscribers rather than blocking producers.
 			}
 		}
-		entry.guard.mu.Unlock()
 	}
+	if scope != "" {
+		for _, entry := range scopedSnapshot {
+			if !entry.guard.closed {
+				select {
+				case entry.ch <- event:
+				default:
+					// Drop events for slow subscribers rather than blocking producers.
+				}
+			}
+		}
+	}
+	b.mu.RUnlock()
 }
 
 // DeliveryAttempts returns the total number of subscriber delivery attempts.
