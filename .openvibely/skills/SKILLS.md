@@ -251,7 +251,7 @@ always_use:
 
 ## openvibely_api_chat_model_selection_workflow
 
-[OpenVibely API Chat Model Selection Workflow](openvibely_api_chat_model_selection_workflow/SKILL.md) — Implement and audit API Chat message model auto-selection without hydrating every full LLM config.
+[OpenVibely API Chat Model Selection Workflow](openvibely_api_chat_model_selection_workflow/SKILL.md) — Implement and audit API Chat message admission, model auto-selection, and queued promotion without unnecessary configuration hydration or side effects.
 
 ## openvibely_update_config_workflow
 
@@ -311,3 +311,7 @@ always_use:
 ## openvibely_interactive_user_input_workflow
 
 [OpenVibely Interactive User Input Workflow](openvibely_interactive_user_input_workflow/SKILL.md) — Implement provider-agnostic Chat tools that pause for validated user choices and resume the same model run safely.
+
+## openvibely_shared_dependency_wiring_workflow
+
+[OpenVibely Shared Dependency Wiring Workflow](openvibely_shared_dependency_wiring_workflow/SKILL.md) — Consolidate repeated service construction and dependency attachment across OpenVibely runtime paths without collapsing caller-specific behavior.

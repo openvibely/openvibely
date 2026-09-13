@@ -4,7 +4,7 @@ type: project
 created: 2026-07-15
 updated: 2026-09-06
 source: after_complete
-source_id: 5c74fe91144a0f84866bf7d8ad82be85:060ff04d233a2c16
+source_id: ada0b7bac9993afd479d498bfd5be4f8:07b0750d2c98d75f
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -28,6 +28,7 @@ Runtime contracts:
 - Failed Native creation/linkage/execution records processing failure; release is valid only before linkage. The remaining repeated task-row creation gap in the shared transactional path is tracked as `#835`.
 - Native Approved Inbox discovery must query `decision_state=approved`, `processing_state=unclaimed`, and `implementation_task_linked=false`, while omitting `read`, `type`, `source`, and `project_id`. Filters are conjunctive, so `processing_state=not_applicable` or `read=false` can incorrectly exclude approved actionable notifications. The generic schema keeps lifecycle filters optional/default-free and explicit caller values retain their meaning. Failed-notification retry belongs in a separate recovery query.
 - Custom Automation graphs reuse this approval lifecycle; topology and ownership belong in `automation_graphs.md`.
+- Chat runtime alert mutation tools now share one private batch result-processing helper in `internal/handler/chat_processing.go`. Delete and toggle wrappers retain typed ID extraction, distinct `AlertService.Delete` versus `MarkRead` callbacks, unavailable-service messages, headings, and success/error wording; the helper owns empty-input/service availability, per-request continuation and logging, result accumulation, empty-result handling, and joined output. Runtime decoding in `chat_action_tools.go`, trimmed responses, browser alert handlers, and repository transactions remain unchanged. Implemented for GitHub issue `#1152` in PR `#1162`.
 
 Alerts UI:
 - Alerts supports inspection, approve/reject controls, decision/processing badges, claimant/failure details, linked-task navigation, project context, project-filtered live refresh, and contextual bulk actions for selected cards. Pending summaries should be scannable without expansion; detail provides full evidence/metadata/copy. Selected `Mark as read` uses a project-preflighted bulk mutation so mixed or foreign IDs do not partially change state; the authoritative Alerts fragment is refreshed afterward.
@@ -36,5 +37,5 @@ Alerts UI:
 - Inspection reuses shared Chat/task-thread Markdown parsing, sanitization, code-copy, and link behavior. Raw body is carried as Base64 UTF-8 and decoded immediately before clipboard write, preserving LF, CRLF, and bare-CR bytes; empty bodies have no copy control and parser failures render escaped inert text. Native light inline code uses dedicated contrast variables; fenced code remains unchanged.
 - New alerts are never auto-focused. Deletion moves focus with `preventScroll` to the next/previous visible delete control. Scroll restoration uses a surviving intersecting row after search/geometry settle and suppresses HTMX show-to-top. `#system-update-card` is API-authoritative and `hx-preserve`d during Alerts swaps.
 - Every saved outbound target and alert action preserves displayed project scope. Details and settings do not put secrets or sensitive metadata in compact card attributes. Notification content begins with a short nontechnical `## Summary`, followed by evidence and implementation detail.
-- Open UI gaps include decision/claim timing visibility (`#847`), source-task navigation when `TaskID` is empty but `SourceTaskID` exists (`#870`), and browser Dismiss for pending actionable notifications (`#944`).
+- Direct task-linked alert cards are semantic, keyboard-reachable links with meaningful accessible names, visible focus rings, and repeat-safe Enter/Space activation to `/tasks/{id}?tab=history&from=alerts`; source-only alerts remain non-navigable, and nested Inspect/details, copy, decision, read, delete, and implementation-task controls retain propagation guards. Native Chromium coverage protects keyboard activation and nested-control isolation.
 - Maintained Automation prompts are point-in-time snapshots. Native SDLC template revision `11` carries the approved-inbox query contract above; saved Automations need an explicit template update, and existing Backlog tasks are not retroactively started. Model/migration/lease documentation is in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.
