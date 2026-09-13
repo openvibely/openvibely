@@ -342,14 +342,15 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 
 func anthropicAgentResult(output, textOnly string, usage llmcontracts.Usage, err error) llmcontracts.AgentResult {
 	res := llmcontracts.AgentResult{
-		Output:                   output,
-		TextOnlyOutput:           textOnly,
-		Usage:                    usage,
-		StopReason:               stopReasonIfMaxTokens(err),
-		NativeCompactionSummary:  usage.ProviderIDs["native_compaction_summary"],
-		NativeCompactionStrategy: usage.ProviderIDs["native_compaction_strategy"],
+		Output:                    output,
+		TextOnlyOutput:            textOnly,
+		Usage:                     usage,
+		StopReason:                stopReasonIfMaxTokens(err),
+		NativeCompactionSummary:   usage.ProviderIDs["native_compaction_summary"],
+		NativeCompactionStrategy:  usage.ProviderIDs["native_compaction_strategy"],
+		NativeCompactionStateJSON: usage.NativeCompactionStateJSON,
 	}
-	if strings.TrimSpace(res.NativeCompactionSummary) != "" {
+	if strings.TrimSpace(res.NativeCompactionSummary) != "" || strings.TrimSpace(res.NativeCompactionStateJSON) != "" {
 		res.Compacted = true
 	}
 	return res
@@ -358,6 +359,7 @@ func anthropicAgentResult(output, textOnly string, usage llmcontracts.Usage, err
 // Call handles Anthropic LLM requests.
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string, w *llmstream.Writer) (llmcontracts.AgentResult, error) {
 	agent := req.Agent
+	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
 
 	// API paths only (OAuth or API key).
 	if !agent.IsOAuth() && !agent.IsAnthropicAPIKey() {
@@ -439,22 +441,23 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	}
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
-		Model:                    agent.Model,
-		ContextWindow:            agent.ContextWindow,
-		MaxTokens:                maxTokens,
-		Effort:                   agent.ReasoningEffort,
-		System:                   systemPrompt,
-		WorkDir:                  workDir,
-		Attachments:              mcAttachments,
-		DisableTools:             disableTools,
-		SkipDefaultTools:         skipDefaultTools,
-		AutoCompaction:           !agent.DisableNativeCompaction,
-		CompactionTokenThreshold: agent.CompactionThreshold,
-		WebSearchEnabled:         webSearchEnabled,
-		ExtraTools:               extraTools,
-		ToolExecutor:             toolExecutor,
-		ToolFilter:               toolFilter,
-		OnToolBoundarySteering:   llmcontracts.SteeringCallbackFromContext(ctx),
+		Model:                     agent.Model,
+		ContextWindow:             agent.ContextWindow,
+		MaxTokens:                 maxTokens,
+		Effort:                    agent.ReasoningEffort,
+		System:                    systemPrompt,
+		WorkDir:                   workDir,
+		Attachments:               mcAttachments,
+		DisableTools:              disableTools,
+		SkipDefaultTools:          skipDefaultTools,
+		AutoCompaction:            !agent.DisableNativeCompaction,
+		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
+		CompactionTokenThreshold:  agent.CompactionThreshold,
+		WebSearchEnabled:          webSearchEnabled,
+		ExtraTools:                extraTools,
+		ToolExecutor:              toolExecutor,
+		ToolFilter:                toolFilter,
+		OnToolBoundarySteering:    llmcontracts.SteeringCallbackFromContext(ctx),
 		OnCompaction: func(summary string) {
 			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[anthropic] callDirect context compacted, summary_len=%d", len(summary))
@@ -467,8 +470,11 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	}
 
 	usage := anthropicContextUsage(resp)
-	if compactionSummary != "" {
-		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "anthropic_context_management"}
+	if compactionSummary != "" || usage.NativeCompactionStateJSON != "" {
+		usage.ProviderIDs = map[string]string{"native_compaction_strategy": "anthropic_context_management"}
+		if compactionSummary != "" {
+			usage.ProviderIDs["native_compaction_summary"] = compactionSummary
+		}
 	}
 	applog.Infof("[anthropic] callDirect success model=%s input=%d output=%d tools=%d stop=%s compacted=%v", resp.Model, resp.InputTokens, resp.OutputTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
@@ -512,20 +518,21 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	chatInThinking := false
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
-		Model:                    agent.Model,
-		ContextWindow:            agent.ContextWindow,
-		MaxTokens:                maxTokens,
-		Effort:                   agent.ReasoningEffort,
-		EnableThinking:           true,
-		DisableTools:             disableTools,
-		SkipDefaultTools:         skipDefaultTools,
-		System:                   systemPromptStr,
-		WorkDir:                  workDir,
-		Attachments:              mcAttachments,
-		AutoCompaction:           !agent.DisableNativeCompaction,
-		CompactionTokenThreshold: agent.CompactionThreshold,
-		WebSearchEnabled:         true,
-		ExtraTools:               extraTools, ToolExecutor: toolExecutor,
+		Model:                     agent.Model,
+		ContextWindow:             agent.ContextWindow,
+		MaxTokens:                 maxTokens,
+		Effort:                    agent.ReasoningEffort,
+		EnableThinking:            true,
+		DisableTools:              disableTools,
+		SkipDefaultTools:          skipDefaultTools,
+		System:                    systemPromptStr,
+		WorkDir:                   workDir,
+		Attachments:               mcAttachments,
+		AutoCompaction:            !agent.DisableNativeCompaction,
+		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
+		CompactionTokenThreshold:  agent.CompactionThreshold,
+		WebSearchEnabled:          true,
+		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
@@ -569,8 +576,11 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	output := sw.String()
 	usage := anthropicContextUsage(resp)
-	if compactionSummary != "" {
-		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "anthropic_context_management"}
+	if compactionSummary != "" || usage.NativeCompactionStateJSON != "" {
+		usage.ProviderIDs = map[string]string{"native_compaction_strategy": "anthropic_context_management"}
+		if compactionSummary != "" {
+			usage.ProviderIDs["native_compaction_summary"] = compactionSummary
+		}
 	}
 	applog.Infof("[anthropic] callChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
@@ -612,19 +622,20 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	inThinking := false
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
-		Model:                    agent.Model,
-		ContextWindow:            agent.ContextWindow,
-		MaxTokens:                maxTokens,
-		Effort:                   agent.ReasoningEffort,
-		EnableThinking:           true,
-		SkipDefaultTools:         skipDefaultTools,
-		System:                   llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
-		WorkDir:                  workDir,
-		Attachments:              mcAttachments,
-		AutoCompaction:           !agent.DisableNativeCompaction,
-		CompactionTokenThreshold: agent.CompactionThreshold,
-		WebSearchEnabled:         true,
-		ExtraTools:               extraTools, ToolExecutor: toolExecutor,
+		Model:                     agent.Model,
+		ContextWindow:             agent.ContextWindow,
+		MaxTokens:                 maxTokens,
+		Effort:                    agent.ReasoningEffort,
+		EnableThinking:            true,
+		SkipDefaultTools:          skipDefaultTools,
+		System:                    llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		WorkDir:                   workDir,
+		Attachments:               mcAttachments,
+		AutoCompaction:            !agent.DisableNativeCompaction,
+		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
+		CompactionTokenThreshold:  agent.CompactionThreshold,
+		WebSearchEnabled:          true,
+		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
 		OnThinking: func(text string) {
@@ -670,8 +681,11 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	output := sw.String()
 	textOnly := sw.TextString()
 	usage := anthropicContextUsage(resp)
-	if compactionSummary != "" {
-		usage.ProviderIDs = map[string]string{"native_compaction_summary": compactionSummary, "native_compaction_strategy": "anthropic_context_management"}
+	if compactionSummary != "" || usage.NativeCompactionStateJSON != "" {
+		usage.ProviderIDs = map[string]string{"native_compaction_strategy": "anthropic_context_management"}
+		if compactionSummary != "" {
+			usage.ProviderIDs["native_compaction_summary"] = compactionSummary
+		}
 	}
 	applog.Infof("[anthropic] callStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if resp.StopReason == "max_tokens" {
@@ -733,6 +747,7 @@ func (a *Adapter) getClient(ctx context.Context, agent models.LLMConfig) (*anthr
 func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.Usage {
 	usage := llmusage.FromAnthropic(resp.InputTokens, resp.OutputTokens, resp.CacheCreationInputTokens, resp.CacheReadInputTokens)
 	usage.LastContextTokens = resp.LastContextTokens
+	usage.NativeCompactionStateJSON = resp.NativeCompactionStateJSON
 	return usage
 }
 

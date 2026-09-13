@@ -70,6 +70,10 @@ type AgenticOptions struct {
 	// For example: "Focus on code changes and decisions".
 	CompactionInstructions string
 
+	// NativeCompactionStateJSON replays a provider-native compaction block from
+	// a compatible prior execution before post-checkpoint history.
+	NativeCompactionStateJSON string
+
 	// Attachments are files to include with the initial message (images, PDFs, code files).
 	// They are sent as multimodal content blocks alongside the text prompt.
 	Attachments []*FileAttachment
@@ -133,16 +137,17 @@ func NormalizeEffort(model, value string) string {
 
 // AgenticResponse is the result of an agentic send.
 type AgenticResponse struct {
-	LastContextTokens        int    // Includes Anthropic's disjoint input/cache token buckets.
-	Text                     string // final text output (all turns concatenated)
-	Model                    string
-	InputTokens              int
-	OutputTokens             int
-	CacheCreationInputTokens int
-	CacheReadInputTokens     int
-	StopReason               string
-	ToolCalls                []ToolCall // log of all tool calls made
-	Compacted                bool       // true if context was compacted during this call
+	LastContextTokens         int    // Includes Anthropic's disjoint input/cache token buckets.
+	Text                      string // final text output (all turns concatenated)
+	Model                     string
+	InputTokens               int
+	OutputTokens              int
+	CacheCreationInputTokens  int
+	CacheReadInputTokens      int
+	StopReason                string
+	ToolCalls                 []ToolCall // log of all tool calls made
+	Compacted                 bool       // true if context was compacted during this call
+	NativeCompactionStateJSON string     // newly returned provider-native compaction block for durable replay
 }
 
 // agenticMessage is a message in the agentic conversation.
@@ -315,8 +320,18 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		tools = filterToolDefinitions(tools, opts.ToolFilter)
 	}
 
-	// Build initial messages from history + new prompt
-	messages := make([]agenticMessage, 0, len(c.History)+1)
+	// Build initial messages from a compatible native checkpoint, history, and new prompt.
+	messages := make([]agenticMessage, 0, len(c.History)+2)
+	if state := strings.TrimSpace(opts.NativeCompactionStateJSON); state != "" {
+		var compactBlock compactionBlockJSON
+		if err := json.Unmarshal([]byte(state), &compactBlock); err != nil {
+			return nil, fmt.Errorf("decode Anthropic native compaction state: %w", err)
+		}
+		if compactBlock.Type != "compaction" || compactBlock.Content == nil {
+			return nil, fmt.Errorf("decode Anthropic native compaction state: invalid compaction block")
+		}
+		messages = append(messages, agenticMessage{Role: "user", Content: []compactionBlockJSON{compactBlock}})
+	}
 	for _, msg := range c.History {
 		messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
 	}
@@ -377,6 +392,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			compactBlock.Content = resp.compaction.content
 
 			if resp.compaction.content != nil {
+				encodedState, err := json.Marshal(compactBlock)
+				if err != nil {
+					return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
+				}
+				result.NativeCompactionStateJSON = string(encodedState)
 				applog.Infof("[anthropicclient] context compacted on turn %d, summary_len=%d", turn+1, len(*resp.compaction.content))
 				if opts.OnCompaction != nil {
 					opts.OnCompaction(*resp.compaction.content)

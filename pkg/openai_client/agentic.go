@@ -1418,11 +1418,26 @@ func nextCompactionTrimIndexes(items []any, protectedIndexes ...int) []int {
 		}
 	}
 
-	// Fallback: trim oldest non-protected item.
-	for i := range items {
-		if !isProtected(i) {
-			return []int{i}
+	// Fallback: trim the oldest structurally safe non-protected item or group.
+	for i, raw := range items {
+		if isProtected(i) {
+			continue
 		}
+		if _, ok := raw.(map[string]any); ok {
+			indexes := compactionToolPairIndexes(items, i)
+			blocked := false
+			for _, index := range indexes {
+				if isProtected(index) {
+					blocked = true
+					break
+				}
+			}
+			if blocked {
+				continue
+			}
+			return indexes
+		}
+		return []int{i}
 	}
 	return nil
 }
