@@ -207,7 +207,7 @@ func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 	if !strings.Contains(body, "class=\"flex flex-col h-[78vh]\"") {
 		t.Errorf("expected agents page to include fixed-height modal content container")
 	}
-	if !strings.Contains(body, "id=\"agent_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"") {
+	if !strings.Contains(body, "id=\"agent_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost(); invalidateAgentModalHydration()\"") {
 		t.Errorf("expected agents modal to resync toast host on close for top-layer stacking")
 	}
 	if !strings.Contains(body, "function getTopMostOpenModal()") {
