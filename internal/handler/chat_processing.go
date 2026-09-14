@@ -98,10 +98,10 @@ type streamingResponseParams struct {
 	// DeferHistoryLoad is true.
 	Task *models.Task
 
-	// RepublishOpenPRAfterStartupSync is set when startup synchronization
-	// advanced a task branch that already has an open pull request. The
-	// reconciled turn must publish that state before Goal Agent evaluation can
-	// schedule a fresh audit.
+	// RepublishOpenPRAfterStartupSync is set while an open pull request has a
+	// durable pending publication requirement created by startup synchronization.
+	// The reconciled turn must publish that state before Goal Agent evaluation
+	// can schedule a fresh audit.
 	RepublishOpenPRAfterStartupSync bool
 
 	steeringHistoryStarted bool
@@ -726,17 +726,15 @@ modelLoop:
 		h.finalizeStreamingTurn(params, output)
 		return
 	}
-	if params.RepublishOpenPRAfterStartupSync {
-		if publishErr := h.republishOpenPullRequestAfterStartupSync(ctx, params.TaskID); publishErr != nil {
-			finalizeLifecycle(publishErr, result.ChatContext)
-			applog.Infof("[handler] processStreamingResponse exec=%s task=%s startup-sync PR publication failed: %v", params.ExecID, params.TaskID, publishErr)
-			h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), publishErr.Error(), durationMs)
-			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, publishErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
-			h.finalizeStreamingTurn(params, output)
-			return
-		}
+	completionOutcome, completionErr := h.completeWithSuccessWithPRReconciliation(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.RepublishOpenPRAfterStartupSync, params.TelegramInitialAckMessageID, params.ChannelReply)
+	if completionErr != nil {
+		finalizeLifecycle(completionErr, result.ChatContext)
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s startup-sync PR publication failed: %v", params.ExecID, params.TaskID, completionErr)
+		h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), completionErr.Error(), durationMs)
+		h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, completionErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		h.finalizeStreamingTurn(params, output)
+		return
 	}
-	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionOutcome == repository.CompleteSuccessCompleted {
 		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
 	}
@@ -761,7 +759,14 @@ modelLoop:
 		}
 		applog.Infof("[handler] processStreamingResponse exec=%s completion deferred with no text steering; requeueing remaining steering inputs", params.ExecID)
 		h.requeuePendingSteeringForExecution(ctx, params.ExecID)
-		completionOutcome = h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		completionOutcome, completionErr = h.completeWithSuccessWithPRReconciliation(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.RepublishOpenPRAfterStartupSync, params.TelegramInitialAckMessageID, params.ChannelReply)
+		if completionErr != nil {
+			finalizeLifecycle(completionErr, result.ChatContext)
+			h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), completionErr.Error(), durationMs)
+			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, completionErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+			h.finalizeStreamingTurn(params, output)
+			return
+		}
 		if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
 			finalizeLifecycle(nil, result.ChatContext)
 			h.finalizeStreamingTurn(params, output)
@@ -1950,19 +1955,33 @@ func (h *Handler) deregisterTaskCancellation(taskID string) {
 // Logs errors but does not fail since this runs in a background goroutine.
 // Captures git diff if workDir is provided.
 func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) repository.CompleteSuccessOutcome {
+	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, execID, taskID, output, workDir, tokensUsed, durationMs, false, completionOptions...)
+	if err != nil {
+		applog.Infof("[handler] completeWithSuccess exec=%s unexpected PR reconciliation error: %v", execID, err)
+		return repository.CompleteSuccessAlreadyTerminal
+	}
+	return outcome
+}
+
+func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (repository.CompleteSuccessOutcome, error) {
 	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
 	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
-		return repository.CompleteSuccessAlreadyTerminal
+		return repository.CompleteSuccessAlreadyTerminal, nil
 	}
 	if outcome == repository.CompleteSuccessPendingSteering {
 		applog.Infof("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
-		return outcome
+		return outcome, nil
 	}
 	if outcome == repository.CompleteSuccessAlreadyTerminal {
 		applog.Infof("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
-		return outcome
+		return outcome, nil
+	}
+	if republishOpenPR {
+		if err := h.republishOpenPullRequestAfterStartupSync(ctx, taskID); err != nil {
+			return outcome, err
+		}
 	}
 
 	// Load task state before publishing the terminal event so any final status
@@ -1988,7 +2007,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 		}
 		h.publishExecutionTerminal(execID, models.ExecCompleted, "")
 		h.notifySwarmChildTerminal(ctx, taskID)
-		return repository.CompleteSuccessCompleted
+		return repository.CompleteSuccessCompleted, nil
 	}
 
 	// Update task status BEFORE git diff capture. The SSE handler detects
@@ -2031,7 +2050,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 		}
 	}
 	h.notifySwarmChildTerminal(ctx, taskID)
-	return repository.CompleteSuccessCompleted
+	return repository.CompleteSuccessCompleted, nil
 }
 
 func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task) (bool, string) {
@@ -2678,18 +2697,26 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 		return wtPath, "", false, nil
 	}
 
+	publicationReservation, reservationErr := h.reserveStartupSyncPublication(ctx, task)
+	if reservationErr != nil {
+		return "", "", false, reservationErr
+	}
 	syncChanged, syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStartWithResult(ctx, task, repoDir)
 	if syncErr != nil {
 		var conflictErr *service.StartupSyncConflictError
 		if errors.As(syncErr, &conflictErr) {
 			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
-			return wtPath, buildStartupSyncConflictContext(conflictErr), false, nil
+			publicationContext, republishOpenPR, publicationErr := h.startupSyncPublicationContext(ctx, task, publicationReservation, true)
+			if publicationErr != nil {
+				return "", "", false, publicationErr
+			}
+			return wtPath, combineContexts(buildStartupSyncConflictContext(conflictErr), publicationContext), republishOpenPR, nil
 		}
 		applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
 		return "", "", false, syncErr
 	}
 
-	publicationContext, republishOpenPR, publicationErr := h.startupSyncPublicationContext(ctx, task, syncChanged)
+	publicationContext, republishOpenPR, publicationErr := h.startupSyncPublicationContext(ctx, task, publicationReservation, syncChanged)
 	if publicationErr != nil {
 		return "", "", false, publicationErr
 	}
@@ -2697,22 +2724,47 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 	return wtPath, publicationContext, republishOpenPR, nil
 }
 
-func (h *Handler) startupSyncPublicationContext(ctx context.Context, task *models.Task, syncChanged bool) (string, bool, error) {
-	if !syncChanged || task == nil || h.taskPullRequestRepo == nil {
-		return "", false, nil
+type startupSyncPublicationReservation struct {
+	active     bool
+	wasPending bool
+	prNumber   int
+}
+
+func (h *Handler) reserveStartupSyncPublication(ctx context.Context, task *models.Task) (startupSyncPublicationReservation, error) {
+	if task == nil || h.taskPullRequestRepo == nil {
+		return startupSyncPublicationReservation{}, nil
 	}
 	pullRequest, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
 	if err != nil {
-		return "", false, fmt.Errorf("checking pull request after startup synchronization: %w", err)
+		return startupSyncPublicationReservation{}, fmt.Errorf("checking pull request before startup synchronization: %w", err)
 	}
 	if pullRequest == nil || !service.IsOpenPullRequestState(pullRequest.PRState) {
+		return startupSyncPublicationReservation{}, nil
+	}
+	reservation := startupSyncPublicationReservation{active: true, wasPending: pullRequest.NeedsRepublish, prNumber: pullRequest.PRNumber}
+	if !pullRequest.NeedsRepublish {
+		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, task.ID, true); err != nil {
+			return startupSyncPublicationReservation{}, fmt.Errorf("reserving pull request publication before startup synchronization: %w", err)
+		}
+	}
+	return reservation, nil
+}
+
+func (h *Handler) startupSyncPublicationContext(ctx context.Context, task *models.Task, reservation startupSyncPublicationReservation, syncChanged bool) (string, bool, error) {
+	if task == nil || !reservation.active {
+		return "", false, nil
+	}
+	if !syncChanged && !reservation.wasPending {
+		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
+			return "", false, fmt.Errorf("clearing unused pull request publication reservation: %w", err)
+		}
 		return "", false, nil
 	}
 	target := strings.TrimSpace(task.MergeTargetBranch)
 	if target == "" {
 		target = "the configured merge target"
 	}
-	return fmt.Sprintf("# Pull Request Reconciliation Required\n\nStartup synchronization advanced this task branch by merging %s. Existing pull request #%d does not yet contain the synchronized worktree state. Treat this as a reconciliation turn, not an audit-only turn: preserve the merge, resolve any remaining implementation work, run relevant validation, and report the result. On successful completion OpenVibely will update the existing pull request automatically; do not reset the task branch merely to match its previous published SHA. A fresh audit can run in the next goal turn.", target, pullRequest.PRNumber), true, nil
+	return fmt.Sprintf("# Pull Request Reconciliation Required\n\nThis task has unpublished target-branch reconciliation work for %s. Existing pull request #%d does not yet contain the reconciled worktree state. Treat this as a reconciliation turn, not an audit-only turn: preserve the merge or conflict resolution, resolve any remaining implementation work, run relevant validation, and report the result. On successful completion OpenVibely will update the existing pull request automatically; do not reset the task branch merely to match its previous published SHA. A fresh audit can run in the next goal turn.", target, reservation.prNumber), true, nil
 }
 
 func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, taskID string) error {
