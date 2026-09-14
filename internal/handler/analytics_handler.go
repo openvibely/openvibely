@@ -257,6 +257,9 @@ func usageEvidenceRequested(filter repository.UsageFilter) bool {
 // @Param workflow query string false "Automation workflow ID"
 // @Param evidence_limit query int false "Evidence rows per page, 1-100" default(20)
 // @Param evidence_offset query int false "Evidence rows to skip" default(0)
+// @Param evidence_skill_handle query string false "Exact skill handle for task-outcome evidence"
+// @Param evidence_skill_scope query string false "Exact skill scope for task-outcome evidence"
+// @Param evidence_skill_agent query string false "Exact reusable Agent definition ID or __unassigned__ for skill task-outcome evidence"
 // @Success 200 {object} models.AnalyticsDashboard "Outcome Analytics dashboard"
 // @Failure 400 {object} ErrorResponse "Missing project ID"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -276,15 +279,18 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 		evidenceOffset = parsed
 	}
 	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), repository.AnalyticsDashboardFilter{
-		ProjectID:      projectID,
-		DateFrom:       usageFilter.DateFrom,
-		DateTo:         usageFilter.DateTo,
-		Compare:        c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
-		Limit:          evidenceLimit,
-		EvidenceOffset: evidenceOffset,
-		GroupBy:        c.QueryParam("group_by"),
-		AgentID:        strings.TrimSpace(c.QueryParam("agent")),
-		WorkflowID:     strings.TrimSpace(c.QueryParam("workflow")),
+		ProjectID:            projectID,
+		DateFrom:             usageFilter.DateFrom,
+		DateTo:               usageFilter.DateTo,
+		Compare:              c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
+		Limit:                evidenceLimit,
+		EvidenceOffset:       evidenceOffset,
+		GroupBy:              c.QueryParam("group_by"),
+		AgentID:              strings.TrimSpace(c.QueryParam("agent")),
+		WorkflowID:           strings.TrimSpace(c.QueryParam("workflow")),
+		EvidenceSkillHandle:  strings.TrimSpace(c.QueryParam("evidence_skill_handle")),
+		EvidenceSkillScope:   strings.TrimSpace(c.QueryParam("evidence_skill_scope")),
+		EvidenceSkillAgentID: strings.TrimSpace(c.QueryParam("evidence_skill_agent")),
 	})
 	if err != nil {
 		applog.Infof("[handler] GetAnalyticsDashboard error: %v", err)

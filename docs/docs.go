@@ -260,6 +260,24 @@ const docTemplate = `{
                         "description": "Evidence rows to skip",
                         "name": "evidence_offset",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact skill handle for task-outcome evidence",
+                        "name": "evidence_skill_handle",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact skill scope for task-outcome evidence",
+                        "name": "evidence_skill_scope",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact reusable Agent definition ID or __unassigned__ for skill task-outcome evidence",
+                        "name": "evidence_skill_agent",
+                        "in": "query"
                     }
                 ],
                 "responses": {

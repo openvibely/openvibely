@@ -16,15 +16,18 @@ import (
 // AnalyticsDashboardFilter applies one authoritative project and a half-open
 // [DateFrom, DateTo) window to every period-sensitive dashboard query.
 type AnalyticsDashboardFilter struct {
-	ProjectID      string
-	DateFrom       time.Time
-	DateTo         time.Time
-	Compare        bool
-	Limit          int
-	EvidenceOffset int
-	GroupBy        string
-	AgentID        string
-	WorkflowID     string
+	ProjectID            string
+	DateFrom             time.Time
+	DateTo               time.Time
+	Compare              bool
+	Limit                int
+	EvidenceOffset       int
+	GroupBy              string
+	AgentID              string
+	WorkflowID           string
+	EvidenceSkillHandle  string
+	EvidenceSkillScope   string
+	EvidenceSkillAgentID string
 }
 
 var analyticsMetricDefinitions = []models.MetricDefinition{
@@ -130,6 +133,37 @@ func analyticsTaskDimensionClause(alias string, filter AnalyticsDashboardFilter)
 		args = append(args, filter.WorkflowID)
 	}
 	return clause, args
+}
+
+func analyticsSkillOutcomeEvidenceClause(taskAlias string, filter AnalyticsDashboardFilter) (string, []any, bool) {
+	handle := strings.TrimSpace(filter.EvidenceSkillHandle)
+	scope := strings.TrimSpace(filter.EvidenceSkillScope)
+	agentID := strings.TrimSpace(filter.EvidenceSkillAgentID)
+	if handle == "" && scope == "" && agentID == "" {
+		return "", nil, false
+	}
+
+	clause := ""
+	args := []any{}
+	if agentID == "__unassigned__" {
+		clause += " AND " + taskAlias + ".agent_definition_id IS NULL"
+	} else if agentID != "" {
+		clause += " AND " + taskAlias + ".agent_definition_id=?"
+		args = append(args, agentID)
+	}
+	eventWindow, eventArgs := analyticsEventWindowClause("skill_evidence", "created_at", filter)
+	clause += " AND EXISTS (SELECT 1 FROM skill_analytics_events skill_evidence WHERE skill_evidence.task_id=" + taskAlias + ".id AND skill_evidence.project_id=" + taskAlias + ".project_id AND skill_evidence.event_type IN ('selected','loaded')" + eventWindow
+	args = append(args, eventArgs...)
+	if handle != "" {
+		clause += " AND skill_evidence.skill_handle=?"
+		args = append(args, handle)
+	}
+	if scope != "" {
+		clause += " AND skill_evidence.skill_scope=?"
+		args = append(args, scope)
+	}
+	clause += ")"
+	return clause, args, true
 }
 
 func analyticsPeriodExpression(groupBy, column string) string {
@@ -734,8 +768,13 @@ func (r *ExecutionRepo) queryEvidenceTotal(ctx context.Context, filter Analytics
 	taskWindow, taskWindowArgs := analyticsTaskWindowClause("t", filter)
 	goalWindow, goalWindowArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
+	skillEvidence, skillEvidenceArgs, skillEvidenceActive := analyticsSkillOutcomeEvidenceClause("t", filter)
+	evidenceTaskIDs := "SELECT task_id FROM period_task_ids UNION SELECT task_id FROM created_task_ids UNION SELECT task_id FROM evaluable_goals"
+	if skillEvidenceActive {
+		evidenceTaskIDs = "SELECT task_id FROM period_task_ids"
+	}
 	query := `WITH scoped_tasks AS (
-		SELECT t.* FROM tasks t WHERE t.project_id=?` + dimension + `
+		SELECT t.* FROM tasks t WHERE t.project_id=?` + dimension + skillEvidence + `
 	), period_exec AS (
 		SELECT e.* FROM executions e JOIN scoped_tasks t ON t.id=e.task_id WHERE 1=1` + window + `
 	), period_task_ids AS (SELECT DISTINCT task_id FROM period_exec),
@@ -745,9 +784,10 @@ func (r *ExecutionRepo) queryEvidenceTotal(ctx context.Context, filter Analytics
 		SELECT g.task_id,g.status FROM task_goals g JOIN scoped_tasks t ON t.id=g.task_id WHERE g.status IN ('achieved','failed')` + goalWindow + `
 		UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_task_ids p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
 	), evidence_task_ids AS (
-		SELECT task_id FROM period_task_ids UNION SELECT task_id FROM created_task_ids UNION SELECT task_id FROM evaluable_goals
+		` + evidenceTaskIDs + `
 	) SELECT COUNT(*) FROM evidence_task_ids`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
+	args = append(args, skillEvidenceArgs...)
 	args = append(args, windowArgs...)
 	args = append(args, taskWindowArgs...)
 	args = append(args, goalWindowArgs...)
@@ -764,10 +804,15 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 	goalWindow, goalWindowArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	usageWindow, usageWindowArgs := analyticsEventWindowClause("llm_usage_events", "occurred_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
+	skillEvidence, skillEvidenceArgs, skillEvidenceActive := analyticsSkillOutcomeEvidenceClause("t", filter)
+	evidenceTaskIDs := "SELECT task_id FROM period_task_ids UNION SELECT task_id FROM created_task_ids UNION SELECT task_id FROM evaluable_goals"
+	if skillEvidenceActive {
+		evidenceTaskIDs = "SELECT task_id FROM period_task_ids"
+	}
 	periodExpr := analyticsPeriodExpression(filter.GroupBy, "MAX(p.started_at)")
 	terminalPeriodExpr := analyticsPeriodExpression(filter.GroupBy, "started_at")
 	query := `WITH scoped_tasks AS (
-			SELECT t.* FROM tasks t WHERE t.project_id=?` + dimension + `
+			SELECT t.* FROM tasks t WHERE t.project_id=?` + dimension + skillEvidence + `
 		), period_exec AS (
 			SELECT e.* FROM executions e JOIN scoped_tasks t ON t.id=e.task_id WHERE 1=1` + window + `
 		), period_task_ids AS (SELECT DISTINCT task_id FROM period_exec),
@@ -782,7 +827,7 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 			SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
 			UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_task_ids p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
 		), evidence_task_ids AS (
-			SELECT task_id FROM period_task_ids UNION SELECT task_id FROM created_task_ids UNION SELECT task_id FROM evaluable_goals
+			` + evidenceTaskIDs + `
 		), usage AS (
 			SELECT task_id,SUM(cost_usd) cost,MAX(CASE WHEN cost_usd IS NOT NULL THEN 1 ELSE 0 END) known
 			FROM llm_usage_events WHERE project_id=?` + usageWindow + ` GROUP BY task_id
@@ -828,6 +873,7 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 	LEFT JOIN terminal_evidence te ON te.task_id=t.id
 	GROUP BY t.id ORDER BY COALESCE(MAX(p.started_at),t.created_at) DESC,t.id DESC LIMIT ? OFFSET ?`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
+	args = append(args, skillEvidenceArgs...)
 	args = append(args, windowArgs...)
 	args = append(args, taskWindowArgs...)
 	args = append(args, goalWindowArgs...)

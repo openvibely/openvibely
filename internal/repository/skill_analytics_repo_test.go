@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -155,6 +156,63 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmapRanksViewedActivity(t *testing.T) {
 	}
 	if len(heatmap.Cells) != 1 || heatmap.Cells[0].ViewedCount != 2 || heatmap.Cells[0].ActivityCount != 2 {
 		t.Fatalf("view-only heatmap cell = %+v", heatmap.Cells)
+	}
+}
+
+func TestSkillAnalyticsRepo_AgentUsageHeatmapRanksAgentSkillPairs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	projectID := defaultProjectID(t, db)
+	if _, err := db.Exec(`INSERT INTO agents (id, name, key, scope) VALUES
+		('agent-a', 'Agent A', 'agent_a', 'global'),
+		('agent-b', 'Agent B', 'agent_b', 'global'),
+		('agent-c', 'Agent C', 'agent_c', 'global')`); err != nil {
+		t.Fatalf("insert agents: %v", err)
+	}
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	var events []models.SkillAnalyticsEvent
+	for i := 0; i < 4; i++ {
+		events = append(events,
+			skillEvent(projectID, fmt.Sprintf("distributed-a-%d", i), "agent-a", models.SkillScopeProject, "distributed", models.SkillEventViewed, models.SkillEventSourceManual, now.Add(time.Duration(i)*time.Minute)),
+			skillEvent(projectID, fmt.Sprintf("distributed-b-%d", i), "agent-b", models.SkillScopeProject, "distributed", models.SkillEventViewed, models.SkillEventSourceManual, now.Add(time.Duration(i)*time.Minute)),
+		)
+	}
+	for i := 0; i < 7; i++ {
+		events = append(events, skillEvent(projectID, fmt.Sprintf("top-pair-%d", i), "agent-c", models.SkillScopeGlobal, "top_pair", models.SkillEventViewed, models.SkillEventSourceManual, now.Add(time.Duration(i)*time.Minute)))
+	}
+	recordSkillAnalyticsEvents(t, repo, events...)
+
+	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
+	if err != nil {
+		t.Fatalf("GetAgentUsage: %v", err)
+	}
+	if len(heatmap.Cells) != 1 || heatmap.Cells[0].AgentID != "agent-c" || heatmap.Cells[0].SkillHandle != "top_pair" || heatmap.Cells[0].ActivityCount != 7 {
+		t.Fatalf("bounded heatmap ranked aggregate skills instead of Agent/skill pairs: %+v", heatmap.Cells)
+	}
+}
+
+func TestSkillAnalyticsRepo_AgentUsageHeatmapExcludesChangeEventsFromRanking(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	projectID := defaultProjectID(t, db)
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	events := []models.SkillAnalyticsEvent{
+		skillEvent(projectID, "clean-use", "", models.SkillScopeProject, "a_clean", models.SkillEventSelected, models.SkillEventSourceSkillCurator, now),
+		skillEvent(projectID, "changed-use", "", models.SkillScopeProject, "z_changed", models.SkillEventSelected, models.SkillEventSourceSkillCurator, now),
+	}
+	for i := 0; i < 5; i++ {
+		events = append(events, skillEvent(projectID, fmt.Sprintf("changed-edit-%d", i), "", models.SkillScopeProject, "z_changed", models.SkillEventEdited, models.SkillEventSourceManual, now.Add(time.Duration(i+1)*time.Minute)))
+	}
+	recordSkillAnalyticsEvents(t, repo, events...)
+
+	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
+	if err != nil {
+		t.Fatalf("GetAgentUsage: %v", err)
+	}
+	if len(heatmap.SkillPairs) != 1 || heatmap.SkillPairs[0].SkillHandle != "a_clean" {
+		t.Fatalf("created/edited events changed usage-only ranking: %+v", heatmap.SkillPairs)
 	}
 }
 

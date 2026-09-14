@@ -177,6 +177,45 @@ func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T)
 	}
 }
 
+func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	config := tc.CreateLLMConfig().WithProvider(models.ProviderTest).WithModel("test-model").Build()
+	target := tc.CreateTask(project.ID).WithTitle("Project skill outcome").Build()
+	other := tc.CreateTask(project.ID).WithTitle("Global skill outcome").Build()
+
+	for _, task := range []*models.Task{target, other} {
+		execution := &models.Execution{TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "analytics evidence"}
+		if err := tc.execRepo.Create(ctx, execution); err != nil {
+			t.Fatalf("create execution for %s: %v", task.ID, err)
+		}
+		if err := tc.execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "done", "", 1, 1); err != nil {
+			t.Fatalf("complete execution for %s: %v", task.ID, err)
+		}
+	}
+
+	skillRepo := repository.NewSkillAnalyticsRepo(tc.db)
+	for _, event := range []*models.SkillAnalyticsEvent{
+		{ProjectID: project.ID, TaskID: target.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeProject, EventType: models.SkillEventSelected},
+		{ProjectID: project.ID, TaskID: other.ID, SkillHandle: "shared:evaluator", SkillScope: models.SkillScopeGlobal, EventType: models.SkillEventSelected},
+	} {
+		if err := skillRepo.RecordEvent(ctx, event); err != nil {
+			t.Fatalf("record skill event: %v", err)
+		}
+	}
+
+	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&range=all&evidence_skill_handle=shared:evaluator&evidence_skill_scope=project").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	var dashboard models.AnalyticsDashboard
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if dashboard.EvidenceTotal != 1 || len(dashboard.RecentOutcomes) != 1 || dashboard.RecentOutcomes[0].TaskID != target.ID {
+		t.Fatalf("scoped skill outcome evidence = total %d rows %+v, want only %s", dashboard.EvidenceTotal, dashboard.RecentOutcomes, target.ID)
+	}
+}
+
 func TestGetSuccessFailureRates(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/success-failure-rates").Execute()
