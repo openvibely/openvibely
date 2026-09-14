@@ -199,6 +199,9 @@ func (s *SlackService) SetCustomPersonalityRepo(repo *repository.CustomPersonali
 
 func (s *SlackService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
 	s.projectSvc = projectSvc
+	if projectSvc != nil {
+		projectSvc.RegisterProjectSelectionCacheInvalidator(s)
+	}
 	s.githubProjectSvc = githubSvc
 	s.memorySvc = memorySvc
 	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
@@ -1556,6 +1559,20 @@ func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, pro
 	s.userProjects[key] = projectID
 	s.mu.Unlock()
 	return nil
+}
+
+func (s *SlackService) InvalidateProjectSelection(projectID string) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, cachedProjectID := range s.userProjects {
+		if cachedProjectID == projectID {
+			delete(s.userProjects, key)
+		}
+	}
 }
 
 func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID string) (string, error) {

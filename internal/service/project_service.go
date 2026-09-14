@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -20,12 +21,18 @@ type ManagedProjectRepoResolver interface {
 	IsManagedProjectRepo(ctx context.Context, projectID, repoPath string) (bool, error)
 }
 
+type ProjectSelectionCacheInvalidator interface {
+	InvalidateProjectSelection(projectID string)
+}
+
 type ProjectService struct {
 	repo                          *repository.ProjectRepo
 	taskSvc                       *TaskService
 	workerRepo                    *repository.WorkerRepo
 	managedRepoResolver           ManagedProjectRepoResolver
 	beforeRelationalDeleteForTest func()
+	projectSelectionMu            sync.RWMutex
+	projectSelectionInvalidators  []ProjectSelectionCacheInvalidator
 }
 
 type projectDeletionMove struct {
@@ -55,6 +62,28 @@ func (e *ProjectDeletionCleanupError) Unwrap() error {
 
 func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
 	return &ProjectService{repo: repo}
+}
+
+func (s *ProjectService) RegisterProjectSelectionCacheInvalidator(invalidator ProjectSelectionCacheInvalidator) {
+	if s == nil || invalidator == nil {
+		return
+	}
+	s.projectSelectionMu.Lock()
+	defer s.projectSelectionMu.Unlock()
+	s.projectSelectionInvalidators = append(s.projectSelectionInvalidators, invalidator)
+}
+
+func (s *ProjectService) invalidateProjectSelectionCaches(projectID string) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return
+	}
+	s.projectSelectionMu.RLock()
+	invalidators := append([]ProjectSelectionCacheInvalidator(nil), s.projectSelectionInvalidators...)
+	s.projectSelectionMu.RUnlock()
+	for _, invalidator := range invalidators {
+		invalidator.InvalidateProjectSelection(projectID)
+	}
 }
 
 func (s *ProjectService) SetTaskService(taskSvc *TaskService) {
@@ -204,6 +233,7 @@ func (s *ProjectService) Delete(ctx context.Context, id string) error {
 			}
 			return deleteErr
 		}
+		s.invalidateProjectSelectionCaches(id)
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cleanupCancel()
 		var cleanupErrors []error

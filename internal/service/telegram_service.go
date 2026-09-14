@@ -241,6 +241,9 @@ func (s *TelegramService) SetCustomPersonalityRepo(repo *repository.CustomPerson
 
 func (s *TelegramService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
 	s.projectSvc = projectSvc
+	if projectSvc != nil {
+		projectSvc.RegisterProjectSelectionCacheInvalidator(s)
+	}
 	s.githubProjectSvc = githubSvc
 	s.memorySvc = memorySvc
 	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
@@ -1688,6 +1691,24 @@ func (s *TelegramService) getActiveProject(userID int64) string {
 
 	projectID = fallbackProjectID(projects)
 	return s.populateTelegramActiveProject(userID, projectID, cacheVersion)
+}
+
+func (s *TelegramService) InvalidateProjectSelection(projectID string) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return
+	}
+	s.userProjectsMu.Lock()
+	defer s.userProjectsMu.Unlock()
+	if s.userProjectVersions == nil {
+		s.userProjectVersions = make(map[int64]uint64)
+	}
+	for userID, cachedProjectID := range s.userProjects {
+		if cachedProjectID == projectID {
+			delete(s.userProjects, userID)
+			s.userProjectVersions[userID]++
+		}
+	}
 }
 
 func (s *TelegramService) cachedTelegramActiveProject(userID int64) (string, bool, uint64) {
