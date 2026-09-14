@@ -368,7 +368,7 @@ func (h *Handler) DeleteSkillsBulk(c echo.Context) error {
 		if err := os.RemoveAll(filepath.Join(roots[i], "skills", ref.Handle)); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "skill deletion stopped after a filesystem failure; some earlier packages may already be removed")
 		}
-		if err := removeStandaloneSkillIndexEntry(filepath.Join(roots[i], "skills", "SKILLS.md"), ref.Handle); err != nil {
+		if _, err := agentlibrary.RemoveSkillIndexEntry(filepath.Join(roots[i], "skills", "SKILLS.md"), ref.Handle); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "skill index cleanup failed after package deletion; manual repair may be required")
 		}
 	}
@@ -401,7 +401,7 @@ func (h *Handler) DeleteSkill(c echo.Context) error {
 	if err := os.RemoveAll(path); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if err := removeStandaloneSkillIndexEntry(filepath.Join(root, "skills", "SKILLS.md"), handle); err != nil {
+	if _, err := agentlibrary.RemoveSkillIndexEntry(filepath.Join(root, "skills", "SKILLS.md"), handle); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	h.recordManualSkillEvent(c, models.SkillEventEdited, handle, scope, "")
@@ -455,89 +455,6 @@ func (h *Handler) SetSkillEnabled(c echo.Context) error {
 	}
 	h.recordManualSkillEvent(c, models.SkillEventEdited, handle, scope, "")
 	return h.ListSkills(c)
-}
-
-func removeStandaloneSkillIndexEntry(path, handle string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	body := string(data)
-	sections := skillIndexSections(body)
-	if len(sections) == 0 {
-		return nil
-	}
-	updated := body
-	for _, section := range sections {
-		if skillIndexSectionHandle(section) != handle {
-			continue
-		}
-		updated = removeSkillIndexSectionText(updated, section)
-		break
-	}
-	if strings.TrimSpace(updated) == strings.TrimSpace(body) {
-		return nil
-	}
-	return os.WriteFile(path, []byte(updated), 0o644)
-}
-
-func skillIndexSections(body string) []string {
-	lines := strings.Split(body, "\n")
-	var sections []string
-	for i := 0; i < len(lines); i++ {
-		if !strings.HasPrefix(lines[i], "## ") {
-			continue
-		}
-		start := i
-		i++
-		for i < len(lines) && !strings.HasPrefix(lines[i], "## ") {
-			i++
-		}
-		sections = append(sections, strings.Join(lines[start:i], "\n"))
-		i--
-	}
-	return sections
-}
-
-func skillIndexSectionHandle(section string) string {
-	for _, line := range strings.Split(section, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "## ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "## "))
-		}
-	}
-	return ""
-}
-
-func removeSkillIndexSectionText(body, section string) string {
-	lines := strings.Split(body, "\n")
-	sectionLines := strings.Split(section, "\n")
-	removeStart := -1
-	removeEnd := -1
-	for i := 0; i <= len(lines)-len(sectionLines); i++ {
-		if strings.Join(lines[i:i+len(sectionLines)], "\n") == section {
-			removeStart = i
-			removeEnd = i + len(sectionLines)
-			break
-		}
-	}
-	if removeStart < 0 {
-		return body
-	}
-	for removeStart > 0 && strings.TrimSpace(lines[removeStart-1]) == "" {
-		removeStart--
-		break
-	}
-	for removeEnd < len(lines) && strings.TrimSpace(lines[removeEnd]) == "" {
-		removeEnd++
-		break
-	}
-	updated := append([]string{}, lines[:removeStart]...)
-	updated = append(updated, lines[removeEnd:]...)
-	return strings.TrimRight(strings.Join(updated, "\n"), "\n") + "\n"
 }
 
 type uploadedSkillPackage struct {

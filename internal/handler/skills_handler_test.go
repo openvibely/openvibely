@@ -332,6 +332,122 @@ func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
 	require.Equal(t, models.SkillSurfaceTaskThread, events[0].Surface)
 }
 
+func TestDeleteSkillUsesSharedIndexCleanupSemantics(t *testing.T) {
+	tests := []struct {
+		name          string
+		index         string
+		missingIndex  bool
+		wantUnchanged bool
+	}{
+		{
+			name:  "without frontmatter",
+			index: "# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+		},
+		{
+			name:  "with frontmatter",
+			index: "---\nalways_use:\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+		},
+		{
+			name:         "missing index",
+			missingIndex: true,
+		},
+		{
+			name:          "similarly named and nonmatching headings",
+			index:         "# Standalone Skills\n\nIndex narrative stays.\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+			wantUnchanged: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _, _ := setupTestHandlerWithDB(t)
+			root := t.TempDir()
+			h.SetAgentSkillRoot(root)
+			project := createProject(t, h, "Shared Skill Index Cleanup Project")
+			project.RepoPath = t.TempDir()
+			require.NoError(t, h.projectRepo.Update(t.Context(), project))
+			writeStandaloneSkill(t, root, "verify", "Verify", "checks changes", "global")
+			indexPath := filepath.Join(root, "skills", "SKILLS.md")
+			if tt.missingIndex {
+				require.NoError(t, os.Remove(indexPath))
+			} else {
+				require.NoError(t, os.WriteFile(indexPath, []byte(tt.index), 0o644))
+			}
+
+			req := httptest.NewRequest(http.MethodDelete, "/skills/verify?scope=global&project_id="+project.ID, nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			_, err := os.Stat(filepath.Join(root, "skills", "verify"))
+			require.ErrorIs(t, err, os.ErrNotExist)
+
+			if tt.missingIndex {
+				_, err := os.Stat(indexPath)
+				require.ErrorIs(t, err, os.ErrNotExist)
+				return
+			}
+			got, err := os.ReadFile(indexPath)
+			require.NoError(t, err)
+			if tt.wantUnchanged {
+				require.Equal(t, tt.index, string(got))
+				return
+			}
+			text := string(got)
+			require.NotContains(t, text, "## verify\n")
+			for _, want := range []string{"Index narrative stays.", "## verify_extended", "## review"} {
+				require.Contains(t, text, want)
+			}
+			if strings.Contains(tt.index, "always_use:") {
+				require.Contains(t, text, "always_use:\n  - review")
+				require.Contains(t, text, "custom: value")
+			}
+		})
+	}
+}
+
+func TestDeleteSkillsBulkUsesScopeSpecificIndexCleanup(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	globalRoot := t.TempDir()
+	projectRepoPath := t.TempDir()
+	h.SetAgentSkillRoot(globalRoot)
+	project := createProject(t, h, "Bulk Skill Index Cleanup Project")
+	project.RepoPath = projectRepoPath
+	require.NoError(t, h.projectRepo.Update(t.Context(), project))
+
+	writeStandaloneSkill(t, globalRoot, "shared_skill", "Global Shared", "global", "global")
+	writeStandaloneSkill(t, globalRoot, "global_keep", "Global Keep", "global", "global")
+	projectRoot := filepath.Join(projectRepoPath, ".openvibely")
+	writeStandaloneSkill(t, projectRoot, "shared_skill", "Project Shared", "project", "project")
+	writeStandaloneSkill(t, projectRoot, "project_delete", "Project Delete", "project", "project")
+
+	request := `{"skills":[{"handle":"shared_skill","scope":"global"},{"handle":"project_delete","scope":"project"}]}`
+	req := httptest.NewRequest(http.MethodDelete, "/skills/bulk?project_id="+project.ID, strings.NewReader(request))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	for _, path := range []string{
+		filepath.Join(globalRoot, "skills", "shared_skill"),
+		filepath.Join(projectRoot, "skills", "project_delete"),
+	} {
+		_, err := os.Stat(path)
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
+	_, err := os.Stat(filepath.Join(projectRoot, "skills", "shared_skill"))
+	require.NoError(t, err)
+
+	globalIndex, err := os.ReadFile(filepath.Join(globalRoot, "skills", "SKILLS.md"))
+	require.NoError(t, err)
+	require.NotContains(t, string(globalIndex), "## shared_skill\n")
+	require.Contains(t, string(globalIndex), "## global_keep\n")
+	projectIndex, err := os.ReadFile(filepath.Join(projectRoot, "skills", "SKILLS.md"))
+	require.NoError(t, err)
+	require.NotContains(t, string(projectIndex), "## project_delete\n")
+	require.Contains(t, string(projectIndex), "## shared_skill\n")
+}
+
 func TestImportSkillPackageWritesSkillAndSupportFiles(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	root := t.TempDir()

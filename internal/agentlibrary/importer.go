@@ -1319,7 +1319,7 @@ func (i *Importer) markArchivedSkillOnDisk(handle, absorbedInto, reason string) 
 			}
 		}
 		rootPath := filepath.Join(root, "skills", "SKILLS.md")
-		if rootChanged, rootErr := removeSkillIndexEntry(rootPath, handle); rootErr != nil {
+		if rootChanged, rootErr := RemoveSkillIndexEntry(rootPath, handle); rootErr != nil {
 			return changed, rootErr
 		} else if rootChanged {
 			changed = append(changed, rootPath)
@@ -1470,7 +1470,10 @@ func mergeRootSkillIndexBodies(agentKey, existingBody, newBody string) string {
 	return merged + "\n"
 }
 
-func removeSkillIndexEntry(path, handle string) (bool, error) {
+// RemoveSkillIndexEntry removes the ## <handle> section for the given standalone
+// skill handle from the SKILLS.md index at path. It is a no-op when the file does
+// not exist or the handle is not present. Returns true when the file was modified.
+func RemoveSkillIndexEntry(path, handle string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1503,7 +1506,7 @@ func removeSkillIndexEntry(path, handle string) (bool, error) {
 // from the AGENTS.md index at path. It is a no-op when the file does not exist
 // or the key is not present. Returns true when the file was modified.
 func RemoveAgentIndexEntry(path, key string) (bool, error) {
-	return removeSkillIndexEntry(path, key)
+	return RemoveSkillIndexEntry(path, key)
 }
 
 func removeSkillIndexSection(body, handle string) string {
