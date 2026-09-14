@@ -98,6 +98,12 @@ type streamingResponseParams struct {
 	// DeferHistoryLoad is true.
 	Task *models.Task
 
+	// RepublishOpenPRAfterStartupSync is set when startup synchronization
+	// advanced a task branch that already has an open pull request. The
+	// reconciled turn must publish that state before Goal Agent evaluation can
+	// schedule a fresh audit.
+	RepublishOpenPRAfterStartupSync bool
+
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
 	lifecycleUserMessage   string
@@ -528,7 +534,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			h.taskGoalContext(ctx, params.Task.ID, agentDefForSys),
 		)
 		personalityCtx := h.getPersonalityContext(ctx, params.ProjectID)
-		workDir, worktreeCtx, workDirErr := h.resolveWorktreeWorkDir(ctx, params.Task)
+		workDir, worktreeCtx, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, params.Task)
 		if workDirErr != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s deferred worktree error: %v", params.ExecID, workDirErr)
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, workDirErr.Error(), 0)
@@ -540,6 +546,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		params.SystemContext = combineContexts(combineContexts(sysCtx, worktreeCtx), personalityCtx)
 		params.WorkDir = workDir
+		params.RepublishOpenPRAfterStartupSync = republishOpenPR
 	}
 
 	applog.Infof("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v history=%d",
@@ -718,6 +725,16 @@ modelLoop:
 		h.completeWithFailure(ctx, params.ExecID, params.TaskID, replayErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		h.finalizeStreamingTurn(params, output)
 		return
+	}
+	if params.RepublishOpenPRAfterStartupSync {
+		if publishErr := h.republishOpenPullRequestAfterStartupSync(ctx, params.TaskID); publishErr != nil {
+			finalizeLifecycle(publishErr, result.ChatContext)
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s startup-sync PR publication failed: %v", params.ExecID, params.TaskID, publishErr)
+			h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), publishErr.Error(), durationMs)
+			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, publishErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+			h.finalizeStreamingTurn(params, output)
+			return
+		}
 	}
 	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionOutcome == repository.CompleteSuccessCompleted {
@@ -1718,7 +1735,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	}
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
-	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, workDirErr.Error(), 0)
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
@@ -1733,21 +1750,22 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:                 exec.ID,
-		RetrySourceExecutionID: failed.ID,
-		TaskID:                 taskID,
-		Message:                failed.PromptSent,
-		Agent:                  *agent,
-		AgentDefinition:        agentDef,
-		ChatHistory:            priorHistory,
-		ProjectID:              task.ProjectID,
-		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:                workDir,
-		IsTaskFollowup:         true,
-		InputOrigin:            models.TaskOriginWeb,
-		Task:                   task,
-		AutomationContext:      automationContext,
-		updateWorkDone:         updateWorkDone,
+		ExecID:                          exec.ID,
+		RetrySourceExecutionID:          failed.ID,
+		TaskID:                          taskID,
+		Message:                         failed.PromptSent,
+		Agent:                           *agent,
+		AgentDefinition:                 agentDef,
+		ChatHistory:                     priorHistory,
+		ProjectID:                       task.ProjectID,
+		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                         workDir,
+		RepublishOpenPRAfterStartupSync: republishOpenPR,
+		IsTaskFollowup:                  true,
+		InputOrigin:                     models.TaskOriginWeb,
+		Task:                            task,
+		AutomationContext:               automationContext,
+		updateWorkDone:                  updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil
@@ -1872,7 +1890,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	}
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext), h.taskGoalContext(ctx, task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
-	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, exec.TaskID, workDirErr.Error(), 0, channelReplyFromThreadInput(input))
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
@@ -1887,26 +1905,27 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:                 exec.ID,
-		RetrySourceExecutionID: input.RetrySourceExecutionID,
-		TaskID:                 exec.TaskID,
-		Message:                input.Content,
-		Agent:                  *agent,
-		AgentDefinition:        agentDef,
-		ChatHistory:            priorHistory,
-		ProjectID:              task.ProjectID,
-		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:                workDir,
-		ImageAttachments:       imageAttachments,
-		IsTaskFollowup:         true,
-		Surface:                surfaceForThreadInput(input),
-		ChannelReply:           channelReplyFromThreadInput(input),
-		RuntimeTools:           h.xRuntimeToolsForThreadInput(task.ID, input),
-		InputOrigin:            string(input.Source),
-		InputOriginAgent:       input.OriginAgent,
-		Task:                   task,
-		AutomationContext:      automationContext,
-		updateWorkDone:         updateWorkDone,
+		ExecID:                          exec.ID,
+		RetrySourceExecutionID:          input.RetrySourceExecutionID,
+		TaskID:                          exec.TaskID,
+		Message:                         input.Content,
+		Agent:                           *agent,
+		AgentDefinition:                 agentDef,
+		ChatHistory:                     priorHistory,
+		ProjectID:                       task.ProjectID,
+		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                         workDir,
+		RepublishOpenPRAfterStartupSync: republishOpenPR,
+		ImageAttachments:                imageAttachments,
+		IsTaskFollowup:                  true,
+		Surface:                         surfaceForThreadInput(input),
+		ChannelReply:                    channelReplyFromThreadInput(input),
+		RuntimeTools:                    h.xRuntimeToolsForThreadInput(task.ID, input),
+		InputOrigin:                     string(input.Source),
+		InputOriginAgent:                input.OriginAgent,
+		Task:                            task,
+		AutomationContext:               automationContext,
+		updateWorkDone:                  updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil
@@ -2631,46 +2650,108 @@ func (h *Handler) resolveWorkDir(ctx context.Context, projectID string) string {
 // resolveWorktreeWorkDir resolves the working directory for a task followup,
 // preferring the task's git worktree. Falls back to project repo path for
 // non-git projects, chat tasks, or when worktree service is unavailable.
-func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) (string, string, error) {
+func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) (string, string, bool, error) {
 	project, err := h.projectSvc.GetByID(ctx, task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
-		return "", "", nil
+		return "", "", false, nil
 	}
 	repoDir := project.RepoPath
 
 	if task.Category == models.CategoryChat || !service.IsGitRepo(repoDir) {
-		return repoDir, "", nil
+		return repoDir, "", false, nil
 	}
 
 	if h.worktreeSvc == nil {
-		return repoDir, "", nil
+		return repoDir, "", false, nil
 	}
 
 	wtPath, wtBranch, skipStartupSync, wtErr := h.worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
 		applog.Infof("[handler] resolveWorktreeWorkDir worktree setup failed for task %s; refusing to use main repo: %v", task.ID, wtErr)
-		return "", "", fmt.Errorf("setting up isolated task worktree: %w", wtErr)
+		return "", "", false, fmt.Errorf("setting up isolated task worktree: %w", wtErr)
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
 
 	if skipStartupSync {
 		applog.Infof("[handler] resolveWorktreeWorkDir task=%s using fresh current-target follow-up worktree path=%s", task.ID, wtPath)
-		return wtPath, "", nil
+		return wtPath, "", false, nil
 	}
 
-	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
+	syncChanged, syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStartWithResult(ctx, task, repoDir)
+	if syncErr != nil {
 		var conflictErr *service.StartupSyncConflictError
 		if errors.As(syncErr, &conflictErr) {
 			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
-			return wtPath, buildStartupSyncConflictContext(conflictErr), nil
+			return wtPath, buildStartupSyncConflictContext(conflictErr), false, nil
 		}
 		applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
-		return "", "", syncErr
+		return "", "", false, syncErr
 	}
 
+	publicationContext, republishOpenPR, publicationErr := h.startupSyncPublicationContext(ctx, task, syncChanged)
+	if publicationErr != nil {
+		return "", "", false, publicationErr
+	}
 	applog.Infof("[handler] resolveWorktreeWorkDir task=%s using worktree path=%s", task.ID, wtPath)
-	return wtPath, "", nil
+	return wtPath, publicationContext, republishOpenPR, nil
+}
+
+func (h *Handler) startupSyncPublicationContext(ctx context.Context, task *models.Task, syncChanged bool) (string, bool, error) {
+	if !syncChanged || task == nil || h.taskPullRequestRepo == nil {
+		return "", false, nil
+	}
+	pullRequest, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		return "", false, fmt.Errorf("checking pull request after startup synchronization: %w", err)
+	}
+	if pullRequest == nil || !service.IsOpenPullRequestState(pullRequest.PRState) {
+		return "", false, nil
+	}
+	target := strings.TrimSpace(task.MergeTargetBranch)
+	if target == "" {
+		target = "the configured merge target"
+	}
+	return fmt.Sprintf("# Pull Request Reconciliation Required\n\nStartup synchronization advanced this task branch by merging %s. Existing pull request #%d does not yet contain the synchronized worktree state. Treat this as a reconciliation turn, not an audit-only turn: preserve the merge, resolve any remaining implementation work, run relevant validation, and report the result. On successful completion OpenVibely will update the existing pull request automatically; do not reset the task branch merely to match its previous published SHA. A fresh audit can run in the next goal turn.", target, pullRequest.PRNumber), true, nil
+}
+
+func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, taskID string) error {
+	if h == nil || h.taskPullRequestRepo == nil {
+		return fmt.Errorf("task pull request repository unavailable")
+	}
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("loading synchronized task: %w", err)
+	}
+	if task == nil {
+		return fmt.Errorf("synchronized task not found: %s", taskID)
+	}
+	pullRequest, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("loading synchronized task pull request: %w", err)
+	}
+	if pullRequest == nil || !service.IsOpenPullRequestState(pullRequest.PRState) {
+		return fmt.Errorf("synchronized task no longer has an open pull request")
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil {
+		return fmt.Errorf("loading synchronized task project: %w", err)
+	}
+	if project == nil {
+		return fmt.Errorf("synchronized task project not found")
+	}
+	result, err := h.newTaskPullRequestService().OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
+		Base:        task.MergeTargetBranch,
+		IssueNumber: pullRequest.IssueNumber,
+		IssueURL:    pullRequest.IssueURL,
+	})
+	if err != nil {
+		return fmt.Errorf("updating existing pull request #%d after startup synchronization: %w", pullRequest.PRNumber, err)
+	}
+	if result == nil || result.Record == nil || result.Record.PRNumber != pullRequest.PRNumber {
+		return fmt.Errorf("startup synchronization publication did not reuse pull request #%d", pullRequest.PRNumber)
+	}
+	return nil
 }
 
 // executeChatTaskCreationRequests creates tasks from typed runtime-tool requests,

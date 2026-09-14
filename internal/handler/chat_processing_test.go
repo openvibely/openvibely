@@ -5455,7 +5455,7 @@ func TestResolveWorktreeWorkDir_ReactivatedConflictContinuesInPreservedWorktree(
 		t.Fatalf("git commit main conflict version: %v\n%s", err, out)
 	}
 
-	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, _, err := h.resolveWorktreeWorkDir(ctx, task)
 	if err != nil {
 		t.Fatalf("terminal followup should continue in preserved worktree after startup conflict: %v", err)
 	}
@@ -5545,7 +5545,7 @@ func TestProcessStreamingResponse_ReactivatedSyncConflictIncludesWorktreeWarning
 		t.Fatalf("git commit main conflict version: %v\n%s", err, out)
 	}
 
-	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, _, err := h.resolveWorktreeWorkDir(ctx, task)
 	if err != nil {
 		t.Fatalf("terminal followup should continue in preserved worktree after startup conflict: %v", err)
 	}
@@ -5594,7 +5594,7 @@ func TestResolveWorktreeWorkDir_UnbornRepoFailsClosed(t *testing.T) {
 	})
 	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo)
 
-	workDir, _, err := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, _, _, err := h.resolveWorktreeWorkDir(ctx, task)
 	if err == nil || !strings.Contains(err.Error(), "repository has no commit for worktree base") {
 		t.Fatalf("expected missing base commit error, got workDir=%q err=%v", workDir, err)
 	}
@@ -5604,8 +5604,10 @@ func TestResolveWorktreeWorkDir_UnbornRepoFailsClosed(t *testing.T) {
 }
 
 func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t *testing.T) {
-	h, _, _ := setupTestHandler(t)
+	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
 
 	repoDir := createHandlerTestGitRepo(t)
 	project := &models.Project{Name: "Stale Followup Project", RepoPath: repoDir}
@@ -5625,6 +5627,10 @@ func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t 
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{
+		TaskID: task.ID, PRNumber: 1196, PRURL: "https://github.com/openvibely/openvibely/pull/1196", PRState: "open",
+		PublishedHeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}))
 
 	mainOnlyPath := filepath.Join(repoDir, "main-only.txt")
 	if err := os.WriteFile(mainOnlyPath, []byte("new main change\n"), 0644); err != nil {
@@ -5645,15 +5651,18 @@ func TestResolveWorktreeWorkDir_SyncsExistingWorktreeFromTargetBeforeFollowup(t 
 		t.Fatalf("expected stale worktree to not have main-only.txt before followup sync, stat err=%v", err)
 	}
 
-	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, republishOpenPR, err := h.resolveWorktreeWorkDir(ctx, task)
 	if err != nil {
 		t.Fatalf("resolve worktree workdir: %v", err)
 	}
 	if workDir != wtPath {
 		t.Fatalf("expected workDir %q, got %q", wtPath, workDir)
 	}
-	if worktreeContext != "" {
-		t.Fatalf("expected no worktree warning context, got %q", worktreeContext)
+	if !republishOpenPR {
+		t.Fatal("expected startup sync to require existing PR publication")
+	}
+	if !strings.Contains(worktreeContext, "Pull Request Reconciliation Required") || !strings.Contains(worktreeContext, "pull request #1196") || !strings.Contains(worktreeContext, "not an audit-only turn") {
+		t.Fatalf("expected model-visible PR reconciliation context, got %q", worktreeContext)
 	}
 	if _, err := os.Stat(filepath.Join(wtPath, "main-only.txt")); err != nil {
 		t.Fatalf("expected followup worktree sync to include main-only.txt: %v", err)
@@ -5713,7 +5722,7 @@ func TestResolveWorktreeWorkDir_MergedStaleFollowupStartsFromCurrentTarget(t *te
 		t.Fatalf("git commit accepted main edit: %v\n%s", err, out)
 	}
 
-	workDir, worktreeContext, err := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, _, err := h.resolveWorktreeWorkDir(ctx, task)
 	if err != nil {
 		t.Fatalf("resolve worktree workdir should skip stale startup merge conflict: %v", err)
 	}
@@ -5974,6 +5983,110 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPul
 	require.NoError(t, err)
 	require.Equal(t, models.StatusCompleted, updatedTask.Status)
 	require.Equal(t, models.CategoryCompleted, updatedTask.Category)
+}
+
+func TestRepublishOpenPullRequestAfterStartupSyncUpdatesExistingPR(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+
+	project := &models.Project{Name: "Startup sync publication", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Republish synchronized task", Category: models.CategoryActive, Status: models.StatusRunning,
+		Prompt: "Reconcile and publish", WorktreePath: t.TempDir(), WorktreeBranch: "task/synchronized", MergeTargetBranch: "main",
+	}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	issueNumber := 1185
+	previousHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	publishedHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{
+		TaskID: task.ID, PRNumber: 1196, PRURL: "https://github.com/openvibely/openvibely/pull/1196", PRState: "open",
+		PublishedHeadSHA: previousHead, IssueNumber: &issueNumber, IssueURL: "https://github.com/openvibely/openvibely/issues/1185",
+	}))
+
+	publishCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			publishCalls++
+			require.Equal(t, task.WorktreeBranch, req.Branch)
+			require.Equal(t, task.WorktreePath, req.WorktreePath)
+			require.Equal(t, "main", req.BaseBranch)
+			return &service.GitHubPublishBranchResult{HeadSHA: publishedHead}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedHead}, nil
+		},
+	})
+
+	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
+	require.Equal(t, 1, publishCalls)
+	reloaded, err := prRepo.GetByTaskID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, publishedHead, reloaded.PublishedHeadSHA)
+	require.Equal(t, 1196, reloaded.PRNumber)
+}
+
+func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Synchronized follow-up", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Synchronized follow-up", Prompt: "Reconcile", Category: models.CategoryActive, Status: models.StatusRunning,
+		AgentID: &agent.ID, WorktreePath: t.TempDir(), WorktreeBranch: "task/synchronized-followup", MergeTargetBranch: "main",
+	}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{
+		TaskID: task.ID, PRNumber: 1196, PRURL: "https://github.com/openvibely/openvibely/pull/1196", PRState: "open",
+		PublishedHeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}))
+
+	publishedHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	publishCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			publishCalls++
+			return &service.GitHubPublishBranchResult{HeadSHA: publishedHead}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedHead}, nil
+		},
+	})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Reconciliation validation passed."
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Reconcile synchronized branch"
+		ex.IsFollowup = true
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: task.ID, Message: exec.PromptSent, Agent: *agent, ProjectID: project.ID,
+		IsTaskFollowup: true, Task: task, RepublishOpenPRAfterStartupSync: true,
+	})
+
+	require.Equal(t, 1, publishCalls)
+	completed, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCompleted, completed.Status)
+	reloaded, err := prRepo.GetByTaskID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, publishedHead, reloaded.PublishedHeadSHA)
 }
 
 func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadFailsTask(t *testing.T) {
