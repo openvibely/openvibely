@@ -281,6 +281,81 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	}
 }
 
+func TestExecutionRepo_SkillOutcomeEvidencePreservesAggregateEligibilityForRetriesAndGoals(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Skill evidence fidelity", RepoPath: "/skill-evidence-fidelity"}
+	if err := NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Completed then failed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "work"}
+	if err := NewTaskRepo(db, nil).Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	executions := NewExecutionRepo(db)
+	for i, status := range []models.ExecutionStatus{models.ExecCompleted, models.ExecFailed} {
+		execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "prompt"}
+		if err := executions.Create(ctx, execution); err != nil {
+			t.Fatal(err)
+		}
+		if err := executions.Complete(ctx, execution.ID, status, "output", "failure", 0, 1000); err != nil {
+			t.Fatal(err)
+		}
+		started := time.Date(2026, 1, 10+i, 10, 0, 0, 0, time.UTC).Format("2006-01-02 15:04:05")
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at=?, completed_at=? WHERE id=?`, started, started, execution.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goal := &models.TaskGoal{TaskID: task.ID, GoalID: "goal-" + task.ID, Objective: "finish", Status: models.TaskGoalStatusAchieved}
+	if err := NewTaskGoalRepo(db).CreateOrReplace(ctx, goal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE task_goals SET achieved_at='2026-02-02 00:00:00', updated_at='2026-02-02 00:00:00' WHERE task_id=?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewSkillAnalyticsRepo(db).RecordEvent(ctx, &models.SkillAnalyticsEvent{
+		CreatedAt: time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC), ProjectID: project.ID, TaskID: task.ID,
+		SkillScope: models.SkillScopeProject, SkillHandle: "project:retry-review", EventType: models.SkillEventSelected,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	aggregate, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(aggregate.SkillOutcomes) != 1 {
+		t.Fatalf("skill outcomes = %+v, want one scoped row", aggregate.SkillOutcomes)
+	}
+	outcome := aggregate.SkillOutcomes[0]
+	if outcome.TechnicalCompletion.Numerator != 1 || outcome.TechnicalCompletion.Denominator != 1 {
+		t.Fatalf("retry technical aggregate = %+v, want completed task in 1/1 numerator and denominator", outcome.TechnicalCompletion)
+	}
+	if outcome.GoalAchievement.Numerator != 0 || outcome.GoalAchievement.Denominator != 0 {
+		t.Fatalf("out-of-period goal aggregate = %+v, want excluded from goal numerator and denominator", outcome.GoalAchievement)
+	}
+
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+		ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20,
+		EvidenceSkillHandle: "project:retry-review", EvidenceSkillScope: models.SkillScopeProject,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dashboard.EvidenceTotal != 1 || len(dashboard.RecentOutcomes) != 1 {
+		t.Fatalf("skill evidence = total %d rows %+v, want one retry task", dashboard.EvidenceTotal, dashboard.RecentOutcomes)
+	}
+	row := dashboard.RecentOutcomes[0]
+	if row.TechnicalResult != string(models.ExecFailed) || row.PeriodCompletedCount != 1 || row.PeriodFailedCount != 1 || row.PeriodCancelledCount != 0 {
+		t.Fatalf("retry evidence lost aggregate technical inputs: %+v", row)
+	}
+	if row.GoalResult != string(models.TaskGoalStatusAchieved) || row.GoalAchievementEligible || row.GoalAchievedInPeriod {
+		t.Fatalf("out-of-period current goal was treated as period evidence: %+v", row)
+	}
+}
+
 func TestExecutionRepo_GetAnalyticsDashboardAllTimeOmitsComparison(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewExecutionRepo(db)
