@@ -18,8 +18,42 @@ func TestCancelThreadInput_NonExistentID(t *testing.T) {
 	// the stale composer row rather than leaving it stuck.
 	rec := tc.HTTP().Post("/thread-inputs/nonexistent-input/cancel").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
+	if got := rec.Header().Get(threadInputMutationStatusHeader); got != "not_pending" {
+		t.Fatalf("cancel of non-existent row status header = %q, want not_pending", got)
+	}
 	if !strings.Contains(rec.Body.String(), `id="thread-input-nonexistent-input"`) {
 		t.Error("cancel of non-existent row should return the hidden-row fragment for stale UI cleanup")
+	}
+}
+
+func TestCancelThreadInput_SuccessReportsCancelled(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	p := tc.CreateProject().Build()
+	task := tc.CreateTask(p.ID).Build()
+	queued := &models.ThreadInput{
+		Scope:       models.ThreadInputScopeTask,
+		ProjectID:   p.ID,
+		TaskID:      task.ID,
+		InputMode:   models.ThreadInputModeQueued,
+		InputStatus: models.ThreadInputPending,
+		Content:     "cancel me",
+	}
+	if err := tc.handler.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("create queued input: %v", err)
+	}
+
+	rec := tc.HTTP().Post("/thread-inputs/" + queued.ID + "/cancel").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	if got := rec.Header().Get(threadInputMutationStatusHeader); got != "cancelled" {
+		t.Fatalf("successful cancel status header = %q, want cancelled", got)
+	}
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputCancelled {
+		t.Fatalf("stored input = %#v, want cancelled", stored)
 	}
 }
 
@@ -55,15 +89,23 @@ func TestCancelThreadInput_AlreadyAppliedReturnsRemovedRow(t *testing.T) {
 	if err := tc.handler.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		t.Fatalf("create queued input: %v", err)
 	}
-
-	// Mark it applied (simulating the promotion path).
 	if err := tc.handler.threadInputRepo.MarkApplied(ctx, queued.ID, exec.ID, exec.ID); err != nil {
 		t.Fatalf("mark applied: %v", err)
+	}
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("load applied input: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputApplied {
+		t.Fatalf("stored input before cancellation = %#v, want applied", stored)
 	}
 
 	// Now cancel should return 200 with the hidden-row fragment (row already consumed).
 	rec := tc.HTTP().Post("/thread-inputs/" + queued.ID + "/cancel").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
+	if got := rec.Header().Get(threadInputMutationStatusHeader); got != "not_pending" {
+		t.Fatalf("cancel of already-applied row status header = %q, want not_pending", got)
+	}
 	body := rec.Body.String()
 	if !strings.Contains(body, `id="thread-input-`+queued.ID) {
 		t.Errorf("cancel of already-applied row should return the hidden-row fragment for UI cleanup, body=%q", body)
@@ -117,6 +159,9 @@ func TestCancelThreadInput_PreparedSteeringReturnsRemovedRow(t *testing.T) {
 	// any stale UI entry is removed from the composer.
 	rec := tc.HTTP().Post("/thread-inputs/" + steering.ID + "/cancel").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
+	if got := rec.Header().Get(threadInputMutationStatusHeader); got != "not_pending" {
+		t.Fatalf("cancel of prepared steering status header = %q, want not_pending", got)
+	}
 	body := rec.Body.String()
 	if !strings.Contains(body, `id="thread-input-`+steering.ID) {
 		t.Errorf("cancel of in-flight prepared steering should return hidden-row fragment for UI cleanup, body=%q", body)
