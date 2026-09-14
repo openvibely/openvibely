@@ -44,6 +44,9 @@ func ChatExecutionRevision(exec models.Execution) string {
 	write(exec.Output)
 	write(exec.ErrorMessage)
 	write(fmt.Sprintf("%t", exec.IsFollowup))
+	write(fmt.Sprintf("%t", exec.PromptTruncated))
+	write(fmt.Sprintf("%t", exec.OutputTruncated))
+	write(fmt.Sprintf("%t", exec.ErrorTruncated))
 	return fmt.Sprintf("%016x", hash)
 }
 
@@ -229,6 +232,72 @@ templ ChatBubbleError(role, errorMsg, output string) {
 				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
 			}
 			@ChatTerminalError(errorMsg)
+		</div>
+	</div>
+}
+
+templ ChatThreadFullOutputAction(taskID, execID string) {
+	<div class="mt-3 flex items-center justify-end" data-task-thread-preview-action="true">
+		<button
+			type="button"
+			class="btn btn-ghost btn-xs"
+			data-task-thread-load-full="true"
+			aria-label="Load full response"
+			hx-get={ fmt.Sprintf("/tasks/%s/thread/executions/%s/full", taskID, execID) }
+			hx-target="closest .chat-bubble"
+			hx-swap="outerHTML"
+		>
+			Load full response
+		</button>
+	</div>
+}
+
+templ ChatThreadPreviewNotice(showLoadAction bool, taskID, execID string) {
+	<div class="mt-3 text-xs opacity-60" data-task-thread-preview-notice="true">
+		if showLoadAction {
+			<span>Preview truncated. Load full response for the complete execution.</span>
+			@ChatThreadFullOutputAction(taskID, execID)
+		} else {
+			<span>Preview truncated.</span>
+		}
+	</div>
+}
+
+// ChatBubbleThreadPreview keeps the normal ChatBubble renderer while making
+// compact task-thread text visibly bounded. The full-output action is only
+// offered for assistant content because its endpoint loads one execution's
+// exact output/error pair.
+templ ChatBubbleThreadPreview(role, content string, contentTruncated bool, showLoadAction bool, taskID, execID string) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			if role == "User" {
+				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
+			} else {
+				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
+			}
+			if contentTruncated {
+				@ChatThreadPreviewNotice(showLoadAction, taskID, execID)
+			}
+		</div>
+	</div>
+}
+
+templ ChatBubbleErrorThreadPreview(role, errorMsg, output string, outputTruncated, errorTruncated bool, taskID, execID string) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			if output != "" {
+				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
+			}
+			@ChatTerminalError(errorMsg)
+			if outputTruncated || errorTruncated {
+				@ChatThreadPreviewNotice(true, taskID, execID)
+			}
 		</div>
 	</div>
 }
@@ -1396,19 +1465,36 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 	if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
 		if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
 			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID)
+			if exec.PromptTruncated {
+				<div class="mt-3 text-xs opacity-60" data-task-thread-preview-notice="true">Preview truncated.</div>
+			}
+		} else if exec.PromptTruncated {
+			@ChatBubbleThreadPreview("User", chatUserContent(exec, task, executions, index), true, false, "", "")
 		} else {
 			@ChatBubble("User", chatUserContent(exec, task, executions, index))
 		}
 	}
 	<!-- Assistant response -->
 	if exec.Status == models.ExecCompleted {
-		@ChatBubble("Assistant", exec.Output)
+		if exec.OutputTruncated {
+			@ChatBubbleThreadPreview("Assistant", exec.Output, true, true, task.ID, exec.ID)
+		} else {
+			@ChatBubble("Assistant", exec.Output)
+		}
 	} else if exec.Status == models.ExecFailed {
-		@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+		if exec.OutputTruncated || exec.ErrorTruncated {
+			@ChatBubbleErrorThreadPreview("Assistant", exec.ErrorMessage, exec.Output, exec.OutputTruncated, exec.ErrorTruncated, task.ID, exec.ID)
+		} else {
+			@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+		}
 	} else if exec.Status == models.ExecCancelled {
-		@ChatBubbleError("Assistant", "Cancelled", exec.Output)
+		if exec.OutputTruncated {
+			@ChatBubbleErrorThreadPreview("Assistant", "Cancelled", exec.Output, true, false, task.ID, exec.ID)
+		} else {
+			@ChatBubbleError("Assistant", "Cancelled", exec.Output)
+		}
 	} else if exec.Status == models.ExecRunning {
-		@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
+		@ChatBubbleStreamingResume("Assistant", taskThreadStreamingResumeContent(exec), exec.ID, messagesContainerID, pausePollingTargetID)
 	}
 }
 
@@ -5982,6 +6068,15 @@ func chatUserContent(exec models.Execution, task *models.Task, execs []models.Ex
 		return task.Prompt
 	}
 	return exec.PromptSent
+}
+
+func taskThreadStreamingResumeContent(exec models.Execution) string {
+	if exec.OutputTruncated {
+		// Resume from byte zero so the SSE catch-up can reconstruct the exact
+		// running output instead of appending to a shortened prefix.
+		return ""
+	}
+	return exec.Output
 }
 
 // IsImageMediaType checks if a media type is an image type.

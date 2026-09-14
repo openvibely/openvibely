@@ -817,6 +817,22 @@ func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *te
 	})
 }
 
+func seedCompletedTaskThreadProjectionFixture(t testing.TB, db *sql.DB, taskID string, count int) {
+	t.Helper()
+	const textBytes = 1024 * 1024
+	output := strings.Repeat("O", textBytes)
+	prompt := "benchmark prompt"
+	for i := 0; i < count; i++ {
+		if _, err := db.Exec(`INSERT INTO executions
+			(id, task_id, status, prompt_sent, output, is_followup, started_at, completed_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("thread-projection-bench-%03d", i), taskID, models.ExecCompleted, prompt, output, i > 0,
+			fmt.Sprintf("2026-08-13 12:00:%02d", i), fmt.Sprintf("2026-08-13 12:00:%02d", i)); err != nil {
+			t.Fatalf("insert benchmark execution %d: %v", i, err)
+		}
+	}
+}
+
 func seedLargeExecutionHistory(t testing.TB, db *sql.DB, taskID, agentID string, count, promptBytes, outputBytes int) {
 	t.Helper()
 	base := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
@@ -8287,6 +8303,229 @@ func TestHandler_GetTaskThreadExecutionFragmentRejectsWrongTask(t *testing.T) {
 
 	rec := htmxGet(e, "/tasks/"+other.ID+"/thread/executions/"+exec.ID+"/fragment")
 	assertCode(t, rec, http.StatusNotFound)
+}
+
+func TestHandler_GetTaskThreadUsesBoundedProjectionForLatestAndEarlierPages(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Bounded Thread Projection Project")
+	task := createTask(t, h, project.ID, "Bounded Thread Projection Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "small task prompt"
+	})
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 6, 1024*1024, 1024*1024)
+	if _, err := db.ExecContext(context.Background(), `UPDATE executions SET status = ?, completed_at = ? WHERE task_id = ?`, models.ExecCompleted, "2026-08-13 12:00:01", task.ID); err != nil {
+		t.Fatalf("complete execution fixture: %v", err)
+	}
+
+	request := func(path string) *httptest.ResponseRecorder {
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := htmxGet(e, path)
+		counter.SetEnabled(false)
+		assertCode(t, rec, http.StatusOK)
+		if counter.SelectedTextBytes() > 200*1024 {
+			t.Fatalf("task-thread selected text too large: got %d bytes, want <= %d", counter.SelectedTextBytes(), 200*1024)
+		}
+		boundedQuerySeen := false
+		for _, statement := range counter.Statements() {
+			if strings.Contains(statement, "FROM executions") && strings.Contains(statement, "prompt_sent") && !strings.Contains(statement, "CAST(COALESCE(prompt_sent, '') AS BLOB)") {
+				t.Fatalf("task-thread request used a broad execution projection: %s", statement)
+			}
+			if strings.Contains(statement, "FROM executions") && strings.Contains(statement, "CAST(COALESCE(output, '') AS BLOB)") {
+				boundedQuerySeen = true
+			}
+		}
+		if !boundedQuerySeen {
+			t.Fatalf("task-thread request did not use the bounded page projection: %#v", counter.Statements())
+		}
+		return rec
+	}
+
+	latest := request("/tasks/" + task.ID + "/thread?limit=5")
+	latestBody := latest.Body.String()
+	assert.Contains(t, latestBody, "output-005-")
+	assert.Contains(t, latestBody, "Preview truncated.")
+	assert.Contains(t, latestBody, `data-task-thread-load-full="true"`)
+	assert.Contains(t, latestBody, `/thread/executions/exec-005/full`)
+	assert.Contains(t, latestBody, `data-earlier-loader="true"`)
+	assert.NotContains(t, latestBody, strings.Repeat("O", 128*1024))
+
+	earlier := request("/tasks/" + task.ID + "/thread?before=exec-003&limit=2")
+	earlierBody := earlier.Body.String()
+	assert.Contains(t, earlierBody, "output-001-")
+	assert.Contains(t, earlierBody, "output-002-")
+	assert.Contains(t, earlierBody, "Preview truncated.")
+	assert.NotContains(t, earlierBody, "output-003-")
+}
+
+func TestHandler_GetTaskThreadExecutionFullOutputIsSingleOwnedRead(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Full Thread Output Project")
+	task := createTask(t, h, project.ID, "Full Thread Output Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+	})
+	requested := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "requested prompt"
+	})
+	fullOutput := "# Exact output\\n\\n```go\\nfmt.Println(\"exact\")\\n```\\n[Tool bash done]result[/Tool]"
+	fullError := "exact error with <unsafe>"
+	require.NoError(t, h.execRepo.Complete(ctx, requested.ID, models.ExecFailed, fullOutput, fullError, 100, 500))
+	neighbor := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "neighbor prompt"
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, neighbor.ID, models.ExecCompleted, "neighbor secret", "", 100, 500))
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread/executions/"+requested.ID+"/full")
+	counter.SetEnabled(false)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	assert.Contains(t, body, "Exact output")
+	assert.Contains(t, body, "fmt.Println")
+	assert.Contains(t, body, "exact error with &lt;unsafe&gt;")
+	assert.NotContains(t, body, "neighbor secret")
+	assert.Equal(t, 1, countExecutionQueries(counter.Statements()))
+
+	otherTask := createTask(t, h, project.ID, "Other Full Thread Task")
+	wrong := htmxGet(e, "/tasks/"+otherTask.ID+"/thread/executions/"+requested.ID+"/full")
+	assertCode(t, wrong, http.StatusNotFound)
+	assert.NotContains(t, wrong.Body.String(), "Exact output")
+}
+
+func countExecutionQueries(statements []string) int {
+	count := 0
+	for _, statement := range statements {
+		if strings.Contains(statement, "FROM executions") {
+			count++
+		}
+	}
+	return count
+}
+
+func TestTaskThreadWindowLimitContract(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int
+	}{
+		{raw: "", want: taskThreadWindowLimitDefault},
+		{raw: "0", want: taskThreadWindowLimitDefault},
+		{raw: "-1", want: taskThreadWindowLimitDefault},
+		{raw: "not-a-limit", want: taskThreadWindowLimitDefault},
+		{raw: "1", want: 1},
+		{raw: "5", want: 5},
+		{raw: "100", want: taskThreadWindowLimitMax},
+		{raw: "101", want: taskThreadWindowLimitMax},
+		{raw: "999", want: taskThreadWindowLimitMax},
+	} {
+		if got := parseThreadWindowLimit(tc.raw, taskThreadWindowLimitDefault, taskThreadWindowLimitMax); got != tc.want {
+			t.Errorf("parseThreadWindowLimit(%q) = %d, want %d", tc.raw, got, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		name        string
+		rows        []models.Execution
+		limit       int
+		wantIDs     []string
+		wantEarlier bool
+	}{
+		{name: "empty", rows: nil, limit: 5, wantIDs: []string{}},
+		{name: "short", rows: []models.Execution{{ID: "one"}, {ID: "two"}}, limit: 5, wantIDs: []string{"one", "two"}},
+		{name: "exact", rows: []models.Execution{{ID: "one"}, {ID: "two"}}, limit: 2, wantIDs: []string{"one", "two"}},
+		{name: "sentinel", rows: []models.Execution{{ID: "one"}, {ID: "two"}, {ID: "three"}}, limit: 2, wantIDs: []string{"two", "three"}, wantEarlier: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, hasEarlier := trimExecutionWindow(tc.rows, tc.limit)
+			if ids := executionIDs(got); !slices.Equal(ids, tc.wantIDs) {
+				t.Fatalf("trimExecutionWindow IDs = %#v, want %#v", ids, tc.wantIDs)
+			}
+			if hasEarlier != tc.wantEarlier {
+				t.Fatalf("trimExecutionWindow hasEarlier = %v, want %v", hasEarlier, tc.wantEarlier)
+			}
+		})
+	}
+}
+
+func BenchmarkHandler_TaskThreadExecutionProjection(b *testing.B) {
+	for _, executionCount := range []int{1, 5, 20} {
+		for _, page := range []string{"latest", "before"} {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			h, _, _ := setupTestHandlerForDB(b, db)
+			project := createProjectTB(b, h, fmt.Sprintf("Task Thread Projection Benchmark Project %d %s", executionCount, page))
+			task := createTaskTB(b, h, project.ID, fmt.Sprintf("Task Thread Projection Benchmark Task %d %s", executionCount, page), func(tk *models.Task) {
+				tk.Status = models.StatusCompleted
+				tk.Prompt = "benchmark task prompt"
+			})
+			fixtureCount := executionCount
+			beforeID := ""
+			if page == "before" {
+				fixtureCount++
+				beforeID = fmt.Sprintf("thread-projection-bench-%03d", fixtureCount-1)
+			}
+			seedCompletedTaskThreadProjectionFixture(b, db, task.ID, fixtureCount)
+
+			for _, compact := range []bool{false, true} {
+				name := "current"
+				if compact {
+					name = "compact"
+				}
+				b.Run(fmt.Sprintf("%d_executions/%s/%s", executionCount, page, name), func(b *testing.B) {
+					load := func() ([]models.Execution, bool, error) {
+						if compact {
+							return h.loadTaskThreadExecutionWindow(context.Background(), task.ID, beforeID, executionCount)
+						}
+						return h.loadTaskExecutionWindow(context.Background(), task.ID, beforeID, executionCount)
+					}
+					render := func(executions []models.Execution) (int, error) {
+						var buf bytes.Buffer
+						if err := components.ChatMessages(executions, task, nil, "task-thread-messages", "task-thread-view", false, task.ProjectID).Render(context.Background(), &buf); err != nil {
+							return 0, err
+						}
+						return buf.Len(), nil
+					}
+
+					counter.Reset()
+					counter.SetEnabled(true)
+					warmExecutions, _, err := load()
+					counter.SetEnabled(false)
+					selectedTextBytes := counter.SelectedTextBytes()
+					if err != nil {
+						b.Fatalf("load benchmark window: %v", err)
+					}
+					warmRenderedBytes, err := render(warmExecutions)
+					if err != nil {
+						b.Fatalf("render benchmark window: %v", err)
+					}
+					_ = warmRenderedBytes
+
+					b.ReportAllocs()
+					b.ResetTimer()
+					renderedBytes := 0
+					for i := 0; i < b.N; i++ {
+						executions, _, loadErr := load()
+						if loadErr != nil {
+							b.Fatalf("load benchmark window: %v", loadErr)
+						}
+						bytesRendered, renderErr := render(executions)
+						if renderErr != nil {
+							b.Fatalf("render benchmark window: %v", renderErr)
+						}
+						renderedBytes += bytesRendered
+					}
+					b.ReportMetric(float64(renderedBytes)/float64(b.N), "rendered_bytes/op")
+					b.ReportMetric(float64(selectedTextBytes), "selected_text_bytes/op")
+				})
+			}
+		}
+	}
 }
 
 func TestHandler_GetTaskThread_ShowsPrimaryAgentDefinition(t *testing.T) {

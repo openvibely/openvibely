@@ -29,8 +29,14 @@ type Execution struct {
 	DispatchID       string                   `json:"dispatch_id,omitempty"`
 	ReasoningContent string                   `json:"-"`
 	ReplayMessages   []ExecutionReplayMessage `json:"-"`
-	StartedAt        time.Time                `json:"started_at"`
-	CompletedAt      *time.Time               `json:"completed_at"`
+	// These flags are populated only by the task-thread preview projection. They
+	// are intentionally excluded from the public JSON model and tell the
+	// renderer that the corresponding text is a bounded preview.
+	PromptTruncated bool       `json:"-"`
+	OutputTruncated bool       `json:"-"`
+	ErrorTruncated  bool       `json:"-"`
+	StartedAt       time.Time  `json:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at"`
 }
 
 // TaskExecutionMetrics is the compact execution projection needed by task
