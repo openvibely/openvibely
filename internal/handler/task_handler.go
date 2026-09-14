@@ -3252,10 +3252,9 @@ func (h *Handler) GetTaskThreadExecutionFullOutput(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	// Scope the full payload read through the task's project before selecting
-	// any output. The task comparison also rejects an execution from another
-	// task in the same project without leaking its content.
-	exec, err := h.execRepo.GetByIDForProject(ctx, execID, task.ProjectID)
+	// Scope the full payload read through both the requested task and its
+	// project before selecting any execution output.
+	exec, err := h.execRepo.GetByIDForTaskAndProject(ctx, execID, taskID, task.ProjectID)
 	if err != nil {
 		return err
 	}
@@ -3265,11 +3264,11 @@ func (h *Handler) GetTaskThreadExecutionFullOutput(c echo.Context) error {
 
 	switch exec.Status {
 	case models.ExecCompleted:
-		return render(c, http.StatusOK, components.ChatBubble("Assistant", exec.Output))
+		return render(c, http.StatusOK, components.ChatBubbleThreadPreview("Assistant", exec.Output, false, false, taskID, exec.ID))
 	case models.ExecFailed:
-		return render(c, http.StatusOK, components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output))
+		return render(c, http.StatusOK, components.ChatBubbleErrorThreadPreview("Assistant", exec.ErrorMessage, exec.Output, false, false, taskID, exec.ID))
 	case models.ExecCancelled:
-		return render(c, http.StatusOK, components.ChatBubbleError("Assistant", "Cancelled", exec.Output))
+		return render(c, http.StatusOK, components.ChatBubbleErrorThreadPreview("Assistant", "Cancelled", exec.Output, false, false, taskID, exec.ID))
 	default:
 		return render(c, http.StatusOK, components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "task-thread-messages", "task-thread-view"))
 	}
