@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -98,6 +100,85 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	var httpErr *echo.HTTPError
 	require.ErrorAs(t, badErr, &httpErr)
 	require.Equal(t, http.StatusBadRequest, httpErr.Code)
+}
+
+func TestHandler_GetTaskReferenceCatalog(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Task Reference Catalog Project").Build()
+	foreign := tc.CreateProject().WithName("Foreign Task Reference Catalog Project").Build()
+	empty := tc.CreateProject().WithName("Empty Task Reference Catalog Project").Build()
+	model := tc.CreateLLMConfig().WithName("Catalog Model").Build()
+
+	catalogTask := &models.Task{
+		ProjectID: project.ID, Title: "Catalog metadata", Category: models.CategoryActive, Status: models.StatusPending,
+		Priority: 4, Tag: models.TagBug, Prompt: strings.Repeat("p", 400), ChainConfig: `{"enabled":true}`,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, catalogTask))
+	require.NoError(t, repository.NewTaskGoalRepo(tc.db).CreateOrReplace(ctx, &models.TaskGoal{
+		TaskID: catalogTask.ID, GoalID: "catalog-goal", Objective: "finish catalog", Status: models.TaskGoalStatusActive,
+	}))
+	for i := 0; i < 25; i++ {
+		tc.CreateTask(project.ID).WithTitle(fmt.Sprintf("Catalog task %02d", i)).Build()
+	}
+	tc.CreateTask(foreign.ID).WithTitle("Foreign task").Build()
+	tc.CreateTask(project.ID).WithTitle("Scheduled task").WithCategory(models.CategoryScheduled).Build()
+	tc.CreateTask(project.ID).WithTitle("Scheduled running task").WithCategory(models.CategoryScheduled).WithStatus(models.StatusRunning).Build()
+	tc.CreateTask(project.ID).WithTitle("Chat task").WithCategory(models.CategoryChat).Build()
+
+	parentID := "catalog-swarm-parent"
+	parent := &models.Task{
+		ID: parentID, ProjectID: project.ID, Title: "Catalog swarm parent", Prompt: "parent",
+		Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, parent))
+	childParentID := parent.ID
+	require.NoError(t, tc.taskRepo.Create(ctx, &models.Task{
+		ID: "catalog-swarm-child", ProjectID: project.ID, Title: "Catalog swarm child", Prompt: "child",
+		Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleWorker,
+		ParentTaskID: &childParentID,
+	}))
+
+	rec := tc.HTTP().Get("/api/tasks/reference-catalog?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response TaskReferenceCatalogResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+	require.NotNil(t, response.Tasks)
+	require.Len(t, response.Tasks, 28)
+
+	byID := make(map[string]TaskReference, len(response.Tasks))
+	for _, task := range response.Tasks {
+		byID[task.ID] = task
+		require.Equal(t, project.ID, task.ProjectID)
+	}
+	metadata := byID[catalogTask.ID]
+	require.Equal(t, strings.Repeat("p", 300), metadata.Prompt)
+	require.Equal(t, []string{"Chain", "Goal", model.Name, "Bug", "Urgent"}, metadata.Badges)
+	require.Contains(t, byID, parent.ID)
+	foundScheduledRunning := false
+	for _, task := range response.Tasks {
+		if task.Title == "Scheduled running task" {
+			foundScheduledRunning = true
+			break
+		}
+	}
+	require.True(t, foundScheduledRunning)
+	require.NotContains(t, byID, "catalog-swarm-child")
+	for _, excluded := range []string{"Foreign task", "Scheduled task", "Chat task"} {
+		for _, task := range response.Tasks {
+			require.NotEqual(t, excluded, task.Title)
+		}
+	}
+
+	emptyRec := tc.HTTP().Get("/api/tasks/reference-catalog?project_id=" + empty.ID).Execute()
+	require.Equal(t, http.StatusOK, emptyRec.Code)
+	var emptyResponse TaskReferenceCatalogResponse
+	require.NoError(t, json.NewDecoder(emptyRec.Body).Decode(&emptyResponse))
+	require.NotNil(t, emptyResponse.Tasks)
+	require.Empty(t, emptyResponse.Tasks)
+
+	missingRec := tc.HTTP().Get("/api/tasks/reference-catalog").Execute()
+	require.Equal(t, http.StatusBadRequest, missingRec.Code)
 }
 
 func TestHandler_CancelTask(t *testing.T) {

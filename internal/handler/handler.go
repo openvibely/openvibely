@@ -778,6 +778,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Tasks (project-scoped via ?project_id= query param)
 	e.GET("/tasks", h.ListTasks)
+	e.GET("/api/tasks/reference-catalog", h.GetTaskReferenceCatalog)
 	e.GET("/schedule", h.ViewSchedule)
 	e.POST("/tasks", h.CreateTask)
 	e.POST("/tasks/move-completed", h.MoveCompletedActiveToCompleted)

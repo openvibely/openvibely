@@ -148,6 +148,34 @@ definitions:
       version:
         type: string
     type: object
+  handler.TaskReference:
+    properties:
+      badges:
+        items:
+          type: string
+        type: array
+      category:
+        type: string
+      display_order:
+        type: integer
+      id:
+        type: string
+      project_id:
+        type: string
+      prompt:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  handler.TaskReferenceCatalogResponse:
+    properties:
+      tasks:
+        items:
+          $ref: '#/definitions/handler.TaskReference'
+        type: array
+    type: object
   handler.TaskStatusCountsResponse:
     properties:
       active_tasks:
@@ -2559,6 +2587,35 @@ paths:
               type: string
             type: object
       summary: Start swarm planner
+      tags:
+      - tasks
+  /api/tasks/reference-catalog:
+    get:
+      description: Returns the complete compact task projection used to resolve terminal
+        task references. Chat, non-visible scheduled, and nested swarm-child tasks
+        are omitted because they are not top-level Kanban cards.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Complete project task reference catalog
+          schema:
+            $ref: '#/definitions/handler.TaskReferenceCatalogResponse'
+        "400":
+          description: Project ID is required
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get project task reference catalog
       tags:
       - tasks
   /api/tasks/status-counts:
