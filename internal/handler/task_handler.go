@@ -2567,12 +2567,11 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(ctx, projectID, "", "", "")
+	tasks, err := h.taskRepo.ListTaskReferences(ctx, projectID)
 	if err != nil {
 		applog.Infof("[handler] GetTaskReferenceCatalog project=%s error listing tasks: %v", projectID, err)
 		return err
 	}
-	tasks = service.AttachSwarmChildren(tasks)
 
 	var llmModels []models.LLMConfig
 	if h.llmConfigRepo != nil {
@@ -2602,7 +2601,7 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 	return c.JSON(http.StatusOK, TaskReferenceCatalogResponse{Tasks: refs})
 }
 
-func taskReferenceVisible(task models.Task) bool {
+func taskReferenceVisible(task repository.TaskReference) bool {
 	if task.Category == models.CategoryChat || models.IsSwarmChildRole(task.SwarmRole) {
 		return false
 	}
@@ -2617,12 +2616,12 @@ func taskReferenceVisible(task models.Task) bool {
 	}
 }
 
-func taskReferenceBadges(task models.Task, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) []string {
+func taskReferenceBadges(task repository.TaskReference, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) []string {
 	badges := make([]string, 0, 8)
 	if task.ParentTaskID != nil {
 		badges = append(badges, "Chained")
 	}
-	if config, err := task.ParseChainConfig(); err == nil && config.Enabled {
+	if task.ChainEnabled {
 		badges = append(badges, "Chain")
 	}
 	if task.HasGoal {
@@ -2654,7 +2653,7 @@ func taskReferenceBadges(task models.Task, llmModels []models.LLMConfig, agentDe
 	return badges
 }
 
-func taskReferenceModelName(task models.Task, llmModels []models.LLMConfig) string {
+func taskReferenceModelName(task repository.TaskReference, llmModels []models.LLMConfig) string {
 	if task.AgentID != nil {
 		for _, model := range llmModels {
 			if model.ID == *task.AgentID {
