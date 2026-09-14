@@ -165,6 +165,9 @@ func (s *DiscordService) SetCustomPersonalityRepo(repo *repository.CustomPersona
 }
 func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
 	s.projectSvc = projectSvc
+	if projectSvc != nil {
+		projectSvc.RegisterProjectSelectionCacheInvalidator(s)
+	}
 	s.githubProjectSvc = githubSvc
 	s.memorySvc = memorySvc
 	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
@@ -685,6 +688,20 @@ func (s *DiscordService) getActiveProject(ctx context.Context, userID string) st
 	s.userProjects[key] = selected
 	s.mu.Unlock()
 	return selected
+}
+
+func (s *DiscordService) InvalidateProjectSelection(projectID string) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, cachedProjectID := range s.userProjects {
+		if cachedProjectID == projectID {
+			delete(s.userProjects, key)
+		}
+	}
 }
 
 func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
