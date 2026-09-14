@@ -1674,6 +1674,19 @@ paths:
         in: query
         name: evidence_offset
         type: integer
+      - description: Exact skill handle for task-outcome evidence
+        in: query
+        name: evidence_skill_handle
+        type: string
+      - description: Exact skill scope for task-outcome evidence
+        in: query
+        name: evidence_skill_scope
+        type: string
+      - description: Exact reusable Agent definition ID or __unassigned__ for skill
+          task-outcome evidence
+        in: query
+        name: evidence_skill_agent
+        type: string
       produces:
       - application/json
       responses:

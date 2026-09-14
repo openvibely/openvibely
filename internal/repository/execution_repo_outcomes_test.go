@@ -122,6 +122,9 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 		t.Fatal(err)
 	}
 	makeExecution(cancelled, configA.ID, models.ExecCancelled, false, "2026-01-13 10:00:00", 500)
+	if err := skills.RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: time.Date(2026, 1, 13, 12, 0, 0, 0, time.UTC), ProjectID: project.ID, TaskID: cancelled.ID, SkillScope: models.SkillScopeProject, SkillHandle: "project:evaluator", EventType: models.SkillEventViewed}); err != nil {
+		t.Fatal(err)
+	}
 
 	foreign := makeTask(other.ID, "Foreign", &assignedID, false)
 	makeExecution(foreign, configA.ID, models.ExecCompleted, false, "2026-01-14 10:00:00", 900)
@@ -202,6 +205,28 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 		if row.AgentID != agent.ID || row.SkillHandle != "project:evaluator" || row.SkillScope == "" {
 			t.Fatalf("Agent/skill outcome lost Agent, handle, or scope identity: %+v", row)
 		}
+	}
+	projectSkillEvidence, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+		ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20,
+		EvidenceSkillHandle: "project:evaluator", EvidenceSkillScope: models.SkillScopeProject, EvidenceSkillAgentID: agent.ID,
+	})
+	if err != nil {
+		t.Fatalf("project skill outcome evidence: %v", err)
+	}
+	if projectSkillEvidence.EvidenceTotal != 2 || len(projectSkillEvidence.RecentOutcomes) != 2 {
+		t.Fatalf("project skill outcome evidence = total %d rows %+v, want exact two task outcome rows", projectSkillEvidence.EvidenceTotal, projectSkillEvidence.RecentOutcomes)
+	}
+	for _, row := range projectSkillEvidence.RecentOutcomes {
+		if row.TaskID != achieved.ID && row.TaskID != reworked.ID {
+			t.Fatalf("skill outcome evidence included view-only, taskless, wrong-scope, or foreign task: %+v", row)
+		}
+	}
+	globalSkillEvidence, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+		ProjectID: project.ID, DateFrom: from, DateTo: to, Limit: 20,
+		EvidenceSkillHandle: "project:evaluator", EvidenceSkillScope: models.SkillScopeGlobal,
+	})
+	if err != nil || globalSkillEvidence.EvidenceTotal != 1 || len(globalSkillEvidence.RecentOutcomes) != 1 || globalSkillEvidence.RecentOutcomes[0].TaskID != achieved.ID {
+		t.Fatalf("global skill outcome evidence = total %d rows %+v err=%v, want achieved task only", globalSkillEvidence.EvidenceTotal, globalSkillEvidence.RecentOutcomes, err)
 	}
 	if len(dashboard.RecentOutcomes) != 4 {
 		t.Errorf("recent project outcomes = %d, want 4", len(dashboard.RecentOutcomes))
