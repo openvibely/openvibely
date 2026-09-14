@@ -124,7 +124,7 @@ return 'ready';
 func releaseTerminalBrowserRender(browser *composerFocusCDP, label string) {
 	browser.t.Helper()
 	browser.waitFor(label+" queued", `String(!!(window.__terminalRenderQueue&&window.__terminalRenderQueue.length))`, "true")
-	if got := browser.evaluate(`String(window.__releaseTerminalRender())`); got != "true" {
+	if got := browser.evaluate(`(function(){var released=0;while(window.__releaseTerminalRender()){released++;}return String(released);})()`); got == "0" {
 		browser.t.Fatalf("release %s: %s", label, got)
 	}
 }
