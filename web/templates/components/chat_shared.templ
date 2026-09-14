@@ -269,7 +269,13 @@ templ ChatThreadPreviewNotice(showLoadAction bool, taskID, execID string) {
 // offered for assistant content because its endpoint loads one execution's
 // exact output/error pair.
 templ ChatBubbleThreadPreview(role, content string, contentTruncated bool, showLoadAction bool, taskID, execID string) {
-	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+	<div
+		if execID != "" {
+			id={ "task-thread-execution-" + execID }
+			data-task-thread-execution-bubble="true"
+		}
+		class={ chatBubbleClass(role), "rounded-xl p-4" }
+	>
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
@@ -287,7 +293,13 @@ templ ChatBubbleThreadPreview(role, content string, contentTruncated bool, showL
 }
 
 templ ChatBubbleErrorThreadPreview(role, errorMsg, output string, outputTruncated, errorTruncated bool, taskID, execID string) {
-	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+	<div
+		if execID != "" {
+			id={ "task-thread-execution-" + execID }
+			data-task-thread-execution-bubble="true"
+		}
+		class={ chatBubbleClass(role), "rounded-xl p-4" }
+	>
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
