@@ -214,6 +214,31 @@ func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, p
 	return tasks, nil
 }
 
+// ListTaskReferences returns the compact project catalog used by reference
+// selectors. It preserves the board's terminal-active normalization without
+// hydrating the board/detail projection.
+func (s *TaskService) ListTaskReferences(ctx context.Context, projectID string) ([]repository.TaskReference, error) {
+	references, err := s.repo.ListTaskReferences(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	moved := 0
+	for _, reference := range references {
+		if reference.Category != models.CategoryActive ||
+			(reference.Status != models.StatusFailed && reference.Status != models.StatusCancelled) {
+			continue
+		}
+		if err := s.repo.UpdateCategory(ctx, reference.ID, models.CategoryBacklog); err != nil {
+			return nil, fmt.Errorf("normalizing task reference %s: %w", reference.ID, err)
+		}
+		moved++
+	}
+	if moved == 0 {
+		return references, nil
+	}
+	return s.repo.ListTaskReferences(ctx, projectID)
+}
+
 func (s *TaskService) normalizeActiveTerminalTasks(ctx context.Context, tasks []models.Task) (int, error) {
 	moved := 0
 	for _, task := range tasks {
