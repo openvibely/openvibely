@@ -9,7 +9,7 @@ type ReviewComment struct {
 	FilePath    string    `json:"file_path"`
 	LineNumber  int       `json:"line_number"`
 	LineType    string    `json:"line_type"` // "new", "old", or "ctx"
-	CommentText string   `json:"comment_text"`
+	CommentText string    `json:"comment_text"`
 	ReviewedBy  string    `json:"reviewed_by"`
 	CreatedAt   time.Time `json:"created_at"`
 }

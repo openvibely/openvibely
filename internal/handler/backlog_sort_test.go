@@ -50,11 +50,11 @@ func TestSetBacklogSort(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		sortBy         string
-		wantStatus     int
-		wantCookie     bool
-		wantCookieVal  string
+		name          string
+		sortBy        string
+		wantStatus    int
+		wantCookie    bool
+		wantCookieVal string
 	}{
 		{
 			name:          "title ascending",

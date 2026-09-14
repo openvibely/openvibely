@@ -49,11 +49,11 @@ type Insight struct {
 	Status      InsightStatus   `json:"status"`
 	Title       string          `json:"title"`
 	Description string          `json:"description"`
-	Evidence    string          `json:"evidence"`    // JSON: supporting data
-	Suggestion  string          `json:"suggestion"`  // what to do about it
-	Impact      string          `json:"impact"`      // estimated impact if addressed/ignored
+	Evidence    string          `json:"evidence"`          // JSON: supporting data
+	Suggestion  string          `json:"suggestion"`        // what to do about it
+	Impact      string          `json:"impact"`            // estimated impact if addressed/ignored
 	TaskID      *string         `json:"task_id,omitempty"` // linked task if accepted
-	Confidence  float64         `json:"confidence"`  // 0.0-1.0
+	Confidence  float64         `json:"confidence"`        // 0.0-1.0
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
 	ResolvedAt  *time.Time      `json:"resolved_at,omitempty"`
@@ -85,10 +85,10 @@ func (i *Insight) SetEvidence(data map[string]interface{}) error {
 type InsightReport struct {
 	ID          string    `json:"id"`
 	ProjectID   string    `json:"project_id"`
-	ReportDate  string    `json:"report_date"` // YYYY-MM-DD
-	Summary     string    `json:"summary"`     // markdown summary
-	InsightIDs  string    `json:"insight_ids"` // JSON array of insight IDs
-	Stats       string    `json:"stats"`       // JSON stats summary
+	ReportDate  string    `json:"report_date"`  // YYYY-MM-DD
+	Summary     string    `json:"summary"`      // markdown summary
+	InsightIDs  string    `json:"insight_ids"`  // JSON array of insight IDs
+	Stats       string    `json:"stats"`        // JSON stats summary
 	AnalysisLog string    `json:"analysis_log"` // what was analyzed
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -132,10 +132,10 @@ type KnowledgeEntry struct {
 	ID        string    `json:"id"`
 	ProjectID string    `json:"project_id"`
 	Topic     string    `json:"topic"`
-	Content   string    `json:"content"`   // the "why" explanation
-	Source    string    `json:"source"`    // where it was extracted from (commit, task, etc.)
+	Content   string    `json:"content"`    // the "why" explanation
+	Source    string    `json:"source"`     // where it was extracted from (commit, task, etc.)
 	SourceRef string    `json:"source_ref"` // specific reference (commit hash, task ID)
-	Tags      string    `json:"tags"`      // JSON array of searchable tags
+	Tags      string    `json:"tags"`       // JSON array of searchable tags
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
@@ -166,11 +166,11 @@ func (k *KnowledgeEntry) SetTags(tags []string) error {
 type HealthCheck struct {
 	ID               string    `json:"id"`
 	ProjectID        string    `json:"project_id"`
-	Grade            string    `json:"grade"`              // A+ to F
-	Strengths        string    `json:"strengths"`          // What you're doing well
-	Improvements     string    `json:"improvements"`       // Areas to improve
-	Assessment       string    `json:"assessment"`         // Overall assessment
-	HowToImprove     string    `json:"how_to_improve"`     // Steps to reach next grade
+	Grade            string    `json:"grade"`          // A+ to F
+	Strengths        string    `json:"strengths"`      // What you're doing well
+	Improvements     string    `json:"improvements"`   // Areas to improve
+	Assessment       string    `json:"assessment"`     // Overall assessment
+	HowToImprove     string    `json:"how_to_improve"` // Steps to reach next grade
 	TasksTotal       int       `json:"tasks_total"`
 	TasksCompleted   int       `json:"tasks_completed"`
 	TasksFailed      int       `json:"tasks_failed"`
@@ -182,21 +182,21 @@ type HealthCheck struct {
 
 // IdeaGrade represents an AI evaluation of the user's idea/task quality
 type IdeaGrade struct {
-	ID              string    `json:"id"`
-	ProjectID       string    `json:"project_id"`
-	Grade           string    `json:"grade"`            // A+ to F
-	Summary         string    `json:"summary"`          // Overall grade explanation
-	Strengths       string    `json:"strengths"`        // What they're doing well
-	Improvements    string    `json:"improvements"`     // Areas for improvement
-	HowToNextGrade  string    `json:"how_to_next_grade"` // How to reach next grade level
-	NextGrade       string    `json:"next_grade"`       // The next grade level to aim for
-	TasksEvaluated  int       `json:"tasks_evaluated"`
-	ClarityScore    float64   `json:"clarity_score"`    // 0-100
-	AmbitionScore   float64   `json:"ambition_score"`   // 0-100
-	FollowThrough   float64   `json:"follow_through"`   // 0-100 (completion rate)
-	DiversityScore  float64   `json:"diversity_score"`  // 0-100
-	StrategyScore   float64   `json:"strategy_score"`   // 0-100
-	CreatedAt       time.Time `json:"created_at"`
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"project_id"`
+	Grade          string    `json:"grade"`             // A+ to F
+	Summary        string    `json:"summary"`           // Overall grade explanation
+	Strengths      string    `json:"strengths"`         // What they're doing well
+	Improvements   string    `json:"improvements"`      // Areas for improvement
+	HowToNextGrade string    `json:"how_to_next_grade"` // How to reach next grade level
+	NextGrade      string    `json:"next_grade"`        // The next grade level to aim for
+	TasksEvaluated int       `json:"tasks_evaluated"`
+	ClarityScore   float64   `json:"clarity_score"`   // 0-100
+	AmbitionScore  float64   `json:"ambition_score"`  // 0-100
+	FollowThrough  float64   `json:"follow_through"`  // 0-100 (completion rate)
+	DiversityScore float64   `json:"diversity_score"` // 0-100
+	StrategyScore  float64   `json:"strategy_score"`  // 0-100
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // InsightDashboardData aggregates all data for the insights page
@@ -214,14 +214,14 @@ type InsightDashboardData struct {
 
 // InsightStats holds summary stats for the insights page
 type InsightStats struct {
-	TotalInsights    int     `json:"total_insights"`
-	NewCount         int     `json:"new_count"`
-	AcceptedCount    int     `json:"accepted_count"`
-	RejectedCount    int     `json:"rejected_count"`
-	ResolvedCount    int     `json:"resolved_count"`
-	AvgConfidence    float64 `json:"avg_confidence"`
-	KnowledgeCount   int     `json:"knowledge_count"`
-	BugPatterns      int     `json:"bug_patterns"`
-	TechDebtItems    int     `json:"tech_debt_items"`
-	Optimizations    int     `json:"optimizations"`
+	TotalInsights  int     `json:"total_insights"`
+	NewCount       int     `json:"new_count"`
+	AcceptedCount  int     `json:"accepted_count"`
+	RejectedCount  int     `json:"rejected_count"`
+	ResolvedCount  int     `json:"resolved_count"`
+	AvgConfidence  float64 `json:"avg_confidence"`
+	KnowledgeCount int     `json:"knowledge_count"`
+	BugPatterns    int     `json:"bug_patterns"`
+	TechDebtItems  int     `json:"tech_debt_items"`
+	Optimizations  int     `json:"optimizations"`
 }

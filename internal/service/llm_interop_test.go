@@ -119,11 +119,11 @@ func TestProviderInterop_UsageAccountingConsistency(t *testing.T) {
 			wantTotal:    150,
 		},
 		{
-			name:          "With cached tokens",
-			inputTokens:   100,
-			outputTokens:  50,
-			cachedTokens:  20,
-			wantTotal:     150, // cached tokens don't add to total
+			name:         "With cached tokens",
+			inputTokens:  100,
+			outputTokens: 50,
+			cachedTokens: 20,
+			wantTotal:    150, // cached tokens don't add to total
 		},
 		{
 			name:            "With reasoning tokens (o1 model)",

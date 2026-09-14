@@ -83,10 +83,10 @@ func TestSchedule_ComputeNextRun_WeeklyPreservesDayOfWeek(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		from          time.Time
-		expectedDate  time.Time
-		expectedDay   time.Weekday
+		name         string
+		from         time.Time
+		expectedDate time.Time
+		expectedDay  time.Weekday
 	}{
 		{
 			name:         "fires on time (Saturday)",

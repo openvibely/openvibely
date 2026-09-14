@@ -11,9 +11,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 	docs "github.com/openvibely/openvibely/docs"
-	echoSwagger "github.com/swaggo/echo-swagger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	echoSwagger "github.com/swaggo/echo-swagger"
 )
 
 var routeParamRe = regexp.MustCompile(`:([A-Za-z0-9_]+)`)

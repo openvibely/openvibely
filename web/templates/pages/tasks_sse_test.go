@@ -53,43 +53,43 @@ func TestSSEAutoRefreshBehavior(t *testing.T) {
 // sidebar clicks were slow or unresponsive due to thread polling morph blocking.
 func TestSidebarNavFromThreadTab(t *testing.T) {
 	tests := []struct {
-		name                string
-		taskRunning         bool
-		streamingActive     bool
-		expectedAbort       bool
-		expectedCleanup     bool
+		name                  string
+		taskRunning           bool
+		streamingActive       bool
+		expectedAbort         bool
+		expectedCleanup       bool
 		expectedSuppressMorph bool
 	}{
 		{
-			name:                "should abort polling when task is running and sidebar is clicked",
-			taskRunning:         true,
-			streamingActive:     false,
-			expectedAbort:       true,
-			expectedCleanup:     true,
+			name:                  "should abort polling when task is running and sidebar is clicked",
+			taskRunning:           true,
+			streamingActive:       false,
+			expectedAbort:         true,
+			expectedCleanup:       true,
 			expectedSuppressMorph: true,
 		},
 		{
-			name:                "should close SSE when streaming and sidebar is clicked",
-			taskRunning:         true,
-			streamingActive:     true,
-			expectedAbort:       true,
-			expectedCleanup:     true,
+			name:                  "should close SSE when streaming and sidebar is clicked",
+			taskRunning:           true,
+			streamingActive:       true,
+			expectedAbort:         true,
+			expectedCleanup:       true,
 			expectedSuppressMorph: true,
 		},
 		{
-			name:                "should suppress stale morph responses during navigation",
-			taskRunning:         true,
-			streamingActive:     false,
-			expectedAbort:       true,
-			expectedCleanup:     true,
+			name:                  "should suppress stale morph responses during navigation",
+			taskRunning:           true,
+			streamingActive:       false,
+			expectedAbort:         true,
+			expectedCleanup:       true,
 			expectedSuppressMorph: true,
 		},
 		{
-			name:                "should clean up scroll tracker on navigation",
-			taskRunning:         false,
-			streamingActive:     false,
-			expectedAbort:       true,
-			expectedCleanup:     true,
+			name:                  "should clean up scroll tracker on navigation",
+			taskRunning:           false,
+			streamingActive:       false,
+			expectedAbort:         true,
+			expectedCleanup:       true,
 			expectedSuppressMorph: true,
 		},
 	}

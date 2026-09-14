@@ -18,10 +18,10 @@ func TestScheduleLifecycle_WeeklyCreatedInPast(t *testing.T) {
 
 	// Create a task first (required by foreign key)
 	task := &models.Task{
-		Title:      "Test Task",
-		ProjectID:  "default",
-		Category:   "scheduled",
-		Status:     "pending",
+		Title:     "Test Task",
+		ProjectID: "default",
+		Category:  "scheduled",
+		Status:    "pending",
 	}
 	err := taskRepo.Create(context.Background(), task)
 	if err != nil {
@@ -123,10 +123,10 @@ func TestScheduleLifecycle_WeeklyCreatedInFuture(t *testing.T) {
 
 	// Create a task first (required by foreign key)
 	task := &models.Task{
-		Title:      "Test Task",
-		ProjectID:  "default",
-		Category:   "scheduled",
-		Status:     "pending",
+		Title:     "Test Task",
+		ProjectID: "default",
+		Category:  "scheduled",
+		Status:    "pending",
 	}
 	err := taskRepo.Create(context.Background(), task)
 	if err != nil {
