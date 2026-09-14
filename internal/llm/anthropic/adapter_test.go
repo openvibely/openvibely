@@ -16,6 +16,12 @@ import (
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
+func TestMaxTokensErrorIsCategorized(t *testing.T) {
+	if !llmcontracts.ErrorIs(errMaxTokens, llmcontracts.ErrorOutputTokenLimitReached) {
+		t.Fatalf("errMaxTokens category missing: %v", errMaxTokens)
+	}
+}
+
 func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testing.T) {
 	followup := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate)
 	if !strings.Contains(followup, llmprompt.ChatActionUnavailableInstructions) {

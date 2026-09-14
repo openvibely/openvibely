@@ -331,6 +331,9 @@ func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virt
 
 func testChromePath(t *testing.T) string {
 	t.Helper()
+	if os.Getenv("OPENVIBELY_SKIP_BROWSER_TESTS") == "1" {
+		t.Skip("browser tests run in an isolated CI step")
+	}
 	chrome := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 	if _, err := os.Stat(chrome); err == nil {
 		return chrome

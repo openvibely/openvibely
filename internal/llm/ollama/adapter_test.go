@@ -17,6 +17,7 @@ import (
 
 type recordingHTTPDoer struct {
 	request chatRequest
+	calls   int
 }
 
 func instantOllamaRetry(t *testing.T) {
@@ -51,6 +52,57 @@ func (d *retryingOllamaDoer) Do(*http.Request) (*http.Response, error) {
 		)),
 		Header: make(http.Header),
 	}, nil
+}
+
+func TestOllamaResponseErrorCategorizesContextWindow(t *testing.T) {
+	err := ollamaResponseError(http.StatusBadRequest, []byte(`{"error":"prompt exceeds context window"}`))
+	if !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("error = %v, want context-window category", err)
+	}
+}
+
+func TestOllamaFinalWirePreflightUsesConfiguredContextWindow(t *testing.T) {
+	for _, operation := range []llmcontracts.Operation{llmcontracts.OperationDirect, llmcontracts.OperationStreaming, llmcontracts.OperationTask} {
+		t.Run(string(operation), func(t *testing.T) {
+			doer := &recordingHTTPDoer{}
+			adapter := New(nil, nil)
+			adapter.SetHTTPClient(doer)
+			req := llmcontracts.AgentRequest{
+				Operation: operation,
+				Message:   strings.Repeat("dense!", 2000),
+				Agent: models.LLMConfig{
+					Provider: models.ProviderOllama, Model: "arbitrary-local", OllamaBaseURL: "http://ollama.invalid", ContextWindow: 4096,
+				},
+			}
+			if operation == llmcontracts.OperationStreaming {
+				req.Followup = true
+				req.ChatHistory = []models.Execution{}
+			}
+			_, err := adapter.Call(context.Background(), req, ".", nil)
+			if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+				t.Fatalf("error = %v, want typed final-wire context rejection", err)
+			}
+			if doer.calls != 0 {
+				t.Fatalf("Ollama HTTP calls = %d, want zero", doer.calls)
+			}
+		})
+	}
+}
+
+func TestOllamaRequestSetsConfiguredNumCtx(t *testing.T) {
+	doer := &recordingHTTPDoer{}
+	adapter := New(nil, nil)
+	adapter.SetHTTPClient(doer)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationDirect, Message: "hello",
+		Agent: models.LLMConfig{Provider: models.ProviderOllama, Model: "arbitrary-local", OllamaBaseURL: "http://ollama.invalid", ContextWindow: 8192},
+	}, ".", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doer.request.Options == nil || doer.request.Options.NumCtx != 8192 || doer.request.Options.NumPredict != 2048 {
+		t.Fatalf("Ollama options = %#v, want num_ctx=8192 and conservative num_predict=2048", doer.request.Options)
+	}
 }
 
 func TestCallDirectRetriesTransientHTTPStatus(t *testing.T) {
@@ -95,6 +147,7 @@ func TestCallDirectRetriesNetworkTimeout(t *testing.T) {
 }
 
 func (d *recordingHTTPDoer) Do(req *http.Request) (*http.Response, error) {
+	d.calls++
 	body, err := io.ReadAll(req.Body)
 	if err != nil {
 		return nil, err

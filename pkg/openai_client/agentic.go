@@ -17,9 +17,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -51,6 +53,7 @@ Return only the summary text.`
 type AgenticOptions struct {
 	Model           string
 	MaxOutputTokens int
+	ContextWindow   int
 	System          string
 	// CompactionPrompt overrides the instruction text used for API-key /responses/compact.
 	// ChatGPT OAuth compaction mirrors Codex v2 and uses the base system instructions.
@@ -261,6 +264,19 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	var allText strings.Builder
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
+			if turn == 0 || !opts.AutoCompaction {
+				return nil, err
+			}
+			var compactErr error
+			inputItems, compactErr = compactIfNeeded(inputItems, compactionThreshold, true)
+			if compactErr != nil {
+				return nil, fmt.Errorf("turn %d preflight compaction: %w", turn+1, compactErr)
+			}
+			if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
+				return nil, err
+			}
+		}
 		var turnResult *agenticTurnResult
 		overflowRecovered := false
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
@@ -290,7 +306,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
 		})
 		if err != nil {
-			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
+			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
 		result.InputTokens += turnResult.inputTokens
@@ -810,7 +826,10 @@ func truncateToolOutputForModelInput(output string, tokenLimit int) string {
 		return output
 	}
 
-	maxChars := limit * 4 // approximate token->char conversion
+	// The hard admission estimator uses one token per rune when no exact
+	// tokenizer is available. Use the same conservative conversion here so a
+	// dense symbol-heavy result cannot exceed its independent replay budget.
+	maxChars := limit
 	runes := []rune(output)
 	if len(runes) <= maxChars {
 		return output
@@ -880,7 +899,10 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
 	}
 
-	trimmedInput := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model)
+	trimmedInput, err := trimCompactionInputItemsToFitContextWindow(inputItems, tools, instructions, opts.Model, opts.ContextWindow)
+	if err != nil {
+		return nil, "", err
+	}
 	if len(trimmedInput) == 0 {
 		return nil, "", fmt.Errorf("compaction input is empty after trimming")
 	}
@@ -942,14 +964,14 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 
 	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
 	if err != nil {
-		return nil, "", err
+		return nil, "", CategorizeCompactionError(err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(resp.Body)
 		apiErr := parseAPIError(resp.StatusCode, errBody)
-		return nil, "", fmt.Errorf("POST %q (compaction): %w", endpoint, apiErr)
+		return nil, "", CategorizeCompactionError(fmt.Errorf("POST %q (compaction): %w", endpoint, apiErr))
 	}
 
 	var compacted struct {
@@ -989,7 +1011,7 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 		return c.sendAgenticTurn(attemptCtx, compactionInput, tools, &compactionOpts, isOAuth)
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("compaction response: %w", err)
+		return nil, "", CategorizeCompactionError(fmt.Errorf("compaction response: %w", err))
 	}
 	compactionItems := make([]any, 0, 1)
 	for _, raw := range result.outputItems {
@@ -1153,7 +1175,7 @@ func truncateTextToOpenAITokenBudget(text string, maxTokens int) string {
 	if maxTokens <= 0 || text == "" {
 		return ""
 	}
-	maxBytes := approxOpenAIBytesForTokens(maxTokens)
+	maxBytes := maxTokens // conservative hard-bound: at most one UTF-8/ASCII rune per token
 	if len(text) <= maxBytes {
 		return text
 	}
@@ -1253,26 +1275,66 @@ func compactionInstructions(opts *AgenticOptions) string {
 	return openAICompactionInstructions
 }
 
-func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string) []any {
-	contextWindow, ok := openAIModelContextWindow(model)
-	if !ok || contextWindow <= 0 || len(inputItems) == 0 {
-		return append([]any(nil), inputItems...)
+func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDefinition, instructions, model string, configuredContextWindow ...int) ([]any, error) {
+	contextWindow := 0
+	if len(configuredContextWindow) > 0 {
+		contextWindow = configuredContextWindow[0]
+	}
+	if contextWindow <= 0 {
+		contextWindow, _ = openAIModelContextWindow(model)
+	}
+	if contextWindow <= 0 {
+		contextWindow = DefaultCompactionThreshold
+	}
+	if len(inputItems) == 0 {
+		return append([]any(nil), inputItems...), nil
+	}
+	safetyMargin := max(1024, contextWindow/50)
+	safeInputBudget := contextWindow - 16384 - safetyMargin
+	if safeInputBudget <= 0 {
+		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("context window %d cannot reserve output and safety margin", contextWindow))
 	}
 
 	trimmed := append([]any(nil), inputItems...)
-	for estimateCompactionRequestTokens(trimmed, tools, instructions) > contextWindow {
+	for estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
 		objectiveIndex := compactionObjectiveIndex(trimmed)
 		recentIndex := compactionRecentContextIndex(trimmed)
-		trimIndex := nextCompactionTrimIndex(trimmed, objectiveIndex, recentIndex)
-		if trimIndex < 0 {
-			break
+		trimIndexes := nextCompactionTrimIndexes(trimmed, objectiveIndex, recentIndex)
+		if len(trimIndexes) > 0 {
+			trimmed = removeCompactionInputIndexes(trimmed, trimIndexes)
+			continue
 		}
-		trimmed = append(trimmed[:trimIndex], trimmed[trimIndex+1:]...)
-		if len(trimmed) == 0 {
-			break
+
+		// A protected objective or recent message can itself exceed the budget.
+		// Bound the larger protected message and retry the complete estimate.
+		candidate := objectiveIndex
+		if recentIndex >= 0 && inputItemTokenEstimate(trimmed[recentIndex]) > inputItemTokenEstimate(trimmed[candidate]) {
+			candidate = recentIndex
 		}
+		item, ok := trimmed[candidate].(map[string]any)
+		if !ok {
+			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item cannot be bounded"))
+		}
+		overhead := estimateCompactionRequestTokens(trimmed, tools, instructions) - inputItemTokenEstimate(item) + 32
+		messageBudget := safeInputBudget - overhead - 256
+		bounded, ok := truncateRetainedMessageForOpenAIRemoteCompactionV2(item, messageBudget)
+		if !ok || inputItemTokenEstimate(bounded) >= inputItemTokenEstimate(item) {
+			return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("protected input item exceeds safe compaction budget %d", safeInputBudget))
+		}
+		trimmed[candidate] = bounded
 	}
-	return trimmed
+	if estimateCompactionRequestTokens(trimmed, tools, instructions)+32 > safeInputBudget {
+		return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "OpenAI compaction preflight", fmt.Errorf("trimmed compaction request exceeds safe budget %d", safeInputBudget))
+	}
+	return trimmed, nil
+}
+
+func inputItemTokenEstimate(item any) int {
+	estimate := estimateInputItemsTokens([]any{item})
+	if encoded, err := json.Marshal(item); err == nil {
+		estimate = max(estimate, utf8.RuneCount(encoded))
+	}
+	return estimate
 }
 
 func compactionObjectiveIndex(items []any) int {
@@ -1316,9 +1378,9 @@ func compactionRecentContextIndex(items []any) int {
 	return len(items) - 1
 }
 
-func nextCompactionTrimIndex(items []any, protectedIndexes ...int) int {
+func nextCompactionTrimIndexes(items []any, protectedIndexes ...int) []int {
 	if len(items) == 0 {
-		return -1
+		return nil
 	}
 
 	isProtected := func(index int) bool {
@@ -1330,27 +1392,123 @@ func nextCompactionTrimIndex(items []any, protectedIndexes ...int) int {
 		return false
 	}
 
-	// First pass: trim oldest codex-generated/tool-heavy items.
+	// First pass: trim the oldest codex-generated/tool-heavy group. Calls and
+	// their outputs must be removed together so provider protocol pairing stays valid.
 	for i, raw := range items {
 		if isProtected(i) {
 			continue
 		}
 		item, ok := raw.(map[string]any)
 		if !ok {
-			return i
+			return []int{i}
 		}
-		if isCodexGeneratedInputItem(item) {
-			return i
+		if !isCodexGeneratedInputItem(item) {
+			continue
+		}
+		indexes := compactionToolPairIndexes(items, i)
+		blocked := false
+		for _, index := range indexes {
+			if isProtected(index) {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			return indexes
 		}
 	}
 
-	// Fallback: trim oldest non-protected item.
-	for i := range items {
-		if !isProtected(i) {
-			return i
+	// Fallback: trim the oldest structurally safe non-protected item or group.
+	for i, raw := range items {
+		if isProtected(i) {
+			continue
+		}
+		if _, ok := raw.(map[string]any); ok {
+			indexes := compactionToolPairIndexes(items, i)
+			blocked := false
+			for _, index := range indexes {
+				if isProtected(index) {
+					blocked = true
+					break
+				}
+			}
+			if blocked {
+				continue
+			}
+			return indexes
+		}
+		return []int{i}
+	}
+	return nil
+}
+
+func compactionToolPairIndexes(items []any, selected int) []int {
+	item, ok := items[selected].(map[string]any)
+	if !ok {
+		return []int{selected}
+	}
+	itemType := strings.ToLower(strings.TrimSpace(stringFromAny(item["type"])))
+	if itemType != "function_call" && itemType != "function_call_output" && itemType != "custom_tool_call" && itemType != "custom_tool_call_output" {
+		return []int{selected}
+	}
+	callID := strings.TrimSpace(stringFromAny(item["call_id"]))
+	if callID == "" {
+		return []int{selected}
+	}
+	indexes := make([]int, 0, 2)
+	for i, raw := range items {
+		candidate, ok := raw.(map[string]any)
+		if !ok || strings.TrimSpace(stringFromAny(candidate["call_id"])) != callID {
+			continue
+		}
+		candidateType := strings.ToLower(strings.TrimSpace(stringFromAny(candidate["type"])))
+		if candidateType == "function_call" || candidateType == "function_call_output" || candidateType == "custom_tool_call" || candidateType == "custom_tool_call_output" {
+			indexes = append(indexes, i)
 		}
 	}
-	return -1
+	if len(indexes) == 0 {
+		return []int{selected}
+	}
+	return indexes
+}
+
+func removeCompactionInputIndexes(items []any, indexes []int) []any {
+	remove := make(map[int]struct{}, len(indexes))
+	for _, index := range indexes {
+		remove[index] = struct{}{}
+	}
+	trimmed := make([]any, 0, len(items)-len(remove))
+	for i, item := range items {
+		if _, ok := remove[i]; !ok {
+			trimmed = append(trimmed, item)
+		}
+	}
+	return trimmed
+}
+
+func ensureOpenAIAgenticRequestFits(inputItems []any, tools []ToolDefinition, opts *AgenticOptions) error {
+	if opts == nil {
+		return nil
+	}
+	window := opts.ContextWindow
+	if window <= 0 {
+		var ok bool
+		window, ok = openAIModelContextWindow(opts.Model)
+		if !ok || window <= 0 {
+			window = 200000
+		}
+	}
+	reserved := opts.MaxOutputTokens
+	if reserved <= 0 {
+		reserved = 16384
+	}
+	safety := max(1024, window/50)
+	safe := window - reserved - safety
+	tokens := estimateCompactionRequestTokens(inputItems, tools, opts.System) + 32
+	if tokens <= safe {
+		return nil
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "OpenAI Responses preflight", fmt.Errorf("complete request requires %d input tokens; safe limit is %d", tokens, safe))
 }
 
 func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, instructions string) int {
@@ -1362,6 +1520,16 @@ func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, i
 		if encoded, err := json.Marshal(tools); err == nil {
 			total += approxOpenAITokensFromByteCount(len(encoded))
 		}
+	}
+	// The byte/4 estimate is useful for trigger heuristics but cannot enforce a
+	// hard admission boundary for source, JSON, logs, or tool arguments. Treat
+	// every serialized rune as a token when that is more conservative.
+	if encoded, err := json.Marshal(struct {
+		Input        []any            `json:"input"`
+		Tools        []ToolDefinition `json:"tools,omitempty"`
+		Instructions string           `json:"instructions,omitempty"`
+	}{inputItems, tools, instructions}); err == nil {
+		total = max(total, utf8.RuneCount(encoded))
 	}
 	return total
 }

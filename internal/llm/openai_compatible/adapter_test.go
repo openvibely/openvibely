@@ -22,6 +22,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMaxTokensErrorIsCategorized(t *testing.T) {
+	if !llmcontracts.ErrorIs(errMaxTokens, llmcontracts.ErrorOutputTokenLimitReached) {
+		t.Fatalf("errMaxTokens category missing: %v", errMaxTokens)
+	}
+}
+
 func TestMain(m *testing.M) {
 	_ = os.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	os.Exit(m.Run())

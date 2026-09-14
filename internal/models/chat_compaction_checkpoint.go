@@ -8,6 +8,7 @@ type ChatCompactionCheckpoint struct {
 	ScopeType         string
 	ScopeID           string
 	ModelConfigID     string
+	CompatibilityKey  string
 	SourceExecutionID string
 	History           []Execution
 	Summary           string

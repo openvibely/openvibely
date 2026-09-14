@@ -11,15 +11,21 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
 type CompletionsOptions struct {
 	Model           string
 	MaxOutputTokens int
+	ContextWindow   int
+	// ToolOutputTokenLimit bounds each tool result replayed to the model while
+	// callbacks and durable transcripts retain the complete output.
+	ToolOutputTokenLimit int
 	// Temperature preserves explicit zero, which many providers treat
 	// differently from their default. Use OmittedTemperature for models that
 	// do not accept the parameter.
@@ -136,9 +142,13 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	}
 	if existingCompletionsHistory != nil {
 		for _, msg := range existingCompletionsHistory {
+			content := msg.Content
+			if msg.Role == "tool" {
+				content = truncateToolOutputForModelInput(content, opts.ToolOutputTokenLimit)
+			}
 			messages = append(messages, completionsMessage{
 				Role:             msg.Role,
-				Content:          msg.Content,
+				Content:          content,
 				ReasoningContent: msg.ReasoningContent,
 				ToolCalls:        append([]CompletionsToolCall(nil), msg.ToolCalls...),
 				ToolCallID:       msg.ToolCallID,
@@ -146,9 +156,13 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 	} else {
 		for _, msg := range c.History {
+			content := msg.Content
+			if msg.Role == "tool" {
+				content = truncateToolOutputForModelInput(content, opts.ToolOutputTokenLimit)
+			}
 			messages = append(messages, completionsMessage{
 				Role:    msg.Role,
-				Content: msg.Content,
+				Content: content,
 			})
 		}
 	}
@@ -200,6 +214,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if err := ensureCompletionsRequestFits(messages, tools, opts); err != nil {
+			return nil, err
+		}
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			RetryConnectionFailuresWithoutBudget: true,
 			OnRetry: func(event httpretry.RetryEvent) {
@@ -214,7 +231,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			return c.sendCompletionsTurn(attemptCtx, messages, tools, opts)
 		})
 		if err != nil {
-			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
+			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
 		result.InputTokens += turnResult.inputTokens
@@ -308,10 +325,11 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				Error:  isError,
 			})
 
-			// Add tool result message
+			// Add a bounded tool result to model-facing history. The complete output
+			// remains in result.ToolCalls and currentTranscript for durability.
 			messages = append(messages, completionsMessage{
 				Role:       "tool",
-				Content:    output,
+				Content:    truncateToolOutputForModelInput(output, opts.ToolOutputTokenLimit),
 				ToolCallID: tc.ID,
 			})
 			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{
@@ -376,6 +394,29 @@ type completionsTurnResult struct {
 	totalTokens       int
 	cachedInputTokens int
 	reasoningTokens   int
+}
+
+func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) error {
+	if opts == nil {
+		return nil
+	}
+	window := opts.ContextWindow
+	if window <= 0 {
+		window = 128000
+	}
+	safe := window - opts.MaxOutputTokens - max(1024, window/50)
+	encoded, err := json.Marshal(struct {
+		Messages []completionsMessage     `json:"messages"`
+		Tools    []map[string]interface{} `json:"tools,omitempty"`
+	}{messages, tools})
+	if err != nil {
+		return err
+	}
+	tokens := utf8.RuneCount(encoded)
+	if tokens <= safe {
+		return nil
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Chat Completions preflight", fmt.Errorf("complete request requires %d input tokens; safe limit is %d", tokens, safe))
 }
 
 func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // buildSSE constructs a server-sent events stream from JSON data lines.
@@ -3261,6 +3262,60 @@ func TestIsCodexGeneratedInputItem_CoversToolCallTypes(t *testing.T) {
 	}
 }
 
+func TestTrimCompactionInputItemsToFitContextWindow_UsesConfiguredWindowForUnknownModel(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "must not be called", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	old := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = old }()
+
+	client := NewWithAPIKey("sk-test")
+	items := []any{map[string]any{"type": "message", "role": "user", "content": strings.Repeat("dense!", 2000)}}
+	_, _, err := client.compactAgenticInputItems(context.Background(), items, nil, &AgenticOptions{
+		Model: "unknown-first-party-model", ContextWindow: 4096, MaxOutputTokens: 1024,
+	}, false)
+	if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorCompactionInputInfeasible) {
+		t.Fatalf("error = %v, want typed compaction infeasibility", err)
+	}
+	if calls != 0 {
+		t.Fatalf("legacy compact HTTP calls = %d, want zero", calls)
+	}
+}
+
+func TestTrimCompactionInputItemsToFitContextWindow_RemovesPairedFunctionCallAndOutput(t *testing.T) {
+	inputItems := []any{
+		agenticInputItem{"type": "message", "role": "user", "content": "Task objective"},
+		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 5000)},
+		agenticInputItem{"type": "function_call_output", "call_id": "call_pair", "output": "small result"},
+	}
+
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "unknown-model", 20000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range trimmed {
+		item, _ := raw.(map[string]any)
+		if item["call_id"] == "call_pair" {
+			t.Fatalf("paired tool item survived compaction trimming: %#v", trimmed)
+		}
+	}
+}
+
+func TestNextCompactionTrimIndexes_DoesNotOrphanProtectedToolPairThroughFallback(t *testing.T) {
+	items := []any{
+		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 5000)},
+		agenticInputItem{"type": "function_call_output", "call_id": "call_pair", "output": "small result"},
+		agenticInputItem{"type": "function_call", "call_id": "trailing", "name": "bash", "arguments": `{}`},
+	}
+	if got := nextCompactionTrimIndexes(items, 0, 2); len(got) != 0 {
+		t.Fatalf("trim indexes = %v, want none because the only removable item belongs to protected call 0", got)
+	}
+}
+
 func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{
@@ -3276,7 +3331,10 @@ func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t 
 		},
 	}
 
-	trimmed := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(trimmed) != 1 {
 		t.Fatalf("trimmed len = %d, want 1", len(trimmed))
 	}
@@ -3286,6 +3344,23 @@ func TestTrimCompactionInputItemsToFitContextWindow_TrimsTrailingFunctionCall(t 
 	}
 	if got := first["type"]; got != "message" {
 		t.Fatalf("trimmed[0].type = %v, want message", got)
+	}
+}
+
+func TestTrimCompactionInputItemsToFitContextWindow_BoundsSingleProtectedMessage(t *testing.T) {
+	input := []any{agenticInputItem{"type": "message", "role": "user", "content": strings.Repeat("!", 2_664_043)}}
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(input, nil, strings.Repeat("system", 1000), "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := 272000 - 16384 - max(1024, 272000/50)
+	if got := estimateCompactionRequestTokens(trimmed, nil, strings.Repeat("system", 1000)) + 32; got > limit {
+		t.Fatalf("compaction request tokens = %d, safe limit = %d", got, limit)
+	}
+	item := trimmed[0].(map[string]any)
+	content := item["content"].(string)
+	if !strings.Contains(content, "tokens truncated") {
+		t.Fatal("bounded protected message lacks visible omission marker")
 	}
 }
 
@@ -3314,7 +3389,10 @@ func TestTrimCompactionInputItemsToFitContextWindow_PreservesObjectiveAndRecentC
 		},
 	}
 
-	trimmed := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	trimmed, err := trimCompactionInputItemsToFitContextWindow(inputItems, nil, "", "gpt-5.3-codex")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(trimmed) >= len(inputItems) {
 		t.Fatalf("expected compaction input to be trimmed; len=%d original=%d", len(trimmed), len(inputItems))
 	}
@@ -3342,6 +3420,14 @@ func TestTrimCompactionInputItemsToFitContextWindow_PreservesObjectiveAndRecentC
 	}
 	if got := last["role"]; got != "assistant" {
 		t.Fatalf("trimmed[last].role = %v, want assistant", got)
+	}
+}
+
+func TestAgenticContinuationPreflightConservativelyCountsToolArguments(t *testing.T) {
+	items := []any{map[string]any{"type": "function_call", "arguments": strings.Repeat("{}", 4000)}}
+	err := ensureOpenAIAgenticRequestFits(items, nil, &AgenticOptions{Model: "custom", ContextWindow: 6000, MaxOutputTokens: 1000})
+	if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed preflight rejection", err)
 	}
 }
 

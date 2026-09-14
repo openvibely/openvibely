@@ -6020,6 +6020,9 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 }
 
 func TestLargeToolOutputHydrationIsLazyAndStatefulInChrome(t *testing.T) {
+	if os.Getenv("OPENVIBELY_SKIP_BROWSER_TESTS") == "1" {
+		t.Skip("browser tests run in an isolated CI step")
+	}
 	if os.Getenv("OPENVIBELY_SKIP_BROWSER_PERF") == "1" {
 		t.Skip("browser performance fixture runs in an isolated CI step")
 	}

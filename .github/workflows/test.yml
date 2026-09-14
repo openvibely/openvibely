@@ -155,8 +155,17 @@ jobs:
 
       - name: Run all tests with coverage
         env:
+          OPENVIBELY_SKIP_BROWSER_TESTS: "1"
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: go test ./... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage.txt
+
+      - name: Run component browser tests
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
+        run: go test ./web/templates/components -count=1 -timeout 180s
+
+      - name: Run page browser tests
+        run: go test ./web/templates/pages -count=1 -timeout 300s
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s

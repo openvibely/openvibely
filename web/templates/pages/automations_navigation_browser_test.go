@@ -396,16 +396,29 @@ func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPaginat
 			fmt.Sprintf(`[data-automation-card-delete=%q]`, "automation-paused-browser"),
 		})
 
-		browser.evaluate(`(function() {
+		browser.waitFor("Automation pagination trigger", `(function() {
 			var root = document.getElementById('automations-container');
 			var state = root && root._openVibelyCardPaginationState;
-			var target = state && state.scrollTarget;
-			if (!target) return 'missing';
+			if (document.querySelector('[data-card-select-id="automation-paginated-browser"]')) return 'ready';
+			if (root && typeof window.refreshCardPagination === 'function' && (!state || !state.scrollTarget || !state.sentinel || typeof state.scrollHandler !== 'function')) {
+				window.refreshCardPagination(root);
+				state = root._openVibelyCardPaginationState;
+			}
+			return state && state.scrollTarget && state.sentinel && typeof state.scrollHandler === 'function' ? 'ready' : 'waiting';
+		})()`, "ready")
+		if got := browser.evaluate(`(function() {
+			if (document.querySelector('[data-card-select-id="automation-paginated-browser"]')) return 'loaded';
+			var state = document.getElementById('automations-container')._openVibelyCardPaginationState;
+			var target = state.scrollTarget;
+			state.sentinel.scrollIntoView({block: 'end'});
 			if (target === window) window.scrollTo(0, document.documentElement.scrollHeight);
 			else target.scrollTop = target.scrollHeight;
 			target.dispatchEvent(new Event('scroll', {bubbles: true}));
+			state.scrollHandler();
 			return 'scrolled';
-		})()`)
+		})()`); got != "scrolled" && got != "loaded" {
+			t.Fatalf("trigger Automation card pagination: %s", got)
+		}
 		browser.waitFor("paginated Automation card", `document.querySelector('[data-card-select-id="automation-paginated-browser"]') ? 'true' : 'false'`, "true")
 		assertCard("automation-paginated-browser", "Paginated Delivery")
 		tabToCard("automation-paginated-browser")
