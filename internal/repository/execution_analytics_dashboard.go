@@ -596,7 +596,7 @@ func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter
 	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	query := `WITH skill_tasks AS (
 		SELECT DISTINCT s.skill_handle,s.skill_scope,s.task_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
-		WHERE t.project_id=?` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
+		WHERE t.project_id=? AND s.project_id=t.project_id` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
 	), period_exec AS (
 		SELECT st.skill_handle,st.skill_scope,e.* FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
 	), task_stats AS (
@@ -645,7 +645,7 @@ func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, f
 	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	query := `WITH skill_tasks AS (
 		SELECT DISTINCT s.skill_handle,s.skill_scope,s.task_id,t.agent_definition_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
-		WHERE t.project_id=?` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
+		WHERE t.project_id=? AND s.project_id=t.project_id` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
 	), period_exec AS (
 		SELECT st.skill_handle,st.skill_scope,st.agent_definition_id,e.* FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
 	), task_stats AS (
