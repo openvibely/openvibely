@@ -28,11 +28,11 @@ func TestHandler_RescheduleTask_Simple1AMto2AM(t *testing.T) {
 
 	// Create a task scheduled for 1:30 AM on March 14, 2026
 	task := &models.Task{
-		Title:      "1 AM Task",
-		Prompt:     "Test task at 1 AM",
-		Category:   models.CategoryScheduled,
-		Status:     models.StatusPending,
-		ProjectID:  project.ID,
+		Title:     "1 AM Task",
+		Prompt:    "Test task at 1 AM",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		ProjectID: project.ID,
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
