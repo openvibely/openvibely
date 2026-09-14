@@ -4363,6 +4363,52 @@ func TestTaskRepo_ListTaskReferencesUsesCompactProjection(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_ListTaskReferencesHandlesMalformedChainConfigAndRunnableSwarmChild(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{
+		ProjectID: "default", Title: "Blocked swarm parent", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent, ChainConfig: `{"enabled":true}`,
+	}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	parentID := parent.ID
+	child := &models.Task{
+		ProjectID: "default", Title: "Runnable swarm child", Category: models.CategoryActive,
+		Status: models.StatusPending, SwarmRole: models.SwarmRoleWorker, ParentTaskID: &parentID,
+	}
+	if err := repo.Create(ctx, child); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ? WHERE id = ?`, "{invalid", parent.ID); err != nil {
+		t.Fatalf("store malformed chain config: %v", err)
+	}
+
+	references, err := repo.ListTaskReferences(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListTaskReferences: %v", err)
+	}
+	var got *TaskReference
+	for i := range references {
+		if references[i].ID == parent.ID {
+			got = &references[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("parent reference missing: %#v", references)
+	}
+	if got.ChainEnabled {
+		t.Fatal("malformed chain config must not enable the Chain badge")
+	}
+	if !got.HasRunnableSwarmChild {
+		t.Fatal("parent reference must report its runnable swarm child")
+	}
+}
+
 func TestTaskRepo_ListTasksForDiscovery_UsesCompactProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

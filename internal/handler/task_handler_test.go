@@ -181,6 +181,59 @@ func TestHandler_GetTaskReferenceCatalog(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, missingRec.Code)
 }
 
+func TestHandler_GetTaskReferenceCatalogPreservesBoardStateOrderAndAgentScope(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Task Reference State Project").Build()
+	foreign := tc.CreateProject().WithName("Foreign Task Reference State Project").Build()
+
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.SetAgentRepo(agentRepo)
+	foreignAgent := &models.Agent{
+		Name: "Foreign Task Agent", Scope: models.AgentScopeProject, ProjectID: foreign.ID,
+		Model: "inherit", Enabled: true, SelectableAsPrimary: true, Tools: []string{},
+	}
+	require.NoError(t, agentRepo.Create(ctx, foreignAgent))
+
+	backlog := tc.CreateTask(project.ID).WithTitle("Backlog reference").WithCategory(models.CategoryBacklog).Build()
+	active := &models.Task{
+		ProjectID: project.ID, Title: "Active reference", Prompt: "active", Category: models.CategoryActive,
+		Status: models.StatusPending, AgentDefinitionID: &foreignAgent.ID,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, active))
+	blockedParent := &models.Task{
+		ProjectID: project.ID, Title: "Blocked swarm parent", Prompt: "blocked", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, blockedParent))
+	failed := tc.CreateTask(project.ID).WithTitle("Failed active reference").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
+
+	rec := tc.HTTP().Get("/api/tasks/reference-catalog?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response TaskReferenceCatalogResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+	require.Len(t, response.Tasks, 4)
+	ids := make([]string, 0, len(response.Tasks))
+	for _, task := range response.Tasks {
+		ids = append(ids, task.ID)
+	}
+	require.Equal(t, []string{backlog.ID, failed.ID, blockedParent.ID, active.ID}, ids)
+
+	var activeReference TaskReference
+	for _, task := range response.Tasks {
+		if task.ID == active.ID {
+			activeReference = task
+			break
+		}
+	}
+	for _, badge := range activeReference.Badges {
+		require.NotEqual(t, foreignAgent.Name, badge)
+	}
+	storedFailed, err := tc.taskRepo.GetByID(ctx, failed.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, storedFailed.Category)
+}
+
 func TestHandler_CancelTask(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

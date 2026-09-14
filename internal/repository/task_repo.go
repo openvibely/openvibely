@@ -165,8 +165,10 @@ var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t
 // task reference and render its selector metadata. Detail-only payloads such as
 // worktree paths, swarm configuration, merge state, and timestamps are omitted.
 var taskReferenceSelectColumns = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id,
-				CASE WHEN json_valid(t.chain_config) AND json_type(t.chain_config, '$.enabled') = 'true' THEN 1 ELSE 0 END AS chain_enabled,
+				CASE WHEN json_type(CASE WHEN json_valid(t.chain_config) THEN t.chain_config ELSE '{}' END, '$.enabled') = 'true' THEN 1 ELSE 0 END AS chain_enabled,
 				t.swarm_role,
+				EXISTS(SELECT 1 FROM tasks child
+					WHERE child.parent_task_id = t.id AND child.status IN ('running', 'pending', 'queued')) AS has_runnable_swarm_child,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM automation_dispatch_outbox d
 					JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
@@ -483,6 +485,7 @@ type TaskReference struct {
 	ParentTaskID             *string
 	ChainEnabled             bool
 	SwarmRole                models.SwarmRole
+	HasRunnableSwarmChild    bool
 	HasGoal                  bool
 	AutomationCapacityQueued bool
 }
@@ -513,7 +516,7 @@ func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]
 			&reference.Priority, &reference.Status, &reference.Prompt, &reference.AgentID,
 			&reference.AgentDefinitionID, &reference.Tag, &reference.DisplayOrder,
 			&reference.ParentTaskID, &reference.ChainEnabled, &reference.SwarmRole,
-			&reference.HasGoal, &reference.AutomationCapacityQueued,
+			&reference.HasRunnableSwarmChild, &reference.HasGoal, &reference.AutomationCapacityQueued,
 		); err != nil {
 			return nil, fmt.Errorf("scanning task reference: %w", err)
 		}

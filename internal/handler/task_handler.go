@@ -2567,7 +2567,10 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	tasks, err := h.taskRepo.ListTaskReferences(ctx, projectID)
+	if h.taskSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "task service is unavailable")
+	}
+	tasks, err := h.taskSvc.ListTaskReferences(ctx, projectID)
 	if err != nil {
 		applog.Infof("[handler] GetTaskReferenceCatalog project=%s error listing tasks: %v", projectID, err)
 		return err
@@ -2581,12 +2584,18 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 			llmModels = nil
 		}
 	}
-	agentDefs := h.listAgentDefinitions(ctx)
-	refs := make([]TaskReference, 0, len(tasks))
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, projectID, nil)
+	visibleTasks := make([]repository.TaskReference, 0, len(tasks))
 	for _, task := range tasks {
-		if !taskReferenceVisible(task) {
-			continue
+		if taskReferenceVisible(task) {
+			visibleTasks = append(visibleTasks, task)
 		}
+	}
+	sort.SliceStable(visibleTasks, func(i, j int) bool {
+		return taskReferenceBoardOrder(visibleTasks[i]) < taskReferenceBoardOrder(visibleTasks[j])
+	})
+	refs := make([]TaskReference, 0, len(visibleTasks))
+	for _, task := range visibleTasks {
 		refs = append(refs, TaskReference{
 			ID:           task.ID,
 			ProjectID:    task.ProjectID,
@@ -2599,6 +2608,30 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, TaskReferenceCatalogResponse{Tasks: refs})
+}
+
+func taskReferenceBoardOrder(task repository.TaskReference) int {
+	category := task.Category
+	if task.SwarmRole == models.SwarmRoleParent &&
+		category == models.CategoryActive && task.Status == models.StatusBlocked &&
+		!task.HasRunnableSwarmChild {
+		category = models.CategoryBacklog
+	}
+	if category == models.CategoryScheduled &&
+		(task.Status == models.StatusRunning ||
+			(task.AutomationCapacityQueued && (task.Status == models.StatusPending || task.Status == models.StatusQueued))) {
+		category = models.CategoryActive
+	}
+	switch category {
+	case models.CategoryBacklog:
+		return 0
+	case models.CategoryActive:
+		return 1
+	case models.CategoryCompleted:
+		return 2
+	default:
+		return 3
+	}
 }
 
 func taskReferenceVisible(task repository.TaskReference) bool {
