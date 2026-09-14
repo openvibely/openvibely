@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,6 +12,304 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChannelProjectSelectionCacheMissCannotRepopulateDeletedProject(t *testing.T) {
+	t.Run("slack", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		projectA, err := projectRepo.GetByID(ctx, "default")
+		require.NoError(t, err)
+		require.NotNil(t, projectA)
+		projectB := &models.Project{Name: "Concurrent Slack B"}
+		require.NoError(t, projectRepo.Create(ctx, projectB))
+		userProjectRepo := repository.NewSlackUserProjectRepo(db)
+		require.NoError(t, userProjectRepo.SetUserProject(ctx, "T-RACE", "U-RACE", projectB.ID))
+
+		svc := NewSlackService(repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil, nil, nil, userProjectRepo, nil, nil)
+		projectSvc := NewProjectService(projectRepo)
+		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
+		populateStarted := make(chan struct{})
+		releasePopulate := make(chan struct{})
+		var populateOnce sync.Once
+		svc.beforeActiveProjectCachePopulateHook = func() {
+			populateOnce.Do(func() {
+				close(populateStarted)
+				<-releasePopulate
+			})
+		}
+		resolved := make(chan struct {
+			projectID string
+			err       error
+		}, 1)
+		go func() {
+			projectID, resolveErr := svc.getActiveProject(ctx, "T-RACE", "U-RACE")
+			resolved <- struct {
+				projectID string
+				err       error
+			}{projectID, resolveErr}
+		}()
+		select {
+		case <-populateStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Slack cache miss did not reach population barrier")
+		}
+		require.NoError(t, projectSvc.Delete(ctx, projectB.ID))
+		close(releasePopulate)
+		select {
+		case result := <-resolved:
+			require.NoError(t, result.err)
+			require.Equal(t, projectA.ID, result.projectID)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Slack cache miss did not resolve after deletion")
+		}
+	})
+
+	t.Run("discord", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		projectA, err := projectRepo.GetByID(ctx, "default")
+		require.NoError(t, err)
+		require.NotNil(t, projectA)
+		projectB := &models.Project{Name: "Concurrent Discord B"}
+		require.NoError(t, projectRepo.Create(ctx, projectB))
+		userProjectRepo := repository.NewDiscordUserProjectRepo(db)
+		require.NoError(t, userProjectRepo.SetUserProject(ctx, "U-RACE", projectB.ID))
+
+		svc := NewDiscordService(repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		svc.SetDiscordUserProjectRepo(userProjectRepo)
+		projectSvc := NewProjectService(projectRepo)
+		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
+		populateStarted := make(chan struct{})
+		releasePopulate := make(chan struct{})
+		var populateOnce sync.Once
+		svc.beforeActiveProjectCachePopulateHook = func() {
+			populateOnce.Do(func() {
+				close(populateStarted)
+				<-releasePopulate
+			})
+		}
+		resolved := make(chan string, 1)
+		go func() {
+			resolved <- svc.getActiveProject(ctx, "U-RACE")
+		}()
+		select {
+		case <-populateStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Discord cache miss did not reach population barrier")
+		}
+		require.NoError(t, projectSvc.Delete(ctx, projectB.ID))
+		close(releasePopulate)
+		select {
+		case projectID := <-resolved:
+			require.Equal(t, projectA.ID, projectID)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Discord cache miss did not resolve after deletion")
+		}
+	})
+
+	t.Run("telegram", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		projectA, err := projectRepo.GetByID(ctx, "default")
+		require.NoError(t, err)
+		require.NotNil(t, projectA)
+		projectB := &models.Project{Name: "Concurrent Telegram B"}
+		require.NoError(t, projectRepo.Create(ctx, projectB))
+		userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+		const userID int64 = 11841184
+		require.NoError(t, userProjectRepo.SetUserProject(ctx, "11841184", projectB.ID))
+
+		svc := &TelegramService{
+			projectRepo:             projectRepo,
+			telegramUserProjectRepo: userProjectRepo,
+			userProjects:            make(map[int64]string),
+			userProjectVersions:     make(map[int64]uint64),
+		}
+		projectSvc := NewProjectService(projectRepo)
+		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
+		populateStarted := make(chan struct{})
+		releasePopulate := make(chan struct{})
+		var populateOnce sync.Once
+		svc.beforeActiveProjectCachePopulateHook = func() {
+			populateOnce.Do(func() {
+				close(populateStarted)
+				<-releasePopulate
+			})
+		}
+		resolved := make(chan string, 1)
+		go func() {
+			resolved <- svc.getActiveProject(userID)
+		}()
+		select {
+		case <-populateStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Telegram cache miss did not reach population barrier")
+		}
+		require.NoError(t, projectSvc.Delete(ctx, projectB.ID))
+		close(releasePopulate)
+		select {
+		case projectID := <-resolved:
+			require.Equal(t, projectA.ID, projectID)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Telegram cache miss did not resolve after deletion")
+		}
+	})
+}
+
+func TestChannelProjectSelectionCacheMissCannotOverwriteSuccessfulSwitch(t *testing.T) {
+	t.Run("slack", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		projectA, err := projectRepo.GetByID(ctx, "default")
+		require.NoError(t, err)
+		require.NotNil(t, projectA)
+		projectB := &models.Project{Name: "Concurrent Slack B"}
+		require.NoError(t, projectRepo.Create(ctx, projectB))
+		projectC := &models.Project{Name: "Concurrent Slack C"}
+		require.NoError(t, projectRepo.Create(ctx, projectC))
+		userProjectRepo := repository.NewSlackUserProjectRepo(db)
+		require.NoError(t, userProjectRepo.SetUserProject(ctx, "T-SWITCH", "U-SWITCH", projectB.ID))
+
+		svc := NewSlackService(repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil, nil, nil, userProjectRepo, nil, nil)
+		projectSvc := NewProjectService(projectRepo)
+		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
+		populateStarted := make(chan struct{})
+		releasePopulate := make(chan struct{})
+		var populateOnce sync.Once
+		svc.beforeActiveProjectCachePopulateHook = func() {
+			populateOnce.Do(func() {
+				close(populateStarted)
+				<-releasePopulate
+			})
+		}
+		resolved := make(chan struct {
+			projectID string
+			err       error
+		}, 1)
+		go func() {
+			projectID, resolveErr := svc.getActiveProject(ctx, "T-SWITCH", "U-SWITCH")
+			resolved <- struct {
+				projectID string
+				err       error
+			}{projectID, resolveErr}
+		}()
+		select {
+		case <-populateStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Slack cache miss did not reach population barrier")
+		}
+		require.NoError(t, svc.setActiveProject(ctx, "T-SWITCH", "U-SWITCH", projectC.ID))
+		close(releasePopulate)
+		select {
+		case result := <-resolved:
+			require.NoError(t, result.err)
+			require.Equal(t, projectC.ID, result.projectID)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Slack cache miss did not resolve after switch")
+		}
+	})
+
+	t.Run("discord", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		projectA, err := projectRepo.GetByID(ctx, "default")
+		require.NoError(t, err)
+		require.NotNil(t, projectA)
+		projectB := &models.Project{Name: "Concurrent Discord B"}
+		require.NoError(t, projectRepo.Create(ctx, projectB))
+		projectC := &models.Project{Name: "Concurrent Discord C"}
+		require.NoError(t, projectRepo.Create(ctx, projectC))
+		userProjectRepo := repository.NewDiscordUserProjectRepo(db)
+		require.NoError(t, userProjectRepo.SetUserProject(ctx, "U-SWITCH", projectB.ID))
+
+		svc := NewDiscordService(repository.NewSettingsRepo(db), projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+		svc.SetDiscordUserProjectRepo(userProjectRepo)
+		projectSvc := NewProjectService(projectRepo)
+		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
+		populateStarted := make(chan struct{})
+		releasePopulate := make(chan struct{})
+		var populateOnce sync.Once
+		svc.beforeActiveProjectCachePopulateHook = func() {
+			populateOnce.Do(func() {
+				close(populateStarted)
+				<-releasePopulate
+			})
+		}
+		resolved := make(chan string, 1)
+		go func() {
+			resolved <- svc.getActiveProject(ctx, "U-SWITCH")
+		}()
+		select {
+		case <-populateStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Discord cache miss did not reach population barrier")
+		}
+		require.NoError(t, svc.setActiveProject(ctx, "U-SWITCH", projectC.ID))
+		close(releasePopulate)
+		select {
+		case projectID := <-resolved:
+			require.Equal(t, projectC.ID, projectID)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Discord cache miss did not resolve after switch")
+		}
+	})
+
+	t.Run("telegram", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		projectA, err := projectRepo.GetByID(ctx, "default")
+		require.NoError(t, err)
+		require.NotNil(t, projectA)
+		projectB := &models.Project{Name: "Concurrent Telegram B"}
+		require.NoError(t, projectRepo.Create(ctx, projectB))
+		projectC := &models.Project{Name: "Concurrent Telegram C"}
+		require.NoError(t, projectRepo.Create(ctx, projectC))
+		userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+		const userID int64 = 11841185
+		require.NoError(t, userProjectRepo.SetUserProject(ctx, "11841185", projectB.ID))
+
+		svc := &TelegramService{
+			projectRepo:             projectRepo,
+			telegramUserProjectRepo: userProjectRepo,
+			userProjects:            make(map[int64]string),
+			userProjectVersions:     make(map[int64]uint64),
+		}
+		projectSvc := NewProjectService(projectRepo)
+		svc.SetProjectCreationServices(projectSvc, nil, nil, nil)
+		populateStarted := make(chan struct{})
+		releasePopulate := make(chan struct{})
+		var populateOnce sync.Once
+		svc.beforeActiveProjectCachePopulateHook = func() {
+			populateOnce.Do(func() {
+				close(populateStarted)
+				<-releasePopulate
+			})
+		}
+		resolved := make(chan string, 1)
+		go func() {
+			resolved <- svc.getActiveProject(userID)
+		}()
+		select {
+		case <-populateStarted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Telegram cache miss did not reach population barrier")
+		}
+		require.NoError(t, svc.setTelegramActiveProject(ctx, userID, projectC.ID))
+		close(releasePopulate)
+		select {
+		case projectID := <-resolved:
+			require.Equal(t, projectC.ID, projectID)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Telegram cache miss did not resolve after switch")
+		}
+	})
+}
 
 func TestChannelProjectSelectionInvalidationPreservesUnrelatedSelections(t *testing.T) {
 	slack := &SlackService{userProjects: map[string]string{"T:U-A": "project-a", "T:U-B": "project-b"}}

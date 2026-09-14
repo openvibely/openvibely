@@ -293,6 +293,7 @@ func TestHandleTelegramSaveErrorDoesNotRefreshOrRedirect(t *testing.T) {
 func TestHandleTelegramSaveNewServiceWiresSharedRunner(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))
+	h.SetTelegramUserProjectRepo(repository.NewTelegramUserProjectRepo(db))
 
 	createdSvc := &service.TelegramService{}
 	origNewTelegramService := newTelegramService
@@ -320,6 +321,11 @@ func TestHandleTelegramSaveNewServiceWiresSharedRunner(t *testing.T) {
 	require.Same(t, createdSvc, h.telegramService)
 	assert.True(t, createdSvc.HasChannelChatRunner(), "settings-created Telegram service must use shared steering-aware runner")
 	assert.True(t, createdSvc.HasAgentRepo(), "settings-created Telegram service must expose agent definitions in chat context")
+	selectionRepoField := reflect.ValueOf(createdSvc).Elem().FieldByName("telegramUserProjectRepo")
+	wiredSelectionRepo := reflect.NewAt(selectionRepoField.Type(), unsafe.Pointer(selectionRepoField.UnsafeAddr())).Elem().Interface()
+	require.Same(t, h.telegramUserProjectRepo, wiredSelectionRepo, "settings-created Telegram service must preserve durable project selection")
+	invalidators := reflect.ValueOf(h.projectSvc).Elem().FieldByName("projectSelectionInvalidators")
+	require.Equal(t, 1, invalidators.Len(), "settings-created Telegram service must register for project deletion invalidation")
 }
 
 func TestHandleTelegramSaveNonHTMXRedirectsToChannels(t *testing.T) {
