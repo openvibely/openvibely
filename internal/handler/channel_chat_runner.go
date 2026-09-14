@@ -54,7 +54,7 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, err.Error(), 0, req.ReplyContext)
 		return
 	}
-	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, workDirErr.Error(), 0, req.ReplyContext)
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: req.ProjectID, TaskID: req.TaskID, IsTaskFollowup: true}, req.ExecID)
@@ -65,20 +65,21 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 	agentDef := h.resolveTaskAgentDefinitionForTask(ctx, req.TaskID, req.AgentDefinition)
 	systemContext := combineContexts(combineContexts(req.SystemContext, h.taskGoalContext(ctx, req.TaskID, agentDef)), worktreeContext)
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:          req.ExecID,
-		TaskID:          req.TaskID,
-		Message:         req.Message,
-		Agent:           req.Agent,
-		AgentDefinition: agentDef,
-		ChatHistory:     filterChatHistory(req.ChatHistory, req.ExecID),
-		ProjectID:       req.ProjectID,
-		SystemContext:   systemContext,
-		WorkDir:         workDir,
-		IsTaskFollowup:  true,
-		ChatMode:        models.ChatModeOrchestrate,
-		Surface:         req.Surface,
-		ChannelReply:    req.ReplyContext,
-		InputOrigin:     req.ReplyContext.Source,
-		RuntimeTools:    req.RuntimeTools,
+		ExecID:                          req.ExecID,
+		TaskID:                          req.TaskID,
+		Message:                         req.Message,
+		Agent:                           req.Agent,
+		AgentDefinition:                 agentDef,
+		ChatHistory:                     filterChatHistory(req.ChatHistory, req.ExecID),
+		ProjectID:                       req.ProjectID,
+		SystemContext:                   systemContext,
+		WorkDir:                         workDir,
+		IsTaskFollowup:                  true,
+		ChatMode:                        models.ChatModeOrchestrate,
+		Surface:                         req.Surface,
+		ChannelReply:                    req.ReplyContext,
+		InputOrigin:                     req.ReplyContext.Source,
+		RuntimeTools:                    req.RuntimeTools,
+		RepublishOpenPRAfterStartupSync: republishOpenPR,
 	})
 }

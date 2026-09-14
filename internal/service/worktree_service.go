@@ -499,14 +499,40 @@ func StartupSyncConflictContext(conflict *StartupSyncConflictError) string {
 // merge target/default branch before task execution begins. It only runs when
 // the worktree is clean and does not implicitly fetch or merge remote branches.
 func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task *models.Task, repoDir string) error {
-	return ws.WithRepositoryMutation(repoDir, func() error {
-		return ws.syncWorktreeFromMainAtStartUnlocked(ctx, task, repoDir)
-	})
+	_, err := ws.SyncWorktreeFromMainAtStartWithResult(ctx, task, repoDir)
+	return err
 }
 
-func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Context, task *models.Task, repoDir string) error {
+// SyncWorktreeFromMainAtStartWithResult performs the startup sync and reports
+// whether it advanced the task worktree HEAD. Callers use this to ensure an
+// already-open pull request is republished after the reconciled turn succeeds.
+func (ws *WorktreeService) SyncWorktreeFromMainAtStartWithResult(ctx context.Context, task *models.Task, repoDir string) (changed bool, err error) {
+	err = ws.WithRepositoryMutation(repoDir, func() error {
+		var syncErr error
+		changed, syncErr = ws.syncWorktreeFromMainAtStartUnlocked(ctx, task, repoDir)
+		return syncErr
+	})
+	return changed, err
+}
+
+func worktreeHeadSHA(ctx context.Context, task *models.Task) (string, error) {
+	if task == nil || strings.TrimSpace(task.WorktreePath) == "" {
+		return "", nil
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "git", "rev-parse", "--verify", "HEAD^{commit}")
+	cmd.Dir = task.WorktreePath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("resolving worktree HEAD in %s: %w: %s", task.WorktreePath, err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Context, task *models.Task, repoDir string) (bool, error) {
 	if task == nil || task.WorktreePath == "" {
-		return nil
+		return false, nil
 	}
 
 	runGit := func(dir string, args ...string) ([]byte, error) {
@@ -534,13 +560,18 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 		if ws.taskRepo != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		}
-		return fmt.Errorf("could not check worktree status in %s: %w", task.WorktreePath, statusErr)
+		return false, fmt.Errorf("could not check worktree status in %s: %w", task.WorktreePath, statusErr)
 	}
 	if strings.TrimSpace(string(statusOut)) != "" {
 		applog.Infof("[worktree] startup auto-merge skipped task=%s branch=%s reason=dirty_worktree", task.ID, currentBranch)
-		return nil
+		return false, nil
 	}
 	ws.clearStaleConflictStatusIfClean(ctx, task)
+
+	before, beforeErr := worktreeHeadSHA(ctx, task)
+	if beforeErr != nil {
+		return false, beforeErr
+	}
 
 	syncBranch := task.MergeTargetBranch
 	if syncBranch == "" {
@@ -572,10 +603,10 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 			if abortErr != nil {
 				err := fmt.Errorf("%s; additionally, git merge --abort failed: %v", conflictErr, abortErr)
 				applog.Infof("[worktree] startup auto-merge failed task=%s reason=conflict details=%s", task.ID, err)
-				return err
+				return false, err
 			}
 			applog.Infof("[worktree] startup auto-merge failed task=%s reason=conflict details=%s", task.ID, conflictErr)
-			return conflictErr
+			return false, conflictErr
 		}
 
 		if ws.taskRepo != nil {
@@ -585,14 +616,18 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 			mergeMsg = mergeErr.Error()
 		}
 		applog.Infof("[worktree] startup auto-merge failed task=%s branch=%s source=%s error=%s", task.ID, currentBranch, mergeSource, mergeMsg)
-		return fmt.Errorf("startup auto-merge failed while merging %s into %s: %s", mergeSource, currentBranch, mergeMsg)
+		return false, fmt.Errorf("startup auto-merge failed while merging %s into %s: %s", mergeSource, currentBranch, mergeMsg)
 	}
 
 	if mergeMsg == "" {
 		mergeMsg = "already up to date"
 	}
 	applog.Infof("[worktree] startup auto-merge ran task=%s branch=%s source=%s result=%s", task.ID, currentBranch, mergeSource, mergeMsg)
-	return nil
+	after, afterErr := worktreeHeadSHA(ctx, task)
+	if afterErr != nil {
+		return false, afterErr
+	}
+	return before != after, nil
 }
 
 type WorktreeCommitPhase string
