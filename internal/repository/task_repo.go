@@ -38,6 +38,13 @@ const activeTaskAdmissionQuery = `SELECT ` + activeTaskAdmissionSelectColumns + 
 
 const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent_id, agent_definition_id`
 
+const taskThreadRenderMetadataWithPromptColumns = `id, project_id, category, status,
+	CASE WHEN length(CAST(COALESCE(prompt, '') AS BLOB)) > 4096
+		THEN substr(CAST(COALESCE(prompt, '') AS BLOB), 1, 4096)
+		ELSE COALESCE(prompt, '') END,
+	agent_id, agent_definition_id,
+	length(CAST(COALESCE(prompt, '') AS BLOB)) > 4096`
+
 const taskDetailActionMetadataColumns = `id, status`
 
 // chatTaskContextQuery contains only the task fields used by the external-channel
@@ -644,6 +651,27 @@ func (r *TaskRepo) GetThreadRenderMetadata(ctx context.Context, id string) (*mod
 	if err != nil {
 		return nil, fmt.Errorf("getting task thread render metadata: %w", err)
 	}
+	return &t, nil
+}
+
+// GetThreadRenderMetadataWithPrompt returns the compact task fields needed by
+// non-poll task-thread pages. The prompt is bounded before scanning so the
+// first non-follow-up user bubble cannot reintroduce the full task payload.
+func (r *TaskRepo) GetThreadRenderMetadataWithPrompt(ctx context.Context, id string) (*models.Task, error) {
+	var t models.Task
+	var promptTruncated bool
+	err := r.db.QueryRowContext(ctx,
+		`SELECT `+taskThreadRenderMetadataWithPromptColumns+`
+			 FROM tasks WHERE id = ?`, id).
+		Scan(&t.ID, &t.ProjectID, &t.Category, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &promptTruncated)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting task thread render metadata with prompt: %w", err)
+	}
+	t.PromptTruncated = promptTruncated
+	t.Prompt = trimTaskThreadPreviewUTF8(t.Prompt, t.PromptTruncated, taskThreadPromptPreviewBytes)
 	return &t, nil
 }
 

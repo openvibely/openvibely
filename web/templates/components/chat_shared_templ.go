@@ -2512,13 +2512,13 @@ func chatExecutionPairContent(exec models.Execution, task *models.Task, executio
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if exec.PromptTruncated {
+				if chatUserContentTruncated(exec, task, executions, index) {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 153, "<div class=\"mt-3 text-xs opacity-60\" data-task-thread-preview-notice=\"true\">Preview truncated.</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-			} else if exec.PromptTruncated {
+			} else if chatUserContentTruncated(exec, task, executions, index) {
 				templ_7745c5c3_Err = ChatBubbleThreadPreview("User", chatUserContent(exec, task, executions, index), true, false, "", "").Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -3998,6 +3998,13 @@ func chatUserContent(exec models.Execution, task *models.Task, execs []models.Ex
 		return task.Prompt
 	}
 	return exec.PromptSent
+}
+
+func chatUserContentTruncated(exec models.Execution, task *models.Task, execs []models.Execution, idx int) bool {
+	if task != nil && !exec.IsFollowup && !hasEarlierNonFollowup(execs, idx) {
+		return task.PromptTruncated
+	}
+	return exec.PromptTruncated
 }
 
 func taskThreadStreamingResumeContent(exec models.Execution) string {

@@ -3007,7 +3007,7 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 	if isPoll && beforeExecID == "" {
 		task, err = h.taskSvc.GetThreadRenderMetadata(ctx, taskID)
 	} else {
-		task, err = h.taskSvc.GetByID(ctx, taskID)
+		task, err = h.taskSvc.GetThreadRenderMetadataWithPrompt(ctx, taskID)
 	}
 	if err != nil {
 		return err
@@ -3244,7 +3244,7 @@ func (h *Handler) GetTaskThreadExecutionFullOutput(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	task, err := h.taskSvc.GetByID(ctx, taskID)
+	task, err := h.taskSvc.GetThreadRenderMetadata(ctx, taskID)
 	if err != nil {
 		return err
 	}

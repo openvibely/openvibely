@@ -1463,16 +1463,16 @@ func chatExecutionIsTerminal(exec models.Execution) bool {
 templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
 	<!-- User message: show for followups and first non-followup only -->
 	if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
-		if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
-			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID)
-			if exec.PromptTruncated {
-				<div class="mt-3 text-xs opacity-60" data-task-thread-preview-notice="true">Preview truncated.</div>
+			if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
+				@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID)
+				if chatUserContentTruncated(exec, task, executions, index) {
+					<div class="mt-3 text-xs opacity-60" data-task-thread-preview-notice="true">Preview truncated.</div>
+				}
+			} else if chatUserContentTruncated(exec, task, executions, index) {
+				@ChatBubbleThreadPreview("User", chatUserContent(exec, task, executions, index), true, false, "", "")
+			} else {
+				@ChatBubble("User", chatUserContent(exec, task, executions, index))
 			}
-		} else if exec.PromptTruncated {
-			@ChatBubbleThreadPreview("User", chatUserContent(exec, task, executions, index), true, false, "", "")
-		} else {
-			@ChatBubble("User", chatUserContent(exec, task, executions, index))
-		}
 	}
 	<!-- Assistant response -->
 	if exec.Status == models.ExecCompleted {
@@ -6068,6 +6068,13 @@ func chatUserContent(exec models.Execution, task *models.Task, execs []models.Ex
 		return task.Prompt
 	}
 	return exec.PromptSent
+}
+
+func chatUserContentTruncated(exec models.Execution, task *models.Task, execs []models.Execution, idx int) bool {
+	if task != nil && !exec.IsFollowup && !hasEarlierNonFollowup(execs, idx) {
+		return task.PromptTruncated
+	}
+	return exec.PromptTruncated
 }
 
 func taskThreadStreamingResumeContent(exec models.Execution) string {

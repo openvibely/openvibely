@@ -8360,6 +8360,53 @@ func TestHandler_GetTaskThreadUsesBoundedProjectionForLatestAndEarlierPages(t *t
 	assert.NotContains(t, earlierBody, "output-003-")
 }
 
+func TestHandler_GetTaskThreadBoundsInitialTaskPrompt(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Bounded Initial Task Prompt Project")
+	const promptBytes = 1024 * 1024
+	task := createTask(t, h, project.ID, "Bounded Initial Task Prompt Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "task-prompt-" + strings.Repeat("T", promptBytes)
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "execution prompt"
+	})
+	require.NoError(t, h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "small output", "", 100, 500))
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread?limit=5")
+	counter.SetEnabled(false)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+	assert.Contains(t, body, "task-prompt-")
+	assert.Contains(t, body, "Preview truncated.")
+	assert.NotContains(t, body, strings.Repeat("T", 128*1024))
+	if counter.SelectedTextBytes() > 200*1024 {
+		t.Fatalf("initial task-thread selected text too large: got %d bytes, want <= %d", counter.SelectedTextBytes(), 200*1024)
+	}
+
+	compactTaskQuerySeen := false
+	for _, statement := range counter.Statements() {
+		if !strings.Contains(statement, "FROM tasks") {
+			continue
+		}
+		if strings.Contains(statement, "CAST(COALESCE(prompt, '') AS BLOB)") {
+			compactTaskQuerySeen = true
+		}
+		if strings.Contains(statement, "SELECT id, project_id, title") {
+			t.Fatalf("initial task-thread request used the full task projection: %s", statement)
+		}
+	}
+	if !compactTaskQuerySeen {
+		t.Fatalf("initial task-thread request did not use the bounded task prompt projection: %#v", counter.Statements())
+	}
+}
+
 func TestHandler_GetTaskThreadExecutionFullOutputIsSingleOwnedRead(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)

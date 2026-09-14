@@ -195,6 +195,7 @@ type Task struct {
 	Priority                 int          `json:"priority"`
 	Status                   TaskStatus   `json:"status"`
 	Prompt                   string       `json:"prompt"`
+	PromptTruncated          bool         `json:"-"`                             // Runtime-only: task-thread prompt is a bounded preview
 	AgentID                  *string      `json:"agent_id,omitempty"`            // Optional: LLM config (model) to use; uses default if nil
 	AgentDefinitionID        *string      `json:"agent_definition_id,omitempty"` // Optional: agent definition (system prompt, skills, MCP)
 	Tag                      TaskTag      `json:"tag"`

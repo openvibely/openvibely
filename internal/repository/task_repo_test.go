@@ -718,6 +718,21 @@ func TestTaskRepo_GetThreadRenderMetadataUsesCompactProjection(t *testing.T) {
 			got.Title, got.Priority, len(got.Prompt), len(got.ChainConfig), len(got.SwarmConfig))
 	}
 
+	withPrompt, err := repo.GetThreadRenderMetadataWithPrompt(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetThreadRenderMetadataWithPrompt: %v", err)
+	}
+	if withPrompt == nil {
+		t.Fatal("expected task metadata with prompt, got nil")
+	}
+	if len(withPrompt.Prompt) > 4*1024 || !withPrompt.PromptTruncated {
+		t.Fatalf("prompt-bearing thread metadata was not bounded: bytes=%d truncated=%v", len(withPrompt.Prompt), withPrompt.PromptTruncated)
+	}
+	if withPrompt.Title != "" || withPrompt.Priority != 0 || withPrompt.ChainConfig != "" || withPrompt.SwarmConfig != "" {
+		t.Fatalf("prompt-bearing metadata carried omitted full-detail fields: title=%q priority=%d chain=%d swarm=%d",
+			withPrompt.Title, withPrompt.Priority, len(withPrompt.ChainConfig), len(withPrompt.SwarmConfig))
+	}
+
 	full, err := repo.GetByID(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)

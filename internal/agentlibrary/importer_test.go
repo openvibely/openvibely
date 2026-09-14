@@ -303,6 +303,90 @@ func TestRemoveSupportFile_RemovesAllowedKind(t *testing.T) {
 	}
 }
 
+func TestRemoveSkillIndexEntryPreservesUnrelatedContent(t *testing.T) {
+	tests := []struct {
+		name          string
+		index         string
+		wantChanged   bool
+		wantUnchanged bool
+	}{
+		{
+			name:        "without frontmatter",
+			index:       "# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+			wantChanged: true,
+		},
+		{
+			name:        "with frontmatter",
+			index:       "---\nalways_use:\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+			wantChanged: true,
+		},
+		{
+			name:          "similarly named and nonmatching headings",
+			index:         "# Standalone Skills\n\nIndex narrative stays.\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+			wantUnchanged: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "skills", "SKILLS.md")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tt.index), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			changed, err := RemoveSkillIndexEntry(path, "verify")
+			if err != nil {
+				t.Fatalf("RemoveSkillIndexEntry: %v", err)
+			}
+			if changed != tt.wantChanged {
+				t.Fatalf("changed = %v, want %v", changed, tt.wantChanged)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantUnchanged {
+				if string(got) != tt.index {
+					t.Fatalf("nonmatching index changed:\n%s", got)
+				}
+				return
+			}
+			text := string(got)
+			if strings.Contains(text, "## verify\n") {
+				t.Fatalf("exact verify section was not removed:\n%s", text)
+			}
+			for _, want := range []string{
+				"Index narrative stays.",
+				"## verify_extended",
+				"## review",
+			} {
+				if !strings.Contains(text, want) {
+					t.Fatalf("result lost %q:\n%s", want, text)
+				}
+			}
+			if strings.Contains(tt.index, "always_use:") {
+				for _, want := range []string{"always_use:", "custom: value"} {
+					if !strings.Contains(text, want) {
+						t.Fatalf("result lost frontmatter %q:\n%s", want, text)
+					}
+				}
+			}
+		})
+	}
+
+	missingPath := filepath.Join(t.TempDir(), "skills", "SKILLS.md")
+	changed, err := RemoveSkillIndexEntry(missingPath, "verify")
+	if err != nil {
+		t.Fatalf("RemoveSkillIndexEntry missing index: %v", err)
+	}
+	if changed {
+		t.Fatal("missing index should be a no-op")
+	}
+}
+
 func TestArchiveSkill_BlockedWhenProtected(t *testing.T) {
 	imp, app, _ := newImporter(t)
 	app.protected["skill:verify"] = "bundled"
@@ -325,6 +409,18 @@ func TestArchiveSkill_MarksSkillFileAndRemovesStandaloneIndexLink(t *testing.T) 
 	if _, err := imp.WriteSkill(context.Background(), review, "# Review\n"); err != nil {
 		t.Fatalf("write review: %v", err)
 	}
+	supportPath := filepath.Join(root, "skills", "verify", "references", "archive-guide.md")
+	if err := os.MkdirAll(filepath.Dir(supportPath), 0o755); err != nil {
+		t.Fatalf("mkdir support files: %v", err)
+	}
+	if err := os.WriteFile(supportPath, []byte("# Archive guide\n"), 0o644); err != nil {
+		t.Fatalf("write support file: %v", err)
+	}
+	rootIndexPath := filepath.Join(root, "skills", "SKILLS.md")
+	rootIndex := "---\nalways_use:\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n"
+	if err := os.WriteFile(rootIndexPath, []byte(rootIndex), 0o644); err != nil {
+		t.Fatalf("write root index: %v", err)
+	}
 	res, err := imp.ArchiveSkill(context.Background(), "verify", "review", "consolidated")
 	if err != nil {
 		t.Fatalf("ArchiveSkill: %v", err)
@@ -332,12 +428,31 @@ func TestArchiveSkill_MarksSkillFileAndRemovesStandaloneIndexLink(t *testing.T) 
 	if !res.Applied || len(res.Archived) != 1 || len(app.archivedSkills) != 1 {
 		t.Fatalf("bad archive result/apply: %+v app=%+v", res, app.archivedSkills)
 	}
-	rootIndex, err := os.ReadFile(filepath.Join(root, "skills", "SKILLS.md"))
+	rootIndexData, err := os.ReadFile(rootIndexPath)
 	if err != nil {
 		t.Fatalf("read root index: %v", err)
 	}
-	if strings.Contains(string(rootIndex), "## verify") || !strings.Contains(string(rootIndex), "## review") {
-		t.Fatalf("root index not consolidated:\n%s", rootIndex)
+	rootIndexText := string(rootIndexData)
+	if strings.Contains(rootIndexText, "## verify\n") || !strings.Contains(rootIndexText, "## verify_extended\n") || !strings.Contains(rootIndexText, "## review\n") {
+		t.Fatalf("root index not consolidated:\n%s", rootIndexText)
+	}
+	for _, want := range []string{"always_use:\n  - review", "custom: value", "Index narrative stays."} {
+		if !strings.Contains(rootIndexText, want) {
+			t.Fatalf("root index lost %q:\n%s", want, rootIndexText)
+		}
+	}
+	indexReported := false
+	for _, path := range res.ChangedPaths {
+		if path == rootIndexPath {
+			indexReported = true
+			break
+		}
+	}
+	if !indexReported {
+		t.Fatalf("archive result did not report changed root index path: %+v", res.ChangedPaths)
+	}
+	if got, err := os.ReadFile(supportPath); err != nil || string(got) != "# Archive guide\n" {
+		t.Fatalf("archive removed or changed support file: %q err=%v", got, err)
 	}
 	skillFile, err := os.ReadFile(filepath.Join(root, "skills", "verify", "SKILL.md"))
 	if err != nil {
