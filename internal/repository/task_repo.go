@@ -154,12 +154,23 @@ const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.pr
 const BoardPromptPreviewCodePoints = 300
 
 var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
+					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
+					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
+					EXISTS(SELECT 1 FROM automation_dispatch_outbox d
+						JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
+					WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
+				t.created_at, t.updated_at, t.completed_at`, BoardPromptPreviewCodePoints)
+
+// taskReferenceSelectColumns contains only fields needed to resolve a terminal
+// task reference and render its selector metadata. Detail-only payloads such as
+// worktree paths, swarm configuration, merge state, and timestamps are omitted.
+var taskReferenceSelectColumns = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id,
+				CASE WHEN json_valid(t.chain_config) AND json_type(t.chain_config, '$.enabled') = 'true' THEN 1 ELSE 0 END AS chain_enabled,
+				t.swarm_role,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
-				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
 				EXISTS(SELECT 1 FROM automation_dispatch_outbox d
 					JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
-				WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
-			t.created_at, t.updated_at, t.completed_at`, BoardPromptPreviewCodePoints)
+					WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued`, BoardPromptPreviewCodePoints)
 
 type TaskRepo struct {
 	db          *sql.DB
@@ -453,6 +464,65 @@ func (r *TaskRepo) ListByProjectWithCategorySorts(ctx context.Context, projectID
 // Kanban cards while projecting Prompt to a bounded Unicode-safe preview.
 func (r *TaskRepo) ListBoardByProjectWithCategorySorts(ctx context.Context, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
 	return r.listByProjectWithCategorySorts(ctx, taskBoardSelectColumnsWithGoal, projectID, category, backlogSort, completedSort)
+}
+
+// TaskReference is the compact task projection used by machine-facing reference
+// lookup. It deliberately omits detail-only task payloads.
+type TaskReference struct {
+	ID                       string
+	ProjectID                string
+	Title                    string
+	Prompt                   string
+	Category                 models.TaskCategory
+	Priority                 int
+	Status                   models.TaskStatus
+	AgentID                  *string
+	AgentDefinitionID        *string
+	Tag                      models.TaskTag
+	DisplayOrder             int
+	ParentTaskID             *string
+	ChainEnabled             bool
+	SwarmRole                models.SwarmRole
+	HasGoal                  bool
+	AutomationCapacityQueued bool
+}
+
+// ListTaskReferences returns the complete compact task reference catalog for one
+// project in board order. The query only selects fields needed for matching and
+// selector badges; board/detail payloads are intentionally not hydrated.
+func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]TaskReference, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("listing task references: project id is required")
+	}
+
+	rows, err := r.db.QueryContext(ctx, `SELECT `+taskReferenceSelectColumns+`
+		FROM tasks t
+		WHERE t.project_id = ? AND t.category != 'chat'
+		ORDER BY t.display_order ASC, t.created_at ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing task references: %w", err)
+	}
+	defer rows.Close()
+
+	references := make([]TaskReference, 0)
+	for rows.Next() {
+		var reference TaskReference
+		if err := rows.Scan(
+			&reference.ID, &reference.ProjectID, &reference.Title, &reference.Category,
+			&reference.Priority, &reference.Status, &reference.Prompt, &reference.AgentID,
+			&reference.AgentDefinitionID, &reference.Tag, &reference.DisplayOrder,
+			&reference.ParentTaskID, &reference.ChainEnabled, &reference.SwarmRole,
+			&reference.HasGoal, &reference.AutomationCapacityQueued,
+		); err != nil {
+			return nil, fmt.Errorf("scanning task reference: %w", err)
+		}
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing task references: %w", err)
+	}
+	return references, nil
 }
 
 func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectColumns string, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
