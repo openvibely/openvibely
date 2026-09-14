@@ -225,6 +225,7 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 		return nil, fmt.Errorf("replacement pull request branch head is unavailable")
 	}
 	existingPR.PublishedHeadSHA = replacementHead
+	existingPR.NeedsRepublish = false
 	if err := s.repo.Upsert(ctx, existingPR); err != nil {
 		return nil, fmt.Errorf("recording replacement pull request branch head: %w", err)
 	}
@@ -349,10 +350,11 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			}
 			liveURL := strings.TrimSpace(livePR.URL)
 			liveState := strings.TrimSpace(livePR.State)
-			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA
+			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA || existingPR.NeedsRepublish
 			existingPR.PRURL = liveURL
 			existingPR.PRState = liveState
 			existingPR.PublishedHeadSHA = publishedHeadSHA
+			existingPR.NeedsRepublish = false
 			changed = mergeTaskPullRequestIssueMetadata(existingPR, opts) || changed
 			if changed {
 				if err := s.repo.Upsert(ctx, existingPR); err != nil {
