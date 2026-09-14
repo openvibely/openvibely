@@ -461,6 +461,19 @@ func TestFilterChatHistory_ExcludesRunningAndCurrentExec(t *testing.T) {
 	}
 }
 
+func TestFilterRetryChatHistory_ExcludesCurrentAndFailedSourceOnly(t *testing.T) {
+	executions := []models.Execution{
+		{ID: "completed", Status: models.ExecCompleted, PromptSent: "completed prompt"},
+		{ID: "useful-failure", Status: models.ExecFailed, PromptSent: "other failed prompt"},
+		{ID: "retried-source", Status: models.ExecFailed, PromptSent: strings.Repeat("large", 100)},
+		{ID: "retry", Status: models.ExecRunning, PromptSent: strings.Repeat("large", 100)},
+	}
+	result := filterRetryChatHistory(executions, "retry", "retried-source")
+	require.Len(t, result, 2)
+	assert.Equal(t, "completed", result[0].ID)
+	assert.Equal(t, "useful-failure", result[1].ID)
+}
+
 func TestFilterChatHistory_ReturnsNonNilForEmpty(t *testing.T) {
 	// filterChatHistory must return a non-nil slice even when empty,
 	// so CallAgentDirectStreaming routes to the chat path.
@@ -7001,12 +7014,10 @@ func TestRetryLatestFailedTaskThreadFollowup_ReplaysFailedFollowupPromptFromActi
 	assert.Equal(t, "fix the failed follow-up", call.Prompt)
 	assert.NotEqual(t, "original task prompt", call.Prompt)
 	req := mock.LastAgentRequest()
-	require.Len(t, req.ChatHistory, 2)
+	require.Len(t, req.ChatHistory, 1)
 	assert.Equal(t, "original task prompt", req.ChatHistory[0].PromptSent)
 	assert.Contains(t, req.ChatHistory[0].Output, "initial task output")
-	assert.Equal(t, "fix the failed follow-up", req.ChatHistory[1].PromptSent)
-	assert.Equal(t, models.ExecFailed, req.ChatHistory[1].Status)
-	assert.Contains(t, req.ChatHistory[1].Output, "failed follow-up output")
+	assert.NotContains(t, req.ChatHistory, failedFollowup)
 	require.Eventually(t, func() bool {
 		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 		if err != nil || len(execs) != 3 || execs[2].Status != models.ExecCompleted {
@@ -7881,7 +7892,7 @@ func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50Too
 	}))
 	defer server.Close()
 
-	agent := models.LLMConfig{Name: "Runtime fixture model", Provider: models.ProviderOpenAICompatible, Model: "fixture/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions"}
+	agent := models.LLMConfig{Name: "Runtime fixture model", Provider: models.ProviderOpenAICompatible, Model: "fixture/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions", ContextWindow: 1_000_000}
 	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
 	task := createTask(t, h, project.ID, "Runtime fixture task", func(task *models.Task) {
 		task.Category = models.CategoryActive
@@ -8184,4 +8195,48 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 	for _, statement := range executionQueries[1:] {
 		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
 	}
+}
+
+func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Provider = models.ProviderTest
+		a.Model = "retry-queue-model"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "Queued Retry Source Project")
+	task := createTask(t, h, project.ID, "Queued Retry Source Task", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusFailed
+		task.AgentID = &agent.ID
+	})
+	failed := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecFailed
+		exec.PromptSent = "large retry prompt"
+		exec.IsFollowup = true
+	})
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued))
+
+	handled, err := h.RetryLatestFailedTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, queued)
+	require.Equal(t, failed.ID, queued.RetrySourceExecutionID)
+
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "ok"
+	h.llmSvc.SetLLMCaller(mock)
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *queued))
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	req := mock.LastAgentRequest()
+	require.Equal(t, failed.ID, req.RetrySourceExecutionID)
+	for _, history := range req.ChatHistory {
+		require.NotEqual(t, failed.ID, history.ID)
+	}
+	require.Equal(t, failed.PromptSent, req.Message)
 }

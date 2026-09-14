@@ -11,6 +11,20 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAnthropicAgentResultPreservesNativeCompactionState(t *testing.T) {
+	usage := llmcontracts.Usage{
+		NativeCompactionStateJSON: `{"type":"compaction","content":"opaque native checkpoint"}`,
+		ProviderIDs:               map[string]string{"native_compaction_strategy": "anthropic_context_management"},
+	}
+	got := anthropicAgentResult("done", "done", usage, nil)
+	if got.NativeCompactionStateJSON != usage.NativeCompactionStateJSON {
+		t.Fatalf("native state = %q, want %q", got.NativeCompactionStateJSON, usage.NativeCompactionStateJSON)
+	}
+	if got.NativeCompactionStrategy != "anthropic_context_management" || !got.Compacted {
+		t.Fatalf("native result = %#v", got)
+	}
+}
+
 func TestRuntimeAnthropicToolsAliasesSkillsListWireName(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{

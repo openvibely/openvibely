@@ -5,16 +5,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
@@ -24,19 +28,24 @@ const (
 	// Prefer the direct-call web tool versions for URL retrieval flows.
 	// Newer web tool versions can route through provider code_execution,
 	// which may hit per-turn tool budgets and cause fetch failures.
-	anthropicWebSearchToolType = "web_search_20250305"
-	anthropicWebFetchToolType  = "web_fetch_20250910"
+	anthropicWebSearchToolType    = "web_search_20250305"
+	anthropicWebFetchToolType     = "web_fetch_20250910"
+	anthropicToolOutputTokenLimit = 10000
 )
 
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
-	Model        string
-	MaxTokens    int
-	Effort       string // output_config.effort; empty preserves the provider default
-	System       string
-	WorkDir      string // working directory for tool execution
-	MaxTurns     int    // max agentic loop iterations (default 25)
-	DisableTools bool   // when true, no tools are sent (chat orchestrator mode)
+	Model         string
+	MaxTokens     int
+	ContextWindow int    // complete-request admission window; defaults conservatively when zero
+	Effort        string // output_config.effort; empty preserves the provider default
+	System        string
+	WorkDir       string // working directory for tool execution
+	MaxTurns      int    // max agentic loop iterations (default 25)
+	DisableTools  bool   // when true, no tools are sent (chat orchestrator mode)
+	// ToolOutputTokenLimit bounds each local tool result replayed to the model;
+	// callbacks and the returned ToolCalls retain the complete output.
+	ToolOutputTokenLimit int
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example runtime action tools) to be sent.
 	SkipDefaultTools bool
@@ -60,6 +69,10 @@ type AgenticOptions struct {
 	// CompactionInstructions provides additional instructions for the summarization.
 	// For example: "Focus on code changes and decisions".
 	CompactionInstructions string
+
+	// NativeCompactionStateJSON replays a provider-native compaction block from
+	// a compatible prior execution before post-checkpoint history.
+	NativeCompactionStateJSON string
 
 	// Attachments are files to include with the initial message (images, PDFs, code files).
 	// They are sent as multimodal content blocks alongside the text prompt.
@@ -124,16 +137,17 @@ func NormalizeEffort(model, value string) string {
 
 // AgenticResponse is the result of an agentic send.
 type AgenticResponse struct {
-	LastContextTokens        int    // Includes Anthropic's disjoint input/cache token buckets.
-	Text                     string // final text output (all turns concatenated)
-	Model                    string
-	InputTokens              int
-	OutputTokens             int
-	CacheCreationInputTokens int
-	CacheReadInputTokens     int
-	StopReason               string
-	ToolCalls                []ToolCall // log of all tool calls made
-	Compacted                bool       // true if context was compacted during this call
+	LastContextTokens         int    // Includes Anthropic's disjoint input/cache token buckets.
+	Text                      string // final text output (all turns concatenated)
+	Model                     string
+	InputTokens               int
+	OutputTokens              int
+	CacheCreationInputTokens  int
+	CacheReadInputTokens      int
+	StopReason                string
+	ToolCalls                 []ToolCall // log of all tool calls made
+	Compacted                 bool       // true if context was compacted during this call
+	NativeCompactionStateJSON string     // newly returned provider-native compaction block for durable replay
 }
 
 // agenticMessage is a message in the agentic conversation.
@@ -215,6 +229,49 @@ type inputTokensTrigger struct {
 type compactionBlockJSON struct {
 	Type    string  `json:"type"`
 	Content *string `json:"content"`
+}
+
+const nativeCompactionStateVersion = 1
+
+type nativeCompactionState struct {
+	Version  int              `json:"version"`
+	Messages []agenticMessage `json:"messages"`
+}
+
+func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
+	var state nativeCompactionState
+	if err := json.Unmarshal([]byte(raw), &state); err == nil && state.Version == nativeCompactionStateVersion {
+		if !hasLeadingCompactionMessage(state.Messages) {
+			return nil, fmt.Errorf("invalid compaction message envelope")
+		}
+		return state.Messages, nil
+	}
+
+	// Accept checkpoints produced before the state envelope retained the
+	// post-compaction assistant/tool continuation.
+	var block compactionBlockJSON
+	if err := json.Unmarshal([]byte(raw), &block); err != nil {
+		return nil, err
+	}
+	if block.Type != "compaction" || block.Content == nil {
+		return nil, fmt.Errorf("invalid compaction block")
+	}
+	return []agenticMessage{{Role: "user", Content: []compactionBlockJSON{block}}}, nil
+}
+
+func hasLeadingCompactionMessage(messages []agenticMessage) bool {
+	if len(messages) == 0 || messages[0].Role != "user" {
+		return false
+	}
+	raw, err := json.Marshal(messages[0].Content)
+	if err != nil {
+		return false
+	}
+	var blocks []compactionBlockJSON
+	if err := json.Unmarshal(raw, &blocks); err != nil || len(blocks) != 1 {
+		return false
+	}
+	return blocks[0].Type == "compaction" && blocks[0].Content != nil
 }
 
 // agenticRequest is the API request body for agentic sends.
@@ -306,8 +363,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		tools = filterToolDefinitions(tools, opts.ToolFilter)
 	}
 
-	// Build initial messages from history + new prompt
-	messages := make([]agenticMessage, 0, len(c.History)+1)
+	// Build initial messages from a compatible native checkpoint, history, and new prompt.
+	messages := make([]agenticMessage, 0, len(c.History)+2)
+	if state := strings.TrimSpace(opts.NativeCompactionStateJSON); state != "" {
+		checkpointMessages, err := decodeNativeCompactionState(state)
+		if err != nil {
+			return nil, fmt.Errorf("decode Anthropic native compaction state: %w", err)
+		}
+		messages = append(messages, checkpointMessages...)
+	}
 	for _, msg := range c.History {
 		messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
 	}
@@ -325,6 +389,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
+	hasDurableCompactionState := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		// Send request (streaming)
@@ -342,7 +407,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return c.sendAgenticTurn(attemptCtx, messages, tools, opts)
 		})
 		if err != nil {
-			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
+			return nil, categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
 		result.InputTokens += resp.inputTokens
@@ -368,11 +433,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			compactBlock.Content = resp.compaction.content
 
 			if resp.compaction.content != nil {
+				hasDurableCompactionState = true
 				applog.Infof("[anthropicclient] context compacted on turn %d, summary_len=%d", turn+1, len(*resp.compaction.content))
 				if opts.OnCompaction != nil {
 					opts.OnCompaction(*resp.compaction.content)
 				}
 			} else {
+				hasDurableCompactionState = false
 				applog.Infof("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
 			}
 
@@ -458,7 +525,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			toolResults = append(toolResults, agenticBlock{
 				Type:      "tool_result",
 				ToolUseID: exec.block.ID,
-				Content:   anthropicStringContentRaw(exec.output),
+				Content:   anthropicStringContentRaw(truncateAnthropicToolOutputForModelInput(exec.output, opts.ToolOutputTokenLimit)),
 				IsError:   exec.isError,
 			})
 		}
@@ -504,6 +571,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		allText.WriteString(turnText)
 	}
 
+	if hasDurableCompactionState {
+		encodedState, err := json.Marshal(nativeCompactionState{Version: nativeCompactionStateVersion, Messages: messages})
+		if err != nil {
+			return nil, fmt.Errorf("encode Anthropic native compaction state: %w", err)
+		}
+		result.NativeCompactionStateJSON = string(encodedState)
+	}
 	result.Text = allText.String()
 
 	// Update client history with the final state
@@ -563,6 +637,28 @@ func anthropicProviderToolResultName(block agenticBlock) string {
 		return strings.TrimSuffix(t, "_tool_result")
 	}
 	return ""
+}
+
+func truncateAnthropicToolOutputForModelInput(output string, tokenLimit int) string {
+	if output == "" {
+		return output
+	}
+	if tokenLimit <= 0 {
+		tokenLimit = anthropicToolOutputTokenLimit
+	}
+	runes := []rune(output)
+	if len(runes) <= tokenLimit {
+		return output
+	}
+	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
+	markerRunes := []rune(marker)
+	if len(markerRunes) >= tokenLimit {
+		return string(runes[:tokenLimit])
+	}
+	available := tokenLimit - len(markerRunes)
+	head := available / 2
+	tail := available - head
+	return string(runes[:head]) + marker + string(runes[len(runes)-tail:])
 }
 
 func anthropicStringContentRaw(s string) json.RawMessage {
@@ -891,7 +987,89 @@ func usesAdaptiveThinking(model string) bool {
 }
 
 // sendAgenticTurn sends a single streaming request and returns parsed content blocks.
+type anthropicProviderError struct {
+	StatusCode int
+	Type       string
+	Message    string
+}
+
+func (e *anthropicProviderError) Error() string {
+	return fmt.Sprintf("Anthropic API error %d (%s): %s", e.StatusCode, e.Type, e.Message)
+}
+
+func categorizeAnthropicAPIError(statusCode int, body []byte, nativeCompaction bool) error {
+	var envelope struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &envelope)
+	providerErr := &anthropicProviderError{StatusCode: statusCode, Type: strings.TrimSpace(envelope.Error.Type), Message: strings.TrimSpace(envelope.Error.Message)}
+	if providerErr.Message == "" {
+		providerErr.Message = strings.TrimSpace(string(body))
+	}
+	typ := strings.ToLower(providerErr.Type)
+	msg := strings.ToLower(providerErr.Message)
+	if typ == "request_too_large" || strings.Contains(msg, "context window") || strings.Contains(msg, "too many tokens") {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Anthropic Messages", providerErr)
+	}
+	if nativeCompaction && (typ == "unsupported_beta" || statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed || statusCode == http.StatusNotImplemented) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionUnsupported, "Anthropic context management", providerErr)
+	}
+	if nativeCompaction && (strings.Contains(msg, "context management") || strings.Contains(msg, "compaction")) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionFailed, "Anthropic context management", providerErr)
+	}
+	return providerErr
+}
+
+func categorizeAnthropicProviderError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var categorized *llmcontracts.CategorizedError
+	if errors.As(err, &categorized) {
+		return err
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return llmcontracts.NewCategorizedError(llmcontracts.ErrorTransportFailure, "Anthropic transport", err)
+	}
+	return err
+}
+
+func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) error {
+	if opts == nil {
+		return nil
+	}
+	window := opts.ContextWindow
+	if window <= 0 {
+		window = 200000
+	}
+	reserved := opts.MaxTokens
+	if reserved <= 0 {
+		reserved = 8192
+	}
+	safe := window - reserved - max(1024, window/50)
+	encoded, err := json.Marshal(struct {
+		Messages []agenticMessage `json:"messages"`
+		Tools    []ToolDefinition `json:"tools,omitempty"`
+		System   string           `json:"system,omitempty"`
+	}{messages, tools, opts.System})
+	if err != nil {
+		return err
+	}
+	tokens := utf8.RuneCount(encoded)
+	if tokens <= safe {
+		return nil
+	}
+	return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Anthropic Messages preflight", fmt.Errorf("complete request requires %d input tokens; safe limit is %d", tokens, safe))
+}
+
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	if err := ensureAnthropicAgenticRequestFits(messages, tools, opts); err != nil {
+		return nil, err
+	}
 	policy := httpretry.DefaultPolicy()
 	policy.MaxRetries = 0
 	policy.AllowReplay = true
@@ -1115,7 +1293,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, httpretry.NewResponseError(resp, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody)))
+		return nil, httpretry.NewResponseError(resp, categorizeAnthropicAPIError(resp.StatusCode, respBody, opts.AutoCompaction))
 	}
 
 	result, err := c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)

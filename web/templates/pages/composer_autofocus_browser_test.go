@@ -229,7 +229,9 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 		t.Fatalf("find Chrome debugging target for %s\n%s", targetURL, stderr)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Some fixtures perform several independent 15-second condition waits. Keep
+	// the connection lifetime from expiring underneath a later wait.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
 	if err != nil {

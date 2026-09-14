@@ -22,7 +22,11 @@ import (
 
 const defaultOutputBudget = 16384
 
-var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)")
+var errMaxTokens = llmcontracts.NewCategorizedError(
+	llmcontracts.ErrorOutputTokenLimitReached,
+	"OpenAI-compatible response",
+	fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)"),
+)
 
 type Adapter struct {
 	configRepo *repository.LLMConfigRepo
@@ -286,6 +290,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	}
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
+		ContextWindow:    req.Agent.ContextWindow,
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
 		Temperature:      compatibleTemperature(req.Agent),
 		System:           systemPrompt,
@@ -333,6 +338,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
+		ContextWindow:    req.Agent.ContextWindow,
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
 		Temperature:      compatibleTemperature(req.Agent),
 		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
@@ -391,6 +397,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
+		ContextWindow:    req.Agent.ContextWindow,
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
 		Temperature:      compatibleTemperature(req.Agent),
 		System:           systemPrompt,

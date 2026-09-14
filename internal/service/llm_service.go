@@ -2322,20 +2322,21 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 	}
 	callCtx, lifecycleUserMessage := trackLifecycleCompletionUserMessage(ctx, message)
 	req, err := llmnormalize.NormalizeRequest(llmcontracts.AgentRequest{
-		Ctx:               callCtx,
-		Operation:         llmcontracts.OperationStreaming,
-		Message:           message,
-		Attachments:       attachments,
-		Agent:             agent,
-		ExecID:            execID,
-		ProjectID:         directUsageProjectFromContext(ctx),
-		TransportScope:    llmcontracts.TransportScopeFromContext(ctx),
-		ChatHistory:       chatHistory,
-		ChatMode:          chatMode,
-		ChatSystemContext: combineAdditionalProjectInstructions(ctx, chatSystemContext),
-		WorkDir:           workDir,
-		AgentDefinition:   agentDef,
-		Followup:          followup,
+		Ctx:                    callCtx,
+		Operation:              llmcontracts.OperationStreaming,
+		Message:                message,
+		Attachments:            attachments,
+		Agent:                  agent,
+		ExecID:                 execID,
+		RetrySourceExecutionID: llmcontracts.RetrySourceExecutionIDFromContext(ctx),
+		ProjectID:              directUsageProjectFromContext(ctx),
+		TransportScope:         llmcontracts.TransportScopeFromContext(ctx),
+		ChatHistory:            chatHistory,
+		ChatMode:               chatMode,
+		ChatSystemContext:      combineAdditionalProjectInstructions(ctx, chatSystemContext),
+		WorkDir:                workDir,
+		AgentDefinition:        agentDef,
+		Followup:               followup,
 	})
 	if err != nil {
 		return llmcontracts.AgentResult{}, err

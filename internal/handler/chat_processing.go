@@ -56,6 +56,7 @@ var (
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
 	ExecID                      string
+	RetrySourceExecutionID      string
 	TaskID                      string
 	Message                     string
 	Agent                       models.LLMConfig
@@ -614,6 +615,7 @@ modelLoop:
 			break
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		requestCtx = llmcontracts.WithRetrySourceExecutionID(requestCtx, params.RetrySourceExecutionID)
 		requestCtx = service.WithDirectUsageProject(requestCtx, params.ProjectID)
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
@@ -1675,7 +1677,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		PromptSent:    failed.PromptSent,
 		IsFollowup:    true,
 	}
-	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: failed.PromptSent, Source: models.TaskOriginWeb}
+	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: failed.PromptSent, Source: models.TaskOriginWeb, RetrySourceExecutionID: failed.ID}
 	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
 	if err != nil {
 		return err
@@ -1707,7 +1709,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	h.resumeUserStoppedGoalForManualStart(ctx, taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(ctx, taskID, models.TaskOriginWeb, "")
 	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, taskID, taskThreadHistoryLimit)
-	priorHistory := filterChatHistory(priorExecs, exec.ID)
+	priorHistory := filterRetryChatHistory(priorExecs, exec.ID, failed.ID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
 		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
@@ -1731,20 +1733,21 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:            exec.ID,
-		TaskID:            taskID,
-		Message:           failed.PromptSent,
-		Agent:             *agent,
-		AgentDefinition:   agentDef,
-		ChatHistory:       priorHistory,
-		ProjectID:         task.ProjectID,
-		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:           workDir,
-		IsTaskFollowup:    true,
-		InputOrigin:       models.TaskOriginWeb,
-		Task:              task,
-		AutomationContext: automationContext,
-		updateWorkDone:    updateWorkDone,
+		ExecID:                 exec.ID,
+		RetrySourceExecutionID: failed.ID,
+		TaskID:                 taskID,
+		Message:                failed.PromptSent,
+		Agent:                  *agent,
+		AgentDefinition:        agentDef,
+		ChatHistory:            priorHistory,
+		ProjectID:              task.ProjectID,
+		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                workDir,
+		IsTaskFollowup:         true,
+		InputOrigin:            models.TaskOriginWeb,
+		Task:                   task,
+		AutomationContext:      automationContext,
+		updateWorkDone:         updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil
@@ -1860,7 +1863,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	h.resumeUserStoppedGoalForManualStart(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	h.reactivateAchievedGoalForManualFollowup(ctx, input.TaskID, string(input.Source), input.OriginAgent)
 	priorExecs, _ := h.execRepo.ListByTaskChronologicalLimit(ctx, exec.TaskID, taskThreadHistoryLimit)
-	priorHistory := filterChatHistory(priorExecs, exec.ID)
+	priorHistory := filterRetryChatHistory(priorExecs, exec.ID, input.RetrySourceExecutionID)
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
 		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
@@ -1884,25 +1887,26 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:            exec.ID,
-		TaskID:            exec.TaskID,
-		Message:           input.Content,
-		Agent:             *agent,
-		AgentDefinition:   agentDef,
-		ChatHistory:       priorHistory,
-		ProjectID:         task.ProjectID,
-		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:           workDir,
-		ImageAttachments:  imageAttachments,
-		IsTaskFollowup:    true,
-		Surface:           surfaceForThreadInput(input),
-		ChannelReply:      channelReplyFromThreadInput(input),
-		RuntimeTools:      h.xRuntimeToolsForThreadInput(task.ID, input),
-		InputOrigin:       string(input.Source),
-		InputOriginAgent:  input.OriginAgent,
-		Task:              task,
-		AutomationContext: automationContext,
-		updateWorkDone:    updateWorkDone,
+		ExecID:                 exec.ID,
+		RetrySourceExecutionID: input.RetrySourceExecutionID,
+		TaskID:                 exec.TaskID,
+		Message:                input.Content,
+		Agent:                  *agent,
+		AgentDefinition:        agentDef,
+		ChatHistory:            priorHistory,
+		ProjectID:              task.ProjectID,
+		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                workDir,
+		ImageAttachments:       imageAttachments,
+		IsTaskFollowup:         true,
+		Surface:                surfaceForThreadInput(input),
+		ChannelReply:           channelReplyFromThreadInput(input),
+		RuntimeTools:           h.xRuntimeToolsForThreadInput(task.ID, input),
+		InputOrigin:            string(input.Source),
+		InputOriginAgent:       input.OriginAgent,
+		Task:                   task,
+		AutomationContext:      automationContext,
+		updateWorkDone:         updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil
@@ -2502,6 +2506,18 @@ func filterChatHistory(executions []models.Execution, currentExecID string) []mo
 		result = append(result, executions[i])
 	}
 	return result
+}
+
+func filterRetryChatHistory(executions []models.Execution, currentExecID, failedSourceExecID string) []models.Execution {
+	history := filterChatHistory(executions, currentExecID)
+	filtered := make([]models.Execution, 0, len(history))
+	for _, exec := range history {
+		if exec.ID == failedSourceExecID {
+			continue
+		}
+		filtered = append(filtered, exec)
+	}
+	return filtered
 }
 
 // selectAgent handles agent selection with vision-awareness for both chat and task thread.
