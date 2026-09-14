@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -342,6 +343,80 @@ func TestGetMostFrequentTasks_StableTieBreakAndFullHistory(t *testing.T) {
 	if len(fullRows) != 3 || fullRows[1].TaskID != firstTieID || fullRows[2].TaskID != secondTieID {
 		t.Fatalf("full-history rows = %+v, want stable ties [%s, %s]", fullRows, firstTieID, secondTieID)
 	}
+}
+
+func TestGetMostFrequentTasks_RealFiveThousandRecordResponseBoundary(t *testing.T) {
+	const fixtureSize = 5000
+	ctx := context.Background()
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Large analytics project").Build()
+	agent := &models.LLMConfig{
+		Name:     "Analytics evidence agent",
+		Provider: models.ProviderAnthropic,
+		Model:    "claude-3-5-sonnet-20241022",
+	}
+	if err := tc.llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	tx, err := tc.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin fixture transaction: %v", err)
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+	for i := 0; i < fixtureSize; i++ {
+		taskID := fmt.Sprintf("analytics-large-%05d", i)
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO tasks (id, project_id, title, prompt) VALUES (?, ?, ?, '')`,
+			taskID, project.ID, fmt.Sprintf("task title %05d", i)); err != nil {
+			t.Fatalf("insert task %d: %v", i, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, started_at, completed_at) VALUES (?, ?, ?, ?, '', ?, ?)`,
+			fmt.Sprintf("execution-large-%05d", i), taskID, agent.ID, models.ExecCompleted, "2026-09-13 12:34:56", "2026-09-13 12:34:56"); err != nil {
+			t.Fatalf("insert execution %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit fixture: %v", err)
+	}
+	rollback = false
+
+	request := func(limit int) ([]repository.TaskFrequency, int) {
+		t.Helper()
+		path := fmt.Sprintf("/api/analytics/most-frequent-tasks?project_id=%s&limit=%d", project.ID, limit)
+		rec := tc.HTTP().Get(path).Execute()
+		tc.Assert(rec).StatusCode(http.StatusOK)
+		var rows []repository.TaskFrequency
+		if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+			t.Fatalf("decode limit=%d response: %v", limit, err)
+		}
+		return rows, len(rec.Body.Bytes())
+	}
+
+	boundedRows, boundedBytes := request(12)
+	fullRows, fullBytes := request(0)
+	if len(boundedRows) != 12 {
+		t.Fatalf("bounded real-backend rows = %d, want 12", len(boundedRows))
+	}
+	if len(fullRows) != fixtureSize {
+		t.Fatalf("full real-backend rows = %d, want %d", len(fullRows), fixtureSize)
+	}
+	for i, row := range boundedRows {
+		wantID := fmt.Sprintf("analytics-large-%05d", i)
+		if row.TaskID != wantID || row.ExecutionCount != 1 {
+			t.Fatalf("bounded row %d = %+v, want task %s with count 1", i, row, wantID)
+		}
+	}
+	if boundedBytes >= fullBytes {
+		t.Fatalf("bounded real-backend response bytes = %d, full = %d", boundedBytes, fullBytes)
+	}
+	t.Logf("real_frequent_analytics_boundary fixture=%d bounded_limit=12 bounded_response_bytes=%d bounded_rows=%d full_limit=0 full_response_bytes=%d full_rows=%d", fixtureSize, boundedBytes, len(boundedRows), fullBytes, len(fullRows))
 }
 
 func TestGetFailedTaskPatterns(t *testing.T) {
