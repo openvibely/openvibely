@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -1738,4 +1739,252 @@ func TestContextDecisionObservabilityIncludesRequiredFields(t *testing.T) {
 	if strings.Contains(got, "private failure detail") {
 		t.Fatalf("context decision logs included raw provider error: %s", got)
 	}
+}
+
+// BenchmarkProviderContextBudgetPreflight compares the historical repeated-budget
+// preflight with the optimized production path without involving a provider or
+// network. Both paths receive the same request fixture; history_bytes_traversed
+// reports the bytes visited by the budget scans rather than the fixture size.
+func BenchmarkProviderContextBudgetPreflight(b *testing.B) {
+	previousLogWriter := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(previousLogWriter)
+
+	for _, historySize := range []int{0, 20, 100} {
+		fixture := newProviderContextBudgetBenchmarkFixture(historySize)
+		b.Run(fmt.Sprintf("%d_history/baseline", historySize), func(b *testing.B) {
+			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				return llmcontracts.AgentResult{Output: "ok"}, nil
+			})
+			svc := &LLMService{}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				benchmarkProviderContextBudgetBaseline(svc, adapter, fixture.req)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(fixture.historyBytes*5), "history_bytes_traversed/op")
+		})
+		b.Run(fmt.Sprintf("%d_history/optimized", historySize), func(b *testing.B) {
+			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				return llmcontracts.AgentResult{Output: "ok"}, nil
+			})
+			svc := &LLMService{}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := svc.callProviderWithCompaction(adapter, fixture.req); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(fixture.historyBytes), "history_bytes_traversed/op")
+		})
+	}
+}
+
+type providerContextBudgetBenchmarkFixture struct {
+	req          llmcontracts.AgentRequest
+	historyBytes int
+}
+
+func newProviderContextBudgetBenchmarkFixture(historySize int) providerContextBudgetBenchmarkFixture {
+	const (
+		promptSize = 512
+		outputSize = 512
+		errorSize  = 256
+		reasonSize = 256
+		replaySize = 256
+	)
+	const repeatedHistoryFields = promptSize + outputSize + errorSize + reasonSize + 4*replaySize
+	text := func(size int, ch byte) string { return strings.Repeat(string(ch), size) }
+	history := make([]models.Execution, historySize)
+	historyBytes := 0
+	for i := range history {
+		exec := models.Execution{
+			ID:               fmt.Sprintf("benchmark-execution-%03d", i),
+			PromptSent:       text(promptSize, 'p'),
+			Output:           text(outputSize, 'o'),
+			ErrorMessage:     text(errorSize, 'e'),
+			ReasoningContent: text(reasonSize, 'r'),
+			Status:           models.ExecCompleted,
+			ReplayMessages: []models.ExecutionReplayMessage{{
+				UserContent:      text(replaySize, 'u'),
+				AssistantContent: text(replaySize, 'a'),
+				ReasoningContent: text(replaySize, 'q'),
+				TranscriptJSON:   text(replaySize, 't'),
+			}},
+		}
+		history[i] = exec
+		historyBytes += repeatedHistoryFields
+	}
+	runtimeTools := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{
+		Name:        "read_file",
+		Description: strings.Repeat("read-only runtime tool description ", 8),
+		Parameters:  []byte(`{"type":"object","properties":{"path":{"type":"string"}}}`),
+		Access:      llmcontracts.RuntimeToolAccessRead,
+	}}}
+	return providerContextBudgetBenchmarkFixture{
+		req: llmcontracts.AgentRequest{
+			Ctx:       llmcontracts.WithRuntimeTools(context.Background(), runtimeTools),
+			Operation: llmcontracts.OperationStreaming,
+			Followup:  true,
+			Message:   "Continue the current request with the next bounded step.",
+			Agent: models.LLMConfig{
+				Provider:      models.ProviderOpenAICompatible,
+				Model:         "benchmark-model",
+				ContextWindow: 2000000,
+			},
+			Attachments: []models.Attachment{{
+				FileName: "context.txt", FilePath: "/tmp/context.txt", MediaType: "text/plain", FileSize: 4096,
+			}},
+			ChatHistory: history,
+		},
+		historyBytes: historyBytes,
+	}
+}
+
+func benchmarkProviderContextBudgetBaseline(svc *LLMService, adapter ProviderAdapter, req llmcontracts.AgentRequest) {
+	req = resolveProviderRequestForBudget(req)
+	originalHistory := append([]models.Execution(nil), req.ChatHistory...)
+	budget := calculateRequestBudget(req)
+	if req.ContextTokenEstimate > 0 {
+		reportedHistory := req.ContextTokenEstimate - budget.FixedTokens - budget.PendingTokens - budget.AttachmentTokens
+		if reportedHistory > budget.HistoryTokens {
+			budget.HistoryTokens = reportedHistory
+		}
+	}
+	_ = historyNeedsCompaction(budget)
+	prepared, _, cleanup, err := svc.preparePendingInput(req)
+	if err != nil {
+		return
+	}
+	cleanup()
+	req = prepared
+	_ = calculateRequestBudget(req)
+	if err := ensureRequestFits(req, "provider request"); err != nil {
+		return
+	}
+	logContextDecision(originalHistory, req, "none", false, nil)
+	_, _ = adapter.Call(req)
+}
+
+// BenchmarkProviderContextBudgetRecoveryPaths keeps the request mutations that
+// must invalidate a snapshot measurable without mixing their provider calls
+// with network latency. Each adapter is an in-process fixture.
+func BenchmarkProviderContextBudgetRecoveryPaths(b *testing.B) {
+	previousLogWriter := log.Writer()
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(previousLogWriter)
+
+	b.Run("pending_externalization", func(b *testing.B) {
+		svc := &LLMService{globalSkillRoot: b.TempDir()}
+		adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			return llmcontracts.AgentResult{Output: "ok"}, nil
+		})
+		req := llmcontracts.AgentRequest{
+			Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true,
+			Message: strings.Repeat("pending input ", 4000), ExecID: "benchmark-pending", WorkDir: "/tmp/work",
+			Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", ContextWindow: 32768},
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(len(req.Message)), "pending_input_bytes/op")
+	})
+
+	b.Run("native_compaction", func(b *testing.B) {
+		svc := &LLMService{}
+		adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			if !req.ForceNativeCompaction || !req.Agent.ForceNativeCompaction {
+				return llmcontracts.AgentResult{}, errors.New("native compaction was not triggered")
+			}
+			return llmcontracts.AgentResult{Output: "ok"}, nil
+		})
+		req := llmcontracts.AgentRequest{
+			Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true,
+			Message: "continue", Agent: models.LLMConfig{
+				Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol", AuthMethod: models.AuthMethodAPIKey, ContextWindow: 20000,
+			},
+			ChatHistory: []models.Execution{{PromptSent: strings.Repeat("history ", 900), Output: "previous"}},
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(len(req.ChatHistory[0].PromptSent)), "history_bytes/op")
+	})
+
+	b.Run("local_summary_retry", func(b *testing.B) {
+		svc := &LLMService{}
+		calls := 0
+		adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			phase := calls % 3
+			calls++
+			if phase == 0 {
+				return llmcontracts.AgentResult{}, errors.New("context length exceeded")
+			}
+			if req.Operation == llmcontracts.OperationDirect {
+				return llmcontracts.AgentResult{Output: "summary"}, nil
+			}
+			return llmcontracts.AgentResult{Output: "ok"}, nil
+		})
+		req := llmcontracts.AgentRequest{
+			Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true,
+			Message: "continue", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "benchmark"},
+			ChatHistory: []models.Execution{{PromptSent: strings.Repeat("history ", 200), Output: "previous"}},
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(len(req.ChatHistory[0].PromptSent)), "history_bytes/op")
+	})
+
+	b.Run("last_resort_truncation", func(b *testing.B) {
+		svc := &LLMService{}
+		calls := 0
+		adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			phase := calls % 3
+			calls++
+			if phase == 0 {
+				return llmcontracts.AgentResult{}, errors.New("context length exceeded")
+			}
+			if req.Operation == llmcontracts.OperationDirect {
+				return llmcontracts.AgentResult{}, errors.New("summary provider unavailable")
+			}
+			return llmcontracts.AgentResult{Output: "ok"}, nil
+		})
+		history := make([]models.Execution, 25)
+		for i := range history {
+			history[i] = models.Execution{PromptSent: fmt.Sprintf("prompt-%02d %s", i, strings.Repeat("history ", 100)), Output: "previous"}
+		}
+		req := llmcontracts.AgentRequest{
+			Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true,
+			Message: "continue", Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "benchmark", ContextWindow: 100000},
+			ChatHistory: history,
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+		b.ReportMetric(float64(len(history)), "history_entries/op")
+	})
 }
