@@ -291,14 +291,32 @@ func (r *ExecutionRepo) GetAPIChatStatusByID(ctx context.Context, id string) (*m
 func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.Execution, error) {
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
 		`SELECT `+executionSelectColumnsAlias+`
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE e.id = ? AND t.project_id = ?`, id, projectID))
+			 FROM executions e
+			 JOIN tasks t ON t.id = e.task_id
+			 WHERE e.id = ? AND t.project_id = ?`, id, projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting project execution: %w", err)
+	}
+	return &e, nil
+}
+
+// GetByIDForTaskAndProject reads one execution only when both its task and
+// project ownership match. The ownership predicates are applied before the
+// complete execution projection is selected and scanned.
+func (r *ExecutionRepo) GetByIDForTaskAndProject(ctx context.Context, id, taskID, projectID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumnsAlias+`
+			 FROM executions e
+			 JOIN tasks t ON t.id = e.task_id
+			 WHERE e.id = ? AND e.task_id = ? AND t.id = ? AND t.project_id = ?`, id, taskID, taskID, projectID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting task project execution: %w", err)
 	}
 	return &e, nil
 }

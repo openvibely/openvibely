@@ -8405,7 +8405,7 @@ func TestHandler_GetTaskThreadExecutionFullOutputIsSingleOwnedRead(t *testing.T)
 		ex.Status = models.ExecFailed
 		ex.PromptSent = "requested prompt"
 	})
-	fullOutput := "# Exact output\\n\\n```go\\nfmt.Println(\"exact\")\\n```\\n[Tool bash done]result[/Tool]"
+	fullOutput := "# Exact output\\n\\n```go\\nfmt.Println(\"exact\")\\n```\\n[Tool bash done]result[/Tool]" + strings.Repeat("F", 1024*1024)
 	fullError := "exact error with <unsafe>"
 	require.NoError(t, h.execRepo.Complete(ctx, requested.ID, models.ExecFailed, fullOutput, fullError, 100, 500))
 	neighbor := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
@@ -8423,13 +8423,26 @@ func TestHandler_GetTaskThreadExecutionFullOutputIsSingleOwnedRead(t *testing.T)
 	assert.Contains(t, body, "Exact output")
 	assert.Contains(t, body, "fmt.Println")
 	assert.Contains(t, body, "exact error with &lt;unsafe&gt;")
+	assert.Contains(t, body, `data-task-thread-execution-bubble="true"`)
+	assert.Contains(t, body, `id="task-thread-execution-`+requested.ID+`"`)
 	assert.NotContains(t, body, "neighbor secret")
 	assert.Equal(t, 1, countExecutionQueries(counter.Statements()))
 
 	otherTask := createTask(t, h, project.ID, "Other Full Thread Task")
+	counter.Reset()
+	counter.SetEnabled(true)
 	wrong := htmxGet(e, "/tasks/"+otherTask.ID+"/thread/executions/"+requested.ID+"/full")
+	counter.SetEnabled(false)
 	assertCode(t, wrong, http.StatusNotFound)
 	assert.NotContains(t, wrong.Body.String(), "Exact output")
+	if got := counter.SelectedTextBytes(); got >= 200*1024 {
+		t.Fatalf("foreign full-output request scanned execution text before ownership rejection: %d bytes", got)
+	}
+	for _, statement := range counter.Statements() {
+		if strings.Contains(statement, "FROM executions") && !strings.Contains(statement, "e.task_id = ?") {
+			t.Fatalf("foreign full-output request did not use task-scoped execution query: %s", statement)
+		}
+	}
 }
 
 func countExecutionQueries(statements []string) int {

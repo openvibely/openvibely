@@ -55,6 +55,8 @@ func TestChatThreadPreviewRenderingContract(t *testing.T) {
 	body := buf.String()
 	for _, required := range []string{
 		`data-task-thread-preview-notice="true"`,
+		`data-task-thread-execution-bubble="true"`,
+		`id="task-thread-execution-exec-thread-preview"`,
 		`Preview truncated. Load full response for the complete execution.`,
 		`data-task-thread-load-full="true"`,
 		`hx-get="/tasks/task-thread-preview/thread/executions/exec-thread-preview/full"`,
@@ -4870,6 +4872,18 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 	// afterSwap handler for task-thread-view must guard expensive work
 	if !strings.Contains(content, "target.id === 'task-thread-view'") {
 		t.Fatal("expected afterSwap handler for task-thread-view")
+	}
+
+	// Full-output outerHTML swaps must re-resolve and hydrate the live bubble.
+	for _, required := range []string{
+		"target.getAttribute('data-task-thread-execution-bubble') === 'true'",
+		"document.getElementById(target.id)",
+		"window.cleanAssistantMessages(fullOutputBubble)",
+		"_finishTaskThreadRenderScroll(chatMessages, renderPromise)",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("task-thread full-output hydration is missing %q", required)
+		}
 	}
 
 	// Both branches must check _sidebarNavigating to skip expensive work
