@@ -21,7 +21,9 @@ type UpcomingTask struct {
 
 // TaskSummary provides high-level task metrics for the Pulse dashboard
 type TaskSummary struct {
-	// Total pending tasks (not completed/cancelled) across active+backlog+scheduled
+	// Total unfinished tasks (not completed/cancelled) across active+backlog+scheduled.
+	// This includes blocked dependency work; callers should use BlockedCount to
+	// distinguish it from work waiting for execution.
 	TotalPending int
 
 	// Counts by priority (1=Low, 2=Normal, 3=High, 4=Urgent)
@@ -36,6 +38,7 @@ type TaskSummary struct {
 	RunningCount   int
 	CompletedCount int
 	FailedCount    int
+	BlockedCount   int
 
 	// Counts by category
 	ActiveCount    int
@@ -56,6 +59,7 @@ type Upcoming struct {
 	WaitingTasks   []UpcomingTask // Active category, pending or queued status in priority/display order
 	PendingTasks   []UpcomingTask // Active category, pending status
 	QueuedTasks    []UpcomingTask // Active category, queued status
+	BlockedTasks   []UpcomingTask // Tasks waiting for a parent or orchestration gate
 	ScheduledTasks []UpcomingTask // Scheduled with upcoming next_run
 	TaskSummary    *TaskSummary   // High-level task metrics
 	AISummary      string         // AI-generated 10,000 foot view

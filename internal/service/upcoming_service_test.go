@@ -55,6 +55,9 @@ func TestUpcomingService_GenerateUpcoming_Empty(t *testing.T) {
 	if len(brief.QueuedTasks) != 0 {
 		t.Fatalf("expected 0 queued tasks, got %d", len(brief.QueuedTasks))
 	}
+	if len(brief.BlockedTasks) != 0 {
+		t.Fatalf("expected 0 blocked tasks, got %d", len(brief.BlockedTasks))
+	}
 	if len(brief.WaitingTasks) != 0 {
 		t.Fatalf("expected 0 waiting tasks, got %d", len(brief.WaitingTasks))
 	}
@@ -125,6 +128,82 @@ func TestUpcomingService_GenerateUpcoming_WithTasks(t *testing.T) {
 	}
 	if brief.TaskSummary == nil || brief.TaskSummary.QueuedCount != 1 {
 		t.Fatalf("queued summary count = %#v, want 1", brief.TaskSummary)
+	}
+}
+
+func TestUpcomingService_GenerateUpcomingIncludesBlockedChainAndSwarmGatesAndMovesOnActivation(t *testing.T) {
+	upcomingSvc, taskRepo, _, _, projectID := setupUpcomingTest(t)
+	ctx := context.Background()
+
+	parent := &models.Task{
+		ProjectID: projectID,
+		Title:     "Chain parent",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    "parent work",
+	}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("creating chain parent: %v", err)
+	}
+	chainChild := &models.Task{
+		ProjectID:    projectID,
+		Title:        "Chain child waiting",
+		Category:     models.CategoryBacklog,
+		Status:       models.StatusBlocked,
+		Priority:     4,
+		ParentTaskID: &parent.ID,
+		Prompt:       strings.Repeat("c", 300),
+	}
+	swarmReviewer := &models.Task{
+		ProjectID: projectID,
+		Title:     "Reviewer gate waiting",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusBlocked,
+		Priority:  3,
+		SwarmRole: models.SwarmRoleReviewer,
+		Prompt:    "review after worker",
+	}
+	for _, task := range []*models.Task{chainChild, swarmReviewer} {
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("creating blocked task %q: %v", task.Title, err)
+		}
+	}
+
+	brief, err := upcomingSvc.GenerateUpcoming(ctx, projectID)
+	if err != nil {
+		t.Fatalf("listing blocked upcoming work: %v", err)
+	}
+	if len(brief.BlockedTasks) != 2 {
+		t.Fatalf("expected 2 blocked tasks, got %d", len(brief.BlockedTasks))
+	}
+	if brief.BlockedTasks[0].Task.ID != chainChild.ID || brief.BlockedTasks[1].Task.ID != swarmReviewer.ID {
+		t.Fatalf("blocked tasks = [%q %q], want [%q %q]", brief.BlockedTasks[0].Task.ID, brief.BlockedTasks[1].Task.ID, chainChild.ID, swarmReviewer.ID)
+	}
+	if brief.BlockedTasks[0].Task.Status != models.StatusBlocked {
+		t.Fatalf("chain child status = %q, want blocked", brief.BlockedTasks[0].Task.Status)
+	}
+	if got, want := brief.BlockedTasks[0].Task.Prompt, strings.Repeat("c", 200); got != want {
+		t.Fatalf("chain child prompt length = %d, want %d", len(got), len(want))
+	}
+	if len(brief.WaitingTasks) != 0 {
+		t.Fatalf("blocked tasks must not appear in execution waiting work: %#v", brief.WaitingTasks)
+	}
+
+	if err := taskRepo.UpdateCategory(ctx, chainChild.ID, models.CategoryActive); err != nil {
+		t.Fatalf("activating chain child category: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, chainChild.ID, models.StatusPending); err != nil {
+		t.Fatalf("activating chain child status: %v", err)
+	}
+	brief, err = upcomingSvc.GenerateUpcoming(ctx, projectID)
+	if err != nil {
+		t.Fatalf("listing activated upcoming work: %v", err)
+	}
+	if len(brief.BlockedTasks) != 1 || brief.BlockedTasks[0].Task.ID != swarmReviewer.ID {
+		t.Fatalf("blocked tasks after activation = %#v", brief.BlockedTasks)
+	}
+	if len(brief.WaitingTasks) != 1 || brief.WaitingTasks[0].Task.ID != chainChild.ID {
+		t.Fatalf("waiting tasks after activation = %#v", brief.WaitingTasks)
 	}
 }
 
@@ -269,7 +348,7 @@ func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
 		t.Fatalf("pulse summary = %q", pulse)
 	}
 	pulseCall := mock.LastCall()
-	for _, want := range []string{"Running tasks: 1", "Run migration", "Pending tasks: 1", "Queued tasks: 1", "Queued deployment", "Nightly smoke", "Task summary: 5 pending total"} {
+	for _, want := range []string{"Running tasks: 1", "Run migration", "Pending tasks: 1", "Queued tasks: 1", "Queued deployment", "Nightly smoke", "Task summary: 5 unfinished total"} {
 		if !strings.Contains(pulseCall.Prompt, want) {
 			t.Fatalf("pulse prompt missing %q:\n%s", want, pulseCall.Prompt)
 		}

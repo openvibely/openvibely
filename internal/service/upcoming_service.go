@@ -77,6 +77,12 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 		}
 	}
 
+	blocked, err := s.upcomingRepo.ListBlockedTasks(ctx, projectID)
+	if err != nil {
+		applog.Infof("[upcoming-svc] error listing blocked tasks: %v", err)
+		return nil, err
+	}
+
 	// Look ahead one week for scheduled tasks
 	until := now.Add(7 * 24 * time.Hour)
 	scheduled, err := s.upcomingRepo.ListUpcomingScheduledTasks(ctx, projectID, until)
@@ -98,12 +104,13 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 		WaitingTasks:   waiting,
 		PendingTasks:   pending,
 		QueuedTasks:    queued,
+		BlockedTasks:   blocked,
 		ScheduledTasks: scheduled,
 		TaskSummary:    taskSummary,
 	}
 
-	applog.Infof("[upcoming-svc] generated upcoming project=%s running=%d waiting=%d pending=%d queued=%d scheduled=%d",
-		projectID, len(running), len(waiting), len(pending), len(queued), len(scheduled))
+	applog.Infof("[upcoming-svc] generated upcoming project=%s running=%d waiting=%d pending=%d queued=%d blocked=%d scheduled=%d",
+		projectID, len(running), len(waiting), len(pending), len(queued), len(blocked), len(scheduled))
 
 	return upcoming, nil
 }
@@ -140,6 +147,7 @@ type pulseActionResponse struct {
 	WaitingCount   int                    `json:"waiting_count"`
 	PendingTasks   []pulseActionTaskEntry `json:"pending_tasks"`
 	QueuedTasks    []pulseActionTaskEntry `json:"queued_tasks"`
+	BlockedTasks   []pulseActionTaskEntry `json:"blocked_tasks"`
 	ScheduledTasks []pulseActionTaskEntry `json:"scheduled_tasks"`
 	TaskSummary    pulseActionTaskSummary `json:"task_summary"`
 }
@@ -176,6 +184,7 @@ type pulseActionTaskSummary struct {
 		Running   int `json:"running"`
 		Completed int `json:"completed"`
 		Failed    int `json:"failed"`
+		Blocked   int `json:"blocked"`
 	} `json:"status"`
 	Category struct {
 		Active    int `json:"active"`
@@ -202,6 +211,7 @@ func compactPulseActionResponse(upcoming *models.Upcoming) pulseActionResponse {
 		WaitingCount:   len(upcoming.WaitingTasks),
 		PendingTasks:   compactPulseTaskEntries(upcoming.PendingTasks),
 		QueuedTasks:    compactPulseTaskEntries(upcoming.QueuedTasks),
+		BlockedTasks:   compactPulseTaskEntries(upcoming.BlockedTasks),
 		ScheduledTasks: compactPulseTaskEntries(upcoming.ScheduledTasks),
 	}
 	if upcoming.TaskSummary != nil {
@@ -216,6 +226,7 @@ func compactPulseActionResponse(upcoming *models.Upcoming) pulseActionResponse {
 		response.TaskSummary.Status.Running = s.RunningCount
 		response.TaskSummary.Status.Completed = s.CompletedCount
 		response.TaskSummary.Status.Failed = s.FailedCount
+		response.TaskSummary.Status.Blocked = s.BlockedCount
 		response.TaskSummary.Category.Active = s.ActiveCount
 		response.TaskSummary.Category.Backlog = s.BacklogCount
 		response.TaskSummary.Category.Scheduled = s.ScheduledCount
@@ -674,6 +685,10 @@ func (s *UpcomingService) GeneratePulseSummary(ctx context.Context, projectID st
 	for _, t := range upcoming.QueuedTasks {
 		sb.WriteString(fmt.Sprintf("  - %s (priority: %d)\n", t.Task.Title, t.Task.Priority))
 	}
+	sb.WriteString(fmt.Sprintf("Blocked tasks: %d\n", len(upcoming.BlockedTasks)))
+	for _, t := range upcoming.BlockedTasks {
+		sb.WriteString(fmt.Sprintf("  - %s (priority: %d)\n", t.Task.Title, t.Task.Priority))
+	}
 	sb.WriteString(fmt.Sprintf("Scheduled tasks: %d\n", len(upcoming.ScheduledTasks)))
 	for _, t := range upcoming.ScheduledTasks {
 		nextRun := "unscheduled"
@@ -684,7 +699,7 @@ func (s *UpcomingService) GeneratePulseSummary(ctx context.Context, projectID st
 	}
 	if upcoming.TaskSummary != nil {
 		ts := upcoming.TaskSummary
-		sb.WriteString(fmt.Sprintf("Task summary: %d pending total, %d urgent, %d high, %d failed, %d overdue\n",
+		sb.WriteString(fmt.Sprintf("Task summary: %d unfinished total, %d urgent, %d high, %d failed, %d overdue\n",
 			ts.TotalPending, ts.UrgentCount, ts.HighCount, ts.FailedCount, ts.OverdueCount))
 	}
 	prompt := fmt.Sprintf(`You are summarizing the current state of a software project for a dashboard.

@@ -744,6 +744,7 @@ type testPulseToolResponse struct {
 	WaitingCount   int                  `json:"waiting_count"`
 	PendingTasks   []testPulseTaskEntry `json:"pending_tasks"`
 	QueuedTasks    []testPulseTaskEntry `json:"queued_tasks"`
+	BlockedTasks   []testPulseTaskEntry `json:"blocked_tasks"`
 	ScheduledTasks []testPulseTaskEntry `json:"scheduled_tasks"`
 	TaskSummary    struct {
 		TotalPending int `json:"total_pending"`
@@ -759,6 +760,7 @@ type testPulseToolResponse struct {
 			Running   int `json:"running"`
 			Completed int `json:"completed"`
 			Failed    int `json:"failed"`
+			Blocked   int `json:"blocked"`
 		} `json:"status"`
 		Category struct {
 			Active    int `json:"active"`
@@ -894,6 +896,7 @@ func TestViewPulseRuntimeToolEmptyProjectReturnsZeroAgenda(t *testing.T) {
 	require.Empty(t, got.PendingTasks)
 	require.Empty(t, got.QueuedTasks)
 	require.Zero(t, got.WaitingCount)
+	require.Empty(t, got.BlockedTasks)
 	require.Empty(t, got.ScheduledTasks)
 	require.Zero(t, got.TaskSummary.TotalPending)
 	require.Zero(t, got.TaskSummary.Scheduled.Overdue)
@@ -931,7 +934,51 @@ func TestViewPulseRuntimeToolQueuedOnlyAgenda(t *testing.T) {
 	require.Equal(t, 1, got.TaskSummary.Status.Queued)
 }
 
-// TestViewTaskThreadResolvesCurrentTaskID reproduces the incident where an
+func TestViewPulseRuntimeToolBlockedTasksAreCompactAndProjectScoped(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Blocked Pulse Project")
+	foreign := createProject(t, h, "Foreign Blocked Pulse Project")
+	parent := &models.Task{ProjectID: project.ID, Title: "Blocked parent", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "parent"}
+	require.NoError(t, h.taskRepo.Create(ctx, parent))
+	longPrompt := strings.Repeat("b", 350)
+	chainChild := &models.Task{ProjectID: project.ID, Title: "Waiting chain child", Prompt: longPrompt, Category: models.CategoryBacklog, Status: models.StatusBlocked, Priority: 4, ParentTaskID: &parent.ID}
+	reviewer := &models.Task{ProjectID: project.ID, Title: "Waiting reviewer gate", Prompt: "review", Category: models.CategoryBacklog, Status: models.StatusBlocked, Priority: 3, SwarmRole: models.SwarmRoleReviewer}
+	foreignTask := &models.Task{ProjectID: foreign.ID, Title: "Foreign blocked", Category: models.CategoryBacklog, Status: models.StatusBlocked}
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Chat blocked", Category: models.CategoryChat, Status: models.StatusBlocked}
+	completedTask := &models.Task{ProjectID: project.ID, Title: "Completed blocked", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	cancelledTask := &models.Task{ProjectID: project.ID, Title: "Cancelled blocked", Category: models.CategoryBacklog, Status: models.StatusCancelled}
+	for _, task := range []*models.Task{chainChild, reviewer, foreignTask, chatTask, completedTask, cancelledTask} {
+		require.NoError(t, h.taskRepo.Create(ctx, task))
+	}
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "view_pulse", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.NotContains(t, out, strings.Repeat("b", 250), "full blocked prompts must not be exposed")
+	require.NotContains(t, out, foreignTask.ID)
+	require.NotContains(t, out, chatTask.ID)
+	require.NotContains(t, out, completedTask.ID)
+	require.NotContains(t, out, cancelledTask.ID)
+
+	var got testPulseToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Len(t, got.BlockedTasks, 2)
+	require.Equal(t, chainChild.ID, got.BlockedTasks[0].TaskID)
+	require.Equal(t, string(models.StatusBlocked), got.BlockedTasks[0].Status)
+	require.LessOrEqual(t, len(got.BlockedTasks[0].PromptPreview), 200)
+	require.Equal(t, reviewer.ID, got.BlockedTasks[1].TaskID)
+	require.Equal(t, 2, got.TaskSummary.Status.Blocked)
+}
+
 // audit-only task-thread follow-up turn called view_task_thread with an
 // explicit task_id of "current" (or omitted task_id/title entirely) and got
 // "task current not found" instead of resolving to the persisted task

@@ -231,6 +231,55 @@ func TestUpcomingRepo_ListWaitingActiveTasksIncludesPendingAndQueuedOnly(t *test
 	}
 }
 
+func TestUpcomingRepo_ListBlockedTasksIsProjectScopedAndDeterministic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	project := createTestProject(t, projectRepo)
+	foreignProject := createTestProject(t, projectRepo)
+	parent := &models.Task{ProjectID: project.ID, Title: "Incomplete parent", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "parent"}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("creating parent task: %v", err)
+	}
+	longPrompt := strings.Repeat("b", 300)
+	blockedUrgent := &models.Task{ProjectID: project.ID, Title: "Blocked urgent chain", Category: models.CategoryBacklog, Status: models.StatusBlocked, Priority: 4, ParentTaskID: &parent.ID, Prompt: longPrompt}
+	blockedNormal := &models.Task{ProjectID: project.ID, Title: "Blocked reviewer gate", Category: models.CategoryBacklog, Status: models.StatusBlocked, Priority: 2, SwarmRole: models.SwarmRoleReviewer, Prompt: "review"}
+	excluded := []*models.Task{
+		{ProjectID: foreignProject.ID, Title: "Foreign blocked", Category: models.CategoryBacklog, Status: models.StatusBlocked, Priority: 4},
+		{ProjectID: project.ID, Title: "Chat blocked", Category: models.CategoryChat, Status: models.StatusBlocked, Priority: 4},
+		{ProjectID: project.ID, Title: "Completed terminal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 4},
+		{ProjectID: project.ID, Title: "Cancelled terminal", Category: models.CategoryBacklog, Status: models.StatusCancelled, Priority: 4},
+	}
+	for _, task := range append([]*models.Task{blockedUrgent, blockedNormal}, excluded...) {
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("creating task %q: %v", task.Title, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET display_order = CASE id WHEN ? THEN 2 WHEN ? THEN 1 END WHERE id IN (?, ?)`, blockedUrgent.ID, blockedNormal.ID, blockedUrgent.ID, blockedNormal.ID); err != nil {
+		t.Fatalf("setting display order: %v", err)
+	}
+
+	results, err := upcomingRepo.ListBlockedTasks(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("listing blocked tasks: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 blocked tasks, got %d", len(results))
+	}
+	if results[0].Task.ID != blockedUrgent.ID || results[1].Task.ID != blockedNormal.ID {
+		t.Fatalf("blocked ordering = [%q %q], want [%q %q]", results[0].Task.ID, results[1].Task.ID, blockedUrgent.ID, blockedNormal.ID)
+	}
+	if results[0].Task.ParentTaskID != nil {
+		t.Fatalf("blocked projection should not perform parent hydration")
+	}
+	if got, want := results[0].Task.Prompt, longPrompt[:upcomingTaskPromptPreviewLen]; got != want {
+		t.Fatalf("blocked prompt preview = %q, want %q", got, want)
+	}
+}
+
 func TestUpcomingRepo_ListRunningTasks_PromptPreviewBounded(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	upcomingRepo := NewUpcomingRepo(db)
@@ -597,6 +646,7 @@ func TestUpcomingRepo_GetTaskSummary(t *testing.T) {
 		{ProjectID: project.ID, Title: "Backlog Low", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 1, Prompt: "p"},
 		{ProjectID: project.ID, Title: "Completed Task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, Prompt: "p"},
 		{ProjectID: project.ID, Title: "Failed Task", Category: models.CategoryActive, Status: models.StatusFailed, Priority: 2, Prompt: "p"},
+		{ProjectID: project.ID, Title: "Blocked Gate", Category: models.CategoryBacklog, Status: models.StatusBlocked, Priority: 2, Prompt: "p"},
 		{ProjectID: project.ID, Title: "Scheduled Task", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2, Prompt: "p"},
 	}
 
@@ -609,7 +659,7 @@ func TestUpcomingRepo_GetTaskSummary(t *testing.T) {
 	// Create a schedule for the scheduled task with next_run in the past (overdue)
 	pastTime := now.Add(-1 * time.Hour)
 	overdueSchedule := &models.Schedule{
-		TaskID:         tasks[6].ID,
+		TaskID:         tasks[7].ID,
 		RunAt:          now.Add(-2 * time.Hour),
 		RepeatType:     models.RepeatDaily,
 		RepeatInterval: 1,
@@ -632,16 +682,19 @@ func TestUpcomingRepo_GetTaskSummary(t *testing.T) {
 	if summary.HighCount != 1 {
 		t.Errorf("expected HighCount=1, got %d", summary.HighCount)
 	}
-	// Normal: backlog(1) + failed(1) + scheduled(1) = 3
-	if summary.NormalCount != 3 {
-		t.Errorf("expected NormalCount=3, got %d", summary.NormalCount)
+	// Normal: backlog(1) + failed(1) + blocked(1) + scheduled(1) = 4
+	if summary.NormalCount != 4 {
+		t.Errorf("expected NormalCount=4, got %d", summary.NormalCount)
 	}
 	if summary.LowCount != 1 {
 		t.Errorf("expected LowCount=1, got %d", summary.LowCount)
 	}
-	// TotalPending = sum of priority counts = 1+1+3+1 = 6
-	if summary.TotalPending != 6 {
-		t.Errorf("expected TotalPending=6, got %d", summary.TotalPending)
+	if summary.BlockedCount != 1 {
+		t.Errorf("expected BlockedCount=1, got %d", summary.BlockedCount)
+	}
+	// TotalPending = sum of priority counts = 1+1+4+1 = 7
+	if summary.TotalPending != 7 {
+		t.Errorf("expected TotalPending=7, got %d", summary.TotalPending)
 	}
 
 	// Check status counts
@@ -664,8 +717,8 @@ func TestUpcomingRepo_GetTaskSummary(t *testing.T) {
 	if summary.ActiveCount != 3 {
 		t.Errorf("expected ActiveCount=3, got %d", summary.ActiveCount)
 	}
-	if summary.BacklogCount != 2 {
-		t.Errorf("expected BacklogCount=2, got %d", summary.BacklogCount)
+	if summary.BacklogCount != 3 {
+		t.Errorf("expected BacklogCount=3, got %d", summary.BacklogCount)
 	}
 	if summary.ScheduledCount != 1 {
 		t.Errorf("expected ScheduledCount=1, got %d", summary.ScheduledCount)
