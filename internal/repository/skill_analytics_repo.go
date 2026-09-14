@@ -204,22 +204,22 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnal
 		limit = 8
 	}
 	topRows, err := r.db.QueryContext(ctx, `
-		SELECT skill_handle
-		FROM skill_analytics_events e `+where+`
-		GROUP BY skill_handle
-		ORDER BY SUM(CASE WHEN event_type IN ('selected','loaded') THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, skill_handle ASC
-		LIMIT ?`, append(args, limit)...)
+			SELECT skill_handle, skill_scope
+			FROM skill_analytics_events e `+where+`
+			GROUP BY skill_handle, skill_scope
+			ORDER BY SUM(CASE WHEN event_type IN ('selected','loaded') THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, skill_handle ASC, skill_scope ASC
+			LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return models.SkillAgentUsageHeatmap{}, fmt.Errorf("getting top agent usage skills: %w", err)
 	}
-	var skills []string
+	var skills []models.SkillAgentUsageSkill
 	for topRows.Next() {
-		var handle string
-		if err := topRows.Scan(&handle); err != nil {
+		var skill models.SkillAgentUsageSkill
+		if err := topRows.Scan(&skill.SkillHandle, &skill.SkillScope); err != nil {
 			topRows.Close()
 			return models.SkillAgentUsageHeatmap{}, err
 		}
-		skills = append(skills, handle)
+		skills = append(skills, skill)
 	}
 	if err := topRows.Close(); err != nil {
 		return models.SkillAgentUsageHeatmap{}, err
@@ -228,32 +228,44 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnal
 		return models.SkillAgentUsageHeatmap{}, nil
 	}
 
-	inClause, inArgs := placeholders(skills)
+	pairClauses := make([]string, 0, len(skills))
 	cellArgs := append([]any{}, args...)
-	cellArgs = append(cellArgs, inArgs...)
+	for _, skill := range skills {
+		pairClauses = append(pairClauses, "(e.skill_handle=? AND e.skill_scope=?)")
+		cellArgs = append(cellArgs, skill.SkillHandle, skill.SkillScope)
+	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT COALESCE(e.agent_id, ''), COALESCE(a.name, CASE WHEN e.agent_id IS NULL OR e.agent_id = '' THEN 'Unassigned' ELSE e.agent_id END), e.skill_handle,
-		       SUM(CASE WHEN e.event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
-		       SUM(CASE WHEN e.event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
-		       SUM(CASE WHEN e.event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
-		       SUM(CASE WHEN e.event_type = 'created' THEN 1 ELSE 0 END) created_count,
-		       SUM(CASE WHEN e.event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
-		       SUM(CASE WHEN e.event_type IN ('selected','loaded','viewed') THEN 1 ELSE 0 END) activity_count
-		FROM skill_analytics_events e
-		LEFT JOIN agents a ON a.id = e.agent_id
-		`+where+` AND e.skill_handle IN (`+inClause+`)
-		GROUP BY COALESCE(e.agent_id, ''), e.skill_handle
-		ORDER BY COALESCE(a.name, CASE WHEN e.agent_id IS NULL OR e.agent_id = '' THEN 'Unassigned' ELSE e.agent_id END) ASC, e.skill_handle ASC`, cellArgs...)
+			SELECT COALESCE(e.agent_id, ''), COALESCE(a.name, CASE WHEN e.agent_id IS NULL OR e.agent_id = '' THEN 'Unassigned' ELSE e.agent_id END), e.skill_handle, e.skill_scope,
+			       SUM(CASE WHEN e.event_type = 'selected' THEN 1 ELSE 0 END) selected_count,
+			       SUM(CASE WHEN e.event_type = 'loaded' THEN 1 ELSE 0 END) loaded_count,
+			       SUM(CASE WHEN e.event_type = 'viewed' THEN 1 ELSE 0 END) viewed_count,
+			       SUM(CASE WHEN e.event_type = 'created' THEN 1 ELSE 0 END) created_count,
+			       SUM(CASE WHEN e.event_type = 'edited' THEN 1 ELSE 0 END) edited_count,
+			       SUM(CASE WHEN e.event_type IN ('selected','loaded','viewed') THEN 1 ELSE 0 END) activity_count
+			FROM skill_analytics_events e
+			LEFT JOIN agents a ON a.id = e.agent_id
+			`+where+` AND (`+strings.Join(pairClauses, " OR ")+`)
+			GROUP BY COALESCE(e.agent_id, ''), e.skill_handle, e.skill_scope
+			ORDER BY COALESCE(a.name, CASE WHEN e.agent_id IS NULL OR e.agent_id = '' THEN 'Unassigned' ELSE e.agent_id END) ASC, e.skill_handle ASC, e.skill_scope ASC`, cellArgs...)
 	if err != nil {
 		return models.SkillAgentUsageHeatmap{}, fmt.Errorf("getting agent skill usage: %w", err)
 	}
 	defer rows.Close()
 
-	heatmap := models.SkillAgentUsageHeatmap{Skills: skills}
+	legacySkills := make([]string, 0, len(skills))
+	legacySeen := map[string]bool{}
+	for _, skill := range skills {
+		if legacySeen[skill.SkillHandle] {
+			continue
+		}
+		legacySeen[skill.SkillHandle] = true
+		legacySkills = append(legacySkills, skill.SkillHandle)
+	}
+	heatmap := models.SkillAgentUsageHeatmap{Skills: legacySkills, SkillPairs: skills}
 	agentSeen := map[string]bool{}
 	for rows.Next() {
 		var cell models.SkillAgentUsageCell
-		if err := rows.Scan(&cell.AgentID, &cell.AgentName, &cell.SkillHandle, &cell.SelectedCount, &cell.LoadedCount, &cell.ViewedCount, &cell.CreatedCount, &cell.EditedCount, &cell.ActivityCount); err != nil {
+		if err := rows.Scan(&cell.AgentID, &cell.AgentName, &cell.SkillHandle, &cell.SkillScope, &cell.SelectedCount, &cell.LoadedCount, &cell.ViewedCount, &cell.CreatedCount, &cell.EditedCount, &cell.ActivityCount); err != nil {
 			return models.SkillAgentUsageHeatmap{}, err
 		}
 		if !agentSeen[cell.AgentID] {

@@ -68,6 +68,7 @@ type AgentPerformance struct {
 
 type SkillOutcomePerformance struct {
 	SkillHandle         string          `json:"skill_handle"`
+	SkillScope          string          `json:"skill_scope"`
 	TasksEvaluated      int             `json:"tasks_evaluated"`
 	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
 	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`
@@ -78,6 +79,7 @@ type AgentSkillOutcomePerformance struct {
 	AgentID             string          `json:"agent_id,omitempty"`
 	AgentName           string          `json:"agent_name"`
 	SkillHandle         string          `json:"skill_handle"`
+	SkillScope          string          `json:"skill_scope"`
 	TasksEvaluated      int             `json:"tasks_evaluated"`
 	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
 	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`

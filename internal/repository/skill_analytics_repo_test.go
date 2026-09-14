@@ -105,6 +105,7 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmap(t *testing.T) {
 		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "viewed", "manual", now),
 		skillEvent(projectID, "turn-1", "agent-a", "global", "provider_adapter", "edited", "manual", now),
 		skillEvent(projectID, "turn-2", "agent-a", "project", "frontend", "selected", "skill_curator", now),
+		skillEvent(projectID, "turn-3", "agent-a", "project", "provider_adapter", "selected", "skill_curator", now),
 	)
 
 	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 5})
@@ -114,12 +115,22 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmap(t *testing.T) {
 	if len(heatmap.Agents) != 1 || heatmap.Agents[0].AgentName != "Default Coding Agent" {
 		t.Fatalf("agents = %+v", heatmap.Agents)
 	}
-	cell := findAgentUsageCell(heatmap.Cells, "agent-a", "provider_adapter")
-	if cell == nil {
-		t.Fatalf("provider cell missing: %+v", heatmap.Cells)
+	if len(heatmap.Skills) != 2 {
+		t.Fatalf("legacy heatmap skills = %+v, want unique handles", heatmap.Skills)
 	}
-	if cell.ActivityCount != 3 || cell.SelectedCount != 1 || cell.LoadedCount != 1 || cell.ViewedCount != 1 || cell.EditedCount != 1 {
-		t.Fatalf("provider cell = %+v", cell)
+	if len(heatmap.SkillPairs) != 3 {
+		t.Fatalf("scoped heatmap skills = %+v, want global/project provider pairs plus frontend", heatmap.SkillPairs)
+	}
+	globalCell := findAgentUsageCell(heatmap.Cells, "agent-a", "provider_adapter", models.SkillScopeGlobal)
+	if globalCell == nil {
+		t.Fatalf("global provider cell missing: %+v", heatmap.Cells)
+	}
+	if globalCell.ActivityCount != 3 || globalCell.SelectedCount != 1 || globalCell.LoadedCount != 1 || globalCell.ViewedCount != 1 || globalCell.EditedCount != 1 {
+		t.Fatalf("global provider cell = %+v", globalCell)
+	}
+	projectCell := findAgentUsageCell(heatmap.Cells, "agent-a", "provider_adapter", models.SkillScopeProject)
+	if projectCell == nil || projectCell.ActivityCount != 1 || projectCell.SelectedCount != 1 {
+		t.Fatalf("project provider cell must remain separate: %+v", heatmap.Cells)
 	}
 }
 
@@ -260,9 +271,9 @@ func findFollowSkill(rows []models.SkillFollowThroughMetric, handle string) *mod
 	return nil
 }
 
-func findAgentUsageCell(rows []models.SkillAgentUsageCell, agentID, handle string) *models.SkillAgentUsageCell {
+func findAgentUsageCell(rows []models.SkillAgentUsageCell, agentID, handle, scope string) *models.SkillAgentUsageCell {
 	for i := range rows {
-		if rows[i].AgentID == agentID && rows[i].SkillHandle == handle {
+		if rows[i].AgentID == agentID && rows[i].SkillHandle == handle && rows[i].SkillScope == scope {
 			return &rows[i]
 		}
 	}
