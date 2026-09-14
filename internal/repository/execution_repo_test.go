@@ -13,6 +13,40 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestExecutionRepo_TaskThreadPageUsesBoundedProjectionAndIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	for _, tc := range []struct {
+		name       string
+		beforeExec string
+	}{
+		{name: "latest"},
+		{name: "before", beforeExec: "thread-projection-cursor"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query, args := taskThreadPageSQL("task-thread-projection-plan", tc.beforeExec, 21)
+			if strings.Contains(query, executionSelectColumnsLight) {
+				t.Fatalf("task-thread query must not use the broad light projection: %s", query)
+			}
+			for _, expression := range []string{
+				"CAST(COALESCE(prompt_sent, '') AS BLOB)",
+				"CAST(COALESCE(output, '') AS BLOB)",
+				"CAST(COALESCE(error_message, '') AS BLOB)",
+			} {
+				if !strings.Contains(query, expression) {
+					t.Fatalf("task-thread query missing bounded expression %q: %s", expression, query)
+				}
+			}
+			plan := explainExecutionRepoPlan(t, db, query, args...)
+			if !strings.Contains(plan, "idx_executions_task_started_at") {
+				t.Fatalf("expected task-thread projection query to use idx_executions_task_started_at, plan:\n%s", plan)
+			}
+			if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+				t.Fatalf("task-thread projection query should not sort with a temp B-tree, plan:\n%s", plan)
+			}
+		})
+	}
+}
+
 func TestExecutionRepo_ListByTaskExecutionWindowUsesTaskStartedIndex(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	query, args := taskExecutionPageSQL("task-execution-window-plan", "", 21)
@@ -1249,6 +1283,49 @@ func TestExecutionRepo_ChatHistoryWindowReturnsLatestChronologicalAndBeforeCurso
 	}
 }
 
+func TestExecutionRepo_TaskThreadWindowBoundsExecutionText(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Bounded Thread Task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	large := strings.Repeat("x", 1024*1024)
+	if _, err := db.ExecContext(ctx, `INSERT INTO executions
+		(id, task_id, status, prompt_sent, output, error_message, duration_ms, is_followup, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, "bounded-thread-exec", task.ID, models.ExecCompleted, large, large, large, 123, 1, "2026-08-18 12:00:00", "2026-08-18 12:00:01"); err != nil {
+		t.Fatalf("insert execution: %v", err)
+	}
+
+	page, err := execRepo.ListByTaskThreadChronologicalLimit(ctx, task.ID, 1)
+	if err != nil {
+		t.Fatalf("ListByTaskChronologicalLimit: %v", err)
+	}
+	if len(page) != 1 {
+		t.Fatalf("page length = %d, want 1", len(page))
+	}
+	got := page[0]
+	if len(got.PromptSent) >= len(large) || len(got.Output) >= len(large) || len(got.ErrorMessage) >= len(large) {
+		t.Fatalf("task-thread page materialized full execution text: prompt=%d output=%d error=%d", len(got.PromptSent), len(got.Output), len(got.ErrorMessage))
+	}
+	if !got.PromptTruncated || !got.OutputTruncated || !got.ErrorTruncated {
+		t.Fatalf("task-thread page did not preserve truncation markers: %+v", got)
+	}
+	if got.DurationMs != 123 || got.CompletedAt == nil {
+		t.Fatalf("task-thread page did not preserve execution timing metadata: duration=%d completed_at=%v", got.DurationMs, got.CompletedAt)
+	}
+
+	earlier, err := execRepo.ListByTaskThreadChronologicalBefore(ctx, task.ID, got.ID, 1)
+	if err != nil {
+		t.Fatalf("ListByTaskThreadChronologicalBefore: %v", err)
+	}
+	if len(earlier) != 0 {
+		t.Fatalf("earlier page length = %d, want 0", len(earlier))
+	}
+}
+
 func TestExecutionRepo_TaskExecutionWindowReturnsLatestChronologicalAndBeforeCursor(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)
@@ -1339,6 +1416,21 @@ func TestExecutionRepo_TaskExecutionWindowUsesRowIDForEqualStartTimes(t *testing
 			}
 		}
 	}
+
+	threadLatest, err := execRepo.ListByTaskThreadChronologicalLimit(ctx, task.ID, 3)
+	if err != nil {
+		t.Fatalf("ListByTaskThreadChronologicalLimit: %v", err)
+	}
+	if got, want := promptsOf(threadLatest), []string{"equal-start-3", "equal-start-4", "equal-start-5"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("task-thread latest IDs = %#v, want %#v", got, want)
+	}
+	threadEarlier, err := execRepo.ListByTaskThreadChronologicalBefore(ctx, task.ID, threadLatest[0].ID, 3)
+	if err != nil {
+		t.Fatalf("ListByTaskThreadChronologicalBefore: %v", err)
+	}
+	if got, want := promptsOf(threadEarlier), []string{"equal-start-0", "equal-start-1", "equal-start-2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("task-thread earlier IDs = %#v, want %#v", got, want)
+	}
 }
 
 func TestExecutionRepo_TaskExecutionWindowRejectsNonpositiveLimits(t *testing.T) {
@@ -1361,6 +1453,30 @@ func TestExecutionRepo_TaskExecutionWindowRejectsNonpositiveLimits(t *testing.T)
 		}
 		if len(earlier) != 0 {
 			t.Fatalf("ListByTaskChronologicalBefore limit=%d returned %d rows, want empty", limit, len(earlier))
+		}
+	}
+}
+
+func TestExecutionRepo_TaskThreadWindowRejectsNonpositiveLimits(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	for _, limit := range []int{0, -1} {
+		latest, err := execRepo.ListByTaskThreadChronologicalLimit(ctx, "missing-task", limit)
+		if err != nil {
+			t.Fatalf("ListByTaskThreadChronologicalLimit limit=%d: %v", limit, err)
+		}
+		if len(latest) != 0 {
+			t.Fatalf("ListByTaskThreadChronologicalLimit limit=%d returned %d rows, want empty", limit, len(latest))
+		}
+
+		earlierr, err := execRepo.ListByTaskThreadChronologicalBefore(ctx, "missing-task", "missing-execution", limit)
+		if err != nil {
+			t.Fatalf("ListByTaskThreadChronologicalBefore limit=%d: %v", limit, err)
+		}
+		if len(earlierr) != 0 {
+			t.Fatalf("ListByTaskThreadChronologicalBefore limit=%d returned %d rows, want empty", limit, len(earlierr))
 		}
 	}
 }
