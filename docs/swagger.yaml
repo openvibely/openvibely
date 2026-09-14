@@ -271,6 +271,8 @@ definitions:
         $ref: '#/definitions/models.AnalyticsMetric'
       skill_handle:
         type: string
+      skill_scope:
+        type: string
       tasks_evaluated:
         type: integer
       technical_completion:
@@ -785,6 +787,8 @@ definitions:
         type: integer
       skill_handle:
         type: string
+      skill_scope:
+        type: string
       viewed_count:
         type: integer
     type: object
@@ -798,10 +802,21 @@ definitions:
         items:
           $ref: '#/definitions/models.SkillAgentUsageCell'
         type: array
+      skill_pairs:
+        items:
+          $ref: '#/definitions/models.SkillAgentUsageSkill'
+        type: array
       skills:
         items:
           type: string
         type: array
+    type: object
+  models.SkillAgentUsageSkill:
+    properties:
+      skill_handle:
+        type: string
+      skill_scope:
+        type: string
     type: object
   models.SkillAnalyticsDashboard:
     properties:
@@ -900,6 +915,8 @@ definitions:
       goal_achievement:
         $ref: '#/definitions/models.AnalyticsMetric'
       skill_handle:
+        type: string
+      skill_scope:
         type: string
       tasks_evaluated:
         type: integer

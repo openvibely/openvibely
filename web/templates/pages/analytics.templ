@@ -569,8 +569,7 @@ templ analyticsContent(currentProject *models.Project) {
 								function rowsOrEmpty(id, rows, columns, render) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(render).join(''):'<tr><td colspan="'+columns+'" class="text-center opacity-50">'+(detail?'No evidence in this period':'Select an Agent to inspect evidence')+'</td></tr>'; }
 								rowsOrEmpty('agentCategoryTable',detail?(detail.categories||[]):[],5,function(row){return '<tr><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});
 								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.task_title)+'</a></td><td>'+row.failure_count+'</td><td>'+escapeHTML(row.last_error||'Unavailable')+'</td></tr>';});
-								rowsOrEmpty('agentSkillTable',detail?(detail.skills||[]):[],5,function(row){return '<tr><td><a class="link" href="/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(row.skill_handle)+'"><code>'+escapeHTML(row.skill_handle)+'</code></a></td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});
-							}
+									rowsOrEmpty('agentSkillTable',detail?(detail.skills||[]):[],5,function(row){return '<tr><td><a class="link" href="/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(row.skill_handle)+'"><code>'+escapeHTML(row.skill_handle)+'</code></a> <span class="badge badge-ghost badge-xs">'+escapeHTML(row.skill_scope||'unknown')+'</span></td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});							}
 							function renderModelCategories(rows) {
 								const table=document.getElementById('modelCategoryTable'); if(!table)return;
 								table.innerHTML=rows.length?rows.map(function(row){return '<tr data-model-id="'+escapeHTML(row.model_config_id)+'"><td><button class="link" type="button" data-model-evidence="'+escapeHTML(row.model_config_id)+'" data-category-evidence="'+escapeHTML(row.category)+'">'+escapeHTML(row.model)+'</button></td><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td></tr>';}).join(''):'<tr><td colspan="4" class="text-center opacity-50">No model/category evidence in this period</td></tr>';
@@ -580,16 +579,14 @@ templ analyticsContent(currentProject *models.Project) {
 								const table = document.getElementById('skillOutcomeTable');
 								if (!table) return;
 								table.innerHTML = rows.length ? rows.map(function(row) {
-									return '<tr><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';
-								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
+										return '<tr><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a> <span class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '</span></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
 							}
 								function renderAgentSkillOutcomes(rows) {
 									const table = document.getElementById('agentSkillOutcomeTable');
 									if (!table) return;
 									table.innerHTML = rows.length ? rows.map(function(row) {
 										const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name);
-										return '<tr><td>' + agent + '</td><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';
-									}).join('') : '<tr><td colspan="6" class="text-center opacity-50">No Agent and skill combinations have outcome evidence in this period</td></tr>';
+											return '<tr><td>' + agent + '</td><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a> <span class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '</span></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';									}).join('') : '<tr><td colspan="6" class="text-center opacity-50">No Agent and skill combinations have outcome evidence in this period</td></tr>';
 								}
 								function renderWorkflowPerformance(rows) {								const filter = document.getElementById('analyticsWorkflowFilter');
 								const selected = selectedWorkflow;
@@ -758,6 +755,12 @@ templ analyticsContent(currentProject *models.Project) {
 									const text = String(value || 'unknown');
 									return text.length > 34 ? text.slice(0, 31) + '…' : text;
 								}
+								function scopedSkillLabel(value, scope) {
+									const suffix = ' [' + (scope || 'unknown') + ']';
+									const text = String(value || 'unknown');
+									const available = Math.max(1, 34 - suffix.length);
+									return (text.length > available ? text.slice(0, Math.max(1, available - 1)) + '…' : text) + suffix;
+								}
 
 								function skillEventTotals(rows) {
 									return (rows || []).reduce(function(acc, row) {
@@ -882,7 +885,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if (canvas) {
 										charts.skillTop = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
-											data: { labels: chartRows.map(r => skillLabel(r.skill_handle + ' [' + (r.skill_scope || 'unknown') + ']')), datasets: [
+											data: { labels: chartRows.map(r => scopedSkillLabel(r.skill_handle, r.skill_scope)), datasets: [
 												{ label: 'Selected', data: chartRows.map(r => r.selected_count || 0), backgroundColor: 'rgba(59, 130, 246, 0.5)', borderColor: 'rgb(59, 130, 246)', borderWidth: 1 },
 												{ label: 'Loaded', data: chartRows.map(r => r.loaded_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 												{ label: 'Viewed', data: chartRows.map(r => r.viewed_count || 0), backgroundColor: 'rgba(251, 146, 60, 0.5)', borderColor: 'rgb(251, 146, 60)', borderWidth: 1 },
@@ -899,7 +902,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if (canvas) {
 										charts.skillFollow = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
-											data: { labels: chartRows.map(r => skillLabel(r.skill_handle + ' [' + (r.skill_scope || 'unknown') + ']')), datasets: [
+											data: { labels: chartRows.map(r => scopedSkillLabel(r.skill_handle, r.skill_scope)), datasets: [
 												{ label: 'Used', data: chartRows.map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 											{ label: 'Ignored', data: chartRows.map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
 										] },
@@ -921,10 +924,9 @@ templ analyticsContent(currentProject *models.Project) {
 										charts.skillAgent = new Chart(canvas.getContext('2d'), {
 											type: 'bar',
 											data: {
-												labels: rows.map(row => skillLabel(row.agent_name + ' · ' + row.skill_handle)),
-												datasets: [{ label: 'Activity', data: rows.map(row => row.activity), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 }]
+													labels: rows.map(row => scopedSkillLabel(row.agent_name + ' · ' + row.skill_handle, row.skill_scope)),												datasets: [{ label: 'Activity', data: rows.map(row => row.activity), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 }]
 											},
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const row=rows[items[0].index];showAggregateSelection('learning',{skill_agent:row.agent_id||'__unassigned__',skill_handle:row.skill_handle,skill_event:'used'},'skillEvidenceSelection',row.agent_name+' · '+row.skill_handle+' · activity '+row.activity);loadSkillEvidence();}, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const row=rows[items[0].index];showAggregateSelection('learning',{skill_agent:row.agent_id||'__unassigned__',skill_handle:row.skill_handle,skill_evidence_scope:row.skill_scope,skill_event:'used'},'skillEvidenceSelection',row.agent_name+' · '+row.skill_handle+' ['+(row.skill_scope||'unknown')+'] · activity '+row.activity);loadSkillEvidence();}, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 								}

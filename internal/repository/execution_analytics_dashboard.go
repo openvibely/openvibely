@@ -595,14 +595,14 @@ func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
 	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	query := `WITH skill_tasks AS (
-		SELECT DISTINCT s.skill_handle,s.task_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
+		SELECT DISTINCT s.skill_handle,s.skill_scope,s.task_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
 		WHERE t.project_id=?` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
 	), period_exec AS (
-		SELECT st.skill_handle,e.* FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
+		SELECT st.skill_handle,st.skill_scope,e.* FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
 	), task_stats AS (
-		SELECT skill_handle,task_id,MAX(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,
+		SELECT skill_handle,skill_scope,task_id,MAX(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,
 		MAX(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal,
-		MAX(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followed FROM period_exec GROUP BY skill_handle,task_id
+		MAX(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followed FROM period_exec GROUP BY skill_handle,skill_scope,task_id
 		), period_terminal_tasks AS (
 			SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')
 		), period_goals AS (
@@ -611,9 +611,9 @@ func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter
 			SELECT task_id,status FROM period_goals
 			UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_tasks p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
 		)
-		SELECT s.skill_handle,COUNT(*),SUM(s.completed),SUM(s.terminal),SUM(s.followed),
+		SELECT s.skill_handle,s.skill_scope,COUNT(*),SUM(s.completed),SUM(s.terminal),SUM(s.followed),
 			SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END),COUNT(g.task_id)
-		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id	GROUP BY s.skill_handle ORDER BY COUNT(*) DESC,s.skill_handle LIMIT 20`
+		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id	GROUP BY s.skill_handle,s.skill_scope ORDER BY COUNT(*) DESC,s.skill_handle,s.skill_scope LIMIT 20`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, eventArgs...)
 	args = append(args, execArgs...)
@@ -627,7 +627,7 @@ func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter
 	for rows.Next() {
 		var row models.SkillOutcomePerformance
 		var completed, terminal, followed, achieved, goalDenominator int
-		if err := rows.Scan(&row.SkillHandle, &row.TasksEvaluated, &completed, &terminal, &followed, &achieved, &goalDenominator); err != nil {
+		if err := rows.Scan(&row.SkillHandle, &row.SkillScope, &row.TasksEvaluated, &completed, &terminal, &followed, &achieved, &goalDenominator); err != nil {
 			return nil, fmt.Errorf("scanning skill outcome performance: %w", err)
 		}
 		row.TechnicalCompletion = metric(completed, terminal)
@@ -644,14 +644,14 @@ func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, f
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
 	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	query := `WITH skill_tasks AS (
-		SELECT DISTINCT s.skill_handle,s.task_id,t.agent_definition_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
+		SELECT DISTINCT s.skill_handle,s.skill_scope,s.task_id,t.agent_definition_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
 		WHERE t.project_id=?` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
 	), period_exec AS (
-		SELECT st.skill_handle,st.agent_definition_id,e.* FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
+		SELECT st.skill_handle,st.skill_scope,st.agent_definition_id,e.* FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
 	), task_stats AS (
-		SELECT skill_handle,agent_definition_id,task_id,MAX(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,
+		SELECT skill_handle,skill_scope,agent_definition_id,task_id,MAX(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,
 		MAX(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal,
-		MAX(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followed FROM period_exec GROUP BY skill_handle,agent_definition_id,task_id
+		MAX(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followed FROM period_exec GROUP BY skill_handle,skill_scope,agent_definition_id,task_id
 	), period_terminal_tasks AS (
 		SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')
 	), period_goals AS (
@@ -660,10 +660,10 @@ func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, f
 		SELECT task_id,status FROM period_goals
 		UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_tasks p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
 	)
-	SELECT COALESCE(a.id,''),COALESCE(a.name,'Unassigned / Auto-routed'),s.skill_handle,COUNT(*),SUM(s.completed),SUM(s.terminal),SUM(s.followed),
+	SELECT COALESCE(a.id,''),COALESCE(a.name,'Unassigned / Auto-routed'),s.skill_handle,s.skill_scope,COUNT(*),SUM(s.completed),SUM(s.terminal),SUM(s.followed),
 		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END),COUNT(g.task_id)
 	FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id LEFT JOIN agents a ON a.id=s.agent_definition_id
-	GROUP BY s.agent_definition_id,s.skill_handle ORDER BY COUNT(*) DESC,a.name,s.skill_handle LIMIT 50`
+	GROUP BY s.agent_definition_id,s.skill_handle,s.skill_scope ORDER BY COUNT(*) DESC,a.name,s.skill_handle,s.skill_scope LIMIT 50`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, eventArgs...)
 	args = append(args, execArgs...)
@@ -677,7 +677,7 @@ func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, f
 	for rows.Next() {
 		var row models.AgentSkillOutcomePerformance
 		var completed, terminal, followed, achieved, goalDenominator int
-		if err := rows.Scan(&row.AgentID, &row.AgentName, &row.SkillHandle, &row.TasksEvaluated, &completed, &terminal, &followed, &achieved, &goalDenominator); err != nil {
+		if err := rows.Scan(&row.AgentID, &row.AgentName, &row.SkillHandle, &row.SkillScope, &row.TasksEvaluated, &completed, &terminal, &followed, &achieved, &goalDenominator); err != nil {
 			return nil, fmt.Errorf("scanning Agent skill outcome performance: %w", err)
 		}
 		row.TechnicalCompletion = metric(completed, terminal)

@@ -109,6 +109,9 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 			t.Fatal(err)
 		}
 	}
+	if err := skills.RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: time.Date(2026, 1, 10, 12, 1, 0, 0, time.UTC), ProjectID: project.ID, TaskID: achieved.ID, SkillScope: models.SkillScopeGlobal, SkillHandle: "project:evaluator", EventType: models.SkillEventSelected}); err != nil {
+		t.Fatal(err)
+	}
 
 	cancelled := makeTask(project.ID, "Cancelled", nil, false)
 	cancelled.Status = models.StatusCancelled
@@ -176,8 +179,26 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	if len(dashboard.Funnel) < 4 || dashboard.Funnel[3].Denominator != 2 {
 		t.Errorf("goal funnel denominator = %+v, want two evaluable goal-bearing tasks", dashboard.Funnel)
 	}
-	if len(dashboard.SkillOutcomes) != 1 || dashboard.SkillOutcomes[0].TasksEvaluated != 2 || dashboard.SkillOutcomes[0].GoalAchievement.Numerator != 1 || dashboard.SkillOutcomes[0].GoalAchievement.Denominator != 2 {
-		t.Errorf("observed skill outcomes = %+v, want project-scoped task outcomes for selected skill", dashboard.SkillOutcomes)
+	if len(dashboard.SkillOutcomes) != 2 {
+		t.Fatalf("observed skill outcomes merged identical handles across scopes: %+v", dashboard.SkillOutcomes)
+	}
+	skillOutcomes := map[string]models.SkillOutcomePerformance{}
+	for _, row := range dashboard.SkillOutcomes {
+		skillOutcomes[row.SkillScope] = row
+	}
+	if row := skillOutcomes[models.SkillScopeProject]; row.TasksEvaluated != 2 || row.GoalAchievement.Numerator != 1 || row.GoalAchievement.Denominator != 2 {
+		t.Errorf("project skill outcomes = %+v, want two project-scoped task outcomes", row)
+	}
+	if row := skillOutcomes[models.SkillScopeGlobal]; row.TasksEvaluated != 1 || row.GoalAchievement.Numerator != 1 || row.GoalAchievement.Denominator != 1 {
+		t.Errorf("global skill outcomes = %+v, want one distinct global-scope task outcome", row)
+	}
+	if len(dashboard.AgentSkillOutcomes) != 2 {
+		t.Fatalf("Agent/skill outcomes merged identical handles across scopes: %+v", dashboard.AgentSkillOutcomes)
+	}
+	for _, row := range dashboard.AgentSkillOutcomes {
+		if row.AgentID != agent.ID || row.SkillHandle != "project:evaluator" || row.SkillScope == "" {
+			t.Fatalf("Agent/skill outcome lost Agent, handle, or scope identity: %+v", row)
+		}
 	}
 	if len(dashboard.RecentOutcomes) != 4 {
 		t.Errorf("recent project outcomes = %d, want 4", len(dashboard.RecentOutcomes))
@@ -192,7 +213,7 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	if err != nil {
 		t.Fatalf("filtered Agent dashboard: %v", err)
 	}
-	if filtered.Current.TasksEvaluated != 3 || filtered.AgentDetail == nil || len(filtered.AgentDetail.OutcomeTrend) == 0 || len(filtered.AgentDetail.Categories) == 0 || len(filtered.AgentDetail.ModelMix) == 0 || len(filtered.AgentDetail.Failures) == 0 || len(filtered.AgentDetail.Skills) != 1 || len(filtered.AgentDetail.RecentTasks) != 3 {
+	if filtered.Current.TasksEvaluated != 3 || filtered.AgentDetail == nil || len(filtered.AgentDetail.OutcomeTrend) == 0 || len(filtered.AgentDetail.Categories) == 0 || len(filtered.AgentDetail.ModelMix) == 0 || len(filtered.AgentDetail.Failures) == 0 || len(filtered.AgentDetail.Skills) != 2 || len(filtered.AgentDetail.RecentTasks) != 3 {
 		t.Errorf("Agent filter/detail not applied consistently: current=%+v detail=%+v", filtered.Current, filtered.AgentDetail)
 	}
 	unassigned, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: from, DateTo: to, AgentID: "__unassigned__", Limit: 20})

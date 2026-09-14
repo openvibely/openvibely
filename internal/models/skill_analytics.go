@@ -100,9 +100,15 @@ type SkillFollowThroughMetric struct {
 }
 
 type SkillAgentUsageHeatmap struct {
-	Agents []SkillAgentUsageAgent `json:"agents"`
-	Skills []string               `json:"skills"`
-	Cells  []SkillAgentUsageCell  `json:"cells"`
+	Agents     []SkillAgentUsageAgent `json:"agents"`
+	Skills     []string               `json:"skills"`
+	SkillPairs []SkillAgentUsageSkill `json:"skill_pairs"`
+	Cells      []SkillAgentUsageCell  `json:"cells"`
+}
+
+type SkillAgentUsageSkill struct {
+	SkillHandle string `json:"skill_handle"`
+	SkillScope  string `json:"skill_scope"`
 }
 
 type SkillAgentUsageAgent struct {
@@ -114,6 +120,7 @@ type SkillAgentUsageCell struct {
 	AgentID       string `json:"agent_id"`
 	AgentName     string `json:"agent_name"`
 	SkillHandle   string `json:"skill_handle"`
+	SkillScope    string `json:"skill_scope"`
 	SelectedCount int    `json:"selected_count"`
 	LoadedCount   int    `json:"loaded_count"`
 	ViewedCount   int    `json:"viewed_count"`

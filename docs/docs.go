@@ -1990,6 +1990,9 @@ const docTemplate = `{
                 "skill_handle": {
                     "type": "string"
                 },
+                "skill_scope": {
+                    "type": "string"
+                },
                 "tasks_evaluated": {
                     "type": "integer"
                 },
@@ -2763,6 +2766,9 @@ const docTemplate = `{
                 "skill_handle": {
                     "type": "string"
                 },
+                "skill_scope": {
+                    "type": "string"
+                },
                 "viewed_count": {
                     "type": "integer"
                 }
@@ -2783,11 +2789,28 @@ const docTemplate = `{
                         "$ref": "#/definitions/models.SkillAgentUsageCell"
                     }
                 },
+                "skill_pairs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.SkillAgentUsageSkill"
+                    }
+                },
                 "skills": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "models.SkillAgentUsageSkill": {
+            "type": "object",
+            "properties": {
+                "skill_handle": {
+                    "type": "string"
+                },
+                "skill_scope": {
+                    "type": "string"
                 }
             }
         },
@@ -2938,6 +2961,9 @@ const docTemplate = `{
                     "$ref": "#/definitions/models.AnalyticsMetric"
                 },
                 "skill_handle": {
+                    "type": "string"
+                },
+                "skill_scope": {
                     "type": "string"
                 },
                 "tasks_evaluated": {
