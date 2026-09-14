@@ -102,7 +102,7 @@ func TestOAuthConnectionManagementRoutesRenameMoveAndDelete(t *testing.T) {
 	}
 }
 
-func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
+func TestModelsPageListsSafeSharedOAuthAccountSelectorWithoutManagementCards(t *testing.T) {
 	_, e, repo := setupTestHandler(t)
 	ctx := context.Background()
 	cfg := &models.LLMConfig{Name: "Shared Anthropic model", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
@@ -124,8 +124,15 @@ func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
 		t.Fatalf("models status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "OAuth Account") || !strings.Contains(body, "OAuth Accounts") || !strings.Contains(body, cfg.Name) || !strings.Contains(body, cfg.OAuthConnectionID) || !strings.Contains(body, "Move selected models") || !strings.Contains(body, "/rename") {
-		t.Fatalf("shared OAuth account selector/management controls missing: %s", body)
+	for _, want := range []string{"OAuth Account", cfg.Name, cfg.OAuthConnectionID} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("models page missing safe OAuth account selector value %q", want)
+		}
+	}
+	for _, unwanted := range []string{"oauth-accounts-heading", "OAuth Accounts", "Move selected models", "/rename", "Delete account"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("models page unexpectedly rendered OAuth account management cards value %q", unwanted)
+		}
 	}
 	wantDisconnectConfirmation := `hx-confirm="Disconnect this OAuth account? Linked models: Shared Anthropic model (claude-sonnet), Shared Anthropic sibling (claude-opus). All will require reconnecting."`
 	if !strings.Contains(body, wantDisconnectConfirmation) {
