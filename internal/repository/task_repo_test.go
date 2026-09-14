@@ -4366,7 +4366,13 @@ func TestTaskRepo_ListTaskReferencesUsesCompactProjection(t *testing.T) {
 func TestTaskRepo_ListTaskReferencesHandlesMalformedChainConfigAndRunnableSwarmChild(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
 	ctx := context.Background()
+
+	foreignProject := &models.Project{Name: "Foreign task reference project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, foreignProject); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
 
 	parent := &models.Task{
 		ProjectID: "default", Title: "Blocked swarm parent", Category: models.CategoryActive,
@@ -4383,6 +4389,36 @@ func TestTaskRepo_ListTaskReferencesHandlesMalformedChainConfigAndRunnableSwarmC
 	if err := repo.Create(ctx, child); err != nil {
 		t.Fatalf("create child: %v", err)
 	}
+
+	ordinaryParent := &models.Task{
+		ProjectID: "default", Title: "Blocked ordinary parent", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent,
+	}
+	if err := repo.Create(ctx, ordinaryParent); err != nil {
+		t.Fatalf("create ordinary parent: %v", err)
+	}
+	ordinaryParentID := ordinaryParent.ID
+	if err := repo.Create(ctx, &models.Task{
+		ProjectID: "default", Title: "Runnable chained child", Category: models.CategoryActive,
+		Status: models.StatusPending, ParentTaskID: &ordinaryParentID,
+	}); err != nil {
+		t.Fatalf("create ordinary child: %v", err)
+	}
+
+	foreignParent := &models.Task{
+		ProjectID: "default", Title: "Blocked scoped parent", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent,
+	}
+	if err := repo.Create(ctx, foreignParent); err != nil {
+		t.Fatalf("create scoped parent: %v", err)
+	}
+	foreignParentID := foreignParent.ID
+	if err := repo.Create(ctx, &models.Task{
+		ProjectID: foreignProject.ID, Title: "Foreign runnable swarm child", Category: models.CategoryActive,
+		Status: models.StatusPending, SwarmRole: models.SwarmRoleWorker, ParentTaskID: &foreignParentID,
+	}); err != nil {
+		t.Fatalf("create foreign child: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ? WHERE id = ?`, "{invalid", parent.ID); err != nil {
 		t.Fatalf("store malformed chain config: %v", err)
 	}
@@ -4391,21 +4427,30 @@ func TestTaskRepo_ListTaskReferencesHandlesMalformedChainConfigAndRunnableSwarmC
 	if err != nil {
 		t.Fatalf("ListTaskReferences: %v", err)
 	}
-	var got *TaskReference
-	for i := range references {
-		if references[i].ID == parent.ID {
-			got = &references[i]
-			break
+	byID := make(map[string]TaskReference, len(references))
+	for _, reference := range references {
+		byID[reference.ID] = reference
+	}
+	for _, test := range []struct {
+		name              string
+		id                string
+		wantRunnableChild bool
+		wantChainEnabled  bool
+	}{
+		{name: "same-project swarm child", id: parent.ID, wantRunnableChild: true},
+		{name: "ordinary chained child", id: ordinaryParent.ID},
+		{name: "foreign-project swarm child", id: foreignParent.ID},
+	} {
+		reference, ok := byID[test.id]
+		if !ok {
+			t.Fatalf("%s: parent reference missing", test.name)
 		}
-	}
-	if got == nil {
-		t.Fatalf("parent reference missing: %#v", references)
-	}
-	if got.ChainEnabled {
-		t.Fatal("malformed chain config must not enable the Chain badge")
-	}
-	if !got.HasRunnableSwarmChild {
-		t.Fatal("parent reference must report its runnable swarm child")
+		if reference.HasRunnableSwarmChild != test.wantRunnableChild {
+			t.Errorf("%s: HasRunnableSwarmChild = %t, want %t", test.name, reference.HasRunnableSwarmChild, test.wantRunnableChild)
+		}
+		if reference.ChainEnabled != test.wantChainEnabled {
+			t.Errorf("%s: ChainEnabled = %t, want %t", test.name, reference.ChainEnabled, test.wantChainEnabled)
+		}
 	}
 }
 

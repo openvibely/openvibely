@@ -168,7 +168,9 @@ var taskReferenceSelectColumns = fmt.Sprintf(`t.id, t.project_id, t.title, t.cat
 				CASE WHEN json_type(CASE WHEN json_valid(t.chain_config) THEN t.chain_config ELSE '{}' END, '$.enabled') = 'true' THEN 1 ELSE 0 END AS chain_enabled,
 				t.swarm_role,
 				EXISTS(SELECT 1 FROM tasks child
-					WHERE child.parent_task_id = t.id AND child.status IN ('running', 'pending', 'queued')) AS has_runnable_swarm_child,
+					WHERE child.project_id = t.project_id AND child.parent_task_id = t.id
+						AND child.swarm_role IN ('planner', 'worker', 'reviewer', 'merger', 'integrator')
+						AND child.status IN ('running', 'pending', 'queued')) AS has_runnable_swarm_child,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM automation_dispatch_outbox d
 					JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
