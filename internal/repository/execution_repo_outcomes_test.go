@@ -112,6 +112,9 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	if err := skills.RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: time.Date(2026, 1, 10, 12, 1, 0, 0, time.UTC), ProjectID: project.ID, TaskID: achieved.ID, SkillScope: models.SkillScopeGlobal, SkillHandle: "project:evaluator", EventType: models.SkillEventSelected}); err != nil {
 		t.Fatal(err)
 	}
+	if err := skills.RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: time.Date(2026, 1, 10, 12, 2, 0, 0, time.UTC), ProjectID: other.ID, TaskID: achieved.ID, SkillScope: models.SkillScopeProject, SkillHandle: "foreign:telemetry", EventType: models.SkillEventSelected}); err != nil {
+		t.Fatal(err)
+	}
 
 	cancelled := makeTask(project.ID, "Cancelled", nil, false)
 	cancelled.Status = models.StatusCancelled

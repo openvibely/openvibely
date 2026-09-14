@@ -410,7 +410,18 @@ templ analyticsContent(currentProject *models.Project) {
 							function clearEvidenceParams(params) {
 								['evidence','model','model_id','category','period','technical_status','cycleDistribution','followupDistribution','execution_hour','skill_period','skill_event','skill_agent','skill_handle','skill_evidence_scope','usage_period','usage_model','usage_provider','usage_model_name'].forEach(function(key) { params.delete(key); });
 								return params;
-							}						function showAggregateSelection(view, values, labelID, text) {
+							}
+							function skillEvidenceURL(row, agentID) {
+								const params = clearEvidenceParams(new URLSearchParams(window.location.search));
+								params.set('project_id', projectID);
+								params.set('view', 'learning');
+								params.set('skill_handle', row.skill_handle);
+								params.set('skill_evidence_scope', row.skill_scope);
+								params.set('skill_event', 'used');
+								if (agentID) params.set('skill_agent', agentID); else params.delete('skill_agent');
+								return '/analytics?' + params.toString();
+							}
+							function showAggregateSelection(view, values, labelID, text) {
 							const params = clearEvidenceParams(new URLSearchParams(window.location.search));
 							params.set('view', view);
 							Object.entries(values).forEach(function(entry) { if (entry[1] !== undefined && entry[1] !== null && entry[1] !== '') params.set(entry[0], String(entry[1])); });
@@ -569,7 +580,7 @@ templ analyticsContent(currentProject *models.Project) {
 								function rowsOrEmpty(id, rows, columns, render) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(render).join(''):'<tr><td colspan="'+columns+'" class="text-center opacity-50">'+(detail?'No evidence in this period':'Select an Agent to inspect evidence')+'</td></tr>'; }
 								rowsOrEmpty('agentCategoryTable',detail?(detail.categories||[]):[],5,function(row){return '<tr><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});
 								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '<tr><td><a class="link" href="'+url+'">'+escapeHTML(row.task_title)+'</a></td><td>'+row.failure_count+'</td><td>'+escapeHTML(row.last_error||'Unavailable')+'</td></tr>';});
-									rowsOrEmpty('agentSkillTable',detail?(detail.skills||[]):[],5,function(row){return '<tr><td><a class="link" href="/skills?project_id='+encodeURIComponent(projectID)+'&search='+encodeURIComponent(row.skill_handle)+'"><code>'+escapeHTML(row.skill_handle)+'</code></a> <span class="badge badge-ghost badge-xs">'+escapeHTML(row.skill_scope||'unknown')+'</span></td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});							}
+									rowsOrEmpty('agentSkillTable',detail?(detail.skills||[]):[],5,function(row){const url=skillEvidenceURL(row,selectedAgent);return '<tr><td><a class="link" data-skill-evidence-link href="'+escapeHTML(url)+'"><code>'+escapeHTML(row.skill_handle)+'</code></a> <span class="badge badge-ghost badge-xs">'+escapeHTML(row.skill_scope||'unknown')+'</span></td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td><td>'+escapeHTML(ratioText(row.goal_achievement))+'</td><td>'+escapeHTML(ratioText(row.follow_up))+'</td></tr>';});							}
 							function renderModelCategories(rows) {
 								const table=document.getElementById('modelCategoryTable'); if(!table)return;
 								table.innerHTML=rows.length?rows.map(function(row){return '<tr data-model-id="'+escapeHTML(row.model_config_id)+'"><td><button class="link" type="button" data-model-evidence="'+escapeHTML(row.model_config_id)+'" data-category-evidence="'+escapeHTML(row.category)+'">'+escapeHTML(row.model)+'</button></td><td>'+escapeHTML(row.category)+'</td><td>'+row.tasks_evaluated+'</td><td>'+escapeHTML(ratioText(row.technical_completion))+'</td></tr>';}).join(''):'<tr><td colspan="4" class="text-center opacity-50">No model/category evidence in this period</td></tr>';
@@ -579,14 +590,14 @@ templ analyticsContent(currentProject *models.Project) {
 								const table = document.getElementById('skillOutcomeTable');
 								if (!table) return;
 								table.innerHTML = rows.length ? rows.map(function(row) {
-										return '<tr><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a> <span class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '</span></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
+									return '<tr><td><a class="link" data-skill-evidence-link href="' + escapeHTML(skillEvidenceURL(row, '')) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a> <span class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '</span></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';								}).join('') : '<tr><td colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period</td></tr>';
 							}
 								function renderAgentSkillOutcomes(rows) {
 									const table = document.getElementById('agentSkillOutcomeTable');
 									if (!table) return;
 									table.innerHTML = rows.length ? rows.map(function(row) {
 										const agent = row.agent_id ? '<a class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '</a>' : escapeHTML(row.agent_name);
-											return '<tr><td>' + agent + '</td><td><a class="link" href="/skills?project_id=' + encodeURIComponent(projectID) + '&search=' + encodeURIComponent(row.skill_handle) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a> <span class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '</span></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';									}).join('') : '<tr><td colspan="6" class="text-center opacity-50">No Agent and skill combinations have outcome evidence in this period</td></tr>';
+										return '<tr><td>' + agent + '</td><td><a class="link" data-skill-evidence-link href="' + escapeHTML(skillEvidenceURL(row, row.agent_id || '__unassigned__')) + '"><code>' + escapeHTML(row.skill_handle) + '</code></a> <span class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '</span></td><td>' + row.tasks_evaluated + '</td><td>' + escapeHTML(ratioText(row.technical_completion)) + '</td><td>' + escapeHTML(ratioText(row.goal_achievement)) + '</td><td>' + escapeHTML(ratioText(row.follow_up)) + '</td></tr>';									}).join('') : '<tr><td colspan="6" class="text-center opacity-50">No Agent and skill combinations have outcome evidence in this period</td></tr>';
 								}
 								function renderWorkflowPerformance(rows) {								const filter = document.getElementById('analyticsWorkflowFilter');
 								const selected = selectedWorkflow;

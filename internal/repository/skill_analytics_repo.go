@@ -207,7 +207,7 @@ func (r *SkillAnalyticsRepo) GetAgentUsage(ctx context.Context, filter SkillAnal
 			SELECT skill_handle, skill_scope
 			FROM skill_analytics_events e `+where+`
 			GROUP BY skill_handle, skill_scope
-			ORDER BY SUM(CASE WHEN event_type IN ('selected','loaded') THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, skill_handle ASC, skill_scope ASC
+			ORDER BY SUM(CASE WHEN event_type IN ('selected','loaded','viewed') THEN 1 ELSE 0 END) DESC, COUNT(*) DESC, skill_handle ASC, skill_scope ASC
 			LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return models.SkillAgentUsageHeatmap{}, fmt.Errorf("getting top agent usage skills: %w", err)

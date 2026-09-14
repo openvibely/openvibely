@@ -134,6 +134,30 @@ func TestSkillAnalyticsRepo_AgentUsageHeatmap(t *testing.T) {
 	}
 }
 
+func TestSkillAnalyticsRepo_AgentUsageHeatmapRanksViewedActivity(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewSkillAnalyticsRepo(db)
+	ctx := context.Background()
+	projectID := defaultProjectID(t, db)
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	recordSkillAnalyticsEvents(t, repo,
+		skillEvent(projectID, "view-1", "", models.SkillScopeGlobal, "view_only", models.SkillEventViewed, models.SkillEventSourceManual, now),
+		skillEvent(projectID, "view-2", "", models.SkillScopeGlobal, "view_only", models.SkillEventViewed, models.SkillEventSourceManual, now.Add(time.Minute)),
+		skillEvent(projectID, "select-1", "", models.SkillScopeProject, "selected_once", models.SkillEventSelected, models.SkillEventSourceSkillCurator, now),
+	)
+
+	heatmap, err := repo.GetAgentUsage(ctx, SkillAnalyticsFilter{ProjectID: projectID, Limit: 1})
+	if err != nil {
+		t.Fatalf("GetAgentUsage: %v", err)
+	}
+	if len(heatmap.SkillPairs) != 1 || heatmap.SkillPairs[0].SkillHandle != "view_only" || heatmap.SkillPairs[0].SkillScope != models.SkillScopeGlobal {
+		t.Fatalf("view-only activity was not ranked with selected/loaded activity: %+v", heatmap.SkillPairs)
+	}
+	if len(heatmap.Cells) != 1 || heatmap.Cells[0].ViewedCount != 2 || heatmap.Cells[0].ActivityCount != 2 {
+		t.Fatalf("view-only heatmap cell = %+v", heatmap.Cells)
+	}
+}
+
 func TestSkillAnalyticsRepo_UnderusedSkillsIncludesEnabledSkillsWithNoEvents(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewSkillAnalyticsRepo(db)
