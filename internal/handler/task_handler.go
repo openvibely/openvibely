@@ -3274,11 +3274,14 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "task id required")
 	}
 	pendingInputs := []models.ThreadInput{}
-	if h.threadInputRepo != nil {
-		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID); inputErr == nil {
-			pendingInputs = inputs
-		}
+	if h.threadInputRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
 	}
+	inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID)
+	if inputErr != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load pending inputs")
+	}
+	pendingInputs = inputs
 	return render(c, http.StatusOK, components.ChatComposerQueuedInputRowsForTask(pendingInputs, func(input models.ThreadInput) string {
 		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
 	}, taskID))
