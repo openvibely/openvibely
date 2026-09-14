@@ -356,7 +356,18 @@ func TestExecutionRepo_GetMostFrequentTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create executions (3 for task1, 1 for task2)
+	task3 := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Another Rare Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "Test",
+	}
+	if err := taskRepo.Create(ctx, task3); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create executions (3 for task1, 1 each for task2 and task3).
 	for i := 0; i < 3; i++ {
 		exec := &models.Execution{
 			TaskID:        task1.ID,
@@ -379,30 +390,42 @@ func TestExecutionRepo_GetMostFrequentTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Get most frequent tasks
-	frequencies, err := repo.GetMostFrequentTasks(ctx, project.ID, 10)
+	exec = &models.Execution{
+		TaskID:        task3.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecCompleted,
+		PromptSent:    "prompt",
+	}
+	if err := repo.Create(ctx, exec); err != nil {
+		t.Fatal(err)
+	}
+
+	// The bounded result must use the stable task-ID tie-breaker.
+	frequencies, err := repo.GetMostFrequentTasks(ctx, project.ID, 2)
 	if err != nil {
-		t.Fatalf("GetMostFrequentTasks failed: %v", err)
+		t.Fatalf("GetMostFrequentTasks with limit failed: %v", err)
 	}
-
 	if len(frequencies) != 2 {
-		t.Fatalf("Expected 2 frequencies, got %d", len(frequencies))
+		t.Fatalf("Expected 2 bounded frequencies, got %d", len(frequencies))
+	}
+	if frequencies[0].TaskID != task1.ID || frequencies[0].ExecutionCount != 3 {
+		t.Fatalf("Expected task1 first with count 3, got %+v", frequencies[0])
+	}
+	firstTieID, secondTieID := task2.ID, task3.ID
+	if firstTieID > secondTieID {
+		firstTieID, secondTieID = secondTieID, firstTieID
+	}
+	if frequencies[1].TaskID != firstTieID || frequencies[1].ExecutionCount != 1 {
+		t.Fatalf("Expected stable first tie %s with count 1, got %+v", firstTieID, frequencies[1])
 	}
 
-	// First should be task1 (most frequent)
-	if frequencies[0].TaskID != task1.ID {
-		t.Errorf("Expected first task to be %s, got %s", task1.ID, frequencies[0].TaskID)
+	// limit=0 is the explicit complete-history contract.
+	frequencies, err = repo.GetMostFrequentTasks(ctx, project.ID, 0)
+	if err != nil {
+		t.Fatalf("GetMostFrequentTasks full history failed: %v", err)
 	}
-	if frequencies[0].ExecutionCount != 3 {
-		t.Errorf("Expected ExecutionCount=3 for task1, got %d", frequencies[0].ExecutionCount)
-	}
-
-	// Second should be task2
-	if frequencies[1].TaskID != task2.ID {
-		t.Errorf("Expected second task to be %s, got %s", task2.ID, frequencies[1].TaskID)
-	}
-	if frequencies[1].ExecutionCount != 1 {
-		t.Errorf("Expected ExecutionCount=1 for task2, got %d", frequencies[1].ExecutionCount)
+	if len(frequencies) != 3 || frequencies[1].TaskID != firstTieID || frequencies[2].TaskID != secondTieID {
+		t.Fatalf("Expected complete stable history [%s, %s], got %+v", firstTieID, secondTieID, frequencies)
 	}
 }
 

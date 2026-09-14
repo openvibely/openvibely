@@ -270,6 +270,80 @@ func TestGetMostFrequentTasks_WithLimit(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
+func TestGetMostFrequentTasks_StableTieBreakAndFullHistory(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Analytics project").Build()
+	agent := &models.LLMConfig{
+		Name:     "Analytics agent",
+		Provider: models.ProviderAnthropic,
+		Model:    "claude-3-5-sonnet-20241022",
+	}
+	if err := tc.llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	createTask := func(title string) *models.Task {
+		t.Helper()
+		task := &models.Task{
+			ProjectID: project.ID,
+			Title:     title,
+			Category:  models.CategoryActive,
+			Status:    models.StatusPending,
+			Prompt:    "analytics test",
+		}
+		if err := tc.taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", title, err)
+		}
+		return task
+	}
+	createExecutions := func(taskID string, count int) {
+		t.Helper()
+		for i := 0; i < count; i++ {
+			if err := tc.execRepo.Create(ctx, &models.Execution{
+				TaskID:        taskID,
+				AgentConfigID: agent.ID,
+				Status:        models.ExecCompleted,
+				PromptSent:    "analytics test",
+			}); err != nil {
+				t.Fatalf("create execution for %s: %v", taskID, err)
+			}
+		}
+	}
+
+	mostFrequent := createTask("Most frequent")
+	tieA := createTask("Tie A")
+	tieB := createTask("Tie B")
+	createExecutions(mostFrequent.ID, 3)
+	createExecutions(tieA.ID, 1)
+	createExecutions(tieB.ID, 1)
+
+	firstTieID, secondTieID := tieA.ID, tieB.ID
+	if firstTieID > secondTieID {
+		firstTieID, secondTieID = secondTieID, firstTieID
+	}
+
+	bounded := tc.HTTP().Get("/api/analytics/most-frequent-tasks?project_id=" + project.ID + "&limit=2").Execute()
+	tc.Assert(bounded).StatusCode(http.StatusOK)
+	var boundedRows []repository.TaskFrequency
+	if err := json.Unmarshal(bounded.Body.Bytes(), &boundedRows); err != nil {
+		t.Fatalf("decode bounded response: %v", err)
+	}
+	if len(boundedRows) != 2 || boundedRows[0].TaskID != mostFrequent.ID || boundedRows[1].TaskID != firstTieID {
+		t.Fatalf("bounded rows = %+v, want most frequent then stable tie %s", boundedRows, firstTieID)
+	}
+
+	full := tc.HTTP().Get("/api/analytics/most-frequent-tasks?project_id=" + project.ID + "&limit=0").Execute()
+	tc.Assert(full).StatusCode(http.StatusOK)
+	var fullRows []repository.TaskFrequency
+	if err := json.Unmarshal(full.Body.Bytes(), &fullRows); err != nil {
+		t.Fatalf("decode full-history response: %v", err)
+	}
+	if len(fullRows) != 3 || fullRows[1].TaskID != firstTieID || fullRows[2].TaskID != secondTieID {
+		t.Fatalf("full-history rows = %+v, want stable ties [%s, %s]", fullRows, firstTieID, secondTieID)
+	}
+}
+
 func TestGetFailedTaskPatterns(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/failed-task-patterns").Execute()

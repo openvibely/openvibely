@@ -397,7 +397,7 @@ const docTemplate = `{
         },
         "/api/analytics/most-frequent-tasks": {
             "get": {
-                "description": "Returns tasks ordered by execution count.",
+                "description": "Returns tasks ordered by execution count descending, then task ID ascending for deterministic ties. Omitted limit defaults to 10; limit=0 returns all matching tasks.",
                 "produces": [
                     "application/json"
                 ],
@@ -415,7 +415,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "default": 10,
-                        "description": "Maximum number of tasks to return",
+                        "description": "Maximum number of tasks to return; 0 returns all matching tasks",
                         "name": "limit",
                         "in": "query"
                     }

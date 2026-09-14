@@ -443,11 +443,11 @@ func (h *Handler) GetAgentUsageByProject(c echo.Context) error {
 
 // GetMostFrequentTasks returns the most frequently executed tasks
 // @Summary Get most frequent tasks
-// @Description Returns tasks ordered by execution count.
+// @Description Returns tasks ordered by execution count descending, then task ID ascending for deterministic ties. Omitted limit defaults to 10; limit=0 returns all matching tasks.
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
-// @Param limit query int false "Maximum number of tasks to return" default(10)
+// @Param limit query int false "Maximum number of tasks to return; 0 returns all matching tasks" default(10)
 // @Success 200 {array} repository.TaskFrequency "Most frequently executed tasks"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/most-frequent-tasks [get]
