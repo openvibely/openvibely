@@ -519,15 +519,30 @@ templ analyticsContent(currentProject *models.Project) {
 									const coverage = 'loaded ' + recent.length + ' of ' + evidenceTotal + ' project-scoped tasks';
 									if (evidenceLabel) evidenceLabel.textContent = evidenceKey || evidenceValue ? 'Filtered supporting tasks: ' + (evidenceKey || 'selection') + (evidenceValue ? ' · ' + evidenceValue : '') + ' · matching loaded rows n=' + evidence.length + ' · ' + coverage : 'Task evidence · ' + coverage;
 									const loadMore = document.getElementById('loadMoreEvidence');
-									if (loadMore) { loadMore.classList.toggle('hidden', recent.length >= evidenceTotal); loadMore.disabled = evidencePageLoading; loadMore.textContent = 'Load more evidence (' + recent.length + ' of ' + evidenceTotal + ')'; loadMore.dataset.nextOffset = String(recent.length); }								const evidenceTechnicalResult = function(row) {
-									if (evidenceKey === 'technical_completion' || evidenceKey === 'technical_completed') return 'completed (' + Number(row.period_completed_count || 0) + ' executions)';
-									if (evidenceKey === 'technical_status') { const status=evidenceParams.get('technical_status') || ''; return status + ' (' + Number(row['period_' + status + '_count'] || 0) + ' executions)'; }
-									return row.technical_result;
-								};
-								document.getElementById('outcomeEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) {
-									const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
-									return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(evidenceTechnicalResult(row)) + '</td><td>' + escapeHTML(row.goal_result || 'Not goal-bearing') + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(row.cycle_eligible ? formatDuration(row.cycle_time_ms || 0) : 'Unavailable') + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';
-								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { const params=clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view','outcomes'); params.set('evidence',stage.key); return '<a class="card bg-base-200" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
+									if (loadMore) { loadMore.classList.toggle('hidden', recent.length >= evidenceTotal); loadMore.disabled = evidencePageLoading; loadMore.textContent = 'Load more evidence (' + recent.length + ' of ' + evidenceTotal + ')'; loadMore.dataset.nextOffset = String(recent.length); }
+									const evidenceTechnicalResult = function(row) {
+										if (evidenceKey === 'skill_outcomes') {
+											const completed = Number(row.period_completed_count || 0);
+											const failed = Number(row.period_failed_count || 0);
+											const cancelled = Number(row.period_cancelled_count || 0);
+											const counts = completed + ' completed, ' + failed + ' failed, ' + cancelled + ' cancelled';
+											if (completed > 0) return 'Completed (numerator; ' + counts + ')';
+											if (failed + cancelled > 0) return 'Not completed (denominator only; ' + counts + ')';
+											return 'Excluded from technical denominator (no terminal execution)';
+										}
+										if (evidenceKey === 'technical_completion' || evidenceKey === 'technical_completed') return 'completed (' + Number(row.period_completed_count || 0) + ' executions)';
+										if (evidenceKey === 'technical_status') { const status=evidenceParams.get('technical_status') || ''; return status + ' (' + Number(row['period_' + status + '_count'] || 0) + ' executions)'; }
+										return row.technical_result;
+									};
+									const evidenceGoalResult = function(row) {
+										if (evidenceKey !== 'skill_outcomes') return row.goal_result || 'Not goal-bearing';
+										if (row.goal_achievement_eligible !== true) return 'Excluded from goal denominator';
+										if (row.goal_achieved_in_period === true) return 'Achieved (numerator)';
+										return 'Not achieved (denominator only)';
+									};
+									document.getElementById('outcomeEvidenceTable').innerHTML = evidence.length ? evidence.map(function(row) {
+										const taskURL = '/tasks/' + encodeURIComponent(row.task_id) + '?project_id=' + encodeURIComponent(projectID);
+										return '<tr><td><a class="link" href="' + taskURL + '">' + escapeHTML(row.task_title) + '</a></td><td>' + escapeHTML(evidenceTechnicalResult(row)) + '</td><td>' + escapeHTML(evidenceGoalResult(row)) + '</td><td>' + escapeHTML(row.agent_name) + '</td><td>' + escapeHTML(row.model) + '</td><td>' + row.execution_count + '</td><td>' + row.follow_up_count + '</td><td>' + escapeHTML(row.cycle_eligible ? formatDuration(row.cycle_time_ms || 0) : 'Unavailable') + '</td><td>' + escapeHTML(row.known_cost_usd == null ? 'Unavailable' : formatCost(row.known_cost_usd)) + '</td></tr>';								}).join('') : '<tr><td colspan="9" class="text-center opacity-50">No task outcomes in this period</td></tr>';							document.getElementById('outcomeFunnel').innerHTML = (data.funnel || []).map(function(stage) { const params=clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view','outcomes'); params.set('evidence',stage.key); return '<a class="card bg-base-200" href="/analytics?' + escapeHTML(params.toString()) + '"><div class="card-body p-3"><span class="text-sm">' + escapeHTML(stage.label) + '</span><strong class="text-xl">' + stage.count + '</strong><span class="text-xs opacity-60">denominator ' + stage.denominator + '</span></div></a>'; }).join('') || '<p class="opacity-50">No funnel evidence in this period.</p>';
 							renderDistributionChart('cycleDistribution', 'cycleDistributionChart', data.cycle_distribution || []);
 							renderDistributionChart('followupDistribution', 'followupDistributionChart', data.follow_up_distribution || []);
 								renderAgentPerformance(data.agents || []);
