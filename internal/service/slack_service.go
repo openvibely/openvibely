@@ -119,30 +119,33 @@ type SlackService struct {
 	httpClient   *http.Client
 	oauthBaseURL string
 
-	mu                             sync.RWMutex
-	botClient                      *slack.Client
-	socketClient                   *socketmode.Client
-	running                        bool
-	ctx                            context.Context
-	cancel                         context.CancelFunc
-	userProjects                   map[string]string
-	processedMessageEvents         map[string]time.Time
-	processingMessageEvents        map[string]struct{}
-	cleanupMessageEvents           map[string]struct{}
-	postMessageFn                  func(channelID, threadTS, text string) (string, error)
-	openConversationFn             func(userID string) (string, error)
-	processIncomingMessageFn       func(msg slackIncomingMessage)
-	processIncomingMessageResultFn func(msg slackIncomingMessage) bool
-	ackSocketRequestFn             func(*socketmode.Client, socketmode.Request)
-	createQueuedInputFn            func(context.Context, *models.ThreadInput) (bool, error)
-	createExecutionFn              func(context.Context, *models.Execution) (bool, error)
-	createFirstTurnExecutionFn     func(context.Context, repository.SQLExecutor, *models.Execution) error
-	deleteProvisionalTaskFn        func(context.Context, string) error
-	downloadSlackAttachmentsFn     func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error)
-	savePendingAttachmentsFn       func([]models.ChatAttachment) (string, error)
-	cleanupAttachmentSourcesFn     func([]models.ChatAttachment)
-	preACKTimeout                  time.Duration
-	cleanupRetryDelay              time.Duration
+	mu                                   sync.RWMutex
+	projectSelectionMutationMu           sync.Mutex
+	botClient                            *slack.Client
+	socketClient                         *socketmode.Client
+	running                              bool
+	ctx                                  context.Context
+	cancel                               context.CancelFunc
+	userProjects                         map[string]string
+	projectSelectionGeneration           uint64
+	beforeActiveProjectCachePopulateHook func()
+	processedMessageEvents               map[string]time.Time
+	processingMessageEvents              map[string]struct{}
+	cleanupMessageEvents                 map[string]struct{}
+	postMessageFn                        func(channelID, threadTS, text string) (string, error)
+	openConversationFn                   func(userID string) (string, error)
+	processIncomingMessageFn             func(msg slackIncomingMessage)
+	processIncomingMessageResultFn       func(msg slackIncomingMessage) bool
+	ackSocketRequestFn                   func(*socketmode.Client, socketmode.Request)
+	createQueuedInputFn                  func(context.Context, *models.ThreadInput) (bool, error)
+	createExecutionFn                    func(context.Context, *models.Execution) (bool, error)
+	createFirstTurnExecutionFn           func(context.Context, repository.SQLExecutor, *models.Execution) error
+	deleteProvisionalTaskFn              func(context.Context, string) error
+	downloadSlackAttachmentsFn           func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error)
+	savePendingAttachmentsFn             func([]models.ChatAttachment) (string, error)
+	cleanupAttachmentSourcesFn           func([]models.ChatAttachment)
+	preACKTimeout                        time.Duration
+	cleanupRetryDelay                    time.Duration
 }
 
 func NewSlackService(
@@ -1549,6 +1552,8 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 
 func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, projectID string) error {
 	key := slackUserProjectKey(teamID, userID)
+	s.projectSelectionMutationMu.Lock()
+	defer s.projectSelectionMutationMu.Unlock()
 	if s.slackUserProjectRepo != nil {
 		if err := s.slackUserProjectRepo.SetUserProject(ctx, teamID, userID, projectID); err != nil {
 			applog.Infof("[slack] persist active project failed: %v", err)
@@ -1556,6 +1561,9 @@ func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, pro
 		}
 	}
 	s.mu.Lock()
+	if s.userProjects == nil {
+		s.userProjects = make(map[string]string)
+	}
 	s.userProjects[key] = projectID
 	s.mu.Unlock()
 	return nil
@@ -1566,8 +1574,11 @@ func (s *SlackService) InvalidateProjectSelection(projectID string) {
 	if projectID == "" {
 		return
 	}
+	s.projectSelectionMutationMu.Lock()
+	defer s.projectSelectionMutationMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.projectSelectionGeneration++
 	for key, cachedProjectID := range s.userProjects {
 		if cachedProjectID == projectID {
 			delete(s.userProjects, key)
@@ -1577,42 +1588,64 @@ func (s *SlackService) InvalidateProjectSelection(projectID string) {
 
 func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID string) (string, error) {
 	key := slackUserProjectKey(teamID, userID)
-
-	s.mu.RLock()
-	if projectID, ok := s.userProjects[key]; ok {
+	for {
+		s.mu.RLock()
+		if projectID, ok := s.userProjects[key]; ok {
+			s.mu.RUnlock()
+			return projectID, nil
+		}
+		generation := s.projectSelectionGeneration
 		s.mu.RUnlock()
-		return projectID, nil
-	}
-	s.mu.RUnlock()
 
-	if s.slackUserProjectRepo != nil {
-		saved, err := s.slackUserProjectRepo.GetUserProject(ctx, teamID, userID)
+		if s.slackUserProjectRepo != nil {
+			saved, err := s.slackUserProjectRepo.GetUserProject(ctx, teamID, userID)
+			if err != nil {
+				return "", fmt.Errorf("load saved Slack project: %w", err)
+			}
+			if saved != "" {
+				if selected, ok := s.populateActiveProject(key, saved, generation); ok {
+					return selected, nil
+				}
+				continue
+			}
+		}
+
+		if s.projectRepo == nil {
+			return "", nil
+		}
+		projects, err := s.projectRepo.List(ctx)
 		if err != nil {
-			return "", fmt.Errorf("load saved Slack project: %w", err)
+			return "", fmt.Errorf("list Slack projects: %w", err)
 		}
-		if saved != "" {
-			s.mu.Lock()
-			s.userProjects[key] = saved
-			s.mu.Unlock()
-			return saved, nil
+		if len(projects) == 0 {
+			return "", nil
+		}
+		selected := fallbackProjectID(projects)
+		if cached, ok := s.populateActiveProject(key, selected, generation); ok {
+			return cached, nil
 		}
 	}
+}
 
-	if s.projectRepo == nil {
-		return "", nil
+func (s *SlackService) populateActiveProject(key, projectID string, expectedGeneration uint64) (string, bool) {
+	if s.beforeActiveProjectCachePopulateHook != nil {
+		s.beforeActiveProjectCachePopulateHook()
 	}
-	projects, err := s.projectRepo.List(ctx)
-	if err != nil {
-		return "", fmt.Errorf("list Slack projects: %w", err)
-	}
-	if len(projects) == 0 {
-		return "", nil
-	}
-	selected := fallbackProjectID(projects)
+	s.projectSelectionMutationMu.Lock()
+	defer s.projectSelectionMutationMu.Unlock()
 	s.mu.Lock()
-	s.userProjects[key] = selected
-	s.mu.Unlock()
-	return selected, nil
+	defer s.mu.Unlock()
+	if s.projectSelectionGeneration != expectedGeneration {
+		return "", false
+	}
+	if current, ok := s.userProjects[key]; ok {
+		return current, true
+	}
+	if s.userProjects == nil {
+		s.userProjects = make(map[string]string)
+	}
+	s.userProjects[key] = projectID
+	return projectID, true
 }
 
 func slackUserProjectKey(teamID, userID string) string {
