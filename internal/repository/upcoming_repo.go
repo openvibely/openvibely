@@ -77,6 +77,13 @@ const upcomingWaitingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
  WHERE t.project_id = ? AND t.category = 'active' AND t.status IN ('pending', 'queued')
  ORDER BY t.priority DESC, t.display_order ASC`
 
+const upcomingBlockedTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
+	` + upcomingTaskListWithoutScheduleColumns + `
+ FROM tasks t
+ LEFT JOIN agent_configs ac ON ac.id = t.agent_id
+ WHERE t.project_id = ? AND t.category != 'chat' AND t.status = 'blocked'
+ ORDER BY t.priority DESC, t.display_order ASC, t.updated_at ASC, t.id ASC`
+
 const upcomingPendingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
 	` + upcomingTaskListWithoutScheduleColumns + `
  FROM tasks t
@@ -108,6 +115,17 @@ func (r *UpcomingRepo) ListWaitingActiveTasks(ctx context.Context, projectID str
 	tasks, err := r.listUpcomingTasks(ctx, upcomingWaitingActiveTasksQuery, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing waiting active tasks: %w", err)
+	}
+	return tasks, nil
+}
+
+// ListBlockedTasks returns tasks waiting for a parent or orchestration gate in
+// deterministic priority/display order. It is a read-only projection and does
+// not make blocked tasks runnable.
+func (r *UpcomingRepo) ListBlockedTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
+	tasks, err := r.listUpcomingTasks(ctx, upcomingBlockedTasksQuery, upcomingTaskPromptPreviewLen, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing blocked tasks: %w", err)
 	}
 	return tasks, nil
 }
@@ -246,6 +264,8 @@ func (r *UpcomingRepo) GetTaskSummary(ctx context.Context, projectID string, now
 			s.CompletedCount = count
 		case models.StatusFailed:
 			s.FailedCount = count
+		case models.StatusBlocked:
+			s.BlockedCount = count
 		}
 	}
 	rows.Close()

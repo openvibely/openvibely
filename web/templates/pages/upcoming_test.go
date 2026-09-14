@@ -97,6 +97,44 @@ func TestUpcomingContentRendersQueuedTaskAsQueued(t *testing.T) {
 	}
 }
 
+func TestUpcomingContentRendersBlockedTaskAsDependencyWaiting(t *testing.T) {
+	upcoming := &models.Upcoming{
+		GeneratedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+		BlockedTasks: []models.UpcomingTask{{
+			Task: models.Task{
+				ID:        "blocked-task",
+				ProjectID: "project-1",
+				Title:     "Waiting chain child",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusBlocked,
+				Priority:  4,
+			},
+			AgentName: "Test Agent",
+		}},
+		TaskSummary: &models.TaskSummary{BlockedCount: 1, TotalPending: 1},
+	}
+
+	var pulse bytes.Buffer
+	if err := UpcomingContent(upcoming, "project-1").Render(context.Background(), &pulse); err != nil {
+		t.Fatalf("render upcoming content: %v", err)
+	}
+	body := pulse.String()
+	for _, want := range []string{"Waiting for Parent", "Waiting chain child", "P4", "Test Agent", "unfinished"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("blocked pulse missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `data-upcoming-stop`) {
+		t.Fatalf("blocked card must not expose a stop control: %s", body)
+	}
+	if !strings.Contains(body, `data-upcoming-task-id="blocked-task"`) {
+		t.Fatalf("blocked card must retain task detail navigation target: %s", body)
+	}
+	if strings.Contains(body, "No active work right now") {
+		t.Fatalf("blocked-only agenda must not render the empty state: %s", body)
+	}
+}
+
 func TestUpcomingTaskCardsRenderStopOnlyForEligibleTasks(t *testing.T) {
 	currentProjectID := "project-1"
 	tests := []struct {
