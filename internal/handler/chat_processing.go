@@ -3190,54 +3190,15 @@ func (h *Handler) executeViewTaskThreadRequest(ctx context.Context, params strea
 		if req.Limit > 0 {
 			executions, err = h.execRepo.ListByTaskChronologicalPage(ctx, task.ID, offset, req.Limit)
 		} else {
-			executions, err = h.loadTaskThreadExecutions(ctx, task, total, offset)
+			executions, err = service.LoadBoundedTaskThreadExecutions(ctx, h.execRepo, task, total, offset, func(loaded []models.Execution) bool {
+				return h.formatThreadTranscriptPage(task, loaded, total, offset).budgetExceeded
+			})
 		}
 		if err != nil {
 			return "", fmt.Errorf("retrieving thread for task %q: %w", task.Title, err)
 		}
 	}
 	return strings.TrimSpace(h.formatThreadTranscriptWithTotal(task, executions, total, offset)), nil
-}
-
-// taskThreadExecutionFetchBatchSize keeps zero-limit runtime reads bounded. The
-// loader fetches chronological pages until the formatter reaches its 80 KiB
-// transcript budget, so a long history does not require an unbounded payload
-// read merely to discover where the transcript must stop.
-const taskThreadExecutionFetchBatchSize = 20
-
-func (h *Handler) loadTaskThreadExecutions(ctx context.Context, task *models.Task, total, offset int) ([]models.Execution, error) {
-	if task == nil || total <= 0 || offset < 0 || offset >= total {
-		return []models.Execution{}, nil
-	}
-
-	executions := make([]models.Execution, 0, minInt(taskThreadExecutionFetchBatchSize, total-offset))
-	nextOffset := offset
-	for nextOffset < total {
-		batchLimit := minInt(taskThreadExecutionFetchBatchSize, total-nextOffset)
-		batch, err := h.execRepo.ListByTaskChronologicalPage(ctx, task.ID, nextOffset, batchLimit)
-		if err != nil {
-			return nil, err
-		}
-		if len(batch) == 0 {
-			break
-		}
-		executions = append(executions, batch...)
-		if h.formatThreadTranscriptPage(task, executions, total, offset).budgetExceeded {
-			break
-		}
-		if len(batch) < batchLimit {
-			break
-		}
-		nextOffset += len(batch)
-	}
-	return executions, nil
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // executeChatScheduleRequests schedules tasks from typed runtime-tool requests.
