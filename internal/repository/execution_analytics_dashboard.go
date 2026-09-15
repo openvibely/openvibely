@@ -466,7 +466,7 @@ func (r *ExecutionRepo) queryOutcomeCosts(ctx context.Context, filter AnalyticsD
 		SELECT g.task_id FROM task_goals g JOIN period_tasks p ON p.task_id=g.task_id WHERE g.status='achieved'` + goalWindow + `
 	), task_usage AS (
 		SELECT p.task_id,SUM(u.cost_usd) known_cost,SUM(u.total_tokens) tokens,
-			MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) has_cost,COUNT(u.id) has_usage
+			MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) has_cost,COUNT(u.task_id) has_usage
 		FROM period_tasks p CROSS JOIN llm_usage_events u INDEXED BY idx_llm_usage_events_task_project_time_cost
 		ON u.task_id=p.task_id AND u.project_id=?` + usageWindow + ` GROUP BY p.task_id
 	)

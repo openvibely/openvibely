@@ -3705,7 +3705,8 @@ func TestMigration192AddsCoveringAnalyticsExecutionIndex(t *testing.T) {
 	if strings.Contains(executionBefore, "USING COVERING INDEX idx_executions_task_analytics") {
 		t.Fatalf("migration 191 unexpectedly has Analytics execution covering index: %q", executionBefore)
 	}
-	usageQuery := `SELECT u.task_id,SUM(u.cost_usd),SUM(u.total_tokens)
+	usageQuery := `SELECT u.task_id,SUM(u.cost_usd),SUM(u.total_tokens),
+		MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END),COUNT(u.task_id)
 		FROM llm_usage_events u WHERE u.task_id=? AND u.project_id=? AND u.occurred_at>=? GROUP BY u.task_id`
 	usageBefore := explainQueryPlan(t, db, usageQuery, "task", "project", "2026-01-01 00:00:00")
 	if strings.Contains(usageBefore, "USING COVERING INDEX idx_llm_usage_events_task_project_time_cost") {
