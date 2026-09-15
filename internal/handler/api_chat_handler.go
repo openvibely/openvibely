@@ -421,19 +421,12 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		chatHistory = []models.Execution{}
 	}
 	priorHistory := filterChatHistory(chatHistory, exec.ID)
-	// Build task context using shared function (same as /chat and Telegram)
-	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
 
-	// Combine context (including personality if set)
-	fullContext := taskContext
-	if attachmentContext != "" {
-		if fullContext != "" {
-			fullContext += "\n"
-		}
-		fullContext += attachmentContext
-	}
+	// Live project catalogs are discovered through runtime tools instead of
+	// being embedded in every API Chat request.
+	fullContext := attachmentContext
 	if personalityContext := h.getPersonalityContext(c.Request().Context(), projectID); personalityContext != "" {
-		fullContext += personalityContext
+		fullContext = combineContexts(fullContext, personalityContext)
 	}
 
 	// Get working directory for the provider call.

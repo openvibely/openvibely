@@ -49,7 +49,7 @@ var (
 //   - Agent: LLM configuration (model, provider, API key, etc.)
 //   - ChatHistory: Prior conversation turns for context (may be empty for first message)
 //   - ProjectID: Project ID for task creation/lookup
-//   - SystemContext: Additional system prompt context (task list, file contents, etc.)
+//   - SystemContext: Request-scoped system prompt context (attachments, personality, etc.)
 //   - WorkDir: Working directory for CLI agents (project repo path)
 //   - ImageAttachments: Image files for vision-capable models
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
@@ -1439,12 +1439,6 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
 	}
-	availableModels, listErr := h.llmConfigRepo.ListChatSelectionOptions(ctx)
-	if listErr != nil {
-		applog.Infof("[handler] startQueuedChatInput error listing chat model selection options: %v", listErr)
-		availableModels = []models.LLMConfig{}
-	}
-	taskContext := h.buildChatContext(ctx, input.ProjectID, availableModels)
 	personalityContext := h.getPersonalityContext(ctx, input.ProjectID)
 	workDir := h.resolveWorkDir(ctx, input.ProjectID)
 	chatMode := models.NormalizeChatMode(string(input.ChatMode))
@@ -1470,7 +1464,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		Message:     input.Content,
 		Agent:       *agent,
 		ChatHistory: history, ProjectID: input.ProjectID,
-		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
+		SystemContext:    combineContexts(attachmentContext, personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
@@ -3850,38 +3844,6 @@ func (h *Handler) executeToggleAlertRequests(ctx context.Context, projectID stri
 			return fmt.Sprintf("- Error marking alert %q as read: %v", alertID, err)
 		},
 	)
-}
-
-// buildChatContext builds the context string for chat prompts, including task, model, and schedule information.
-// Returns a formatted string with current tasks (excluding chat tasks), available models, and schedule details.
-// Delegates to the shared service.BuildChatContext so /chat and Telegram produce identical context.
-func (h *Handler) buildChatContext(ctx context.Context, projectID string, availableModels []models.LLMConfig) string {
-	existingTasks, err := h.taskSvc.ListByProject(ctx, projectID, "")
-	if err != nil {
-		applog.Infof("[handler] buildChatContext error listing tasks for project %s: %v", projectID, err)
-		existingTasks = []models.Task{}
-	}
-
-	schedules, err := h.scheduleRepo.ListByProject(ctx, projectID)
-	if err != nil {
-		applog.Infof("[handler] buildChatContext error listing schedules for project %s: %v", projectID, err)
-		schedules = []models.Schedule{}
-	}
-
-	agentDefinitions := h.listChatAssignableAgentDefinitions(ctx)
-	return service.BuildChatContextWithAgentDefinitions(existingTasks, availableModels, agentDefinitions, schedules, time.Now())
-}
-
-func (h *Handler) listChatAssignableAgentDefinitions(ctx context.Context) []models.ChatAssignableAgentDefinition {
-	if h.agentRepo == nil {
-		return nil
-	}
-	agents, err := h.agentRepo.ListChatAssignableDefinitions(ctx)
-	if err != nil {
-		applog.Infof("[handler] buildChatContext error listing agent definitions: %v", err)
-		return nil
-	}
-	return service.UniqueChatAssignableAgentDefinitions(agents)
 }
 
 // buildThreadSystemContext builds the system context string for task thread follow-ups.

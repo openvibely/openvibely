@@ -314,9 +314,9 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		userMsg = components.ChatBubble("User", message)
 	}
 	agentMsg := components.ChatBubbleStreaming("Assistant", exec.ID, "chat-messages", "", false)
-	// Build context and spawn LLM processing goroutine
-	availableModels, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
-	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
+	// Build request-local context and spawn the LLM processing goroutine. Live
+	// project catalogs are discovered through runtime tools instead of being
+	// embedded in every Chat request.
 	personalityContext := h.getPersonalityContext(c.Request().Context(), projectID)
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
 
@@ -328,7 +328,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		ChatHistory:      priorHistory,
 		ProjectID:        projectID,
 		PrincipalID:      h.authPrincipalID(c),
-		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
+		SystemContext:    combineContexts(attachmentContext, personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
