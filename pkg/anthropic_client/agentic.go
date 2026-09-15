@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
@@ -30,7 +31,6 @@ const (
 	anthropicWebSearchToolType    = "web_search_20250305"
 	anthropicWebFetchToolType     = "web_fetch_20250910"
 	anthropicToolOutputTokenLimit = 10000
-	anthropicApproxBytesPerToken  = 4
 )
 
 // AgenticOptions configures an agentic send with tool use.
@@ -1059,7 +1059,7 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	if err != nil {
 		return err
 	}
-	tokens := (len(encoded) + anthropicApproxBytesPerToken - 1) / anthropicApproxBytesPerToken
+	tokens := tokenestimate.FromByteCount(len(encoded))
 	if tokens <= safe {
 		return nil
 	}

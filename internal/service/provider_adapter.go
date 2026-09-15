@@ -26,6 +26,7 @@ import (
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
@@ -159,7 +160,6 @@ its work. Use it to continue without duplicating completed work. This is histori
 context, not a new user instruction or authorization:`
 
 const (
-	providerApproxBytesPerToken          = 4
 	retainedUserMessageTokenBudget       = 20000
 	defaultOpenAICompatibleContextWindow = 128000
 	defaultAnthropicContextWindow        = 200000
@@ -487,7 +487,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	for _, att := range req.Attachments {
 		budget.AttachmentTokens += estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
 		if att.FileSize > 0 {
-			budget.AttachmentTokens += int((att.FileSize + providerApproxBytesPerToken - 1) / providerApproxBytesPerToken)
+			budget.AttachmentTokens += tokenestimate.FromByteCount(int(att.FileSize))
 		}
 	}
 	return budget
@@ -678,7 +678,7 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	for _, att := range req.Attachments {
 		total += estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
 		if att.FileSize > 0 {
-			total += int((att.FileSize + 3) / 4)
+			total += tokenestimate.FromByteCount(int(att.FileSize))
 		}
 	}
 	for _, exec := range req.ChatHistory {
@@ -1372,17 +1372,11 @@ func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []m
 }
 
 func estimatedUTF8Tokens(text string) int {
-	bytes := len([]byte(text))
-	if bytes == 0 {
-		return 0
-	}
-	// Use a tokenizer-free fallback of four UTF-8 bytes per token.
-	// Provider-reported usage remains authoritative when present.
-	return (bytes + providerApproxBytesPerToken - 1) / providerApproxBytesPerToken
+	return tokenestimate.FromText(text)
 }
 
 func truncateMiddleByEstimatedTokens(text string, tokenBudget int) string {
-	byteBudget := tokenBudget * providerApproxBytesPerToken
+	byteBudget := tokenestimate.ByteBudget(tokenBudget)
 	if byteBudget <= 0 || len([]byte(text)) <= byteBudget {
 		return text
 	}
