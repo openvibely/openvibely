@@ -114,6 +114,8 @@ type modelEditDetails struct {
 	APIKey                string             `json:"api_key"`
 	AuthMethod            models.AuthMethod  `json:"auth_method"`
 	OAuthConnectionID     string             `json:"oauth_connection_id"`
+	OAuthConnected        bool               `json:"oauth_connected"`
+	OAuthNeedsReauth      bool               `json:"oauth_needs_reauth"`
 	MaxWorkers            int                `json:"max_workers"`
 	WorkerTimeout         int                `json:"worker_timeout"`
 	OAuthClientID         string             `json:"oauth_client_id"`
@@ -149,7 +151,8 @@ func (h *Handler) GetModelEditDetails(c echo.Context) error {
 		ReasoningEffort: config.ReasoningEffort, Temperature: config.Temperature,
 		IsDefault: config.IsDefault, APIKey: config.APIKey, AuthMethod: config.AuthMethod,
 		OAuthConnectionID: config.OAuthConnectionID,
-		MaxWorkers:        config.MaxWorkers, WorkerTimeout: config.WorkerTimeout,
+		OAuthConnected:    config.HasValidOAuthToken(), OAuthNeedsReauth: config.OAuthNeedsReauth,
+		MaxWorkers: config.MaxWorkers, WorkerTimeout: config.WorkerTimeout,
 		OAuthClientID: config.OAuthClientID, OAuthAuthorizeURL: config.OAuthAuthorizeURL,
 		OAuthTokenURL: config.OAuthTokenURL, OAuthScopes: config.OAuthScopes,
 		OllamaBaseURL: config.OllamaBaseURL, BaseURL: config.BaseURL,
