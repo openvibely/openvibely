@@ -357,11 +357,11 @@ func (h *Handler) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	h.executionStreamHub = hub
 }
 
-func (h *Handler) cancelActiveExecutionsAndPublish(ctx context.Context, taskID, operation string) {
+func (h *Handler) cancelActiveExecutionsAndPublish(ctx context.Context, taskID, operation string, cutoff int64) {
 	if h == nil || h.execRepo == nil {
 		return
 	}
-	cancelledIDs, err := h.execRepo.CancelActiveByTaskReturningIDs(ctx, taskID)
+	cancelledIDs, err := h.execRepo.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, taskID, cutoff)
 	if err != nil {
 		applog.Infof("[handler] %s error cancelling active executions task=%s: %v", operation, taskID, err)
 		return

@@ -1145,6 +1145,56 @@ func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category model
 	return nil
 }
 
+// MoveCancelledToBacklogIfStillCancelled avoids moving a task out of Active
+// after a follow-up has reactivated it during the user-stop transition.
+func (r *TaskRepo) MoveCancelledToBacklogIfStillCancelled(ctx context.Context, id string) (bool, error) {
+	var task *models.Task
+	moved := false
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("getting task before cancelled backlog move: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", id)
+		}
+		if task.Status != models.StatusCancelled {
+			return nil
+		}
+		if task.Category == models.CategoryBacklog {
+			moved = true
+			return nil
+		}
+		var displayOrder int
+		if err := exec.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'backlog'`,
+			task.ProjectID).Scan(&displayOrder); err != nil {
+			return fmt.Errorf("getting cancelled backlog display_order: %w", err)
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', display_order = ?,
+			updated_at = datetime('now'), completed_at = NULL WHERE id = ?`, displayOrder, id); err != nil {
+			return fmt.Errorf("moving cancelled task to backlog: %w", err)
+		}
+		moved = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if moved && r.broadcaster != nil && task.Category != models.CategoryBacklog {
+		r.broadcaster.Publish(events.TaskEvent{
+			Type:        events.TaskCategoryChanged,
+			TaskID:      id,
+			TaskName:    task.Title,
+			ProjectID:   task.ProjectID,
+			Category:    string(models.CategoryBacklog),
+			OldCategory: string(task.Category),
+		})
+	}
+	return moved, nil
+}
+
 func (r *TaskRepo) RestoreBoardState(ctx context.Context, task models.Task) error {
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = ?, status = ?, display_order = ?, completed_at = ?, updated_at = datetime('now') WHERE id = ?`,

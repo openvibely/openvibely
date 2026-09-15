@@ -2170,6 +2170,36 @@ func TestTaskRepo_FinalizeExecutionCancellationPreservesNewFollowup(t *testing.T
 	}
 }
 
+func TestTaskRepo_MoveCancelledToBacklogIfStillCancelledPreservesReactivatedFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Stop transition follow-up", Category: models.CategoryActive, Status: models.StatusCancelled, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	followup := &models.Execution{TaskID: task.ID, PromptSent: "continue", IsFollowup: true}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, followup, &models.ThreadInput{Content: followup.PromptSent})
+	if err != nil || !started {
+		t.Fatalf("CreateDirectTaskFollowupOrQueue: started=%v err=%v", started, err)
+	}
+	moved, err := taskRepo.MoveCancelledToBacklogIfStillCancelled(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("MoveCancelledToBacklogIfStillCancelled: %v", err)
+	}
+	if moved {
+		t.Fatal("stop transition moved reactivated follow-up to Backlog")
+	}
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("GetByID: task=%#v err=%v", stored, err)
+	}
+	if stored.Category != models.CategoryActive || stored.Status != models.StatusQueued {
+		t.Fatalf("reactivated task state = %s/%s", stored.Category, stored.Status)
+	}
+}
+
 func TestTaskRepo_FinalizeExecutionCancellationPreservesNewerTerminalFollowup(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)

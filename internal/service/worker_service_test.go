@@ -36,6 +36,27 @@ func TestGlobalWorkerCapacityUnlimitedAndFinite(t *testing.T) {
 	}
 }
 
+func TestWorkerService_DeregisterCancelOwnedPreservesFollowupCallback(t *testing.T) {
+	worker := &WorkerService{}
+	oldCtx, oldCancel := context.WithCancel(context.Background())
+	defer oldCancel()
+	newCtx, newCancel := context.WithCancel(context.Background())
+	defer newCancel()
+	oldRegistration := worker.RegisterCancelOwned("task", oldCancel)
+	newRegistration := worker.RegisterCancelOwned("task", newCancel)
+	worker.DeregisterCancelOwned("task", oldRegistration)
+	if !worker.CancelRunningTask("task") {
+		t.Fatal("follow-up cancellation callback was removed by old turn cleanup")
+	}
+	if newCtx.Err() != context.Canceled {
+		t.Fatalf("follow-up context = %v, want cancelled", newCtx.Err())
+	}
+	if oldCtx.Err() != nil {
+		t.Fatalf("old context unexpectedly cancelled: %v", oldCtx.Err())
+	}
+	worker.DeregisterCancelOwned("task", newRegistration)
+}
+
 func TestWorkerService_GlobalAdmissionUsesActualRunningAcrossProjectCaps(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

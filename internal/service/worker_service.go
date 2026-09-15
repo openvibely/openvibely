@@ -44,9 +44,11 @@ type WorkerService struct {
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 
-	cancelMu              sync.Mutex
-	cancelFuncs           map[string]context.CancelFunc // taskID -> cancel func for running tasks
-	cancellationRequested map[string]bool               // taskID -> user stop/cancel requested before durable status is visible
+	cancelMu               sync.Mutex
+	cancelFuncs            map[string]context.CancelFunc // taskID -> cancel func for running tasks
+	cancelRegistrationIDs  map[string]uint64
+	nextCancelRegistration uint64
+	cancellationRequested  map[string]bool // taskID -> user stop/cancel requested before durable status is visible
 
 	// Per-project concurrency tracking
 	projectRunning sync.Map // projectID -> *int32 (atomic counter)
@@ -166,6 +168,7 @@ func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repositor
 		reserved:              make(map[string]string),
 		prepared:              make(map[string]preparedAutomationDispatch),
 		cancelFuncs:           make(map[string]context.CancelFunc),
+		cancelRegistrationIDs: make(map[string]uint64),
 		cancellationRequested: make(map[string]bool),
 		submitted:             make(chan models.Task, 100),
 	}
@@ -516,7 +519,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			taskCtx = withTaskPreClaimed(taskCtx)
 		}
 	}
-	w.RegisterCancel(task.ID, taskCancel)
+	cancelRegistration := w.RegisterCancelOwned(task.ID, taskCancel)
 
 	var executionErr error
 	var preparedTerminalStatus models.ExecutionStatus
@@ -549,7 +552,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		}
 
 		wasCancelled := errors.Is(taskCtx.Err(), context.Canceled)
-		w.DeregisterCancel(task.ID)
+		w.DeregisterCancelOwned(task.ID, cancelRegistration)
 		taskCancel()
 
 		// Remove from pending AFTER execution so scheduler doesn't re-submit during execution.
@@ -1077,15 +1080,41 @@ func (w *WorkerService) IsCancellationRequested(taskID string) bool {
 // cancelled later via CancelRunningTask. This is also used by chat tasks
 // that bypass the worker pool.
 func (w *WorkerService) RegisterCancel(taskID string, cancel context.CancelFunc) {
+	w.RegisterCancelOwned(taskID, cancel)
+}
+
+// RegisterCancelOwned returns a registration ID that lets a completed turn
+// remove only its own callback, even if a follow-up has since replaced it.
+func (w *WorkerService) RegisterCancelOwned(taskID string, cancel context.CancelFunc) uint64 {
 	w.cancelMu.Lock()
+	w.nextCancelRegistration++
+	id := w.nextCancelRegistration
+	if w.cancelFuncs == nil {
+		w.cancelFuncs = make(map[string]context.CancelFunc)
+	}
+	if w.cancelRegistrationIDs == nil {
+		w.cancelRegistrationIDs = make(map[string]uint64)
+	}
 	w.cancelFuncs[taskID] = cancel
+	w.cancelRegistrationIDs[taskID] = id
 	w.cancelMu.Unlock()
+	return id
 }
 
 // DeregisterCancel removes the cancel function for a task after it completes.
 func (w *WorkerService) DeregisterCancel(taskID string) {
 	w.cancelMu.Lock()
 	delete(w.cancelFuncs, taskID)
+	delete(w.cancelRegistrationIDs, taskID)
+	w.cancelMu.Unlock()
+}
+
+func (w *WorkerService) DeregisterCancelOwned(taskID string, registrationID uint64) {
+	w.cancelMu.Lock()
+	if currentID, ok := w.cancelRegistrationIDs[taskID]; ok && currentID == registrationID {
+		delete(w.cancelFuncs, taskID)
+		delete(w.cancelRegistrationIDs, taskID)
+	}
 	w.cancelMu.Unlock()
 }
 
@@ -1096,6 +1125,7 @@ func (w *WorkerService) CancelRunningTask(taskID string) bool {
 	cancel, ok := w.cancelFuncs[taskID]
 	if ok {
 		delete(w.cancelFuncs, taskID)
+		delete(w.cancelRegistrationIDs, taskID)
 	}
 	w.cancelMu.Unlock()
 

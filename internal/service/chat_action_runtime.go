@@ -470,6 +470,14 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 		b, err := json.Marshal(result)
 		return string(b), err
 	}
+	var cancellationCutoff int64
+	if opts.ExecRepo != nil {
+		var err error
+		cancellationCutoff, err = opts.ExecRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
+		if err != nil {
+			return "", err
+		}
+	}
 	workerSvc := workerFromTaskService(opts.TaskSvc)
 	if workerSvc != nil {
 		workerSvc.MarkCancellationRequested(task.ID)
@@ -495,7 +503,7 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 		return "", fmt.Errorf("task service not configured")
 	}
 	if opts.ExecRepo != nil {
-		cancelledIDs, err := opts.ExecRepo.CancelActiveByTaskReturningIDs(ctx, task.ID)
+		cancelledIDs, err := opts.ExecRepo.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, task.ID, cancellationCutoff)
 		if err != nil {
 			applog.Infof("[channel-runtime] cancel_task error cancelling active executions task=%s: %v", task.ID, err)
 		} else if opts.ExecutionStreamHub != nil {
