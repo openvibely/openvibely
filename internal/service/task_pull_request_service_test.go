@@ -709,7 +709,7 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 22, PRURL: "https://github.com/openvibely/openvibely/pull/22", PRState: "open"}); err != nil {
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 22, PRURL: "https://github.com/openvibely/openvibely/pull/22", PRState: "open", NeedsRepublish: true}); err != nil {
 		t.Fatalf("seed PR record: %v", err)
 	}
 	createCalls := 0
@@ -753,7 +753,7 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByTaskID: %v", err)
 	}
-	if record == nil || record.PublishedHeadSHA != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	if record == nil || record.PublishedHeadSHA != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || record.NeedsRepublish {
 		t.Fatalf("expected existing PR record to store current publication head, got %#v", record)
 	}
 }

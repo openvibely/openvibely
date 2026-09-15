@@ -65,6 +65,7 @@ func TestTaskPullRequestRepoSetNeedsRepublish(t *testing.T) {
 	if err := repo.Upsert(ctx, record); err != nil {
 		t.Fatalf("upsert task pull request: %v", err)
 	}
+	initialUpdatedAt := record.UpdatedAt
 	if err := repo.SetNeedsRepublish(ctx, record.TaskID, true); err != nil {
 		t.Fatalf("set publication requirement: %v", err)
 	}
@@ -74,5 +75,30 @@ func TestTaskPullRequestRepoSetNeedsRepublish(t *testing.T) {
 	}
 	if got == nil || !got.NeedsRepublish {
 		t.Fatalf("expected durable publication requirement, got %#v", got)
+	}
+	if !got.UpdatedAt.Equal(initialUpdatedAt) {
+		t.Fatalf("publication marker changed external-state refresh timestamp: got %s want %s", got.UpdatedAt, initialUpdatedAt)
+	}
+
+	// A stale writer must not erase a publication requirement it did not own.
+	if err := repo.Upsert(ctx, record); err != nil {
+		t.Fatalf("upsert stale task pull request: %v", err)
+	}
+	got, err = repo.GetByTaskID(ctx, record.TaskID)
+	if err != nil {
+		t.Fatalf("get task pull request after stale upsert: %v", err)
+	}
+	if got == nil || !got.NeedsRepublish {
+		t.Fatalf("stale upsert erased publication requirement: %#v", got)
+	}
+	if err := repo.SetNeedsRepublish(ctx, record.TaskID, false); err != nil {
+		t.Fatalf("clear publication requirement: %v", err)
+	}
+	got, err = repo.GetByTaskID(ctx, record.TaskID)
+	if err != nil {
+		t.Fatalf("get task pull request after clear: %v", err)
+	}
+	if got == nil || got.NeedsRepublish {
+		t.Fatalf("expected explicit publication clear, got %#v", got)
 	}
 }
