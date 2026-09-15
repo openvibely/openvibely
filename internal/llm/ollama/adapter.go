@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -20,6 +19,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -65,7 +65,7 @@ func ensureOllamaRequestFits(body []byte, agent models.LLMConfig) error {
 	window := ollamaContextWindow(agent)
 	reserved := ollamaOutputTokens(agent)
 	safe := window - reserved - max(64, window/50)
-	tokens := utf8.RuneCount(body)
+	tokens := tokenestimate.FromByteCount(len(body))
 	if safe > 0 && tokens <= safe {
 		return nil
 	}

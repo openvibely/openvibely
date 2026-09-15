@@ -10,13 +10,19 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
-func TestCompletionsContinuationPreflightConservativelyCountsToolArguments(t *testing.T) {
+func TestCompletionsContinuationPreflightUsesByteEstimate(t *testing.T) {
 	messages := []completionsMessage{{Role: "assistant", Content: strings.Repeat("{}", 4000)}}
-	err := ensureCompletionsRequestFits(messages, nil, &CompletionsOptions{ContextWindow: 6000, MaxOutputTokens: 1000})
-	if err == nil {
-		t.Fatal("expected local complete-request rejection")
+	opts := &CompletionsOptions{ContextWindow: 6000, MaxOutputTokens: 1000}
+	if err := ensureCompletionsRequestFits(messages, nil, opts); err != nil {
+		t.Fatalf("moderate ASCII payload should fit: %v", err)
+	}
+	messages[0].Content = strings.Repeat("{}", 10000)
+	if err := ensureCompletionsRequestFits(messages, nil, opts); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
 	}
 }
 

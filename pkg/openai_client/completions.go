@@ -11,11 +11,11 @@ import (
 	"math"
 	"net/http"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
@@ -412,7 +412,7 @@ func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[str
 	if err != nil {
 		return err
 	}
-	tokens := utf8.RuneCount(encoded)
+	tokens := tokenestimate.FromByteCount(len(encoded))
 	if tokens <= safe {
 		return nil
 	}
