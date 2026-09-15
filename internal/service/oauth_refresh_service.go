@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	oauthBackgroundRefreshInterval = 15 * time.Minute
-	oauthBackgroundRefreshMinTTL   = time.Hour
+	oauthBackgroundRefreshInterval       = 15 * time.Minute
+	oauthBackgroundRefreshMinTTL         = time.Hour
+	oauthBackgroundIdentityLookupTimeout = 10 * time.Second
 )
 
 // OAuthRefreshService keeps built-in OAuth model credentials fresh while the
@@ -27,6 +28,7 @@ type OAuthRefreshService struct {
 	anthropicRefresh llmoauth.RefreshFunc
 	openAIRefresh    llmoauth.RefreshFunc
 	identityResolver func(context.Context, string) (AnthropicOAuthIdentity, error)
+	identityTimeout  time.Duration
 	interval         time.Duration
 	wg               sync.WaitGroup
 }
@@ -40,6 +42,7 @@ func NewOAuthRefreshService(repo *repository.LLMConfigRepo, manager *llmoauth.Ma
 		manager:          manager,
 		anthropicRefresh: llmoauth.AnthropicRefreshFunc(),
 		openAIRefresh:    llmoauth.OpenAIRefreshFunc(),
+		identityTimeout:  oauthBackgroundIdentityLookupTimeout,
 		interval:         oauthBackgroundRefreshInterval,
 	}
 }
@@ -135,7 +138,9 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 			continue
 		}
 		if cfg.Provider == models.ProviderAnthropic && s.identityResolver != nil {
-			identity, identityErr := s.identityResolver(ctx, fresh.OAuthAccessToken)
+			identityCtx, cancelIdentity := context.WithTimeout(ctx, s.identityTimeout)
+			identity, identityErr := s.identityResolver(identityCtx, fresh.OAuthAccessToken)
+			cancelIdentity()
 			if identityErr == nil {
 				updated, updateErr := s.repo.UpdateLinkedOAuthConnectionProfileIfRevision(
 					ctx, fresh.ID, fresh.OAuthConnectionID, fresh.OAuthConfigRevision, fresh.Provider,
