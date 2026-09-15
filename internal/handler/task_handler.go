@@ -2090,6 +2090,10 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, compose
 		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
 		return result, nil
 	}
+	cutoff, err := h.execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
 
 	if h.workerSvc != nil {
 		h.workerSvc.MarkCancellationRequested(task.ID)
@@ -2110,7 +2114,7 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, compose
 	} else if models.IsSwarmChildRole(task.SwarmRole) {
 		h.notifySwarmChildTerminal(ctx, task.ID)
 	}
-	h.cancelActiveExecutionsAndPublish(ctx, task.ID, operation)
+	h.cancelActiveExecutionsAndPublish(ctx, task.ID, operation, cutoff)
 	updated, err := h.taskSvc.GetByID(ctx, task.ID)
 	if err != nil {
 		return nil, err

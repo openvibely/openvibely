@@ -895,11 +895,16 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 
 	// Move cancelled tasks to backlog so they remain visible in the kanban board
 	// and can be re-run later. Status stays "cancelled" to reflect what happened.
-	if err := s.repo.UpdateCategory(ctx, id, models.CategoryBacklog); err != nil {
+	moved, err := s.repo.MoveCancelledToBacklogIfStillCancelled(ctx, id)
+	if err != nil {
 		applog.Infof("[task-svc] CancelTask error moving to backlog: %v", err)
 		return fmt.Errorf("move cancelled task to backlog: %w", err)
 	}
-	applog.Infof("[task-svc] CancelTask moved to backlog id=%s", id)
+	if moved {
+		applog.Infof("[task-svc] CancelTask moved to backlog id=%s", id)
+	} else {
+		applog.Infof("[task-svc] CancelTask preserved reactivated task id=%s", id)
+	}
 
 	applog.Infof("[task-svc] CancelTask success id=%s", id)
 	return nil

@@ -600,14 +600,34 @@ func (r *ExecutionRepo) CancelActiveByTask(ctx context.Context, taskID string) (
 }
 
 func (r *ExecutionRepo) CancelActiveByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
+	cutoff, err := r.TaskExecutionHistoryCutoff(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return r.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, taskID, cutoff)
+}
+
+// TaskExecutionHistoryCutoff snapshots execution admission before a cancellation
+// begins. A follow-up inserted afterward has a greater history_order and must
+// not be included in the cancellation's later execution sweep.
+func (r *ExecutionRepo) TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error) {
+	var cutoff int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(history_order), 0)
+		FROM executions WHERE task_id = ?`, taskID).Scan(&cutoff); err != nil {
+		return 0, fmt.Errorf("loading task execution cancellation cutoff: %w", err)
+	}
+	return cutoff, nil
+}
+
+func (r *ExecutionRepo) CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx context.Context, taskID string, cutoff int64) ([]string, error) {
 	var ids []string
 	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
 		rows, err := conn.QueryContext(ctx,
 			`UPDATE executions
 				 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
-				 WHERE task_id = ? AND status IN (?, ?)
+				 WHERE task_id = ? AND history_order <= ? AND status IN (?, ?)
 				 RETURNING id`,
-			models.ExecCancelled, taskID, models.ExecRunning, models.ExecQueued)
+			models.ExecCancelled, taskID, cutoff, models.ExecRunning, models.ExecQueued)
 		if err != nil {
 			return fmt.Errorf("cancelling active task executions: %w", err)
 		}

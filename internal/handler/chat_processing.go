@@ -271,13 +271,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 
 	waitCtx := context.Background()
 	var waitCancel context.CancelFunc
+	var waitCancelRegistration uint64
 	if params.IsTaskFollowup && h.workerSvc != nil {
 		waitCtx, waitCancel = context.WithCancel(context.Background())
-		h.registerTaskCancellation(params.TaskID, waitCancel)
+		waitCancelRegistration = h.registerTaskCancellation(params.TaskID, waitCancel)
 	}
 	cleanupWaitCancellation := func() {
 		if waitCancel != nil {
-			h.deregisterTaskCancellation(params.TaskID)
+			h.deregisterTaskCancellation(params.TaskID, waitCancelRegistration)
 			waitCancel()
 			waitCancel = nil
 		}
@@ -290,6 +291,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
+	var runtimeCancelRegistration uint64
 	runtimeCancelRegistered := false
 	preRuntimeCtx := func() context.Context {
 		if ctx != nil {
@@ -304,13 +306,13 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		var resetInactivity func()
 		ctx, cancel, resetInactivity = withInactivityTimeout(context.Background(), timeout)
 		ctx = llmcontracts.WithActivityCallback(ctx, resetInactivity)
-		h.registerTaskCancellation(params.TaskID, cancel)
+		runtimeCancelRegistration = h.registerTaskCancellation(params.TaskID, cancel)
 		runtimeCancelRegistered = true
 		cancelWaitOnly()
 	}
 	cleanupRuntimeCancellation := func() {
 		if runtimeCancelRegistered {
-			h.deregisterTaskCancellation(params.TaskID)
+			h.deregisterTaskCancellation(params.TaskID, runtimeCancelRegistration)
 			runtimeCancelRegistered = false
 		}
 		if cancel != nil {
@@ -1930,17 +1932,18 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	return nil
 }
 
-func (h *Handler) registerTaskCancellation(taskID string, cancel context.CancelFunc) {
+func (h *Handler) registerTaskCancellation(taskID string, cancel context.CancelFunc) uint64 {
 	if h.workerSvc != nil {
-		h.workerSvc.RegisterCancel(taskID, cancel)
+		return h.workerSvc.RegisterCancelOwned(taskID, cancel)
 	}
+	return 0
 }
 
 // deregisterTaskCancellation removes a task's cancel function from the worker service.
 // No-op if worker service is unavailable.
-func (h *Handler) deregisterTaskCancellation(taskID string) {
+func (h *Handler) deregisterTaskCancellation(taskID string, registrationID uint64) {
 	if h.workerSvc != nil {
-		h.workerSvc.DeregisterCancel(taskID)
+		h.workerSvc.DeregisterCancelOwned(taskID, registrationID)
 	}
 }
 

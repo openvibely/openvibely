@@ -362,6 +362,10 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
+	cutoff, err := h.execRepo.TaskExecutionHistoryCutoff(c.Request().Context(), activeChatExec.TaskID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to snapshot active response")
+	}
 	if err := h.taskSvc.CancelTask(c.Request().Context(), activeChatExec.TaskID); err != nil {
 		applog.Infof("[handler] ChatStop error cancelling chat task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -374,7 +378,7 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		applog.Infof("[handler] ChatStop error preserving chat category task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to preserve chat history")
 	}
-	h.cancelActiveExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop")
+	h.cancelActiveExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop", cutoff)
 	if isHTMX(c) {
 		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false, ""))
 	}
