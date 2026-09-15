@@ -4077,6 +4077,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								}						})();
 					</script>
 			</div>
+			<!-- Project dialogs are HTMX-loaded outside the sidebar so native dialog close transitions stay viewport-centered. -->
+			<div id="new-project-container"></div>
+			<div id="project-settings-container"></div>
 			<!-- Toast Notification Container -->
 			<div id="toast-container"></div>
 			<script>
