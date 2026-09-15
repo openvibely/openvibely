@@ -1,6 +1,10 @@
 package tokenestimate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 func TestEstimateConversions(t *testing.T) {
 	for _, tc := range []struct {
@@ -16,5 +20,25 @@ func TestEstimateConversions(t *testing.T) {
 	}
 	if got := ByteBudget(2); got != 8 {
 		t.Fatalf("ByteBudget(2) = %d, want 8", got)
+	}
+}
+
+func TestTruncateMiddle(t *testing.T) {
+	got := TruncateMiddle("prefix-"+strings.Repeat("x", 100)+"-suffix", 32, "[omitted]")
+	if len(got) > 32 || !strings.HasPrefix(got, "prefix-") || !strings.HasSuffix(got, "-suffix") || !strings.Contains(got, "[omitted]") {
+		t.Fatalf("unexpected bounded text: %q", got)
+	}
+	got = TruncateMiddle(strings.Repeat("é", 100), 31, "[x]")
+	if len(got) > 31 || !utf8.ValidString(got) {
+		t.Fatalf("UTF-8 result valid=%v bytes=%d", utf8.ValidString(got), len(got))
+	}
+}
+
+func TestTruncateMiddleWithMarkerReportsRemoval(t *testing.T) {
+	got := TruncateMiddleWithMarker(strings.Repeat("a", 100), 30, func(bytes, _ int) string {
+		return "[removed:" + string(rune('0'+bytes%10)) + "]"
+	})
+	if len(got) > 30 || !strings.Contains(got, "[removed:") {
+		t.Fatalf("unexpected bounded text: %q", got)
 	}
 }

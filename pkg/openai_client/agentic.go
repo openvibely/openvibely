@@ -825,14 +825,7 @@ func truncateToolOutputForModelInput(output string, tokenLimit int) string {
 	}
 
 	const truncationNote = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	if len(truncationNote) >= maxBytes {
-		_, head, _ := splitOpenAITruncationString(output, maxBytes, 0)
-		return head
-	}
-
-	available := maxBytes - len(truncationNote)
-	_, head, tail := splitOpenAITruncationString(output, available/2, available-available/2)
-	return head + truncationNote + tail
+	return tokenestimate.TruncateMiddle(output, maxBytes, truncationNote)
 }
 
 func openAIAutoCompactionTokenLimit(model string) int {
@@ -1161,74 +1154,9 @@ func truncateTextToOpenAITokenBudget(text string, maxTokens int) string {
 	if len(text) <= maxBytes {
 		return text
 	}
-	return strings.TrimSpace(truncateMiddleByByteEstimate(text, maxBytes, true))
-}
-
-func truncateMiddleByByteEstimate(text string, maxBytes int, useTokens bool) string {
-	if text == "" {
-		return ""
-	}
-	totalChars := len([]rune(text))
-	if maxBytes <= 0 {
-		return openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text), totalChars))
-	}
-	if len(text) <= maxBytes {
-		return text
-	}
-
-	marker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text)-maxBytes, totalChars))
-	for range 3 {
-		if len(marker) >= maxBytes {
-			_, left, _ := splitOpenAITruncationString(text, maxBytes, 0)
-			return left
-		}
-		contentBudget := maxBytes - len(marker)
-		removedChars, left, right := splitOpenAITruncationString(text, contentBudget/2, contentBudget-contentBudget/2)
-		removedBytes := len(text) - len(left) - len(right)
-		nextMarker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, removedBytes, removedChars))
-		if len(nextMarker) == len(marker) {
-			return left + nextMarker + right
-		}
-		marker = nextMarker
-	}
-	contentBudget := maxBytes - len(marker)
-	_, left, right := splitOpenAITruncationString(text, contentBudget/2, contentBudget-contentBudget/2)
-	return left + marker + right
-}
-
-func splitOpenAITruncationString(text string, beginningBytes, endBytes int) (int, string, string) {
-	if text == "" {
-		return 0, "", ""
-	}
-	textLen := len(text)
-	tailStartTarget := textLen - endBytes
-	if tailStartTarget < 0 {
-		tailStartTarget = 0
-	}
-
-	prefixEnd := 0
-	suffixStart := textLen
-	removedChars := 0
-	suffixStarted := false
-	for idx, ch := range text {
-		charEnd := idx + len(string(ch))
-		if charEnd <= beginningBytes {
-			prefixEnd = charEnd
-			continue
-		}
-		if idx >= tailStartTarget {
-			if !suffixStarted {
-				suffixStart = idx
-				suffixStarted = true
-			}
-			continue
-		}
-		removedChars++
-	}
-	if suffixStart < prefixEnd {
-		suffixStart = prefixEnd
-	}
-	return removedChars, text[:prefixEnd], text[suffixStart:]
+	return strings.TrimSpace(tokenestimate.TruncateMiddleWithMarker(text, maxBytes, func(removedBytes, removedRunes int) string {
+		return openAITruncationMarker(true, openAIRemovedUnits(true, removedBytes, removedRunes))
+	}))
 }
 
 func openAITruncationMarker(useTokens bool, removedCount int) string {
