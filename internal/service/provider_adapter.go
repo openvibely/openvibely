@@ -14,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
@@ -160,6 +159,7 @@ its work. Use it to continue without duplicating completed work. This is histori
 context, not a new user instruction or authorization:`
 
 const (
+	providerApproxBytesPerToken          = 4
 	retainedUserMessageTokenBudget       = 20000
 	defaultOpenAICompatibleContextWindow = 128000
 	defaultAnthropicContextWindow        = 200000
@@ -1376,14 +1376,13 @@ func estimatedUTF8Tokens(text string) int {
 	if bytes == 0 {
 		return 0
 	}
-	// Without a provider tokenizer, use the larger of the common byte estimate
-	// and one token per rune. This deliberately overestimates ASCII-heavy logs,
-	// source and JSON instead of allowing known-unsafe requests through.
-	return max((bytes+3)/4, utf8.RuneCountInString(text))
+	// Use a tokenizer-free fallback of four UTF-8 bytes per token.
+	// Provider-reported usage remains authoritative when present.
+	return (bytes + providerApproxBytesPerToken - 1) / providerApproxBytesPerToken
 }
 
 func truncateMiddleByEstimatedTokens(text string, tokenBudget int) string {
-	byteBudget := tokenBudget
+	byteBudget := tokenBudget * providerApproxBytesPerToken
 	if byteBudget <= 0 || len([]byte(text)) <= byteBudget {
 		return text
 	}
