@@ -1219,10 +1219,10 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 }
 
 // FinalizeExecutionCancellation moves a task to its cancelled board state only
-// when no different execution has already taken ownership of the task. A user
-// can submit a follow-up while the cancelled execution is still unwinding; in
-// that case the follow-up's queued/running execution must retain the task's
-// reactivated state.
+// when no newer execution has already taken ownership of the task. A user can
+// submit a follow-up while the cancelled execution is still unwinding; in that
+// case the follow-up must retain the task state it established, even if it has
+// already reached a terminal status.
 func (r *TaskRepo) FinalizeExecutionCancellation(ctx context.Context, taskID, executionID string) (bool, error) {
 	var task *models.Task
 	finalized := false
@@ -1236,14 +1236,22 @@ func (r *TaskRepo) FinalizeExecutionCancellation(ctx context.Context, taskID, ex
 			return fmt.Errorf("task not found: %s", taskID)
 		}
 
-		var successorActive bool
+		var cancelledHistoryOrder int64
+		if err := exec.QueryRowContext(ctx, `SELECT history_order FROM executions
+			WHERE id = ? AND task_id = ?`, executionID, taskID).Scan(&cancelledHistoryOrder); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("cancelled execution not found for task: %s", executionID)
+			}
+			return fmt.Errorf("loading cancelled execution order: %w", err)
+		}
+		var successorExists bool
 		if err := exec.QueryRowContext(ctx, `SELECT EXISTS (
 			SELECT 1 FROM executions
-			WHERE task_id = ? AND id <> ? AND status IN ('queued', 'running')
-		)`, taskID, executionID).Scan(&successorActive); err != nil {
+			WHERE task_id = ? AND history_order > ?
+		)`, taskID, cancelledHistoryOrder).Scan(&successorExists); err != nil {
 			return fmt.Errorf("checking cancellation execution ownership: %w", err)
 		}
-		if successorActive {
+		if successorExists {
 			return nil
 		}
 
@@ -1272,20 +1280,28 @@ func (r *TaskRepo) FinalizeExecutionCancellation(ctx context.Context, taskID, ex
 	if err != nil {
 		return false, err
 	}
-	if finalized && r.broadcaster != nil && (task.Status != models.StatusCancelled || task.Category == models.CategoryActive) {
-		category := task.Category
-		if category == models.CategoryActive {
-			category = models.CategoryBacklog
+	if finalized && r.broadcaster != nil {
+		if task.Status != models.StatusCancelled {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type:      events.TaskStatusChanged,
+				TaskID:    task.ID,
+				TaskName:  task.Title,
+				ProjectID: task.ProjectID,
+				Status:    string(models.StatusCancelled),
+				OldStatus: string(task.Status),
+				Category:  string(task.Category),
+			})
 		}
-		r.broadcaster.Publish(events.TaskEvent{
-			Type:        events.TaskBoardUpdated,
-			TaskID:      task.ID,
-			TaskName:    task.Title,
-			ProjectID:   task.ProjectID,
-			Category:    string(category),
-			OldCategory: string(task.Category),
-			Status:      string(models.StatusCancelled),
-		})
+		if task.Category == models.CategoryActive {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type:        events.TaskCategoryChanged,
+				TaskID:      task.ID,
+				TaskName:    task.Title,
+				ProjectID:   task.ProjectID,
+				Category:    string(models.CategoryBacklog),
+				OldCategory: string(task.Category),
+			})
+		}
 	}
 	return finalized, nil
 }
