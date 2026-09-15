@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 func TestCompletionsContinuationPreflightUsesByteEstimate(t *testing.T) {
@@ -315,8 +316,8 @@ func TestSendCompletionsBoundsDurableToolOutputWhenReplayingLaterTurn(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len([]rune(replayed)) > 512 || !strings.Contains(replayed, "truncated") {
-		t.Fatalf("durable replay was not bounded for model input: runes=%d", len([]rune(replayed)))
+	if len(replayed) > tokenestimate.ByteBudget(512) || len(replayed) <= 512 || !strings.Contains(replayed, "truncated") {
+		t.Fatalf("durable replay was not bounded for model input: bytes=%d", len(replayed))
 	}
 }
 
@@ -357,8 +358,8 @@ func TestSendCompletionsBoundsDenseToolOutputForModelButPreservesTranscript(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len([]rune(modelToolResult)) > 512 || !strings.Contains(modelToolResult, "truncated") {
-		t.Fatalf("model tool result was not conservatively bounded: runes=%d", len([]rune(modelToolResult)))
+	if len(modelToolResult) > tokenestimate.ByteBudget(512) || len(modelToolResult) <= 512 || !strings.Contains(modelToolResult, "truncated") {
+		t.Fatalf("model tool result was not bounded: bytes=%d", len(modelToolResult))
 	}
 	transcript := client.LastCompletionsTranscript()
 	if len(transcript) < 3 || transcript[2].ToolCallID != "call_dense" || transcript[2].Content != full {

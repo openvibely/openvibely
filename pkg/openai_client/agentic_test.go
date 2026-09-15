@@ -14,9 +14,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // buildSSE constructs a server-sent events stream from JSON data lines.
@@ -3014,12 +3016,16 @@ func TestTruncateToolOutputForModelInput_UsesTokenLimit(t *testing.T) {
 		t.Fatal("expected output to be truncated")
 	}
 
-	maxChars := normalizedToolOutputTokenLimit(limit) * 4
-	if len([]rune(got)) > maxChars {
-		t.Fatalf("truncated output len=%d, want <= %d", len([]rune(got)), maxChars)
+	maxBytes := tokenestimate.ByteBudget(normalizedToolOutputTokenLimit(limit))
+	if len(got) > maxBytes || len(got) <= limit {
+		t.Fatalf("truncated output bytes=%d, want > %d and <= %d", len(got), limit, maxBytes)
 	}
 	if !strings.Contains(got, "Tool output truncated to fit model context") {
 		t.Fatalf("expected truncation marker in output, got: %q", got)
+	}
+	utf8Output := truncateToolOutputForModelInput(strings.Repeat("é", 1000), limit)
+	if !utf8.ValidString(utf8Output) || len(utf8Output) > maxBytes {
+		t.Fatalf("UTF-8 output valid=%v bytes=%d, want <= %d", utf8.ValidString(utf8Output), len(utf8Output), maxBytes)
 	}
 }
 

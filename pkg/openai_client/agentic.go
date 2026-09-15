@@ -819,30 +819,19 @@ func truncateToolOutputForModelInput(output string, tokenLimit int) string {
 		return output
 	}
 
-	// The hard admission estimator uses one token per rune when no exact
-	// tokenizer is available. Use the same conservative conversion here so a
-	// dense symbol-heavy result cannot exceed its independent replay budget.
-	maxChars := limit
-	runes := []rune(output)
-	if len(runes) <= maxChars {
+	maxBytes := tokenestimate.ByteBudget(limit)
+	if len(output) <= maxBytes {
 		return output
 	}
 
 	const truncationNote = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	noteRunes := []rune(truncationNote)
-	if len(noteRunes) >= maxChars {
-		return string(runes[:maxChars])
+	if len(truncationNote) >= maxBytes {
+		_, head, _ := splitOpenAITruncationString(output, maxBytes, 0)
+		return head
 	}
 
-	available := maxChars - len(noteRunes)
-	headLen := available / 2
-	tailLen := available - headLen
-	if headLen <= 0 || tailLen <= 0 {
-		return string(runes[:maxChars])
-	}
-
-	head := string(runes[:headLen])
-	tail := string(runes[len(runes)-tailLen:])
+	available := maxBytes - len(truncationNote)
+	_, head, tail := splitOpenAITruncationString(output, available/2, available-available/2)
 	return head + truncationNote + tail
 }
 
@@ -1168,7 +1157,7 @@ func truncateTextToOpenAITokenBudget(text string, maxTokens int) string {
 	if maxTokens <= 0 || text == "" {
 		return ""
 	}
-	maxBytes := maxTokens // conservative hard-bound: at most one UTF-8/ASCII rune per token
+	maxBytes := tokenestimate.ByteBudget(maxTokens)
 	if len(text) <= maxBytes {
 		return text
 	}
@@ -1187,10 +1176,23 @@ func truncateMiddleByByteEstimate(text string, maxBytes int, useTokens bool) str
 		return text
 	}
 
-	leftBudget := maxBytes / 2
-	rightBudget := maxBytes - leftBudget
-	removedChars, left, right := splitOpenAITruncationString(text, leftBudget, rightBudget)
-	marker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text)-maxBytes, removedChars))
+	marker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text)-maxBytes, totalChars))
+	for range 3 {
+		if len(marker) >= maxBytes {
+			_, left, _ := splitOpenAITruncationString(text, maxBytes, 0)
+			return left
+		}
+		contentBudget := maxBytes - len(marker)
+		removedChars, left, right := splitOpenAITruncationString(text, contentBudget/2, contentBudget-contentBudget/2)
+		removedBytes := len(text) - len(left) - len(right)
+		nextMarker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, removedBytes, removedChars))
+		if len(nextMarker) == len(marker) {
+			return left + nextMarker + right
+		}
+		marker = nextMarker
+	}
+	contentBudget := maxBytes - len(marker)
+	_, left, right := splitOpenAITruncationString(text, contentBudget/2, contentBudget-contentBudget/2)
 	return left + marker + right
 }
 
