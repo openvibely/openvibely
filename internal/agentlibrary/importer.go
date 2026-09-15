@@ -1471,9 +1471,22 @@ func mergeRootSkillIndexBodies(agentKey, existingBody, newBody string) string {
 }
 
 // RemoveSkillIndexEntry removes the ## <handle> section for the given standalone
-// skill handle from the SKILLS.md index at path. It is a no-op when the file does
-// not exist or the handle is not present. Returns true when the file was modified.
+// skill handle from the SKILLS.md index at path and clears that handle from the
+// index always_use preference. It is a no-op when the file does not exist or the
+// handle is absent from both the body and preference list. Returns true when the
+// file was modified.
 func RemoveSkillIndexEntry(path, handle string) (bool, error) {
+	return removeIndexEntry(path, handle, true)
+}
+
+// RemoveAgentIndexEntry removes the ## <key> section for the given agent key
+// from the AGENTS.md index at path. It is a no-op when the file does not exist
+// or the key is not present. Returns true when the file was modified.
+func RemoveAgentIndexEntry(path, key string) (bool, error) {
+	return removeIndexEntry(path, key, false)
+}
+
+func removeIndexEntry(path, handle string, removeAlwaysUse bool) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -1483,11 +1496,16 @@ func RemoveSkillIndexEntry(path, handle string) (bool, error) {
 	}
 	frontmatter, body, hasFrontmatter := SplitFrontmatter(string(data))
 	updated := removeSkillIndexSection(body, handle)
-	if strings.TrimSpace(updated) == strings.TrimSpace(body) {
+	bodyChanged := strings.TrimSpace(updated) != strings.TrimSpace(body)
+	frontmatterChanged := false
+	if hasFrontmatter && removeAlwaysUse {
+		frontmatter, frontmatterChanged = removeAlwaysUseFromFrontmatter(frontmatter, handle)
+	}
+	if !bodyChanged && !frontmatterChanged {
 		return false, nil
 	}
 	var rendered string
-	if hasFrontmatter {
+	if hasFrontmatter && strings.TrimSpace(frontmatter) != "" {
 		rendered = "---\n" + strings.TrimSpace(frontmatter) + "\n---\n"
 		if updated != "" && !strings.HasPrefix(updated, "\n") {
 			rendered += "\n"
@@ -1502,11 +1520,46 @@ func RemoveSkillIndexEntry(path, handle string) (bool, error) {
 	return true, nil
 }
 
-// RemoveAgentIndexEntry removes the ## <key> section for the given agent key
-// from the AGENTS.md index at path. It is a no-op when the file does not exist
-// or the key is not present. Returns true when the file was modified.
-func RemoveAgentIndexEntry(path, key string) (bool, error) {
-	return RemoveSkillIndexEntry(path, key)
+func removeAlwaysUseFromFrontmatter(frontmatter, handle string) (string, bool) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(frontmatter), &doc); err != nil || len(doc.Content) == 0 {
+		return frontmatter, false
+	}
+	mapping := doc.Content[0]
+	if mapping == nil || mapping.Kind != yaml.MappingNode {
+		return frontmatter, false
+	}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		keyNode := mapping.Content[i]
+		valueNode := mapping.Content[i+1]
+		if keyNode == nil || keyNode.Value != "always_use" || valueNode == nil || valueNode.Kind != yaml.SequenceNode {
+			continue
+		}
+		kept := valueNode.Content[:0]
+		for _, item := range valueNode.Content {
+			if item != nil && item.Kind == yaml.ScalarNode && strings.TrimSpace(item.Value) == handle {
+				continue
+			}
+			kept = append(kept, item)
+		}
+		if len(kept) == len(valueNode.Content) {
+			return frontmatter, false
+		}
+		if len(kept) == 0 {
+			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+		} else {
+			valueNode.Content = kept
+		}
+		if len(mapping.Content) == 0 {
+			return "", true
+		}
+		rendered, err := yaml.Marshal(mapping)
+		if err != nil {
+			return frontmatter, false
+		}
+		return strings.TrimRight(string(rendered), "\n"), true
+	}
+	return frontmatter, false
 }
 
 func removeSkillIndexSection(body, handle string) string {

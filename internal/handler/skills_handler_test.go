@@ -293,6 +293,40 @@ func TestDeleteGlobalSkillUsesTargetScopeOnUnfilteredProjectPage(t *testing.T) {
 	require.True(t, stat.IsDir())
 }
 
+func TestDeleteProjectSkillClearsOnlyProjectAlwaysUsePreference(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	globalRoot := t.TempDir()
+	projectRepoPath := t.TempDir()
+	h.SetAgentSkillRoot(globalRoot)
+	project := createProject(t, h, "Project Skill Delete Preference Project")
+	project.RepoPath = projectRepoPath
+	require.NoError(t, h.projectRepo.Update(t.Context(), project))
+	projectRoot := filepath.Join(projectRepoPath, ".openvibely")
+	writeStandaloneSkill(t, globalRoot, "shared_delete", "Global Shared", "global package", "global")
+	writeStandaloneSkill(t, projectRoot, "shared_delete", "Project Shared", "project package", "project")
+	require.NoError(t, agentlibrary.SetSkillAlwaysUse(filepath.Join(globalRoot, "skills", "SKILLS.md"), "shared_delete", true))
+	require.NoError(t, agentlibrary.SetSkillAlwaysUse(filepath.Join(projectRoot, "skills", "SKILLS.md"), "shared_delete", true))
+
+	req := httptest.NewRequest(http.MethodDelete, "/skills/shared_delete?scope=project&project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	_, err := os.Stat(filepath.Join(projectRoot, "skills", "shared_delete"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	stat, err := os.Stat(filepath.Join(globalRoot, "skills", "shared_delete"))
+	require.NoError(t, err)
+	require.True(t, stat.IsDir())
+	globalIndex, err := os.ReadFile(filepath.Join(globalRoot, "skills", "SKILLS.md"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"shared_delete"}, agentskills.ParseSkillsIndexMeta(string(globalIndex)).AlwaysUse)
+	projectIndex, err := os.ReadFile(filepath.Join(projectRoot, "skills", "SKILLS.md"))
+	require.NoError(t, err)
+	require.Empty(t, agentskills.ParseSkillsIndexMeta(string(projectIndex)).AlwaysUse)
+	require.NotContains(t, string(projectIndex), "## shared_delete\n")
+}
+
 func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	root := t.TempDir()
@@ -301,6 +335,8 @@ func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
 	project.RepoPath = t.TempDir()
 	require.NoError(t, h.projectRepo.Update(t.Context(), project))
 	writeStandaloneSkill(t, root, "debug_tests", "Debug Tests", "Find and fix tests", "global")
+	indexPath := filepath.Join(root, "skills", "SKILLS.md")
+	require.NoError(t, agentlibrary.SetSkillAlwaysUse(indexPath, "debug_tests", true))
 
 	req := httptest.NewRequest(http.MethodDelete, "/skills/debug_tests?scope=global&project_id="+project.ID, nil)
 	req.Header.Set("HX-Request", "true")
@@ -316,13 +352,29 @@ func TestDeleteSkillRemovesStandaloneSkillAndReturnsCards(t *testing.T) {
 	if strings.Contains(rec.Body.String(), "Debug Tests") {
 		t.Fatalf("expected response to omit deleted skill card")
 	}
-	index, err := os.ReadFile(filepath.Join(root, "skills", "SKILLS.md"))
+	index, err := os.ReadFile(indexPath)
 	if err != nil {
 		t.Fatalf("read skill index: %v", err)
 	}
 	if strings.Contains(string(index), "debug_tests") {
 		t.Fatalf("expected skill index to omit deleted skill, got:\n%s", index)
 	}
+	if meta := agentskills.ParseSkillsIndexMeta(string(index)); len(meta.AlwaysUse) != 0 {
+		t.Fatalf("expected deleted skill to be removed from always_use, got %v; content:\n%s", meta.AlwaysUse, index)
+	}
+
+	writeStandaloneSkill(t, root, "debug_tests", "Debug Tests", "Find and fix tests", "global")
+	reimportedIndex, err := os.ReadFile(indexPath)
+	require.NoError(t, err)
+	require.Empty(t, agentskills.ParseSkillsIndexMeta(string(reimportedIndex)).AlwaysUse)
+	catalog, err := agentskills.BuildCatalog("test", root, "")
+	require.NoError(t, err)
+	merged, provenance := agentskills.MergeAlwaysUseIntoSelected(catalog, root, "", nil)
+	require.NotContains(t, merged, "debug_tests")
+	require.NotContains(t, provenance, "debug_tests")
+	reimportedCards := serveSkillsHTMX(t, e)
+	require.Contains(t, reimportedCards, "Debug Tests")
+	require.NotContains(t, reimportedCards, `<span class="badge badge-primary badge-sm">Always use</span>`)
 	events := skillAnalyticsEventsForTest(t, db, "debug_tests")
 	require.Len(t, events, 1)
 	require.Equal(t, project.ID, events[0].ProjectID)
@@ -345,7 +397,7 @@ func TestDeleteSkillUsesSharedIndexCleanupSemantics(t *testing.T) {
 		},
 		{
 			name:  "with frontmatter",
-			index: "---\nalways_use:\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+			index: "---\nalways_use:\n  - verify\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
 		},
 		{
 			name:         "missing index",
@@ -399,7 +451,9 @@ func TestDeleteSkillUsesSharedIndexCleanupSemantics(t *testing.T) {
 				require.Contains(t, text, want)
 			}
 			if strings.Contains(tt.index, "always_use:") {
-				require.Contains(t, text, "always_use:\n  - review")
+				meta := agentskills.ParseSkillsIndexMeta(text)
+				require.Equal(t, []string{"review"}, meta.AlwaysUse)
+				require.Contains(t, text, "always_use:")
 				require.Contains(t, text, "custom: value")
 			}
 		})
@@ -420,6 +474,10 @@ func TestDeleteSkillsBulkUsesScopeSpecificIndexCleanup(t *testing.T) {
 	projectRoot := filepath.Join(projectRepoPath, ".openvibely")
 	writeStandaloneSkill(t, projectRoot, "shared_skill", "Project Shared", "project", "project")
 	writeStandaloneSkill(t, projectRoot, "project_delete", "Project Delete", "project", "project")
+	require.NoError(t, agentlibrary.SetSkillAlwaysUse(filepath.Join(globalRoot, "skills", "SKILLS.md"), "shared_skill", true))
+	require.NoError(t, agentlibrary.SetSkillAlwaysUse(filepath.Join(globalRoot, "skills", "SKILLS.md"), "global_keep", true))
+	require.NoError(t, agentlibrary.SetSkillAlwaysUse(filepath.Join(projectRoot, "skills", "SKILLS.md"), "project_delete", true))
+	require.NoError(t, agentlibrary.SetSkillAlwaysUse(filepath.Join(projectRoot, "skills", "SKILLS.md"), "shared_skill", true))
 
 	request := `{"skills":[{"handle":"shared_skill","scope":"global"},{"handle":"project_delete","scope":"project"}]}`
 	req := httptest.NewRequest(http.MethodDelete, "/skills/bulk?project_id="+project.ID, strings.NewReader(request))
@@ -442,10 +500,12 @@ func TestDeleteSkillsBulkUsesScopeSpecificIndexCleanup(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(globalIndex), "## shared_skill\n")
 	require.Contains(t, string(globalIndex), "## global_keep\n")
+	require.Equal(t, []string{"global_keep"}, agentskills.ParseSkillsIndexMeta(string(globalIndex)).AlwaysUse)
 	projectIndex, err := os.ReadFile(filepath.Join(projectRoot, "skills", "SKILLS.md"))
 	require.NoError(t, err)
 	require.NotContains(t, string(projectIndex), "## project_delete\n")
 	require.Contains(t, string(projectIndex), "## shared_skill\n")
+	require.Equal(t, []string{"shared_skill"}, agentskills.ParseSkillsIndexMeta(string(projectIndex)).AlwaysUse)
 }
 
 func TestImportSkillPackageWritesSkillAndSupportFiles(t *testing.T) {
