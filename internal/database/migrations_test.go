@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 189 {
-		t.Fatalf("max goose version = %d, want 189", maxVersion)
+	if maxVersion != 190 {
+		t.Fatalf("max goose version = %d, want 190", maxVersion)
 	}
 }
 
@@ -1811,8 +1811,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 189 {
-		t.Fatalf("max goose version = %d, want 189", maxVersion)
+	if maxVersion != 190 {
+		t.Fatalf("max goose version = %d, want 190", maxVersion)
 	}
 }
 
@@ -2260,8 +2260,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 189 {
-		t.Fatalf("max goose version = %d, want 189", maxVersion)
+	if maxVersion != 190 {
+		t.Fatalf("max goose version = %d, want 190", maxVersion)
 	}
 }
 
@@ -2596,8 +2596,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 189 {
-		t.Fatalf("max goose version = %d, want 189", maxVersion)
+	if maxVersion != 190 {
+		t.Fatalf("max goose version = %d, want 190", maxVersion)
 	}
 }
 
@@ -2683,6 +2683,165 @@ func TestMigration187CreatesSeparateOAuthConnectionsForExistingModels(t *testing
 	}
 	if snapshotConnectionID != "openai-one" {
 		t.Fatalf("migrated snapshot connection = %q, want %q", snapshotConnectionID, "openai-one")
+	}
+}
+
+func TestMigration187ConsolidatesExactRotatingCredentialsWithoutMergingAccountIdentity(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "shared-rotating-oauth-connections.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 186); err != nil {
+		t.Fatalf("migrate to 186: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO agent_configs (id, name, provider, model, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_config_revision)
+		VALUES
+			('openai-shared-one', 'OpenAI Shared One', 'openai', 'gpt-one', 'oauth', 'openai-access', 'openai-shared-refresh', 111, 'openai-account', 4),
+			('openai-shared-two', 'OpenAI Shared Two', 'openai', 'gpt-two', 'oauth', 'openai-access', 'openai-shared-refresh', 111, 'openai-account', 4),
+			('openai-separate', 'OpenAI Separate', 'openai', 'gpt-three', 'oauth', 'openai-other-access', 'openai-other-refresh', 222, 'openai-account', 7),
+			('anthropic-shared-one', 'Anthropic Shared One', 'anthropic', 'claude-one', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 333, 'anthropic-account', 9),
+			('anthropic-shared-two', 'Anthropic Shared Two', 'anthropic', 'claude-two', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 333, 'anthropic-account', 9),
+			('anthropic-separate', 'Anthropic Separate', 'anthropic', 'claude-three', 'oauth', 'anthropic-other-access', 'anthropic-other-refresh', 444, 'anthropic-account', 12);
+	`); err != nil {
+		t.Fatalf("seed duplicate rotating OAuth credentials: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 187); err != nil {
+		t.Fatalf("migrate to 187: %v", err)
+	}
+
+	for _, provider := range []string{"openai", "anthropic"} {
+		var firstConnection, secondConnection, separateConnection string
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-shared-one").Scan(&firstConnection); err != nil {
+			t.Fatalf("query %s first shared connection: %v", provider, err)
+		}
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-shared-two").Scan(&secondConnection); err != nil {
+			t.Fatalf("query %s second shared connection: %v", provider, err)
+		}
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-separate").Scan(&separateConnection); err != nil {
+			t.Fatalf("query %s separate connection: %v", provider, err)
+		}
+		if firstConnection != secondConnection {
+			t.Fatalf("%s exact rotating credentials were split across %q and %q", provider, firstConnection, secondConnection)
+		}
+		if separateConnection == firstConnection {
+			t.Fatalf("%s distinct refresh tokens were merged from account identity", provider)
+		}
+	}
+
+	var connectionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM oauth_connections`).Scan(&connectionCount); err != nil {
+		t.Fatalf("count migrated OAuth connections: %v", err)
+	}
+	if connectionCount != 4 {
+		t.Fatalf("migrated OAuth connections = %d, want 4 credential owners", connectionCount)
+	}
+}
+
+func TestMigration190RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "repair-split-rotating-oauth-connections.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 189); err != nil {
+		t.Fatalf("migrate to 189: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO oauth_connections (id, provider, name, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_needs_reauth, oauth_revision)
+		VALUES
+			('openai-old', 'openai', 'OpenAI Old', 'openai-old-access', 'openai-shared-refresh', 100, 'openai-account', 1, 4),
+			('openai-healthy', 'openai', 'OpenAI Healthy', 'openai-healthy-access', 'openai-shared-refresh', 200, 'openai-account', 0, 7),
+			('openai-separate', 'openai', 'OpenAI Separate', 'openai-other-access', 'openai-other-refresh', 300, 'openai-account', 0, 9),
+			('anthropic-old', 'anthropic', 'Anthropic Old', 'anthropic-old-access', 'anthropic-shared-refresh', 400, 'anthropic-account', 1, 11),
+			('anthropic-healthy', 'anthropic', 'Anthropic Healthy', 'anthropic-healthy-access', 'anthropic-shared-refresh', 500, 'anthropic-account', 0, 13),
+			('anthropic-separate', 'anthropic', 'Anthropic Separate', 'anthropic-other-access', 'anthropic-other-refresh', 600, 'anthropic-account', 0, 15);
+		INSERT INTO agent_configs (id, name, provider, model, auth_method, oauth_connection_id)
+		VALUES
+			('openai-model-old', 'OpenAI Model Old', 'openai', 'gpt-one', 'oauth', 'openai-old'),
+			('openai-model-healthy', 'OpenAI Model Healthy', 'openai', 'gpt-two', 'oauth', 'openai-healthy'),
+			('openai-model-separate', 'OpenAI Model Separate', 'openai', 'gpt-three', 'oauth', 'openai-separate'),
+			('anthropic-model-old', 'Anthropic Model Old', 'anthropic', 'claude-one', 'oauth', 'anthropic-old'),
+			('anthropic-model-healthy', 'Anthropic Model Healthy', 'anthropic', 'claude-two', 'oauth', 'anthropic-healthy'),
+			('anthropic-model-separate', 'Anthropic Model Separate', 'anthropic', 'claude-three', 'oauth', 'anthropic-separate');
+		INSERT INTO account_usage_snapshots (id, provider, account_id, agent_config_id, oauth_connection_id, oauth_config_revision, raw_json)
+		VALUES
+			('openai-current', 'openai', 'openai-account', 'openai-model-old', 'openai-old', 4, '{}'),
+			('openai-stale', 'openai', 'openai-account', 'openai-model-old', 'openai-old', 3, '{}'),
+			('anthropic-current', 'anthropic', 'anthropic-account', 'anthropic-model-old', 'anthropic-old', 11, '{}'),
+			('anthropic-stale', 'anthropic', 'anthropic-account', 'anthropic-model-old', 'anthropic-old', 10, '{}');
+	`); err != nil {
+		t.Fatalf("seed previously split OAuth connections: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 190); err != nil {
+		t.Fatalf("migrate to 190: %v", err)
+	}
+
+	for _, provider := range []string{"openai", "anthropic"} {
+		var oldModelConnection, healthyModelConnection, separateModelConnection string
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-model-old").Scan(&oldModelConnection); err != nil {
+			t.Fatalf("query %s repaired old model: %v", provider, err)
+		}
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-model-healthy").Scan(&healthyModelConnection); err != nil {
+			t.Fatalf("query %s healthy model: %v", provider, err)
+		}
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-model-separate").Scan(&separateModelConnection); err != nil {
+			t.Fatalf("query %s separate model: %v", provider, err)
+		}
+		wantCanonical := provider + "-healthy"
+		if oldModelConnection != wantCanonical || healthyModelConnection != wantCanonical {
+			t.Fatalf("%s repaired connections = %q, %q, want %q", provider, oldModelConnection, healthyModelConnection, wantCanonical)
+		}
+		if separateModelConnection == wantCanonical {
+			t.Fatalf("%s distinct refresh token was merged from account identity", provider)
+		}
+
+		var currentConnection string
+		var currentRevision int64
+		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, provider+"-current").Scan(&currentConnection, &currentRevision); err != nil {
+			t.Fatalf("query %s current snapshot: %v", provider, err)
+		}
+		wantRevision := int64(7)
+		if provider == "anthropic" {
+			wantRevision = 13
+		}
+		if currentConnection != wantCanonical || currentRevision != wantRevision {
+			t.Fatalf("%s current snapshot = connection %q revision %d, want %q/%d", provider, currentConnection, currentRevision, wantCanonical, wantRevision)
+		}
+		var staleConnection string
+		var staleRevision int64
+		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, provider+"-stale").Scan(&staleConnection, &staleRevision); err != nil {
+			t.Fatalf("query %s stale snapshot: %v", provider, err)
+		}
+		wantStaleRevision := int64(3)
+		if provider == "anthropic" {
+			wantStaleRevision = 10
+		}
+		if staleConnection != wantCanonical || staleRevision != wantStaleRevision {
+			t.Fatalf("%s stale snapshot = connection %q revision %d, want %q/%d", provider, staleConnection, staleRevision, wantCanonical, wantStaleRevision)
+		}
+	}
+
+	if err := goose.DownTo(db, ".", 189); err != nil {
+		t.Fatalf("roll back migration 190: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 190); err != nil {
+		t.Fatalf("reapply migration 190: %v", err)
+	}
+	for _, provider := range []string{"openai", "anthropic"} {
+		var firstConnection, secondConnection string
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-model-old").Scan(&firstConnection); err != nil {
+			t.Fatalf("query %s old model after re-upgrade: %v", provider, err)
+		}
+		if err := db.QueryRow(`SELECT oauth_connection_id FROM agent_configs WHERE id = ?`, provider+"-model-healthy").Scan(&secondConnection); err != nil {
+			t.Fatalf("query %s healthy model after re-upgrade: %v", provider, err)
+		}
+		if firstConnection != secondConnection || firstConnection != provider+"-healthy" {
+			t.Fatalf("%s rollback/re-upgrade recreated split credentials: %q, %q", provider, firstConnection, secondConnection)
+		}
 	}
 }
 
