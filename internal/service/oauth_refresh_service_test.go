@@ -13,6 +13,59 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestOAuthRefreshServiceRunOnceAdoptsVerifiedAnthropicPrincipal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	configs := []*models.LLMConfig{
+		{Name: "First", Provider: models.ProviderAnthropic, Model: "claude-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-a", OAuthRefreshToken: "refresh-a", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
+		{Name: "Second", Provider: models.ProviderAnthropic, Model: "claude-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-b", OAuthRefreshToken: "refresh-b", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
+		{Name: "Organization only", Provider: models.ProviderAnthropic, Model: "claude-three", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-c", OAuthRefreshToken: "refresh-c", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
+	}
+	for _, cfg := range configs {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	worker.SetAnthropicIdentityResolver(func(_ context.Context, token string) (AnthropicOAuthIdentity, error) {
+		if token == "access-c" {
+			return AnthropicOAuthIdentity{AccountID: "organization:shared", DisplayName: "Organization account"}, nil
+		}
+		return AnthropicOAuthIdentity{AccountID: "organization:shared", DisplayName: "Verified account", PrincipalHash: "same-user-hash"}, nil
+	})
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	first, err := repo.GetByID(ctx, configs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.GetByID(ctx, configs[1].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := repo.GetByID(ctx, configs[2].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.OAuthConnectionID != second.OAuthConnectionID {
+		t.Fatalf("verified same-user connections remain split: %q != %q", first.OAuthConnectionID, second.OAuthConnectionID)
+	}
+	if third.OAuthConnectionID == first.OAuthConnectionID {
+		t.Fatal("organization-only connection was adopted without strong user evidence")
+	}
+	connections, err := repo.ListOAuthConnections(ctx, models.ProviderAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connections) != 2 {
+		t.Fatalf("connections = %d, want 2", len(connections))
+	}
+}
+
 func TestOAuthRefreshServiceRunOnceRefreshesEachExpiringConfigIndependently(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)

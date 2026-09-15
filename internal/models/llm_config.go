@@ -26,18 +26,20 @@ const (
 )
 
 type OAuthConnection struct {
-	ID           string      `json:"id"`
-	Provider     LLMProvider `json:"provider"`
-	Name         string      `json:"name"`
-	AccessToken  string      `json:"-"`
-	RefreshToken string      `json:"-"`
-	ExpiresAt    int64       `json:"oauth_expires_at,omitempty"`
-	AccountID    string      `json:"-"`
-	NeedsReauth  bool        `json:"oauth_needs_reauth,omitempty"`
-	Revision     int64       `json:"-"`
-	LinkedModels int         `json:"linked_models"`
-	CreatedAt    time.Time   `json:"created_at"`
-	UpdatedAt    time.Time   `json:"updated_at"`
+	ID                  string      `json:"id"`
+	Provider            LLMProvider `json:"provider"`
+	Name                string      `json:"name"`
+	AccessToken         string      `json:"-"`
+	RefreshToken        string      `json:"-"`
+	ExpiresAt           int64       `json:"oauth_expires_at,omitempty"`
+	AccountID           string      `json:"-"`
+	ProviderDisplayName string      `json:"-"`
+	PrincipalHash       string      `json:"-"`
+	NeedsReauth         bool        `json:"oauth_needs_reauth,omitempty"`
+	Revision            int64       `json:"-"`
+	LinkedModels        int         `json:"linked_models"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
 type LLMConfig struct {

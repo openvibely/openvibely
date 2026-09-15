@@ -19,8 +19,87 @@ import (
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testing.T) {
+	profiles := map[string]string{
+		"Bearer access-a": `{"organization":{"uuid":"org-shared"},"account":{"uuid":"user-shared","display_name":"Primary account"}}`,
+		"Bearer access-b": `{"organization":{"uuid":"org-shared"},"account":{"uuid":"user-shared","display_name":"Primary account"}}`,
+		"Bearer access-c": `{"organization":{"uuid":"org-shared"},"account":{"uuid":"user-other","display_name":"Other account"}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/oauth/profile" {
+			profile, ok := profiles[r.Header.Get("Authorization")]
+			require.True(t, ok, "unexpected profile authorization")
+			_, _ = w.Write([]byte(profile))
+			return
+		}
+		access := strings.TrimPrefix(r.URL.Path, "/token/")
+		_, _ = fmt.Fprintf(w, `{"access_token":"access-%s","refresh_token":"refresh-%s","expires_in":7200}`, access, access)
+	}))
+	defer server.Close()
+	oldHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = oldHost }()
+
+	h, _, repo := setupTestHandler(t)
+	h.oauthIdentityResolver = service.ResolveAnthropicOAuthIdentity
+	var configs []*models.LLMConfig
+	for _, suffix := range []string{"a", "b", "c"} {
+		cfg := &models.LLMConfig{
+			Name:              "Anthropic " + suffix,
+			Provider:          models.ProviderAnthropic,
+			Model:             "claude-test-" + suffix,
+			AuthMethod:        models.AuthMethodOAuth,
+			OAuthAccessToken:  "old-access-" + suffix,
+			OAuthRefreshToken: "old-refresh-" + suffix,
+		}
+		require.NoError(t, repo.Create(context.Background(), cfg))
+		configs = append(configs, cfg)
+	}
+
+	for i, cfg := range configs {
+		current, err := repo.GetByID(context.Background(), cfg.ID)
+		require.NoError(t, err)
+		suffix := string(rune('a' + i))
+		_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
+			ConfigID:       current.ID,
+			ConnectionID:   current.OAuthConnectionID,
+			Provider:       models.ProviderAnthropic,
+			TokenURL:       server.URL + "/token/" + suffix,
+			ConfigRevision: current.OAuthConfigRevision,
+		}, "code", "state")
+		require.NoError(t, err)
+	}
+
+	first, err := repo.GetByID(context.Background(), configs[0].ID)
+	require.NoError(t, err)
+	second, err := repo.GetByID(context.Background(), configs[1].ID)
+	require.NoError(t, err)
+	third, err := repo.GetByID(context.Background(), configs[2].ID)
+	require.NoError(t, err)
+	require.Equal(t, second.OAuthConnectionID, first.OAuthConnectionID, "verified same-user connections should be adopted automatically")
+	require.NotEqual(t, second.OAuthConnectionID, third.OAuthConnectionID, "same-organization different-user connection must remain isolated")
+
+	connections, err := repo.ListOAuthConnections(context.Background(), models.ProviderAnthropic)
+	require.NoError(t, err)
+	require.Len(t, connections, 2)
+	names := []string{connections[0].Name, connections[1].Name}
+	require.ElementsMatch(t, []string{"Primary account", "Other account"}, names)
+	fullConnection, err := repo.GetOAuthConnectionByID(context.Background(), second.OAuthConnectionID)
+	require.NoError(t, err)
+	require.Equal(t, "Primary account", fullConnection.ProviderDisplayName)
+	require.NotEmpty(t, fullConnection.PrincipalHash)
+	encoded, err := json.Marshal(fullConnection)
+	require.NoError(t, err)
+	for _, privateValue := range []string{"Primary account", "access-b", "refresh-b", "organization:org-shared", fullConnection.PrincipalHash, "oauth_principal_hash", "principal_hash"} {
+		require.NotContains(t, string(encoded), privateValue)
+	}
+}
 
 func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavailable(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
