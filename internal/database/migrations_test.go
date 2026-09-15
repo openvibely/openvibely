@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 192 {
+		t.Fatalf("max goose version = %d, want 192", maxVersion)
 	}
 }
 
@@ -1811,8 +1811,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 192 {
+		t.Fatalf("max goose version = %d, want 192", maxVersion)
 	}
 }
 
@@ -2260,8 +2260,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 192 {
+		t.Fatalf("max goose version = %d, want 192", maxVersion)
 	}
 }
 
@@ -2596,8 +2596,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 192 {
+		t.Fatalf("max goose version = %d, want 192", maxVersion)
 	}
 }
 
@@ -3685,6 +3685,52 @@ func TestMigration164DeletesOrphanedSchedules(t *testing.T) {
 	}
 	if kept != 1 || orphan != 0 {
 		t.Fatalf("migration 164 schedules: kept=%d orphan=%d, want kept=1 orphan=0", kept, orphan)
+	}
+}
+
+func TestMigration192AddsCoveringAnalyticsExecutionIndex(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "analytics-covering-index-192.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 191); err != nil {
+		t.Fatal(err)
+	}
+
+	executionQuery := `SELECT e.id,e.task_id,e.status,e.started_at,e.history_order,e.agent_config_id,e.completed_at,e.is_followup
+		FROM executions e WHERE e.task_id=? AND e.started_at>=?`
+	executionBefore := explainQueryPlan(t, db, executionQuery, "task", "2026-01-01 00:00:00")
+	if strings.Contains(executionBefore, "USING COVERING INDEX idx_executions_task_analytics") {
+		t.Fatalf("migration 191 unexpectedly has Analytics execution covering index: %q", executionBefore)
+	}
+	usageQuery := `SELECT u.task_id,SUM(u.cost_usd),SUM(u.total_tokens)
+		FROM llm_usage_events u WHERE u.task_id=? AND u.project_id=? AND u.occurred_at>=? GROUP BY u.task_id`
+	usageBefore := explainQueryPlan(t, db, usageQuery, "task", "project", "2026-01-01 00:00:00")
+	if strings.Contains(usageBefore, "USING COVERING INDEX idx_llm_usage_events_task_project_time_cost") {
+		t.Fatalf("migration 191 unexpectedly has Analytics usage covering index: %q", usageBefore)
+	}
+	executionUsageQuery := `SELECT u.cost_usd FROM llm_usage_events u
+		WHERE u.execution_id=? AND u.project_id=? AND u.occurred_at>=?`
+	executionUsageBefore := explainQueryPlan(t, db, executionUsageQuery, "execution", "project", "2026-01-01 00:00:00")
+	if strings.Contains(executionUsageBefore, "USING COVERING INDEX idx_llm_usage_events_execution_project_time_cost") {
+		t.Fatalf("migration 191 unexpectedly has execution usage covering index: %q", executionUsageBefore)
+	}
+	if err := goose.UpTo(db, ".", 192); err != nil {
+		t.Fatal(err)
+	}
+	executionAfter := explainQueryPlan(t, db, executionQuery, "task", "2026-01-01 00:00:00")
+	if !strings.Contains(executionAfter, "USING COVERING INDEX idx_executions_task_analytics") {
+		t.Fatalf("migration 192 Analytics execution projection plan = %q, want covering index", executionAfter)
+	}
+	usageAfter := explainQueryPlan(t, db, usageQuery, "task", "project", "2026-01-01 00:00:00")
+	if !strings.Contains(usageAfter, "USING COVERING INDEX idx_llm_usage_events_task_project_time_cost") {
+		t.Fatalf("migration 192 Analytics usage projection plan = %q, want covering index", usageAfter)
+	}
+	executionUsageAfter := explainQueryPlan(t, db, executionUsageQuery, "execution", "project", "2026-01-01 00:00:00")
+	if !strings.Contains(executionUsageAfter, "USING COVERING INDEX idx_llm_usage_events_execution_project_time_cost") {
+		t.Fatalf("migration 192 execution usage projection plan = %q, want covering index", executionUsageAfter)
 	}
 }
 
