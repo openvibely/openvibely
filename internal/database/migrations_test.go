@@ -2699,12 +2699,18 @@ func TestMigration187ConsolidatesExactRotatingCredentialsWithoutMergingAccountId
 	if _, err := db.Exec(`
 		INSERT INTO agent_configs (id, name, provider, model, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_config_revision)
 		VALUES
-			('openai-shared-one', 'OpenAI Shared One', 'openai', 'gpt-one', 'oauth', 'openai-access', 'openai-shared-refresh', 111, 'openai-account', 4),
+			('openai-shared-one', 'OpenAI Shared One', 'openai', 'gpt-one', 'oauth', 'openai-access', 'openai-shared-refresh', 222, 'openai-account', 7),
 			('openai-shared-two', 'OpenAI Shared Two', 'openai', 'gpt-two', 'oauth', 'openai-access', 'openai-shared-refresh', 111, 'openai-account', 4),
-			('openai-separate', 'OpenAI Separate', 'openai', 'gpt-three', 'oauth', 'openai-other-access', 'openai-other-refresh', 222, 'openai-account', 7),
-			('anthropic-shared-one', 'Anthropic Shared One', 'anthropic', 'claude-one', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 333, 'anthropic-account', 9),
-			('anthropic-shared-two', 'Anthropic Shared Two', 'anthropic', 'claude-two', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 333, 'anthropic-account', 9),
-			('anthropic-separate', 'Anthropic Separate', 'anthropic', 'claude-three', 'oauth', 'anthropic-other-access', 'anthropic-other-refresh', 444, 'anthropic-account', 12);
+			('openai-separate', 'OpenAI Separate', 'openai', 'gpt-three', 'oauth', 'openai-other-access', 'openai-other-refresh', 333, 'openai-account', 9),
+			('anthropic-shared-one', 'Anthropic Shared One', 'anthropic', 'claude-one', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 555, 'anthropic-account', 13),
+			('anthropic-shared-two', 'Anthropic Shared Two', 'anthropic', 'claude-two', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 444, 'anthropic-account', 11),
+			('anthropic-separate', 'Anthropic Separate', 'anthropic', 'claude-three', 'oauth', 'anthropic-other-access', 'anthropic-other-refresh', 666, 'anthropic-account', 15);
+		INSERT INTO account_usage_snapshots (id, provider, account_id, agent_config_id, oauth_config_revision, raw_json)
+		VALUES
+			('openai-current', 'openai', 'openai-account', 'openai-shared-two', 4, '{}'),
+			('openai-stale', 'openai', 'openai-account', 'openai-shared-two', 7, '{}'),
+			('anthropic-current', 'anthropic', 'anthropic-account', 'anthropic-shared-two', 11, '{}'),
+			('anthropic-stale', 'anthropic', 'anthropic-account', 'anthropic-shared-two', 13, '{}');
 	`); err != nil {
 		t.Fatalf("seed duplicate rotating OAuth credentials: %v", err)
 	}
@@ -2728,6 +2734,27 @@ func TestMigration187ConsolidatesExactRotatingCredentialsWithoutMergingAccountId
 		}
 		if separateConnection == firstConnection {
 			t.Fatalf("%s distinct refresh tokens were merged from account identity", provider)
+		}
+
+		wantCurrentRevision := int64(7)
+		if provider == "anthropic" {
+			wantCurrentRevision = 13
+		}
+		var currentConnection string
+		var currentRevision int64
+		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, provider+"-current").Scan(&currentConnection, &currentRevision); err != nil {
+			t.Fatalf("query %s current snapshot: %v", provider, err)
+		}
+		if currentConnection != firstConnection || currentRevision != wantCurrentRevision {
+			t.Fatalf("%s current snapshot = connection %q revision %d, want %q/%d", provider, currentConnection, currentRevision, firstConnection, wantCurrentRevision)
+		}
+		var staleConnection string
+		var staleRevision int64
+		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, provider+"-stale").Scan(&staleConnection, &staleRevision); err != nil {
+			t.Fatalf("query %s stale snapshot: %v", provider, err)
+		}
+		if staleConnection != firstConnection || staleRevision != -1 {
+			t.Fatalf("%s stale snapshot = connection %q revision %d, want %q/-1", provider, staleConnection, staleRevision, firstConnection)
 		}
 	}
 
