@@ -1684,6 +1684,11 @@ paths:
         in: query
         name: group_by
         type: string
+      - description: 'Active Analytics view: overview, outcomes, agents, learning,
+          usage, workflows, or all'
+        in: query
+        name: view
+        type: string
       - description: Reusable Agent definition ID or __unassigned__
         in: query
         name: agent

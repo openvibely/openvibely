@@ -253,6 +253,7 @@ func usageEvidenceRequested(filter repository.UsageFilter) bool {
 // @Param date_to query string false "Optional exclusive end datetime"
 // @Param compare query boolean false "Compare with the immediately preceding equivalent period"
 // @Param group_by query string false "Trend grouping: day, week, or month" default(day)
+// @Param view query string false "Active Analytics view: overview, outcomes, agents, learning, usage, workflows, or all"
 // @Param agent query string false "Reusable Agent definition ID or __unassigned__"
 // @Param workflow query string false "Automation workflow ID"
 // @Param evidence_limit query int false "Evidence rows per page, 1-100" default(20)
@@ -280,6 +281,7 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 	}
 	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), repository.AnalyticsDashboardFilter{
 		ProjectID:            projectID,
+		View:                 strings.TrimSpace(c.QueryParam("view")),
 		DateFrom:             usageFilter.DateFrom,
 		DateTo:               usageFilter.DateTo,
 		Compare:              c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",

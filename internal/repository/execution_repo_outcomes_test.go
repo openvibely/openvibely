@@ -356,6 +356,73 @@ func TestExecutionRepo_SkillOutcomeEvidencePreservesAggregateEligibilityForRetri
 	}
 }
 
+func TestAnalyticsDashboardSectionsForView(t *testing.T) {
+	tests := []struct {
+		view string
+		want analyticsDashboardSections
+	}{
+		{
+			view: "overview",
+			want: analyticsDashboardSections{
+				outcomeMetrics: true,
+				comparison:     true,
+				workflows:      true,
+				evidence:       true,
+				insights:       true,
+			},
+		},
+		{
+			view: "outcomes",
+			want: analyticsDashboardSections{
+				outcomeMetrics: true,
+				funnel:         true,
+				evidence:       true,
+			},
+		},
+		{
+			view: "agents",
+			want: analyticsDashboardSections{
+				agents:      true,
+				skills:      true,
+				evidence:    true,
+				agentDetail: true,
+			},
+		},
+		{
+			view: "learning",
+			want: analyticsDashboardSections{
+				skills:      true,
+				agentSkills: true,
+			},
+		},
+		{
+			view: "usage",
+			want: analyticsDashboardSections{
+				outcomeMetrics:  true,
+				modelCategories: true,
+			},
+		},
+		{
+			view: "workflows",
+			want: analyticsDashboardSections{
+				workflows:      true,
+				workflowDetail: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.view, func(t *testing.T) {
+			if got := analyticsDashboardSectionsForView(tt.view); got != tt.want {
+				t.Fatalf("sections for %q = %+v, want %+v", tt.view, got, tt.want)
+			}
+		})
+	}
+	all := analyticsDashboardSectionsForView("")
+	if !all.outcomeMetrics || !all.comparison || !all.funnel || !all.agents || !all.skills || !all.agentSkills || !all.modelCategories || !all.workflows || !all.evidence || !all.agentDetail || !all.workflowDetail || !all.insights {
+		t.Fatalf("legacy empty view must retain all dashboard sections: %+v", all)
+	}
+}
+
 func TestExecutionRepo_GetAnalyticsDashboardAllTimeOmitsComparison(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewExecutionRepo(db)

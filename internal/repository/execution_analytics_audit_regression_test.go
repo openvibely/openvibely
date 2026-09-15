@@ -72,6 +72,42 @@ func TestAnalyticsDashboardPeriodDoesNotResurrectHistoricalOutcomes(t *testing.T
 	}
 }
 
+func TestAnalyticsDashboardWorkflowCompletionRateIncludesAllInvocations(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	now := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
+	insertAutomationHistoryInvocation(t, db, fixture, "inv-completed", fixture.Nodes["trigger"], "completed", now.Add(-3*time.Hour), now.Add(-2*time.Hour), false)
+	insertAutomationHistoryInvocation(t, db, fixture, "inv-cancelled", fixture.Nodes["trigger"], "cancelled", now.Add(-2*time.Hour), now.Add(-time.Hour), false)
+	insertAutomationHistoryInvocation(t, db, fixture, "inv-skipped", fixture.Nodes["trigger"], "cancelled", now.Add(-time.Hour), now, false)
+	if _, err := db.ExecContext(ctx, `UPDATE automation_invocations SET status='skipped',skipped_reason='not applicable' WHERE id='inv-skipped'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE automation_invocations SET created_at=? WHERE automation_id=?`, now, fixture.AutomationID); err != nil {
+		t.Fatal(err)
+	}
+
+	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
+		ProjectID: fixture.ProjectID,
+		View:      "workflows",
+		DateFrom:  now.Add(-24 * time.Hour),
+		DateTo:    now.Add(24 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dashboard.Workflows) != 1 {
+		t.Fatalf("workflows = %+v, want one", dashboard.Workflows)
+	}
+	workflow := dashboard.Workflows[0]
+	if workflow.InvocationCount != 3 || workflow.CompletedCount != 1 || workflow.FailedCount != 0 {
+		t.Fatalf("workflow counts = %+v, want one completed among three invocations", workflow)
+	}
+	if workflow.CompletionRate < 33.3 || workflow.CompletionRate > 33.4 {
+		t.Fatalf("completion rate = %v, want 33.3%% across completed, cancelled, and skipped invocations", workflow.CompletionRate)
+	}
+}
+
 func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
