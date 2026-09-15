@@ -382,18 +382,28 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 	out.GoalAchievement = metric(achieved, evaluable)
 	out.TasksEvaluated = tasks
 
-	cycleQuery := `WITH period_exec AS (
-			SELECT e.task_id,e.status,e.started_at,e.completed_at FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + `
+	terminalWindow, terminalWindowArgs := analyticsWindowClause("e2", filter)
+	cycleQuery := `WITH scoped_tasks AS (
+			SELECT t.id FROM tasks t WHERE t.project_id=?` + dimension + `
 	), terminal_tasks AS (
-		SELECT task_id,MAX(COALESCE(completed_at,started_at)) terminal_at FROM period_exec
-		WHERE status IN ('completed','failed','cancelled') GROUP BY task_id
-	), historical_start AS (
-		SELECT e.task_id,MIN(e.started_at) first_started_at FROM executions e JOIN terminal_tasks p ON p.task_id=e.task_id GROUP BY e.task_id
+		SELECT t.id task_id FROM scoped_tasks t
+		WHERE EXISTS (
+			SELECT 1 FROM executions e
+			WHERE e.task_id=t.id AND e.status IN ('completed','failed','cancelled')` + window + `
+			LIMIT 1
+		)
 	)
-	SELECT COALESCE(CAST(MAX(0,(julianday(p.terminal_at)-julianday(h.first_started_at))*86400000) AS INTEGER),0)
-	FROM terminal_tasks p JOIN historical_start h ON h.task_id=p.task_id`
+	SELECT COALESCE(CAST(MAX(0,(julianday(terminal_at)-julianday(first_started_at))*86400000) AS INTEGER),0)
+	FROM (
+		SELECT p.task_id,
+			(SELECT COALESCE(e2.completed_at,e2.started_at) FROM executions e2 WHERE e2.task_id=p.task_id AND e2.status IN ('completed','failed','cancelled')` + terminalWindow + ` ORDER BY COALESCE(e2.completed_at,e2.started_at) DESC LIMIT 1) terminal_at,
+			(SELECT e3.started_at FROM executions e3 WHERE e3.task_id=p.task_id ORDER BY e3.started_at ASC LIMIT 1) first_started_at
+		FROM terminal_tasks p
+	) task_cycles
+	WHERE terminal_at IS NOT NULL AND first_started_at IS NOT NULL`
 	cycleArgs := append([]any{filter.ProjectID}, dimensionArgs...)
 	cycleArgs = append(cycleArgs, windowArgs...)
+	cycleArgs = append(cycleArgs, terminalWindowArgs...)
 	rows, err := r.db.QueryContext(ctx, cycleQuery, cycleArgs...)
 	if err != nil {
 		return out, nil, nil, fmt.Errorf("getting analytics task distributions: %w", err)
@@ -414,7 +424,9 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 	if includeFollowUpDistribution {
 		followupQuery := `SELECT COALESCE(SUM(CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END),0)
 			FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + ` GROUP BY e.task_id`
-		followupRows, err := r.db.QueryContext(ctx, followupQuery, cycleArgs...)
+		followupArgs := append([]any{filter.ProjectID}, dimensionArgs...)
+		followupArgs = append(followupArgs, windowArgs...)
+		followupRows, err := r.db.QueryContext(ctx, followupQuery, followupArgs...)
 		if err != nil {
 			return out, nil, nil, fmt.Errorf("getting analytics follow-up distribution: %w", err)
 		}
