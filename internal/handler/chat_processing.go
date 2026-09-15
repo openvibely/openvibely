@@ -2178,21 +2178,19 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	} else {
 		h.publishExecutionTerminal(execID, models.ExecCancelled, "cancelled")
 	}
-	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCancelled); err != nil {
-		applog.Infof("[handler] completeWithCancellation task=%s error updating status: %v", taskID, err)
+	finalized, err := h.taskRepo.FinalizeExecutionCancellation(ctx, taskID, execID)
+	if err != nil {
+		applog.Infof("[handler] completeWithCancellation task=%s error finalizing cancellation: %v", taskID, err)
+	} else if !finalized {
+		applog.Infof("[handler] completeWithCancellation task=%s exec=%s preserved newer active execution", taskID, execID)
 	}
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		applog.Infof("[handler] completeWithCancellation task=%s error getting task: %v", taskID, err)
 		return
 	}
-	if task != nil && task.Category == models.CategoryActive {
-		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
-			applog.Infof("[handler] completeWithCancellation task=%s error moving to backlog: %v", taskID, err)
-		} else {
-			applog.Infof("[handler] completeWithCancellation task=%s moved to backlog", taskID)
-			task.Category = models.CategoryBacklog
-		}
+	if finalized && task != nil && task.Category == models.CategoryBacklog {
+		applog.Infof("[handler] completeWithCancellation task=%s moved to backlog", taskID)
 	}
 	reply := service.ChannelReplyContext{}
 	if len(channelReply) > 0 {

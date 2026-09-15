@@ -2123,6 +2123,84 @@ func TestTaskRepo_GetByID_NotFound(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_FinalizeExecutionCancellationPreservesNewFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "cancel followed immediately", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	cancelled := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "original"}
+	if err := execRepo.Create(ctx, cancelled); err != nil {
+		t.Fatalf("Create cancelled execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, cancelled.ID, models.ExecCancelled, "", "cancelled", 0, 0); err != nil {
+		t.Fatalf("Complete cancelled execution: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled); err != nil {
+		t.Fatalf("mark task cancelled: %v", err)
+	}
+	if err := taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
+		t.Fatalf("move cancelled task to backlog: %v", err)
+	}
+
+	followup := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: "continue", IsFollowup: true}
+	queued := &models.ThreadInput{Content: followup.PromptSent}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, followup, queued)
+	if err != nil || !started {
+		t.Fatalf("CreateDirectTaskFollowupOrQueue: started=%v err=%v", started, err)
+	}
+
+	finalized, err := taskRepo.FinalizeExecutionCancellation(ctx, task.ID, cancelled.ID)
+	if err != nil {
+		t.Fatalf("FinalizeExecutionCancellation: %v", err)
+	}
+	if finalized {
+		t.Fatal("cancelled execution must not overwrite its successor")
+	}
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetByID: task=%#v err=%v", got, err)
+	}
+	if got.Status != models.StatusQueued || got.Category != models.CategoryActive {
+		t.Fatalf("successor state overwritten: status=%s category=%s", got.Status, got.Category)
+	}
+}
+
+func TestTaskRepo_FinalizeExecutionCancellationWithoutSuccessorMovesToBacklog(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "cancel without successor", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	cancelled := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "original"}
+	if err := execRepo.Create(ctx, cancelled); err != nil {
+		t.Fatalf("Create execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, cancelled.ID, models.ExecCancelled, "", "cancelled", 0, 0); err != nil {
+		t.Fatalf("Complete execution: %v", err)
+	}
+
+	finalized, err := taskRepo.FinalizeExecutionCancellation(ctx, task.ID, cancelled.ID)
+	if err != nil || !finalized {
+		t.Fatalf("FinalizeExecutionCancellation: finalized=%v err=%v", finalized, err)
+	}
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetByID: task=%#v err=%v", got, err)
+	}
+	if got.Status != models.StatusCancelled || got.Category != models.CategoryBacklog {
+		t.Fatalf("terminal state = status=%s category=%s", got.Status, got.Category)
+	}
+}
+
 func TestTaskRepo_ClaimTask_PendingSucceeds(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

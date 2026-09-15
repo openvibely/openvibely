@@ -1218,6 +1218,78 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 	return nil
 }
 
+// FinalizeExecutionCancellation moves a task to its cancelled board state only
+// when no different execution has already taken ownership of the task. A user
+// can submit a follow-up while the cancelled execution is still unwinding; in
+// that case the follow-up's queued/running execution must retain the task's
+// reactivated state.
+func (r *TaskRepo) FinalizeExecutionCancellation(ctx context.Context, taskID, executionID string) (bool, error) {
+	var task *models.Task
+	finalized := false
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, taskID)
+		if err != nil {
+			return fmt.Errorf("getting task before cancellation finalization: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+
+		var successorActive bool
+		if err := exec.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM executions
+			WHERE task_id = ? AND id <> ? AND status IN ('queued', 'running')
+		)`, taskID, executionID).Scan(&successorActive); err != nil {
+			return fmt.Errorf("checking cancellation execution ownership: %w", err)
+		}
+		if successorActive {
+			return nil
+		}
+
+		category := task.Category
+		displayOrder := task.DisplayOrder
+		movedToBacklog := false
+		if category == models.CategoryActive {
+			category = models.CategoryBacklog
+			movedToBacklog = true
+			if err := exec.QueryRowContext(ctx,
+				`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = ?`,
+				task.ProjectID, category).Scan(&displayOrder); err != nil {
+				return fmt.Errorf("getting cancellation backlog display_order: %w", err)
+			}
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks
+			SET status = 'cancelled', category = ?, display_order = ?,
+				completed_at = CASE WHEN ? THEN NULL ELSE completed_at END,
+				updated_at = datetime('now')
+			WHERE id = ?`, category, displayOrder, movedToBacklog, taskID); err != nil {
+			return fmt.Errorf("finalizing task cancellation: %w", err)
+		}
+		finalized = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if finalized && r.broadcaster != nil && (task.Status != models.StatusCancelled || task.Category == models.CategoryActive) {
+		category := task.Category
+		if category == models.CategoryActive {
+			category = models.CategoryBacklog
+		}
+		r.broadcaster.Publish(events.TaskEvent{
+			Type:        events.TaskBoardUpdated,
+			TaskID:      task.ID,
+			TaskName:    task.Title,
+			ProjectID:   task.ProjectID,
+			Category:    string(category),
+			OldCategory: string(task.Category),
+			Status:      string(models.StatusCancelled),
+		})
+	}
+	return finalized, nil
+}
+
 func isActiveBoardStatus(status models.TaskStatus) bool {
 	switch status {
 	case models.StatusPending, models.StatusQueued, models.StatusRunning, models.StatusBlocked:
