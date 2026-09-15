@@ -92,6 +92,10 @@ func scanThreadInput(scanner interface {
 }
 
 func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.ThreadInput) error {
+	if input.TaskID != "" {
+		unlock := LockTaskLifecycle(input.TaskID)
+		defer unlock()
+	}
 	if input.InputMode == "" {
 		input.InputMode = models.ThreadInputModeQueued
 	}
@@ -107,6 +111,10 @@ func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.Thread
 // server-derived causal bindings in one transaction. The existing thread_inputs
 // queue remains authoritative for admission, cancellation, and promotion.
 func (r *ThreadInputRepo) CreateQueuedWithAutomationContext(ctx context.Context, input *models.ThreadInput, automationContext models.AutomationContext, bindingKey string) error {
+	if input.TaskID != "" {
+		unlock := LockTaskLifecycle(input.TaskID)
+		defer unlock()
+	}
 	if automationContext.ProjectID == "" || automationContext.ProjectID != input.ProjectID || len(automationContext.Bindings) == 0 {
 		return errors.New("queued automation context does not match input project")
 	}

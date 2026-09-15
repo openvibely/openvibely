@@ -2299,6 +2299,103 @@ func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
 	assert.Equal(t, models.CategoryBacklog, updated.Category)
 }
 
+func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Superseded Stop", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	old := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "old"}
+	require.NoError(t, execRepo.Create(ctx, old))
+	observed, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	cutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
+	require.NoError(t, err)
+
+	// The old turn completes and a direct follow-up is admitted before Stop
+	// reaches the callback and durable task status update.
+	_, err = db.ExecContext(ctx, `UPDATE executions SET status = 'completed' WHERE id = ?`, old.ID)
+	require.NoError(t, err)
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	next := &models.Execution{TaskID: task.ID, IsFollowup: true, PromptSent: "new"}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new"})
+	require.NoError(t, err)
+	require.True(t, started)
+	inputRepo := repository.NewThreadInputRepo(db)
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, Content: "another follow-up"}
+	require.NoError(t, inputRepo.CreateQueued(ctx, queued))
+	cancelled := make(chan struct{}, 1)
+	worker.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+	swept := false
+	require.ErrorIs(t, svc.CancelTaskObservedWithPending(ctx, observed, cutoff, func() error {
+		swept = true
+		return inputRepo.CancelPendingForTask(ctx, task.ID)
+	}), ErrTaskCancellationSuperseded)
+	require.False(t, swept, "stale Stop must not sweep pending follow-ups")
+	require.False(t, worker.IsCancellationRequested(task.ID), "stale Stop must not mark the new run")
+	select {
+	case <-cancelled:
+		t.Fatal("new follow-up callback was cancelled")
+	default:
+	}
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusQueued, current.Status)
+	require.Equal(t, models.CategoryActive, current.Category)
+	stored, err := execRepo.GetByID(ctx, next.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, stored.Status)
+	pending, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, queued.ID, pending[0].ID)
+}
+
+func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Rerun During Stop", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	observed, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	cutoff, err := taskRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
+	require.NoError(t, err)
+	stopEntered := make(chan struct{})
+	releaseStop := make(chan struct{})
+	worker.RegisterCancel(task.ID, func() {
+		close(stopEntered)
+		<-releaseStop
+	})
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- svc.CancelTaskObserved(ctx, observed, cutoff) }()
+	select {
+	case <-stopEntered:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not reach its callback")
+	}
+	rerunDone := make(chan error, 1)
+	go func() { rerunDone <- svc.RunTask(ctx, task.ID) }()
+	close(releaseStop)
+	require.NoError(t, <-stopDone)
+	require.NoError(t, <-rerunDone)
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, current.Status)
+	require.Equal(t, models.CategoryActive, current.Category)
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	require.True(t, worker.pending[task.ID])
+	require.Len(t, worker.queue, 1)
+	require.Equal(t, task.ID, worker.queue[0].ID)
+}
+
 func TestTaskService_CancelTask_ReturnsCategoryUpdateFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

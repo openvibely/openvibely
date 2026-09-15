@@ -15,6 +15,17 @@ import (
 
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
+// TaskExecutionHistoryCutoff is the run admission watermark used to reject a
+// stale cancellation before it can touch an in-process callback or queue.
+func (r *TaskRepo) TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error) {
+	var cutoff int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(history_order), 0)
+		FROM executions WHERE task_id = ?`, taskID).Scan(&cutoff); err != nil {
+		return 0, fmt.Errorf("loading task execution cutoff: %w", err)
+	}
+	return cutoff, nil
+}
+
 // ProjectTaskStatusCounts contains only the task predicates needed by the
 // terminal status view. It intentionally does not hydrate task cards.
 type ProjectTaskStatusCounts struct {

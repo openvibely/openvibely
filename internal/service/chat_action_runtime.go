@@ -398,18 +398,18 @@ func usageAnalyticsServiceFromRepos(existing *UsageAnalyticsService, execRepo *r
 	return NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
 }
 
-func workerFromTaskService(taskSvc *TaskService) *WorkerService {
-	if taskSvc == nil {
-		return nil
-	}
-	return taskSvc.workerSvc
-}
-
 func swarmFromTaskService(taskSvc *TaskService) *SwarmService {
 	if taskSvc == nil {
 		return nil
 	}
 	return taskSvc.swarmSvc
+}
+
+func workerFromTaskService(taskSvc *TaskService) *WorkerService {
+	if taskSvc == nil {
+		return nil
+	}
+	return taskSvc.workerSvc
 }
 
 type cancelTaskRuntimeInput struct {
@@ -477,14 +477,10 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 		if err != nil {
 			return "", err
 		}
-	}
-	workerSvc := workerFromTaskService(opts.TaskSvc)
-	if workerSvc != nil {
-		workerSvc.MarkCancellationRequested(task.ID)
-	}
-	if opts.ThreadInputRepo != nil {
-		if err := opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
-			applog.Infof("[channel-runtime] cancel_task error cancelling pending thread inputs task=%s: %v", task.ID, err)
+	} else if opts.TaskSvc != nil {
+		cancellationCutoff, err = opts.TaskSvc.repo.TaskExecutionHistoryCutoff(ctx, task.ID)
+		if err != nil {
+			return "", err
 		}
 	}
 	swarmSvc := opts.SwarmSvc
@@ -492,12 +488,23 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 		swarmSvc = swarmFromTaskService(opts.TaskSvc)
 	}
 	if task.SwarmRole == models.SwarmRoleParent && swarmSvc != nil {
+		if opts.ThreadInputRepo != nil {
+			if err := opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
+				applog.Infof("[channel-runtime] cancel_task error cancelling pending thread inputs task=%s: %v", task.ID, err)
+			}
+		}
 		if err := swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
 			return "", err
 		}
 	} else if opts.TaskSvc != nil {
-		if err := opts.TaskSvc.CancelTask(ctx, task.ID); err != nil {
-			return "", err
+		var cancelErr error
+		var pendingSweep func() error
+		if opts.ThreadInputRepo != nil {
+			pendingSweep = func() error { return opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID) }
+		}
+		cancelErr = opts.TaskSvc.CancelTaskObservedWithPending(ctx, task, cancellationCutoff, pendingSweep)
+		if cancelErr != nil {
+			return "", cancelErr
 		}
 	} else {
 		return "", fmt.Errorf("task service not configured")
