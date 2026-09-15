@@ -362,13 +362,23 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
-	observedTask, err := h.taskSvc.GetByID(c.Request().Context(), activeChatExec.TaskID)
+	observedTask, cutoff, err := h.taskSvc.ObserveTaskCancellation(c.Request().Context(), activeChatExec.TaskID)
 	if err != nil || observedTask == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load active response")
 	}
-	cutoff, err := h.execRepo.TaskExecutionHistoryCutoff(c.Request().Context(), activeChatExec.TaskID)
+	latestActiveExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to snapshot active response")
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to recheck active response")
+	}
+	if latestActiveExec == nil || latestActiveExec.ID != activeChatExec.ID {
+		if isHTMX(c) {
+			activeTurnID := ""
+			if latestActiveExec != nil {
+				activeTurnID = latestActiveExec.ID
+			}
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, latestActiveExec != nil, activeTurnID))
+		}
+		return c.NoContent(http.StatusNoContent)
 	}
 	if err := h.taskSvc.CancelTaskObserved(c.Request().Context(), observedTask, cutoff); err != nil {
 		applog.Infof("[handler] ChatStop error cancelling chat task=%s: %v", activeChatExec.TaskID, err)

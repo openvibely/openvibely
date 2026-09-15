@@ -2355,6 +2355,58 @@ func TestTaskService_CancelTaskObservedDoesNotCancelNewFollowup(t *testing.T) {
 	require.Equal(t, queued.ID, pending[0].ID)
 }
 
+func TestTaskService_ObserveTaskCancellationKeepsTaskAndCutoffTogether(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Atomic Stop Observation", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	old := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "old"}
+	require.NoError(t, execRepo.Create(ctx, old))
+	oldCutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
+	require.NoError(t, err)
+
+	unlock := repository.LockTaskLifecycle(task.ID)
+	_, err = db.ExecContext(ctx, `UPDATE executions SET status = 'completed' WHERE id = ?`, old.ID)
+	require.NoError(t, err)
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	next := &models.Execution{TaskID: task.ID, IsFollowup: true, PromptSent: "new"}
+	admitted := make(chan error, 1)
+	go func() {
+		started, admissionErr := execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new"})
+		if admissionErr == nil && !started {
+			admissionErr = fmt.Errorf("follow-up was queued instead of started")
+		}
+		admitted <- admissionErr
+	}()
+	type observation struct {
+		task   *models.Task
+		cutoff int64
+		err    error
+	}
+	observed := make(chan observation, 1)
+	go func() {
+		snapshot, cutoff, snapshotErr := svc.ObserveTaskCancellation(ctx, task.ID)
+		observed <- observation{snapshot, cutoff, snapshotErr}
+	}()
+	unlock()
+	require.NoError(t, <-admitted)
+	got := <-observed
+	require.NoError(t, got.err)
+	require.NotNil(t, got.task)
+	newCutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
+	require.NoError(t, err)
+	require.Greater(t, newCutoff, oldCutoff)
+	if got.cutoff == oldCutoff {
+		require.Equal(t, models.StatusCompleted, got.task.Status)
+	} else {
+		require.Equal(t, newCutoff, got.cutoff)
+		require.Equal(t, models.StatusQueued, got.task.Status)
+	}
+}
+
 func TestTaskService_CancelTaskDoesNotPurgeRerunSubmittedDuringStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -2478,6 +2530,60 @@ func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsRunning(t *testi
 	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
 	assert.Equal(t, goal.GoalID, paused.GoalID)
 	assert.Equal(t, "stopped by user", paused.Reason)
+}
+
+func TestTaskService_UpdateCategoryDemotionDoesNotCancelConcurrentFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	worker := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Demotion Follow-up", Prompt: "test", Status: models.StatusRunning, Category: models.CategoryActive}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	old := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "old"}
+	require.NoError(t, execRepo.Create(ctx, old))
+	categoryUpdated := make(chan struct{})
+	releaseLoader := make(chan struct{})
+	svc.updateCategoryTaskLoader = func(loadCtx context.Context, id string) (*models.Task, error) {
+		close(categoryUpdated)
+		<-releaseLoader
+		return taskRepo.GetByID(loadCtx, id)
+	}
+	demoted := make(chan error, 1)
+	go func() { demoted <- svc.UpdateCategory(ctx, task.ID, models.CategoryBacklog) }()
+	select {
+	case <-categoryUpdated:
+	case <-time.After(time.Second):
+		t.Fatal("category demotion did not reach its loader")
+	}
+	_, err := db.ExecContext(ctx, `UPDATE executions SET status = 'completed' WHERE id = ?`, old.ID)
+	require.NoError(t, err)
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	next := &models.Execution{TaskID: task.ID, IsFollowup: true, PromptSent: "new"}
+	admitted := make(chan error, 1)
+	go func() {
+		started, admissionErr := execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new"})
+		if admissionErr == nil && !started {
+			admissionErr = fmt.Errorf("follow-up was queued instead of started")
+		}
+		admitted <- admissionErr
+	}()
+	select {
+	case err := <-admitted:
+		t.Fatalf("follow-up entered while category cancellation was still in flight: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseLoader)
+	require.NoError(t, <-demoted)
+	require.NoError(t, <-admitted)
+	current, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusQueued, current.Status)
+	require.Equal(t, models.CategoryActive, current.Category)
+	stored, err := execRepo.GetByID(ctx, next.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, stored.Status)
 }
 
 func TestTaskService_UpdateCategory_FromActiveToCompletedCancelsQueued(t *testing.T) {

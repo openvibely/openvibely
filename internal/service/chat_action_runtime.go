@@ -464,21 +464,25 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 	if taskID == "" && title != "" && !strings.EqualFold(strings.TrimSpace(task.Title), title) {
 		return "", fmt.Errorf("no task found with exact title %q", title)
 	}
+	var cancellationCutoff int64
+	if opts.TaskSvc != nil {
+		task, cancellationCutoff, err = opts.TaskSvc.ObserveTaskCancellation(ctx, task.ID)
+		if err != nil {
+			return "", err
+		}
+		if task == nil {
+			return "", fmt.Errorf("task no longer exists")
+		}
+	}
 	result := cancelTaskRuntimeResponse{OK: true, TaskID: task.ID, Title: task.Title, PreviousStatus: task.Status, PreviousCategory: task.Category, FinalStatus: task.Status, FinalCategory: task.Category}
 	if !taskIsCancellableByUser(task) {
 		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
 		b, err := json.Marshal(result)
 		return string(b), err
 	}
-	var cancellationCutoff int64
-	if opts.ExecRepo != nil {
+	if opts.TaskSvc == nil && opts.ExecRepo != nil {
 		var err error
 		cancellationCutoff, err = opts.ExecRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
-		if err != nil {
-			return "", err
-		}
-	} else if opts.TaskSvc != nil {
-		cancellationCutoff, err = opts.TaskSvc.repo.TaskExecutionHistoryCutoff(ctx, task.ID)
 		if err != nil {
 			return "", err
 		}

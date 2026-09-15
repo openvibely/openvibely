@@ -2072,7 +2072,7 @@ func taskIsCancellableByUser(task *models.Task) bool {
 	return task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) || (task.SwarmRole == models.SwarmRoleParent && task.Status == models.StatusBlocked && task.Category == models.CategoryActive)
 }
 
-func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, composerStop bool, operation string) (*taskCancellationResult, error) {
+func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, cutoff int64, composerStop bool, operation string) (*taskCancellationResult, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task not found")
 	}
@@ -2090,11 +2090,6 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, compose
 		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
 		return result, nil
 	}
-	cutoff, err := h.execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
-	if err != nil {
-		return nil, err
-	}
-
 	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
 		if !composerStop && h.threadInputRepo != nil {
 			if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
@@ -2151,7 +2146,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	}
 
 	// Fetch task to get projectID for kanban board response
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	task, cutoff, err := h.taskSvc.ObserveTaskCancellation(c.Request().Context(), taskID)
 	if err != nil {
 		applog.Infof("[handler] CancelTask fetch error: %v", err)
 		if pulseRequest {
@@ -2173,7 +2168,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
-	result, err := h.cancelTaskWork(c.Request().Context(), task, composerStop, "CancelTask")
+	result, err := h.cancelTaskWork(c.Request().Context(), task, cutoff, composerStop, "CancelTask")
 	if err != nil {
 		if pulseRequest {
 			return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task. Try again.")

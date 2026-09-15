@@ -486,6 +486,13 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 }
 
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
+	if category != models.CategoryActive {
+		// A demotion may cancel the observed run after its board update. Keep
+		// direct follow-ups and manual worker submissions out until that older
+		// cancellation has finished.
+		unlock := repository.LockTaskLifecycle(id)
+		defer unlock()
+	}
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
 	var previousTask *models.Task
 	var err error
@@ -920,18 +927,34 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 }
 
 func (s *TaskService) CancelTask(ctx context.Context, id string) error {
-	observed, err := s.repo.GetByID(ctx, id)
+	observed, cutoff, err := s.ObserveTaskCancellation(ctx, id)
 	if err != nil {
 		return err
 	}
 	if observed == nil {
 		return fmt.Errorf("task not found: %s", id)
 	}
+	return s.CancelTaskObserved(ctx, observed, cutoff)
+}
+
+// ObserveTaskCancellation captures task state and execution admission under
+// one gate. Splitting these reads can pair an old running task with a newer
+// follow-up's history cutoff, allowing the older Stop to cancel that turn.
+func (s *TaskService) ObserveTaskCancellation(ctx context.Context, id string) (*models.Task, int64, error) {
+	unlock := repository.LockTaskLifecycle(id)
+	defer unlock()
+	observed, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	if observed == nil {
+		return nil, 0, nil
+	}
 	cutoff, err := s.repo.TaskExecutionHistoryCutoff(ctx, id)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	return s.CancelTaskObserved(ctx, observed, cutoff)
+	return observed, cutoff, nil
 }
 
 // CancelTaskObserved stops only the run observed by the caller. A later
