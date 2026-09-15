@@ -797,6 +797,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	}
 	cfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	cfg.Generation++
+	cfg.StopRevision++
 	if cfg.Generation == 0 {
 		cfg.Generation = 1
 	}
@@ -844,6 +845,12 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 }
 
 func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID string, message string) error {
+	initialChild, err := s.taskRepo.GetByID(ctx, childTaskID)
+	if err != nil || initialChild == nil || initialChild.ParentTaskID == nil {
+		return err
+	}
+	unlock := repository.LockTaskLifecycle(*initialChild.ParentTaskID)
+	defer unlock()
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	child, err := s.taskRepo.GetByID(ctx, childTaskID)
@@ -855,6 +862,7 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 		return err
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.StopRevision++
 	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 	repairingFailure := child.Status == models.StatusFailed || child.SwarmStatus == "failed" || child.SwarmStatus == "followup_failed"
 	swarmStatus := ""
@@ -930,6 +938,12 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 }
 
 func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context, childTaskID string) error {
+	initialChild, err := s.taskRepo.GetByID(ctx, childTaskID)
+	if err != nil || initialChild == nil || initialChild.ParentTaskID == nil {
+		return err
+	}
+	unlock := repository.LockTaskLifecycle(*initialChild.ParentTaskID)
+	defer unlock()
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	child, err := s.taskRepo.GetByID(ctx, childTaskID)
@@ -938,6 +952,18 @@ func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context
 	}
 	parent, err := s.taskRepo.GetByID(ctx, *child.ParentTaskID)
 	if err != nil || parent == nil {
+		return err
+	}
+	parentCfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	if err != nil {
+		return err
+	}
+	parentCfg.StopRevision++
+	parent.SwarmConfig, err = parentCfg.JSON()
+	if err != nil {
+		return err
+	}
+	if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, parent.SwarmStatus, parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		return err
 	}
 	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
@@ -957,6 +983,8 @@ func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context
 }
 
 func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
+	unlock := repository.LockTaskLifecycle(parentTaskID)
+	defer unlock()
 	if role != models.SwarmRoleReviewer && !isMergerRole(role) {
 		return nil, fmt.Errorf("unsupported swarm rerun role %q", role)
 	}
@@ -988,6 +1016,7 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 		}
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.StopRevision++
 	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 	childCfg.RerunGeneration = max(childCfg.RerunGeneration, parentCfg.Generation)
 	swarmStatus := "pending"
@@ -1179,7 +1208,7 @@ func (s *SwarmService) CancelSwarmObservedWithPending(ctx context.Context, obser
 	if err != nil {
 		return err
 	}
-	if current.Status != observed.Status || current.Category != observed.Category || currentCfg.Generation != observedCfg.Generation {
+	if current.Status != observed.Status || current.Category != observed.Category || currentCfg.Generation != observedCfg.Generation || currentCfg.StopRevision != observedCfg.StopRevision {
 		return ErrTaskCancellationSuperseded
 	}
 	if cancelPending != nil {

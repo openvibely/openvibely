@@ -28,6 +28,46 @@ func getDefaultProjectID(t *testing.T, db interface {
 	return "default"
 }
 
+func TestTaskRepo_SwarmUpdatesPreserveNewerStopRevision(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	tasks := NewTaskRepo(db, nil)
+	execs := NewExecutionRepo(db)
+	parent := &models.Task{ProjectID: "default", Title: "Revision parent", Status: models.StatusRunning, Category: models.CategoryActive, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	if err := tasks.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	parentID := parent.ID
+	child := &models.Task{ProjectID: "default", Title: "Revision reviewer", Status: models.StatusCompleted, Category: models.CategoryCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRoleReviewer}
+	if err := tasks.Create(ctx, child); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := tasks.GetByID(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := execs.Create(ctx, &models.Execution{TaskID: child.ID, IsFollowup: true, Status: models.ExecQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", stale.SwarmConfig, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.Update(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	current, err := tasks.GetByID(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := models.ParseSwarmConfig(current.SwarmConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StopRevision != 1 {
+		t.Fatalf("Stop revision after stale updates = %d, want 1", cfg.StopRevision)
+	}
+}
+
 func TestTaskRepo_ListChatContextByProjectUsesBoundedProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewTaskRepo(db, nil)

@@ -21,12 +21,20 @@ func TaskThreadHasActiveComposerStopState(task *models.Task, executions []models
 }
 
 func taskThreadActiveTurnID(executions []models.Execution) string {
+	runningTurnID := ""
+	queuedTurnID := ""
 	for _, exec := range executions {
 		if exec.Status == models.ExecRunning {
-			return exec.ID
+			runningTurnID = exec.ID
+		}
+		if exec.Status == models.ExecQueued {
+			queuedTurnID = exec.ID
 		}
 	}
-	return ""
+	if runningTurnID != "" {
+		return runningTurnID
+	}
+	return queuedTurnID
 }
 
 func taskQueuedSteerEndpoint(input models.ThreadInput) string {

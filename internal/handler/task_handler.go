@@ -2180,6 +2180,19 @@ func (h *Handler) CancelTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "swarm generation changed; Stop was not applied")
 		}
 	}
+	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_stop_revision") != "" {
+		expectedRevision, err := strconv.Atoi(c.QueryParam("expected_stop_revision"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm Stop revision")
+		}
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		if err != nil {
+			return err
+		}
+		if expectedRevision != cfg.StopRevision {
+			return echo.NewHTTPError(http.StatusConflict, "swarm follow-up changed; Stop was not applied")
+		}
+	}
 	if composerStop && c.QueryParam("expected_turn_id") != "" {
 		matches, err := h.execRepo.IsTaskExecutionAtHistoryCutoff(c.Request().Context(), taskID, c.QueryParam("expected_turn_id"), cutoff)
 		if err != nil {
@@ -2943,10 +2956,17 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 		return err
 	}
 	activeTurnID := ""
+	queuedTurnID := ""
 	for _, exec := range executions {
 		if exec.Status == models.ExecRunning {
 			activeTurnID = exec.ID
 		}
+		if exec.Status == models.ExecQueued {
+			queuedTurnID = exec.ID
+		}
+	}
+	if activeTurnID == "" {
+		activeTurnID = queuedTurnID
 	}
 	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", components.SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID)), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
 }

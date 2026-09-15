@@ -2815,7 +2815,7 @@ func SwarmParentStopEndpoint(task *models.Task, endpoint string) string {
 	if strings.Contains(endpoint, "?") {
 		separator = "&"
 	}
-	return fmt.Sprintf("%s%sexpected_generation=%d", endpoint, separator, cfg.Generation)
+	return fmt.Sprintf("%s%sexpected_generation=%d&expected_stop_revision=%d", endpoint, separator, cfg.Generation, cfg.StopRevision)
 }
 
 func chatComposerActionButton(stopEndpoint string, isRunning bool) templ.Component {
