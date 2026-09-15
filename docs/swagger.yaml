@@ -1800,7 +1800,9 @@ paths:
       - analytics
   /api/analytics/most-frequent-tasks:
     get:
-      description: Returns tasks ordered by execution count descending, then task ID ascending for deterministic ties. Omitted limit defaults to 10; limit=0 returns all matching tasks.
+      description: Returns tasks ordered by execution count descending, then task
+        ID ascending for deterministic ties. Omitted limit defaults to 10; limit=0
+        returns all matching tasks.
       parameters:
       - description: Project ID filter
         in: query
