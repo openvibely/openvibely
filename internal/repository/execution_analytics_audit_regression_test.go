@@ -72,26 +72,56 @@ func TestAnalyticsDashboardPeriodDoesNotResurrectHistoricalOutcomes(t *testing.T
 	}
 }
 
-func TestAnalyticsDashboardWorkflowCompletionRateIncludesAllInvocations(t *testing.T) {
+func TestAnalyticsDashboardWorkflowCompletionRateIncludesAllInvocationStatuses(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
-	now := time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC)
-	insertAutomationHistoryInvocation(t, db, fixture, "inv-completed", fixture.Nodes["trigger"], "completed", now.Add(-3*time.Hour), now.Add(-2*time.Hour), false)
-	insertAutomationHistoryInvocation(t, db, fixture, "inv-cancelled", fixture.Nodes["trigger"], "cancelled", now.Add(-2*time.Hour), now.Add(-time.Hour), false)
-	insertAutomationHistoryInvocation(t, db, fixture, "inv-skipped", fixture.Nodes["trigger"], "cancelled", now.Add(-time.Hour), now, false)
-	if _, err := db.ExecContext(ctx, `UPDATE automation_invocations SET status='skipped',skipped_reason='not applicable' WHERE id='inv-skipped'`); err != nil {
-		t.Fatal(err)
+	from := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 1, 11, 0, 0, 0, 0, time.UTC)
+	insertInvocation := func(id string, status models.AutomationInvocationStatus, created, started, completed time.Time) {
+		t.Helper()
+		var startedAt, completedAt any
+		if !started.IsZero() {
+			startedAt = sqliteTestTime(started)
+		}
+		if !completed.IsZero() {
+			completedAt = sqliteTestTime(completed)
+		}
+		skippedReason := ""
+		if status == models.AutomationInvocationSkipped {
+			skippedReason = "not applicable"
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO automation_invocations
+			(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+			 occurrence_key, status, skipped_reason, started_at, completed_at, created_at)
+			VALUES (?, ?, ?, ?, ?, 'schedule', ?, ?, ?, ?, ?, ?, ?)`,
+			id, fixture.ProjectID, fixture.AutomationID, fixture.VersionID, fixture.Nodes["trigger"], "schedule-"+id, "occurrence-"+id,
+			status, skippedReason, startedAt, completedAt, sqliteTestTime(created)); err != nil {
+			t.Fatalf("insert invocation %s: %v", id, err)
+		}
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE automation_invocations SET created_at=? WHERE automation_id=?`, now, fixture.AutomationID); err != nil {
+	insertInvocation("inv-completed", models.AutomationInvocationCompleted, from, from, from.Add(10*time.Minute))
+	insertInvocation("inv-failed", models.AutomationInvocationFailed, from.Add(2*time.Hour), from.Add(2*time.Hour), from.Add(2*time.Hour+20*time.Minute))
+	insertInvocation("inv-cancelled", models.AutomationInvocationCancelled, from.Add(4*time.Hour), from.Add(4*time.Hour), from.Add(4*time.Hour+30*time.Minute))
+	insertInvocation("inv-skipped", models.AutomationInvocationSkipped, from.Add(6*time.Hour), from.Add(6*time.Hour), from.Add(6*time.Hour))
+	insertInvocation("inv-claimed", models.AutomationInvocationClaimed, from.Add(8*time.Hour), time.Time{}, time.Time{})
+	insertInvocation("inv-dispatched", models.AutomationInvocationDispatched, from.Add(9*time.Hour), time.Time{}, time.Time{})
+	insertInvocation("inv-running", models.AutomationInvocationRunning, from.Add(10*time.Hour), from.Add(10*time.Hour), time.Time{})
+	insertInvocation("inv-before-from", models.AutomationInvocationFailed, from.Add(-time.Second), from.Add(-time.Second), from)
+	insertInvocation("inv-at-date-to", models.AutomationInvocationCompleted, to, to, to.Add(time.Minute))
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
+		VALUES ('workflow-waiting', ?, ?, ?, 'workflow-waiting', 'work', 'Waiting work', 'waiting'),
+		('workflow-blocked', ?, ?, ?, 'workflow-blocked', 'work', 'Blocked work', 'blocked')`,
+		fixture.ProjectID, fixture.AutomationID, fixture.VersionID, fixture.ProjectID, fixture.AutomationID, fixture.VersionID); err != nil {
 		t.Fatal(err)
 	}
 
 	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{
 		ProjectID: fixture.ProjectID,
 		View:      "workflows",
-		DateFrom:  now.Add(-24 * time.Hour),
-		DateTo:    now.Add(24 * time.Hour),
+		DateFrom:  from,
+		DateTo:    to,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -100,11 +130,17 @@ func TestAnalyticsDashboardWorkflowCompletionRateIncludesAllInvocations(t *testi
 		t.Fatalf("workflows = %+v, want one", dashboard.Workflows)
 	}
 	workflow := dashboard.Workflows[0]
-	if workflow.InvocationCount != 3 || workflow.CompletedCount != 1 || workflow.FailedCount != 0 {
-		t.Fatalf("workflow counts = %+v, want one completed among three invocations", workflow)
+	if workflow.InvocationCount != 7 || workflow.CompletedCount != 1 || workflow.FailedCount != 1 || workflow.CancelledCount != 1 || workflow.SkippedCount != 1 || workflow.OpenCount != 3 {
+		t.Fatalf("workflow counts = %+v, want explicit accounting for every in-period invocation status", workflow)
 	}
-	if workflow.CompletionRate < 33.3 || workflow.CompletionRate > 33.4 {
-		t.Fatalf("completion rate = %v, want 33.3%% across completed, cancelled, and skipped invocations", workflow.CompletionRate)
+	if workflow.DurationSampleSize != 4 {
+		t.Fatalf("duration sample size = %d, want completed, failed, cancelled, and skipped terminal samples only", workflow.DurationSampleSize)
+	}
+	if workflow.WaitingCount != 1 || workflow.BlockedCount != 1 {
+		t.Fatalf("current work-item counts = waiting %d blocked %d, want separate current-state values", workflow.WaitingCount, workflow.BlockedCount)
+	}
+	if workflow.CompletionRate < 14.2 || workflow.CompletionRate > 14.3 {
+		t.Fatalf("completion rate = %v, want one completion divided by all seven selected-period invocations", workflow.CompletionRate)
 	}
 }
 

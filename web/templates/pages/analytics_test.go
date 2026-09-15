@@ -399,6 +399,44 @@ func TestAnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestAnalyticsContent_WorkflowPerformanceRendersInvocationStatusCountsInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+
+	fixture := `<main id="reconnect-result"></main><script>
+(function() {
+  var result = document.getElementById('reconnect-result');
+  function fail(message) { result.setAttribute('data-test-result', 'fail'); result.setAttribute('data-test-error', message); throw new Error(message); }
+  history.replaceState({}, '', location.pathname + '?project_id=project-1&view=workflows');
+  window.Chart = function() { this.destroy = function() {}; };
+  window.fetch = function(url) {
+    var value = String(url);
+    var payload = [];
+    if (value.indexOf('/api/analytics/dashboard') >= 0) payload = {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One',invocation_count:2,completed_count:1,failed_count:0,cancelled_count:1,skipped_count:0,open_count:0,completion_rate:50,average_duration_ms:60000,duration_sample_size:2,waiting_count:3,blocked_count:4,health:'degraded'}],recent_outcomes:[],insights:[]};
+    return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
+  };
+  function wait(attempt) {
+    var text = document.getElementById('workflowPerformanceTable').textContent;
+    if (text.indexOf('Workflow One') >= 0) {
+      if (text.indexOf('1 / 2 (50.0%)') < 0) fail('workflow completion did not use invocation denominator: ' + text);
+      if (text.indexOf('1 / 1 (100.0%)') >= 0) fail('workflow completion regressed to successful-terminal denominator: ' + text);
+      var cells = Array.prototype.map.call(document.querySelectorAll('#workflowPerformanceTable td'), function(cell) { return cell.textContent.trim(); });
+      if (cells.join('|') !== 'Workflow One|2|1 / 2 (50.0%)|0|1|0|0|1m 0s · n=2|3 / 4|degraded') fail('workflow status cells missing cancelled/skipped/open accounting: ' + cells.join('|'));
+      result.setAttribute('data-test-result', 'pass');
+      return;
+    }
+    if ((attempt || 0) > 100) fail('workflow row did not render');
+    setTimeout(function() { wait((attempt || 0) + 1); }, 20);
+  }
+  window.addEventListener('load', function() { wait(0); });
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_ImmediateNavigationAwayAbortsWorkInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer

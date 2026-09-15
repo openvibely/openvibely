@@ -3497,6 +3497,9 @@ const docTemplate = `{
                 "blocked_count": {
                     "type": "integer"
                 },
+                "cancelled_count": {
+                    "type": "integer"
+                },
                 "completed_count": {
                     "type": "integer"
                 },
@@ -3513,6 +3516,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "invocation_count": {
+                    "type": "integer"
+                },
+                "open_count": {
+                    "type": "integer"
+                },
+                "skipped_count": {
                     "type": "integer"
                 },
                 "waiting_count": {
