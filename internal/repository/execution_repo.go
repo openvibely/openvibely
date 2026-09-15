@@ -262,6 +262,16 @@ func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID str
 }
 
 func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
+	unlockParent, err := lockSwarmParentFollowup(ctx, r.db, e.TaskID, e.IsFollowup)
+	if err != nil {
+		return err
+	}
+	defer unlockParent()
+	if e.IsFollowup {
+		return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+			return r.CreateWithExecutor(ctx, exec, e)
+		})
+	}
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
 		return r.CreateWithExecutor(ctx, conn, e)
 	})
@@ -280,6 +290,9 @@ func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor
 		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).Scan(&e.ID, &e.StartedAt)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
+	}
+	if e.IsFollowup {
+		return bumpSwarmParentStopRevision(ctx, exec, e.TaskID)
 	}
 	return nil
 }
@@ -323,11 +336,16 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	if e == nil || input == nil {
 		return false, fmt.Errorf("execution and queued input are required")
 	}
+	unlockParent, err := lockSwarmParentFollowup(ctx, r.db, e.TaskID, e.IsFollowup)
+	if err != nil {
+		return false, err
+	}
+	defer unlockParent()
 	unlock := LockTaskLifecycle(e.TaskID)
 	defer unlock()
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
-	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
+	err = withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		var status models.TaskStatus
 		var projectID string
 		if expected, guarded := activeLaneExpectedState(ctx, e.TaskID); guarded {
@@ -375,6 +393,11 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 			RETURNING id, started_at`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
 			Scan(&e.ID, &e.StartedAt); err != nil {
 			return fmt.Errorf("creating direct task follow-up execution: %w", err)
+		}
+		if e.IsFollowup {
+			if err := bumpSwarmParentStopRevision(ctx, dbexec, e.TaskID); err != nil {
+				return err
+			}
 		}
 		started = true
 		return nil

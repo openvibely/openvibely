@@ -543,6 +543,36 @@ func TestHandler_TaskThreadStopRejectsDelayedPreviousTurn(t *testing.T) {
 	require.Equal(t, models.ExecCancelled, stored.Status)
 }
 
+func TestHandler_QueuedTaskThreadStopKeepsTurnOwnershipAfterRefresh(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Queued turn", Category: models.CategoryActive, Status: models.StatusQueued}
+	require.NoError(t, tc.taskRepo.Create(ctx, task))
+	old := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecQueued, IsFollowup: true, PromptSent: "old"}
+	require.NoError(t, tc.execRepo.Create(ctx, old))
+
+	button := tc.HTMX().Get("/tasks/" + task.ID + "/thread/composer-action").Execute()
+	require.Equal(t, http.StatusOK, button.Code)
+	require.Contains(t, button.Body.String(), "/tasks/"+task.ID+"/cancel?composer_stop=1&amp;expected_turn_id="+old.ID)
+	thread := tc.HTMX().Get("/tasks/" + task.ID + "/thread").Execute()
+	require.Equal(t, http.StatusOK, thread.Code)
+	require.Contains(t, thread.Body.String(), "/tasks/"+task.ID+"/cancel?composer_stop=1&amp;expected_turn_id="+old.ID)
+
+	require.NoError(t, tc.execRepo.Complete(ctx, old.ID, models.ExecCompleted, "done", "", 0, 1))
+	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	next := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, IsFollowup: true, PromptSent: "next"}
+	started, err := tc.execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "next"})
+	require.NoError(t, err)
+	require.True(t, started)
+	stale := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?composer_stop=1&expected_turn_id=" + old.ID).Execute()
+	require.Equal(t, http.StatusConflict, stale.Code)
+	stored, err := tc.execRepo.GetByID(ctx, next.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, stored.Status)
+}
+
 func TestHandler_SwarmParentStopRejectsDelayedPreviousGeneration(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -568,6 +598,38 @@ func TestHandler_SwarmParentStopRejectsDelayedPreviousGeneration(t *testing.T) {
 	currentPlanner, err := h.taskRepo.GetByID(ctx, planner.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusPending, currentPlanner.Status)
+}
+
+func TestHandler_SwarmParentStopRejectsDelayedReviewerFollowup(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Delayed Reviewer Stop Project")
+	parent := &models.Task{ProjectID: project.ID, Title: "Parent", Prompt: "parent", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	require.NoError(t, h.taskRepo.Create(ctx, parent))
+	parentID := parent.ID
+	reviewer := &models.Task{ProjectID: project.ID, Title: "Reviewer", Prompt: "review", Category: models.CategoryCompleted, Status: models.StatusCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRoleReviewer, SwarmConfig: `{"rerun_generation":1}`}
+	require.NoError(t, h.taskRepo.Create(ctx, reviewer))
+	button := htmxGet(e, "/tasks/"+parent.ID+"/thread/composer-action")
+	require.Equal(t, http.StatusOK, button.Code)
+	require.Contains(t, button.Body.String(), "expected_generation=1&amp;expected_stop_revision=0")
+
+	next := &models.Execution{TaskID: reviewer.ID, IsFollowup: true, PromptSent: "new review"}
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new review"})
+	require.NoError(t, err)
+	require.True(t, started)
+	require.NoError(t, h.swarmSvc.HandleChildFollowup(ctx, reviewer.ID, "new review"))
+	stale := htmxPost(e, "/tasks/"+parent.ID+"/cancel?composer_stop=1&expected_generation=1&expected_stop_revision=0", nil)
+	require.Equal(t, http.StatusConflict, stale.Code)
+	currentParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	cfg, err := models.ParseSwarmConfig(currentParent.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Generation)
+	require.Greater(t, cfg.StopRevision, 0)
+	require.Equal(t, models.StatusRunning, currentParent.Status)
+	currentReviewer, err := h.taskRepo.GetByID(ctx, reviewer.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusQueued, currentReviewer.Status)
 }
 
 func TestHandler_CancelTask_AllowsActivePendingTask(t *testing.T) {
