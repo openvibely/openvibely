@@ -398,18 +398,18 @@ func usageAnalyticsServiceFromRepos(existing *UsageAnalyticsService, execRepo *r
 	return NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
 }
 
-func swarmFromTaskService(taskSvc *TaskService) *SwarmService {
-	if taskSvc == nil {
-		return nil
-	}
-	return taskSvc.swarmSvc
-}
-
 func workerFromTaskService(taskSvc *TaskService) *WorkerService {
 	if taskSvc == nil {
 		return nil
 	}
 	return taskSvc.workerSvc
+}
+
+func swarmFromTaskService(taskSvc *TaskService) *SwarmService {
+	if taskSvc == nil {
+		return nil
+	}
+	return taskSvc.swarmSvc
 }
 
 type cancelTaskRuntimeInput struct {
@@ -464,27 +464,19 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 	if taskID == "" && title != "" && !strings.EqualFold(strings.TrimSpace(task.Title), title) {
 		return "", fmt.Errorf("no task found with exact title %q", title)
 	}
-	var cancellationCutoff int64
-	if opts.TaskSvc != nil {
-		task, cancellationCutoff, err = opts.TaskSvc.ObserveTaskCancellation(ctx, task.ID)
-		if err != nil {
-			return "", err
-		}
-		if task == nil {
-			return "", fmt.Errorf("task no longer exists")
-		}
-	}
 	result := cancelTaskRuntimeResponse{OK: true, TaskID: task.ID, Title: task.Title, PreviousStatus: task.Status, PreviousCategory: task.Category, FinalStatus: task.Status, FinalCategory: task.Category}
 	if !taskIsCancellableByUser(task) {
 		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
 		b, err := json.Marshal(result)
 		return string(b), err
 	}
-	if opts.TaskSvc == nil && opts.ExecRepo != nil {
-		var err error
-		cancellationCutoff, err = opts.ExecRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
-		if err != nil {
-			return "", err
+	workerSvc := workerFromTaskService(opts.TaskSvc)
+	if workerSvc != nil {
+		workerSvc.MarkCancellationRequested(task.ID)
+	}
+	if opts.ThreadInputRepo != nil {
+		if err := opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
+			applog.Infof("[channel-runtime] cancel_task error cancelling pending thread inputs task=%s: %v", task.ID, err)
 		}
 	}
 	swarmSvc := opts.SwarmSvc
@@ -492,28 +484,18 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 		swarmSvc = swarmFromTaskService(opts.TaskSvc)
 	}
 	if task.SwarmRole == models.SwarmRoleParent && swarmSvc != nil {
-		var pendingSweep func() error
-		if opts.ThreadInputRepo != nil {
-			pendingSweep = func() error { return opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID) }
-		}
-		if err := swarmSvc.CancelSwarmObservedWithPending(ctx, task, pendingSweep); err != nil {
+		if err := swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
 			return "", err
 		}
 	} else if opts.TaskSvc != nil {
-		var cancelErr error
-		var pendingSweep func() error
-		if opts.ThreadInputRepo != nil {
-			pendingSweep = func() error { return opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID) }
-		}
-		cancelErr = opts.TaskSvc.CancelTaskObservedWithPending(ctx, task, cancellationCutoff, pendingSweep)
-		if cancelErr != nil {
-			return "", cancelErr
+		if err := opts.TaskSvc.CancelTask(ctx, task.ID); err != nil {
+			return "", err
 		}
 	} else {
 		return "", fmt.Errorf("task service not configured")
 	}
 	if opts.ExecRepo != nil {
-		cancelledIDs, err := opts.ExecRepo.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, task.ID, cancellationCutoff)
+		cancelledIDs, err := opts.ExecRepo.CancelActiveByTaskReturningIDs(ctx, task.ID)
 		if err != nil {
 			applog.Infof("[channel-runtime] cancel_task error cancelling active executions task=%s: %v", task.ID, err)
 		} else if opts.ExecutionStreamHub != nil {
@@ -681,53 +663,15 @@ func runChannelViewTaskThread(ctx context.Context, taskRepo *repository.TaskRepo
 		if req.Limit > 0 {
 			executions, err = execRepo.ListByTaskChronologicalPage(ctx, task.ID, offset, req.Limit)
 		} else {
-			executions, err = loadChannelTaskThreadExecutions(ctx, execRepo, task, total, offset)
+			executions, err = LoadBoundedTaskThreadExecutions(ctx, execRepo, task, total, offset, func(loaded []models.Execution) bool {
+				return formatThreadTranscriptPage(task, loaded, total, offset).budgetExceeded
+			})
 		}
 		if err != nil {
 			return "", fmt.Errorf("retrieving thread for %q: %w", task.Title, err)
 		}
 	}
 	return strings.TrimSpace(formatThreadTranscriptWithTotal(task, executions, total, offset)), nil
-}
-
-// channelTaskThreadExecutionFetchBatchSize bounds zero-limit channel reads to
-// formatter-sized chronological pages. The loader stops after the existing
-// 80 KiB transcript budget is reached instead of scanning the full history.
-const channelTaskThreadExecutionFetchBatchSize = 20
-
-func loadChannelTaskThreadExecutions(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task, total, offset int) ([]models.Execution, error) {
-	if execRepo == nil || task == nil || total <= 0 || offset < 0 || offset >= total {
-		return []models.Execution{}, nil
-	}
-
-	executions := make([]models.Execution, 0, minServiceInt(channelTaskThreadExecutionFetchBatchSize, total-offset))
-	nextOffset := offset
-	for nextOffset < total {
-		batchLimit := minServiceInt(channelTaskThreadExecutionFetchBatchSize, total-nextOffset)
-		batch, err := execRepo.ListByTaskChronologicalPage(ctx, task.ID, nextOffset, batchLimit)
-		if err != nil {
-			return nil, err
-		}
-		if len(batch) == 0 {
-			break
-		}
-		executions = append(executions, batch...)
-		if formatThreadTranscriptPage(task, executions, total, offset).budgetExceeded {
-			break
-		}
-		if len(batch) < batchLimit {
-			break
-		}
-		nextOffset += len(batch)
-	}
-	return executions, nil
-}
-
-func minServiceInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHandlerOptions, req SendToTaskRequest) string {

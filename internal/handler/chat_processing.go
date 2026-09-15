@@ -49,7 +49,7 @@ var (
 //   - Agent: LLM configuration (model, provider, API key, etc.)
 //   - ChatHistory: Prior conversation turns for context (may be empty for first message)
 //   - ProjectID: Project ID for task creation/lookup
-//   - SystemContext: Request-scoped system prompt context (attachments, personality, etc.)
+//   - SystemContext: Additional system prompt context (task list, file contents, etc.)
 //   - WorkDir: Working directory for CLI agents (project repo path)
 //   - ImageAttachments: Image files for vision-capable models
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
@@ -97,12 +97,6 @@ type streamingResponseParams struct {
 	// Task is the task record supplied for deferred context loading when
 	// DeferHistoryLoad is true.
 	Task *models.Task
-
-	// RepublishOpenPRAfterStartupSync is set while an open pull request has a
-	// durable pending publication requirement created by startup synchronization.
-	// The reconciled turn must publish that state before Goal Agent evaluation
-	// can schedule a fresh audit.
-	RepublishOpenPRAfterStartupSync bool
 
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
@@ -271,14 +265,13 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 
 	waitCtx := context.Background()
 	var waitCancel context.CancelFunc
-	var waitCancelRegistration uint64
 	if params.IsTaskFollowup && h.workerSvc != nil {
 		waitCtx, waitCancel = context.WithCancel(context.Background())
-		waitCancelRegistration = h.registerTaskCancellation(params.TaskID, waitCancel)
+		h.registerTaskCancellation(params.TaskID, waitCancel)
 	}
 	cleanupWaitCancellation := func() {
 		if waitCancel != nil {
-			h.deregisterTaskCancellation(params.TaskID, waitCancelRegistration)
+			h.deregisterTaskCancellation(params.TaskID)
 			waitCancel()
 			waitCancel = nil
 		}
@@ -291,7 +284,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 	var ctx context.Context
 	var cancel context.CancelFunc
-	var runtimeCancelRegistration uint64
 	runtimeCancelRegistered := false
 	preRuntimeCtx := func() context.Context {
 		if ctx != nil {
@@ -306,13 +298,13 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		var resetInactivity func()
 		ctx, cancel, resetInactivity = withInactivityTimeout(context.Background(), timeout)
 		ctx = llmcontracts.WithActivityCallback(ctx, resetInactivity)
-		runtimeCancelRegistration = h.registerTaskCancellation(params.TaskID, cancel)
+		h.registerTaskCancellation(params.TaskID, cancel)
 		runtimeCancelRegistered = true
 		cancelWaitOnly()
 	}
 	cleanupRuntimeCancellation := func() {
 		if runtimeCancelRegistered {
-			h.deregisterTaskCancellation(params.TaskID, runtimeCancelRegistration)
+			h.deregisterTaskCancellation(params.TaskID)
 			runtimeCancelRegistered = false
 		}
 		if cancel != nil {
@@ -536,7 +528,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			h.taskGoalContext(ctx, params.Task.ID, agentDefForSys),
 		)
 		personalityCtx := h.getPersonalityContext(ctx, params.ProjectID)
-		workDir, worktreeCtx, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, params.Task)
+		workDir, worktreeCtx, workDirErr := h.resolveWorktreeWorkDir(ctx, params.Task)
 		if workDirErr != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s deferred worktree error: %v", params.ExecID, workDirErr)
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, workDirErr.Error(), 0)
@@ -548,7 +540,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		params.SystemContext = combineContexts(combineContexts(sysCtx, worktreeCtx), personalityCtx)
 		params.WorkDir = workDir
-		params.RepublishOpenPRAfterStartupSync = republishOpenPR
 	}
 
 	applog.Infof("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v history=%d",
@@ -728,15 +719,7 @@ modelLoop:
 		h.finalizeStreamingTurn(params, output)
 		return
 	}
-	completionOutcome, completionErr := h.completeWithSuccessWithPRReconciliation(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.RepublishOpenPRAfterStartupSync, params.TelegramInitialAckMessageID, params.ChannelReply)
-	if completionErr != nil {
-		finalizeLifecycle(completionErr, result.ChatContext)
-		applog.Infof("[handler] processStreamingResponse exec=%s task=%s startup-sync PR publication failed: %v", params.ExecID, params.TaskID, completionErr)
-		h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), completionErr.Error(), durationMs)
-		h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, completionErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
-		h.finalizeStreamingTurn(params, output)
-		return
-	}
+	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionOutcome == repository.CompleteSuccessCompleted {
 		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
 	}
@@ -761,14 +744,7 @@ modelLoop:
 		}
 		applog.Infof("[handler] processStreamingResponse exec=%s completion deferred with no text steering; requeueing remaining steering inputs", params.ExecID)
 		h.requeuePendingSteeringForExecution(ctx, params.ExecID)
-		completionOutcome, completionErr = h.completeWithSuccessWithPRReconciliation(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.RepublishOpenPRAfterStartupSync, params.TelegramInitialAckMessageID, params.ChannelReply)
-		if completionErr != nil {
-			finalizeLifecycle(completionErr, result.ChatContext)
-			h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), completionErr.Error(), durationMs)
-			h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, completionErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
-			h.finalizeStreamingTurn(params, output)
-			return
-		}
+		completionOutcome = h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
 			finalizeLifecycle(nil, result.ChatContext)
 			h.finalizeStreamingTurn(params, output)
@@ -1441,6 +1417,12 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
 	}
+	availableModels, listErr := h.llmConfigRepo.ListChatSelectionOptions(ctx)
+	if listErr != nil {
+		applog.Infof("[handler] startQueuedChatInput error listing chat model selection options: %v", listErr)
+		availableModels = []models.LLMConfig{}
+	}
+	taskContext := h.buildChatContext(ctx, input.ProjectID, availableModels)
 	personalityContext := h.getPersonalityContext(ctx, input.ProjectID)
 	workDir := h.resolveWorkDir(ctx, input.ProjectID)
 	chatMode := models.NormalizeChatMode(string(input.ChatMode))
@@ -1466,7 +1448,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		Message:     input.Content,
 		Agent:       *agent,
 		ChatHistory: history, ProjectID: input.ProjectID,
-		SystemContext:    combineContexts(attachmentContext, personalityContext),
+		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
@@ -1736,7 +1718,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	}
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(ctx, task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
-	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, workDirErr.Error(), 0)
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
@@ -1751,22 +1733,21 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:                          exec.ID,
-		RetrySourceExecutionID:          failed.ID,
-		TaskID:                          taskID,
-		Message:                         failed.PromptSent,
-		Agent:                           *agent,
-		AgentDefinition:                 agentDef,
-		ChatHistory:                     priorHistory,
-		ProjectID:                       task.ProjectID,
-		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:                         workDir,
-		RepublishOpenPRAfterStartupSync: republishOpenPR,
-		IsTaskFollowup:                  true,
-		InputOrigin:                     models.TaskOriginWeb,
-		Task:                            task,
-		AutomationContext:               automationContext,
-		updateWorkDone:                  updateWorkDone,
+		ExecID:                 exec.ID,
+		RetrySourceExecutionID: failed.ID,
+		TaskID:                 taskID,
+		Message:                failed.PromptSent,
+		Agent:                  *agent,
+		AgentDefinition:        agentDef,
+		ChatHistory:            priorHistory,
+		ProjectID:              task.ProjectID,
+		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                workDir,
+		IsTaskFollowup:         true,
+		InputOrigin:            models.TaskOriginWeb,
+		Task:                   task,
+		AutomationContext:      automationContext,
+		updateWorkDone:         updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil
@@ -1891,7 +1872,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	}
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, attachmentContext), h.taskGoalContext(ctx, task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(ctx, task.ProjectID)
-	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
+	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(ctx, exec.ID, exec.TaskID, workDirErr.Error(), 0, channelReplyFromThreadInput(input))
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
@@ -1906,44 +1887,42 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		}
 	}
 	h.startStreamingResponse(streamingResponseParams{
-		ExecID:                          exec.ID,
-		RetrySourceExecutionID:          input.RetrySourceExecutionID,
-		TaskID:                          exec.TaskID,
-		Message:                         input.Content,
-		Agent:                           *agent,
-		AgentDefinition:                 agentDef,
-		ChatHistory:                     priorHistory,
-		ProjectID:                       task.ProjectID,
-		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:                         workDir,
-		RepublishOpenPRAfterStartupSync: republishOpenPR,
-		ImageAttachments:                imageAttachments,
-		IsTaskFollowup:                  true,
-		Surface:                         surfaceForThreadInput(input),
-		ChannelReply:                    channelReplyFromThreadInput(input),
-		RuntimeTools:                    h.xRuntimeToolsForThreadInput(task.ID, input),
-		InputOrigin:                     string(input.Source),
-		InputOriginAgent:                input.OriginAgent,
-		Task:                            task,
-		AutomationContext:               automationContext,
-		updateWorkDone:                  updateWorkDone,
+		ExecID:                 exec.ID,
+		RetrySourceExecutionID: input.RetrySourceExecutionID,
+		TaskID:                 exec.TaskID,
+		Message:                input.Content,
+		Agent:                  *agent,
+		AgentDefinition:        agentDef,
+		ChatHistory:            priorHistory,
+		ProjectID:              task.ProjectID,
+		SystemContext:          combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                workDir,
+		ImageAttachments:       imageAttachments,
+		IsTaskFollowup:         true,
+		Surface:                surfaceForThreadInput(input),
+		ChannelReply:           channelReplyFromThreadInput(input),
+		RuntimeTools:           h.xRuntimeToolsForThreadInput(task.ID, input),
+		InputOrigin:            string(input.Source),
+		InputOriginAgent:       input.OriginAgent,
+		Task:                   task,
+		AutomationContext:      automationContext,
+		updateWorkDone:         updateWorkDone,
 	})
 	updateWorkDone = nil
 	return nil
 }
 
-func (h *Handler) registerTaskCancellation(taskID string, cancel context.CancelFunc) uint64 {
+func (h *Handler) registerTaskCancellation(taskID string, cancel context.CancelFunc) {
 	if h.workerSvc != nil {
-		return h.workerSvc.RegisterCancelOwned(taskID, cancel)
+		h.workerSvc.RegisterCancel(taskID, cancel)
 	}
-	return 0
 }
 
 // deregisterTaskCancellation removes a task's cancel function from the worker service.
 // No-op if worker service is unavailable.
-func (h *Handler) deregisterTaskCancellation(taskID string, registrationID uint64) {
+func (h *Handler) deregisterTaskCancellation(taskID string) {
 	if h.workerSvc != nil {
-		h.workerSvc.DeregisterCancelOwned(taskID, registrationID)
+		h.workerSvc.DeregisterCancel(taskID)
 	}
 }
 
@@ -1952,45 +1931,19 @@ func (h *Handler) deregisterTaskCancellation(taskID string, registrationID uint6
 // Logs errors but does not fail since this runs in a background goroutine.
 // Captures git diff if workDir is provided.
 func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) repository.CompleteSuccessOutcome {
-	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, execID, taskID, output, workDir, tokensUsed, durationMs, false, completionOptions...)
-	if err != nil {
-		applog.Infof("[handler] completeWithSuccess exec=%s unexpected PR reconciliation error: %v", execID, err)
-		return repository.CompleteSuccessAlreadyTerminal
-	}
-	return outcome
-}
-
-func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (repository.CompleteSuccessOutcome, error) {
 	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
-	if republishOpenPR {
-		readiness, err := h.execRepo.SuccessCompletionReadiness(ctx, execID)
-		if err != nil {
-			return repository.CompleteSuccessAlreadyTerminal, err
-		}
-		if readiness != repository.CompleteSuccessCompleted {
-			return readiness, nil
-		}
-		if err := h.republishOpenPullRequestAfterStartupSync(ctx, taskID); err != nil {
-			return readiness, err
-		}
-	}
 	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
-		return repository.CompleteSuccessAlreadyTerminal, nil
+		return repository.CompleteSuccessAlreadyTerminal
 	}
 	if outcome == repository.CompleteSuccessPendingSteering {
 		applog.Infof("[handler] completeWithSuccess exec=%s deferred completion because pending steering exists", execID)
-		return outcome, nil
+		return outcome
 	}
 	if outcome == repository.CompleteSuccessAlreadyTerminal {
 		applog.Infof("[handler] completeWithSuccess exec=%s skipped because execution is already terminal", execID)
-		return outcome, nil
-	}
-	if republishOpenPR {
-		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, taskID, false); err != nil {
-			applog.Infof("[handler] completeWithSuccess task=%s published startup-sync reconciliation but could not clear durable publication requirement: %v", taskID, err)
-		}
+		return outcome
 	}
 
 	// Load task state before publishing the terminal event so any final status
@@ -2016,7 +1969,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		}
 		h.publishExecutionTerminal(execID, models.ExecCompleted, "")
 		h.notifySwarmChildTerminal(ctx, taskID)
-		return repository.CompleteSuccessCompleted, nil
+		return repository.CompleteSuccessCompleted
 	}
 
 	// Update task status BEFORE git diff capture. The SSE handler detects
@@ -2059,7 +2012,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		}
 	}
 	h.notifySwarmChildTerminal(ctx, taskID)
-	return repository.CompleteSuccessCompleted, nil
+	return repository.CompleteSuccessCompleted
 }
 
 func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task) (bool, string) {
@@ -2181,19 +2134,21 @@ func (h *Handler) completeWithCancellation(execID, taskID, output string, tokens
 	} else {
 		h.publishExecutionTerminal(execID, models.ExecCancelled, "cancelled")
 	}
-	finalized, err := h.taskRepo.FinalizeExecutionCancellation(ctx, taskID, execID)
-	if err != nil {
-		applog.Infof("[handler] completeWithCancellation task=%s error finalizing cancellation: %v", taskID, err)
-	} else if !finalized {
-		applog.Infof("[handler] completeWithCancellation task=%s exec=%s preserved newer active execution", taskID, execID)
+	if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusCancelled); err != nil {
+		applog.Infof("[handler] completeWithCancellation task=%s error updating status: %v", taskID, err)
 	}
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		applog.Infof("[handler] completeWithCancellation task=%s error getting task: %v", taskID, err)
 		return
 	}
-	if finalized && task != nil && task.Category == models.CategoryBacklog {
-		applog.Infof("[handler] completeWithCancellation task=%s moved to backlog", taskID)
+	if task != nil && task.Category == models.CategoryActive {
+		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
+			applog.Infof("[handler] completeWithCancellation task=%s error moving to backlog: %v", taskID, err)
+		} else {
+			applog.Infof("[handler] completeWithCancellation task=%s moved to backlog", taskID)
+			task.Category = models.CategoryBacklog
+		}
 	}
 	reply := service.ChannelReplyContext{}
 	if len(channelReply) > 0 {
@@ -2676,142 +2631,46 @@ func (h *Handler) resolveWorkDir(ctx context.Context, projectID string) string {
 // resolveWorktreeWorkDir resolves the working directory for a task followup,
 // preferring the task's git worktree. Falls back to project repo path for
 // non-git projects, chat tasks, or when worktree service is unavailable.
-func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) (string, string, bool, error) {
+func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task) (string, string, error) {
 	project, err := h.projectSvc.GetByID(ctx, task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
-		return "", "", false, nil
+		return "", "", nil
 	}
 	repoDir := project.RepoPath
 
 	if task.Category == models.CategoryChat || !service.IsGitRepo(repoDir) {
-		return repoDir, "", false, nil
+		return repoDir, "", nil
 	}
 
 	if h.worktreeSvc == nil {
-		return repoDir, "", false, nil
+		return repoDir, "", nil
 	}
 
 	wtPath, wtBranch, skipStartupSync, wtErr := h.worktreeSvc.SetupFollowupWorktree(ctx, task, repoDir)
 	if wtErr != nil {
 		applog.Infof("[handler] resolveWorktreeWorkDir worktree setup failed for task %s; refusing to use main repo: %v", task.ID, wtErr)
-		return "", "", false, fmt.Errorf("setting up isolated task worktree: %w", wtErr)
+		return "", "", fmt.Errorf("setting up isolated task worktree: %w", wtErr)
 	}
 	task.WorktreePath = wtPath
 	task.WorktreeBranch = wtBranch
 
 	if skipStartupSync {
 		applog.Infof("[handler] resolveWorktreeWorkDir task=%s using fresh current-target follow-up worktree path=%s", task.ID, wtPath)
-		return wtPath, "", false, nil
+		return wtPath, "", nil
 	}
 
-	publicationReservation, reservationErr := h.reserveStartupSyncPublication(ctx, task)
-	if reservationErr != nil {
-		return "", "", false, reservationErr
-	}
-	syncChanged, syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStartWithResult(ctx, task, repoDir)
-	if syncErr != nil {
+	if syncErr := h.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, task, repoDir); syncErr != nil {
 		var conflictErr *service.StartupSyncConflictError
 		if errors.As(syncErr, &conflictErr) {
 			applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync conflict for task follow-up %s, continuing in preserved worktree: %v", task.ID, syncErr)
-			publicationContext, republishOpenPR, publicationErr := h.startupSyncPublicationContext(ctx, task, publicationReservation, true)
-			if publicationErr != nil {
-				return "", "", false, publicationErr
-			}
-			return wtPath, combineContexts(buildStartupSyncConflictContext(conflictErr), publicationContext), republishOpenPR, nil
+			return wtPath, buildStartupSyncConflictContext(conflictErr), nil
 		}
 		applog.Infof("[handler] resolveWorktreeWorkDir startup worktree sync failed for task %s: %v", task.ID, syncErr)
-		return "", "", false, syncErr
+		return "", "", syncErr
 	}
 
-	publicationContext, republishOpenPR, publicationErr := h.startupSyncPublicationContext(ctx, task, publicationReservation, syncChanged)
-	if publicationErr != nil {
-		return "", "", false, publicationErr
-	}
 	applog.Infof("[handler] resolveWorktreeWorkDir task=%s using worktree path=%s", task.ID, wtPath)
-	return wtPath, publicationContext, republishOpenPR, nil
-}
-
-type startupSyncPublicationReservation struct {
-	active     bool
-	wasPending bool
-	prNumber   int
-}
-
-func (h *Handler) reserveStartupSyncPublication(ctx context.Context, task *models.Task) (startupSyncPublicationReservation, error) {
-	if task == nil || h.taskPullRequestRepo == nil {
-		return startupSyncPublicationReservation{}, nil
-	}
-	pullRequest, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
-	if err != nil {
-		return startupSyncPublicationReservation{}, fmt.Errorf("checking pull request before startup synchronization: %w", err)
-	}
-	if pullRequest == nil || !service.IsOpenPullRequestState(pullRequest.PRState) {
-		return startupSyncPublicationReservation{}, nil
-	}
-	reservation := startupSyncPublicationReservation{active: true, wasPending: pullRequest.NeedsRepublish, prNumber: pullRequest.PRNumber}
-	if !pullRequest.NeedsRepublish {
-		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, task.ID, true); err != nil {
-			return startupSyncPublicationReservation{}, fmt.Errorf("reserving pull request publication before startup synchronization: %w", err)
-		}
-	}
-	return reservation, nil
-}
-
-func (h *Handler) startupSyncPublicationContext(ctx context.Context, task *models.Task, reservation startupSyncPublicationReservation, syncChanged bool) (string, bool, error) {
-	if task == nil || !reservation.active {
-		return "", false, nil
-	}
-	if !syncChanged && !reservation.wasPending {
-		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
-			return "", false, fmt.Errorf("clearing unused pull request publication reservation: %w", err)
-		}
-		return "", false, nil
-	}
-	target := strings.TrimSpace(task.MergeTargetBranch)
-	if target == "" {
-		target = "the configured merge target"
-	}
-	return fmt.Sprintf("# Pull Request Reconciliation Required\n\nThis task has unpublished target-branch reconciliation work for %s. Existing pull request #%d does not yet contain the reconciled worktree state. Treat this as a reconciliation turn, not an audit-only turn: preserve the merge or conflict resolution, resolve any remaining implementation work, run relevant validation, and report the result. On successful completion OpenVibely will update the existing pull request automatically; do not reset the task branch merely to match its previous published SHA. A fresh audit can run in the next goal turn.", target, reservation.prNumber), true, nil
-}
-
-func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, taskID string) error {
-	if h == nil || h.taskPullRequestRepo == nil {
-		return fmt.Errorf("task pull request repository unavailable")
-	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("loading synchronized task: %w", err)
-	}
-	if task == nil {
-		return fmt.Errorf("synchronized task not found: %s", taskID)
-	}
-	pullRequest, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
-	if err != nil {
-		return fmt.Errorf("loading synchronized task pull request: %w", err)
-	}
-	if pullRequest == nil || !service.IsOpenPullRequestState(pullRequest.PRState) {
-		return fmt.Errorf("synchronized task no longer has an open pull request")
-	}
-	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
-	if err != nil {
-		return fmt.Errorf("loading synchronized task project: %w", err)
-	}
-	if project == nil {
-		return fmt.Errorf("synchronized task project not found")
-	}
-	result, err := h.newTaskPullRequestService().OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
-		Base:                   task.MergeTargetBranch,
-		IssueNumber:            pullRequest.IssueNumber,
-		IssueURL:               pullRequest.IssueURL,
-		PreserveNeedsRepublish: true,
-	})
-	if err != nil {
-		return fmt.Errorf("updating existing pull request #%d after startup synchronization: %w", pullRequest.PRNumber, err)
-	}
-	if result == nil || result.Record == nil || result.Record.PRNumber != pullRequest.PRNumber {
-		return fmt.Errorf("startup synchronization publication did not reuse pull request #%d", pullRequest.PRNumber)
-	}
-	return nil
+	return wtPath, "", nil
 }
 
 // executeChatTaskCreationRequests creates tasks from typed runtime-tool requests,
@@ -3111,54 +2970,15 @@ func (h *Handler) executeViewTaskThreadRequest(ctx context.Context, params strea
 		if req.Limit > 0 {
 			executions, err = h.execRepo.ListByTaskChronologicalPage(ctx, task.ID, offset, req.Limit)
 		} else {
-			executions, err = h.loadTaskThreadExecutions(ctx, task, total, offset)
+			executions, err = service.LoadBoundedTaskThreadExecutions(ctx, h.execRepo, task, total, offset, func(loaded []models.Execution) bool {
+				return h.formatThreadTranscriptPage(task, loaded, total, offset).budgetExceeded
+			})
 		}
 		if err != nil {
 			return "", fmt.Errorf("retrieving thread for task %q: %w", task.Title, err)
 		}
 	}
 	return strings.TrimSpace(h.formatThreadTranscriptWithTotal(task, executions, total, offset)), nil
-}
-
-// taskThreadExecutionFetchBatchSize keeps zero-limit runtime reads bounded. The
-// loader fetches chronological pages until the formatter reaches its 80 KiB
-// transcript budget, so a long history does not require an unbounded payload
-// read merely to discover where the transcript must stop.
-const taskThreadExecutionFetchBatchSize = 20
-
-func (h *Handler) loadTaskThreadExecutions(ctx context.Context, task *models.Task, total, offset int) ([]models.Execution, error) {
-	if task == nil || total <= 0 || offset < 0 || offset >= total {
-		return []models.Execution{}, nil
-	}
-
-	executions := make([]models.Execution, 0, minInt(taskThreadExecutionFetchBatchSize, total-offset))
-	nextOffset := offset
-	for nextOffset < total {
-		batchLimit := minInt(taskThreadExecutionFetchBatchSize, total-nextOffset)
-		batch, err := h.execRepo.ListByTaskChronologicalPage(ctx, task.ID, nextOffset, batchLimit)
-		if err != nil {
-			return nil, err
-		}
-		if len(batch) == 0 {
-			break
-		}
-		executions = append(executions, batch...)
-		if h.formatThreadTranscriptPage(task, executions, total, offset).budgetExceeded {
-			break
-		}
-		if len(batch) < batchLimit {
-			break
-		}
-		nextOffset += len(batch)
-	}
-	return executions, nil
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // executeChatScheduleRequests schedules tasks from typed runtime-tool requests.
@@ -3845,6 +3665,38 @@ func (h *Handler) executeToggleAlertRequests(ctx context.Context, projectID stri
 			return fmt.Sprintf("- Error marking alert %q as read: %v", alertID, err)
 		},
 	)
+}
+
+// buildChatContext builds the context string for chat prompts, including task, model, and schedule information.
+// Returns a formatted string with current tasks (excluding chat tasks), available models, and schedule details.
+// Delegates to the shared service.BuildChatContext so /chat and Telegram produce identical context.
+func (h *Handler) buildChatContext(ctx context.Context, projectID string, availableModels []models.LLMConfig) string {
+	existingTasks, err := h.taskSvc.ListByProject(ctx, projectID, "")
+	if err != nil {
+		applog.Infof("[handler] buildChatContext error listing tasks for project %s: %v", projectID, err)
+		existingTasks = []models.Task{}
+	}
+
+	schedules, err := h.scheduleRepo.ListByProject(ctx, projectID)
+	if err != nil {
+		applog.Infof("[handler] buildChatContext error listing schedules for project %s: %v", projectID, err)
+		schedules = []models.Schedule{}
+	}
+
+	agentDefinitions := h.listChatAssignableAgentDefinitions(ctx)
+	return service.BuildChatContextWithAgentDefinitions(existingTasks, availableModels, agentDefinitions, schedules, time.Now())
+}
+
+func (h *Handler) listChatAssignableAgentDefinitions(ctx context.Context) []models.ChatAssignableAgentDefinition {
+	if h.agentRepo == nil {
+		return nil
+	}
+	agents, err := h.agentRepo.ListChatAssignableDefinitions(ctx)
+	if err != nil {
+		applog.Infof("[handler] buildChatContext error listing agent definitions: %v", err)
+		return nil
+	}
+	return service.UniqueChatAssignableAgentDefinitions(agents)
 }
 
 // buildThreadSystemContext builds the system context string for task thread follow-ups.
