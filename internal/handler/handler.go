@@ -801,6 +801,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/thread", h.GetTaskThread)
 	e.GET("/tasks/:taskId/thread/composer-action", h.TaskThreadComposerAction)
 	e.GET("/tasks/:taskId/thread/executions/:execId/fragment", h.GetTaskThreadExecutionFragment)
+	e.GET("/tasks/:taskId/thread/executions/:execId/full", h.GetTaskThreadExecutionFullOutput)
 	e.POST("/tasks/:taskId/thread", h.TaskThreadSend)
 	e.POST("/tasks/:taskId/thread/model", h.TaskThreadSelectModel)
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)
