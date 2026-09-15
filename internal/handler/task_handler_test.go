@@ -903,6 +903,37 @@ func TestHandler_RunTask_NoModelsConfiguredHTMX(t *testing.T) {
 	}
 }
 
+func TestHandler_RunTask_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithTitle("Schedule page run now").
+		WithCategory(models.CategoryScheduled).
+		WithStatus(models.StatusPending).
+		Build()
+	runAt := time.Now().Add(time.Hour)
+	tc.CreateSchedule(task.ID).WithRunAt(runAt).Build()
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/run?project_id=" + project.ID + "&from=schedule").Execute()
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), `id="schedule-content"`)
+	require.Contains(t, rec.Body.String(), `id="schedule-context-menu"`)
+	require.Contains(t, rec.Body.String(), "Schedule page run now")
+	require.Contains(t, rec.Header().Get("HX-Trigger"), "Task queued to run now")
+}
+
+func TestHandler_RunTaskRejectsForeignProjectScope(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	foreign := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/run?project_id=" + foreign.ID + "&from=schedule").Execute()
+
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+}
+
 func TestHandler_CreateTask_Active_NoModelsConfiguredHTMX(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

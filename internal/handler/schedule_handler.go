@@ -297,7 +297,51 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 
 type scheduleToggleResult struct {
 	schedule       *models.Schedule
+	task           *models.Task
 	errorOperation string
+}
+
+func isSchedulePageMutation(c echo.Context) bool {
+	return c.QueryParam("from") == "schedule"
+}
+
+func scheduleWeekOffset(c echo.Context) int {
+	weekOffset := 0
+	if weekParam := c.QueryParam("week"); weekParam != "" {
+		if parsed, err := strconv.Atoi(weekParam); err == nil {
+			weekOffset = parsed
+		}
+	}
+	return weekOffset
+}
+
+func (h *Handler) renderScheduleContentForProject(c echo.Context, projectID string) error {
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
+	if err != nil {
+		applog.Infof("[handler] renderScheduleContentForProject error listing projects: %v", err)
+		return err
+	}
+	if projectID == "" && len(projects) > 0 {
+		projectID = projects[0].ID
+	}
+	var currentProject *models.Project
+	for i := range projects {
+		if projects[i].ID == projectID {
+			currentProject = &projects[i]
+			break
+		}
+	}
+	if currentProject == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	}
+	tasks, err := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
+	if err != nil {
+		applog.Infof("[handler] renderScheduleContentForProject error fetching tasks with schedules: %v", err)
+		return err
+	}
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
+	agentDefs := h.listScheduleAgentOptions(c.Request().Context(), projectID)
+	return render(c, http.StatusOK, pages.ScheduleContent(currentProject, tasks, scheduleWeekOffset(c), agents, agentDefs))
 }
 
 func scheduleToggleHTTPError(err error) error {
@@ -320,11 +364,12 @@ func scheduleToggleHTTPError(err error) error {
 // browser and JSON API transports.
 func (h *Handler) toggleScheduleEnabled(ctx context.Context, id, projectID string) (scheduleToggleResult, error) {
 	var result scheduleToggleResult
-	if schedule, _, err := h.requireScheduleInRequestProject(ctx, id, projectID); err != nil {
+	if schedule, task, err := h.requireScheduleInRequestProject(ctx, id, projectID); err != nil {
 		result.errorOperation = "lookup"
 		return result, err
 	} else {
 		result.schedule = schedule
+		result.task = task
 	}
 
 	actionResult, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).Toggle(ctx, projectID, id)
@@ -358,6 +403,13 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 			var actionErr *service.ScheduleActionError
 			if errors.As(err, &actionErr) && actionErr.Kind == service.ScheduleActionTimeError {
 				setHTMXToast(c, actionErr.Error(), "failed")
+				if isSchedulePageMutation(c) {
+					projectID := h.mutationProjectID(c)
+					if projectID == "" && result.task != nil {
+						projectID = result.task.ProjectID
+					}
+					return h.renderScheduleContentForProject(c, projectID)
+				}
 				return h.renderScheduleTaskDetail(c, result.schedule.TaskID, "", true)
 			}
 		}
@@ -376,6 +428,13 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 			message = "Schedule resumed"
 		}
 		setHTMXToast(c, message, "success")
+		if isSchedulePageMutation(c) {
+			projectID := h.mutationProjectID(c)
+			if projectID == "" && result.task != nil {
+				projectID = result.task.ProjectID
+			}
+			return h.renderScheduleContentForProject(c, projectID)
+		}
 		return h.renderScheduleTaskDetail(c, taskID, "", true)
 	}
 
@@ -407,7 +466,8 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteSchedule id=%s", id)
 
-	if _, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.mutationProjectID(c)); err != nil {
+	_, task, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.mutationProjectID(c))
+	if err != nil {
 		applog.Infof("[handler] DeleteSchedule error getting schedule: %v", err)
 		return err
 	}
@@ -424,6 +484,14 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	applog.Infof("[handler] DeleteSchedule success id=%s", id)
 
 	if isHTMX(c) {
+		setHTMXToast(c, "Schedule deleted", "success")
+		if isSchedulePageMutation(c) {
+			projectID := h.mutationProjectID(c)
+			if projectID == "" && task != nil {
+				projectID = task.ProjectID
+			}
+			return h.renderScheduleContentForProject(c, projectID)
+		}
 		return c.NoContent(http.StatusOK)
 	}
 	return c.Redirect(http.StatusSeeOther, "/")

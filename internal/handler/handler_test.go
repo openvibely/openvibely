@@ -4321,7 +4321,10 @@ func TestHandler_ViewSchedule_DeleteConfirmationDialog(t *testing.T) {
 		`deleteScheduleTarget = button.dataset.scheduleTarget || '#schedule-content';`,
 		`deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML show:none';`,
 		`modal.showModal()`,
-		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
+		`function schedulePageMutationURL(path)`,
+		`params.set('from', 'schedule')`,
+		`htmx.ajax('DELETE', schedulePageMutationURL('/schedules/' + encodeURIComponent(scheduleID))`,
+		`data-schedule-context-action="delete"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected schedule delete confirmation markup/script to contain %q", want)

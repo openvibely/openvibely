@@ -2031,6 +2031,9 @@ func (h *Handler) RunTask(c echo.Context) error {
 		applog.Infof("[handler] RunTask not found id=%s", taskID)
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
+	if projectID := h.mutationProjectID(c); projectID != "" && task.ProjectID != projectID {
+		return echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
+	}
 	if task.SwarmRole == models.SwarmRoleParent {
 		if h.swarmSvc == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
@@ -2048,6 +2051,10 @@ func (h *Handler) RunTask(c echo.Context) error {
 	// Return no content for HTMX requests — the dialog close handler on each page
 	// will refresh relevant content (e.g., kanban board on tasks page)
 	if isHTMX(c) {
+		setHTMXToast(c, "Task queued to run now", "success")
+		if isSchedulePageMutation(c) {
+			return h.renderScheduleContentForProject(c, task.ProjectID)
+		}
 		return c.NoContent(http.StatusNoContent)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
