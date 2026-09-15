@@ -44,7 +44,7 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "cycle_time_p90", Label: "P90 task cycle time", Definition: "90th percentile elapsed time from historical first execution start to latest terminal execution in the selected period.", Denominator: "Tasks with a terminal execution in the selected period and a persisted historical first execution start."},
 	{Key: "tokens_per_achieved_goal", Label: "Tokens per achieved goal", Definition: "Recorded tokens associated with achieved-goal tasks divided by represented achieved goals.", Denominator: "Achieved-goal tasks with usage records; coverage is disclosed."},
 	{Key: "agent_performance", Label: "Agent performance", Definition: "Task and execution outcomes attributed through tasks.agent_definition_id; duration uses historical first execution to the selected-period terminal outcome.", Denominator: "Selected-period tasks assigned to each reusable Agent definition, with unassigned work separate; duration samples are disclosed."},
-	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations; terminal-duration sample size is disclosed.", Denominator: "Selected-period workflow invocations; waiting and blocked values are explicitly current state."},
+	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations; selected-period invocation status counts are displayed as completed, failed, cancelled, skipped, or open, and terminal-duration sample size is disclosed.", Denominator: "All selected-period workflow invocations for completion rate; waiting and blocked values are explicitly current state."},
 	{Key: "agent_skill_outcomes", Label: "Observed Agent and skill outcomes", Definition: "Task outcomes grouped by assigned reusable Agent definition and selected or loaded skill.", Denominator: "Selected-period tasks with execution evidence and a selected or loaded skill event; association is observational, not causal."},
 	{Key: "skill_outcomes", Label: "Observed skill outcomes", Definition: "Observed task outcomes where a skill was selected or loaded; this is association, not causation.", Denominator: "Selected-period tasks with a selected or loaded skill event and execution evidence."},
 	{Key: "model_category", Label: "Model performance by task category", Definition: "Technical terminal completion grouped by configured model and task category.", Denominator: "Terminal executions in each model/category group during the selected period."},
@@ -811,9 +811,15 @@ func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter Ana
 		invocationWindow += " AND i.created_at<?"
 		args = append(args, filter.DateTo.UTC().Format("2006-01-02 15:04:05.999999999"))
 	}
-	query := `SELECT a.id,a.name,COUNT(DISTINCT i.id),COUNT(DISTINCT CASE WHEN i.status='completed' THEN i.id END),COUNT(DISTINCT CASE WHEN i.status='failed' THEN i.id END),
-		COALESCE(CAST(AVG(CASE WHEN i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN (julianday(i.completed_at)-julianday(i.started_at))*86400000 END) AS INTEGER),0),
-		COUNT(DISTINCT CASE WHEN i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN i.id END),
+	query := `SELECT a.id,a.name,
+		COUNT(DISTINCT i.id),
+		COUNT(DISTINCT CASE WHEN i.status='completed' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status='failed' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status='cancelled' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status='skipped' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status IN ('claimed','dispatched','running') THEN i.id END),
+		COALESCE(CAST(AVG(CASE WHEN i.status IN ('completed','failed','cancelled','skipped') AND i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN (julianday(i.completed_at)-julianday(i.started_at))*86400000 END) AS INTEGER),0),
+		COUNT(DISTINCT CASE WHEN i.status IN ('completed','failed','cancelled','skipped') AND i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN i.id END),
 		(SELECT COUNT(*) FROM automation_work_items w WHERE w.project_id=a.project_id AND w.automation_id=a.id AND w.status='waiting'),
 		(SELECT COUNT(*) FROM automation_work_items w WHERE w.project_id=a.project_id AND w.automation_id=a.id AND w.status='blocked'),
 		a.health_state
@@ -829,7 +835,7 @@ func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter Ana
 	result := []models.WorkflowPerformance{}
 	for rows.Next() {
 		var row models.WorkflowPerformance
-		if err := rows.Scan(&row.WorkflowID, &row.WorkflowName, &row.InvocationCount, &row.CompletedCount, &row.FailedCount, &row.AverageDurationMs, &row.DurationSampleSize, &row.WaitingCount, &row.BlockedCount, &row.Health); err != nil {
+		if err := rows.Scan(&row.WorkflowID, &row.WorkflowName, &row.InvocationCount, &row.CompletedCount, &row.FailedCount, &row.CancelledCount, &row.SkippedCount, &row.OpenCount, &row.AverageDurationMs, &row.DurationSampleSize, &row.WaitingCount, &row.BlockedCount, &row.Health); err != nil {
 			return nil, err
 		}
 		if row.InvocationCount > 0 {
