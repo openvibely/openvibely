@@ -1380,25 +1380,11 @@ func truncateMiddleByEstimatedTokens(text string, tokenBudget int) string {
 	if byteBudget <= 0 || len([]byte(text)) <= byteBudget {
 		return text
 	}
-	runes := []rune(text)
-	if len(runes) <= 1 {
-		return text
-	}
 	gap := "\n\n[Middle of user message omitted during context compaction]\n\n"
-	gapBytes := len([]byte(gap))
-	if byteBudget <= gapBytes+8 {
+	if byteBudget <= len(gap)+8 {
 		gap = "\n[omitted]\n"
-		gapBytes = len([]byte(gap))
-		if byteBudget <= gapBytes {
-			return takePrefixBytes([]rune(gap), byteBudget)
-		}
 	}
-	contentBudget := byteBudget - gapBytes
-	headBudget := contentBudget / 2
-	tailBudget := contentBudget - headBudget
-	head := takePrefixBytes(runes, headBudget)
-	tail := takeSuffixBytes(runes, tailBudget)
-	return head + gap + tail
+	return tokenestimate.TruncateMiddle(text, byteBudget, gap)
 }
 
 func takePrefixBytes(runes []rune, byteBudget int) string {
