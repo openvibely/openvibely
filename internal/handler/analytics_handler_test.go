@@ -367,6 +367,47 @@ func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T)
 	}
 }
 
+func TestGetAnalyticsDashboardExposesWorkflowInvocationStatusAccounting(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	if _, err := tc.db.ExecContext(ctx, `
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, published_version_id)
+		VALUES ('analytics-api-workflow', ?, 'analytics-api-workflow', 'API workflow', 'custom', 'active', 'analytics-api-version');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at)
+		VALUES ('analytics-api-version', ?, 'analytics-api-workflow', 1, 'published', 'manual', 'custom', '2026-01-01 00:00:00');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+		VALUES ('analytics-api-node', ?, 'analytics-api-workflow', 'analytics-api-version', 'trigger', 'Trigger', 'trigger', 'trigger');
+		INSERT INTO automation_invocations
+			(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, skipped_reason, started_at, completed_at, created_at)
+		VALUES
+			('api-completed', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-completed', 'occurrence-api-completed', 'completed', '', '2026-01-10 00:00:00', '2026-01-10 00:01:00', '2026-01-10 00:00:00'),
+			('api-cancelled', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-cancelled', 'occurrence-api-cancelled', 'cancelled', '', '2026-01-10 01:00:00', '2026-01-10 01:01:00', '2026-01-10 01:00:00'),
+			('api-skipped', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-skipped', 'occurrence-api-skipped', 'skipped', 'not applicable', '2026-01-10 02:00:00', '2026-01-10 02:00:00', '2026-01-10 02:00:00'),
+			('api-running', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-running', 'occurrence-api-running', 'running', '', '2026-01-10 03:00:00', NULL, '2026-01-10 03:00:00'),
+			('api-at-date-to', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-at-date-to', 'occurrence-api-at-date-to', 'completed', '', '2026-01-11 00:00:00', '2026-01-11 00:01:00', '2026-01-11 00:00:00');
+	`, project.ID, project.ID, project.ID, project.ID, project.ID, project.ID, project.ID, project.ID); err != nil {
+		t.Fatalf("seed workflow analytics fixture: %v", err)
+	}
+
+	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&view=workflows&date_from=2026-01-10&date_to=2026-01-11").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	var dashboard models.AnalyticsDashboard
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if len(dashboard.Workflows) != 1 {
+		t.Fatalf("workflows = %+v, want one", dashboard.Workflows)
+	}
+	workflow := dashboard.Workflows[0]
+	if workflow.InvocationCount != 4 || workflow.CompletedCount != 1 || workflow.CancelledCount != 1 || workflow.SkippedCount != 1 || workflow.OpenCount != 1 {
+		t.Fatalf("workflow status accounting = %+v, want completed/cancelled/skipped/open visible and DateTo excluded", workflow)
+	}
+	if workflow.CompletionRate != 25 {
+		t.Fatalf("completion rate = %v, want 1/4 selected invocations", workflow.CompletionRate)
+	}
+}
+
 func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
