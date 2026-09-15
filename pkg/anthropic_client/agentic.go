@@ -21,8 +21,16 @@ import (
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
-// DefaultCompactionThreshold is the default input token count that triggers compaction.
-const DefaultCompactionThreshold = 150000
+const (
+	defaultAnthropicContextWindow = 200000
+	compactionOutputReserveCap    = 20000
+	compactionSummaryBuffer       = 13000
+	compactionBlockingBuffer      = 3000
+)
+
+// DefaultCompactionThreshold mirrors Claude Code's trigger for a normal
+// 200,000-token context window.
+const DefaultCompactionThreshold = defaultAnthropicContextWindow - compactionOutputReserveCap - compactionSummaryBuffer
 
 // MinCompactionThreshold is the minimum trigger accepted by Anthropic's
 // server-side compaction API.
@@ -68,7 +76,8 @@ type AgenticOptions struct {
 	// round-tripped in subsequent requests to maintain compressed context.
 	AutoCompaction bool
 	// CompactionTokenThreshold is the input token count that triggers compaction.
-	// Defaults to DefaultCompactionThreshold (150,000) if zero.
+	// Defaults to a Claude Code-compatible value derived from ContextWindow
+	// (167,000 for the normal 200,000-token window) when zero.
 	CompactionTokenThreshold int
 	// CompactionInstructions provides additional instructions for the summarization.
 	// For example: "Focus on code changes and decisions".
@@ -231,8 +240,36 @@ type inputTokensTrigger struct {
 // compactionBlockJSON is used for marshaling compaction blocks with proper null handling.
 // When Content is nil, it marshals as "content": null (failed compaction).
 type compactionBlockJSON struct {
-	Type    string  `json:"type"`
-	Content *string `json:"content"`
+	Type             string  `json:"type"`
+	Content          *string `json:"content"`
+	EncryptedContent *string `json:"encrypted_content,omitempty"`
+}
+
+// CompactionTriggerLimit returns the Claude Code-compatible automatic
+// compaction trigger for an Anthropic context window.
+func CompactionTriggerLimit(contextWindow int) int {
+	if contextWindow <= 0 {
+		contextWindow = defaultAnthropicContextWindow
+	}
+	return max(MinCompactionThreshold, contextWindow-compactionOutputReserveCap-compactionSummaryBuffer)
+}
+
+// CompactionOutputReserve returns the output headroom Claude Code uses when
+// calculating compaction limits. Large model output limits are capped at 20k.
+func CompactionOutputReserve(maxOutputTokens int) int {
+	if maxOutputTokens <= 0 {
+		return compactionOutputReserveCap
+	}
+	return min(maxOutputTokens, compactionOutputReserveCap)
+}
+
+// CompactionBlockingLimit returns the latest input size accepted while native
+// compaction is still able to run.
+func CompactionBlockingLimit(contextWindow int) int {
+	if contextWindow <= 0 {
+		contextWindow = defaultAnthropicContextWindow
+	}
+	return max(1, contextWindow-compactionOutputReserveCap-compactionBlockingBuffer)
 }
 
 const nativeCompactionStateVersion = 1
@@ -485,7 +522,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// before any continuation blocks returned in that same response.
 		if resp.compaction != nil {
 			blocks := make([]any, 0, len(resp.contentBlocks)+1)
-			blocks = append(blocks, compactionBlockJSON{Type: "compaction", Content: resp.compaction.content})
+			blocks = append(blocks, compactionBlockJSON{Type: "compaction", Content: resp.compaction.content, EncryptedContent: resp.compaction.encryptedContent})
 			for _, block := range resp.contentBlocks {
 				blocks = append(blocks, block)
 			}
@@ -1001,7 +1038,8 @@ type turnResult struct {
 // compactionResult holds the result of a server-side compaction.
 type compactionResult struct {
 	// content is the compaction summary. nil means compaction failed.
-	content *string
+	content          *string
+	encryptedContent *string
 }
 
 type streamUsage struct {
@@ -1145,13 +1183,16 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	}
 	window := opts.ContextWindow
 	if window <= 0 {
-		window = 200000
+		window = defaultAnthropicContextWindow
 	}
 	reserved := opts.MaxTokens
 	if reserved <= 0 {
 		reserved = 8192
 	}
 	safe := window - reserved - max(1024, window/50)
+	if opts.AutoCompaction {
+		safe = CompactionBlockingLimit(window)
+	}
 	encoded, err := json.Marshal(struct {
 		Messages []agenticMessage `json:"messages"`
 		Tools    []ToolDefinition `json:"tools,omitempty"`
@@ -1295,7 +1336,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	if opts.AutoCompaction {
 		threshold := opts.CompactionTokenThreshold
 		if threshold == 0 {
-			threshold = DefaultCompactionThreshold
+			threshold = CompactionTriggerLimit(opts.ContextWindow)
 		}
 		if threshold < MinCompactionThreshold {
 			threshold = MinCompactionThreshold
@@ -1433,6 +1474,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 		inToolCallTag bool            // true when inside <tool_call>...</tool_call> in text
 		tagBuf        strings.Builder // buffer for detecting partial <tool_call> tags
 		compaction    strings.Builder // for compaction blocks
+		encrypted     *string         // opaque compaction state to round-trip
 	}
 	blocks := make(map[int]*blockState)
 	seenMeaningfulEvent := false
@@ -1510,6 +1552,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 					Name      string          `json:"name,omitempty"`
 					Input     json.RawMessage `json:"input,omitempty"`
 					Content   json.RawMessage `json:"content,omitempty"`
+					Encrypted *string         `json:"encrypted_content,omitempty"`
 				}
 				if err := json.Unmarshal(event.ContentBlock, &cb); err == nil {
 					blockID := cb.ID
@@ -1521,6 +1564,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 						id:         blockID,
 						name:       cb.Name,
 						startInput: cb.Input,
+						encrypted:  cb.Encrypted,
 					}
 					// Compaction and provider tool result blocks may include content
 					// in the start event.
@@ -1549,12 +1593,13 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			}
 
 			var delta struct {
-				Type        string `json:"type"`
-				Text        string `json:"text,omitempty"`
-				Thinking    string `json:"thinking,omitempty"`
-				Signature   string `json:"signature,omitempty"`
-				PartialJSON string `json:"partial_json,omitempty"`
-				Content     string `json:"content,omitempty"` // for compaction_delta
+				Type        string  `json:"type"`
+				Text        string  `json:"text,omitempty"`
+				Thinking    string  `json:"thinking,omitempty"`
+				Signature   string  `json:"signature,omitempty"`
+				PartialJSON string  `json:"partial_json,omitempty"`
+				Content     string  `json:"content,omitempty"` // for compaction_delta
+				Encrypted   *string `json:"encrypted_content,omitempty"`
 			}
 			if err := json.Unmarshal(event.Delta, &delta); err != nil {
 				continue
@@ -1609,6 +1654,9 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 				bs.inputJSON.WriteString(delta.PartialJSON)
 			case "compaction_delta":
 				bs.compaction.WriteString(delta.Content)
+				if delta.Encrypted != nil {
+					bs.encrypted = delta.Encrypted
+				}
 			}
 
 		case "content_block_stop":
@@ -1719,10 +1767,10 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			case "compaction":
 				summary := bs.compaction.String()
 				if summary != "" {
-					result.compaction = &compactionResult{content: &summary}
+					result.compaction = &compactionResult{content: &summary, encryptedContent: bs.encrypted}
 				} else {
 					// Failed compaction — content is null
-					result.compaction = &compactionResult{content: nil}
+					result.compaction = &compactionResult{content: nil, encryptedContent: bs.encrypted}
 				}
 				// Compaction blocks are NOT added to contentBlocks — they are
 				// tracked separately and round-tripped as user message content.

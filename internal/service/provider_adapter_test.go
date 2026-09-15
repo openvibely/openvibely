@@ -805,8 +805,14 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 		t.Fatalf("OpenAI request budget = %+v", openAIBudget)
 	}
 	anthropicBudget := requestBudgetForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ContextWindow: 200000})
-	if anthropicBudget.ReservedOutputTokens != 64000 || anthropicBudget.SafeInputLimit != 132000 {
-		t.Fatalf("Anthropic request budget = %+v, want concrete Claude output reservation", anthropicBudget)
+	if anthropicBudget.ReservedOutputTokens != 20000 || anthropicBudget.SafetyMargin != 3000 || anthropicBudget.SafeInputLimit != 177000 {
+		t.Fatalf("Anthropic request budget = %+v, want Claude-compatible compaction headroom", anthropicBudget)
+	}
+	if limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ContextWindow: 200000}); limits.AutoLimit != 167000 || limits.TriggerLimit != 167000 || limits.EffectiveHardLimit != 177000 {
+		t.Fatalf("Anthropic compaction limits = %+v, want trigger=167000 hard=177000", limits)
+	}
+	if limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ContextWindow: 200000, CompactionThreshold: 20000}); limits.TriggerLimit != 50000 {
+		t.Fatalf("Anthropic configured threshold = %+v, want minimum 50000", limits)
 	}
 	attachmentBudget := calculateRequestBudget(llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 10000}, Attachments: []models.Attachment{{FileSize: 4000}}})
 	if attachmentBudget.AttachmentTokens != 1000 {
@@ -865,6 +871,15 @@ func TestProviderContextCompactionFallback_NativeProvidersReceiveProactiveThresh
 	}
 	if got.Agent.CompactionThreshold != 7300 || got.NativeCompactionTokenThreshold != 7300 {
 		t.Fatalf("native threshold = agent:%d request:%d, want safe input limit 7300", got.Agent.CompactionThreshold, got.NativeCompactionTokenThreshold)
+	}
+
+	got = llmcontracts.AgentRequest{}
+	req = llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "small pending", ContextTokenEstimate: 170000, Agent: models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ContextWindow: 200000}, ChatHistory: []models.Execution{{PromptSent: "old context", Output: "done"}}}
+	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
+		t.Fatalf("Anthropic native compaction call: %v", err)
+	}
+	if !got.ForceNativeCompaction || got.Agent.CompactionThreshold != 167000 || got.NativeCompactionTokenThreshold != 167000 {
+		t.Fatalf("Anthropic native compaction request = %#v, want 167k provider trigger", got)
 	}
 }
 
