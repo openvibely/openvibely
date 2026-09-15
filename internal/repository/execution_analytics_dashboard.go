@@ -187,28 +187,30 @@ func metric(numerator, denominator int) models.AnalyticsMetric {
 }
 
 type analyticsDashboardSections struct {
-	outcomeMetrics  bool
-	comparison      bool
-	funnel          bool
-	agents          bool
-	skills          bool
-	agentSkills     bool
-	modelCategories bool
-	workflows       bool
-	evidence        bool
-	agentDetail     bool
-	workflowDetail  bool
-	insights        bool
+	outcomeMetrics       bool
+	followUpDistribution bool
+	comparison           bool
+	funnel               bool
+	agents               bool
+	skills               bool
+	agentSkills          bool
+	modelCategories      bool
+	workflows            bool
+	evidenceRows         bool
+	evidenceTotal        bool
+	agentDetail          bool
+	workflowDetail       bool
+	insights             bool
 }
 
 func analyticsDashboardSectionsForView(view string) analyticsDashboardSections {
 	switch strings.ToLower(strings.TrimSpace(view)) {
 	case "overview":
-		return analyticsDashboardSections{outcomeMetrics: true, comparison: true, workflows: true, evidence: true, insights: true}
+		return analyticsDashboardSections{outcomeMetrics: true, comparison: true, workflows: true, evidenceRows: true, insights: true}
 	case "outcomes":
-		return analyticsDashboardSections{outcomeMetrics: true, funnel: true, evidence: true}
+		return analyticsDashboardSections{outcomeMetrics: true, followUpDistribution: true, funnel: true, evidenceRows: true, evidenceTotal: true}
 	case "agents":
-		return analyticsDashboardSections{agents: true, skills: true, evidence: true, agentDetail: true}
+		return analyticsDashboardSections{agents: true, skills: true, evidenceRows: true, agentDetail: true}
 	case "learning":
 		return analyticsDashboardSections{skills: true, agentSkills: true}
 	case "usage":
@@ -217,8 +219,8 @@ func analyticsDashboardSectionsForView(view string) analyticsDashboardSections {
 		return analyticsDashboardSections{workflows: true, workflowDetail: true}
 	default:
 		return analyticsDashboardSections{
-			outcomeMetrics: true, comparison: true, funnel: true, agents: true, skills: true,
-			agentSkills: true, modelCategories: true, workflows: true, evidence: true,
+			outcomeMetrics: true, followUpDistribution: true, comparison: true, funnel: true, agents: true, skills: true,
+			agentSkills: true, modelCategories: true, workflows: true, evidenceRows: true, evidenceTotal: true,
 			agentDetail: true, workflowDetail: true, insights: true,
 		}
 	}
@@ -250,13 +252,15 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 	sections := analyticsDashboardSectionsForView(filter.View)
 	var err error
 	if sections.outcomeMetrics {
-		current, cycles, followups, queryErr := r.queryOutcomeMetrics(ctx, filter)
+		current, cycles, followups, queryErr := r.queryOutcomeMetrics(ctx, filter, sections.followUpDistribution)
 		if queryErr != nil {
 			return dashboard, queryErr
 		}
 		dashboard.Current = current
 		dashboard.CycleDistribution = cycleDistribution(cycles)
-		dashboard.FollowUpDistribution = followUpDistribution(followups)
+		if sections.followUpDistribution {
+			dashboard.FollowUpDistribution = followUpDistribution(followups)
+		}
 	}
 	if sections.comparison && filter.Compare && !filter.DateFrom.IsZero() && !filter.DateTo.IsZero() && filter.DateTo.After(filter.DateFrom) {
 		duration := filter.DateTo.Sub(filter.DateFrom)
@@ -264,7 +268,7 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		previousFilter.DateTo = filter.DateFrom
 		previousFilter.DateFrom = filter.DateFrom.Add(-duration)
 		previousFilter.Compare = false
-		previous, _, _, queryErr := r.queryOutcomeMetrics(ctx, previousFilter)
+		previous, _, _, queryErr := r.queryOutcomeMetrics(ctx, previousFilter, false)
 		if queryErr != nil {
 			return dashboard, queryErr
 		}
@@ -302,10 +306,12 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 	}
 	dashboard.EvidenceLimit = filter.Limit
 	dashboard.EvidenceOffset = filter.EvidenceOffset
-	if sections.evidence {
+	if sections.evidenceTotal {
 		if dashboard.EvidenceTotal, err = r.queryEvidenceTotal(ctx, filter); err != nil {
 			return dashboard, err
 		}
+	}
+	if sections.evidenceRows {
 		if dashboard.RecentOutcomes, err = r.queryRecentOutcomes(ctx, filter); err != nil {
 			return dashboard, err
 		}
@@ -326,7 +332,7 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 	return dashboard, nil
 }
 
-func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter AnalyticsDashboardFilter) (models.OutcomeMetrics, []int64, []int, error) {
+func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter AnalyticsDashboardFilter, includeFollowUpDistribution bool) (models.OutcomeMetrics, []int64, []int, error) {
 	out := models.OutcomeMetrics{}
 	window, windowArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -377,17 +383,15 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 	out.TasksEvaluated = tasks
 
 	cycleQuery := `WITH period_exec AS (
-			SELECT e.task_id,e.status,e.started_at,e.completed_at,e.is_followup FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + `
+			SELECT e.task_id,e.status,e.started_at,e.completed_at FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + `
 	), terminal_tasks AS (
 		SELECT task_id,MAX(COALESCE(completed_at,started_at)) terminal_at FROM period_exec
 		WHERE status IN ('completed','failed','cancelled') GROUP BY task_id
 	), historical_start AS (
 		SELECT e.task_id,MIN(e.started_at) first_started_at FROM executions e JOIN terminal_tasks p ON p.task_id=e.task_id GROUP BY e.task_id
-	), period_followups AS (
-		SELECT task_id,SUM(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followups FROM period_exec GROUP BY task_id
 	)
-	SELECT COALESCE(CAST(MAX(0,(julianday(p.terminal_at)-julianday(h.first_started_at))*86400000) AS INTEGER),0),COALESCE(f.followups,0)
-	FROM terminal_tasks p JOIN historical_start h ON h.task_id=p.task_id LEFT JOIN period_followups f ON f.task_id=p.task_id`
+	SELECT COALESCE(CAST(MAX(0,(julianday(p.terminal_at)-julianday(h.first_started_at))*86400000) AS INTEGER),0)
+	FROM terminal_tasks p JOIN historical_start h ON h.task_id=p.task_id`
 	cycleArgs := append([]any{filter.ProjectID}, dimensionArgs...)
 	cycleArgs = append(cycleArgs, windowArgs...)
 	rows, err := r.db.QueryContext(ctx, cycleQuery, cycleArgs...)
@@ -395,37 +399,36 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 		return out, nil, nil, fmt.Errorf("getting analytics task distributions: %w", err)
 	}
 	cycles := []int64{}
-	followups := []int{}
 	for rows.Next() {
 		var cycle int64
-		var count int
-		if err := rows.Scan(&cycle, &count); err != nil {
+		if err := rows.Scan(&cycle); err != nil {
 			rows.Close()
 			return out, nil, nil, fmt.Errorf("scanning analytics task distributions: %w", err)
 		}
 		cycles = append(cycles, cycle)
-		followups = append(followups, count)
 	}
 	if err := rows.Close(); err != nil {
 		return out, nil, nil, err
 	}
-	followups = []int{}
-	followupQuery := `SELECT COALESCE(SUM(CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END),0)
-		FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + ` GROUP BY e.task_id`
-	followupRows, err := r.db.QueryContext(ctx, followupQuery, cycleArgs...)
-	if err != nil {
-		return out, nil, nil, fmt.Errorf("getting analytics follow-up distribution: %w", err)
-	}
-	for followupRows.Next() {
-		var count int
-		if err := followupRows.Scan(&count); err != nil {
-			followupRows.Close()
-			return out, nil, nil, fmt.Errorf("scanning analytics follow-up distribution: %w", err)
+	followups := []int{}
+	if includeFollowUpDistribution {
+		followupQuery := `SELECT COALESCE(SUM(CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END),0)
+			FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + ` GROUP BY e.task_id`
+		followupRows, err := r.db.QueryContext(ctx, followupQuery, cycleArgs...)
+		if err != nil {
+			return out, nil, nil, fmt.Errorf("getting analytics follow-up distribution: %w", err)
 		}
-		followups = append(followups, count)
-	}
-	if err := followupRows.Close(); err != nil {
-		return out, nil, nil, err
+		for followupRows.Next() {
+			var count int
+			if err := followupRows.Scan(&count); err != nil {
+				followupRows.Close()
+				return out, nil, nil, fmt.Errorf("scanning analytics follow-up distribution: %w", err)
+			}
+			followups = append(followups, count)
+		}
+		if err := followupRows.Close(); err != nil {
+			return out, nil, nil, err
+		}
 	}
 	sort.Slice(cycles, func(i, j int) bool { return cycles[i] < cycles[j] })
 	out.MedianCycleTimeMs = percentileInt64(cycles, 0.5)
