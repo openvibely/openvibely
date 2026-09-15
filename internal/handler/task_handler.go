@@ -2592,7 +2592,23 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 		}
 	}
 	sort.SliceStable(visibleTasks, func(i, j int) bool {
-		return taskReferenceBoardOrder(visibleTasks[i]) < taskReferenceBoardOrder(visibleTasks[j])
+		left, right := visibleTasks[i], visibleTasks[j]
+		leftOrder, rightOrder := taskReferenceBoardOrder(left), taskReferenceBoardOrder(right)
+		if leftOrder != rightOrder {
+			return leftOrder < rightOrder
+		}
+		if left.DisplayOrder != right.DisplayOrder {
+			return left.DisplayOrder < right.DisplayOrder
+		}
+		// Prefer cards already stored in this board column over cards projected
+		// into it (blocked swarm parents and active scheduled tasks). Their
+		// per-category display orders can legitimately collide.
+		leftProjected := taskReferenceProjectedToAnotherBoardColumn(left)
+		rightProjected := taskReferenceProjectedToAnotherBoardColumn(right)
+		if leftProjected != rightProjected {
+			return !leftProjected
+		}
+		return left.ID < right.ID
 	})
 	refs := make([]TaskReference, 0, len(visibleTasks))
 	for _, task := range visibleTasks {
@@ -2608,6 +2624,19 @@ func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, TaskReferenceCatalogResponse{Tasks: refs})
+}
+
+func taskReferenceProjectedToAnotherBoardColumn(task repository.TaskReference) bool {
+	switch taskReferenceBoardOrder(task) {
+	case 0:
+		return task.Category != models.CategoryBacklog
+	case 1:
+		return task.Category != models.CategoryActive
+	case 2:
+		return task.Category != models.CategoryCompleted
+	default:
+		return false
+	}
 }
 
 func taskReferenceBoardOrder(task repository.TaskReference) int {
