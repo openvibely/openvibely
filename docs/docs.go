@@ -237,6 +237,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Active Analytics view: overview, outcomes, agents, learning, usage, workflows, or all",
+                        "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Reusable Agent definition ID or __unassigned__",
                         "name": "agent",
                         "in": "query"

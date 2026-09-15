@@ -380,9 +380,11 @@ func TestAnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
   };
   function waitFor(check, next, attempt) { if (check()) { next(); return; } if ((attempt || 0) > 100) fail('timed out; urls=' + urls.join('|')); setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20); }
   window.addEventListener('load', function() {
-    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});}, function() {
-      setTimeout(function() {
-        if (urls.some(function(url){return url.indexOf('/api/analytics/dashboard') < 0;})) fail('overview eagerly loaded hidden-view analytics: ' + urls.join('|'));
+	    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});}, function() {
+	      setTimeout(function() {
+	        var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
+	        if (!dashboardURL || new URL(dashboardURL, location.href).searchParams.get('view') !== 'overview') fail('dashboard request did not preserve the visible view: ' + urls.join('|'));
+	        if (urls.some(function(url){return url.indexOf('/api/analytics/dashboard') < 0;})) fail('overview eagerly loaded hidden-view analytics: ' + urls.join('|'));
         if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('skillOutcomeTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelCategoryTable').innerHTML) fail('overview synchronously rendered hidden-view analytics');
         document.querySelector('[data-analytics-view="learning"]').click();
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
@@ -392,6 +394,44 @@ func TestAnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
       }, 50);
     });
   });
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestAnalyticsContent_ImmediateNavigationAwayAbortsWorkInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+
+	fixture := `<main id="reconnect-result"></main><a id="other-nav" href="/tasks" data-nav-base="/tasks">Tasks</a><script>
+(function() {
+  var result = document.getElementById('reconnect-result'), requests = 0, dashboardSignal = null;
+  function fail(message) { result.setAttribute('data-test-result', 'fail'); result.setAttribute('data-test-error', message); throw new Error(message); }
+  history.replaceState({}, '', '/analytics?project_id=project-1&view=overview');
+  window.Chart = function() { this.destroy = function() {}; };
+  window.fetch = function(url, options) {
+    requests++;
+    dashboardSignal = options && options.signal;
+    return new Promise(function() {});
+  };
+  function waitForRequest(attempt) {
+    if (dashboardSignal) {
+      var nav = document.getElementById('other-nav');
+      nav.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true}));
+      if (!dashboardSignal.aborted) fail('Analytics request was not aborted before sidebar navigation');
+      setTimeout(function() {
+        if (requests !== 1) fail('Analytics started more work after navigation: ' + requests + ' requests');
+        result.setAttribute('data-test-result', 'pass');
+      }, 50);
+      return;
+    }
+    if ((attempt || 0) > 100) fail('dashboard request did not start');
+    setTimeout(function() { waitForRequest((attempt || 0) + 1); }, 20);
+  }
+  window.addEventListener('load', function() { waitForRequest(0); });
 })();
 </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
