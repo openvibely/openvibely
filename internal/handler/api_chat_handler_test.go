@@ -786,7 +786,7 @@ func TestAPIChatMessage_NoAgents(t *testing.T) {
 	assert.Contains(t, resp["error"], "no agents available")
 }
 
-func TestAPIChatMessage_UsesCompactSelectionAndHydratesSingleConfiguredModel(t *testing.T) {
+func TestAPIChatMessage_HydratesSingleConfiguredModelWithoutEmbeddingCatalog(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
@@ -849,8 +849,10 @@ func TestAPIChatMessage_UsesCompactSelectionAndHydratesSingleConfiguredModel(t *
 	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
 
 	request := mock.LastAgentRequest()
-	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
-	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, agent.Name)
+	require.NotContains(t, request.ChatSystemContext, "Available models")
+	require.NotContains(t, request.ChatSystemContext, "Available Agent definitions")
+	require.NotContains(t, request.ChatSystemContext, "Current tasks in this project")
 	require.NotContains(t, request.ChatSystemContext, "secret-api-key")
 	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
 }
@@ -944,11 +946,10 @@ func TestAPIChatMessage_QueuedBehindActiveTurnStoresSelectedModelWithoutFullList
 	require.NoError(t, err)
 	require.NotNil(t, queued)
 	require.Equal(t, agent.ID, queued.AgentConfigID)
-	assertAPIChatSelectionStatements(t, counter.Statements())
 	assertNoAPIChatFullListStatement(t, counter.Statements())
 }
 
-func TestAPIChatMessage_QueuedPromotionUsesCompactContextAndHydratedSelectedModel(t *testing.T) {
+func TestAPIChatMessage_QueuedPromotionHydratesSelectedModelWithoutEmbeddingCatalog(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
@@ -1007,7 +1008,6 @@ func TestAPIChatMessage_QueuedPromotionUsesCompactContextAndHydratedSelectedMode
 	}
 	counter.SetEnabled(false)
 
-	assertAPIChatSelectionStatements(t, counter.Statements())
 	assertNoAPIChatFullListStatement(t, counter.Statements())
 	call := mock.LastCall()
 	require.Equal(t, agent.ID, call.Agent.ID)
@@ -1021,8 +1021,10 @@ func TestAPIChatMessage_QueuedPromotionUsesCompactContextAndHydratedSelectedMode
 	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
 
 	request := mock.LastAgentRequest()
-	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
-	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, agent.Name)
+	require.NotContains(t, request.ChatSystemContext, "Available models")
+	require.NotContains(t, request.ChatSystemContext, "Available Agent definitions")
+	require.NotContains(t, request.ChatSystemContext, "Current tasks in this project")
 	require.NotContains(t, request.ChatSystemContext, "queued-promotion-secret")
 	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
 }

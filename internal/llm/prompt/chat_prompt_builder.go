@@ -142,7 +142,6 @@ func BuildChatSystemPrompt(isTaskFollowup bool, chatMode models.ChatMode, chatSy
 			sb.WriteString(" Do not reference project files or try to execute code unless the user specifically asks you to.")
 		}
 		sb.WriteString("\n\n")
-		sb.WriteString(ChatTaskAwarenessInstructions)
 	}
 
 	if chatSystemContext != "" {
@@ -151,9 +150,3 @@ func BuildChatSystemPrompt(isTaskFollowup bool, chatMode models.ChatMode, chatSy
 	}
 	return sb.String()
 }
-
-// ChatTaskAwarenessInstructions gives Chat read-only knowledge of task context.
-const ChatTaskAwarenessInstructions = `You have access to the user's current tasks when they are listed below under "Current tasks in this project". You can answer questions about them, summarize them by category or status, and explain a task from its title and prompt.
-
-When the user asks about a specific task, use the provided task context. A task prompt contains the detailed instructions its assigned agent will execute.
-`
