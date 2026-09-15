@@ -1034,21 +1034,25 @@ func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	}
 }
 
-func TestModelsContent_OAuthAccountDropdownShowsOnlyProviderAccountLabel(t *testing.T) {
+func TestModelsContent_OAuthAccountDropdownShowsProviderProfileNames(t *testing.T) {
 	connections := []models.OAuthConnection{
 		{
 			ID:           "anthropic-connection",
-			Name:         "Claude Fable 5",
+			Name:         "Alice",
 			Provider:     models.ProviderAnthropic,
 			NeedsReauth:  true,
 			LinkedModels: 4,
 		},
 		{
 			ID:           "openai-connection",
-			Name:         "GPT Codex",
+			Name:         "Engineering workspace",
 			Provider:     models.ProviderOpenAI,
 			AccessToken:  "present",
 			LinkedModels: 3,
+		},
+		{
+			ID:       "unnamed-anthropic-connection",
+			Provider: models.ProviderAnthropic,
 		},
 	}
 
@@ -1067,14 +1071,15 @@ func TestModelsContent_OAuthAccountDropdownShowsOnlyProviderAccountLabel(t *test
 	}
 	dropdown := out[selectStart : selectStart+selectEnd]
 	for _, want := range []string{
-		`<option value="anthropic-connection" data-provider="anthropic" data-status="Reconnect required">Anthropic account</option>`,
-		`<option value="openai-connection" data-provider="openai" data-status="Connected">OpenAI account</option>`,
+		`<option value="anthropic-connection" data-provider="anthropic" data-status="Reconnect required">Alice</option>`,
+		`<option value="openai-connection" data-provider="openai" data-status="Connected">Engineering workspace</option>`,
+		`<option value="unnamed-anthropic-connection" data-provider="anthropic" data-status="Not connected">Anthropic account</option>`,
 	} {
 		if !strings.Contains(dropdown, want) {
-			t.Errorf("expected plain account option %q", want)
+			t.Errorf("expected account option %q", want)
 		}
 	}
-	for _, unwanted := range []string{"Claude Fable 5", "GPT Codex", "4 models", "3 models", "Anthropic account ·", "OpenAI account ·"} {
+	for _, unwanted := range []string{"4 models", "3 models", "Alice ·", "Engineering workspace ·"} {
 		if strings.Contains(dropdown, unwanted) {
 			t.Errorf("OAuth Account dropdown exposed unwanted option text %q", unwanted)
 		}
