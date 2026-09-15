@@ -2095,24 +2095,28 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, compose
 		return nil, err
 	}
 
-	if h.workerSvc != nil {
-		h.workerSvc.MarkCancellationRequested(task.ID)
-	}
-	if !composerStop && h.threadInputRepo != nil {
-		if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
-			applog.Infof("[handler] %s error cancelling pending thread inputs task=%s: %v", operation, task.ID, err)
-		}
-	}
 	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
+		if !composerStop && h.threadInputRepo != nil {
+			if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
+				applog.Infof("[handler] %s error cancelling pending thread inputs task=%s: %v", operation, task.ID, err)
+			}
+		}
 		if err := h.swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
 			applog.Infof("[handler] %s swarm cascade error: %v", operation, err)
 			return nil, err
 		}
-	} else if err := h.taskSvc.CancelTask(ctx, task.ID); err != nil {
-		applog.Infof("[handler] %s error: %v", operation, err)
-		return nil, err
-	} else if models.IsSwarmChildRole(task.SwarmRole) {
-		h.notifySwarmChildTerminal(ctx, task.ID)
+	} else {
+		var pendingSweep func() error
+		if !composerStop && h.threadInputRepo != nil {
+			pendingSweep = func() error { return h.threadInputRepo.CancelPendingForTask(ctx, task.ID) }
+		}
+		if err := h.taskSvc.CancelTaskObservedWithPending(ctx, task, cutoff, pendingSweep); err != nil {
+			applog.Infof("[handler] %s error: %v", operation, err)
+			return nil, err
+		}
+		if models.IsSwarmChildRole(task.SwarmRole) {
+			h.notifySwarmChildTerminal(ctx, task.ID)
+		}
 	}
 	h.cancelActiveExecutionsAndPublish(ctx, task.ID, operation, cutoff)
 	updated, err := h.taskSvc.GetByID(ctx, task.ID)

@@ -309,6 +309,8 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	if e == nil || input == nil {
 		return false, fmt.Errorf("execution and queued input are required")
 	}
+	unlock := LockTaskLifecycle(e.TaskID)
+	defer unlock()
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
 	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {

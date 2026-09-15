@@ -362,11 +362,15 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
+	observedTask, err := h.taskSvc.GetByID(c.Request().Context(), activeChatExec.TaskID)
+	if err != nil || observedTask == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load active response")
+	}
 	cutoff, err := h.execRepo.TaskExecutionHistoryCutoff(c.Request().Context(), activeChatExec.TaskID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to snapshot active response")
 	}
-	if err := h.taskSvc.CancelTask(c.Request().Context(), activeChatExec.TaskID); err != nil {
+	if err := h.taskSvc.CancelTaskObserved(c.Request().Context(), observedTask, cutoff); err != nil {
 		applog.Infof("[handler] ChatStop error cancelling chat task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
