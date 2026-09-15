@@ -35,8 +35,6 @@ Preserve completed one-time setup actions (for example required project-guidance
 Do not restart the task from scratch.
 Keep the summary actionable and specific. Omit chit-chat and duplication.
 Return only the summary text.`
-	openAICompactionTranscriptLimit                    = 200000
-	openAICompactionTranscriptGap                      = "\n\n[Middle conversation content omitted before compaction]\n\n"
 	openAIEffectiveContextPercent                      = 90
 	openAIRemoteCompactionV2RetainedMessageTokenBudget = 64000
 	openAIResizedImageBytesEstimate                    = 7373
@@ -371,7 +369,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 			modelOutput := truncateToolOutputForModelInput(exec.output, toolOutputTokenLimit)
 			if len(modelOutput) < len(exec.output) {
-				applog.Infof("[openai-client] truncated tool output for model input tool=%s call_id=%s original_chars=%d truncated_chars=%d token_limit=%d",
+				applog.Infof("[openai-client] truncated tool output for model input tool=%s call_id=%s original_bytes=%d truncated_bytes=%d token_limit=%d",
 					exec.call.Name, exec.call.CallID, len(exec.output), len(modelOutput), toolOutputTokenLimit)
 			}
 			toolResultItem := agenticInputItem{
@@ -1492,32 +1490,6 @@ func openAICompactionOutputTokens(maxOutputTokens int) int {
 		return 512
 	}
 	return maxOutputTokens
-}
-
-func clampCompactionTranscript(transcript string) string {
-	runes := []rune(transcript)
-	if len(runes) <= openAICompactionTranscriptLimit {
-		return transcript
-	}
-
-	gapRunes := []rune(openAICompactionTranscriptGap)
-	if len(gapRunes) >= openAICompactionTranscriptLimit {
-		return string(runes[len(runes)-openAICompactionTranscriptLimit:])
-	}
-
-	headLen := openAICompactionTranscriptLimit / 4
-	tailLen := openAICompactionTranscriptLimit - headLen - len(gapRunes)
-	if tailLen < headLen {
-		tailLen = openAICompactionTranscriptLimit / 2
-		headLen = openAICompactionTranscriptLimit - tailLen - len(gapRunes)
-	}
-	if headLen <= 0 || tailLen <= 0 {
-		return string(runes[len(runes)-openAICompactionTranscriptLimit:])
-	}
-
-	head := string(runes[:headLen])
-	tail := string(runes[len(runes)-tailLen:])
-	return head + openAICompactionTranscriptGap + tail
 }
 
 func openAIInputItemsTranscript(inputItems []any) string {

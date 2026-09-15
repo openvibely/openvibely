@@ -3198,28 +3198,6 @@ func TestNormalizedCompactionThresholdForModel_CapsToModelLimit(t *testing.T) {
 	}
 }
 
-func TestClampCompactionTranscript_PreservesHeadAndTail(t *testing.T) {
-	head := "USER:\nTask objective: move Idea Quality Grade off /history and redesign it to match How Am I Doing.\n\n"
-	middle := strings.Repeat("TOOL_RESULT read_file:\nnoise\n\n", 12000)
-	tail := "TOOL_RESULT grep_search:\nlatest matching lines near insights templ and history templ\n\n"
-
-	transcript := head + middle + tail
-	clamped := clampCompactionTranscript(transcript)
-
-	if len([]rune(clamped)) > openAICompactionTranscriptLimit {
-		t.Fatalf("clamped transcript length = %d, want <= %d", len([]rune(clamped)), openAICompactionTranscriptLimit)
-	}
-	if !strings.Contains(clamped, "Task objective: move Idea Quality Grade off /history") {
-		t.Fatalf("expected clamped transcript to preserve head, got %q", clamped[:min(len(clamped), 300)])
-	}
-	if !strings.Contains(clamped, "latest matching lines near insights templ and history templ") {
-		t.Fatalf("expected clamped transcript to preserve tail")
-	}
-	if !strings.Contains(clamped, "[Middle conversation content omitted before compaction]") {
-		t.Fatal("expected clamped transcript to include omission marker")
-	}
-}
-
 func TestIsCodexGeneratedInputItem_CoversToolCallTypes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -4275,16 +4253,6 @@ func TestOpenAIAgenticCompactionTranscriptAndImageHelpers(t *testing.T) {
 	}
 	if got := openAIInputItemsTranscript([]any{map[string]any{"type": "message", "role": "user", "content": "   "}}); got != "" {
 		t.Fatalf("blank transcript item should be omitted, got %q", got)
-	}
-
-	short := "short transcript"
-	if got := clampCompactionTranscript(short); got != short {
-		t.Fatalf("short transcript should not be clamped: %q", got)
-	}
-	long := strings.Repeat("a", openAICompactionTranscriptLimit+100) + "tail"
-	clamped := clampCompactionTranscript(long)
-	if len([]rune(clamped)) > openAICompactionTranscriptLimit || !strings.Contains(clamped, openAICompactionTranscriptGap) || !strings.HasSuffix(clamped, "tail") {
-		t.Fatalf("unexpected clamped transcript length=%d value suffix=%q", len([]rune(clamped)), clamped[len(clamped)-10:])
 	}
 
 	const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
