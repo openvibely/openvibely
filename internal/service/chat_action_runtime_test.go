@@ -83,6 +83,8 @@ func TestRunChannelViewTaskThreadUsesBoundedExecutionPage(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, transcript, "Total executions: 40")
 	require.Contains(t, transcript, "Transcript size limit reached")
+	require.Contains(t, transcript, "output-00")
+	require.NotContains(t, transcript, "prompt-20")
 
 	executionQueries = nil
 	for _, statement := range counter.Statements() {
@@ -90,10 +92,41 @@ func TestRunChannelViewTaskThreadUsesBoundedExecutionPage(t *testing.T) {
 			executionQueries = append(executionQueries, statement)
 		}
 	}
-	require.GreaterOrEqual(t, len(executionQueries), 2)
-	for _, statement := range executionQueries[1:] {
-		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+	require.Len(t, executionQueries, 2)
+	require.Contains(t, executionQueries[0], "COUNT(*)")
+	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+}
+
+func TestRunChannelViewTaskThreadPreservesChannelFormattingContract(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	project := &models.Project{Name: "Channel Thread Formatting Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Channel Thread Formatting Task",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusCompleted,
+		Prompt:    "original prompt",
 	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	exec := &models.Execution{
+		ID:         "channel-thread-formatting-exec",
+		TaskID:     task.ID,
+		Status:     models.ExecRunning,
+		PromptSent: "format prompt",
+	}
+	require.NoError(t, execRepo.Create(ctx, exec))
+	require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "[Thinking]\ninternal channel thought\n[/Thinking]\nVisible channel answer.", "", 0, 0))
+
+	transcript, err := runChannelViewTaskThread(ctx, taskRepo, execRepo, project.ID, ViewThreadRequest{TaskID: task.ID})
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Visible channel answer.")
+	require.Contains(t, transcript, "internal channel thought")
+	require.Contains(t, transcript, "[Thinking]")
 }
 
 func TestChannelContextModeActionHandlers(t *testing.T) {

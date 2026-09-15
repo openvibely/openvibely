@@ -8529,6 +8529,8 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, transcript, "Total executions: 40")
 	require.Contains(t, transcript, "Transcript size limit reached")
+	require.Contains(t, transcript, "output-00")
+	require.NotContains(t, transcript, "prompt-20")
 
 	executionQueries = nil
 	for _, statement := range counter.Statements() {
@@ -8536,10 +8538,35 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 			executionQueries = append(executionQueries, statement)
 		}
 	}
-	require.GreaterOrEqual(t, len(executionQueries), 2)
-	for _, statement := range executionQueries[1:] {
-		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
-	}
+	require.Len(t, executionQueries, 2)
+	require.Contains(t, executionQueries[0], "COUNT(*)")
+	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+}
+
+func TestExecuteViewTaskThreadPreservesBrowserFormattingContract(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	h, _, agentRepo := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Browser Thread Formatting Project")
+	agent := createAgent(t, agentRepo)
+	task := createTask(t, h, project.ID, "Browser Thread Formatting Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "original prompt"
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.ID = "browser-thread-formatting-exec"
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "format prompt"
+	})
+	require.NoError(t, h.execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, "[Thinking]\ninternal browser thought\n[/Thinking]\nVisible browser answer.", "", 0, 0))
+
+	transcript, err := h.executeViewTaskThreadRequest(context.Background(), streamingResponseParams{ProjectID: project.ID}, service.ViewThreadRequest{
+		TaskID: task.ID,
+	})
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Visible browser answer.")
+	require.NotContains(t, transcript, "internal browser thought")
+	require.NotContains(t, transcript, "[Thinking]")
 }
 
 func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) {
