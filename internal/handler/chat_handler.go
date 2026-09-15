@@ -362,6 +362,12 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
+	if expectedTurnID := c.QueryParam("expected_turn_id"); expectedTurnID != "" && expectedTurnID != activeChatExec.ID {
+		if isHTMX(c) {
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true, activeChatExec.ID))
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
 	observedTask, cutoff, err := h.taskSvc.ObserveTaskCancellation(c.Request().Context(), activeChatExec.TaskID)
 	if err != nil || observedTask == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load active response")

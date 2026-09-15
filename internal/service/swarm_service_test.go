@@ -51,6 +51,76 @@ func TestCancelSwarmMarksRunningChildCancellationBeforeRuntimeCancel(t *testing.
 	require.Equal(t, models.StatusCancelled, updatedChild.Status)
 }
 
+func TestCancelSwarmObservedDoesNotCancelNewParentFollowupGeneration(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(repo, nil, workerSvc)
+	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
+	parent := &models.Task{ProjectID: "default", Title: "Follow-up parent", Prompt: "parent", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	require.NoError(t, repo.Create(ctx, parent))
+	parentID := parent.ID
+	planner := &models.Task{ProjectID: "default", Title: "Planner", Prompt: "old", Category: models.CategoryActive, Status: models.StatusCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRolePlanner, SwarmConfig: `{"rerun_generation":1}`}
+	require.NoError(t, repo.Create(ctx, planner))
+	observed, _, err := taskSvc.ObserveTaskCancellation(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, observed)
+
+	require.NoError(t, svc.HandleParentFollowup(ctx, parent.ID, "new generation"))
+	swept := false
+	require.ErrorIs(t, svc.CancelSwarmObservedWithPending(ctx, observed, func() error {
+		swept = true
+		return nil
+	}), ErrTaskCancellationSuperseded)
+	require.False(t, swept)
+	require.False(t, workerSvc.IsCancellationRequested(parent.ID))
+	require.False(t, workerSvc.IsCancellationRequested(planner.ID))
+	currentParent := requireFullSwarmTestTask(t, repo, parent.ID)
+	currentCfg, err := models.ParseSwarmConfig(currentParent.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 2, currentCfg.Generation)
+	require.Equal(t, models.StatusRunning, currentParent.Status)
+	currentPlanner := requireFullSwarmTestTask(t, repo, planner.ID)
+	require.Equal(t, models.StatusPending, currentPlanner.Status)
+}
+
+func TestCancelSwarmObservedDoesNotCancelNewReviewerAdmissionBeforeRouting(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(repo, nil, workerSvc)
+	svc := NewSwarmService(taskSvc, repo, execRepo, workerSvc)
+	parent := &models.Task{ProjectID: "default", Title: "Active reviewer parent", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	require.NoError(t, repo.Create(ctx, parent))
+	parentID := parent.ID
+	reviewer := &models.Task{ProjectID: "default", Title: "Reviewer", Category: models.CategoryCompleted, Status: models.StatusCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRoleReviewer, SwarmConfig: `{"rerun_generation":1}`}
+	require.NoError(t, repo.Create(ctx, reviewer))
+	observed, _, err := taskSvc.ObserveTaskCancellation(ctx, parent.ID)
+	require.NoError(t, err)
+	next := &models.Execution{TaskID: reviewer.ID, IsFollowup: true, PromptSent: "new review"}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new review"})
+	require.NoError(t, err)
+	require.True(t, started)
+	beforeRouting := requireFullSwarmTestTask(t, repo, parent.ID)
+	cfg, err := models.ParseSwarmConfig(beforeRouting.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Generation)
+	require.Equal(t, 1, cfg.StopRevision, "child execution admission must advance ownership atomically")
+	require.ErrorIs(t, svc.CancelSwarmObservedWithPending(ctx, observed, nil), ErrTaskCancellationSuperseded)
+	stored, err := execRepo.GetByID(ctx, next.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, stored.Status)
+	require.NoError(t, svc.HandleChildFollowup(ctx, reviewer.ID, "new review"))
+	currentParent := requireFullSwarmTestTask(t, repo, parent.ID)
+	cfg, err = models.ParseSwarmConfig(currentParent.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Generation)
+	require.Greater(t, cfg.StopRevision, 1)
+}
+
 func TestStartPlannerClearsCancellationRequestsForRestartedParentAndPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

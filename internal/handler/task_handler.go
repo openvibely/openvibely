@@ -2091,12 +2091,11 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, cutoff 
 		return result, nil
 	}
 	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
+		var pendingSweep func() error
 		if !composerStop && h.threadInputRepo != nil {
-			if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
-				applog.Infof("[handler] %s error cancelling pending thread inputs task=%s: %v", operation, task.ID, err)
-			}
+			pendingSweep = func() error { return h.threadInputRepo.CancelPendingForTask(ctx, task.ID) }
 		}
-		if err := h.swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
+		if err := h.swarmSvc.CancelSwarmObservedWithPending(ctx, task, pendingSweep); err != nil {
 			applog.Infof("[handler] %s swarm cascade error: %v", operation, err)
 			return nil, err
 		}
@@ -2168,8 +2167,49 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
+	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_generation") != "" {
+		expectedGeneration, err := strconv.Atoi(c.QueryParam("expected_generation"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm generation")
+		}
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		if err != nil {
+			return err
+		}
+		if expectedGeneration != cfg.Generation {
+			return echo.NewHTTPError(http.StatusConflict, "swarm generation changed; Stop was not applied")
+		}
+	}
+	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_stop_revision") != "" {
+		expectedRevision, err := strconv.Atoi(c.QueryParam("expected_stop_revision"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm Stop revision")
+		}
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		if err != nil {
+			return err
+		}
+		if expectedRevision != cfg.StopRevision {
+			return echo.NewHTTPError(http.StatusConflict, "swarm follow-up changed; Stop was not applied")
+		}
+	}
+	if composerStop && c.QueryParam("expected_turn_id") != "" {
+		matches, err := h.execRepo.IsTaskExecutionAtHistoryCutoff(c.Request().Context(), taskID, c.QueryParam("expected_turn_id"), cutoff)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return echo.NewHTTPError(http.StatusConflict, "response turn changed; Stop was not applied")
+		}
+	}
 	result, err := h.cancelTaskWork(c.Request().Context(), task, cutoff, composerStop, "CancelTask")
 	if err != nil {
+		if errors.Is(err, service.ErrTaskCancellationSuperseded) {
+			if pulseRequest {
+				return h.renderPulseCancelError(c, http.StatusConflict, taskID, "This task changed before Stop could be applied.")
+			}
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if pulseRequest {
 			return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task. Try again.")
 		}
@@ -2916,12 +2956,19 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 		return err
 	}
 	activeTurnID := ""
+	queuedTurnID := ""
 	for _, exec := range executions {
 		if exec.Status == models.ExecRunning {
 			activeTurnID = exec.ID
 		}
+		if exec.Status == models.ExecQueued {
+			queuedTurnID = exec.ID
+		}
 	}
-	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
+	if activeTurnID == "" {
+		activeTurnID = queuedTurnID
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", components.SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID)), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
 }
 
 // TaskThreadSelectModel persists a task-thread composer model selection
