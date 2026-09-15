@@ -70,6 +70,9 @@ templ ModelsPageWithOAuthConnectionsAndState(projects []models.Project, currentP
 }
 
 func oauthConnectionAccountLabel(connection models.OAuthConnection) string {
+	if name := strings.TrimSpace(connection.Name); name != "" {
+		return name
+	}
 	if connection.Provider == models.ProviderAnthropic {
 		return "Anthropic account"
 	}

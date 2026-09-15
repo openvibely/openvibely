@@ -1663,11 +1663,8 @@ type TaskFrequency struct {
 	LastExecutedAt string
 }
 
-// GetMostFrequentTasks returns the most frequently executed tasks. Positive
-// limits bound the result; limit=0 explicitly requests the complete history.
-// Results are ordered by execution count descending, then task ID ascending for
-// deterministic tie handling. Optional bounds use the Analytics half-open
-// [dateFrom,dateTo) convention.
+// GetMostFrequentTasks returns the most frequently executed tasks.
+// Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
 func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID string, limit int, bounds ...string) ([]TaskFrequency, error) {
 	query := `SELECT
 			t.id,
@@ -1682,11 +1679,8 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 	if len(bounds) > 2 {
 		query, args = appendAnalyticsDimensions(query, args, "t", bounds[2:])
 	}
-	query += ` GROUP BY t.id, t.title ORDER BY execution_count DESC, t.id ASC`
-	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
-	}
+	query += ` GROUP BY t.id, t.title ORDER BY execution_count DESC LIMIT ?`
+	args = append(args, limit)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting most frequent tasks: %w", err)

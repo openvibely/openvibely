@@ -223,6 +223,16 @@ func TestLLMConfigRepo_ListOAuthConnectionsReturnsSafeSummaries(t *testing.T) {
 	if err := repo.Create(ctx, cfg); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO account_usage_snapshots (
+			provider, account_id, agent_config_id, oauth_connection_id,
+			oauth_config_revision, account_display_name, account_detail, raw_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		models.ProviderAnthropic, "secret-account-id", cfg.ID, cfg.OAuthConnectionID,
+		cfg.OAuthConfigRevision, "Alice", "alice@example.com", `{"private":"profile"}`,
+	); err != nil {
+		t.Fatalf("create account profile snapshot: %v", err)
+	}
 	connections, err := repo.ListOAuthConnections(ctx, "")
 	if err != nil {
 		t.Fatalf("ListOAuthConnections: %v", err)
@@ -231,6 +241,9 @@ func TestLLMConfigRepo_ListOAuthConnectionsReturnsSafeSummaries(t *testing.T) {
 		t.Fatalf("connection summaries = %#v", connections)
 	}
 	summary := connections[0]
+	if summary.Name != "Alice" {
+		t.Fatalf("OAuth connection summary name = %q, want provider profile display name", summary.Name)
+	}
 	if summary.AccessToken != "present" || summary.RefreshToken != "" || summary.AccountID != "" || summary.Revision != 0 {
 		t.Fatalf("OAuth connection summary exposed private state: %#v", summary)
 	}
