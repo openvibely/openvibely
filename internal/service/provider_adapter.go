@@ -487,7 +487,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	for _, att := range req.Attachments {
 		budget.AttachmentTokens += estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
 		if att.FileSize > 0 {
-			budget.AttachmentTokens += int(att.FileSize)
+			budget.AttachmentTokens += int((att.FileSize + providerApproxBytesPerToken - 1) / providerApproxBytesPerToken)
 		}
 	}
 	return budget
