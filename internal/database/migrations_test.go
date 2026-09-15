@@ -2740,7 +2740,7 @@ func TestMigration187ConsolidatesExactRotatingCredentialsWithoutMergingAccountId
 	}
 }
 
-func TestMigration191RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
+func TestMigration190RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "repair-split-rotating-oauth-connections.db"))
 	goose.SetBaseFS(migrations.FS)
 	defer goose.SetBaseFS(nil)
@@ -2776,8 +2776,8 @@ func TestMigration191RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed previously split OAuth connections: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 191); err != nil {
-		t.Fatalf("migrate to 191: %v", err)
+	if err := goose.UpTo(db, ".", 190); err != nil {
+		t.Fatalf("migrate to 190: %v", err)
 	}
 
 	for _, provider := range []string{"openai", "anthropic"} {
@@ -2823,10 +2823,10 @@ func TestMigration191RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 	}
 
 	if err := goose.DownTo(db, ".", 189); err != nil {
-		t.Fatalf("roll back migration 191: %v", err)
+		t.Fatalf("roll back migration 190: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 191); err != nil {
-		t.Fatalf("reapply migration 191: %v", err)
+	if err := goose.UpTo(db, ".", 190); err != nil {
+		t.Fatalf("reapply migration 190: %v", err)
 	}
 	for _, provider := range []string{"openai", "anthropic"} {
 		var firstConnection, secondConnection string
