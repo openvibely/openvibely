@@ -13,6 +13,61 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestOAuthRefreshServiceRunOnceTimesOutAnthropicIdentityAndContinues(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	anthropic := &models.LLMConfig{
+		Name: "Anthropic", Provider: models.ProviderAnthropic, Model: "claude",
+		AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "anthropic-access", OAuthRefreshToken: "anthropic-refresh",
+		OAuthExpiresAt: time.Now().Add(2 * time.Minute).UnixMilli(),
+	}
+	openAI := &models.LLMConfig{
+		Name: "OpenAI", Provider: models.ProviderOpenAI, Model: "gpt",
+		AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "openai-access", OAuthRefreshToken: "openai-refresh",
+		OAuthExpiresAt: time.Now().Add(5 * time.Minute).UnixMilli(),
+	}
+	for _, cfg := range []*models.LLMConfig{anthropic, openAI} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	openAIRefreshed := false
+	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	worker.identityTimeout = 20 * time.Millisecond
+	worker.SetRefreshers(
+		func(_ context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
+			return llmoauth.TokenSet{AccessToken: "anthropic-fresh", RefreshToken: cfg.OAuthRefreshToken, ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+		},
+		func(_ context.Context, cfg models.LLMConfig) (llmoauth.TokenSet, error) {
+			openAIRefreshed = true
+			return llmoauth.TokenSet{AccessToken: "openai-fresh", RefreshToken: cfg.OAuthRefreshToken, ExpiresAt: time.Now().Add(2 * time.Hour).UnixMilli()}, nil
+		},
+	)
+	worker.SetAnthropicIdentityResolver(func(ctx context.Context, _ string) (AnthropicOAuthIdentity, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("identity lookup context has no deadline")
+		}
+		<-ctx.Done()
+		return AnthropicOAuthIdentity{}, ctx.Err()
+	})
+
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if !openAIRefreshed {
+		t.Fatal("later OpenAI connection was not refreshed after Anthropic identity timeout")
+	}
+	loaded, err := repo.GetByID(ctx, openAI.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OAuthAccessToken != "openai-fresh" {
+		t.Fatalf("OpenAI access token = %q, want refreshed token", loaded.OAuthAccessToken)
+	}
+}
+
 func TestOAuthRefreshServiceRunOnceAdoptsVerifiedAnthropicPrincipal(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
