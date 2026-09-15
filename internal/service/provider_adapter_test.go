@@ -1876,7 +1876,7 @@ func benchmarkProviderContextBudgetBaseline(svc *LLMService, adapter ProviderAda
 			budget.HistoryTokens = reportedHistory
 		}
 	}
-	_ = historyNeedsCompaction(budget)
+	_ = historyNeedsCompaction(budget, compactionLimitsForAgent(req.Agent).TriggerLimit)
 	prepared, _, cleanup, err := svc.preparePendingInput(req)
 	if err != nil {
 		return
@@ -1933,7 +1933,7 @@ func BenchmarkProviderContextBudgetRecoveryPaths(b *testing.B) {
 			Message: "continue", Agent: models.LLMConfig{
 				Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol", AuthMethod: models.AuthMethodAPIKey, ContextWindow: 20000,
 			},
-			ChatHistory: []models.Execution{{PromptSent: strings.Repeat("history ", 900), Output: "previous"}},
+			ChatHistory: []models.Execution{{PromptSent: strings.Repeat("history ", 30000), Output: "previous"}},
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
