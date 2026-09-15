@@ -2280,6 +2280,9 @@ func TestNormalizeAnthropicOAuthProfileSubscriptionMetadata(t *testing.T) {
 	if profile.AccountID != "organization:org-1" {
 		t.Fatalf("account id = %q", profile.AccountID)
 	}
+	if profile.PrincipalHash == "" || strings.Contains(profile.PrincipalHash, "org-1") || strings.Contains(profile.PrincipalHash, "acct-1") {
+		t.Fatalf("principal hash did not preserve private strong identity safely: %q", profile.PrincipalHash)
+	}
 	if profile.PlanLabel != "Claude Max (5x)" || profile.BillingLabel != "Contract subscription" || profile.StatusLabel != "Pending" || profile.ExtraUsageLabel != "Usage credits enabled" {
 		t.Fatalf("unexpected metadata: %+v", profile)
 	}
@@ -2293,6 +2296,13 @@ func TestNormalizeAnthropicOAuthProfileSubscriptionMetadata(t *testing.T) {
 	})
 	if fallback.AccountID != "account:acct-2" || fallback.PlanLabel != "Claude Pro" || fallback.BillingLabel != "Team billing" || fallback.StatusLabel != "Disabled" {
 		t.Fatalf("unexpected fallback metadata: %+v", fallback)
+	}
+	organizationOnly := normalizeAnthropicOAuthProfile(map[string]any{
+		"organization": map[string]any{"uuid": "org-only"},
+		"account":      map[string]any{"display_name": "Organization member"},
+	})
+	if organizationOnly.AccountID != "organization:org-only" || organizationOnly.PrincipalHash != "" {
+		t.Fatalf("organization-only profile produced credential-interchange evidence: %+v", organizationOnly)
 	}
 }
 

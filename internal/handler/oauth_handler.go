@@ -671,22 +671,36 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	}
 
 	expiresAt := resolveOAuthExpiryAt(tokenResult.ExpiresIn)
-	openAIAccountID := ""
+	accountID := ""
+	profileDisplayName := ""
+	principalHash := ""
 	if flow.Provider == models.ProviderOpenAI {
-		openAIAccountID = extractOpenAIAccountIDFromIDToken(tokenResult.IDToken)
+		accountID = extractOpenAIAccountIDFromIDToken(tokenResult.IDToken)
+	} else if flow.Provider == models.ProviderAnthropic && h.oauthIdentityResolver != nil {
+		profileCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		profile, profileErr := h.oauthIdentityResolver(profileCtx, tokenResult.AccessToken)
+		cancel()
+		if profileErr != nil {
+			applog.Infof("[handler] Anthropic OAuth profile unavailable after authorization")
+		} else {
+			accountID = profile.AccountID
+			profileDisplayName = profile.DisplayName
+			principalHash = profile.PrincipalHash
+		}
 	}
 
 	bgCtx := context.Background()
 	var updated bool
 	if flow.ConnectionID != "" {
-		updated, err = h.llmConfigRepo.ReplaceLinkedOAuthConnectionIfRevision(
+		updated, err = h.llmConfigRepo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(
 			bgCtx, flow.ConfigID, flow.ConnectionID, flow.ConfigRevision, flow.Provider,
-			tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID,
+			tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, accountID,
+			profileDisplayName, principalHash,
 		)
 	} else {
 		updated, err = h.llmConfigRepo.UpdateStandardOAuthConnectionIfRevision(
 			bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider,
-			tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID,
+			tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, accountID,
 		)
 	}
 	if err != nil {

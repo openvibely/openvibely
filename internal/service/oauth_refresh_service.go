@@ -26,6 +26,7 @@ type OAuthRefreshService struct {
 	manager          *llmoauth.Manager
 	anthropicRefresh llmoauth.RefreshFunc
 	openAIRefresh    llmoauth.RefreshFunc
+	identityResolver func(context.Context, string) (AnthropicOAuthIdentity, error)
 	interval         time.Duration
 	wg               sync.WaitGroup
 }
@@ -50,6 +51,10 @@ func (s *OAuthRefreshService) SetRefreshers(anthropicRefresh, openAIRefresh llmo
 	if openAIRefresh != nil {
 		s.openAIRefresh = openAIRefresh
 	}
+}
+
+func (s *OAuthRefreshService) SetAnthropicIdentityResolver(resolver func(context.Context, string) (AnthropicOAuthIdentity, error)) {
+	s.identityResolver = resolver
 }
 
 func (s *OAuthRefreshService) Start(ctx context.Context) {
@@ -94,7 +99,21 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 		return fmt.Errorf("list OAuth model configurations: %w", err)
 	}
 	var refreshErrors []error
+	processedConnections := map[string]struct{}{}
 	for _, cfg := range configs {
+		current, loadErr := s.repo.GetByID(ctx, cfg.ID)
+		if loadErr != nil {
+			refreshErrors = append(refreshErrors, loadErr)
+			continue
+		}
+		if current == nil {
+			continue
+		}
+		cfg = *current
+		if _, seen := processedConnections[cfg.OAuthConnectionID]; seen {
+			continue
+		}
+		processedConnections[cfg.OAuthConnectionID] = struct{}{}
 		if cfg.AuthMethod != models.AuthMethodOAuth || cfg.OAuthNeedsReauth || strings.TrimSpace(cfg.OAuthAccessToken) == "" || strings.TrimSpace(cfg.OAuthRefreshToken) == "" {
 			continue
 		}
@@ -107,11 +126,27 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 		default:
 			continue
 		}
-		if _, refreshErr := s.manager.EnsureFresh(ctx, cfg, oauthBackgroundRefreshMinTTL, refresh); refreshErr != nil {
+		fresh, refreshErr := s.manager.EnsureFresh(ctx, cfg, oauthBackgroundRefreshMinTTL, refresh)
+		if refreshErr != nil {
 			if errors.Is(refreshErr, llmoauth.ErrReauthenticationRequired) {
 				continue
 			}
 			refreshErrors = append(refreshErrors, refreshErr)
+			continue
+		}
+		if cfg.Provider == models.ProviderAnthropic && s.identityResolver != nil {
+			identity, identityErr := s.identityResolver(ctx, fresh.OAuthAccessToken)
+			if identityErr == nil {
+				updated, updateErr := s.repo.UpdateLinkedOAuthConnectionProfileIfRevision(
+					ctx, fresh.ID, fresh.OAuthConnectionID, fresh.OAuthConfigRevision, fresh.Provider,
+					identity.AccountID, identity.DisplayName, identity.PrincipalHash,
+				)
+				if updateErr != nil {
+					refreshErrors = append(refreshErrors, updateErr)
+				} else if !updated {
+					refreshErrors = append(refreshErrors, fmt.Errorf("OAuth connection changed while its provider profile was being resolved"))
+				}
+			}
 		}
 	}
 	return errors.Join(refreshErrors...)

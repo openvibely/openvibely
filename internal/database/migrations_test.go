@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 192 {
-		t.Fatalf("max goose version = %d, want 192", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -1811,8 +1811,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 192 {
-		t.Fatalf("max goose version = %d, want 192", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -2260,8 +2260,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 192 {
-		t.Fatalf("max goose version = %d, want 192", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -2596,8 +2596,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 192 {
-		t.Fatalf("max goose version = %d, want 192", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -2615,6 +2615,44 @@ func TestMigration095_AllowsCreatedSkillAnalyticsEvents(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO skill_analytics_events (skill_scope, skill_handle, event_type, source, surface) VALUES ('global', 'created_skill', 'created', 'manual', 'task_thread')`); err != nil {
 		t.Fatalf("created skill analytics event rejected: %v", err)
+	}
+}
+
+func TestMigration193BackfillsSafeOAuthDisplayNameWithoutInferringPrincipal(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "oauth-provider-identity.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 192); err != nil {
+		t.Fatalf("migrate to 192: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO oauth_connections (id, provider, name, oauth_access_token, oauth_refresh_token, oauth_revision)
+		VALUES ('connection', 'anthropic', 'Legacy model name', 'access', 'refresh', 3);
+		INSERT INTO agent_configs (id, name, provider, model, auth_method, oauth_connection_id)
+		VALUES ('model', 'Model', 'anthropic', 'claude-test', 'oauth', 'connection');
+		INSERT INTO account_usage_snapshots (id, provider, agent_config_id, oauth_connection_id, oauth_config_revision, account_display_name, account_detail, raw_json)
+		VALUES ('current', 'anthropic', 'model', 'connection', 3, 'Provider Account', 'private@example.com', '{"account_id":"private"}'),
+		       ('stale', 'anthropic', 'model', 'connection', 2, 'Stale Account', 'stale@example.com', '{}');`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 193); err != nil {
+		t.Fatalf("migrate to 193: %v", err)
+	}
+	var displayName, principalHash string
+	if err := db.QueryRow(`SELECT oauth_provider_display_name, oauth_principal_hash FROM oauth_connections WHERE id = 'connection'`).Scan(&displayName, &principalHash); err != nil {
+		t.Fatal(err)
+	}
+	if displayName != "Provider Account" || principalHash != "" {
+		t.Fatalf("provider identity = display %q principal %q, want current safe name and no inferred principal", displayName, principalHash)
+	}
+	if err := goose.DownTo(db, ".", 192); err != nil {
+		t.Fatalf("rollback to 192: %v", err)
+	}
+	if testColumnExists(t, db, "oauth_connections", "oauth_provider_display_name") || testColumnExists(t, db, "oauth_connections", "oauth_principal_hash") {
+		t.Fatal("migration 193 rollback retained provider identity columns")
 	}
 }
 

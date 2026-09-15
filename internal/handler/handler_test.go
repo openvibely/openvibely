@@ -75,6 +75,7 @@ func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *rep
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 
 	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.oauthIdentityResolver = nil
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
@@ -129,6 +130,7 @@ func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLM
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 
 	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.oauthIdentityResolver = nil
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
