@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -38,7 +39,6 @@ Return only the summary text.`
 	openAICompactionTranscriptGap                      = "\n\n[Middle conversation content omitted before compaction]\n\n"
 	openAIEffectiveContextPercent                      = 90
 	openAIRemoteCompactionV2RetainedMessageTokenBudget = 64000
-	openAIApproxBytesPerToken                          = 4
 	openAIResizedImageBytesEstimate                    = 7373
 	openAIOriginalImagePatchSize                       = 32
 	openAIOriginalImageMaxPatches                      = 10000
@@ -773,21 +773,15 @@ func estimateAgenticOriginalImageBytes(imageURL string) int {
 }
 
 func approxOpenAITokenCount(text string) int {
-	return approxOpenAITokensFromByteCount(len(text))
+	return tokenestimate.FromText(text)
 }
 
 func approxOpenAITokensFromByteCount(bytes int) int {
-	if bytes <= 0 {
-		return 0
-	}
-	return (bytes + openAIApproxBytesPerToken - 1) / openAIApproxBytesPerToken
+	return tokenestimate.FromByteCount(bytes)
 }
 
 func approxOpenAIBytesForTokens(tokens int) int {
-	if tokens <= 0 {
-		return 0
-	}
-	return tokens * openAIApproxBytesPerToken
+	return tokenestimate.ByteBudget(tokens)
 }
 
 func normalizedCompactionThreshold(threshold int) int {
