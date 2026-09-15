@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -150,6 +152,126 @@ func TestGetAnalyticsUsage_WithDateRange(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage?date_from=2024-01-01T00:00:00Z&date_to=2024-12-31T23:59:59Z").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
+}
+
+func TestGetAnalyticsDashboardCancellationReleasesSoleReaderForConcurrentRequest(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-contention.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	if got := connections.Reader.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("reader max connections = %d, want production topology of 1", got)
+	}
+	if got := connections.Writer.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("writer max connections = %d, want production topology of 1", got)
+	}
+	if _, err := connections.Writer.Exec(`
+		INSERT INTO projects(id,name) VALUES ('analytics-project','Analytics project');
+		INSERT INTO tasks(id,project_id,title,category,status,created_at)
+			VALUES ('analytics-task','analytics-project','Analytics task','backlog','completed',CURRENT_TIMESTAMP);
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<250000)
+		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order)
+		SELECT printf('analytics-exec-%06d',n),'analytics-task',
+			CASE WHEN n%3=0 THEN 'failed' ELSE 'completed' END,
+			CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CASE WHEN n=1 THEN 0 ELSE 1 END,n
+		FROM seq;
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Handler{execRepo: repository.NewExecutionRepo(connections.Reader)}
+	e := echo.New()
+	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
+	e.GET("/probe", func(c echo.Context) error {
+		var count int
+		if err := connections.Reader.QueryRowContext(c.Request().Context(), `SELECT COUNT(*) FROM projects`).Scan(&count); err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, map[string]int{"projects": count})
+	})
+	server := httptest.NewServer(e)
+	defer server.Close()
+
+	analyticsCtx, cancelAnalytics := context.WithCancel(context.Background())
+	defer cancelAnalytics()
+	analyticsReq, err := http.NewRequestWithContext(analyticsCtx, http.MethodGet, server.URL+"/api/analytics/dashboard?project_id=analytics-project&view=overview&range=all", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyticsDone := make(chan error, 1)
+	go func() {
+		response, requestErr := server.Client().Do(analyticsReq)
+		if response != nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+		}
+		analyticsDone <- requestErr
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for connections.Reader.Stats().InUse != 1 {
+		select {
+		case requestErr := <-analyticsDone:
+			t.Fatalf("Analytics request completed before occupying the sole reader: %v", requestErr)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Analytics request did not occupy the sole reader")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	probeDone := make(chan error, 1)
+	probeStarted := time.Now()
+	waitCountBeforeProbe := connections.Reader.Stats().WaitCount
+	go func() {
+		response, requestErr := server.Client().Get(server.URL + "/probe")
+		if response != nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			if requestErr == nil && response.StatusCode != http.StatusOK {
+				requestErr = fmt.Errorf("probe status = %d", response.StatusCode)
+			}
+		}
+		probeDone <- requestErr
+	}()
+
+	deadline = time.Now().Add(time.Second)
+	for connections.Reader.Stats().WaitCount <= waitCountBeforeProbe {
+		select {
+		case err := <-probeDone:
+			t.Fatalf("concurrent request completed before contending for the Analytics reader: %v", err)
+		case err := <-analyticsDone:
+			t.Fatalf("Analytics request completed before cancellation: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("concurrent request did not queue behind the Analytics reader")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancelAnalytics()
+	select {
+	case err := <-probeDone:
+		if err != nil {
+			t.Fatalf("concurrent request after Analytics cancellation: %v", err)
+		}
+		if elapsed := time.Since(probeStarted); elapsed > time.Second {
+			t.Fatalf("concurrent request waited %s after Analytics cancellation; want <= 1s", elapsed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent request remained blocked after Analytics cancellation")
+	}
+	select {
+	case err := <-analyticsDone:
+		if err == nil {
+			t.Fatal("cancelled Analytics HTTP request unexpectedly succeeded")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled Analytics HTTP request did not terminate")
+	}
 }
 
 func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T) {
