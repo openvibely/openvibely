@@ -14,8 +14,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -421,8 +423,12 @@ func TestAgenticBlockMarshal_ToolUseEmptyInputIncludesObject(t *testing.T) {
 func TestAnthropicToolResultReplayBoundsDenseOutputAndPreservesPairing(t *testing.T) {
 	full := strings.Repeat("!", 5000)
 	bounded := truncateAnthropicToolOutputForModelInput(full, 512)
-	if len([]rune(bounded)) > 512 || !strings.Contains(bounded, "truncated") {
-		t.Fatalf("bounded output runes=%d content=%q", len([]rune(bounded)), bounded)
+	if len(bounded) > tokenestimate.ByteBudget(512) || len(bounded) <= 512 || !strings.Contains(bounded, "truncated") {
+		t.Fatalf("bounded output bytes=%d content=%q", len(bounded), bounded)
+	}
+	utf8Output := truncateAnthropicToolOutputForModelInput(strings.Repeat("é", 2000), 512)
+	if !utf8.ValidString(utf8Output) || len(utf8Output) > tokenestimate.ByteBudget(512) {
+		t.Fatalf("UTF-8 output valid=%v bytes=%d", utf8.ValidString(utf8Output), len(utf8Output))
 	}
 	block := agenticBlock{Type: "tool_result", ToolUseID: "toolu_dense", Content: anthropicStringContentRaw(bounded)}
 	encoded, err := json.Marshal(block)
