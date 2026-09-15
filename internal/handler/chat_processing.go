@@ -2745,8 +2745,28 @@ func (h *Handler) reserveStartupSyncPublication(ctx context.Context, task *model
 	if err != nil {
 		return startupSyncPublicationReservation{}, fmt.Errorf("checking pull request before startup synchronization: %w", err)
 	}
-	if pullRequest == nil || !service.IsOpenPullRequestState(pullRequest.PRState) {
+	if pullRequest == nil {
 		return startupSyncPublicationReservation{}, nil
+	}
+	if !service.IsOpenPullRequestState(pullRequest.PRState) {
+		if pullRequest.NeedsRepublish {
+			if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
+				return startupSyncPublicationReservation{}, fmt.Errorf("clearing closed pull request publication requirement: %w", err)
+			}
+		}
+		return startupSyncPublicationReservation{}, nil
+	}
+	if h.githubSvc != nil {
+		livePR, err := h.liveStartupSyncPullRequest(ctx, task, pullRequest.PRNumber)
+		if err != nil {
+			return startupSyncPublicationReservation{}, fmt.Errorf("checking live pull request before startup synchronization: %w", err)
+		}
+		if !service.IsOpenPullRequestState(livePR.State) {
+			if err := h.recordClosedStartupSyncPullRequest(ctx, pullRequest, livePR); err != nil {
+				return startupSyncPublicationReservation{}, err
+			}
+			return startupSyncPublicationReservation{}, nil
+		}
 	}
 	reservation := startupSyncPublicationReservation{active: true, wasPending: pullRequest.NeedsRepublish, prNumber: pullRequest.PRNumber}
 	if !pullRequest.NeedsRepublish {
@@ -2789,8 +2809,25 @@ func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, 
 	if err != nil {
 		return fmt.Errorf("loading synchronized task pull request: %w", err)
 	}
-	if pullRequest == nil || !service.IsOpenPullRequestState(pullRequest.PRState) {
-		return fmt.Errorf("synchronized task no longer has an open pull request")
+	if pullRequest == nil {
+		return fmt.Errorf("synchronized task no longer has a recorded pull request")
+	}
+	if !service.IsOpenPullRequestState(pullRequest.PRState) {
+		if pullRequest.NeedsRepublish {
+			if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
+				return fmt.Errorf("clearing closed pull request publication requirement: %w", err)
+			}
+		}
+		return nil // A closed PR cancels the startup publication requirement.
+	}
+	if h.githubSvc != nil {
+		livePR, err := h.liveStartupSyncPullRequest(ctx, task, pullRequest.PRNumber)
+		if err != nil {
+			return fmt.Errorf("checking live pull request before startup publication: %w", err)
+		}
+		if !service.IsOpenPullRequestState(livePR.State) {
+			return h.recordClosedStartupSyncPullRequest(ctx, pullRequest, livePR)
+		}
 	}
 	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
 	if err != nil {
@@ -2804,12 +2841,69 @@ func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, 
 		IssueNumber:            pullRequest.IssueNumber,
 		IssueURL:               pullRequest.IssueURL,
 		PreserveNeedsRepublish: true,
+		RequireExistingOpenPR:  pullRequest.PRNumber,
 	})
 	if err != nil {
+		// The PR may have been closed between our live-state check and the
+		// serialized publication attempt. Honor that closure without replacing it.
+		if livePR, liveErr := h.liveStartupSyncPullRequest(ctx, task, pullRequest.PRNumber); liveErr == nil && !service.IsOpenPullRequestState(livePR.State) {
+			return h.recordClosedStartupSyncPullRequest(ctx, pullRequest, livePR)
+		}
 		return fmt.Errorf("updating existing pull request #%d after startup synchronization: %w", pullRequest.PRNumber, err)
 	}
 	if result == nil || result.Record == nil || result.Record.PRNumber != pullRequest.PRNumber {
 		return fmt.Errorf("startup synchronization publication did not reuse pull request #%d", pullRequest.PRNumber)
+	}
+	return nil
+}
+
+func (h *Handler) liveStartupSyncPullRequest(ctx context.Context, task *models.Task, number int) (*service.GitHubPullRequest, error) {
+	if h.githubSvc == nil || h.projectRepo == nil {
+		return nil, fmt.Errorf("GitHub live-state verification is unavailable")
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil {
+		return nil, fmt.Errorf("loading task project: %w", err)
+	}
+	if project == nil {
+		return nil, fmt.Errorf("task project not found")
+	}
+	repoPath := ""
+	if strings.TrimSpace(project.RepoURL) == "" {
+		repoPath = project.RepoPath
+	}
+	repoRef, err := h.githubSvc.ResolveRepo(ctx, project.RepoURL, repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving repository: %w", err)
+	}
+	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
+		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
+	}
+	livePR, err := h.githubSvc.GetPullRequest(ctx, repoRef, number)
+	if err != nil {
+		return nil, fmt.Errorf("loading pull request #%d: %w", number, err)
+	}
+	if livePR == nil {
+		return nil, fmt.Errorf("pull request #%d was not found", number)
+	}
+	return livePR, nil
+}
+
+func (h *Handler) recordClosedStartupSyncPullRequest(ctx context.Context, recorded *models.TaskPullRequest, live *service.GitHubPullRequest) error {
+	if recorded == nil || live == nil || recorded.PRNumber != live.Number {
+		return fmt.Errorf("startup synchronization pull request changed while checking live state")
+	}
+	recorded.PRState = live.State
+	if live.URL != "" {
+		recorded.PRURL = live.URL
+	}
+	if err := h.taskPullRequestRepo.Upsert(ctx, recorded); err != nil {
+		return fmt.Errorf("recording closed pull request #%d: %w", recorded.PRNumber, err)
+	}
+	if recorded.NeedsRepublish {
+		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, recorded.TaskID, false); err != nil {
+			return fmt.Errorf("clearing closed pull request #%d publication requirement: %w", recorded.PRNumber, err)
+		}
 	}
 	return nil
 }
