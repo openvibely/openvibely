@@ -24,6 +24,10 @@ import (
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
 const DefaultCompactionThreshold = 150000
 
+// MinCompactionThreshold is the minimum trigger accepted by Anthropic's
+// server-side compaction API.
+const MinCompactionThreshold = 50000
+
 const (
 	// Prefer the direct-call web tool versions for URL retrieval flows.
 	// Newer web tool versions can route through provider code_execution,
@@ -241,10 +245,25 @@ type nativeCompactionState struct {
 func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
 	var state nativeCompactionState
 	if err := json.Unmarshal([]byte(raw), &state); err == nil && state.Version == nativeCompactionStateVersion {
-		if !hasLeadingCompactionMessage(state.Messages) {
-			return nil, fmt.Errorf("invalid compaction message envelope")
+		if hasLeadingCompactionMessage(state.Messages) {
+			return state.Messages, nil
 		}
-		return state.Messages, nil
+		// Normalize checkpoints written before compaction blocks were retained
+		// under their provider-returned assistant role.
+		if hasLeadingCompactionMessageWithRole(state.Messages, "user") {
+			state.Messages[0].Role = "assistant"
+			if len(state.Messages) > 1 && state.Messages[1].Role == "assistant" {
+				first, firstErr := contentBlocksJSON(state.Messages[0].Content)
+				second, secondErr := contentBlocksJSON(state.Messages[1].Content)
+				if firstErr != nil || secondErr != nil {
+					return nil, fmt.Errorf("invalid legacy compaction message envelope")
+				}
+				state.Messages[0].Content = append(first, second...)
+				state.Messages = append(state.Messages[:1], state.Messages[2:]...)
+			}
+			return state.Messages, nil
+		}
+		return nil, fmt.Errorf("invalid compaction message envelope")
 	}
 
 	// Accept checkpoints produced before the state envelope retained the
@@ -256,22 +275,38 @@ func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
 	if block.Type != "compaction" || block.Content == nil {
 		return nil, fmt.Errorf("invalid compaction block")
 	}
-	return []agenticMessage{{Role: "user", Content: []compactionBlockJSON{block}}}, nil
+	return []agenticMessage{{Role: "assistant", Content: []compactionBlockJSON{block}}}, nil
 }
 
 func hasLeadingCompactionMessage(messages []agenticMessage) bool {
-	if len(messages) == 0 || messages[0].Role != "user" {
+	return hasLeadingCompactionMessageWithRole(messages, "assistant")
+}
+
+func hasLeadingCompactionMessageWithRole(messages []agenticMessage, role string) bool {
+	if len(messages) == 0 || messages[0].Role != role {
 		return false
 	}
-	raw, err := json.Marshal(messages[0].Content)
+	blocks, err := contentBlocksJSON(messages[0].Content)
+	if err != nil || len(blocks) == 0 {
+		return false
+	}
+	var block compactionBlockJSON
+	if err := json.Unmarshal(blocks[0], &block); err != nil {
+		return false
+	}
+	return block.Type == "compaction" && block.Content != nil
+}
+
+func contentBlocksJSON(content any) ([]json.RawMessage, error) {
+	raw, err := json.Marshal(content)
 	if err != nil {
-		return false
+		return nil, err
 	}
-	var blocks []compactionBlockJSON
-	if err := json.Unmarshal(raw, &blocks); err != nil || len(blocks) != 1 {
-		return false
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return nil, err
 	}
-	return blocks[0].Type == "compaction" && blocks[0].Content != nil
+	return blocks, nil
 }
 
 // agenticRequest is the API request body for agentic sends.
@@ -424,14 +459,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 
 		// Handle compaction: if the API compacted context, replace old messages
-		// with the compaction block for subsequent turns.
+		// with the assistant response beginning at the compaction block. Anthropic
+		// ignores everything before that block on subsequent requests.
 		if resp.compaction != nil {
 			result.Compacted = true
-			// Build the compaction block for round-tripping
-			var compactBlock compactionBlockJSON
-			compactBlock.Type = "compaction"
-			compactBlock.Content = resp.compaction.content
-
 			if resp.compaction.content != nil {
 				hasDurableCompactionState = true
 				applog.Infof("[anthropicclient] context compacted on turn %d, summary_len=%d", turn+1, len(*resp.compaction.content))
@@ -442,14 +473,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				hasDurableCompactionState = false
 				applog.Infof("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
 			}
-
-			// Replace all prior messages with the compaction block.
-			// The compaction summary covers all messages accumulated so far.
-			compactionMsg := agenticMessage{
-				Role:    "user",
-				Content: []compactionBlockJSON{compactBlock},
-			}
-			messages = []agenticMessage{compactionMsg}
 		}
 
 		// Ensure contentBlocks is never nil (nil slice marshals as JSON null,
@@ -458,11 +481,21 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			resp.contentBlocks = []agenticBlock{}
 		}
 
-		// Add assistant response to messages
-		messages = append(messages, agenticMessage{
-			Role:    "assistant",
-			Content: resp.contentBlocks,
-		})
+		// A compaction block is part of the assistant response and must remain
+		// before any continuation blocks returned in that same response.
+		if resp.compaction != nil {
+			blocks := make([]any, 0, len(resp.contentBlocks)+1)
+			blocks = append(blocks, compactionBlockJSON{Type: "compaction", Content: resp.compaction.content})
+			for _, block := range resp.contentBlocks {
+				blocks = append(blocks, block)
+			}
+			messages = []agenticMessage{{Role: "assistant", Content: blocks}}
+		} else {
+			messages = append(messages, agenticMessage{
+				Role:    "assistant",
+				Content: resp.contentBlocks,
+			})
+		}
 
 		// Collect text blocks for this turn.
 		turnText := ""
@@ -963,8 +996,12 @@ type compactionResult struct {
 	content *string
 }
 
-// ContextManagementBetaHeader is the beta feature flag for context management.
-const ContextManagementBetaHeader = "context-management-2025-06-27"
+// CompactionBetaHeader is the beta feature flag for server-side compaction.
+const CompactionBetaHeader = "compact-2026-01-12"
+
+// ContextManagementBetaHeader is retained for source compatibility.
+// Deprecated: use CompactionBetaHeader.
+const ContextManagementBetaHeader = CompactionBetaHeader
 
 func requiresAdaptiveThinking(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
@@ -1183,33 +1220,24 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		}
 	}
 
-	// Add context management config to reduce context size.
-	// clear_tool_uses: strip tool results from older messages when token threshold exceeded.
-	// clear_thinking: strip thinking blocks from older messages (only when thinking is enabled).
+	// Ask Anthropic to summarize older context when the input reaches the trigger.
 	if opts.AutoCompaction {
 		threshold := opts.CompactionTokenThreshold
 		if threshold == 0 {
 			threshold = DefaultCompactionThreshold
 		}
-		var edits []contextManagementEdit
-		// clear_thinking requires thinking to be enabled; only include it when
-		// the request actually has a thinking config. Without this guard the API
-		// returns 400 "clear_thinking strategy requires thinking to be enabled".
-		if req.Thinking != nil {
-			edits = append(edits, contextManagementEdit{
-				// clear_thinking must be first when provided (API requirement)
-				Type: "clear_thinking_20251015",
-			})
+		if threshold < MinCompactionThreshold {
+			threshold = MinCompactionThreshold
 		}
-		edits = append(edits, contextManagementEdit{
-			Type: "clear_tool_uses_20250919",
-			Trigger: &inputTokensTrigger{
-				Type:  "input_tokens",
-				Value: threshold,
-			},
-		})
 		req.ContextManagement = &contextManagementConfig{
-			Edits: edits,
+			Edits: []contextManagementEdit{{
+				Type: "compact_20260112",
+				Trigger: &inputTokensTrigger{
+					Type:  "input_tokens",
+					Value: threshold,
+				},
+				Instructions: opts.CompactionInstructions,
+			}},
 		}
 	}
 
@@ -1229,7 +1257,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		betaHeaders = append(betaHeaders, "claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05")
 	}
 	if opts.AutoCompaction {
-		betaHeaders = append(betaHeaders, ContextManagementBetaHeader)
+		betaHeaders = append(betaHeaders, CompactionBetaHeader)
 	}
 
 	// OAuth uses ?beta=true query parameter (required by the beta Messages endpoint).
