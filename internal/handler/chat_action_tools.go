@@ -1178,7 +1178,14 @@ func (h *Handler) executeCancelTaskTool(ctx context.Context, params streamingRes
 	if taskIDInput == "" && strings.TrimSpace(req.Title) != "" && !strings.EqualFold(strings.TrimSpace(task.Title), strings.TrimSpace(req.Title)) {
 		return "", fmt.Errorf("no task found with exact title %q", strings.TrimSpace(req.Title))
 	}
-	result, err := h.cancelTaskWork(ctx, task, false, "ChatCancelTask")
+	observed, cutoff, err := h.taskSvc.ObserveTaskCancellation(ctx, task.ID)
+	if err != nil || observed == nil {
+		if err == nil {
+			err = fmt.Errorf("task not found: %s", task.ID)
+		}
+		return "", err
+	}
+	result, err := h.cancelTaskWork(ctx, observed, cutoff, false, "ChatCancelTask")
 	if err != nil {
 		return "", err
 	}
