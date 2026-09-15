@@ -953,12 +953,14 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	if t.AutoMergeOnGoalAchieved {
 		autoMergeOnGoalAchieved = 1
 	}
+	swarmConfig := defaultJSON(t.SwarmConfig)
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET title = ?, category = ?, priority = ?, status = ?,
 			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
-			 swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
+			 swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
-		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
+		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
+		t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
 			return ErrDuplicateTask
@@ -2322,9 +2324,10 @@ func scanSwarmChildTask(scan func(dest ...any) error) (models.Task, error) {
 }
 
 func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {
+	swarmConfig := defaultJSON(config)
 	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
-		role, status, defaultJSON(config), sequence, id)
+		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
+		role, status, role, swarmConfig, swarmConfig, swarmConfig, sequence, id)
 	if err != nil {
 		return fmt.Errorf("updating swarm fields: %w", err)
 	}
