@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -68,14 +69,17 @@ templ ModelsPageWithOAuthConnectionsAndState(projects []models.Project, currentP
 	}
 }
 
-func oauthConnectionLinkedModelLabels(connectionID string, modelOptions []models.LLMConfig) string {
-	labels := make([]string, 0)
-	for _, option := range modelOptions {
-		if option.OAuthConnectionID == connectionID {
-			labels = append(labels, fmt.Sprintf("%s (%s)", option.Name, option.Model))
-		}
+func oauthConnectionStatusText(connection models.OAuthConnection) string {
+	if connection.NeedsReauth {
+		return "Reconnect required"
 	}
-	return strings.Join(labels, ", ")
+	if connection.AccessToken == "" {
+		return "Not connected"
+	}
+	if connection.ExpiresAt > 0 && connection.ExpiresAt <= time.Now().UnixMilli() {
+		return "Token expired"
+	}
+	return "Connected"
 }
 
 func hasDefault(agents []models.LLMConfig) bool {
@@ -363,29 +367,12 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 										if agent.OAuthConnectionName != "" {
 											<p class="text-sm opacity-60">Account: { agent.OAuthConnectionName }</p>
 										}
-										<div class="mt-2 flex items-center gap-2">										<span class={ "badge badge-sm", oauthStatusClass(agent) }>
-											{ oauthStatusText(agent) }
-										</span>
-									if !agent.HasValidOAuthToken() {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } data-oauth-external={ fmt.Sprintf("%t", desktopMode) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
-											Connect with OAuth
-										</a>
-										} else {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } data-oauth-external={ fmt.Sprintf("%t", desktopMode) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
-												Reconnect account
-											</a>
-										}
-										if agent.OAuthConnectionID != "" && agent.OAuthAccessToken != "" {
-											<button
-												class="btn btn-xs btn-ghost text-error"
-												hx-post={ fmt.Sprintf("/models/%s/oauth/disconnect", agent.ID) }
-												hx-target="#models-content"
-												hx-swap="outerHTML"
-												hx-confirm={ fmt.Sprintf("Disconnect this OAuth account? Linked models: %s. All will require reconnecting.", oauthConnectionLinkedModelLabels(agent.OAuthConnectionID, modelOptions)) }
-												onclick="event.stopPropagation()"
-											>Disconnect account</button>
-										}
-									</div>								}
+										<div class="mt-2 flex items-center gap-2">
+											<span class={ "badge badge-sm", oauthStatusClass(agent) }>
+												{ oauthStatusText(agent) }
+											</span>
+										</div>
+									}
 								if agent.MaxWorkers > 0 {
 									<div class="mt-2 flex items-center gap-2">
 										<span class="text-sm opacity-60">Workers:</span>
@@ -514,13 +501,20 @@ for _, agent := range modelOptions {
 					</div>
 					<div id="oauth_connection_field" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">OAuth Account</span></label>
-						<select name="oauth_connection_id" id="model_oauth_connection_id" class="select select-bordered">
+						<select name="oauth_connection_id" id="model_oauth_connection_id" class="select select-bordered" onchange="updateOAuthConnectionAction()">
 							<option value="new">Connect another account</option>
 							for _, connection := range oauthConnections {
-								<option value={ connection.ID } data-provider={ string(connection.Provider) }>{ connection.Name }</option>
+								<option value={ connection.ID } data-provider={ string(connection.Provider) } data-status={ oauthConnectionStatusText(connection) }>{ connection.Name }</option>
 							}
 						</select>
 						<label class="label"><span class="label-text-alt opacity-70">Models using the same account share refresh and reconnect state.</span></label>
+					</div>
+					<div id="model_oauth_connection_action" class="hidden mb-3 rounded-box border border-base-300 p-3">
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<span id="model_oauth_connection_status" class="text-sm"></span>
+							<a id="model_oauth_connect_action" href="#" data-oauth-path="" data-oauth-external={ fmt.Sprintf("%t", desktopMode) } class="btn btn-sm btn-outline" onclick="return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">Connect OAuth</a>
+						</div>
+						<p id="model_oauth_connection_save_hint" class="hidden text-sm opacity-70">Save this model before connecting the selected account.</p>
 					</div>
 					<!-- Connection method selector for OpenAI OAuth (CLI option removed) -->
 					<div id="openai_connection_method_field" class="form-control mb-3 hidden">
@@ -578,7 +572,7 @@ for _, agent := range modelOptions {
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 							<div>
 								<p class="font-semibold">OAuth via API</p>
-								<p class="text-sm">Uses the Anthropic API directly via OAuth. After saving, click "Connect with OAuth" on the model card to authorize.</p>
+								<p class="text-sm">Uses the Anthropic API directly via OAuth. After saving, edit the model to connect its selected OAuth account.</p>
 							</div>
 						</div>
 					</div>
@@ -587,7 +581,7 @@ for _, agent := range modelOptions {
 								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 								<div>
 									<p class="font-semibold">OAuth via API</p>
-									<p class="text-sm">Uses the OpenAI API directly via OAuth. After saving, click "Connect with OAuth" on the model card to authorize.</p>
+									<p class="text-sm">Uses the OpenAI API directly via OAuth. After saving, edit the model to connect its selected OAuth account.</p>
 								</div>
 							</div>
 						</div>
@@ -1833,8 +1827,10 @@ for _, agent := range modelOptions {
 						modelIsDefault: String(details.is_default === true),
 						modelApiKey: details.api_key || '',
 						modelAuthMethod: details.auth_method || 'api_key',
-						modelOauthConnectionId: details.oauth_connection_id || '',
-						modelMaxWorkers: String(details.max_workers || 0),
+							modelOauthConnectionId: details.oauth_connection_id || '',
+							modelOauthConnected: String(details.oauth_connected === true),
+							modelOauthNeedsReauth: String(details.oauth_needs_reauth === true),
+							modelMaxWorkers: String(details.max_workers || 0),
 						modelWorkerTimeout: String(details.worker_timeout || 0),
 						modelOauthClientId: details.oauth_client_id || '',
 						modelOauthClientSecret: details.oauth_client_secret || '',
@@ -1872,6 +1868,8 @@ for _, agent := range modelOptions {
 						var hasAPIKey = apiKey !== '';
 						var authMethod = button.dataset.modelAuthMethod || 'api_key';
 						var oauthConnectionId = button.dataset.modelOauthConnectionId || '';
+						var oauthConnected = button.dataset.modelOauthConnected === 'true';
+						var oauthNeedsReauth = button.dataset.modelOauthNeedsReauth === 'true';
 						var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
 					var workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;
 					var ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';
@@ -1932,7 +1930,11 @@ for _, agent := range modelOptions {
 					form.dataset.originalBaseUrl = baseUrl;
 					form.dataset.originalModelsUrl = modelsUrl;
 					form.dataset.originalOAuthConnectionId = oauthConnectionId || '';
-					document.getElementById('model_config_id').value = id;					document.getElementById('model_name').value = name;				document.getElementById('model_provider').value = uiProvider;
+					form.dataset.originalOAuthConnected = oauthConnected ? 'true' : 'false';
+					form.dataset.originalOAuthNeedsReauth = oauthNeedsReauth ? 'true' : 'false';
+					document.getElementById('model_config_id').value = id;
+					document.getElementById('model_name').value = name;
+					document.getElementById('model_provider').value = uiProvider;
 				document.getElementById('model_anthropic_auth_type').value = anthropicAuthType;
 				document.getElementById('model_openai_auth_type').value = openaiAuthType;
 				document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
@@ -2055,7 +2057,47 @@ for _, agent := range modelOptions {
 						setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);						updateTemperatureField(provider, activeModel);
 					}
 
-				function updateOAuthConnectionField() {
+				function updateOAuthConnectionAction() {
+					var form = document.getElementById('model_form');
+					var select = document.getElementById('model_oauth_connection_id');
+					var action = document.getElementById('model_oauth_connection_action');
+					var status = document.getElementById('model_oauth_connection_status');
+					var connect = document.getElementById('model_oauth_connect_action');
+					var saveHint = document.getElementById('model_oauth_connection_save_hint');
+					if (!form || !select || !action || !status || !connect || !saveHint) return;
+
+					var provider = canonicalProvider(document.getElementById('model_provider').value);
+					var builtInOAuth = (provider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
+						(provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth');
+					var customOAuth = provider === 'openai_compatible' && document.getElementById('model_custom_auth_method').value === 'oauth';
+					var editing = form.dataset.mode === 'edit';
+					var persistedConnectionID = form.dataset.originalOAuthConnectionId || '';
+					var hasSelectedAccount = builtInOAuth && select.value && select.value !== 'new';
+					var selectionChanged = hasSelectedAccount && select.value !== persistedConnectionID;
+					var available = editing && (hasSelectedAccount || customOAuth);
+					action.classList.toggle('hidden', !available);
+					if (!available) return;
+
+					var connected = form.dataset.originalOAuthConnected === 'true';
+					if (builtInOAuth) {
+						var selected = select.options[select.selectedIndex];
+						status.textContent = selected.dataset.status || '';
+						connected = selected.dataset.status === 'Connected';
+					} else if (form.dataset.originalOAuthNeedsReauth === 'true') {
+						status.textContent = 'Reconnect required';
+					} else {
+						status.textContent = connected ? 'Connected' : 'Not connected';
+					}
+					saveHint.classList.toggle('hidden', !selectionChanged);
+					connect.classList.toggle('hidden', selectionChanged);
+					if (selectionChanged) return;
+
+					var id = document.getElementById('model_config_id').value;
+					connect.dataset.oauthPath = '/models/' + encodeURIComponent(id) + '/oauth/initiate';
+					connect.textContent = connected ? 'Reconnect OAuth' : 'Connect OAuth';
+				}
+
+					function updateOAuthConnectionField() {
 					var provider = canonicalProvider(document.getElementById('model_provider').value);
 					var oauthSelected = (provider === 'anthropic' && document.getElementById('model_anthropic_auth_type').value === 'oauth') ||
 						(provider === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth');
@@ -2071,8 +2113,9 @@ for _, agent := range modelOptions {
 						option.hidden = !allowed;
 						if (allowed && option.value === select.value) selectedAllowed = true;
 					});
-					if (!selectedAllowed) select.value = 'new';
-				}
+						if (!selectedAllowed) select.value = 'new';
+						updateOAuthConnectionAction();
+					}
 
 				function isEditingModelForm() {
 					return document.getElementById('model_form').dataset.mode === 'edit';
@@ -2167,6 +2210,7 @@ for _, agent := range modelOptions {
 					if (apiKeyField && canonicalProvider(provider) === 'openai_compatible') {
 						apiKeyField.classList.toggle('hidden', showCustom && method === 'oauth');
 					}
+					updateOAuthConnectionAction();
 				}
 
 				function toggleSubscriptionMethodFields() {
@@ -2258,7 +2302,11 @@ for _, agent := range modelOptions {
 					form.dataset.originalApiKey = '';
 					form.dataset.originalBaseUrl = '';
 						form.dataset.originalModelsUrl = '';
-						form.dataset.originalOAuthConnectionId = '';					document.getElementById('model_config_id').value = '';
+					form.dataset.originalOAuthConnectionId = '';
+					form.dataset.originalOAuthConnected = 'false';
+					form.dataset.originalOAuthNeedsReauth = 'false';
+					document.getElementById('model_config_id').value = '';
+					document.getElementById('model_oauth_connection_id').value = 'new';
 					document.getElementById('model_name').value = '';				document.getElementById('model_provider').value = 'anthropic';
 				document.getElementById('model_anthropic_auth_type').value = 'api_key';
 				document.getElementById('model_openai_auth_type').value = 'api_key';
