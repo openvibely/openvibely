@@ -14,15 +14,27 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
-// DefaultCompactionThreshold is the default input token count that triggers compaction.
-const DefaultCompactionThreshold = 150000
+const (
+	defaultAnthropicContextWindow = 200000
+	compactionOutputReserveCap    = 20000
+	compactionSummaryBuffer       = 13000
+	compactionBlockingBuffer      = 3000
+)
+
+// DefaultCompactionThreshold mirrors Claude Code's trigger for a normal
+// 200,000-token context window.
+const DefaultCompactionThreshold = defaultAnthropicContextWindow - compactionOutputReserveCap - compactionSummaryBuffer
+
+// MinCompactionThreshold is the minimum trigger accepted by Anthropic's
+// server-side compaction API.
+const MinCompactionThreshold = 50000
 
 const (
 	// Prefer the direct-call web tool versions for URL retrieval flows.
@@ -64,7 +76,8 @@ type AgenticOptions struct {
 	// round-tripped in subsequent requests to maintain compressed context.
 	AutoCompaction bool
 	// CompactionTokenThreshold is the input token count that triggers compaction.
-	// Defaults to DefaultCompactionThreshold (150,000) if zero.
+	// Defaults to a Claude Code-compatible value derived from ContextWindow
+	// (167,000 for the normal 200,000-token window) when zero.
 	CompactionTokenThreshold int
 	// CompactionInstructions provides additional instructions for the summarization.
 	// For example: "Focus on code changes and decisions".
@@ -227,8 +240,36 @@ type inputTokensTrigger struct {
 // compactionBlockJSON is used for marshaling compaction blocks with proper null handling.
 // When Content is nil, it marshals as "content": null (failed compaction).
 type compactionBlockJSON struct {
-	Type    string  `json:"type"`
-	Content *string `json:"content"`
+	Type             string  `json:"type"`
+	Content          *string `json:"content"`
+	EncryptedContent *string `json:"encrypted_content,omitempty"`
+}
+
+// CompactionTriggerLimit returns the Claude Code-compatible automatic
+// compaction trigger for an Anthropic context window.
+func CompactionTriggerLimit(contextWindow int) int {
+	if contextWindow <= 0 {
+		contextWindow = defaultAnthropicContextWindow
+	}
+	return max(MinCompactionThreshold, contextWindow-compactionOutputReserveCap-compactionSummaryBuffer)
+}
+
+// CompactionOutputReserve returns the output headroom Claude Code uses when
+// calculating compaction limits. Large model output limits are capped at 20k.
+func CompactionOutputReserve(maxOutputTokens int) int {
+	if maxOutputTokens <= 0 {
+		return compactionOutputReserveCap
+	}
+	return min(maxOutputTokens, compactionOutputReserveCap)
+}
+
+// CompactionBlockingLimit returns the latest input size accepted while native
+// compaction is still able to run.
+func CompactionBlockingLimit(contextWindow int) int {
+	if contextWindow <= 0 {
+		contextWindow = defaultAnthropicContextWindow
+	}
+	return max(1, contextWindow-compactionOutputReserveCap-compactionBlockingBuffer)
 }
 
 const nativeCompactionStateVersion = 1
@@ -241,10 +282,25 @@ type nativeCompactionState struct {
 func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
 	var state nativeCompactionState
 	if err := json.Unmarshal([]byte(raw), &state); err == nil && state.Version == nativeCompactionStateVersion {
-		if !hasLeadingCompactionMessage(state.Messages) {
-			return nil, fmt.Errorf("invalid compaction message envelope")
+		if hasLeadingCompactionMessage(state.Messages) {
+			return state.Messages, nil
 		}
-		return state.Messages, nil
+		// Normalize checkpoints written before compaction blocks were retained
+		// under their provider-returned assistant role.
+		if hasLeadingCompactionMessageWithRole(state.Messages, "user") {
+			state.Messages[0].Role = "assistant"
+			if len(state.Messages) > 1 && state.Messages[1].Role == "assistant" {
+				first, firstErr := contentBlocksJSON(state.Messages[0].Content)
+				second, secondErr := contentBlocksJSON(state.Messages[1].Content)
+				if firstErr != nil || secondErr != nil {
+					return nil, fmt.Errorf("invalid legacy compaction message envelope")
+				}
+				state.Messages[0].Content = append(first, second...)
+				state.Messages = append(state.Messages[:1], state.Messages[2:]...)
+			}
+			return state.Messages, nil
+		}
+		return nil, fmt.Errorf("invalid compaction message envelope")
 	}
 
 	// Accept checkpoints produced before the state envelope retained the
@@ -256,22 +312,38 @@ func decodeNativeCompactionState(raw string) ([]agenticMessage, error) {
 	if block.Type != "compaction" || block.Content == nil {
 		return nil, fmt.Errorf("invalid compaction block")
 	}
-	return []agenticMessage{{Role: "user", Content: []compactionBlockJSON{block}}}, nil
+	return []agenticMessage{{Role: "assistant", Content: []compactionBlockJSON{block}}}, nil
 }
 
 func hasLeadingCompactionMessage(messages []agenticMessage) bool {
-	if len(messages) == 0 || messages[0].Role != "user" {
+	return hasLeadingCompactionMessageWithRole(messages, "assistant")
+}
+
+func hasLeadingCompactionMessageWithRole(messages []agenticMessage, role string) bool {
+	if len(messages) == 0 || messages[0].Role != role {
 		return false
 	}
-	raw, err := json.Marshal(messages[0].Content)
+	blocks, err := contentBlocksJSON(messages[0].Content)
+	if err != nil || len(blocks) == 0 {
+		return false
+	}
+	var block compactionBlockJSON
+	if err := json.Unmarshal(blocks[0], &block); err != nil {
+		return false
+	}
+	return block.Type == "compaction" && block.Content != nil
+}
+
+func contentBlocksJSON(content any) ([]json.RawMessage, error) {
+	raw, err := json.Marshal(content)
 	if err != nil {
-		return false
+		return nil, err
 	}
-	var blocks []compactionBlockJSON
-	if err := json.Unmarshal(raw, &blocks); err != nil || len(blocks) != 1 {
-		return false
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(raw, &blocks); err != nil {
+		return nil, err
 	}
-	return blocks[0].Type == "compaction" && blocks[0].Content != nil
+	return blocks, nil
 }
 
 // agenticRequest is the API request body for agentic sends.
@@ -410,28 +482,24 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return nil, categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
-		result.InputTokens += resp.inputTokens
+		result.InputTokens += resp.billedInputTokens
 		result.LastContextTokens = 0
 		if input := resp.inputTokens + resp.cacheCreationInputTokens + resp.cacheReadInputTokens; input > 0 {
 			result.LastContextTokens = input + resp.outputTokens
 		}
-		result.OutputTokens += resp.outputTokens
-		result.CacheCreationInputTokens += resp.cacheCreationInputTokens
-		result.CacheReadInputTokens += resp.cacheReadInputTokens
+		result.OutputTokens += resp.billedOutputTokens
+		result.CacheCreationInputTokens += resp.billedCacheCreationInputTokens
+		result.CacheReadInputTokens += resp.billedCacheReadInputTokens
 		result.StopReason = resp.stopReason
 		if resp.model != "" {
 			result.Model = resp.model
 		}
 
 		// Handle compaction: if the API compacted context, replace old messages
-		// with the compaction block for subsequent turns.
+		// with the assistant response beginning at the compaction block. Anthropic
+		// ignores everything before that block on subsequent requests.
 		if resp.compaction != nil {
 			result.Compacted = true
-			// Build the compaction block for round-tripping
-			var compactBlock compactionBlockJSON
-			compactBlock.Type = "compaction"
-			compactBlock.Content = resp.compaction.content
-
 			if resp.compaction.content != nil {
 				hasDurableCompactionState = true
 				applog.Infof("[anthropicclient] context compacted on turn %d, summary_len=%d", turn+1, len(*resp.compaction.content))
@@ -442,14 +510,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				hasDurableCompactionState = false
 				applog.Infof("[anthropicclient] compaction failed on turn %d (null content), round-tripping as no-op", turn+1)
 			}
-
-			// Replace all prior messages with the compaction block.
-			// The compaction summary covers all messages accumulated so far.
-			compactionMsg := agenticMessage{
-				Role:    "user",
-				Content: []compactionBlockJSON{compactBlock},
-			}
-			messages = []agenticMessage{compactionMsg}
 		}
 
 		// Ensure contentBlocks is never nil (nil slice marshals as JSON null,
@@ -458,11 +518,21 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			resp.contentBlocks = []agenticBlock{}
 		}
 
-		// Add assistant response to messages
-		messages = append(messages, agenticMessage{
-			Role:    "assistant",
-			Content: resp.contentBlocks,
-		})
+		// A compaction block is part of the assistant response and must remain
+		// before any continuation blocks returned in that same response.
+		if resp.compaction != nil {
+			blocks := make([]any, 0, len(resp.contentBlocks)+1)
+			blocks = append(blocks, compactionBlockJSON{Type: "compaction", Content: resp.compaction.content, EncryptedContent: resp.compaction.encryptedContent})
+			for _, block := range resp.contentBlocks {
+				blocks = append(blocks, block)
+			}
+			messages = []agenticMessage{{Role: "assistant", Content: blocks}}
+		} else {
+			messages = append(messages, agenticMessage{
+				Role:    "assistant",
+				Content: resp.contentBlocks,
+			})
+		}
 
 		// Collect text blocks for this turn.
 		turnText := ""
@@ -646,19 +716,12 @@ func truncateAnthropicToolOutputForModelInput(output string, tokenLimit int) str
 	if tokenLimit <= 0 {
 		tokenLimit = anthropicToolOutputTokenLimit
 	}
-	runes := []rune(output)
-	if len(runes) <= tokenLimit {
+	byteLimit := tokenestimate.ByteBudget(tokenLimit)
+	if len(output) <= byteLimit {
 		return output
 	}
 	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	markerRunes := []rune(marker)
-	if len(markerRunes) >= tokenLimit {
-		return string(runes[:tokenLimit])
-	}
-	available := tokenLimit - len(markerRunes)
-	head := available / 2
-	tail := available - head
-	return string(runes[:head]) + marker + string(runes[len(runes)-tail:])
+	return tokenestimate.TruncateMiddle(output, byteLimit, marker)
 }
 
 func anthropicStringContentRaw(s string) json.RawMessage {
@@ -952,13 +1015,21 @@ func allAnthropicToolsReadOnly(blocks []agenticBlock) bool {
 
 // turnResult holds the parsed result of a single API turn.
 type turnResult struct {
-	contentBlocks            []agenticBlock
-	stopReason               string
-	model                    string
+	contentBlocks []agenticBlock
+	stopReason    string
+	model         string
+	// Top-level usage describes the final message iteration and therefore the
+	// live context after server-side compaction.
 	inputTokens              int
 	outputTokens             int
 	cacheCreationInputTokens int
 	cacheReadInputTokens     int
+	// Billed usage includes compaction sampling passes, which Anthropic excludes
+	// from the top-level usage fields.
+	billedInputTokens              int
+	billedOutputTokens             int
+	billedCacheCreationInputTokens int
+	billedCacheReadInputTokens     int
 	// compaction holds the compaction summary if the API compacted context.
 	// nil = no compaction, non-nil with nil *string = failed compaction.
 	compaction *compactionResult
@@ -967,11 +1038,79 @@ type turnResult struct {
 // compactionResult holds the result of a server-side compaction.
 type compactionResult struct {
 	// content is the compaction summary. nil means compaction failed.
-	content *string
+	content          *string
+	encryptedContent *string
 }
 
-// ContextManagementBetaHeader is the beta feature flag for context management.
-const ContextManagementBetaHeader = "context-management-2025-06-27"
+type streamUsage struct {
+	InputTokens              *int                `json:"input_tokens"`
+	OutputTokens             *int                `json:"output_tokens"`
+	CacheCreationInputTokens *int                `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int                `json:"cache_read_input_tokens"`
+	CacheCreation            *usageCacheCreation `json:"cache_creation,omitempty"`
+	CacheRead                *usageCacheRead     `json:"cache_read,omitempty"`
+	Iterations               []UsageIteration    `json:"iterations,omitempty"`
+}
+
+func applyStreamUsage(result *turnResult, raw json.RawMessage, iterationUsage *[]UsageIteration) {
+	if len(raw) == 0 {
+		return
+	}
+	var usage streamUsage
+	if json.Unmarshal(raw, &usage) != nil {
+		return
+	}
+	if usage.InputTokens != nil {
+		result.inputTokens = *usage.InputTokens
+	}
+	if usage.OutputTokens != nil {
+		result.outputTokens = *usage.OutputTokens
+	}
+	if usage.CacheCreationInputTokens != nil || usage.CacheCreation != nil {
+		result.cacheCreationInputTokens = 0
+		if usage.CacheCreationInputTokens != nil {
+			result.cacheCreationInputTokens += *usage.CacheCreationInputTokens
+		}
+		if usage.CacheCreation != nil {
+			result.cacheCreationInputTokens += usage.CacheCreation.InputTokens
+		}
+	}
+	if usage.CacheReadInputTokens != nil || usage.CacheRead != nil {
+		result.cacheReadInputTokens = 0
+		if usage.CacheReadInputTokens != nil {
+			result.cacheReadInputTokens += *usage.CacheReadInputTokens
+		}
+		if usage.CacheRead != nil {
+			result.cacheReadInputTokens += usage.CacheRead.InputTokens
+		}
+	}
+	if usage.Iterations != nil {
+		*iterationUsage = usage.Iterations
+	}
+}
+
+func finalizeTurnUsage(result *turnResult, iterations []UsageIteration) {
+	if len(iterations) == 0 {
+		result.billedInputTokens = result.inputTokens
+		result.billedOutputTokens = result.outputTokens
+		result.billedCacheCreationInputTokens = result.cacheCreationInputTokens
+		result.billedCacheReadInputTokens = result.cacheReadInputTokens
+		return
+	}
+	for _, usage := range iterations {
+		result.billedInputTokens += usage.InputTokens
+		result.billedOutputTokens += usage.OutputTokens
+		result.billedCacheCreationInputTokens += usage.CacheCreationInputTokens + usage.CacheCreation.InputTokens
+		result.billedCacheReadInputTokens += usage.CacheReadInputTokens + usage.CacheRead.InputTokens
+	}
+}
+
+// CompactionBetaHeader is the beta feature flag for server-side compaction.
+const CompactionBetaHeader = "compact-2026-01-12"
+
+// ContextManagementBetaHeader is retained for source compatibility.
+// Deprecated: use CompactionBetaHeader.
+const ContextManagementBetaHeader = CompactionBetaHeader
 
 func requiresAdaptiveThinking(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
@@ -1044,13 +1183,16 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	}
 	window := opts.ContextWindow
 	if window <= 0 {
-		window = 200000
+		window = defaultAnthropicContextWindow
 	}
 	reserved := opts.MaxTokens
 	if reserved <= 0 {
 		reserved = 8192
 	}
 	safe := window - reserved - max(1024, window/50)
+	if opts.AutoCompaction {
+		safe = CompactionBlockingLimit(window)
+	}
 	encoded, err := json.Marshal(struct {
 		Messages []agenticMessage `json:"messages"`
 		Tools    []ToolDefinition `json:"tools,omitempty"`
@@ -1059,7 +1201,7 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	if err != nil {
 		return err
 	}
-	tokens := utf8.RuneCount(encoded)
+	tokens := tokenestimate.FromByteCount(len(encoded))
 	if tokens <= safe {
 		return nil
 	}
@@ -1190,33 +1332,24 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		}
 	}
 
-	// Add context management config to reduce context size.
-	// clear_tool_uses: strip tool results from older messages when token threshold exceeded.
-	// clear_thinking: strip thinking blocks from older messages (only when thinking is enabled).
+	// Ask Anthropic to summarize older context when the input reaches the trigger.
 	if opts.AutoCompaction {
 		threshold := opts.CompactionTokenThreshold
 		if threshold == 0 {
-			threshold = DefaultCompactionThreshold
+			threshold = CompactionTriggerLimit(opts.ContextWindow)
 		}
-		var edits []contextManagementEdit
-		// clear_thinking requires thinking to be enabled; only include it when
-		// the request actually has a thinking config. Without this guard the API
-		// returns 400 "clear_thinking strategy requires thinking to be enabled".
-		if req.Thinking != nil {
-			edits = append(edits, contextManagementEdit{
-				// clear_thinking must be first when provided (API requirement)
-				Type: "clear_thinking_20251015",
-			})
+		if threshold < MinCompactionThreshold {
+			threshold = MinCompactionThreshold
 		}
-		edits = append(edits, contextManagementEdit{
-			Type: "clear_tool_uses_20250919",
-			Trigger: &inputTokensTrigger{
-				Type:  "input_tokens",
-				Value: threshold,
-			},
-		})
 		req.ContextManagement = &contextManagementConfig{
-			Edits: edits,
+			Edits: []contextManagementEdit{{
+				Type: "compact_20260112",
+				Trigger: &inputTokensTrigger{
+					Type:  "input_tokens",
+					Value: threshold,
+				},
+				Instructions: opts.CompactionInstructions,
+			}},
 		}
 	}
 
@@ -1236,7 +1369,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		betaHeaders = append(betaHeaders, "claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05")
 	}
 	if opts.AutoCompaction {
-		betaHeaders = append(betaHeaders, ContextManagementBetaHeader)
+		betaHeaders = append(betaHeaders, CompactionBetaHeader)
 	}
 
 	// OAuth uses ?beta=true query parameter (required by the beta Messages endpoint).
@@ -1325,6 +1458,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	}
 	seenProviderToolUses := make(map[string]struct{})
 	providerToolNamesByID := make(map[string]string)
+	var iterationUsage []UsageIteration
 
 	// Track content blocks being built
 	type blockState struct {
@@ -1340,6 +1474,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 		inToolCallTag bool            // true when inside <tool_call>...</tool_call> in text
 		tagBuf        strings.Builder // buffer for detecting partial <tool_call> tags
 		compaction    strings.Builder // for compaction blocks
+		encrypted     *string         // opaque compaction state to round-trip
 	}
 	blocks := make(map[int]*blockState)
 	seenMeaningfulEvent := false
@@ -1398,14 +1533,12 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			seenMeaningfulEvent = true
 			if event.Message != nil {
 				var msg struct {
-					Model string `json:"model"`
-					Usage Usage  `json:"usage"`
+					Model string          `json:"model"`
+					Usage json.RawMessage `json:"usage"`
 				}
 				if err := json.Unmarshal(event.Message, &msg); err == nil {
 					result.model = msg.Model
-					result.inputTokens = msg.Usage.InputTokens
-					result.cacheCreationInputTokens = msg.Usage.CacheCreationInputTokens + msg.Usage.CacheCreation.InputTokens
-					result.cacheReadInputTokens = msg.Usage.CacheReadInputTokens + msg.Usage.CacheRead.InputTokens
+					applyStreamUsage(result, msg.Usage, &iterationUsage)
 				}
 			}
 
@@ -1419,6 +1552,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 					Name      string          `json:"name,omitempty"`
 					Input     json.RawMessage `json:"input,omitempty"`
 					Content   json.RawMessage `json:"content,omitempty"`
+					Encrypted *string         `json:"encrypted_content,omitempty"`
 				}
 				if err := json.Unmarshal(event.ContentBlock, &cb); err == nil {
 					blockID := cb.ID
@@ -1430,6 +1564,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 						id:         blockID,
 						name:       cb.Name,
 						startInput: cb.Input,
+						encrypted:  cb.Encrypted,
 					}
 					// Compaction and provider tool result blocks may include content
 					// in the start event.
@@ -1458,12 +1593,13 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			}
 
 			var delta struct {
-				Type        string `json:"type"`
-				Text        string `json:"text,omitempty"`
-				Thinking    string `json:"thinking,omitempty"`
-				Signature   string `json:"signature,omitempty"`
-				PartialJSON string `json:"partial_json,omitempty"`
-				Content     string `json:"content,omitempty"` // for compaction_delta
+				Type        string  `json:"type"`
+				Text        string  `json:"text,omitempty"`
+				Thinking    string  `json:"thinking,omitempty"`
+				Signature   string  `json:"signature,omitempty"`
+				PartialJSON string  `json:"partial_json,omitempty"`
+				Content     string  `json:"content,omitempty"` // for compaction_delta
+				Encrypted   *string `json:"encrypted_content,omitempty"`
 			}
 			if err := json.Unmarshal(event.Delta, &delta); err != nil {
 				continue
@@ -1518,6 +1654,9 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 				bs.inputJSON.WriteString(delta.PartialJSON)
 			case "compaction_delta":
 				bs.compaction.WriteString(delta.Content)
+				if delta.Encrypted != nil {
+					bs.encrypted = delta.Encrypted
+				}
 			}
 
 		case "content_block_stop":
@@ -1628,10 +1767,10 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			case "compaction":
 				summary := bs.compaction.String()
 				if summary != "" {
-					result.compaction = &compactionResult{content: &summary}
+					result.compaction = &compactionResult{content: &summary, encryptedContent: bs.encrypted}
 				} else {
 					// Failed compaction — content is null
-					result.compaction = &compactionResult{content: nil}
+					result.compaction = &compactionResult{content: nil, encryptedContent: bs.encrypted}
 				}
 				// Compaction blocks are NOT added to contentBlocks — they are
 				// tracked separately and round-tripped as user message content.
@@ -1679,12 +1818,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 				}
 			}
 			if event.Usage != nil {
-				var usage struct {
-					OutputTokens int `json:"output_tokens"`
-				}
-				if err := json.Unmarshal(event.Usage, &usage); err == nil {
-					result.outputTokens = usage.OutputTokens
-				}
+				applyStreamUsage(result, event.Usage, &iterationUsage)
 			}
 		}
 	}
@@ -1698,6 +1832,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	if !terminal {
 		return result, io.ErrUnexpectedEOF
 	}
+	finalizeTurnUsage(result, iterationUsage)
 	return result, nil
 }
 

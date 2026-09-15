@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -98,6 +100,138 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	var httpErr *echo.HTTPError
 	require.ErrorAs(t, badErr, &httpErr)
 	require.Equal(t, http.StatusBadRequest, httpErr.Code)
+}
+
+func TestHandler_GetTaskReferenceCatalog(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Task Reference Catalog Project").Build()
+	foreign := tc.CreateProject().WithName("Foreign Task Reference Catalog Project").Build()
+	empty := tc.CreateProject().WithName("Empty Task Reference Catalog Project").Build()
+	model := tc.CreateLLMConfig().WithName("Catalog Model").Build()
+
+	catalogTask := &models.Task{
+		ProjectID: project.ID, Title: "Catalog metadata", Category: models.CategoryActive, Status: models.StatusPending,
+		Priority: 4, Tag: models.TagBug, Prompt: strings.Repeat("p", 400), ChainConfig: `{"enabled":true}`,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, catalogTask))
+	require.NoError(t, repository.NewTaskGoalRepo(tc.db).CreateOrReplace(ctx, &models.TaskGoal{
+		TaskID: catalogTask.ID, GoalID: "catalog-goal", Objective: "finish catalog", Status: models.TaskGoalStatusActive,
+	}))
+	for i := 0; i < 25; i++ {
+		tc.CreateTask(project.ID).WithTitle(fmt.Sprintf("Catalog task %02d", i)).Build()
+	}
+	tc.CreateTask(foreign.ID).WithTitle("Foreign task").Build()
+	tc.CreateTask(project.ID).WithTitle("Scheduled task").WithCategory(models.CategoryScheduled).Build()
+	tc.CreateTask(project.ID).WithTitle("Scheduled running task").WithCategory(models.CategoryScheduled).WithStatus(models.StatusRunning).Build()
+	tc.CreateTask(project.ID).WithTitle("Chat task").WithCategory(models.CategoryChat).Build()
+
+	parentID := "catalog-swarm-parent"
+	parent := &models.Task{
+		ID: parentID, ProjectID: project.ID, Title: "Catalog swarm parent", Prompt: "parent",
+		Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleParent,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, parent))
+	childParentID := parent.ID
+	require.NoError(t, tc.taskRepo.Create(ctx, &models.Task{
+		ID: "catalog-swarm-child", ProjectID: project.ID, Title: "Catalog swarm child", Prompt: "child",
+		Category: models.CategoryActive, Status: models.StatusPending, SwarmRole: models.SwarmRoleWorker,
+		ParentTaskID: &childParentID,
+	}))
+
+	rec := tc.HTTP().Get("/api/tasks/reference-catalog?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response TaskReferenceCatalogResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+	require.NotNil(t, response.Tasks)
+	require.Len(t, response.Tasks, 28)
+
+	byID := make(map[string]TaskReference, len(response.Tasks))
+	for _, task := range response.Tasks {
+		byID[task.ID] = task
+		require.Equal(t, project.ID, task.ProjectID)
+	}
+	metadata := byID[catalogTask.ID]
+	require.Equal(t, strings.Repeat("p", 300), metadata.Prompt)
+	require.Equal(t, []string{"Chain", "Goal", model.Name, "Bug", "Urgent"}, metadata.Badges)
+	require.Contains(t, byID, parent.ID)
+	foundScheduledRunning := false
+	for _, task := range response.Tasks {
+		if task.Title == "Scheduled running task" {
+			foundScheduledRunning = true
+			break
+		}
+	}
+	require.True(t, foundScheduledRunning)
+	require.NotContains(t, byID, "catalog-swarm-child")
+	for _, excluded := range []string{"Foreign task", "Scheduled task", "Chat task"} {
+		for _, task := range response.Tasks {
+			require.NotEqual(t, excluded, task.Title)
+		}
+	}
+
+	emptyRec := tc.HTTP().Get("/api/tasks/reference-catalog?project_id=" + empty.ID).Execute()
+	require.Equal(t, http.StatusOK, emptyRec.Code)
+	var emptyResponse TaskReferenceCatalogResponse
+	require.NoError(t, json.NewDecoder(emptyRec.Body).Decode(&emptyResponse))
+	require.NotNil(t, emptyResponse.Tasks)
+	require.Empty(t, emptyResponse.Tasks)
+
+	missingRec := tc.HTTP().Get("/api/tasks/reference-catalog").Execute()
+	require.Equal(t, http.StatusBadRequest, missingRec.Code)
+}
+
+func TestHandler_GetTaskReferenceCatalogPreservesBoardStateOrderAndAgentScope(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Task Reference State Project").Build()
+	foreign := tc.CreateProject().WithName("Foreign Task Reference State Project").Build()
+
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.SetAgentRepo(agentRepo)
+	foreignAgent := &models.Agent{
+		Name: "Foreign Task Agent", Scope: models.AgentScopeProject, ProjectID: foreign.ID,
+		Model: "inherit", Enabled: true, SelectableAsPrimary: true, Tools: []string{},
+	}
+	require.NoError(t, agentRepo.Create(ctx, foreignAgent))
+
+	backlog := tc.CreateTask(project.ID).WithTitle("Backlog reference").WithCategory(models.CategoryBacklog).Build()
+	active := &models.Task{
+		ProjectID: project.ID, Title: "Active reference", Prompt: "active", Category: models.CategoryActive,
+		Status: models.StatusPending, AgentDefinitionID: &foreignAgent.ID,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, active))
+	blockedParent := &models.Task{
+		ProjectID: project.ID, Title: "Blocked swarm parent", Prompt: "blocked", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent,
+	}
+	require.NoError(t, tc.taskRepo.Create(ctx, blockedParent))
+	failed := tc.CreateTask(project.ID).WithTitle("Failed active reference").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
+
+	rec := tc.HTTP().Get("/api/tasks/reference-catalog?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	var response TaskReferenceCatalogResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
+	require.Len(t, response.Tasks, 4)
+	ids := make([]string, 0, len(response.Tasks))
+	for _, task := range response.Tasks {
+		ids = append(ids, task.ID)
+	}
+	require.Equal(t, []string{backlog.ID, failed.ID, blockedParent.ID, active.ID}, ids)
+
+	var activeReference TaskReference
+	for _, task := range response.Tasks {
+		if task.ID == active.ID {
+			activeReference = task
+			break
+		}
+	}
+	for _, badge := range activeReference.Badges {
+		require.NotEqual(t, foreignAgent.Name, badge)
+	}
+	storedFailed, err := tc.taskRepo.GetByID(ctx, failed.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, storedFailed.Category)
 }
 
 func TestHandler_CancelTask(t *testing.T) {
@@ -341,7 +475,7 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 		t.Fatalf("active composer action status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`+runningExec.ID+`" data-composer-stop-endpoint="/tasks/`+task.ID+`/cancel?composer_stop=1" hx-swap-oob="outerHTML"`) {
+	if !strings.Contains(body, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`+runningExec.ID+`" data-composer-stop-endpoint="/tasks/`+task.ID+`/cancel?composer_stop=1&amp;expected_turn_id=`+runningExec.ID+`" hx-swap-oob="outerHTML"`) {
 		t.Fatalf("expected active OOB primary action fragment, got %s", body)
 	}
 	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/tasks/`+task.ID+`/cancel?composer_stop=1`) {
@@ -369,6 +503,133 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 	if !strings.Contains(body, `title="Send message"`) || strings.Contains(body, `title="Stop response"`) {
 		t.Fatalf("expected terminal task-thread action to render send button, got %s", body)
 	}
+}
+
+func TestHandler_TaskThreadStopRejectsDelayedPreviousTurn(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).
+		WithStatus(models.StatusRunning).
+		WithCategory(models.CategoryActive).
+		Build()
+	old := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).Build()
+	rec := tc.HTMX().Get("/tasks/" + task.ID + "/thread/composer-action").Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "/tasks/"+task.ID+"/cancel?composer_stop=1&amp;expected_turn_id="+old.ID)
+
+	require.NoError(t, tc.handler.execRepo.Complete(ctx, old.ID, models.ExecCompleted, "done", "", 0, 1))
+	require.NoError(t, tc.handler.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	next := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, IsFollowup: true, PromptSent: "next"}
+	started, err := tc.handler.execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "next"})
+	require.NoError(t, err)
+	require.True(t, started)
+
+	stale := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?composer_stop=1&expected_turn_id=" + old.ID).Execute()
+	require.Equal(t, http.StatusConflict, stale.Code)
+	current, err := tc.handler.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusQueued, current.Status)
+	stored, err := tc.handler.execRepo.GetByID(ctx, next.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, stored.Status)
+	require.False(t, tc.handler.workerSvc.IsCancellationRequested(task.ID))
+
+	fresh := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?composer_stop=1&expected_turn_id=" + next.ID).Execute()
+	require.Equal(t, http.StatusOK, fresh.Code, fresh.Body.String())
+	stored, err = tc.handler.execRepo.GetByID(ctx, next.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, stored.Status)
+}
+
+func TestHandler_QueuedTaskThreadStopKeepsTurnOwnershipAfterRefresh(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Queued turn", Category: models.CategoryActive, Status: models.StatusQueued}
+	require.NoError(t, tc.taskRepo.Create(ctx, task))
+	old := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecQueued, IsFollowup: true, PromptSent: "old"}
+	require.NoError(t, tc.execRepo.Create(ctx, old))
+
+	button := tc.HTMX().Get("/tasks/" + task.ID + "/thread/composer-action").Execute()
+	require.Equal(t, http.StatusOK, button.Code)
+	require.Contains(t, button.Body.String(), "/tasks/"+task.ID+"/cancel?composer_stop=1&amp;expected_turn_id="+old.ID)
+	thread := tc.HTMX().Get("/tasks/" + task.ID + "/thread").Execute()
+	require.Equal(t, http.StatusOK, thread.Code)
+	require.Contains(t, thread.Body.String(), "/tasks/"+task.ID+"/cancel?composer_stop=1&amp;expected_turn_id="+old.ID)
+
+	require.NoError(t, tc.execRepo.Complete(ctx, old.ID, models.ExecCompleted, "done", "", 0, 1))
+	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	next := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, IsFollowup: true, PromptSent: "next"}
+	started, err := tc.execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "next"})
+	require.NoError(t, err)
+	require.True(t, started)
+	stale := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?composer_stop=1&expected_turn_id=" + old.ID).Execute()
+	require.Equal(t, http.StatusConflict, stale.Code)
+	stored, err := tc.execRepo.GetByID(ctx, next.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, stored.Status)
+}
+
+func TestHandler_SwarmParentStopRejectsDelayedPreviousGeneration(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Delayed Swarm Stop Project")
+	parent := &models.Task{ProjectID: project.ID, Title: "Parent", Prompt: "parent", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	require.NoError(t, h.taskRepo.Create(ctx, parent))
+	parentID := parent.ID
+	planner := &models.Task{ProjectID: project.ID, Title: "Planner", Prompt: "old", Category: models.CategoryActive, Status: models.StatusCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRolePlanner, SwarmConfig: `{"rerun_generation":1}`}
+	require.NoError(t, h.taskRepo.Create(ctx, planner))
+	button := htmxGet(e, "/tasks/"+parent.ID+"/thread/composer-action")
+	require.Equal(t, http.StatusOK, button.Code)
+	require.Contains(t, button.Body.String(), "/tasks/"+parent.ID+"/cancel?composer_stop=1&amp;expected_generation=1")
+
+	require.NoError(t, h.swarmSvc.HandleParentFollowup(ctx, parent.ID, "new"))
+	stale := htmxPost(e, "/tasks/"+parent.ID+"/cancel?composer_stop=1&expected_generation=1", nil)
+	require.Equal(t, http.StatusConflict, stale.Code)
+	currentParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	cfg, err := models.ParseSwarmConfig(currentParent.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 2, cfg.Generation)
+	require.Equal(t, models.StatusRunning, currentParent.Status)
+	currentPlanner, err := h.taskRepo.GetByID(ctx, planner.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, currentPlanner.Status)
+}
+
+func TestHandler_SwarmParentStopRejectsDelayedReviewerFollowup(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Delayed Reviewer Stop Project")
+	parent := &models.Task{ProjectID: project.ID, Title: "Parent", Prompt: "parent", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	require.NoError(t, h.taskRepo.Create(ctx, parent))
+	parentID := parent.ID
+	reviewer := &models.Task{ProjectID: project.ID, Title: "Reviewer", Prompt: "review", Category: models.CategoryCompleted, Status: models.StatusCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRoleReviewer, SwarmConfig: `{"rerun_generation":1}`}
+	require.NoError(t, h.taskRepo.Create(ctx, reviewer))
+	button := htmxGet(e, "/tasks/"+parent.ID+"/thread/composer-action")
+	require.Equal(t, http.StatusOK, button.Code)
+	require.Contains(t, button.Body.String(), "expected_generation=1&amp;expected_stop_revision=0")
+
+	next := &models.Execution{TaskID: reviewer.ID, IsFollowup: true, PromptSent: "new review"}
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, next, &models.ThreadInput{Content: "new review"})
+	require.NoError(t, err)
+	require.True(t, started)
+	require.NoError(t, h.swarmSvc.HandleChildFollowup(ctx, reviewer.ID, "new review"))
+	stale := htmxPost(e, "/tasks/"+parent.ID+"/cancel?composer_stop=1&expected_generation=1&expected_stop_revision=0", nil)
+	require.Equal(t, http.StatusConflict, stale.Code)
+	currentParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	cfg, err := models.ParseSwarmConfig(currentParent.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 1, cfg.Generation)
+	require.Greater(t, cfg.StopRevision, 0)
+	require.Equal(t, models.StatusRunning, currentParent.Status)
+	currentReviewer, err := h.taskRepo.GetByID(ctx, reviewer.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusQueued, currentReviewer.Status)
 }
 
 func TestHandler_CancelTask_AllowsActivePendingTask(t *testing.T) {
@@ -874,7 +1135,7 @@ func TestHandler_TaskThread_RendersStopButtonWhileActiveAndSendWhenTerminal(t *t
 
 	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
+	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1&amp;expected_turn_id=`+exec.ID+`"`)
 	assertContains(t, rec, `title="Stop response"`)
 	assertContains(t, rec, `<rect x="6" y="6" width="12" height="12" rx="2"></rect>`)
 	assertNotContains(t, rec, `title="Cancel running task"`)

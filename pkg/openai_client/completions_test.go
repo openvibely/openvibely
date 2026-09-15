@@ -10,13 +10,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
-func TestCompletionsContinuationPreflightConservativelyCountsToolArguments(t *testing.T) {
+func TestCompletionsContinuationPreflightUsesByteEstimate(t *testing.T) {
 	messages := []completionsMessage{{Role: "assistant", Content: strings.Repeat("{}", 4000)}}
-	err := ensureCompletionsRequestFits(messages, nil, &CompletionsOptions{ContextWindow: 6000, MaxOutputTokens: 1000})
-	if err == nil {
-		t.Fatal("expected local complete-request rejection")
+	opts := &CompletionsOptions{ContextWindow: 6000, MaxOutputTokens: 1000}
+	if err := ensureCompletionsRequestFits(messages, nil, opts); err != nil {
+		t.Fatalf("moderate ASCII payload should fit: %v", err)
+	}
+	messages[0].Content = strings.Repeat("{}", 10000)
+	if err := ensureCompletionsRequestFits(messages, nil, opts); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
 	}
 }
 
@@ -309,8 +316,8 @@ func TestSendCompletionsBoundsDurableToolOutputWhenReplayingLaterTurn(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len([]rune(replayed)) > 512 || !strings.Contains(replayed, "truncated") {
-		t.Fatalf("durable replay was not bounded for model input: runes=%d", len([]rune(replayed)))
+	if len(replayed) > tokenestimate.ByteBudget(512) || len(replayed) <= 512 || !strings.Contains(replayed, "truncated") {
+		t.Fatalf("durable replay was not bounded for model input: bytes=%d", len(replayed))
 	}
 }
 
@@ -351,8 +358,8 @@ func TestSendCompletionsBoundsDenseToolOutputForModelButPreservesTranscript(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len([]rune(modelToolResult)) > 512 || !strings.Contains(modelToolResult, "truncated") {
-		t.Fatalf("model tool result was not conservatively bounded: runes=%d", len([]rune(modelToolResult)))
+	if len(modelToolResult) > tokenestimate.ByteBudget(512) || len(modelToolResult) <= 512 || !strings.Contains(modelToolResult, "truncated") {
+		t.Fatalf("model tool result was not bounded: bytes=%d", len(modelToolResult))
 	}
 	transcript := client.LastCompletionsTranscript()
 	if len(transcript) < 3 || transcript[2].ToolCallID != "call_dense" || transcript[2].Content != full {

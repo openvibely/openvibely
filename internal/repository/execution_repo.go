@@ -203,6 +203,20 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 	return &e, nil
 }
 
+// IsTaskExecutionAtHistoryCutoff checks whether a rendered Stop still names
+// the newest execution included in the task cancellation snapshot.
+func (r *ExecutionRepo) IsTaskExecutionAtHistoryCutoff(ctx context.Context, taskID, execID string, cutoff int64) (bool, error) {
+	var matches bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM executions
+		WHERE task_id = ? AND id = ? AND history_order = ?
+	)`, taskID, execID, cutoff).Scan(&matches)
+	if err != nil {
+		return false, fmt.Errorf("checking Stop execution ownership: %w", err)
+	}
+	return matches, nil
+}
+
 // GetAPIChatStatusByID returns only the execution fields needed by
 // GET /api/chat/message/:id status polling. It intentionally omits prompt,
 // reasoning, diff, timestamps, and other execution-detail payloads.
@@ -248,6 +262,16 @@ func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID str
 }
 
 func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
+	unlockParent, err := lockSwarmParentFollowup(ctx, r.db, e.TaskID, e.IsFollowup)
+	if err != nil {
+		return err
+	}
+	defer unlockParent()
+	if e.IsFollowup {
+		return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+			return r.CreateWithExecutor(ctx, exec, e)
+		})
+	}
 	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
 		return r.CreateWithExecutor(ctx, conn, e)
 	})
@@ -266,6 +290,9 @@ func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor
 		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).Scan(&e.ID, &e.StartedAt)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
+	}
+	if e.IsFollowup {
+		return bumpSwarmParentStopRevision(ctx, exec, e.TaskID)
 	}
 	return nil
 }
@@ -309,9 +336,16 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	if e == nil || input == nil {
 		return false, fmt.Errorf("execution and queued input are required")
 	}
+	unlockParent, err := lockSwarmParentFollowup(ctx, r.db, e.TaskID, e.IsFollowup)
+	if err != nil {
+		return false, err
+	}
+	defer unlockParent()
+	unlock := LockTaskLifecycle(e.TaskID)
+	defer unlock()
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
-	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
+	err = withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		var status models.TaskStatus
 		var projectID string
 		if expected, guarded := activeLaneExpectedState(ctx, e.TaskID); guarded {
@@ -359,6 +393,11 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 			RETURNING id, started_at`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
 			Scan(&e.ID, &e.StartedAt); err != nil {
 			return fmt.Errorf("creating direct task follow-up execution: %w", err)
+		}
+		if e.IsFollowup {
+			if err := bumpSwarmParentStopRevision(ctx, dbexec, e.TaskID); err != nil {
+				return err
+			}
 		}
 		started = true
 		return nil
@@ -600,14 +639,34 @@ func (r *ExecutionRepo) CancelActiveByTask(ctx context.Context, taskID string) (
 }
 
 func (r *ExecutionRepo) CancelActiveByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
+	cutoff, err := r.TaskExecutionHistoryCutoff(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return r.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, taskID, cutoff)
+}
+
+// TaskExecutionHistoryCutoff snapshots execution admission before a cancellation
+// begins. A follow-up inserted afterward has a greater history_order and must
+// not be included in the cancellation's later execution sweep.
+func (r *ExecutionRepo) TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error) {
+	var cutoff int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(history_order), 0)
+		FROM executions WHERE task_id = ?`, taskID).Scan(&cutoff); err != nil {
+		return 0, fmt.Errorf("loading task execution cancellation cutoff: %w", err)
+	}
+	return cutoff, nil
+}
+
+func (r *ExecutionRepo) CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx context.Context, taskID string, cutoff int64) ([]string, error) {
 	var ids []string
 	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
 		rows, err := conn.QueryContext(ctx,
 			`UPDATE executions
 				 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
-				 WHERE task_id = ? AND status IN (?, ?)
+				 WHERE task_id = ? AND history_order <= ? AND status IN (?, ?)
 				 RETURNING id`,
-			models.ExecCancelled, taskID, models.ExecRunning, models.ExecQueued)
+			models.ExecCancelled, taskID, cutoff, models.ExecRunning, models.ExecQueued)
 		if err != nil {
 			return fmt.Errorf("cancelling active task executions: %w", err)
 		}
@@ -637,6 +696,35 @@ const (
 	CompleteSuccessPendingSteering CompleteSuccessOutcome = "pending_steering"
 	CompleteSuccessAlreadyTerminal CompleteSuccessOutcome = "already_terminal"
 )
+
+// SuccessCompletionReadiness reports whether an execution can currently be
+// completed without mutating execution or automation state. The subsequent
+// CompleteSuccessIfNoPendingSteering call remains the atomic authority if
+// steering arrives after this check.
+func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id string) (CompleteSuccessOutcome, error) {
+	var status models.ExecutionStatus
+	var hasPendingSteering bool
+	err := r.db.QueryRowContext(ctx, `SELECT status, EXISTS (
+		SELECT 1 FROM thread_inputs
+		WHERE run_execution_id = executions.id
+		  AND turn_id = executions.id
+		  AND input_mode = 'steering'
+		  AND input_status = 'pending'
+	) FROM executions WHERE id = ?`, id).Scan(&status, &hasPendingSteering)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CompleteSuccessAlreadyTerminal, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("checking execution completion readiness: %w", err)
+	}
+	if status != models.ExecRunning {
+		return CompleteSuccessAlreadyTerminal, nil
+	}
+	if hasPendingSteering {
+		return CompleteSuccessPendingSteering, nil
+	}
+	return CompleteSuccessCompleted, nil
+}
 
 func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
 	output = llmtranscript.NormalizeMarkers(output)
@@ -1532,8 +1620,11 @@ type TaskFrequency struct {
 	LastExecutedAt string
 }
 
-// GetMostFrequentTasks returns the most frequently executed tasks.
-// Optional bounds use the Analytics half-open [dateFrom,dateTo) convention.
+// GetMostFrequentTasks returns the most frequently executed tasks. Positive
+// limits bound the result; limit=0 explicitly requests the complete history.
+// Results are ordered by execution count descending, then task ID ascending for
+// deterministic tie handling. Optional bounds use the Analytics half-open
+// [dateFrom,dateTo) convention.
 func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID string, limit int, bounds ...string) ([]TaskFrequency, error) {
 	query := `SELECT
 			t.id,
@@ -1548,8 +1639,11 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 	if len(bounds) > 2 {
 		query, args = appendAnalyticsDimensions(query, args, "t", bounds[2:])
 	}
-	query += ` GROUP BY t.id, t.title ORDER BY execution_count DESC LIMIT ?`
-	args = append(args, limit)
+	query += ` GROUP BY t.id, t.title ORDER BY execution_count DESC, t.id ASC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting most frequent tasks: %w", err)

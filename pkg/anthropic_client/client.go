@@ -148,6 +148,20 @@ type Usage struct {
 	CacheReadInputTokens     int                `json:"cache_read_input_tokens"`
 	CacheCreation            usageCacheCreation `json:"cache_creation,omitempty"`
 	CacheRead                usageCacheRead     `json:"cache_read,omitempty"`
+	Iterations               []UsageIteration   `json:"iterations,omitempty"`
+}
+
+// UsageIteration reports one sampling pass within a Messages API request.
+// Compaction passes are excluded from the top-level usage fields, so callers
+// must aggregate iterations when the API returns them to capture billed usage.
+type UsageIteration struct {
+	Type                     string             `json:"type"`
+	InputTokens              int                `json:"input_tokens"`
+	OutputTokens             int                `json:"output_tokens"`
+	CacheCreationInputTokens int                `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                `json:"cache_read_input_tokens"`
+	CacheCreation            usageCacheCreation `json:"cache_creation,omitempty"`
+	CacheRead                usageCacheRead     `json:"cache_read,omitempty"`
 }
 
 // StreamEvent represents a server-sent event from the streaming API.

@@ -28,6 +28,46 @@ func getDefaultProjectID(t *testing.T, db interface {
 	return "default"
 }
 
+func TestTaskRepo_SwarmUpdatesPreserveNewerStopRevision(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	tasks := NewTaskRepo(db, nil)
+	execs := NewExecutionRepo(db)
+	parent := &models.Task{ProjectID: "default", Title: "Revision parent", Status: models.StatusRunning, Category: models.CategoryActive, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	if err := tasks.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	parentID := parent.ID
+	child := &models.Task{ProjectID: "default", Title: "Revision reviewer", Status: models.StatusCompleted, Category: models.CategoryCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRoleReviewer}
+	if err := tasks.Create(ctx, child); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := tasks.GetByID(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := execs.Create(ctx, &models.Execution{TaskID: child.ID, IsFollowup: true, Status: models.ExecQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, "needs_review", stale.SwarmConfig, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := tasks.Update(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	current, err := tasks.GetByID(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := models.ParseSwarmConfig(current.SwarmConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StopRevision != 1 {
+		t.Fatalf("Stop revision after stale updates = %d, want 1", cfg.StopRevision)
+	}
+}
+
 func TestTaskRepo_ListChatContextByProjectUsesBoundedProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewTaskRepo(db, nil)
@@ -2120,6 +2160,169 @@ func TestTaskRepo_GetByID_NotFound(t *testing.T) {
 	}
 	if got != nil {
 		t.Error("expected nil for nonexistent")
+	}
+}
+
+func TestTaskRepo_FinalizeExecutionCancellationPreservesNewFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "cancel followed immediately", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	cancelled := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "original"}
+	if err := execRepo.Create(ctx, cancelled); err != nil {
+		t.Fatalf("Create cancelled execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, cancelled.ID, models.ExecCancelled, "", "cancelled", 0, 0); err != nil {
+		t.Fatalf("Complete cancelled execution: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled); err != nil {
+		t.Fatalf("mark task cancelled: %v", err)
+	}
+	if err := taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
+		t.Fatalf("move cancelled task to backlog: %v", err)
+	}
+
+	followup := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: "continue", IsFollowup: true}
+	queued := &models.ThreadInput{Content: followup.PromptSent}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, followup, queued)
+	if err != nil || !started {
+		t.Fatalf("CreateDirectTaskFollowupOrQueue: started=%v err=%v", started, err)
+	}
+
+	finalized, err := taskRepo.FinalizeExecutionCancellation(ctx, task.ID, cancelled.ID)
+	if err != nil {
+		t.Fatalf("FinalizeExecutionCancellation: %v", err)
+	}
+	if finalized {
+		t.Fatal("cancelled execution must not overwrite its successor")
+	}
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetByID: task=%#v err=%v", got, err)
+	}
+	if got.Status != models.StatusQueued || got.Category != models.CategoryActive {
+		t.Fatalf("successor state overwritten: status=%s category=%s", got.Status, got.Category)
+	}
+}
+
+func TestTaskRepo_MoveCancelledToBacklogIfStillCancelledPreservesReactivatedFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Stop transition follow-up", Category: models.CategoryActive, Status: models.StatusCancelled, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	followup := &models.Execution{TaskID: task.ID, PromptSent: "continue", IsFollowup: true}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, followup, &models.ThreadInput{Content: followup.PromptSent})
+	if err != nil || !started {
+		t.Fatalf("CreateDirectTaskFollowupOrQueue: started=%v err=%v", started, err)
+	}
+	moved, err := taskRepo.MoveCancelledToBacklogIfStillCancelled(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("MoveCancelledToBacklogIfStillCancelled: %v", err)
+	}
+	if moved {
+		t.Fatal("stop transition moved reactivated follow-up to Backlog")
+	}
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || stored == nil {
+		t.Fatalf("GetByID: task=%#v err=%v", stored, err)
+	}
+	if stored.Category != models.CategoryActive || stored.Status != models.StatusQueued {
+		t.Fatalf("reactivated task state = %s/%s", stored.Category, stored.Status)
+	}
+}
+
+func TestTaskRepo_FinalizeExecutionCancellationPreservesNewerTerminalFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "cancel followed by fast completion", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	cancelled := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "original"}
+	if err := execRepo.Create(ctx, cancelled); err != nil {
+		t.Fatalf("Create cancelled execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, cancelled.ID, models.ExecCancelled, "", "cancelled", 0, 0); err != nil {
+		t.Fatalf("Complete cancelled execution: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled); err != nil {
+		t.Fatalf("mark task cancelled: %v", err)
+	}
+	if err := taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
+		t.Fatalf("move cancelled task to backlog: %v", err)
+	}
+
+	followup := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: "quick follow-up", IsFollowup: true}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, followup, &models.ThreadInput{Content: followup.PromptSent})
+	if err != nil || !started {
+		t.Fatalf("CreateDirectTaskFollowupOrQueue: started=%v err=%v", started, err)
+	}
+	if err := execRepo.Complete(ctx, followup.ID, models.ExecCompleted, "done", "", 0, 1); err != nil {
+		t.Fatalf("Complete follow-up: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	if err := taskRepo.UpdateCategory(ctx, task.ID, models.CategoryCompleted); err != nil {
+		t.Fatalf("move completed task: %v", err)
+	}
+
+	finalized, err := taskRepo.FinalizeExecutionCancellation(ctx, task.ID, cancelled.ID)
+	if err != nil {
+		t.Fatalf("FinalizeExecutionCancellation: %v", err)
+	}
+	if finalized {
+		t.Fatal("cancelled execution must not overwrite a terminal successor")
+	}
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetByID: task=%#v err=%v", got, err)
+	}
+	if got.Status != models.StatusCompleted || got.Category != models.CategoryCompleted {
+		t.Fatalf("terminal successor state overwritten: status=%s category=%s", got.Status, got.Category)
+	}
+}
+
+func TestTaskRepo_FinalizeExecutionCancellationWithoutSuccessorMovesToBacklog(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "cancel without successor", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	cancelled := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "original"}
+	if err := execRepo.Create(ctx, cancelled); err != nil {
+		t.Fatalf("Create execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, cancelled.ID, models.ExecCancelled, "", "cancelled", 0, 0); err != nil {
+		t.Fatalf("Complete execution: %v", err)
+	}
+
+	finalized, err := taskRepo.FinalizeExecutionCancellation(ctx, task.ID, cancelled.ID)
+	if err != nil || !finalized {
+		t.Fatalf("FinalizeExecutionCancellation: finalized=%v err=%v", finalized, err)
+	}
+	got, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || got == nil {
+		t.Fatalf("GetByID: task=%#v err=%v", got, err)
+	}
+	if got.Status != models.StatusCancelled || got.Category != models.CategoryBacklog {
+		t.Fatalf("terminal state = status=%s category=%s", got.Status, got.Category)
 	}
 }
 
@@ -4306,6 +4509,151 @@ func TestTaskRepo_ReclaimStaleQueuedTaskRejectsOwnerAddedAfterListing(t *testing
 	}
 	if stored.Status != models.StatusQueued {
 		t.Fatalf("owner-added race changed task status to %s", stored.Status)
+	}
+}
+
+func TestTaskRepo_ListTaskReferencesUsesCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID:   "default",
+		Title:       "Compact reference task",
+		Category:    models.CategoryActive,
+		Priority:    4,
+		Status:      models.StatusPending,
+		Prompt:      strings.Repeat("p", 64*1024),
+		ChainConfig: `{"enabled":true,"payload":"` + strings.Repeat("c", 16*1024) + `"}`,
+		SwarmConfig: `{"payload":"` + strings.Repeat("s", 16*1024) + `"}`,
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := NewTaskGoalRepo(db).CreateOrReplace(ctx, &models.TaskGoal{
+		TaskID: task.ID, GoalID: "compact-reference-goal", Objective: "finish", Status: models.TaskGoalStatusActive,
+	}); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+
+	references, err := repo.ListTaskReferences(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListTaskReferences: %v", err)
+	}
+	if len(references) != 1 {
+		t.Fatalf("reference count = %d, want 1", len(references))
+	}
+	got := references[0]
+	if got.ID != task.ID || got.ProjectID != "default" || got.Title != task.Title || got.Category != task.Category || got.Priority != task.Priority || got.Status != task.Status {
+		t.Fatalf("reference identity fields changed: %+v", got)
+	}
+	if got.Prompt != strings.Repeat("p", BoardPromptPreviewCodePoints) {
+		t.Fatalf("prompt length = %d, want %d", len(got.Prompt), BoardPromptPreviewCodePoints)
+	}
+	if !got.ChainEnabled || !got.HasGoal {
+		t.Fatalf("derived metadata = chain:%t goal:%t, want both true", got.ChainEnabled, got.HasGoal)
+	}
+	if got.AgentID != nil || got.AgentDefinitionID != nil || got.ParentTaskID != nil || got.AutomationCapacityQueued {
+		t.Fatalf("unexpected optional metadata: %+v", got)
+	}
+
+	empty, err := repo.ListTaskReferences(ctx, "missing-project")
+	if err != nil {
+		t.Fatalf("empty ListTaskReferences: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("empty references = %#v, want non-nil empty slice", empty)
+	}
+}
+
+func TestTaskRepo_ListTaskReferencesHandlesMalformedChainConfigAndRunnableSwarmChild(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	foreignProject := &models.Project{Name: "Foreign task reference project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, foreignProject); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+
+	parent := &models.Task{
+		ProjectID: "default", Title: "Blocked swarm parent", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent, ChainConfig: `{"enabled":true}`,
+	}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	parentID := parent.ID
+	child := &models.Task{
+		ProjectID: "default", Title: "Runnable swarm child", Category: models.CategoryActive,
+		Status: models.StatusPending, SwarmRole: models.SwarmRoleWorker, ParentTaskID: &parentID,
+	}
+	if err := repo.Create(ctx, child); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	ordinaryParent := &models.Task{
+		ProjectID: "default", Title: "Blocked ordinary parent", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent,
+	}
+	if err := repo.Create(ctx, ordinaryParent); err != nil {
+		t.Fatalf("create ordinary parent: %v", err)
+	}
+	ordinaryParentID := ordinaryParent.ID
+	if err := repo.Create(ctx, &models.Task{
+		ProjectID: "default", Title: "Runnable chained child", Category: models.CategoryActive,
+		Status: models.StatusPending, ParentTaskID: &ordinaryParentID,
+	}); err != nil {
+		t.Fatalf("create ordinary child: %v", err)
+	}
+
+	foreignParent := &models.Task{
+		ProjectID: "default", Title: "Blocked scoped parent", Category: models.CategoryActive,
+		Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent,
+	}
+	if err := repo.Create(ctx, foreignParent); err != nil {
+		t.Fatalf("create scoped parent: %v", err)
+	}
+	foreignParentID := foreignParent.ID
+	if err := repo.Create(ctx, &models.Task{
+		ProjectID: foreignProject.ID, Title: "Foreign runnable swarm child", Category: models.CategoryActive,
+		Status: models.StatusPending, SwarmRole: models.SwarmRoleWorker, ParentTaskID: &foreignParentID,
+	}); err != nil {
+		t.Fatalf("create foreign child: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ? WHERE id = ?`, "{invalid", parent.ID); err != nil {
+		t.Fatalf("store malformed chain config: %v", err)
+	}
+
+	references, err := repo.ListTaskReferences(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListTaskReferences: %v", err)
+	}
+	byID := make(map[string]TaskReference, len(references))
+	for _, reference := range references {
+		byID[reference.ID] = reference
+	}
+	for _, test := range []struct {
+		name              string
+		id                string
+		wantRunnableChild bool
+		wantChainEnabled  bool
+	}{
+		{name: "same-project swarm child", id: parent.ID, wantRunnableChild: true},
+		{name: "ordinary chained child", id: ordinaryParent.ID},
+		{name: "foreign-project swarm child", id: foreignParent.ID},
+	} {
+		reference, ok := byID[test.id]
+		if !ok {
+			t.Fatalf("%s: parent reference missing", test.name)
+		}
+		if reference.HasRunnableSwarmChild != test.wantRunnableChild {
+			t.Errorf("%s: HasRunnableSwarmChild = %t, want %t", test.name, reference.HasRunnableSwarmChild, test.wantRunnableChild)
+		}
+		if reference.ChainEnabled != test.wantChainEnabled {
+			t.Errorf("%s: ChainEnabled = %t, want %t", test.name, reference.ChainEnabled, test.wantChainEnabled)
+		}
 	}
 }
 

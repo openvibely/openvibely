@@ -1130,6 +1130,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)
+	h.SetTelegramUserProjectRepo(telegramUserProjectRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
 	h.SetEmailTaskContextRepo(emailTaskContextRepo)

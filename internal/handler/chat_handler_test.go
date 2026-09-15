@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,26 +189,15 @@ func assertChatModelPickerQuery(t *testing.T, statements []string) {
 	}
 }
 
-func assertBrowserChatContextModelStatements(t *testing.T, statements []string) {
+func assertNoBrowserChatCatalogStatements(t *testing.T, statements []string) {
 	t.Helper()
-	var contextStatements []string
 	for _, statement := range statements {
-		normalized := strings.Join(strings.Fields(statement), " ")
-		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
-			contextStatements = append(contextStatements, normalized)
+		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(normalized, "from agent_configs order by is_default desc, name asc") {
+			t.Fatalf("browser Chat loaded the model catalog: %s", statement)
 		}
-	}
-	if len(contextStatements) != 1 {
-		t.Fatalf("expected exactly one browser Chat context model query, got %d in statements: %q", len(contextStatements), statements)
-	}
-	contextQuery := contextStatements[0]
-	projection := strings.Split(strings.ToLower(contextQuery), " from agent_configs ")[0]
-	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
-		t.Fatalf("browser Chat context query does not use id/name/provider/model/is_default projection: %s", contextQuery)
-	}
-	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
-		if strings.Contains(projection, forbidden) {
-			t.Fatalf("browser Chat context query selected forbidden column %q: %s", forbidden, contextQuery)
+		if strings.Contains(normalized, " from schedules ") || strings.Contains(normalized, " from agents ") {
+			t.Fatalf("browser Chat loaded an eager project catalog: %s", statement)
 		}
 	}
 }
@@ -434,7 +424,7 @@ func TestHandler_ChatSend(t *testing.T) {
 	}
 }
 
-func TestHandler_ChatSend_UsesCompactContextModelProjectionAndHydratesSelectedModel(t *testing.T) {
+func TestHandler_ChatSend_HydratesSelectedModelWithoutEagerCatalogs(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
 	ctx := context.Background()
@@ -457,6 +447,11 @@ func TestHandler_ChatSend_UsesCompactContextModelProjectionAndHydratesSelectedMo
 	require.NoError(t, err)
 	require.NotEmpty(t, projects)
 	projectID := projects[0].ID
+	queuedTask := &models.Task{ProjectID: projectID, Title: "must-not-enter-chat-task-catalog", Prompt: "must-not-enter-chat-task-prompt", Status: models.StatusPending, Category: models.CategoryBacklog}
+	require.NoError(t, h.taskRepo.Create(ctx, queuedTask))
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+	agentDefinition := &models.Agent{Name: "must-not-enter-chat-agent-catalog", Key: "no-eager-chat-agent", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, h.agentRepo.Create(ctx, agentDefinition))
 
 	mock := testutil.NewMockLLMCaller()
 	providerCalled := make(chan struct{}, 1)
@@ -485,7 +480,7 @@ func TestHandler_ChatSend_UsesCompactContextModelProjectionAndHydratesSelectedMo
 		t.Fatal("timed out waiting for mock provider call")
 	}
 
-	assertBrowserChatContextModelStatements(t, counter.Statements())
+	assertNoBrowserChatCatalogStatements(t, counter.Statements())
 	call := mock.LastCall()
 	require.Equal(t, agent.ID, call.Agent.ID)
 	require.Equal(t, "browser-secret-api-key", call.Agent.APIKey)
@@ -498,8 +493,13 @@ func TestHandler_ChatSend_UsesCompactContextModelProjectionAndHydratesSelectedMo
 	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
 
 	request := mock.LastAgentRequest()
-	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
-	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, agent.Name)
+	require.NotContains(t, request.ChatSystemContext, queuedTask.Title)
+	require.NotContains(t, request.ChatSystemContext, queuedTask.Prompt)
+	require.NotContains(t, request.ChatSystemContext, agentDefinition.Name)
+	require.NotContains(t, request.ChatSystemContext, "Available models")
+	require.NotContains(t, request.ChatSystemContext, "Available Agent definitions")
+	require.NotContains(t, request.ChatSystemContext, "Current tasks in this project")
 	require.NotContains(t, request.ChatSystemContext, "browser-secret-api-key")
 	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
 }
@@ -1615,14 +1615,14 @@ func TestHandler_Chat_RendersStopButtonWhileActive(t *testing.T) {
 		tk.Status = models.StatusRunning
 		tk.AgentID = &agent.ID
 	})
-	createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "active chat"
 	})
 
 	rec := htmxGet(e, "/chat?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `hx-post="/chat/stop?project_id=`+project.ID+`"`)
+	assertContains(t, rec, `hx-post="/chat/stop?project_id=`+project.ID+`&amp;expected_turn_id=`+activeExec.ID+`"`)
 	assertContains(t, rec, `title="Stop response"`)
 	assertContains(t, rec, `aria-label="Stop response"`)
 	assertContains(t, rec, `<rect x="6" y="6" width="12" height="12" rx="2"></rect>`)
@@ -1725,6 +1725,43 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 	}
 	_, ok := <-sub
 	assert.False(t, ok, "ChatStop should close the execution subscriber")
+}
+
+func TestHandler_ChatStopRejectsDelayedPreviousTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Delayed Chat Stop Project")
+	oldTask := createTask(t, h, project.ID, "Old chat turn", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusCompleted
+		task.AgentID = &agent.ID
+	})
+	oldExec := createExec(t, h, oldTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecCompleted
+	})
+	newTask := createTask(t, h, project.ID, "New chat turn", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	newExec := createExec(t, h, newTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+	})
+
+	button := htmxGet(e, "/chat/composer-action?project_id="+project.ID)
+	assertCode(t, button, http.StatusOK)
+	assertContains(t, button, "/chat/stop?project_id="+project.ID+"&amp;expected_turn_id="+newExec.ID)
+	stale := htmxPost(e, "/chat/stop?project_id="+project.ID+"&expected_turn_id="+oldExec.ID, url.Values{})
+	assertCode(t, stale, http.StatusOK)
+	assertContains(t, stale, `data-active-turn-id="`+newExec.ID+`"`)
+	currentTask, err := h.taskRepo.GetByID(ctx, newTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusRunning, currentTask.Status)
+	currentExec, err := h.execRepo.GetByID(ctx, newExec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecRunning, currentExec.Status)
+	require.False(t, h.workerSvc.IsCancellationRequested(newTask.ID))
 }
 
 func TestHandler_Chat_HidesComposerSteeringAffordanceWhileActive(t *testing.T) {
@@ -3788,7 +3825,7 @@ func TestHandler_TaskThreadSend_QueuesWhenAtCapacity(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "task follow-up should be accepted and queued")
 	assertContains(t, rec, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`)
 	assertNotContains(t, rec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
-	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
+	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1&amp;expected_turn_id=`)
 	assertContains(t, rec, `title="Stop response"`)
 
 	// Message should be saved in an execution record

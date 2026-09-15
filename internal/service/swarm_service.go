@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -788,12 +789,15 @@ func (s *SwarmService) handleChildCancelled(ctx context.Context, parent *models.
 }
 
 func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID string, message string) error {
+	unlock := repository.LockTaskLifecycle(parentTaskID)
+	defer unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
 	if err != nil || parent == nil {
 		return err
 	}
 	cfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
 	cfg.Generation++
+	cfg.StopRevision++
 	if cfg.Generation == 0 {
 		cfg.Generation = 1
 	}
@@ -841,6 +845,12 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 }
 
 func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID string, message string) error {
+	initialChild, err := s.taskRepo.GetByID(ctx, childTaskID)
+	if err != nil || initialChild == nil || initialChild.ParentTaskID == nil {
+		return err
+	}
+	unlock := repository.LockTaskLifecycle(*initialChild.ParentTaskID)
+	defer unlock()
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	child, err := s.taskRepo.GetByID(ctx, childTaskID)
@@ -852,6 +862,7 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 		return err
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.StopRevision++
 	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 	repairingFailure := child.Status == models.StatusFailed || child.SwarmStatus == "failed" || child.SwarmStatus == "followup_failed"
 	swarmStatus := ""
@@ -927,6 +938,12 @@ func (s *SwarmService) HandleChildFollowup(ctx context.Context, childTaskID stri
 }
 
 func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context, childTaskID string) error {
+	initialChild, err := s.taskRepo.GetByID(ctx, childTaskID)
+	if err != nil || initialChild == nil || initialChild.ParentTaskID == nil {
+		return err
+	}
+	unlock := repository.LockTaskLifecycle(*initialChild.ParentTaskID)
+	defer unlock()
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	child, err := s.taskRepo.GetByID(ctx, childTaskID)
@@ -935,6 +952,18 @@ func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context
 	}
 	parent, err := s.taskRepo.GetByID(ctx, *child.ParentTaskID)
 	if err != nil || parent == nil {
+		return err
+	}
+	parentCfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	if err != nil {
+		return err
+	}
+	parentCfg.StopRevision++
+	parent.SwarmConfig, err = parentCfg.JSON()
+	if err != nil {
+		return err
+	}
+	if err := s.taskRepo.UpdateSwarmFields(ctx, parent.ID, parent.SwarmRole, parent.SwarmStatus, parent.SwarmConfig, parent.SwarmSequence); err != nil {
 		return err
 	}
 	if err := s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning); err != nil {
@@ -954,6 +983,8 @@ func (s *SwarmService) ReactivateParentForChildFollowupRetry(ctx context.Context
 }
 
 func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
+	unlock := repository.LockTaskLifecycle(parentTaskID)
+	defer unlock()
 	if role != models.SwarmRoleReviewer && !isMergerRole(role) {
 		return nil, fmt.Errorf("unsupported swarm rerun role %q", role)
 	}
@@ -985,6 +1016,7 @@ func (s *SwarmService) RerunRole(ctx context.Context, parentTaskID string, role 
 		}
 	}
 	parentCfg, _ := models.ParseSwarmConfig(parent.SwarmConfig)
+	parentCfg.StopRevision++
 	childCfg, _ := models.ParseSwarmConfig(child.SwarmConfig)
 	childCfg.RerunGeneration = max(childCfg.RerunGeneration, parentCfg.Generation)
 	swarmStatus := "pending"
@@ -1148,6 +1180,46 @@ func swarmCompleteWithoutMerger(children []models.Task, parentCfg models.SwarmCo
 }
 
 func (s *SwarmService) CancelSwarm(ctx context.Context, parentTaskID string) error {
+	unlock := repository.LockTaskLifecycle(parentTaskID)
+	defer unlock()
+	return s.cancelSwarmLocked(ctx, parentTaskID)
+}
+
+// CancelSwarmObservedWithPending refuses to cascade an old Stop into a newer
+// parent follow-up generation. The pending-input sweep shares this guard.
+func (s *SwarmService) CancelSwarmObservedWithPending(ctx context.Context, observed *models.Task, cancelPending func() error) error {
+	if observed == nil {
+		return fmt.Errorf("swarm parent not found")
+	}
+	unlock := repository.LockTaskLifecycle(observed.ID)
+	defer unlock()
+	current, err := s.taskRepo.GetByID(ctx, observed.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("swarm parent not found: %s", observed.ID)
+	}
+	observedCfg, err := models.ParseSwarmConfig(observed.SwarmConfig)
+	if err != nil {
+		return err
+	}
+	currentCfg, err := models.ParseSwarmConfig(current.SwarmConfig)
+	if err != nil {
+		return err
+	}
+	if current.Status != observed.Status || current.Category != observed.Category || currentCfg.Generation != observedCfg.Generation || currentCfg.StopRevision != observedCfg.StopRevision {
+		return ErrTaskCancellationSuperseded
+	}
+	if cancelPending != nil {
+		if err := cancelPending(); err != nil {
+			applog.Infof("[swarm-svc] error cancelling pending thread inputs parent=%s: %v", observed.ID, err)
+		}
+	}
+	return s.cancelSwarmLocked(ctx, observed.ID)
+}
+
+func (s *SwarmService) cancelSwarmLocked(ctx context.Context, parentTaskID string) error {
 	children, err := s.taskRepo.ListSwarmChildren(ctx, parentTaskID)
 	if err != nil {
 		return err

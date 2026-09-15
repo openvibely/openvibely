@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -21,6 +22,7 @@ var ErrTaskPromptRequired = errors.New("task prompt is required")
 var ErrInvalidTaskPriority = errors.New("task priority must be between 1 and 4")
 var ErrTaskNotFoundInProject = errors.New("task not found in project")
 var ErrActiveLaneLifecycleRouted = errors.New("task activation was routed to its lifecycle owner")
+var ErrTaskCancellationSuperseded = errors.New("task cancellation was superseded by a newer run")
 
 type TaskService struct {
 	repo                              *repository.TaskRepo
@@ -214,6 +216,31 @@ func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, p
 	return tasks, nil
 }
 
+// ListTaskReferences returns the compact project catalog used by reference
+// selectors. It preserves the board's terminal-active normalization without
+// hydrating the board/detail projection.
+func (s *TaskService) ListTaskReferences(ctx context.Context, projectID string) ([]repository.TaskReference, error) {
+	references, err := s.repo.ListTaskReferences(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	moved := 0
+	for _, reference := range references {
+		if reference.Category != models.CategoryActive ||
+			(reference.Status != models.StatusFailed && reference.Status != models.StatusCancelled) {
+			continue
+		}
+		if err := s.repo.UpdateCategory(ctx, reference.ID, models.CategoryBacklog); err != nil {
+			return nil, fmt.Errorf("normalizing task reference %s: %w", reference.ID, err)
+		}
+		moved++
+	}
+	if moved == 0 {
+		return references, nil
+	}
+	return s.repo.ListTaskReferences(ctx, projectID)
+}
+
 func (s *TaskService) normalizeActiveTerminalTasks(ctx context.Context, tasks []models.Task) (int, error) {
 	moved := 0
 	for _, task := range tasks {
@@ -383,16 +410,16 @@ func (s *TaskService) cancelActiveTaskWork(ctx context.Context, id string) error
 	}
 	if s.workerSvc != nil {
 		s.workerSvc.CancelRunningTask(id)
-	}
-	if err := s.repo.UpdateStatus(ctx, id, models.StatusCancelled); err != nil {
-		applog.Infof("[task-svc] cancelActiveTaskWork error marking active task cancelled id=%s: %v", id, err)
-		return err
-	}
-	if s.workerSvc != nil {
 		if err := s.workerSvc.CancelQueuedTask(context.WithoutCancel(ctx), id, "Automation task was cancelled by the user"); err != nil {
 			applog.Infof("[task-svc] cancelActiveTaskWork error cancelling queued Automation dispatch id=%s: %v", id, err)
 			return err
 		}
+	}
+	// Purge the old queue before making the task eligible for a manual rerun.
+	// A task-ID-only purge after this status update could remove new work.
+	if err := s.repo.UpdateStatus(ctx, id, models.StatusCancelled); err != nil {
+		applog.Infof("[task-svc] cancelActiveTaskWork error marking active task cancelled id=%s: %v", id, err)
+		return err
 	}
 	return nil
 }
@@ -401,8 +428,31 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 	if s.workerSvc == nil {
 		return errors.New("worker service unavailable")
 	}
+	// Hold each task's admission gate from the durable board move through worker
+	// submission. Otherwise an older Stop can purge a newly submitted rerun.
+	ids := make([]string, 0, len(moves))
+	seen := make(map[string]bool, len(moves))
+	for _, move := range moves {
+		if !seen[move.ID] {
+			ids = append(ids, move.ID)
+			seen[move.ID] = true
+		}
+	}
+	sort.Strings(ids)
+	unlocks := make([]func(), 0, len(ids))
+	for _, id := range ids {
+		unlocks = append(unlocks, repository.LockTaskLifecycle(id))
+	}
+	release := func() {
+		for i := len(unlocks) - 1; i >= 0; i-- {
+			unlocks[i]()
+		}
+		unlocks = nil
+	}
+	defer release()
 	admissions, err := s.repo.MoveTasksToActiveLane(ctx, projectID, moves, status)
 	if errors.Is(err, repository.ErrActiveLaneLifecycleOwned) && len(moves) == 1 {
+		release() // lifecycle routing can reenter RunTask for this task
 		move := moves[0]
 		routeCtx := repository.WithActiveLaneExpectedState(ctx, move)
 		if s.beforeActiveLaneLifecycleRoute != nil {
@@ -436,6 +486,13 @@ func (s *TaskService) MoveTasksToActiveLane(ctx context.Context, projectID strin
 }
 
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
+	if category != models.CategoryActive {
+		// A demotion may cancel the observed run after its board update. Keep
+		// direct follow-ups and manual worker submissions out until that older
+		// cancellation has finished.
+		unlock := repository.LockTaskLifecycle(id)
+		defer unlock()
+	}
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
 	var previousTask *models.Task
 	var err error
@@ -570,6 +627,24 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			}
 		}
 		applog.Infof("[task-svc] UpdateCategory resetting status to pending and activating id=%s (was %s)", id, task.Status)
+		unlock := repository.LockTaskLifecycle(id)
+		defer unlock()
+		// Category editing and follow-up hooks ran outside the gate. A Stop may
+		// have completed meanwhile, so restore Active from current durable state
+		// before submitting this deliberate manual activation.
+		task, err = s.repo.GetByID(ctx, id)
+		if err != nil || task == nil {
+			if err == nil {
+				err = fmt.Errorf("task not found: %s", id)
+			}
+			return rollbackActivation(err)
+		}
+		if task.Category != models.CategoryActive {
+			if err := s.repo.UpdateCategory(ctx, id, models.CategoryActive); err != nil {
+				return rollbackActivation(err)
+			}
+			task.Category = models.CategoryActive
+		}
 		if err := s.repo.UpdateStatus(ctx, id, models.StatusPending); err != nil {
 			return rollbackActivation(err)
 		}
@@ -587,6 +662,10 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 	if status == models.StatusRunning {
 		applog.Infof("[task-svc] UpdateStatus routing running request through worker admission id=%s", id)
 		return s.RunTask(ctx, id)
+	}
+	if status == models.StatusPending {
+		unlock := repository.LockTaskLifecycle(id)
+		defer unlock()
 	}
 	if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
 		applog.Infof("[task-svc] UpdateStatus error: %v", err)
@@ -813,6 +892,17 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 
 	// Move to active category if not already active (e.g., task is in backlog).
 	// This must happen before submission so the UI reflects the move immediately.
+	unlock := repository.LockTaskLifecycle(id)
+	defer unlock()
+	// The task may have changed while the hook and model selection ran. Reload it
+	// under the same gate that protects cancellation's callback and queue purge.
+	task, err = s.repo.GetByID(ctx, id)
+	if err != nil || task == nil {
+		if err == nil {
+			err = fmt.Errorf("task not found: %s", id)
+		}
+		return err
+	}
 	if task.Category != models.CategoryActive {
 		if err := s.repo.UpdateCategory(ctx, id, models.CategoryActive); err != nil {
 			applog.Infof("[task-svc] RunTask error updating category: %v", err)
@@ -837,6 +927,78 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 }
 
 func (s *TaskService) CancelTask(ctx context.Context, id string) error {
+	observed, cutoff, err := s.ObserveTaskCancellation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if observed == nil {
+		return fmt.Errorf("task not found: %s", id)
+	}
+	return s.CancelTaskObserved(ctx, observed, cutoff)
+}
+
+// ObserveTaskCancellation captures task state and execution admission under
+// one gate. Splitting these reads can pair an old running task with a newer
+// follow-up's history cutoff, allowing the older Stop to cancel that turn.
+func (s *TaskService) ObserveTaskCancellation(ctx context.Context, id string) (*models.Task, int64, error) {
+	unlock := repository.LockTaskLifecycle(id)
+	defer unlock()
+	observed, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	if observed == nil {
+		return nil, 0, nil
+	}
+	cutoff, err := s.repo.TaskExecutionHistoryCutoff(ctx, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	return observed, cutoff, nil
+}
+
+// CancelTaskObserved stops only the run observed by the caller. A later
+// follow-up must not inherit an older Stop's callback, status or queue purge.
+func (s *TaskService) CancelTaskObserved(ctx context.Context, observed *models.Task, cutoff int64) error {
+	return s.CancelTaskObservedWithPending(ctx, observed, cutoff, nil)
+}
+
+// CancelTaskObservedWithPending performs any pending-input sweep only after
+// confirming that the observed run still owns this task. Queued task-thread
+// admissions share the same gate, so a new follow-up cannot enter the sweep.
+func (s *TaskService) CancelTaskObservedWithPending(ctx context.Context, observed *models.Task, cutoff int64, cancelPending func() error) error {
+	if observed == nil {
+		return fmt.Errorf("task not found")
+	}
+	id := observed.ID
+	unlock := repository.LockTaskLifecycle(id)
+	defer unlock()
+	currentCutoff, err := s.repo.TaskExecutionHistoryCutoff(ctx, id)
+	if err != nil {
+		return err
+	}
+	current, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("task not found: %s", id)
+	}
+	if currentCutoff > cutoff || current.Status != observed.Status {
+		return ErrTaskCancellationSuperseded
+	}
+	if cancelPending != nil {
+		if s.workerSvc != nil {
+			s.workerSvc.MarkCancellationRequested(id)
+		}
+		if err := cancelPending(); err != nil {
+			applog.Infof("[task-svc] CancelTask pending input sweep task=%s: %v", id, err)
+		}
+	}
+	return s.cancelTaskLocked(ctx, id)
+}
+
+func (s *TaskService) cancelTaskLocked(ctx context.Context, id string) error {
 	applog.Infof("[task-svc] CancelTask id=%s", id)
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -870,11 +1032,16 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 
 	// Move cancelled tasks to backlog so they remain visible in the kanban board
 	// and can be re-run later. Status stays "cancelled" to reflect what happened.
-	if err := s.repo.UpdateCategory(ctx, id, models.CategoryBacklog); err != nil {
+	moved, err := s.repo.MoveCancelledToBacklogIfStillCancelled(ctx, id)
+	if err != nil {
 		applog.Infof("[task-svc] CancelTask error moving to backlog: %v", err)
 		return fmt.Errorf("move cancelled task to backlog: %w", err)
 	}
-	applog.Infof("[task-svc] CancelTask moved to backlog id=%s", id)
+	if moved {
+		applog.Infof("[task-svc] CancelTask moved to backlog id=%s", id)
+	} else {
+		applog.Infof("[task-svc] CancelTask preserved reactivated task id=%s", id)
+	}
 
 	applog.Infof("[task-svc] CancelTask success id=%s", id)
 	return nil

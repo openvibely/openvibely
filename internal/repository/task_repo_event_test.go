@@ -233,3 +233,50 @@ func TestTaskRepo_UpdateCategory_PublishesEvent(t *testing.T) {
 		t.Error("timeout waiting for event - event was not published")
 	}
 }
+
+func TestTaskRepo_FinalizeExecutionCancellationPublishesStatusAndCategoryEvents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	broadcaster := events.NewBroadcaster()
+	repo := NewTaskRepo(db, broadcaster)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	sub, err := broadcaster.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer broadcaster.Unsubscribe(sub)
+
+	task := &models.Task{ProjectID: "default", Title: "Cancellation events", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "test"}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "test"}
+	if err := execRepo.Create(ctx, execution); err != nil {
+		t.Fatalf("Create execution: %v", err)
+	}
+	if err := execRepo.Complete(ctx, execution.ID, models.ExecCancelled, "", "cancelled", 0, 0); err != nil {
+		t.Fatalf("Complete execution: %v", err)
+	}
+	finalized, err := repo.FinalizeExecutionCancellation(ctx, task.ID, execution.ID)
+	if err != nil || !finalized {
+		t.Fatalf("FinalizeExecutionCancellation: finalized=%v err=%v", finalized, err)
+	}
+
+	select {
+	case event := <-sub:
+		if event.Type != events.TaskStatusChanged || event.Status != string(models.StatusCancelled) || event.OldStatus != string(models.StatusRunning) || event.Category != string(models.CategoryActive) {
+			t.Fatalf("status event = %#v", event)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for cancellation status event")
+	}
+	select {
+	case event := <-sub:
+		if event.Type != events.TaskCategoryChanged || event.Category != string(models.CategoryBacklog) || event.OldCategory != string(models.CategoryActive) {
+			t.Fatalf("category event = %#v", event)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout waiting for cancellation category event")
+	}
+}

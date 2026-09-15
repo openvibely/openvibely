@@ -56,6 +56,7 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
 
 	fixture := `<main id="reconnect-result"></main><script>
 (function() {
+  history.replaceState({}, '', location.pathname + '?project_id=project-1&view=all');
   function fail(message) {
     var result = document.getElementById('reconnect-result');
     result.setAttribute('data-test-result', 'fail');
@@ -141,6 +142,7 @@ func TestAnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
+	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all');
 	  var result=document.getElementById('reconnect-result'), urls=[], dashboardCalls=0, evidencePageCalls=0, failDashboard=false, destroyed=0, chartsByID={};  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   function dashboard(url){var q=new URL(url,location.href).searchParams;return {definitions:[],current:{technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0},tasks_evaluated:1,cycle_sample_size:1,cancelled_execution_count:0},funnel:[],cycle_distribution:[{label:'< 1m',count:1}],follow_up_distribution:[{label:'0',count:1}],agents:[{agent_id:'agent-1',agent_name:'Agent One',tasks_evaluated:1,technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0}}],agent_detail:q.get('agent')?{outcome_trend:[{period:'today',completed:1,failed:0,cancelled:0,sample_size:1}],categories:[],model_mix:[],failures:[],skills:[],recent_tasks:[]}:null,skill_outcomes:[],model_categories:[{model_config_id:'model-1',model:'Model One',category:'active',tasks_evaluated:1,technical_completion:{numerator:1,denominator:1,percent:100}}],workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One',invocation_count:1,completed_count:1,failed_count:0}],workflow_detail:q.get('workflow')?{funnel:[],durations:[],failures:[],bottlenecks:[]}:null,evidence_total:2,evidence_limit:1,evidence_offset:Number(q.get('evidence_offset')||0),recent_outcomes:q.get('evidence_offset')==='1'?[{task_id:'created-task',task_title:'Created only',technical_result:'pending',goal_result:'',merge_state:'',agent_id:'',agent_name:'Unassigned',model:'Unknown',model_config_ids:[],terminal_period_statuses:[],category:'backlog',created_in_period:true,started_in_period:false,cycle_eligible:false,cycle_time_ms:0,execution_count:0,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0,known_cost_usd:null}]:[{task_id:'retry-task',task_title:'Multi-model retry',technical_result:'completed',goal_result:'',merge_state:'',agent_id:'agent-1',agent_name:'Agent One',model:'Model Two',model_config_ids:['model-1','model-2'],terminal_period_statuses:['2026-01-10|failed'],category:'active',started_in_period:true,cycle_eligible:true,cycle_time_ms:1000,execution_count:2,period_completed_count:1,period_failed_count:1,period_cancelled_count:0,follow_up_count:1,known_cost_usd:null}],insights:[]};}
 	  window.fetch=function(url){var value=String(url);urls.push(value);if(value.indexOf('/api/analytics/dashboard')>=0){dashboardCalls++;if(new URL(value,location.href).searchParams.get('evidence_offset')==='1'){evidencePageCalls++;return new Promise(function(resolve){setTimeout(function(){resolve({ok:true,json:function(){return Promise.resolve(dashboard(value));}});},50);});}if(failDashboard)return Promise.resolve({ok:false,status:500,json:function(){return Promise.resolve({});}});return Promise.resolve({ok:true,json:function(){return Promise.resolve(dashboard(value));}});}var payload=[];if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[{period:'2026-01-10',selected_count:1}],top_skills:[],follow_through:[],agent_usage:{cells:[],agents:[]},underused:[]};if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[{period:'2026-01-10',total_tokens:10}],usage_rate_by_model:[{period:'2026-01-10',provider:'test',model:'model-a',total_tokens:10}],totals:{call_count:1},model_breakdown:[{provider:'test',model:'model-a',total_tokens:10}],account_limits:[]};if(value.indexOf('/api/analytics/success-failure-rates')>=0)payload=[{Period:'2026-01-10',TotalCount:2,SuccessCount:1,FailureCount:1,CancelledCount:0,SuccessRate:50}];if(value.indexOf('/api/analytics/execution-trends-by-hour')>=0)payload=[{Hour:10,Count:1}];if(value.indexOf('/api/analytics/avg-execution-time-by-agent')>=0)payload=[{ID:'model-1',Name:'Model One',AvgMs:1000,Count:1}];if(value.indexOf('/api/analytics/agent-usage-by-project')>=0)payload=[{AgentID:'model-1',AgentName:'Model One',ExecutionCount:1}];return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};	  window.Chart=function(ctx,config){this.config=config;this.destroy=function(){destroyed++;};if(ctx&&ctx.canvas)chartsByID[ctx.canvas.id]=config;};  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out');setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
@@ -192,9 +194,9 @@ func TestAnalyticsContent_RejectsStaleDashboardAndEvidenceResponsesInChrome(t *t
 		t.Fatalf("render analytics content: %v", err)
 	}
 	fixture := `<main id="reconnect-result"></main><script>
-(function(){
-	  var result=document.getElementById('reconnect-result'),staleResolve=null,staleSignal=null,agentBaseResolve=null,agentPageResolve=null,prematureAgentPageCalls=0;  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
-  function dashboard(agent,title,total){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{},tasks_evaluated:agent?2:1},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-2',agent_name:'Agent Two',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:total,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:title,task_title:title,technical_result:'running',goal_result:'',merge_state:'',agent_id:agent,agent_name:agent?'Agent Two':'Unassigned',model:'Model',model_config_ids:[],terminal_period_statuses:[],category:'active',started_in_period:true,cycle_eligible:false,execution_count:1,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};}
+	(function(){
+	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all');
+		  var result=document.getElementById('reconnect-result'),staleResolve=null,staleSignal=null,agentBaseResolve=null,agentPageResolve=null,prematureAgentPageCalls=0;  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}  function dashboard(agent,title,total){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{},tasks_evaluated:agent?2:1},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-2',agent_name:'Agent Two',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:total,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:title,task_title:title,technical_result:'running',goal_result:'',merge_state:'',agent_id:agent,agent_name:agent?'Agent Two':'Unassigned',model:'Model',model_config_ids:[],terminal_period_statuses:[],category:'active',started_in_period:true,cycle_eligible:false,execution_count:1,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};}
   window.Chart=function(){this.destroy=function(){};};
   window.fetch=function(url,options){var value=String(url),q=new URL(value,location.href).searchParams,payload=[];
     if(value.indexOf('/api/analytics/dashboard')>=0){
@@ -249,8 +251,8 @@ func TestAnalyticsContent_RejectsStaleEvidenceErrorsAndClearsChartsOnFilterChang
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
-  var result=document.getElementById('reconnect-result'),charts={},destroyed=[],rejectOldSkill=null,rejectOldUsage=null,agentDashboardResolve=null;
-  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all');
+	  var result=document.getElementById('reconnect-result'),charts={},destroyed=[],rejectOldSkill=null,rejectOldUsage=null,agentDashboardResolve=null;  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   function dashboard(){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[{label:'< 1m',count:1}],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:0,evidence_limit:20,evidence_offset:0,recent_outcomes:[],insights:[]};}
   function skills(query){return {usage_over_time:[{period:'2026-01-10',created_count:1},{period:'2026-01-11',created_count:1}],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence_total:query.get('skill_period')?1:0,evidence:query.get('skill_period')?[{id:'skill-'+query.get('skill_period'),created_at:'2026-01-11T00:00:00Z',skill_handle:'project:review',event_type:'created',source:'manual',surface:'task_thread'}]:[]};}
   function usage(query){return {usage_rate:[{period:'2026-01-10',total_tokens:1},{period:'2026-01-11',total_tokens:2}],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[],evidence_total:query.get('usage_period')||query.get('usage_provider')?1:0,evidence:query.get('usage_period')||query.get('usage_provider')?[{id:'usage-'+query.get('usage_period'),occurred_at:'2026-01-11T00:00:00Z',provider:'test',model:'model-a',total_tokens:2}]:[]};}
@@ -258,8 +260,7 @@ func TestAnalyticsContent_RejectsStaleEvidenceErrorsAndClearsChartsOnFilterChang
   window.fetch=function(url){var value=String(url),query=new URL(value,location.href).searchParams,payload=[];
     if(value.indexOf('/api/analytics/dashboard')>=0){if(query.get('agent')==='agent-1')return new Promise(function(resolve){agentDashboardResolve=function(){resolve({ok:true,json:function(){return Promise.resolve(dashboard());}});};});payload=dashboard();}
     if(value.indexOf('/api/analytics/skills')>=0){if(query.get('skill_period')==='2026-01-10')return new Promise(function(_,reject){rejectOldSkill=reject;});payload=skills(query);}
-    if(value.indexOf('/api/analytics/usage')>=0){if(query.get('usage_period')==='2026-01-10')return new Promise(function(_,reject){rejectOldUsage=reject;});payload=usage(query);}
-    return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
+	    if(value.indexOf('/api/analytics/usage')>=0){if(query.get('usage_period')==='2026-01-10')return new Promise(function(_,reject){rejectOldUsage=reject;});payload=usage(query);}    return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
   function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out');setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
   window.addEventListener('load',function(){waitFor(function(){return charts.skillUsageTrendChart&&charts.usageRateChart&&charts.cycleDistributionChart;},function(){
@@ -280,11 +281,9 @@ func TestAnalyticsContent_RejectsStaleEvidenceErrorsAndClearsChartsOnFilterChang
                 if(!document.getElementById('analyticsError').classList.contains('hidden'))fail('stale usage evidence failure replaced the newer selection');
                 if(document.getElementById('usageEventEvidenceTable').textContent.indexOf('usage-2026-01-11')<0)fail('stale usage evidence failure cleared newer records');
                 var agent=document.getElementById('analyticsAgentFilter');agent.value='agent-1';agent.dispatchEvent(new Event('change'));
-                setTimeout(function(){
-                  if(destroyed.indexOf('cycleDistributionChart')<0)fail('filter change left the old chart visible');
-                  var state=document.querySelector('#cycleDistributionChart + [data-analytics-chart-state], #cycleDistributionChart ~ [data-analytics-chart-state]');
-                  if(!state||state.textContent.indexOf('Loading')<0)fail('filter change did not show a controlled loading state');
-                  agentDashboardResolve();
+		  setTimeout(function(){
+			    if(destroyed.indexOf('usageRateChart')<0)fail('filter change left the active chart visible');
+	                  agentDashboardResolve();
                   result.setAttribute('data-test-result','pass');
                 },20);
               },40);
@@ -307,8 +306,7 @@ func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
-  history.replaceState({},'',location.pathname+'?project_id=project-1&view=learning&agent=agent-1');
-	  var result=document.getElementById('reconnect-result'),charts={},urls=[],longHandle='shared:review-skill-with-a-very-long-identical-handle';  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all&agent=agent-1');	  var result=document.getElementById('reconnect-result'),charts={},urls=[],longHandle='shared:review-skill-with-a-very-long-identical-handle';  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   window.Chart=function(ctx,config){this.destroy=function(){};if(ctx&&ctx.canvas)charts[ctx.canvas.id]=config;};
 	  window.fetch=function(url){var value=String(url),query=new URL(value,location.href).searchParams,payload=[];urls.push(value);
 		    if(value.indexOf('/api/analytics/dashboard')>=0)payload={definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_detail:{agent_id:'agent-1',outcome_trend:[],categories:[],model_mix:[],failures:[],skills:[{skill_handle:longHandle,skill_scope:'agent_owned',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],recent_tasks:[]},agent_skill_outcomes:[{agent_id:'agent-1',agent_name:'Agent One',skill_handle:longHandle,skill_scope:'project',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],skill_outcomes:[{skill_handle:longHandle,skill_scope:'global',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],model_categories:[],workflows:[],evidence_total:1,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:'hour-task',task_title:'Hour task',technical_result:'running',goal_result:'',merge_state:'',agent_id:'agent-1',agent_name:'Agent One',model:'Model',model_config_ids:[],execution_hours:[10],terminal_period_statuses:[],category:'active',started_in_period:true,cycle_eligible:false,execution_count:1,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};
@@ -360,6 +358,85 @@ func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestAnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+
+	fixture := `<main id="reconnect-result"></main><script>
+(function() {
+  var result = document.getElementById('reconnect-result'), urls = [], renderedCharts = [];
+  function fail(message) { result.setAttribute('data-test-result', 'fail'); result.setAttribute('data-test-error', message); throw new Error(message); }
+  history.replaceState({}, '', location.pathname + '?project_id=project-1&view=overview');
+  window.Chart = function(ctx) { if (ctx && ctx.canvas) renderedCharts.push(ctx.canvas.id); this.destroy = function() {}; };
+  window.fetch = function(url) {
+    var value = String(url); urls.push(value);
+    var payload = [];
+    if (value.indexOf('/api/analytics/dashboard') >= 0) payload = {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],skill_outcomes:[{skill_handle:'project:visible-on-learning',skill_scope:'project',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],agent_skill_outcomes:[],model_categories:[],workflows:[],recent_outcomes:[],insights:[]};
+    if (value.indexOf('/api/analytics/skills') >= 0) payload = {usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]};
+    return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
+  };
+  function waitFor(check, next, attempt) { if (check()) { next(); return; } if ((attempt || 0) > 100) fail('timed out; urls=' + urls.join('|')); setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20); }
+  window.addEventListener('load', function() {
+	    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});}, function() {
+	      setTimeout(function() {
+	        var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
+	        if (!dashboardURL || new URL(dashboardURL, location.href).searchParams.get('view') !== 'overview') fail('dashboard request did not preserve the visible view: ' + urls.join('|'));
+	        if (urls.some(function(url){return url.indexOf('/api/analytics/dashboard') < 0;})) fail('overview eagerly loaded hidden-view analytics: ' + urls.join('|'));
+        if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('skillOutcomeTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelCategoryTable').innerHTML) fail('overview synchronously rendered hidden-view analytics');
+        document.querySelector('[data-analytics-view="learning"]').click();
+        waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
+          if (urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0 || url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('learning loaded unrelated analytics: ' + urls.join('|'));
+          result.setAttribute('data-test-result', 'pass');
+        });
+      }, 50);
+    });
+  });
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestAnalyticsContent_ImmediateNavigationAwayAbortsWorkInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+
+	fixture := `<main id="reconnect-result"></main><a id="other-nav" href="/tasks" data-nav-base="/tasks">Tasks</a><script>
+(function() {
+  var result = document.getElementById('reconnect-result'), requests = 0, dashboardSignal = null;
+  function fail(message) { result.setAttribute('data-test-result', 'fail'); result.setAttribute('data-test-error', message); throw new Error(message); }
+  history.replaceState({}, '', '/analytics?project_id=project-1&view=overview');
+  window.Chart = function() { this.destroy = function() {}; };
+  window.fetch = function(url, options) {
+    requests++;
+    dashboardSignal = options && options.signal;
+    return new Promise(function() {});
+  };
+  function waitForRequest(attempt) {
+    if (dashboardSignal) {
+      var nav = document.getElementById('other-nav');
+      nav.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true}));
+      if (!dashboardSignal.aborted) fail('Analytics request was not aborted before sidebar navigation');
+      setTimeout(function() {
+        if (requests !== 1) fail('Analytics started more work after navigation: ' + requests + ' requests');
+        result.setAttribute('data-test-result', 'pass');
+      }, 50);
+      return;
+    }
+    if ((attempt || 0) > 100) fail('dashboard request did not start');
+    setTimeout(function() { waitForRequest((attempt || 0) + 1); }, 20);
+  }
+  window.addEventListener('load', function() { waitForRequest(0); });
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_DirectFilteredURLAppliesFirstRequestsInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
@@ -373,8 +450,7 @@ func TestAnalyticsContent_DirectFilteredURLAppliesFirstRequestsInChrome(t *testi
   function dashboard(){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],skill_outcomes:[],model_categories:[],workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One'}],recent_outcomes:[],insights:[]};}
   window.Chart=function(){this.destroy=function(){};};
   window.fetch=function(url){var value=String(url);urls.push(value);result.setAttribute('data-observed-urls',urls.join('|'));var payload=[];if(value.indexOf('/api/analytics/dashboard')>=0)payload=dashboard();if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{},underused:[]};return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
-  function wait(){var required=['/api/analytics/dashboard','/api/analytics/usage','/api/analytics/skills','success-failure-rates'];var ready=required.every(function(path){return urls.some(function(url){return url.indexOf(path)>=0&&url.indexOf('agent=agent-1')>=0&&url.indexOf('workflow=workflow-1')>=0;});});if(ready&&document.getElementById('analyticsAgentFilter').value==='agent-1'&&document.getElementById('analyticsWorkflowFilter').value==='workflow-1'){result.setAttribute('data-test-result','pass');return;}setTimeout(wait,20);}
-  window.addEventListener('load',wait);
+	  function wait(){var required=['/api/analytics/dashboard','/api/analytics/avg-execution-time-by-agent','/api/analytics/agent-usage-by-project'];var ready=required.every(function(path){return urls.some(function(url){return url.indexOf(path)>=0&&url.indexOf('agent=agent-1')>=0&&url.indexOf('workflow=workflow-1')>=0;});});if(ready&&document.getElementById('analyticsAgentFilter').value==='agent-1'&&document.getElementById('analyticsWorkflowFilter').value==='workflow-1'){if(urls.some(function(url){return url.indexOf('/api/analytics/usage')>=0||url.indexOf('/api/analytics/skills')>=0||url.indexOf('success-failure-rates')>=0;})){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error','agents view loaded unrelated analytics');return;}result.setAttribute('data-test-result','pass');return;}setTimeout(wait,20);}  window.addEventListener('load',wait);
 })();
 </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)

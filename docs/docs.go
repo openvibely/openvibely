@@ -237,6 +237,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Active Analytics view: overview, outcomes, agents, learning, usage, workflows, or all",
+                        "name": "view",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Reusable Agent definition ID or __unassigned__",
                         "name": "agent",
                         "in": "query"
@@ -397,7 +403,7 @@ const docTemplate = `{
         },
         "/api/analytics/most-frequent-tasks": {
             "get": {
-                "description": "Returns tasks ordered by execution count.",
+                "description": "Returns tasks ordered by execution count descending, then task ID ascending for deterministic ties. Omitted limit defaults to 10; limit=0 returns all matching tasks.",
                 "produces": [
                     "application/json"
                 ],
@@ -415,7 +421,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "default": 10,
-                        "description": "Maximum number of tasks to return",
+                        "description": "Maximum number of tasks to return; 0 returns all matching tasks",
                         "name": "limit",
                         "in": "query"
                     }
@@ -1208,6 +1214,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/tasks/reference-catalog": {
+            "get": {
+                "description": "Returns the complete compact task projection used to resolve terminal task references. Chat, non-visible scheduled, and nested swarm-child tasks are omitted because they are not top-level Kanban cards.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tasks"
+                ],
+                "summary": "Get project task reference catalog",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Complete project task reference catalog",
+                        "schema": {
+                            "$ref": "#/definitions/handler.TaskReferenceCatalogResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Project ID is required",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/tasks/status-counts": {
             "get": {
                 "description": "Returns only the active-category and queued-status predicates needed by terminal status.",
@@ -1818,6 +1865,49 @@ const docTemplate = `{
                 },
                 "version": {
                     "type": "string"
+                }
+            }
+        },
+        "handler.TaskReference": {
+            "type": "object",
+            "properties": {
+                "badges": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "category": {
+                    "type": "string"
+                },
+                "display_order": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "prompt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "handler.TaskReferenceCatalogResponse": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handler.TaskReference"
+                    }
                 }
             }
         },

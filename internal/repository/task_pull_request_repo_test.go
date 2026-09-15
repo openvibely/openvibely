@@ -49,3 +49,56 @@ func TestTaskPullRequestRepoGetByIssueNumber(t *testing.T) {
 		t.Fatalf("unexpected issue URL: %q", got.IssueURL)
 	}
 }
+
+func TestTaskPullRequestRepoSetNeedsRepublish(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name, description, repo_path, repo_url) VALUES ('proj-pr-publish', 'PR Publish Project', '', '/tmp/repo', 'https://github.com/openvibely/openvibely')`); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO tasks (id, project_id, title, category, status) VALUES ('task-pr-publish', 'proj-pr-publish', 'Task', 'active', 'pending')`); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	record := &models.TaskPullRequest{TaskID: "task-pr-publish", PRNumber: 456, PRURL: "https://github.com/openvibely/openvibely/pull/456", PRState: "open"}
+	if err := repo.Upsert(ctx, record); err != nil {
+		t.Fatalf("upsert task pull request: %v", err)
+	}
+	initialUpdatedAt := record.UpdatedAt
+	if err := repo.SetNeedsRepublish(ctx, record.TaskID, true); err != nil {
+		t.Fatalf("set publication requirement: %v", err)
+	}
+	got, err := repo.GetByTaskID(ctx, record.TaskID)
+	if err != nil {
+		t.Fatalf("get task pull request: %v", err)
+	}
+	if got == nil || !got.NeedsRepublish {
+		t.Fatalf("expected durable publication requirement, got %#v", got)
+	}
+	if !got.UpdatedAt.Equal(initialUpdatedAt) {
+		t.Fatalf("publication marker changed external-state refresh timestamp: got %s want %s", got.UpdatedAt, initialUpdatedAt)
+	}
+
+	// A stale writer must not erase a publication requirement it did not own.
+	if err := repo.Upsert(ctx, record); err != nil {
+		t.Fatalf("upsert stale task pull request: %v", err)
+	}
+	got, err = repo.GetByTaskID(ctx, record.TaskID)
+	if err != nil {
+		t.Fatalf("get task pull request after stale upsert: %v", err)
+	}
+	if got == nil || !got.NeedsRepublish {
+		t.Fatalf("stale upsert erased publication requirement: %#v", got)
+	}
+	if err := repo.SetNeedsRepublish(ctx, record.TaskID, false); err != nil {
+		t.Fatalf("clear publication requirement: %v", err)
+	}
+	got, err = repo.GetByTaskID(ctx, record.TaskID)
+	if err != nil {
+		t.Fatalf("get task pull request after clear: %v", err)
+	}
+	if got == nil || got.NeedsRepublish {
+		t.Fatalf("expected explicit publication clear, got %#v", got)
+	}
+}

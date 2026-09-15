@@ -12,6 +12,8 @@ import (
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
+const threadInputMutationStatusHeader = "X-OpenVibely-Thread-Input-Status"
+
 func (h *Handler) CancelThreadInput(c echo.Context) error {
 	inputID := c.Param("inputId")
 	if inputID == "" {
@@ -27,10 +29,12 @@ func (h *Handler) CancelThreadInput(c echo.Context) error {
 			// row currently being consumed by a provider call.  In all cases it is no longer
 			// user-removable via this action.  Return the hidden-row fragment so HTMX removes
 			// any stale pending row from the composer UI instead of leaving it stuck.
+			c.Response().Header().Set(threadInputMutationStatusHeader, "not_pending")
 			return render(c, http.StatusOK, components.ChatInputCancelledRow(inputID))
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to cancel queued input")
 	}
+	c.Response().Header().Set(threadInputMutationStatusHeader, "cancelled")
 	h.publishThreadInputCancelledEvent(cancelled)
 	return render(c, http.StatusOK, components.ChatInputCancelledRow(inputID))
 }

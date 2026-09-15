@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"net/url"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
@@ -1477,12 +1478,41 @@ templ ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool,
 		data-composer-running={ boolStr(isRunning) }
 		data-active-turn-id={ activeTurnID }
 		if isRunning && stopEndpoint != "" {
-			data-composer-stop-endpoint={ stopEndpoint }
+			data-composer-stop-endpoint={ stopEndpointForTurn(stopEndpoint, activeTurnID) }
 		}
 		hx-swap-oob="outerHTML"
 	>
-		@chatComposerActionButton(stopEndpoint, isRunning)
+		@chatComposerActionButton(stopEndpointForTurn(stopEndpoint, activeTurnID), isRunning)
 	</div>
+}
+
+// A delayed Stop must stay bound to the turn shown when the button was rendered.
+func stopEndpointForTurn(endpoint, turnID string) string {
+	if endpoint == "" || turnID == "" {
+		return endpoint
+	}
+	separator := "?"
+	if strings.Contains(endpoint, "?") {
+		separator = "&"
+	}
+	return endpoint + separator + "expected_turn_id=" + url.QueryEscape(turnID)
+}
+
+// Swarm parents have planner executions on child tasks, so bind their Stop
+// button to the parent's generation instead of an execution ID.
+func SwarmParentStopEndpoint(task *models.Task, endpoint string) string {
+	if endpoint == "" || task == nil || task.SwarmRole != models.SwarmRoleParent {
+		return endpoint
+	}
+	cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+	if err != nil {
+		return endpoint
+	}
+	separator := "?"
+	if strings.Contains(endpoint, "?") {
+		separator = "&"
+	}
+	return fmt.Sprintf("%s%sexpected_generation=%d&expected_stop_revision=%d", endpoint, separator, cfg.Generation, cfg.StopRevision)
 }
 
 templ chatComposerActionButton(stopEndpoint string, isRunning bool) {
@@ -1650,10 +1680,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						data-composer-running={ boolStr(config.IsRunning) }
 						data-active-turn-id={ config.ActiveTurnID }
 						if config.IsRunning && config.StopEndpoint != "" {
-							data-composer-stop-endpoint={ config.StopEndpoint }
+							data-composer-stop-endpoint={ stopEndpointForTurn(config.StopEndpoint, config.ActiveTurnID) }
 						}
 					>
-						@chatComposerActionButton(config.StopEndpoint, config.IsRunning)
+						@chatComposerActionButton(stopEndpointForTurn(config.StopEndpoint, config.ActiveTurnID), config.IsRunning)
 					</div>
 				</div>
 			</div>

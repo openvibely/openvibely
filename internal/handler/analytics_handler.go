@@ -253,6 +253,7 @@ func usageEvidenceRequested(filter repository.UsageFilter) bool {
 // @Param date_to query string false "Optional exclusive end datetime"
 // @Param compare query boolean false "Compare with the immediately preceding equivalent period"
 // @Param group_by query string false "Trend grouping: day, week, or month" default(day)
+// @Param view query string false "Active Analytics view: overview, outcomes, agents, learning, usage, workflows, or all"
 // @Param agent query string false "Reusable Agent definition ID or __unassigned__"
 // @Param workflow query string false "Automation workflow ID"
 // @Param evidence_limit query int false "Evidence rows per page, 1-100" default(20)
@@ -280,6 +281,7 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 	}
 	dashboard, err := h.execRepo.GetAnalyticsDashboard(c.Request().Context(), repository.AnalyticsDashboardFilter{
 		ProjectID:            projectID,
+		View:                 strings.TrimSpace(c.QueryParam("view")),
 		DateFrom:             usageFilter.DateFrom,
 		DateTo:               usageFilter.DateTo,
 		Compare:              c.QueryParam("compare") == "1" || c.QueryParam("compare") == "true",
@@ -443,11 +445,11 @@ func (h *Handler) GetAgentUsageByProject(c echo.Context) error {
 
 // GetMostFrequentTasks returns the most frequently executed tasks
 // @Summary Get most frequent tasks
-// @Description Returns tasks ordered by execution count.
+// @Description Returns tasks ordered by execution count descending, then task ID ascending for deterministic ties. Omitted limit defaults to 10; limit=0 returns all matching tasks.
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"
-// @Param limit query int false "Maximum number of tasks to return" default(10)
+// @Param limit query int false "Maximum number of tasks to return; 0 returns all matching tasks" default(10)
 // @Success 200 {array} repository.TaskFrequency "Most frequently executed tasks"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/analytics/most-frequent-tasks [get]

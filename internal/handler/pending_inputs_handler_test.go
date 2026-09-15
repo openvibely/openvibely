@@ -179,6 +179,21 @@ func TestTaskThreadPendingInputs_NoPendingInputs(t *testing.T) {
 	}
 }
 
+func TestTaskThreadPendingInputs_QueryFailureIsServerError(t *testing.T) {
+	tc := NewTestContext(t)
+	p := tc.CreateProject().Build()
+	task := tc.CreateTask(p.ID).Build()
+	if err := tc.db.Close(); err != nil {
+		t.Fatalf("close test database: %v", err)
+	}
+
+	rec := tc.HTTP().Get("/tasks/" + task.ID + "/thread/pending-inputs").Execute()
+	tc.Assert(rec).StatusCode(http.StatusInternalServerError)
+	if strings.Contains(rec.Body.String(), `id="pending-thread-inputs"`) {
+		t.Fatalf("query failure returned an empty pending-input fragment: %q", rec.Body.String())
+	}
+}
+
 func TestTaskThreadPendingInputs_ExcludesPreparedInFlightSteering(t *testing.T) {
 	// Regression: prepared/in-flight steering must not appear in the fragment.
 	tc := NewTestContext(t)

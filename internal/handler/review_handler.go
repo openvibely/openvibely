@@ -204,7 +204,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	agentDef := h.resolveTaskAgentDefinitionForTask(c.Request().Context(), taskID, nil)
 	systemContext := combineContexts(buildThreadSystemContext(task.Title, len(priorHistory) > 0, ""), h.taskGoalContext(c.Request().Context(), task.ID, agentDef))
 	personalityContext := h.getPersonalityContext(c.Request().Context(), task.ProjectID)
-	workDir, worktreeContext, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
+	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(c.Request().Context(), task)
 	if workDirErr != nil {
 		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, workDirErr.Error(), 0)
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: taskID, IsTaskFollowup: true}, exec.ID)
@@ -214,16 +214,17 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	}
 
 	if err := h.startStreamingResponse(streamingResponseParams{
-		ExecID:          exec.ID,
-		TaskID:          taskID,
-		Message:         reviewMessage,
-		Agent:           *agent,
-		AgentDefinition: agentDef,
-		ChatHistory:     priorHistory,
-		ProjectID:       task.ProjectID,
-		SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:         workDir,
-		IsTaskFollowup:  true,
+		ExecID:                          exec.ID,
+		TaskID:                          taskID,
+		Message:                         reviewMessage,
+		Agent:                           *agent,
+		AgentDefinition:                 agentDef,
+		ChatHistory:                     priorHistory,
+		ProjectID:                       task.ProjectID,
+		SystemContext:                   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:                         workDir,
+		IsTaskFollowup:                  true,
+		RepublishOpenPRAfterStartupSync: republishOpenPR,
 	}); err != nil {
 		c.Response().Header().Set("Retry-After", "30")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())

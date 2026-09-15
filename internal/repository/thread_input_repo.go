@@ -92,6 +92,10 @@ func scanThreadInput(scanner interface {
 }
 
 func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.ThreadInput) error {
+	if input.TaskID != "" {
+		unlock := LockTaskLifecycle(input.TaskID)
+		defer unlock()
+	}
 	if input.InputMode == "" {
 		input.InputMode = models.ThreadInputModeQueued
 	}
@@ -107,6 +111,10 @@ func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.Thread
 // server-derived causal bindings in one transaction. The existing thread_inputs
 // queue remains authoritative for admission, cancellation, and promotion.
 func (r *ThreadInputRepo) CreateQueuedWithAutomationContext(ctx context.Context, input *models.ThreadInput, automationContext models.AutomationContext, bindingKey string) error {
+	if input.TaskID != "" {
+		unlock := LockTaskLifecycle(input.TaskID)
+		defer unlock()
+	}
 	if automationContext.ProjectID == "" || automationContext.ProjectID != input.ProjectID || len(automationContext.Bindings) == 0 {
 		return errors.New("queued automation context does not match input project")
 	}
@@ -733,6 +741,11 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 	if exec == nil {
 		return fmt.Errorf("execution is required")
 	}
+	unlockParent, err := lockSwarmParentFollowup(ctx, r.db, exec.TaskID, exec.IsFollowup)
+	if err != nil {
+		return err
+	}
+	defer unlockParent()
 	return withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		promoted, err := scanThreadInput(dbexec.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
@@ -821,6 +834,11 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
 					RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
 			return fmt.Errorf("creating promoted task execution: %w", err)
+		}
+		if exec.IsFollowup {
+			if err := bumpSwarmParentStopRevision(ctx, dbexec, exec.TaskID); err != nil {
+				return err
+			}
 		}
 		bindingRows, err := dbexec.QueryContext(ctx, `SELECT automation_id, version_id, node_id,
 				COALESCE(invocation_id, ''), COALESCE(work_item_id, ''), binding_key
