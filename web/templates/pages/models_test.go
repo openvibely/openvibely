@@ -1034,32 +1034,116 @@ func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	}
 }
 
-func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
-	agents := []models.LLMConfig{
+func TestModelsContent_OAuthAccountDropdownShowsOnlyProviderAccountLabel(t *testing.T) {
+	connections := []models.OAuthConnection{
 		{
-			ID:         "openai-oauth",
-			Name:       "OpenAI OAuth",
-			Provider:   models.ProviderOpenAI,
-			AuthMethod: models.AuthMethodOAuth,
-			Model:      "gpt-5.4",
+			ID:           "anthropic-connection",
+			Name:         "Claude Fable 5",
+			Provider:     models.ProviderAnthropic,
+			NeedsReauth:  true,
+			LinkedModels: 4,
+		},
+		{
+			ID:           "openai-connection",
+			Name:         "GPT Codex",
+			Provider:     models.ProviderOpenAI,
+			AccessToken:  "present",
+			LinkedModels: 3,
 		},
 	}
 
 	var buf bytes.Buffer
-	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
+	if err := modelsContent(nil, nil, connections, nil, false, false, CardListState{}).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+	selectStart := strings.Index(out, `id="model_oauth_connection_id"`)
+	if selectStart < 0 {
+		t.Fatal("expected OAuth Account dropdown")
+	}
+	selectEnd := strings.Index(out[selectStart:], `</select>`)
+	if selectEnd < 0 {
+		t.Fatal("expected OAuth Account dropdown closing tag")
+	}
+	dropdown := out[selectStart : selectStart+selectEnd]
+	for _, want := range []string{
+		`<option value="anthropic-connection" data-provider="anthropic" data-status="Reconnect required">Anthropic account</option>`,
+		`<option value="openai-connection" data-provider="openai" data-status="Connected">OpenAI account</option>`,
+	} {
+		if !strings.Contains(dropdown, want) {
+			t.Errorf("expected plain account option %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Claude Fable 5", "GPT Codex", "4 models", "3 models", "Anthropic account ·", "OpenAI account ·"} {
+		if strings.Contains(dropdown, unwanted) {
+			t.Errorf("OAuth Account dropdown exposed unwanted option text %q", unwanted)
+		}
+	}
+}
+
+func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) {
+	agents := []models.LLMConfig{
+		{
+			ID:                  "openai-oauth",
+			Name:                "OpenAI OAuth",
+			Provider:            models.ProviderOpenAI,
+			AuthMethod:          models.AuthMethodOAuth,
+			Model:               "gpt-5.4",
+			OAuthConnectionID:   "openai-connection",
+			OAuthConnectionName: "OpenAI account",
+		},
+		{
+			ID:                  "healthy-oauth",
+			Name:                "Healthy OAuth",
+			Provider:            models.ProviderOpenAI,
+			AuthMethod:          models.AuthMethodOAuth,
+			Model:               "gpt-5.4",
+			OAuthConnectionID:   "healthy-connection",
+			OAuthConnectionName: "OpenAI account",
+			OAuthAccessToken:    "present",
+			OAuthExpiresAt:      time.Now().Add(time.Hour).UnixMilli(),
+		},
+	}
+	connections := []models.OAuthConnection{{
+		ID:          "openai-connection",
+		Name:        "OpenAI account",
+		Provider:    models.ProviderOpenAI,
+		AccessToken: "present",
+	}}
+
+	var buf bytes.Buffer
+	err := modelsContent(agents, agents, connections, nil, false, false, CardListState{}).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 
 	out := buf.String()
 	if !strings.Contains(out, "return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)") {
-		t.Fatal("expected OAuth links to use the runtime-specific launch helper")
+		t.Fatal("expected editor OAuth action to use the runtime-specific launch helper")
 	}
-	if !strings.Contains(out, "data-oauth-path=\"/models/openai-oauth/oauth/initiate\"") {
-		t.Fatal("expected OAuth links to expose model-specific oauth path via data attribute")
+	if !strings.Contains(out, `data-oauth-path="/models/openai-oauth/oauth/initiate"`) || !strings.Contains(out, `href="/models/openai-oauth/oauth/initiate"`) {
+		t.Fatal("expected disconnected OAuth model cards to expose the OAuth connection action")
+	}
+	if !strings.Contains(out, `>Connect OAuth</a>`) {
+		t.Fatal("expected disconnected OAuth model cards to label the action Connect OAuth")
+	}
+	if strings.Contains(out, `data-oauth-path="/models/healthy-oauth/oauth/initiate"`) || strings.Contains(out, `href="/models/healthy-oauth/oauth/initiate"`) {
+		t.Fatal("expected healthy OAuth model cards not to expose a reconnect action")
+	}
+	if strings.Contains(out, "Disconnect account") || strings.Contains(out, "Reconnect account") {
+		t.Fatal("expected model cards not to expose connection-wide account controls")
+	}
+	if !strings.Contains(out, `'/models/' + encodeURIComponent(id) + '/oauth/initiate'`) {
+		t.Fatal("expected the editor to derive its OAuth path from the loaded model")
+	}
+	if !strings.Contains(out, "select.value !== persistedConnectionID") || !strings.Contains(out, "Save this model before connecting the selected account") {
+		t.Fatal("expected changed account selections to require save before OAuth initiation")
+	}
+	if !strings.Contains(out, "var customOAuth = provider === 'openai_compatible'") {
+		t.Fatal("expected custom OpenAI-compatible OAuth to retain an editor-owned connect action")
 	}
 	if !strings.Contains(out, "data-oauth-external=\"false\"") {
-		t.Fatal("expected server-rendered OAuth links to use normal browser navigation")
+		t.Fatal("expected server-rendered editor OAuth action to use normal browser navigation")
 	}
 	if strings.Contains(out, "getAttribute('data-runtime')") {
 		t.Fatal("expected OAuth launch mode not to depend on client-side runtime detection")
@@ -1075,11 +1159,11 @@ func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 	}
 
 	buf.Reset()
-	if err := ModelsContent(agents, nil, true).Render(context.Background(), &buf); err != nil {
+	if err := modelsContent(agents, agents, connections, nil, true, false, CardListState{}).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render desktop models content: %v", err)
 	}
 	if !strings.Contains(buf.String(), "data-oauth-external=\"true\"") {
-		t.Fatal("expected desktop OAuth links to request external browser launch")
+		t.Fatal("expected desktop editor OAuth action to request external browser launch")
 	}
 }
 

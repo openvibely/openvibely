@@ -895,8 +895,19 @@ func TestSyncWorktreeFromMainAtStart_CleanWorktreeAutoMergeSuccess(t *testing.T)
 		t.Fatalf("git commit on main: %v\n%s", err, out)
 	}
 
-	if err := ws.SyncWorktreeFromMainAtStart(ctx, task, repoDir); err != nil {
+	changed, err := ws.SyncWorktreeFromMainAtStartWithResult(ctx, task, repoDir)
+	if err != nil {
 		t.Fatalf("SyncWorktreeFromMainAtStart: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected startup sync to report an advanced worktree HEAD")
+	}
+	changed, err = ws.SyncWorktreeFromMainAtStartWithResult(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("second SyncWorktreeFromMainAtStart: %v", err)
+	}
+	if changed {
+		t.Fatal("expected already-up-to-date startup sync to report no HEAD change")
 	}
 
 	if _, err := os.Stat(filepath.Join(wtPath, "main_update.txt")); err != nil {

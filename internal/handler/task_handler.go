@@ -2527,6 +2527,149 @@ func (h *Handler) ExecuteBacklogTasks(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
 
+// TaskReference is the compact machine-facing task projection used by terminal
+// selectors and non-canonical task reference resolution. It intentionally omits
+// task execution, worktree, swarm configuration, and other detail-only fields.
+type TaskReference struct {
+	ID           string   `json:"id"`
+	ProjectID    string   `json:"project_id"`
+	Title        string   `json:"title"`
+	Prompt       string   `json:"prompt"`
+	Category     string   `json:"category"`
+	Status       string   `json:"status"`
+	DisplayOrder int      `json:"display_order"`
+	Badges       []string `json:"badges,omitempty"`
+}
+
+// TaskReferenceCatalogResponse is the complete compact task catalog for one
+// project. The envelope leaves room for response metadata without changing the
+// task projection consumed by terminal clients.
+type TaskReferenceCatalogResponse struct {
+	Tasks []TaskReference `json:"tasks"`
+}
+
+// GetTaskReferenceCatalog returns all top-level board tasks for one project as a
+// compact JSON projection. It mirrors the task set exposed by the rendered board
+// while avoiding the board's controls, scripts, and unrelated page data.
+// @Summary Get project task reference catalog
+// @Description Returns the complete compact task projection used to resolve terminal task references. Chat, non-visible scheduled, and nested swarm-child tasks are omitted because they are not top-level Kanban cards.
+// @Tags tasks
+// @Produce json
+// @Param project_id query string true "Project ID"
+// @Success 200 {object} TaskReferenceCatalogResponse "Complete project task reference catalog"
+// @Failure 400 {object} ErrorResponse "Project ID is required"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/tasks/reference-catalog [get]
+func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+
+	ctx := c.Request().Context()
+	tasks, err := h.taskRepo.ListTaskReferences(ctx, projectID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskReferenceCatalog project=%s error listing tasks: %v", projectID, err)
+		return err
+	}
+
+	var llmModels []models.LLMConfig
+	if h.llmConfigRepo != nil {
+		llmModels, err = h.llmConfigRepo.ListBadgeOptions(ctx)
+		if err != nil {
+			applog.Infof("[handler] GetTaskReferenceCatalog project=%s error listing model badges: %v", projectID, err)
+			llmModels = nil
+		}
+	}
+	agentDefs := h.listAgentDefinitions(ctx)
+	refs := make([]TaskReference, 0, len(tasks))
+	for _, task := range tasks {
+		if !taskReferenceVisible(task) {
+			continue
+		}
+		refs = append(refs, TaskReference{
+			ID:           task.ID,
+			ProjectID:    task.ProjectID,
+			Title:        task.Title,
+			Prompt:       task.Prompt,
+			Category:     string(task.Category),
+			Status:       string(task.Status),
+			DisplayOrder: task.DisplayOrder,
+			Badges:       taskReferenceBadges(task, llmModels, agentDefs),
+		})
+	}
+	return c.JSON(http.StatusOK, TaskReferenceCatalogResponse{Tasks: refs})
+}
+
+func taskReferenceVisible(task repository.TaskReference) bool {
+	if task.Category == models.CategoryChat || models.IsSwarmChildRole(task.SwarmRole) {
+		return false
+	}
+	switch task.Category {
+	case models.CategoryActive, models.CategoryBacklog, models.CategoryCompleted:
+		return true
+	case models.CategoryScheduled:
+		return task.Status == models.StatusRunning ||
+			(task.AutomationCapacityQueued && (task.Status == models.StatusPending || task.Status == models.StatusQueued))
+	default:
+		return false
+	}
+}
+
+func taskReferenceBadges(task repository.TaskReference, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) []string {
+	badges := make([]string, 0, 8)
+	if task.ParentTaskID != nil {
+		badges = append(badges, "Chained")
+	}
+	if task.ChainEnabled {
+		badges = append(badges, "Chain")
+	}
+	if task.HasGoal {
+		badges = append(badges, "Goal")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		badges = append(badges, "Swarm")
+	}
+	if len(llmModels) > 0 {
+		badges = append(badges, taskReferenceModelName(task, llmModels))
+	}
+	if task.AgentDefinitionID != nil {
+		for _, agent := range agentDefs {
+			if agent.ID == *task.AgentDefinitionID {
+				badges = append(badges, agent.Name)
+				break
+			}
+		}
+	}
+	if label := components.TagLabel(task.Tag); label != "" {
+		badges = append(badges, label)
+	}
+	if label := components.PriorityLabel(task.Priority); label != "" {
+		badges = append(badges, label)
+	}
+	if len(badges) == 0 {
+		return nil
+	}
+	return badges
+}
+
+func taskReferenceModelName(task repository.TaskReference, llmModels []models.LLMConfig) string {
+	if task.AgentID != nil {
+		for _, model := range llmModels {
+			if model.ID == *task.AgentID {
+				return model.Name
+			}
+		}
+	} else {
+		for _, model := range llmModels {
+			if model.IsDefault {
+				return model.Name
+			}
+		}
+	}
+	return "No Model"
+}
+
 // TaskStatusCountsResponse is the compact machine-facing task projection used
 // by terminal status. Full task board responses remain HTML and unchanged.
 type TaskStatusCountsResponse struct {

@@ -356,6 +356,115 @@ func TestExecutionRepo_SkillOutcomeEvidencePreservesAggregateEligibilityForRetri
 	}
 }
 
+func TestAnalyticsDashboardSectionsForView(t *testing.T) {
+	tests := []struct {
+		view string
+		want analyticsDashboardSections
+	}{
+		{
+			view: "overview",
+			want: analyticsDashboardSections{
+				outcomeMetrics: true,
+				comparison:     true,
+				workflows:      true,
+				evidenceRows:   true,
+				insights:       true,
+			},
+		},
+		{
+			view: "outcomes",
+			want: analyticsDashboardSections{
+				outcomeMetrics:       true,
+				followUpDistribution: true,
+				funnel:               true,
+				evidenceRows:         true,
+				evidenceTotal:        true,
+			},
+		},
+		{
+			view: "agents",
+			want: analyticsDashboardSections{
+				agents:       true,
+				skills:       true,
+				evidenceRows: true,
+				agentDetail:  true,
+			},
+		},
+		{
+			view: "learning",
+			want: analyticsDashboardSections{
+				skills:      true,
+				agentSkills: true,
+			},
+		},
+		{
+			view: "usage",
+			want: analyticsDashboardSections{
+				outcomeMetrics:  true,
+				modelCategories: true,
+			},
+		},
+		{
+			view: "workflows",
+			want: analyticsDashboardSections{
+				workflows:      true,
+				workflowDetail: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.view, func(t *testing.T) {
+			if got := analyticsDashboardSectionsForView(tt.view); got != tt.want {
+				t.Fatalf("sections for %q = %+v, want %+v", tt.view, got, tt.want)
+			}
+		})
+	}
+	all := analyticsDashboardSectionsForView("")
+	if !all.outcomeMetrics || !all.followUpDistribution || !all.comparison || !all.funnel || !all.agents || !all.skills || !all.agentSkills || !all.modelCategories || !all.workflows || !all.evidenceRows || !all.evidenceTotal || !all.agentDetail || !all.workflowDetail || !all.insights {
+		t.Fatalf("legacy empty view must retain all dashboard sections: %+v", all)
+	}
+}
+
+func TestAnalyticsDashboardOverviewOmitsHiddenEvidenceCountAndFollowUpDistribution(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO projects(id,name) VALUES ('overview-project','Overview project');
+		INSERT INTO tasks(id,project_id,title,category,status,created_at)
+			VALUES ('overview-task','overview-project','Overview task','backlog','completed',CURRENT_TIMESTAMP);
+		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order)
+			VALUES ('overview-exec','overview-task','completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,0,1);
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := NewExecutionRepo(db)
+	overview, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "overview-project", View: "overview"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overview.EvidenceTotal != 0 {
+		t.Fatalf("Overview computed hidden evidence total %d", overview.EvidenceTotal)
+	}
+	if len(overview.RecentOutcomes) != 1 {
+		t.Fatalf("Overview recent outcomes = %+v, want visible row", overview.RecentOutcomes)
+	}
+	if len(overview.FollowUpDistribution) != 0 {
+		t.Fatalf("Overview computed hidden follow-up distribution: %+v", overview.FollowUpDistribution)
+	}
+
+	outcomes, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "overview-project", View: "outcomes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcomes.EvidenceTotal != 1 || len(outcomes.RecentOutcomes) != 1 {
+		t.Fatalf("Outcomes evidence = total %d rows %+v, want one", outcomes.EvidenceTotal, outcomes.RecentOutcomes)
+	}
+	if len(outcomes.FollowUpDistribution) == 0 {
+		t.Fatal("Outcomes omitted visible follow-up distribution")
+	}
+}
+
 func TestExecutionRepo_GetAnalyticsDashboardAllTimeOmitsComparison(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewExecutionRepo(db)

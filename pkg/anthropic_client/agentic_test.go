@@ -14,8 +14,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -35,11 +37,27 @@ func TestCategorizeAnthropicAPIErrorUsesStructuredEnvelope(t *testing.T) {
 	}
 }
 
-func TestAnthropicContinuationPreflightConservativelyCountsToolPayload(t *testing.T) {
-	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("{}", 4000)}}
-	err := ensureAnthropicAgenticRequestFits(messages, nil, &AgenticOptions{ContextWindow: 6000, MaxTokens: 1000})
-	if err == nil {
-		t.Fatal("expected local complete-request rejection")
+func TestAnthropicContinuationPreflightUsesByteEstimate(t *testing.T) {
+	opts := &AgenticOptions{ContextWindow: 6000, MaxTokens: 1000}
+	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("a", 12000)}}
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err != nil {
+		t.Fatalf("moderate ASCII payload should fit: %v", err)
+	}
+	messages[0].Content = strings.Repeat("a", 20000)
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
+	}
+}
+
+func TestAnthropicContinuationPreflightLeavesRoomForNativeCompaction(t *testing.T) {
+	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("a", 680000)}}
+	opts := &AgenticOptions{ContextWindow: 200000, MaxTokens: 64000, AutoCompaction: true}
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err != nil {
+		t.Fatalf("170k-token request should reach native compaction: %v", err)
+	}
+	opts.AutoCompaction = false
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err == nil {
+		t.Fatal("request should exceed the non-compacting 132k preflight limit")
 	}
 }
 
@@ -143,6 +161,71 @@ func TestParseAgenticStream_TextOnly(t *testing.T) {
 	}
 	if result.contentBlocks[0].Text != "Hello world" {
 		t.Errorf("block text = %q, want %q", result.contentBlocks[0].Text, "Hello world")
+	}
+}
+
+func TestParseAgenticStreamUsesFinalUsageAndIncludesCompactionIterations(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-5","usage":{"input_tokens":160000,"cache_creation_input_tokens":2000,"cache_read_input_tokens":3000}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"compaction"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"summary"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"done"}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5,"iterations":[{"type":"compaction","input_tokens":180000,"output_tokens":3500,"cache_creation_input_tokens":100,"cache_read_input_tokens":200},{"type":"message","input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5}]}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	result, err := (&Client{}).parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.inputTokens != 23 || result.outputTokens != 1000 || result.cacheCreationInputTokens != 4 || result.cacheReadInputTokens != 5 {
+		t.Fatalf("final context usage = input:%d output:%d cache-create:%d cache-read:%d", result.inputTokens, result.outputTokens, result.cacheCreationInputTokens, result.cacheReadInputTokens)
+	}
+	if result.billedInputTokens != 180023 || result.billedOutputTokens != 4500 || result.billedCacheCreationInputTokens != 104 || result.billedCacheReadInputTokens != 205 {
+		t.Fatalf("billed usage = input:%d output:%d cache-create:%d cache-read:%d", result.billedInputTokens, result.billedOutputTokens, result.billedCacheCreationInputTokens, result.billedCacheReadInputTokens)
+	}
+}
+
+func TestSendAgenticReportsCompactionIterationUsageSeparatelyFromContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-5","usage":{"input_tokens":160000}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"compaction"}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"summary"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"done"}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5,"iterations":[{"type":"compaction","input_tokens":180000,"output_tokens":3500},{"type":"message","input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5}]}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+		}
+	}))
+	defer server.Close()
+
+	originalHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = originalHost }()
+
+	response, err := NewWithAPIKey("test-key").SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:        "claude-opus-5",
+		MaxTokens:    8192,
+		MaxTurns:     1,
+		DisableTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.LastContextTokens != 1032 {
+		t.Fatalf("last context tokens = %d, want 1032", response.LastContextTokens)
+	}
+	if response.InputTokens != 180023 || response.OutputTokens != 4500 || response.CacheCreationInputTokens != 4 || response.CacheReadInputTokens != 5 {
+		t.Fatalf("response usage = input:%d output:%d cache-create:%d cache-read:%d", response.InputTokens, response.OutputTokens, response.CacheCreationInputTokens, response.CacheReadInputTokens)
 	}
 }
 
@@ -417,8 +500,12 @@ func TestAgenticBlockMarshal_ToolUseEmptyInputIncludesObject(t *testing.T) {
 func TestAnthropicToolResultReplayBoundsDenseOutputAndPreservesPairing(t *testing.T) {
 	full := strings.Repeat("!", 5000)
 	bounded := truncateAnthropicToolOutputForModelInput(full, 512)
-	if len([]rune(bounded)) > 512 || !strings.Contains(bounded, "truncated") {
-		t.Fatalf("bounded output runes=%d content=%q", len([]rune(bounded)), bounded)
+	if len(bounded) > tokenestimate.ByteBudget(512) || len(bounded) <= 512 || !strings.Contains(bounded, "truncated") {
+		t.Fatalf("bounded output bytes=%d content=%q", len(bounded), bounded)
+	}
+	utf8Output := truncateAnthropicToolOutputForModelInput(strings.Repeat("é", 2000), 512)
+	if !utf8.ValidString(utf8Output) || len(utf8Output) > tokenestimate.ByteBudget(512) {
+		t.Fatalf("UTF-8 output valid=%v bytes=%d", utf8.ValidString(utf8Output), len(utf8Output))
 	}
 	block := agenticBlock{Type: "tool_result", ToolUseID: "toolu_dense", Content: anthropicStringContentRaw(bounded)}
 	encoded, err := json.Marshal(block)
@@ -796,7 +883,7 @@ func TestParseAgenticStream_CompactionBlock(t *testing.T) {
 		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":160000}}}`,
 		`{"type":"content_block_start","index":0,"content_block":{"type":"compaction"}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"Previous context summary: "}}`,
-		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"The user asked about Go programming."}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"The user asked about Go programming.","encrypted_content":"opaque-checkpoint"}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
 		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Here is my response."}}`,
@@ -821,6 +908,9 @@ func TestParseAgenticStream_CompactionBlock(t *testing.T) {
 	expected := "Previous context summary: The user asked about Go programming."
 	if *result.compaction.content != expected {
 		t.Errorf("compaction content = %q, want %q", *result.compaction.content, expected)
+	}
+	if result.compaction.encryptedContent == nil || *result.compaction.encryptedContent != "opaque-checkpoint" {
+		t.Fatalf("encrypted compaction content = %#v, want opaque-checkpoint", result.compaction.encryptedContent)
 	}
 
 	// Content blocks should only contain the text block (no compaction)
@@ -893,15 +983,17 @@ func TestParseAgenticStream_NoCompaction(t *testing.T) {
 func TestCompactionBlockJSON_Marshal(t *testing.T) {
 	t.Run("with content", func(t *testing.T) {
 		summary := "Summary of context"
+		encrypted := "opaque-checkpoint"
 		block := compactionBlockJSON{
-			Type:    "compaction",
-			Content: &summary,
+			Type:             "compaction",
+			Content:          &summary,
+			EncryptedContent: &encrypted,
 		}
 		data, err := json.Marshal(block)
 		if err != nil {
 			t.Fatal(err)
 		}
-		expected := `{"type":"compaction","content":"Summary of context"}`
+		expected := `{"type":"compaction","content":"Summary of context","encrypted_content":"opaque-checkpoint"}`
 		if string(data) != expected {
 			t.Errorf("got %s, want %s", data, expected)
 		}
@@ -925,22 +1017,14 @@ func TestCompactionBlockJSON_Marshal(t *testing.T) {
 
 func TestContextManagementConfig_Marshal(t *testing.T) {
 	cfg := contextManagementConfig{
-		Edits: []contextManagementEdit{
-			{
-				Type: "clear_tool_uses_20250919",
-				Trigger: &inputTokensTrigger{
-					Type:  "input_tokens",
-					Value: 150000,
-				},
+		Edits: []contextManagementEdit{{
+			Type: "compact_20260112",
+			Trigger: &inputTokensTrigger{
+				Type:  "input_tokens",
+				Value: 167000,
 			},
-			{
-				Type: "clear_thinking_20251015",
-				Trigger: &inputTokensTrigger{
-					Type:  "input_tokens",
-					Value: 150000,
-				},
-			},
-		},
+			Instructions: "Preserve implementation details.",
+		}},
 	}
 
 	data, err := json.Marshal(cfg)
@@ -954,20 +1038,23 @@ func TestContextManagementConfig_Marshal(t *testing.T) {
 	}
 
 	edits, ok := m["edits"].([]interface{})
-	if !ok || len(edits) != 2 {
-		t.Fatalf("expected 2 edits, got %v", m["edits"])
+	if !ok || len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %v", m["edits"])
 	}
 
 	edit := edits[0].(map[string]interface{})
-	if edit["type"] != "clear_tool_uses_20250919" {
+	if edit["type"] != "compact_20260112" {
 		t.Errorf("type = %v", edit["type"])
+	}
+	if edit["instructions"] != "Preserve implementation details." {
+		t.Errorf("instructions = %v", edit["instructions"])
 	}
 
 	trigger := edit["trigger"].(map[string]interface{})
 	if trigger["type"] != "input_tokens" {
 		t.Errorf("trigger type = %v", trigger["type"])
 	}
-	if trigger["value"] != float64(150000) {
+	if trigger["value"] != float64(167000) {
 		t.Errorf("trigger value = %v", trigger["value"])
 	}
 }
@@ -981,22 +1068,13 @@ func TestAgenticRequest_WithCompaction(t *testing.T) {
 		},
 		Stream: true,
 		ContextManagement: &contextManagementConfig{
-			Edits: []contextManagementEdit{
-				{
-					Type: "clear_tool_uses_20250919",
-					Trigger: &inputTokensTrigger{
-						Type:  "input_tokens",
-						Value: 100000,
-					},
+			Edits: []contextManagementEdit{{
+				Type: "compact_20260112",
+				Trigger: &inputTokensTrigger{
+					Type:  "input_tokens",
+					Value: 100000,
 				},
-				{
-					Type: "clear_thinking_20251015",
-					Trigger: &inputTokensTrigger{
-						Type:  "input_tokens",
-						Value: 100000,
-					},
-				},
-			},
+			}},
 		},
 	}
 
@@ -1016,8 +1094,11 @@ func TestAgenticRequest_WithCompaction(t *testing.T) {
 	}
 
 	edits, ok := cm["edits"].([]interface{})
-	if !ok || len(edits) != 2 {
-		t.Fatalf("expected 2 edits, got %v", cm["edits"])
+	if !ok || len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %v", cm["edits"])
+	}
+	if edit := edits[0].(map[string]interface{}); edit["type"] != "compact_20260112" {
+		t.Fatalf("edit type = %v, want compact_20260112", edit["type"])
 	}
 }
 
@@ -1054,10 +1135,10 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		turnCount++
 
-		// Verify beta header includes context management
+		// Verify beta header includes server-side compaction.
 		betaHeader := r.Header.Get("anthropic-beta")
-		if !strings.Contains(betaHeader, "context-management-2025-06-27") {
-			t.Errorf("missing context management beta header, got: %s", betaHeader)
+		if !strings.Contains(betaHeader, CompactionBetaHeader) {
+			t.Errorf("missing compaction beta header, got: %s", betaHeader)
 		}
 
 		// Verify context_management is in the request body
@@ -1066,6 +1147,11 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 		json.Unmarshal(body, &reqBody)
 		if _, ok := reqBody["context_management"]; !ok {
 			t.Error("context_management not found in request body")
+		} else {
+			edits := reqBody["context_management"].(map[string]any)["edits"].([]any)
+			if len(edits) != 1 || edits[0].(map[string]any)["type"] != "compact_20260112" {
+				t.Errorf("unexpected compaction edits: %#v", edits)
+			}
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1099,21 +1185,20 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 			if msgsRaw, ok := reqBody["messages"].([]interface{}); ok {
 				msgs = msgsRaw
 			}
-			// First message should be the compaction block
-			if len(msgs) > 0 {
-				firstMsg := msgs[0].(map[string]interface{})
-				if firstMsg["role"] == "user" {
-					content, ok := firstMsg["content"].([]interface{})
-					if ok && len(content) > 0 {
-						block := content[0].(map[string]interface{})
-						if block["type"] != "compaction" {
-							t.Errorf("first message content type = %v, want compaction", block["type"])
-						}
-						if block["content"] != "Summary of prior context." {
-							t.Errorf("compaction content = %v", block["content"])
-						}
-					}
-				}
+			if len(msgs) == 0 {
+				t.Fatal("compacted request has no messages")
+			}
+			firstMsg := msgs[0].(map[string]interface{})
+			if firstMsg["role"] != "assistant" {
+				t.Errorf("compaction message role = %v, want assistant", firstMsg["role"])
+			}
+			content, ok := firstMsg["content"].([]interface{})
+			if !ok || len(content) < 2 {
+				t.Fatalf("compacted assistant content = %#v", firstMsg["content"])
+			}
+			block := content[0].(map[string]interface{})
+			if block["type"] != "compaction" || block["content"] != "Summary of prior context." {
+				t.Errorf("compaction block = %#v", block)
 			}
 
 			// Return final response
@@ -1184,6 +1269,20 @@ func TestDecodeNativeCompactionStateAcceptsLegacyBlock(t *testing.T) {
 	}
 }
 
+func TestDecodeNativeCompactionStateNormalizesLegacyEnvelope(t *testing.T) {
+	messages, err := decodeNativeCompactionState(`{"version":1,"messages":[{"role":"user","content":[{"type":"compaction","content":"legacy checkpoint"}]},{"role":"assistant","content":[{"type":"text","text":"continuing"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Role != "assistant" || !hasLeadingCompactionMessage(messages) {
+		t.Fatalf("normalized legacy compaction messages = %#v", messages)
+	}
+	blocks, err := contentBlocksJSON(messages[0].Content)
+	if err != nil || len(blocks) != 2 {
+		t.Fatalf("normalized legacy content = %#v, err=%v", messages[0].Content, err)
+	}
+}
+
 func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	requestCount := 0
 	var replayedMessages []map[string]any
@@ -1204,7 +1303,7 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 		case 1:
 			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":160000}}}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"compaction\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"Durable native checkpoint.\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"Durable native checkpoint.\",\"encrypted_content\":\"opaque-native-state\"}}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"checking after compaction\"}}\n\n")
@@ -1254,41 +1353,41 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-20250514", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
 		t.Fatal(err)
 	}
-	if len(replayedMessages) != 5 {
-		t.Fatalf("replayed messages = %#v, want compaction, assistant tool call, tool result, final assistant, and current user", replayedMessages)
+	if len(replayedMessages) != 4 {
+		t.Fatalf("replayed messages = %#v, want compacted assistant, tool result, final assistant, and current user", replayedMessages)
 	}
-	if replayedMessages[0]["role"] != "user" || replayedMessages[1]["role"] != "assistant" || replayedMessages[2]["role"] != "user" || replayedMessages[3]["role"] != "assistant" || replayedMessages[4]["role"] != "user" {
+	if replayedMessages[0]["role"] != "assistant" || replayedMessages[1]["role"] != "user" || replayedMessages[2]["role"] != "assistant" || replayedMessages[3]["role"] != "user" {
 		t.Fatalf("replayed message roles = %#v", replayedMessages)
 	}
 	stateBlocks, _ := replayedMessages[0]["content"].([]any)
 	stateBlock, _ := stateBlocks[0].(map[string]any)
-	if stateBlock["type"] != "compaction" || stateBlock["content"] != "Durable native checkpoint." {
+	if stateBlock["type"] != "compaction" || stateBlock["content"] != "Durable native checkpoint." || stateBlock["encrypted_content"] != "opaque-native-state" {
 		t.Fatalf("replayed native block = %#v", stateBlock)
 	}
-	assistantBlocks, _ := replayedMessages[1]["content"].([]any)
-	if len(assistantBlocks) != 2 || assistantBlocks[1].(map[string]any)["id"] != "toolu_after_compaction" {
+	assistantBlocks, _ := replayedMessages[0]["content"].([]any)
+	if len(assistantBlocks) != 3 || assistantBlocks[2].(map[string]any)["id"] != "toolu_after_compaction" {
 		t.Fatalf("replayed assistant continuation = %#v", assistantBlocks)
 	}
-	resultBlocks, _ := replayedMessages[2]["content"].([]any)
+	resultBlocks, _ := replayedMessages[1]["content"].([]any)
 	resultBlock, _ := resultBlocks[0].(map[string]any)
 	if resultBlock["tool_use_id"] != "toolu_after_compaction" || resultBlock["content"] != "tool output after compaction" {
 		t.Fatalf("replayed tool result = %#v", resultBlock)
 	}
-	finalBlocks, _ := replayedMessages[3]["content"].([]any)
+	finalBlocks, _ := replayedMessages[2]["content"].([]any)
 	if len(finalBlocks) != 1 || finalBlocks[0].(map[string]any)["text"] != "first done" {
 		t.Fatalf("replayed final assistant content = %#v", finalBlocks)
 	}
-	if replayedMessages[4]["content"] != "second prompt" {
-		t.Fatalf("current prompt = %#v", replayedMessages[4])
+	if replayedMessages[3]["content"] != "second prompt" {
+		t.Fatalf("current prompt = %#v", replayedMessages[3])
 	}
 }
 
 func TestSendAgentic_NoCompactionWhenDisabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify context management beta header is NOT present
+		// Verify compaction beta header is NOT present.
 		betaHeader := r.Header.Get("anthropic-beta")
-		if strings.Contains(betaHeader, "context-management") {
-			t.Error("context management beta header should not be present when disabled")
+		if strings.Contains(betaHeader, CompactionBetaHeader) {
+			t.Error("compaction beta header should not be present when disabled")
 		}
 
 		// Verify context_management is NOT in request body
@@ -1868,18 +1967,21 @@ func TestCompactionThreshold_CustomValue(t *testing.T) {
 		found := false
 		for _, rawEdit := range edits {
 			edit := rawEdit.(map[string]interface{})
-			if edit["type"] != "clear_tool_uses_20250919" {
+			if edit["type"] != "compact_20260112" {
 				continue
 			}
 			trigger := edit["trigger"].(map[string]interface{})
 			if trigger["value"] != float64(50000) {
 				t.Errorf("threshold = %v, want 50000", trigger["value"])
 			}
+			if edit["instructions"] != "Preserve code and decisions." {
+				t.Errorf("instructions = %v", edit["instructions"])
+			}
 			found = true
 			break
 		}
 		if !found {
-			t.Error("clear_tool_uses_20250919 edit not found")
+			t.Error("compact_20260112 edit not found")
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1910,14 +2012,15 @@ func TestCompactionThreshold_CustomValue(t *testing.T) {
 		DisableTools:             true,
 		AutoCompaction:           true,
 		CompactionTokenThreshold: 50000,
+		CompactionInstructions:   "Preserve code and decisions.",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestContextManagementEdits_BothTypes(t *testing.T) {
-	// Verify that both clear_tool_uses and clear_thinking edits are sent when thinking is enabled
+func TestContextManagementEdit_WithThinking(t *testing.T) {
+	// Compaction is the only context edit, including when thinking is enabled.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var reqBody map[string]interface{}
@@ -1926,19 +2029,15 @@ func TestContextManagementEdits_BothTypes(t *testing.T) {
 		cm := reqBody["context_management"].(map[string]interface{})
 		edits := cm["edits"].([]interface{})
 
-		if len(edits) != 2 {
-			t.Errorf("expected 2 edits, got %d", len(edits))
+		if len(edits) != 1 {
+			t.Errorf("expected 1 edit, got %d", len(edits))
 		}
 		edit0 := edits[0].(map[string]interface{})
-		edit1 := edits[1].(map[string]interface{})
-		if edit0["type"] != "clear_thinking_20251015" {
-			t.Errorf("first edit type = %v, want clear_thinking_20251015", edit0["type"])
+		if edit0["type"] != "compact_20260112" {
+			t.Errorf("edit type = %v, want compact_20260112", edit0["type"])
 		}
-		if edit1["type"] != "clear_tool_uses_20250919" {
-			t.Errorf("second edit type = %v, want clear_tool_uses_20250919", edit1["type"])
-		}
-		if _, ok := edit1["trigger"]; !ok {
-			t.Error("clear_tool_uses_20250919 must include trigger")
+		if _, ok := edit0["trigger"]; !ok {
+			t.Error("compact_20260112 must include trigger")
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -2117,10 +2216,8 @@ func TestSendAgentic_RefusalStopReasonIsReturnedWithText(t *testing.T) {
 	}
 }
 
-func TestContextManagementEdits_NoClearThinkingWithoutThinking(t *testing.T) {
-	// Verify that clear_thinking is NOT included when thinking is disabled.
-	// The Anthropic API returns 400 "clear_thinking strategy requires thinking
-	// to be enabled or adaptive" if clear_thinking is sent without thinking.
+func TestContextManagementEdit_WithoutThinking(t *testing.T) {
+	// Compaction does not require thinking to be enabled.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var reqBody map[string]interface{}
@@ -2130,18 +2227,11 @@ func TestContextManagementEdits_NoClearThinkingWithoutThinking(t *testing.T) {
 		edits := cm["edits"].([]interface{})
 
 		if len(edits) != 1 {
-			t.Errorf("expected 1 edit (clear_tool_uses only), got %d", len(edits))
+			t.Errorf("expected 1 compaction edit, got %d", len(edits))
 		}
 		edit0 := edits[0].(map[string]interface{})
-		if edit0["type"] != "clear_tool_uses_20250919" {
-			t.Errorf("first edit type = %v, want clear_tool_uses_20250919", edit0["type"])
-		}
-		// Verify clear_thinking is NOT present
-		for _, edit := range edits {
-			e := edit.(map[string]interface{})
-			if e["type"] == "clear_thinking_20251015" {
-				t.Error("clear_thinking must NOT be included when thinking is disabled")
-			}
+		if edit0["type"] != "compact_20260112" {
+			t.Errorf("edit type = %v, want compact_20260112", edit0["type"])
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -2171,7 +2261,7 @@ func TestContextManagementEdits_NoClearThinkingWithoutThinking(t *testing.T) {
 		MaxTokens:      8192,
 		DisableTools:   true,
 		AutoCompaction: true,
-		// EnableThinking is false — clear_thinking must be omitted
+		// EnableThinking is false; server compaction still applies.
 	})
 	if err != nil {
 		t.Fatal(err)

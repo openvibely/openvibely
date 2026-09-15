@@ -4324,6 +4324,60 @@ func TestTaskRepo_ReclaimStaleQueuedTaskRejectsOwnerAddedAfterListing(t *testing
 	}
 }
 
+func TestTaskRepo_ListTaskReferencesUsesCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID:   "default",
+		Title:       "Compact reference task",
+		Category:    models.CategoryActive,
+		Priority:    4,
+		Status:      models.StatusPending,
+		Prompt:      strings.Repeat("p", 64*1024),
+		ChainConfig: `{"enabled":true,"payload":"` + strings.Repeat("c", 16*1024) + `"}`,
+		SwarmConfig: `{"payload":"` + strings.Repeat("s", 16*1024) + `"}`,
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := NewTaskGoalRepo(db).CreateOrReplace(ctx, &models.TaskGoal{
+		TaskID: task.ID, GoalID: "compact-reference-goal", Objective: "finish", Status: models.TaskGoalStatusActive,
+	}); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+
+	references, err := repo.ListTaskReferences(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListTaskReferences: %v", err)
+	}
+	if len(references) != 1 {
+		t.Fatalf("reference count = %d, want 1", len(references))
+	}
+	got := references[0]
+	if got.ID != task.ID || got.ProjectID != "default" || got.Title != task.Title || got.Category != task.Category || got.Priority != task.Priority || got.Status != task.Status {
+		t.Fatalf("reference identity fields changed: %+v", got)
+	}
+	if got.Prompt != strings.Repeat("p", BoardPromptPreviewCodePoints) {
+		t.Fatalf("prompt length = %d, want %d", len(got.Prompt), BoardPromptPreviewCodePoints)
+	}
+	if !got.ChainEnabled || !got.HasGoal {
+		t.Fatalf("derived metadata = chain:%t goal:%t, want both true", got.ChainEnabled, got.HasGoal)
+	}
+	if got.AgentID != nil || got.AgentDefinitionID != nil || got.ParentTaskID != nil || got.AutomationCapacityQueued {
+		t.Fatalf("unexpected optional metadata: %+v", got)
+	}
+
+	empty, err := repo.ListTaskReferences(ctx, "missing-project")
+	if err != nil {
+		t.Fatalf("empty ListTaskReferences: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("empty references = %#v, want non-nil empty slice", empty)
+	}
+}
+
 func TestTaskRepo_ListTasksForDiscovery_UsesCompactProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

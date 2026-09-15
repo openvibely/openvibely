@@ -17,11 +17,11 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -35,11 +35,8 @@ Preserve completed one-time setup actions (for example required project-guidance
 Do not restart the task from scratch.
 Keep the summary actionable and specific. Omit chit-chat and duplication.
 Return only the summary text.`
-	openAICompactionTranscriptLimit                    = 200000
-	openAICompactionTranscriptGap                      = "\n\n[Middle conversation content omitted before compaction]\n\n"
 	openAIEffectiveContextPercent                      = 90
 	openAIRemoteCompactionV2RetainedMessageTokenBudget = 64000
-	openAIApproxBytesPerToken                          = 4
 	openAIResizedImageBytesEstimate                    = 7373
 	openAIOriginalImagePatchSize                       = 32
 	openAIOriginalImageMaxPatches                      = 10000
@@ -372,7 +369,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 			modelOutput := truncateToolOutputForModelInput(exec.output, toolOutputTokenLimit)
 			if len(modelOutput) < len(exec.output) {
-				applog.Infof("[openai-client] truncated tool output for model input tool=%s call_id=%s original_chars=%d truncated_chars=%d token_limit=%d",
+				applog.Infof("[openai-client] truncated tool output for model input tool=%s call_id=%s original_bytes=%d truncated_bytes=%d token_limit=%d",
 					exec.call.Name, exec.call.CallID, len(exec.output), len(modelOutput), toolOutputTokenLimit)
 			}
 			toolResultItem := agenticInputItem{
@@ -774,21 +771,15 @@ func estimateAgenticOriginalImageBytes(imageURL string) int {
 }
 
 func approxOpenAITokenCount(text string) int {
-	return approxOpenAITokensFromByteCount(len(text))
+	return tokenestimate.FromText(text)
 }
 
 func approxOpenAITokensFromByteCount(bytes int) int {
-	if bytes <= 0 {
-		return 0
-	}
-	return (bytes + openAIApproxBytesPerToken - 1) / openAIApproxBytesPerToken
+	return tokenestimate.FromByteCount(bytes)
 }
 
 func approxOpenAIBytesForTokens(tokens int) int {
-	if tokens <= 0 {
-		return 0
-	}
-	return tokens * openAIApproxBytesPerToken
+	return tokenestimate.ByteBudget(tokens)
 }
 
 func normalizedCompactionThreshold(threshold int) int {
@@ -826,31 +817,13 @@ func truncateToolOutputForModelInput(output string, tokenLimit int) string {
 		return output
 	}
 
-	// The hard admission estimator uses one token per rune when no exact
-	// tokenizer is available. Use the same conservative conversion here so a
-	// dense symbol-heavy result cannot exceed its independent replay budget.
-	maxChars := limit
-	runes := []rune(output)
-	if len(runes) <= maxChars {
+	maxBytes := tokenestimate.ByteBudget(limit)
+	if len(output) <= maxBytes {
 		return output
 	}
 
 	const truncationNote = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	noteRunes := []rune(truncationNote)
-	if len(noteRunes) >= maxChars {
-		return string(runes[:maxChars])
-	}
-
-	available := maxChars - len(noteRunes)
-	headLen := available / 2
-	tailLen := available - headLen
-	if headLen <= 0 || tailLen <= 0 {
-		return string(runes[:maxChars])
-	}
-
-	head := string(runes[:headLen])
-	tail := string(runes[len(runes)-tailLen:])
-	return head + truncationNote + tail
+	return tokenestimate.TruncateMiddle(output, maxBytes, truncationNote)
 }
 
 func openAIAutoCompactionTokenLimit(model string) int {
@@ -1175,65 +1148,13 @@ func truncateTextToOpenAITokenBudget(text string, maxTokens int) string {
 	if maxTokens <= 0 || text == "" {
 		return ""
 	}
-	maxBytes := maxTokens // conservative hard-bound: at most one UTF-8/ASCII rune per token
+	maxBytes := tokenestimate.ByteBudget(maxTokens)
 	if len(text) <= maxBytes {
 		return text
 	}
-	return strings.TrimSpace(truncateMiddleByByteEstimate(text, maxBytes, true))
-}
-
-func truncateMiddleByByteEstimate(text string, maxBytes int, useTokens bool) string {
-	if text == "" {
-		return ""
-	}
-	totalChars := len([]rune(text))
-	if maxBytes <= 0 {
-		return openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text), totalChars))
-	}
-	if len(text) <= maxBytes {
-		return text
-	}
-
-	leftBudget := maxBytes / 2
-	rightBudget := maxBytes - leftBudget
-	removedChars, left, right := splitOpenAITruncationString(text, leftBudget, rightBudget)
-	marker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text)-maxBytes, removedChars))
-	return left + marker + right
-}
-
-func splitOpenAITruncationString(text string, beginningBytes, endBytes int) (int, string, string) {
-	if text == "" {
-		return 0, "", ""
-	}
-	textLen := len(text)
-	tailStartTarget := textLen - endBytes
-	if tailStartTarget < 0 {
-		tailStartTarget = 0
-	}
-
-	prefixEnd := 0
-	suffixStart := textLen
-	removedChars := 0
-	suffixStarted := false
-	for idx, ch := range text {
-		charEnd := idx + len(string(ch))
-		if charEnd <= beginningBytes {
-			prefixEnd = charEnd
-			continue
-		}
-		if idx >= tailStartTarget {
-			if !suffixStarted {
-				suffixStart = idx
-				suffixStarted = true
-			}
-			continue
-		}
-		removedChars++
-	}
-	if suffixStart < prefixEnd {
-		suffixStart = prefixEnd
-	}
-	return removedChars, text[:prefixEnd], text[suffixStart:]
+	return strings.TrimSpace(tokenestimate.TruncateMiddleWithMarker(text, maxBytes, func(removedBytes, removedRunes int) string {
+		return openAITruncationMarker(true, openAIRemovedUnits(true, removedBytes, removedRunes))
+	}))
 }
 
 func openAITruncationMarker(useTokens bool, removedCount int) string {
@@ -1330,11 +1251,7 @@ func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDe
 }
 
 func inputItemTokenEstimate(item any) int {
-	estimate := estimateInputItemsTokens([]any{item})
-	if encoded, err := json.Marshal(item); err == nil {
-		estimate = max(estimate, utf8.RuneCount(encoded))
-	}
-	return estimate
+	return estimateInputItemsTokens([]any{item})
 }
 
 func compactionObjectiveIndex(items []any) int {
@@ -1521,16 +1438,6 @@ func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, i
 			total += approxOpenAITokensFromByteCount(len(encoded))
 		}
 	}
-	// The byte/4 estimate is useful for trigger heuristics but cannot enforce a
-	// hard admission boundary for source, JSON, logs, or tool arguments. Treat
-	// every serialized rune as a token when that is more conservative.
-	if encoded, err := json.Marshal(struct {
-		Input        []any            `json:"input"`
-		Tools        []ToolDefinition `json:"tools,omitempty"`
-		Instructions string           `json:"instructions,omitempty"`
-	}{inputItems, tools, instructions}); err == nil {
-		total = max(total, utf8.RuneCount(encoded))
-	}
 	return total
 }
 
@@ -1583,32 +1490,6 @@ func openAICompactionOutputTokens(maxOutputTokens int) int {
 		return 512
 	}
 	return maxOutputTokens
-}
-
-func clampCompactionTranscript(transcript string) string {
-	runes := []rune(transcript)
-	if len(runes) <= openAICompactionTranscriptLimit {
-		return transcript
-	}
-
-	gapRunes := []rune(openAICompactionTranscriptGap)
-	if len(gapRunes) >= openAICompactionTranscriptLimit {
-		return string(runes[len(runes)-openAICompactionTranscriptLimit:])
-	}
-
-	headLen := openAICompactionTranscriptLimit / 4
-	tailLen := openAICompactionTranscriptLimit - headLen - len(gapRunes)
-	if tailLen < headLen {
-		tailLen = openAICompactionTranscriptLimit / 2
-		headLen = openAICompactionTranscriptLimit - tailLen - len(gapRunes)
-	}
-	if headLen <= 0 || tailLen <= 0 {
-		return string(runes[len(runes)-openAICompactionTranscriptLimit:])
-	}
-
-	head := string(runes[:headLen])
-	tail := string(runes[len(runes)-tailLen:])
-	return head + openAICompactionTranscriptGap + tail
 }
 
 func openAIInputItemsTranscript(inputItems []any) string {

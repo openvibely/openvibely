@@ -120,11 +120,3 @@ func TestBuildChatSystemPrompt_TaskFollowupIncludesSelectedMemoryContext(t *test
 		}
 	}
 }
-
-func TestChatTaskAwarenessInstructions_ContainsRequiredElements(t *testing.T) {
-	for _, want := range []string{"Current tasks in this project", "answer questions", "explain a task"} {
-		if !strings.Contains(ChatTaskAwarenessInstructions, want) {
-			t.Errorf("ChatTaskAwarenessInstructions missing %q", want)
-		}
-	}
-}

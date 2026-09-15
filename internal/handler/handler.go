@@ -68,6 +68,7 @@ type Handler struct {
 	xConfigMu                  sync.Mutex
 	emailService               EmailServiceProvider
 	telegramAuthRepo           *repository.TelegramAuthRepo
+	telegramUserProjectRepo    *repository.TelegramUserProjectRepo
 	slackAuthRepo              *repository.SlackAuthRepo
 	emailAuthRepo              *repository.EmailAuthRepo
 	discordAuthRepo            *repository.DiscordAuthRepo
@@ -384,6 +385,14 @@ func (h *Handler) publishExecutionTerminal(execID string, status models.Executio
 // SetTelegramAuthRepo sets the Telegram authorization repo for managing authorized users.
 func (h *Handler) SetTelegramAuthRepo(repo *repository.TelegramAuthRepo) {
 	h.telegramAuthRepo = repo
+}
+
+// SetTelegramUserProjectRepo sets the Telegram project-selection repo for live and settings-created services.
+func (h *Handler) SetTelegramUserProjectRepo(repo *repository.TelegramUserProjectRepo) {
+	h.telegramUserProjectRepo = repo
+	if h.telegramService != nil {
+		h.telegramService.SetTelegramUserProjectRepo(repo)
+	}
 }
 
 // SetSlackAuthRepo sets the Slack authorization repo for managing authorized users.
@@ -769,6 +778,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Tasks (project-scoped via ?project_id= query param)
 	e.GET("/tasks", h.ListTasks)
+	e.GET("/api/tasks/reference-catalog", h.GetTaskReferenceCatalog)
 	e.GET("/schedule", h.ViewSchedule)
 	e.POST("/tasks", h.CreateTask)
 	e.POST("/tasks/move-completed", h.MoveCompletedActiveToCompleted)
