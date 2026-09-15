@@ -14,7 +14,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -652,40 +651,7 @@ func truncateAnthropicToolOutputForModelInput(output string, tokenLimit int) str
 		return output
 	}
 	const marker = "\n\n[Tool output truncated to fit model context; middle content omitted]\n\n"
-	if len(marker) >= byteLimit {
-		return anthropicPrefixBytes(output, byteLimit)
-	}
-	available := byteLimit - len(marker)
-	head := available / 2
-	tail := available - head
-	return anthropicPrefixBytes(output, head) + marker + anthropicSuffixBytes(output, tail)
-}
-
-func anthropicPrefixBytes(text string, byteLimit int) string {
-	end := 0
-	for i, r := range text {
-		next := i + len(string(r))
-		if next > byteLimit {
-			break
-		}
-		end = next
-	}
-	return text[:end]
-}
-
-func anthropicSuffixBytes(text string, byteLimit int) string {
-	start := len(text)
-	used := 0
-	for i := len(text); i > 0; {
-		_, size := utf8.DecodeLastRuneInString(text[:i])
-		if used+size > byteLimit {
-			break
-		}
-		i -= size
-		start = i
-		used += size
-	}
-	return text[start:]
+	return tokenestimate.TruncateMiddle(output, byteLimit, marker)
 }
 
 func anthropicStringContentRaw(s string) json.RawMessage {
