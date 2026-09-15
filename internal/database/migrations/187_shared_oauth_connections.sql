@@ -19,8 +19,10 @@ CREATE INDEX idx_oauth_connections_provider_name ON oauth_connections(provider, 
 ALTER TABLE agent_configs ADD COLUMN oauth_connection_id TEXT REFERENCES oauth_connections(id) ON DELETE SET NULL;
 CREATE INDEX idx_agent_configs_oauth_connection ON agent_configs(oauth_connection_id, id);
 
--- Preserve every existing standard OAuth configuration as its own connection.
--- Matching account identities are intentionally not merged.
+-- Preserve existing standard OAuth configurations as private connections first.
+-- Rows with the same provider and exact non-empty rotating refresh token are then
+-- linked to one credential owner before refresh can rotate that shared token.
+-- Provider account identities are intentionally never used for this decision.
 INSERT INTO oauth_connections (
     id, provider, name, oauth_access_token, oauth_refresh_token, oauth_expires_at,
     oauth_account_id, oauth_needs_reauth, oauth_revision, created_at, updated_at
@@ -31,10 +33,36 @@ FROM agent_configs
 WHERE auth_method = 'oauth' AND provider IN ('openai', 'anthropic');
 
 UPDATE agent_configs
-SET oauth_connection_id = id,
-    oauth_access_token = '', oauth_refresh_token = '', oauth_expires_at = 0,
+SET oauth_connection_id = id
+WHERE auth_method = 'oauth' AND provider IN ('openai', 'anthropic');
+
+UPDATE agent_configs AS target
+SET oauth_connection_id = (
+    SELECT candidate.id
+    FROM agent_configs candidate
+    WHERE candidate.auth_method = 'oauth'
+      AND candidate.provider = target.provider
+      AND candidate.oauth_refresh_token = target.oauth_refresh_token
+    ORDER BY candidate.oauth_needs_reauth ASC,
+             candidate.oauth_expires_at DESC,
+             candidate.oauth_config_revision DESC,
+             candidate.updated_at DESC,
+             candidate.id ASC
+    LIMIT 1
+)
+WHERE target.auth_method = 'oauth'
+  AND target.provider IN ('openai', 'anthropic')
+  AND target.oauth_refresh_token != '';
+
+UPDATE agent_configs
+SET oauth_access_token = '', oauth_refresh_token = '', oauth_expires_at = 0,
     oauth_account_id = '', oauth_needs_reauth = 0
 WHERE auth_method = 'oauth' AND provider IN ('openai', 'anthropic');
+
+DELETE FROM oauth_connections
+WHERE NOT EXISTS (
+    SELECT 1 FROM agent_configs WHERE agent_configs.oauth_connection_id = oauth_connections.id
+);
 
 ALTER TABLE account_usage_snapshots ADD COLUMN oauth_connection_id TEXT REFERENCES oauth_connections(id) ON DELETE SET NULL;
 CREATE INDEX idx_account_usage_snapshots_connection_revision
