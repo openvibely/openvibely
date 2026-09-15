@@ -15,6 +15,17 @@ import (
 
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 
+// TaskExecutionHistoryCutoff is the run admission watermark used to reject a
+// stale cancellation before it can touch an in-process callback or queue.
+func (r *TaskRepo) TaskExecutionHistoryCutoff(ctx context.Context, taskID string) (int64, error) {
+	var cutoff int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(history_order), 0)
+		FROM executions WHERE task_id = ?`, taskID).Scan(&cutoff); err != nil {
+		return 0, fmt.Errorf("loading task execution cutoff: %w", err)
+	}
+	return cutoff, nil
+}
+
 // ProjectTaskStatusCounts contains only the task predicates needed by the
 // terminal status view. It intentionally does not hydrate task cards.
 type ProjectTaskStatusCounts struct {
@@ -154,12 +165,27 @@ const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.pr
 const BoardPromptPreviewCodePoints = 300
 
 var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.auto_merge_on_goal_achieved, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
+					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
+					EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
+					EXISTS(SELECT 1 FROM automation_dispatch_outbox d
+						JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
+					WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
+				t.created_at, t.updated_at, t.completed_at`, BoardPromptPreviewCodePoints)
+
+// taskReferenceSelectColumns contains only fields needed to resolve a terminal
+// task reference and render its selector metadata. Detail-only payloads such as
+// worktree paths, swarm configuration, merge state, and timestamps are omitted.
+var taskReferenceSelectColumns = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id,
+				CASE WHEN json_type(CASE WHEN json_valid(t.chain_config) THEN t.chain_config ELSE '{}' END, '$.enabled') = 'true' THEN 1 ELSE 0 END AS chain_enabled,
+				t.swarm_role,
+				EXISTS(SELECT 1 FROM tasks child
+					WHERE child.project_id = t.project_id AND child.parent_task_id = t.id
+						AND child.swarm_role IN ('planner', 'worker', 'reviewer', 'merger', 'integrator')
+						AND child.status IN ('running', 'pending', 'queued')) AS has_runnable_swarm_child,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
-				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
 				EXISTS(SELECT 1 FROM automation_dispatch_outbox d
 					JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
-				WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
-			t.created_at, t.updated_at, t.completed_at`, BoardPromptPreviewCodePoints)
+					WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued`, BoardPromptPreviewCodePoints)
 
 type TaskRepo struct {
 	db          *sql.DB
@@ -453,6 +479,66 @@ func (r *TaskRepo) ListByProjectWithCategorySorts(ctx context.Context, projectID
 // Kanban cards while projecting Prompt to a bounded Unicode-safe preview.
 func (r *TaskRepo) ListBoardByProjectWithCategorySorts(ctx context.Context, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
 	return r.listByProjectWithCategorySorts(ctx, taskBoardSelectColumnsWithGoal, projectID, category, backlogSort, completedSort)
+}
+
+// TaskReference is the compact task projection used by machine-facing reference
+// lookup. It deliberately omits detail-only task payloads.
+type TaskReference struct {
+	ID                       string
+	ProjectID                string
+	Title                    string
+	Prompt                   string
+	Category                 models.TaskCategory
+	Priority                 int
+	Status                   models.TaskStatus
+	AgentID                  *string
+	AgentDefinitionID        *string
+	Tag                      models.TaskTag
+	DisplayOrder             int
+	ParentTaskID             *string
+	ChainEnabled             bool
+	SwarmRole                models.SwarmRole
+	HasRunnableSwarmChild    bool
+	HasGoal                  bool
+	AutomationCapacityQueued bool
+}
+
+// ListTaskReferences returns the complete compact task reference catalog for one
+// project in board order. The query only selects fields needed for matching and
+// selector badges; board/detail payloads are intentionally not hydrated.
+func (r *TaskRepo) ListTaskReferences(ctx context.Context, projectID string) ([]TaskReference, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil, fmt.Errorf("listing task references: project id is required")
+	}
+
+	rows, err := r.db.QueryContext(ctx, `SELECT `+taskReferenceSelectColumns+`
+		FROM tasks t
+		WHERE t.project_id = ? AND t.category != 'chat'
+		ORDER BY t.display_order ASC, t.created_at ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing task references: %w", err)
+	}
+	defer rows.Close()
+
+	references := make([]TaskReference, 0)
+	for rows.Next() {
+		var reference TaskReference
+		if err := rows.Scan(
+			&reference.ID, &reference.ProjectID, &reference.Title, &reference.Category,
+			&reference.Priority, &reference.Status, &reference.Prompt, &reference.AgentID,
+			&reference.AgentDefinitionID, &reference.Tag, &reference.DisplayOrder,
+			&reference.ParentTaskID, &reference.ChainEnabled, &reference.SwarmRole,
+			&reference.HasRunnableSwarmChild, &reference.HasGoal, &reference.AutomationCapacityQueued,
+		); err != nil {
+			return nil, fmt.Errorf("scanning task reference: %w", err)
+		}
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing task references: %w", err)
+	}
+	return references, nil
 }
 
 func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectColumns string, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
@@ -867,12 +953,14 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	if t.AutoMergeOnGoalAchieved {
 		autoMergeOnGoalAchieved = 1
 	}
+	swarmConfig := defaultJSON(t.SwarmConfig)
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET title = ?, category = ?, priority = ?, status = ?,
 			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
-			 swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
+			 swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, auto_merge = ?, auto_merge_on_goal_achieved = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
-		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus, defaultJSON(t.SwarmConfig), t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
+		t.Title, t.Category, t.Priority, t.Status, t.Prompt, t.AgentID, t.AgentDefinitionID, t.Tag, t.DisplayOrder, t.ParentTaskID, t.ChainConfig, t.SwarmRole, t.SwarmStatus,
+		t.SwarmRole, swarmConfig, swarmConfig, swarmConfig, t.SwarmSequence, autoMerge, autoMergeOnGoalAchieved, t.MergeTargetBranch, t.BaseBranch, t.BaseCommitSHA, t.LineageDepth, t.ID)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
 			return ErrDuplicateTask
@@ -1070,6 +1158,56 @@ func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category model
 	return nil
 }
 
+// MoveCancelledToBacklogIfStillCancelled avoids moving a task out of Active
+// after a follow-up has reactivated it during the user-stop transition.
+func (r *TaskRepo) MoveCancelledToBacklogIfStillCancelled(ctx context.Context, id string) (bool, error) {
+	var task *models.Task
+	moved := false
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("getting task before cancelled backlog move: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", id)
+		}
+		if task.Status != models.StatusCancelled {
+			return nil
+		}
+		if task.Category == models.CategoryBacklog {
+			moved = true
+			return nil
+		}
+		var displayOrder int
+		if err := exec.QueryRowContext(ctx,
+			`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'backlog'`,
+			task.ProjectID).Scan(&displayOrder); err != nil {
+			return fmt.Errorf("getting cancelled backlog display_order: %w", err)
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', display_order = ?,
+			updated_at = datetime('now'), completed_at = NULL WHERE id = ?`, displayOrder, id); err != nil {
+			return fmt.Errorf("moving cancelled task to backlog: %w", err)
+		}
+		moved = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if moved && r.broadcaster != nil && task.Category != models.CategoryBacklog {
+		r.broadcaster.Publish(events.TaskEvent{
+			Type:        events.TaskCategoryChanged,
+			TaskID:      id,
+			TaskName:    task.Title,
+			ProjectID:   task.ProjectID,
+			Category:    string(models.CategoryBacklog),
+			OldCategory: string(task.Category),
+		})
+	}
+	return moved, nil
+}
+
 func (r *TaskRepo) RestoreBoardState(ctx context.Context, task models.Task) error {
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = ?, status = ?, display_order = ?, completed_at = ?, updated_at = datetime('now') WHERE id = ?`,
@@ -1141,6 +1279,94 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 		})
 	}
 	return nil
+}
+
+// FinalizeExecutionCancellation moves a task to its cancelled board state only
+// when no newer execution has already taken ownership of the task. A user can
+// submit a follow-up while the cancelled execution is still unwinding; in that
+// case the follow-up must retain the task state it established, even if it has
+// already reached a terminal status.
+func (r *TaskRepo) FinalizeExecutionCancellation(ctx context.Context, taskID, executionID string) (bool, error) {
+	var task *models.Task
+	finalized := false
+	err := withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
+		var err error
+		task, err = getTaskWithExecutor(ctx, exec, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, taskID)
+		if err != nil {
+			return fmt.Errorf("getting task before cancellation finalization: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+
+		var cancelledHistoryOrder int64
+		if err := exec.QueryRowContext(ctx, `SELECT history_order FROM executions
+			WHERE id = ? AND task_id = ?`, executionID, taskID).Scan(&cancelledHistoryOrder); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("cancelled execution not found for task: %s", executionID)
+			}
+			return fmt.Errorf("loading cancelled execution order: %w", err)
+		}
+		var successorExists bool
+		if err := exec.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM executions
+			WHERE task_id = ? AND history_order > ?
+		)`, taskID, cancelledHistoryOrder).Scan(&successorExists); err != nil {
+			return fmt.Errorf("checking cancellation execution ownership: %w", err)
+		}
+		if successorExists {
+			return nil
+		}
+
+		category := task.Category
+		displayOrder := task.DisplayOrder
+		movedToBacklog := false
+		if category == models.CategoryActive {
+			category = models.CategoryBacklog
+			movedToBacklog = true
+			if err := exec.QueryRowContext(ctx,
+				`SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = ?`,
+				task.ProjectID, category).Scan(&displayOrder); err != nil {
+				return fmt.Errorf("getting cancellation backlog display_order: %w", err)
+			}
+		}
+		if _, err := exec.ExecContext(ctx, `UPDATE tasks
+			SET status = 'cancelled', category = ?, display_order = ?,
+				completed_at = CASE WHEN ? THEN NULL ELSE completed_at END,
+				updated_at = datetime('now')
+			WHERE id = ?`, category, displayOrder, movedToBacklog, taskID); err != nil {
+			return fmt.Errorf("finalizing task cancellation: %w", err)
+		}
+		finalized = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if finalized && r.broadcaster != nil {
+		if task.Status != models.StatusCancelled {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type:      events.TaskStatusChanged,
+				TaskID:    task.ID,
+				TaskName:  task.Title,
+				ProjectID: task.ProjectID,
+				Status:    string(models.StatusCancelled),
+				OldStatus: string(task.Status),
+				Category:  string(task.Category),
+			})
+		}
+		if task.Category == models.CategoryActive {
+			r.broadcaster.Publish(events.TaskEvent{
+				Type:        events.TaskCategoryChanged,
+				TaskID:      task.ID,
+				TaskName:    task.Title,
+				ProjectID:   task.ProjectID,
+				Category:    string(models.CategoryBacklog),
+				OldCategory: string(task.Category),
+			})
+		}
+	}
+	return finalized, nil
 }
 
 func isActiveBoardStatus(status models.TaskStatus) bool {
@@ -2098,9 +2324,10 @@ func scanSwarmChildTask(scan func(dest ...any) error) (models.Task, error) {
 }
 
 func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {
+	swarmConfig := defaultJSON(config)
 	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
-		role, status, defaultJSON(config), sequence, id)
+		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = `+monotonicParentStopRevisionSQL+`, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
+		role, status, role, swarmConfig, swarmConfig, swarmConfig, sequence, id)
 	if err != nil {
 		return fmt.Errorf("updating swarm fields: %w", err)
 	}

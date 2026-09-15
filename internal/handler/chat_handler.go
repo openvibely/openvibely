@@ -314,9 +314,9 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		userMsg = components.ChatBubble("User", message)
 	}
 	agentMsg := components.ChatBubbleStreaming("Assistant", exec.ID, "chat-messages", "", false)
-	// Build context and spawn LLM processing goroutine
-	availableModels, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
-	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
+	// Build request-local context and spawn the LLM processing goroutine. Live
+	// project catalogs are discovered through runtime tools instead of being
+	// embedded in every Chat request.
 	personalityContext := h.getPersonalityContext(c.Request().Context(), projectID)
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
 
@@ -328,7 +328,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		ChatHistory:      priorHistory,
 		ProjectID:        projectID,
 		PrincipalID:      h.authPrincipalID(c),
-		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
+		SystemContext:    combineContexts(attachmentContext, personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
@@ -362,7 +362,31 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
-	if err := h.taskSvc.CancelTask(c.Request().Context(), activeChatExec.TaskID); err != nil {
+	if expectedTurnID := c.QueryParam("expected_turn_id"); expectedTurnID != "" && expectedTurnID != activeChatExec.ID {
+		if isHTMX(c) {
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true, activeChatExec.ID))
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
+	observedTask, cutoff, err := h.taskSvc.ObserveTaskCancellation(c.Request().Context(), activeChatExec.TaskID)
+	if err != nil || observedTask == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load active response")
+	}
+	latestActiveExec, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to recheck active response")
+	}
+	if latestActiveExec == nil || latestActiveExec.ID != activeChatExec.ID {
+		if isHTMX(c) {
+			activeTurnID := ""
+			if latestActiveExec != nil {
+				activeTurnID = latestActiveExec.ID
+			}
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, latestActiveExec != nil, activeTurnID))
+		}
+		return c.NoContent(http.StatusNoContent)
+	}
+	if err := h.taskSvc.CancelTaskObserved(c.Request().Context(), observedTask, cutoff); err != nil {
 		applog.Infof("[handler] ChatStop error cancelling chat task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -374,7 +398,7 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		applog.Infof("[handler] ChatStop error preserving chat category task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to preserve chat history")
 	}
-	h.cancelActiveExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop")
+	h.cancelActiveExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop", cutoff)
 	if isHTMX(c) {
 		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false, ""))
 	}

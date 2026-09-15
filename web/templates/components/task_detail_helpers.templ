@@ -21,12 +21,20 @@ func TaskThreadHasActiveComposerStopState(task *models.Task, executions []models
 }
 
 func taskThreadActiveTurnID(executions []models.Execution) string {
+	runningTurnID := ""
+	queuedTurnID := ""
 	for _, exec := range executions {
 		if exec.Status == models.ExecRunning {
-			return exec.ID
+			runningTurnID = exec.ID
+		}
+		if exec.Status == models.ExecQueued {
+			queuedTurnID = exec.ID
 		}
 	}
-	return ""
+	if runningTurnID != "" {
+		return runningTurnID
+	}
+	return queuedTurnID
 }
 
 func taskQueuedSteerEndpoint(input models.ThreadInput) string {
@@ -384,7 +392,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			TaskID:                 task.ID,
 			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
 			ActiveTurnID:           taskThreadActiveTurnID(executions),
-			StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
+			StopEndpoint:           SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID)),
 			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer", task.ID),
 			SelectedAgentID:        derefString(task.AgentID),
 			PendingInputs:          pendingInputs,

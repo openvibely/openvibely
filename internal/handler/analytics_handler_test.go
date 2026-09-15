@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -151,6 +154,138 @@ func TestGetAnalyticsUsage_WithDateRange(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
+func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-contention.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	if got := connections.Reader.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("reader max connections = %d, want production topology of 1", got)
+	}
+	if got := connections.Writer.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("writer max connections = %d, want production topology of 1", got)
+	}
+	if _, err := connections.Writer.Exec(`
+		INSERT INTO projects(id,name) VALUES ('analytics-project','Analytics project');
+		INSERT INTO tasks(id,project_id,title,category,status,created_at)
+			VALUES ('analytics-task','analytics-project','Analytics task','backlog','completed',CURRENT_TIMESTAMP);
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<250000)
+		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order)
+		SELECT printf('analytics-exec-%06d',n),'analytics-task',
+			CASE WHEN n%3=0 THEN 'failed' ELSE 'completed' END,
+			CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CASE WHEN n=1 THEN 0 ELSE 1 END,n
+		FROM seq;
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Handler{execRepo: repository.NewExecutionRepo(connections.Reader)}
+	e := echo.New()
+	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
+	e.GET("/probe", func(c echo.Context) error {
+		var count int
+		if err := connections.Reader.QueryRowContext(c.Request().Context(), `SELECT COUNT(*) FROM projects`).Scan(&count); err != nil {
+			return err
+		}
+		return c.JSON(http.StatusOK, map[string]int{"projects": count})
+	})
+	server := httptest.NewServer(e)
+	defer server.Close()
+
+	analyticsCtx, cleanupAnalyticsRequest := context.WithCancel(context.Background())
+	defer cleanupAnalyticsRequest()
+	analyticsReq, err := http.NewRequestWithContext(analyticsCtx, http.MethodGet, server.URL+"/api/analytics/dashboard?project_id=analytics-project&view=overview&range=all", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	analyticsDone := make(chan error, 1)
+	go func() {
+		response, requestErr := server.Client().Do(analyticsReq)
+		if response != nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			if requestErr == nil && response.StatusCode != http.StatusOK {
+				requestErr = fmt.Errorf("Analytics status = %d", response.StatusCode)
+			}
+		}
+		analyticsDone <- requestErr
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for connections.Reader.Stats().InUse != 1 {
+		select {
+		case requestErr := <-analyticsDone:
+			t.Fatalf("Analytics request completed before occupying the sole reader: %v", requestErr)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Analytics request did not occupy the sole reader")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	probeDone := make(chan error, 1)
+	probeStarted := time.Now()
+	waitCountBeforeProbe := connections.Reader.Stats().WaitCount
+	go func() {
+		response, requestErr := server.Client().Get(server.URL + "/probe")
+		if response != nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			if requestErr == nil && response.StatusCode != http.StatusOK {
+				requestErr = fmt.Errorf("probe status = %d", response.StatusCode)
+			}
+		}
+		probeDone <- requestErr
+	}()
+
+	deadline = time.Now().Add(time.Second)
+	for connections.Reader.Stats().WaitCount <= waitCountBeforeProbe {
+		select {
+		case err := <-probeDone:
+			t.Fatalf("concurrent request completed before contending for the Analytics reader: %v", err)
+		case err := <-analyticsDone:
+			t.Fatalf("Analytics request completed before cancellation: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("concurrent request did not queue behind the Analytics reader")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	select {
+	case err := <-probeDone:
+		if err != nil {
+			t.Fatalf("concurrent request while Analytics remained active: %v", err)
+		}
+		if elapsed := time.Since(probeStarted); elapsed > time.Second {
+			t.Fatalf("concurrent request waited %s while Analytics remained active; want <= 1s", elapsed)
+		}
+		if err := analyticsCtx.Err(); err != nil {
+			t.Fatalf("Analytics context was cancelled while the concurrent request completed: %v", err)
+		}
+		select {
+		case err := <-analyticsDone:
+			t.Fatalf("Analytics completed before the concurrent request could be observed: %v", err)
+		default:
+		}
+	case err := <-analyticsDone:
+		t.Fatalf("Analytics completed before the contending request: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent request remained blocked while Analytics was active")
+	}
+	select {
+	case err := <-analyticsDone:
+		if err != nil {
+			t.Fatalf("Analytics did not resume after yielding the reader: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Analytics did not complete after yielding the reader")
+	}
+}
+
 func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T) {
 	tc := NewTestContext(t)
 	missing := tc.HTTP().Get("/api/analytics/dashboard?range=30d").Execute()
@@ -268,6 +403,154 @@ func TestGetMostFrequentTasks_WithLimit(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/most-frequent-tasks?limit=3").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
+}
+
+func TestGetMostFrequentTasks_StableTieBreakAndFullHistory(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Analytics project").Build()
+	agent := &models.LLMConfig{
+		Name:     "Analytics agent",
+		Provider: models.ProviderAnthropic,
+		Model:    "claude-3-5-sonnet-20241022",
+	}
+	if err := tc.llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	createTask := func(title string) *models.Task {
+		t.Helper()
+		task := &models.Task{
+			ProjectID: project.ID,
+			Title:     title,
+			Category:  models.CategoryActive,
+			Status:    models.StatusPending,
+			Prompt:    "analytics test",
+		}
+		if err := tc.taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", title, err)
+		}
+		return task
+	}
+	createExecutions := func(taskID string, count int) {
+		t.Helper()
+		for i := 0; i < count; i++ {
+			if err := tc.execRepo.Create(ctx, &models.Execution{
+				TaskID:        taskID,
+				AgentConfigID: agent.ID,
+				Status:        models.ExecCompleted,
+				PromptSent:    "analytics test",
+			}); err != nil {
+				t.Fatalf("create execution for %s: %v", taskID, err)
+			}
+		}
+	}
+
+	mostFrequent := createTask("Most frequent")
+	tieA := createTask("Tie A")
+	tieB := createTask("Tie B")
+	createExecutions(mostFrequent.ID, 3)
+	createExecutions(tieA.ID, 1)
+	createExecutions(tieB.ID, 1)
+
+	firstTieID, secondTieID := tieA.ID, tieB.ID
+	if firstTieID > secondTieID {
+		firstTieID, secondTieID = secondTieID, firstTieID
+	}
+
+	bounded := tc.HTTP().Get("/api/analytics/most-frequent-tasks?project_id=" + project.ID + "&limit=2").Execute()
+	tc.Assert(bounded).StatusCode(http.StatusOK)
+	var boundedRows []repository.TaskFrequency
+	if err := json.Unmarshal(bounded.Body.Bytes(), &boundedRows); err != nil {
+		t.Fatalf("decode bounded response: %v", err)
+	}
+	if len(boundedRows) != 2 || boundedRows[0].TaskID != mostFrequent.ID || boundedRows[1].TaskID != firstTieID {
+		t.Fatalf("bounded rows = %+v, want most frequent then stable tie %s", boundedRows, firstTieID)
+	}
+
+	full := tc.HTTP().Get("/api/analytics/most-frequent-tasks?project_id=" + project.ID + "&limit=0").Execute()
+	tc.Assert(full).StatusCode(http.StatusOK)
+	var fullRows []repository.TaskFrequency
+	if err := json.Unmarshal(full.Body.Bytes(), &fullRows); err != nil {
+		t.Fatalf("decode full-history response: %v", err)
+	}
+	if len(fullRows) != 3 || fullRows[1].TaskID != firstTieID || fullRows[2].TaskID != secondTieID {
+		t.Fatalf("full-history rows = %+v, want stable ties [%s, %s]", fullRows, firstTieID, secondTieID)
+	}
+}
+
+func TestGetMostFrequentTasks_RealFiveThousandRecordResponseBoundary(t *testing.T) {
+	const fixtureSize = 5000
+	ctx := context.Background()
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Large analytics project").Build()
+	agent := &models.LLMConfig{
+		Name:     "Analytics evidence agent",
+		Provider: models.ProviderAnthropic,
+		Model:    "claude-3-5-sonnet-20241022",
+	}
+	if err := tc.llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	tx, err := tc.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin fixture transaction: %v", err)
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+	for i := 0; i < fixtureSize; i++ {
+		taskID := fmt.Sprintf("analytics-large-%05d", i)
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO tasks (id, project_id, title, prompt) VALUES (?, ?, ?, '')`,
+			taskID, project.ID, fmt.Sprintf("task title %05d", i)); err != nil {
+			t.Fatalf("insert task %d: %v", i, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, started_at, completed_at) VALUES (?, ?, ?, ?, '', ?, ?)`,
+			fmt.Sprintf("execution-large-%05d", i), taskID, agent.ID, models.ExecCompleted, "2026-09-13 12:34:56", "2026-09-13 12:34:56"); err != nil {
+			t.Fatalf("insert execution %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit fixture: %v", err)
+	}
+	rollback = false
+
+	request := func(limit int) ([]repository.TaskFrequency, int) {
+		t.Helper()
+		path := fmt.Sprintf("/api/analytics/most-frequent-tasks?project_id=%s&limit=%d", project.ID, limit)
+		rec := tc.HTTP().Get(path).Execute()
+		tc.Assert(rec).StatusCode(http.StatusOK)
+		var rows []repository.TaskFrequency
+		if err := json.Unmarshal(rec.Body.Bytes(), &rows); err != nil {
+			t.Fatalf("decode limit=%d response: %v", limit, err)
+		}
+		return rows, len(rec.Body.Bytes())
+	}
+
+	boundedRows, boundedBytes := request(12)
+	fullRows, fullBytes := request(0)
+	if len(boundedRows) != 12 {
+		t.Fatalf("bounded real-backend rows = %d, want 12", len(boundedRows))
+	}
+	if len(fullRows) != fixtureSize {
+		t.Fatalf("full real-backend rows = %d, want %d", len(fullRows), fixtureSize)
+	}
+	for i, row := range boundedRows {
+		wantID := fmt.Sprintf("analytics-large-%05d", i)
+		if row.TaskID != wantID || row.ExecutionCount != 1 {
+			t.Fatalf("bounded row %d = %+v, want task %s with count 1", i, row, wantID)
+		}
+	}
+	if boundedBytes >= fullBytes {
+		t.Fatalf("bounded real-backend response bytes = %d, full = %d", boundedBytes, fullBytes)
+	}
+	t.Logf("real_frequent_analytics_boundary fixture=%d bounded_limit=12 bounded_response_bytes=%d bounded_rows=%d full_limit=0 full_response_bytes=%d full_rows=%d", fixtureSize, boundedBytes, len(boundedRows), fullBytes, len(fullRows))
 }
 
 func TestGetFailedTaskPatterns(t *testing.T) {

@@ -1069,8 +1069,22 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatalf("create execution: %v", err)
 	}
+	readiness, err := execRepo.SuccessCompletionReadiness(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("SuccessCompletionReadiness before cancellation: %v", err)
+	}
+	if readiness != CompleteSuccessCompleted {
+		t.Fatalf("expected completion-ready execution, got %s", readiness)
+	}
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecCancelled, "partial", "cancelled", 0, 10); err != nil {
 		t.Fatalf("cancel execution: %v", err)
+	}
+	readiness, err = execRepo.SuccessCompletionReadiness(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("SuccessCompletionReadiness after cancellation: %v", err)
+	}
+	if readiness != CompleteSuccessAlreadyTerminal {
+		t.Fatalf("expected terminal readiness after cancellation, got %s", readiness)
 	}
 
 	outcome, err := execRepo.CompleteSuccessIfNoPendingSteering(ctx, exec.ID, "late success", 1, 20)
@@ -1141,6 +1155,59 @@ func TestExecutionRepo_CancelActiveByTaskCancelsRunningAndQueuedOnly(t *testing.
 	}
 	if completed.Status != models.ExecCompleted {
 		t.Fatalf("completed execution was changed to %s", completed.Status)
+	}
+}
+
+func TestExecutionRepo_CancelActiveByTaskCutoffPreservesFollowupAdmittedAfterStop(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "Stop then follow up", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "initial"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("Create task: %v", err)
+	}
+	old := &models.Execution{TaskID: task.ID, Status: models.ExecQueued, PromptSent: "initial", IsFollowup: true}
+	if err := execRepo.Create(ctx, old); err != nil {
+		t.Fatalf("Create old execution: %v", err)
+	}
+	cutoff, err := execRepo.TaskExecutionHistoryCutoff(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("TaskExecutionHistoryCutoff: %v", err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusCancelled); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+	if err := taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
+		t.Fatalf("UpdateCategory: %v", err)
+	}
+	newTurn := &models.Execution{TaskID: task.ID, PromptSent: "follow up", IsFollowup: true}
+	started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, newTurn, &models.ThreadInput{Content: newTurn.PromptSent})
+	if err != nil || !started {
+		t.Fatalf("CreateDirectTaskFollowupOrQueue: started=%v err=%v", started, err)
+	}
+	cancelledIDs, err := execRepo.CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx, task.ID, cutoff)
+	if err != nil {
+		t.Fatalf("CancelActiveByTaskThroughHistoryOrderReturningIDs: %v", err)
+	}
+	oldCancelled := false
+	for _, id := range cancelledIDs {
+		if id == old.ID {
+			oldCancelled = true
+		}
+		if id == newTurn.ID {
+			t.Fatal("new follow-up was included in old turn's cancellation")
+		}
+	}
+	if !oldCancelled {
+		t.Fatal("old active execution was not cancelled")
+	}
+	stored, err := execRepo.GetByID(ctx, newTurn.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored.Status != models.ExecQueued {
+		t.Fatalf("new follow-up status = %s, want queued", stored.Status)
 	}
 }
 

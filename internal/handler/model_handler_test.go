@@ -102,7 +102,7 @@ func TestOAuthConnectionManagementRoutesRenameMoveAndDelete(t *testing.T) {
 	}
 }
 
-func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
+func TestModelsPageKeepsOAuthAccountActionsInEditorNotModelCards(t *testing.T) {
 	_, e, repo := setupTestHandler(t)
 	ctx := context.Background()
 	cfg := &models.LLMConfig{Name: "Shared Anthropic model", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "secret-access", OAuthRefreshToken: "secret-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
@@ -124,15 +124,40 @@ func TestModelsPageListsSafeSharedOAuthAccountOptions(t *testing.T) {
 		t.Fatalf("models status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "OAuth Account") || !strings.Contains(body, "OAuth Accounts") || !strings.Contains(body, cfg.Name) || !strings.Contains(body, cfg.OAuthConnectionID) || !strings.Contains(body, "Move selected models") || !strings.Contains(body, "/rename") {
-		t.Fatalf("shared OAuth account selector/management controls missing: %s", body)
+	for _, want := range []string{"OAuth Account", cfg.Name, cfg.OAuthConnectionID, `id="model_oauth_connection_action"`, "Save this model before connecting the selected account", `'/models/' + encodeURIComponent(id) + '/oauth/initiate'`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("models page missing editor-owned OAuth value %q", want)
+		}
 	}
-	wantDisconnectConfirmation := `hx-confirm="Disconnect this OAuth account? Linked models: Shared Anthropic model (claude-sonnet), Shared Anthropic sibling (claude-opus). All will require reconnecting."`
-	if !strings.Contains(body, wantDisconnectConfirmation) {
-		t.Fatalf("disconnect confirmation does not identify every affected model: %s", body)
+	for _, unwanted := range []string{
+		"oauth-accounts-heading", "OAuth Accounts", "Move selected models", "/rename", "Delete account",
+		`href="/models/` + cfg.ID + `/oauth/initiate"`,
+		`hx-post="/models/` + cfg.ID + `/oauth/disconnect"`,
+		"Reconnect account", "Disconnect account",
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("models page unexpectedly rendered model-card OAuth action %q", unwanted)
+		}
 	}
 	if strings.Contains(body, "secret-access") || strings.Contains(body, "secret-refresh") {
 		t.Fatal("Models page exposed OAuth credentials")
+	}
+
+	detailsReq := httptest.NewRequest(http.MethodGet, "/models/"+cfg.ID+"/edit-details", nil)
+	detailsRec := httptest.NewRecorder()
+	e.ServeHTTP(detailsRec, detailsReq)
+	if detailsRec.Code != http.StatusOK {
+		t.Fatalf("edit details status = %d, body=%s", detailsRec.Code, detailsRec.Body.String())
+	}
+	var details modelEditDetails
+	if err := json.Unmarshal(detailsRec.Body.Bytes(), &details); err != nil {
+		t.Fatalf("decode edit details: %v", err)
+	}
+	if !details.OAuthConnected || details.OAuthNeedsReauth {
+		t.Fatalf("edit details OAuth status = connected %v needs_reauth %v", details.OAuthConnected, details.OAuthNeedsReauth)
+	}
+	if strings.Contains(detailsRec.Body.String(), "secret-access") || strings.Contains(detailsRec.Body.String(), "secret-refresh") {
+		t.Fatal("edit details exposed OAuth credentials")
 	}
 }
 
@@ -2240,6 +2265,73 @@ func TestCreateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
 			}
 			if linked.OAuthConnectionID != existing.OAuthConnectionID || linked.OAuthAccessToken != "existing-access" || linked.OAuthRefreshToken != "existing-refresh" {
 				t.Fatalf("model did not use selected OAuth account: %#v", linked)
+			}
+		})
+	}
+}
+
+func TestUpdateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		t.Run(string(provider), func(t *testing.T) {
+			_, e, repo := setupTestHandler(t)
+			ctx := context.Background()
+			healthy := &models.LLMConfig{
+				Name:              string(provider) + " healthy account",
+				Provider:          provider,
+				Model:             "healthy-model",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "healthy-access",
+				OAuthRefreshToken: "healthy-refresh",
+				OAuthExpiresAt:    time.Now().Add(time.Hour).UnixMilli(),
+			}
+			legacy := &models.LLMConfig{
+				Name:              string(provider) + " legacy private model",
+				Provider:          provider,
+				Model:             "legacy-model",
+				AuthMethod:        models.AuthMethodOAuth,
+				OAuthAccessToken:  "stale-access",
+				OAuthRefreshToken: "stale-refresh",
+				OAuthNeedsReauth:  true,
+			}
+			for _, cfg := range []*models.LLMConfig{healthy, legacy} {
+				if err := repo.Create(ctx, cfg); err != nil {
+					t.Fatalf("create %s: %v", cfg.Name, err)
+				}
+			}
+
+			form := url.Values{}
+			form.Set("name", legacy.Name)
+			form.Set("provider", string(provider))
+			form.Set("auth_method", "oauth")
+			form.Set("oauth_connection_id", healthy.OAuthConnectionID)
+			form.Set("model", legacy.Model)
+			if provider == models.ProviderAnthropic {
+				form.Set("anthropic_auth_type", "oauth")
+			} else {
+				form.Set("openai_auth_type", "oauth")
+			}
+
+			req := httptest.NewRequest(http.MethodPut, "/models/"+legacy.ID, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("update linked model status = %d, body=%s", rec.Code, rec.Body.String())
+			}
+
+			linked, err := repo.GetByID(ctx, legacy.ID)
+			if err != nil {
+				t.Fatalf("load linked model: %v", err)
+			}
+			if linked.OAuthConnectionID != healthy.OAuthConnectionID || linked.OAuthAccessToken != "healthy-access" || linked.OAuthRefreshToken != "healthy-refresh" || linked.OAuthNeedsReauth {
+				t.Fatalf("legacy model did not use selected healthy OAuth account: %#v", linked)
+			}
+			reloadedHealthy, err := repo.GetByID(ctx, healthy.ID)
+			if err != nil {
+				t.Fatalf("reload healthy model: %v", err)
+			}
+			if reloadedHealthy.OAuthAccessToken != "healthy-access" || reloadedHealthy.OAuthRefreshToken != "healthy-refresh" || reloadedHealthy.OAuthNeedsReauth {
+				t.Fatalf("selected healthy OAuth account changed: %#v", reloadedHealthy)
 			}
 		})
 	}

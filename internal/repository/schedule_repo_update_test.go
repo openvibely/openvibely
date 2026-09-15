@@ -22,16 +22,16 @@ func TestUpdateSchedule_DoesNotAffectOtherSchedules(t *testing.T) {
 
 	// Create two tasks
 	task1 := &models.Task{
-		ProjectID:   "default",
-		Title:       "Task 1",
-		Category:    "scheduled",
-		Status:      "pending",
+		ProjectID: "default",
+		Title:     "Task 1",
+		Category:  "scheduled",
+		Status:    "pending",
 	}
 	task2 := &models.Task{
-		ProjectID:   "default",
-		Title:       "Task 2",
-		Category:    "scheduled",
-		Status:      "pending",
+		ProjectID: "default",
+		Title:     "Task 2",
+		Category:  "scheduled",
+		Status:    "pending",
 	}
 	if err := taskRepo.Create(ctx, task1); err != nil {
 		t.Fatalf("creating task1: %v", err)
@@ -130,11 +130,11 @@ func TestReschedulePreservesTimezone(t *testing.T) {
 
 	// Create a task first (required for foreign key constraint)
 	task := &models.Task{
-		ProjectID:   "default",
-		Title:       "Test Task",
+		ProjectID: "default",
+		Title:     "Test Task",
 		//Description: "Test task for timezone test",
-		Category:    "scheduled",
-		Status:      "pending",
+		Category: "scheduled",
+		Status:   "pending",
 	}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)

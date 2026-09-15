@@ -632,6 +632,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to start Telegram bot: "+err.Error())
 		}
 		svc.SetTelegramAuthRepo(h.telegramAuthRepo)
+		svc.SetTelegramUserProjectRepo(h.telegramUserProjectRepo)
 		if h.agentRepo != nil {
 			svc.SetAgentRepo(h.agentRepo)
 		}
@@ -644,6 +645,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		if h.automationGraphSvc != nil {
 			svc.SetAutomationGraphService(h.automationGraphSvc)
 		}
+		svc.SetProjectCreationServices(h.projectSvc, h.githubSvc, h.memorySvc, h.agentLibraryMaintenanceSvc)
 		if h.chatBroadcaster != nil {
 			svc.SetChatBroadcaster(h.chatBroadcaster)
 		}

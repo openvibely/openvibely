@@ -89,6 +89,16 @@ func TestOllamaFinalWirePreflightUsesConfiguredContextWindow(t *testing.T) {
 	}
 }
 
+func TestOllamaRequestPreflightUsesByteEstimate(t *testing.T) {
+	agent := models.LLMConfig{Provider: models.ProviderOllama, ContextWindow: 6000}
+	if err := ensureOllamaRequestFits([]byte(strings.Repeat("a", 12000)), agent); err != nil {
+		t.Fatalf("moderate ASCII payload should fit: %v", err)
+	}
+	if err := ensureOllamaRequestFits([]byte(strings.Repeat("a", 20000)), agent); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
+	}
+}
+
 func TestOllamaRequestSetsConfiguredNumCtx(t *testing.T) {
 	doer := &recordingHTTPDoer{}
 	adapter := New(nil, nil)

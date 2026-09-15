@@ -51,56 +51,59 @@ type DiscordConnectionStatus struct {
 }
 
 type DiscordService struct {
-	session                    *discordgo.Session
-	settingsRepo               *repository.SettingsRepo
-	discordAuthRepo            *repository.DiscordAuthRepo
-	discordTaskContextRepo     *repository.DiscordTaskContextRepo
-	discordUserProjectRepo     *repository.DiscordUserProjectRepo
-	projectRepo                *repository.ProjectRepo
-	projectSvc                 *ProjectService
-	githubProjectSvc           GitHubProjectCloneProvider
-	memorySvc                  *MemoryService
-	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
-	llmConfigRepo              *repository.LLMConfigRepo
-	taskRepo                   *repository.TaskRepo
-	execRepo                   *repository.ExecutionRepo
-	scheduleRepo               *repository.ScheduleRepo
-	taskSvc                    *TaskService
-	taskGoalSvc                *TaskGoalService
-	llmSvc                     *LLMService
-	workerSvc                  *WorkerService
-	automationGraphSvc         *AutomationGraphService
-	automationDraftSvc         *AutomationDraftService
-	automationCompiler         *AutomationCompiler
-	threadInputRepo            *repository.ThreadInputRepo
-	chatAttachmentRepo         *repository.ChatAttachmentRepo
-	customPersonalityRepo      *repository.CustomPersonalityRepo
-	agentRepo                  *repository.AgentRepo
-	alertSvc                   *AlertService
-	usageAnalyticsSvc          *UsageAnalyticsService
-	upcomingSvc                *UpcomingService
-	emailStatus                func(context.Context) EmailConnectionStatus
-	emailAuthRepo              *repository.EmailAuthRepo
-	webhookRepo                *repository.WebhookRepo
-	chatBroadcaster            *events.ChatBroadcaster
-	executionStreamHub         *events.ExecutionStreamHub
-	queuedTurnPromoter         func(projectID string)
-	queuedTaskThreadPromoter   func(taskID string)
-	channelChatRunner          ChannelChatRunner
-	channelTaskRunner          ChannelTaskRunner
-	channelMessageRouter       *ChannelMessageRouter
-	userProjects               map[string]string
-	uploadsDir                 string
-	httpClient                 *http.Client
+	session                              *discordgo.Session
+	settingsRepo                         *repository.SettingsRepo
+	discordAuthRepo                      *repository.DiscordAuthRepo
+	discordTaskContextRepo               *repository.DiscordTaskContextRepo
+	discordUserProjectRepo               *repository.DiscordUserProjectRepo
+	projectRepo                          *repository.ProjectRepo
+	projectSvc                           *ProjectService
+	githubProjectSvc                     GitHubProjectCloneProvider
+	memorySvc                            *MemoryService
+	agentLibraryMaintenanceSvc           *AgentLibraryMaintenanceService
+	llmConfigRepo                        *repository.LLMConfigRepo
+	taskRepo                             *repository.TaskRepo
+	execRepo                             *repository.ExecutionRepo
+	scheduleRepo                         *repository.ScheduleRepo
+	taskSvc                              *TaskService
+	taskGoalSvc                          *TaskGoalService
+	llmSvc                               *LLMService
+	workerSvc                            *WorkerService
+	automationGraphSvc                   *AutomationGraphService
+	automationDraftSvc                   *AutomationDraftService
+	automationCompiler                   *AutomationCompiler
+	threadInputRepo                      *repository.ThreadInputRepo
+	chatAttachmentRepo                   *repository.ChatAttachmentRepo
+	customPersonalityRepo                *repository.CustomPersonalityRepo
+	agentRepo                            *repository.AgentRepo
+	alertSvc                             *AlertService
+	usageAnalyticsSvc                    *UsageAnalyticsService
+	upcomingSvc                          *UpcomingService
+	emailStatus                          func(context.Context) EmailConnectionStatus
+	emailAuthRepo                        *repository.EmailAuthRepo
+	webhookRepo                          *repository.WebhookRepo
+	chatBroadcaster                      *events.ChatBroadcaster
+	executionStreamHub                   *events.ExecutionStreamHub
+	queuedTurnPromoter                   func(projectID string)
+	queuedTaskThreadPromoter             func(taskID string)
+	channelChatRunner                    ChannelChatRunner
+	channelTaskRunner                    ChannelTaskRunner
+	channelMessageRouter                 *ChannelMessageRouter
+	userProjects                         map[string]string
+	projectSelectionGeneration           uint64
+	beforeActiveProjectCachePopulateHook func()
+	uploadsDir                           string
+	httpClient                           *http.Client
 
-	mu                       sync.RWMutex
-	running                  bool
-	lastStartError           string
-	ctx                      context.Context
-	cancel                   context.CancelFunc
-	sendMessageFunc          func(channelID, messageID, text string) (string, error)
-	createDMChannelFunc      func(userID string) (string, error)
-	processIncomingMessageFn func(msg discordIncomingMessage)
+	mu                         sync.RWMutex
+	projectSelectionMutationMu sync.Mutex
+	running                    bool
+	lastStartError             string
+	ctx                        context.Context
+	cancel                     context.CancelFunc
+	sendMessageFunc            func(channelID, messageID, text string) (string, error)
+	createDMChannelFunc        func(userID string) (string, error)
+	processIncomingMessageFn   func(msg discordIncomingMessage)
 }
 
 func NewDiscordService(
@@ -165,6 +168,9 @@ func (s *DiscordService) SetCustomPersonalityRepo(repo *repository.CustomPersona
 }
 func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
 	s.projectSvc = projectSvc
+	if projectSvc != nil {
+		projectSvc.RegisterProjectSelectionCacheInvalidator(s)
+	}
 	s.githubProjectSvc = githubSvc
 	s.memorySvc = memorySvc
 	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
@@ -655,36 +661,76 @@ func (s *DiscordService) checkAuthorization(ctx context.Context, projectID, disc
 
 func (s *DiscordService) getActiveProject(ctx context.Context, userID string) string {
 	key := strings.TrimSpace(userID)
-	s.mu.RLock()
-	if projectID, ok := s.userProjects[key]; ok {
+	for {
+		s.mu.RLock()
+		if projectID, ok := s.userProjects[key]; ok {
+			s.mu.RUnlock()
+			return projectID
+		}
+		generation := s.projectSelectionGeneration
 		s.mu.RUnlock()
-		return projectID
-	}
-	s.mu.RUnlock()
 
-	if s.discordUserProjectRepo != nil {
-		if saved, err := s.discordUserProjectRepo.GetUserProject(ctx, key); err == nil && saved != "" {
-			s.mu.Lock()
-			s.userProjects[key] = saved
-			s.mu.Unlock()
-			return saved
-		} else if err != nil {
-			applog.Infof("[discord] error loading persisted project for user=%s: %v", key, err)
+		if s.discordUserProjectRepo != nil {
+			if saved, err := s.discordUserProjectRepo.GetUserProject(ctx, key); err == nil && saved != "" {
+				if selected, ok := s.populateActiveProject(key, saved, generation); ok {
+					return selected
+				}
+				continue
+			} else if err != nil {
+				applog.Infof("[discord] error loading persisted project for user=%s: %v", key, err)
+			}
+		}
+
+		if s.projectRepo == nil {
+			return ""
+		}
+		projects, err := s.projectRepo.List(ctx)
+		if err != nil || len(projects) == 0 {
+			return ""
+		}
+		selected := fallbackProjectID(projects)
+		if cached, ok := s.populateActiveProject(key, selected, generation); ok {
+			return cached
 		}
 	}
+}
 
-	if s.projectRepo == nil {
-		return ""
+func (s *DiscordService) InvalidateProjectSelection(projectID string) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return
 	}
-	projects, err := s.projectRepo.List(ctx)
-	if err != nil || len(projects) == 0 {
-		return ""
-	}
-	selected := fallbackProjectID(projects)
+	s.projectSelectionMutationMu.Lock()
+	defer s.projectSelectionMutationMu.Unlock()
 	s.mu.Lock()
-	s.userProjects[key] = selected
-	s.mu.Unlock()
-	return selected
+	defer s.mu.Unlock()
+	s.projectSelectionGeneration++
+	for key, cachedProjectID := range s.userProjects {
+		if cachedProjectID == projectID {
+			delete(s.userProjects, key)
+		}
+	}
+}
+
+func (s *DiscordService) populateActiveProject(key, projectID string, expectedGeneration uint64) (string, bool) {
+	if s.beforeActiveProjectCachePopulateHook != nil {
+		s.beforeActiveProjectCachePopulateHook()
+	}
+	s.projectSelectionMutationMu.Lock()
+	defer s.projectSelectionMutationMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.projectSelectionGeneration != expectedGeneration {
+		return "", false
+	}
+	if current, ok := s.userProjects[key]; ok {
+		return current, true
+	}
+	if s.userProjects == nil {
+		s.userProjects = make(map[string]string)
+	}
+	s.userProjects[key] = projectID
+	return projectID, true
 }
 
 func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
@@ -813,6 +859,8 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 
 func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) error {
 	key := strings.TrimSpace(userID)
+	s.projectSelectionMutationMu.Lock()
+	defer s.projectSelectionMutationMu.Unlock()
 	if s.discordUserProjectRepo != nil {
 		if err := s.discordUserProjectRepo.SetUserProject(ctx, key, projectID); err != nil {
 			applog.Infof("[discord] persist active project failed for user=%s: %v", key, err)
@@ -820,6 +868,9 @@ func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID
 		}
 	}
 	s.mu.Lock()
+	if s.userProjects == nil {
+		s.userProjects = make(map[string]string)
+	}
 	s.userProjects[key] = projectID
 	s.mu.Unlock()
 	return nil

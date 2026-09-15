@@ -110,6 +110,7 @@ type SwarmConfig struct {
 	RerunMergerAfterReviewer         bool     `json:"rerun_merger_after_reviewer,omitempty"`
 	RerunIntegratorAfterReviewer     bool     `json:"rerun_integrator_after_reviewer,omitempty"`
 	Generation                       int      `json:"generation,omitempty"`
+	StopRevision                     int      `json:"stop_revision,omitempty"`
 	ReviewedGeneration               int      `json:"reviewed_generation,omitempty"`
 	MergedGeneration                 int      `json:"merged_generation,omitempty"`
 	IntegratedGeneration             int      `json:"integrated_generation,omitempty"`

@@ -31,11 +31,25 @@ const oauthConnectionColumns = `c.id, c.provider, c.name,
 	c.created_at, c.updated_at,
 	(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
 
-const oauthConnectionSummaryColumns = `c.id, c.provider, c.name,
-	CASE WHEN c.oauth_access_token != '' THEN 'present' ELSE '' END, '', c.oauth_expires_at,
-	'', c.oauth_needs_reauth, 0,
-	c.created_at, c.updated_at,
-	(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
+const oauthConnectionSummaryColumns = `c.id, c.provider,
+		COALESCE(
+			(SELECT NULLIF(TRIM(snapshot.account_display_name), '')
+			 FROM account_usage_snapshots snapshot
+			 WHERE snapshot.oauth_connection_id = c.id
+			   AND snapshot.oauth_config_revision = c.oauth_revision
+			   AND TRIM(snapshot.account_display_name) != ''
+			 ORDER BY snapshot.fetched_at DESC, snapshot.created_at DESC, snapshot.rowid DESC
+			 LIMIT 1),
+			CASE c.provider
+				WHEN 'anthropic' THEN 'Anthropic account'
+				WHEN 'openai' THEN 'OpenAI account'
+				ELSE c.name
+			END
+		),
+		CASE WHEN c.oauth_access_token != '' THEN 'present' ELSE '' END, '', c.oauth_expires_at,
+		'', c.oauth_needs_reauth, 0,
+		c.created_at, c.updated_at,
+		(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
 
 func (r *LLMConfigRepo) CreateOAuthConnection(ctx context.Context, connection *models.OAuthConnection) error {
 	if connection == nil {

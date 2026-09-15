@@ -2072,7 +2072,7 @@ func taskIsCancellableByUser(task *models.Task) bool {
 	return task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) || (task.SwarmRole == models.SwarmRoleParent && task.Status == models.StatusBlocked && task.Category == models.CategoryActive)
 }
 
-func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, composerStop bool, operation string) (*taskCancellationResult, error) {
+func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, cutoff int64, composerStop bool, operation string) (*taskCancellationResult, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task not found")
 	}
@@ -2090,27 +2090,29 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, compose
 		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
 		return result, nil
 	}
-
-	if h.workerSvc != nil {
-		h.workerSvc.MarkCancellationRequested(task.ID)
-	}
-	if !composerStop && h.threadInputRepo != nil {
-		if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
-			applog.Infof("[handler] %s error cancelling pending thread inputs task=%s: %v", operation, task.ID, err)
-		}
-	}
 	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
-		if err := h.swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
+		var pendingSweep func() error
+		if !composerStop && h.threadInputRepo != nil {
+			pendingSweep = func() error { return h.threadInputRepo.CancelPendingForTask(ctx, task.ID) }
+		}
+		if err := h.swarmSvc.CancelSwarmObservedWithPending(ctx, task, pendingSweep); err != nil {
 			applog.Infof("[handler] %s swarm cascade error: %v", operation, err)
 			return nil, err
 		}
-	} else if err := h.taskSvc.CancelTask(ctx, task.ID); err != nil {
-		applog.Infof("[handler] %s error: %v", operation, err)
-		return nil, err
-	} else if models.IsSwarmChildRole(task.SwarmRole) {
-		h.notifySwarmChildTerminal(ctx, task.ID)
+	} else {
+		var pendingSweep func() error
+		if !composerStop && h.threadInputRepo != nil {
+			pendingSweep = func() error { return h.threadInputRepo.CancelPendingForTask(ctx, task.ID) }
+		}
+		if err := h.taskSvc.CancelTaskObservedWithPending(ctx, task, cutoff, pendingSweep); err != nil {
+			applog.Infof("[handler] %s error: %v", operation, err)
+			return nil, err
+		}
+		if models.IsSwarmChildRole(task.SwarmRole) {
+			h.notifySwarmChildTerminal(ctx, task.ID)
+		}
 	}
-	h.cancelActiveExecutionsAndPublish(ctx, task.ID, operation)
+	h.cancelActiveExecutionsAndPublish(ctx, task.ID, operation, cutoff)
 	updated, err := h.taskSvc.GetByID(ctx, task.ID)
 	if err != nil {
 		return nil, err
@@ -2143,7 +2145,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	}
 
 	// Fetch task to get projectID for kanban board response
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	task, cutoff, err := h.taskSvc.ObserveTaskCancellation(c.Request().Context(), taskID)
 	if err != nil {
 		applog.Infof("[handler] CancelTask fetch error: %v", err)
 		if pulseRequest {
@@ -2165,8 +2167,49 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
-	result, err := h.cancelTaskWork(c.Request().Context(), task, composerStop, "CancelTask")
+	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_generation") != "" {
+		expectedGeneration, err := strconv.Atoi(c.QueryParam("expected_generation"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm generation")
+		}
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		if err != nil {
+			return err
+		}
+		if expectedGeneration != cfg.Generation {
+			return echo.NewHTTPError(http.StatusConflict, "swarm generation changed; Stop was not applied")
+		}
+	}
+	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_stop_revision") != "" {
+		expectedRevision, err := strconv.Atoi(c.QueryParam("expected_stop_revision"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm Stop revision")
+		}
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		if err != nil {
+			return err
+		}
+		if expectedRevision != cfg.StopRevision {
+			return echo.NewHTTPError(http.StatusConflict, "swarm follow-up changed; Stop was not applied")
+		}
+	}
+	if composerStop && c.QueryParam("expected_turn_id") != "" {
+		matches, err := h.execRepo.IsTaskExecutionAtHistoryCutoff(c.Request().Context(), taskID, c.QueryParam("expected_turn_id"), cutoff)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return echo.NewHTTPError(http.StatusConflict, "response turn changed; Stop was not applied")
+		}
+	}
+	result, err := h.cancelTaskWork(c.Request().Context(), task, cutoff, composerStop, "CancelTask")
 	if err != nil {
+		if errors.Is(err, service.ErrTaskCancellationSuperseded) {
+			if pulseRequest {
+				return h.renderPulseCancelError(c, http.StatusConflict, taskID, "This task changed before Stop could be applied.")
+			}
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if pulseRequest {
 			return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task. Try again.")
 		}
@@ -2527,6 +2570,211 @@ func (h *Handler) ExecuteBacklogTasks(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
 
+// TaskReference is the compact machine-facing task projection used by terminal
+// selectors and non-canonical task reference resolution. It intentionally omits
+// task execution, worktree, swarm configuration, and other detail-only fields.
+type TaskReference struct {
+	ID           string   `json:"id"`
+	ProjectID    string   `json:"project_id"`
+	Title        string   `json:"title"`
+	Prompt       string   `json:"prompt"`
+	Category     string   `json:"category"`
+	Status       string   `json:"status"`
+	DisplayOrder int      `json:"display_order"`
+	Badges       []string `json:"badges,omitempty"`
+}
+
+// TaskReferenceCatalogResponse is the complete compact task catalog for one
+// project. The envelope leaves room for response metadata without changing the
+// task projection consumed by terminal clients.
+type TaskReferenceCatalogResponse struct {
+	Tasks []TaskReference `json:"tasks"`
+}
+
+// GetTaskReferenceCatalog returns all top-level board tasks for one project as a
+// compact JSON projection. It mirrors the task set exposed by the rendered board
+// while avoiding the board's controls, scripts, and unrelated page data.
+// @Summary Get project task reference catalog
+// @Description Returns the complete compact task projection used to resolve terminal task references. Chat, non-visible scheduled, and nested swarm-child tasks are omitted because they are not top-level Kanban cards.
+// @Tags tasks
+// @Produce json
+// @Param project_id query string true "Project ID"
+// @Success 200 {object} TaskReferenceCatalogResponse "Complete project task reference catalog"
+// @Failure 400 {object} ErrorResponse "Project ID is required"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/tasks/reference-catalog [get]
+func (h *Handler) GetTaskReferenceCatalog(c echo.Context) error {
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
+	}
+
+	ctx := c.Request().Context()
+	if h.taskSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "task service is unavailable")
+	}
+	tasks, err := h.taskSvc.ListTaskReferences(ctx, projectID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskReferenceCatalog project=%s error listing tasks: %v", projectID, err)
+		return err
+	}
+
+	var llmModels []models.LLMConfig
+	if h.llmConfigRepo != nil {
+		llmModels, err = h.llmConfigRepo.ListBadgeOptions(ctx)
+		if err != nil {
+			applog.Infof("[handler] GetTaskReferenceCatalog project=%s error listing model badges: %v", projectID, err)
+			llmModels = nil
+		}
+	}
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, projectID, nil)
+	visibleTasks := make([]repository.TaskReference, 0, len(tasks))
+	for _, task := range tasks {
+		if taskReferenceVisible(task) {
+			visibleTasks = append(visibleTasks, task)
+		}
+	}
+	sort.SliceStable(visibleTasks, func(i, j int) bool {
+		left, right := visibleTasks[i], visibleTasks[j]
+		leftOrder, rightOrder := taskReferenceBoardOrder(left), taskReferenceBoardOrder(right)
+		if leftOrder != rightOrder {
+			return leftOrder < rightOrder
+		}
+		if left.DisplayOrder != right.DisplayOrder {
+			return left.DisplayOrder < right.DisplayOrder
+		}
+		// Prefer cards already stored in this board column over cards projected
+		// into it (blocked swarm parents and active scheduled tasks). Their
+		// per-category display orders can legitimately collide.
+		leftProjected := taskReferenceProjectedToAnotherBoardColumn(left)
+		rightProjected := taskReferenceProjectedToAnotherBoardColumn(right)
+		if leftProjected != rightProjected {
+			return !leftProjected
+		}
+		return left.ID < right.ID
+	})
+	refs := make([]TaskReference, 0, len(visibleTasks))
+	for _, task := range visibleTasks {
+		refs = append(refs, TaskReference{
+			ID:           task.ID,
+			ProjectID:    task.ProjectID,
+			Title:        task.Title,
+			Prompt:       task.Prompt,
+			Category:     string(task.Category),
+			Status:       string(task.Status),
+			DisplayOrder: task.DisplayOrder,
+			Badges:       taskReferenceBadges(task, llmModels, agentDefs),
+		})
+	}
+	return c.JSON(http.StatusOK, TaskReferenceCatalogResponse{Tasks: refs})
+}
+
+func taskReferenceProjectedToAnotherBoardColumn(task repository.TaskReference) bool {
+	switch taskReferenceBoardOrder(task) {
+	case 0:
+		return task.Category != models.CategoryBacklog
+	case 1:
+		return task.Category != models.CategoryActive
+	case 2:
+		return task.Category != models.CategoryCompleted
+	default:
+		return false
+	}
+}
+
+func taskReferenceBoardOrder(task repository.TaskReference) int {
+	category := task.Category
+	if task.SwarmRole == models.SwarmRoleParent &&
+		category == models.CategoryActive && task.Status == models.StatusBlocked &&
+		!task.HasRunnableSwarmChild {
+		category = models.CategoryBacklog
+	}
+	if category == models.CategoryScheduled &&
+		(task.Status == models.StatusRunning ||
+			(task.AutomationCapacityQueued && (task.Status == models.StatusPending || task.Status == models.StatusQueued))) {
+		category = models.CategoryActive
+	}
+	switch category {
+	case models.CategoryBacklog:
+		return 0
+	case models.CategoryActive:
+		return 1
+	case models.CategoryCompleted:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func taskReferenceVisible(task repository.TaskReference) bool {
+	if task.Category == models.CategoryChat || models.IsSwarmChildRole(task.SwarmRole) {
+		return false
+	}
+	switch task.Category {
+	case models.CategoryActive, models.CategoryBacklog, models.CategoryCompleted:
+		return true
+	case models.CategoryScheduled:
+		return task.Status == models.StatusRunning ||
+			(task.AutomationCapacityQueued && (task.Status == models.StatusPending || task.Status == models.StatusQueued))
+	default:
+		return false
+	}
+}
+
+func taskReferenceBadges(task repository.TaskReference, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) []string {
+	badges := make([]string, 0, 8)
+	if task.ParentTaskID != nil {
+		badges = append(badges, "Chained")
+	}
+	if task.ChainEnabled {
+		badges = append(badges, "Chain")
+	}
+	if task.HasGoal {
+		badges = append(badges, "Goal")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		badges = append(badges, "Swarm")
+	}
+	if len(llmModels) > 0 {
+		badges = append(badges, taskReferenceModelName(task, llmModels))
+	}
+	if task.AgentDefinitionID != nil {
+		for _, agent := range agentDefs {
+			if agent.ID == *task.AgentDefinitionID {
+				badges = append(badges, agent.Name)
+				break
+			}
+		}
+	}
+	if label := components.TagLabel(task.Tag); label != "" {
+		badges = append(badges, label)
+	}
+	if label := components.PriorityLabel(task.Priority); label != "" {
+		badges = append(badges, label)
+	}
+	if len(badges) == 0 {
+		return nil
+	}
+	return badges
+}
+
+func taskReferenceModelName(task repository.TaskReference, llmModels []models.LLMConfig) string {
+	if task.AgentID != nil {
+		for _, model := range llmModels {
+			if model.ID == *task.AgentID {
+				return model.Name
+			}
+		}
+	} else {
+		for _, model := range llmModels {
+			if model.IsDefault {
+				return model.Name
+			}
+		}
+	}
+	return "No Model"
+}
+
 // TaskStatusCountsResponse is the compact machine-facing task projection used
 // by terminal status. Full task board responses remain HTML and unchanged.
 type TaskStatusCountsResponse struct {
@@ -2708,12 +2956,19 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 		return err
 	}
 	activeTurnID := ""
+	queuedTurnID := ""
 	for _, exec := range executions {
 		if exec.Status == models.ExecRunning {
 			activeTurnID = exec.ID
 		}
+		if exec.Status == models.ExecQueued {
+			queuedTurnID = exec.ID
+		}
 	}
-	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
+	if activeTurnID == "" {
+		activeTurnID = queuedTurnID
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", components.SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID)), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
 }
 
 // TaskThreadSelectModel persists a task-thread composer model selection
@@ -3131,11 +3386,14 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "task id required")
 	}
 	pendingInputs := []models.ThreadInput{}
-	if h.threadInputRepo != nil {
-		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID); inputErr == nil {
-			pendingInputs = inputs
-		}
+	if h.threadInputRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
 	}
+	inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID)
+	if inputErr != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load pending inputs")
+	}
+	pendingInputs = inputs
 	return render(c, http.StatusOK, components.ChatComposerQueuedInputRowsForTask(pendingInputs, func(input models.ThreadInput) string {
 		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
 	}, taskID))

@@ -14,9 +14,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 )
 
 // buildSSE constructs a server-sent events stream from JSON data lines.
@@ -3014,12 +3016,16 @@ func TestTruncateToolOutputForModelInput_UsesTokenLimit(t *testing.T) {
 		t.Fatal("expected output to be truncated")
 	}
 
-	maxChars := normalizedToolOutputTokenLimit(limit) * 4
-	if len([]rune(got)) > maxChars {
-		t.Fatalf("truncated output len=%d, want <= %d", len([]rune(got)), maxChars)
+	maxBytes := tokenestimate.ByteBudget(normalizedToolOutputTokenLimit(limit))
+	if len(got) > maxBytes || len(got) <= limit {
+		t.Fatalf("truncated output bytes=%d, want > %d and <= %d", len(got), limit, maxBytes)
 	}
 	if !strings.Contains(got, "Tool output truncated to fit model context") {
 		t.Fatalf("expected truncation marker in output, got: %q", got)
+	}
+	utf8Output := truncateToolOutputForModelInput(strings.Repeat("é", 1000), limit)
+	if !utf8.ValidString(utf8Output) || len(utf8Output) > maxBytes {
+		t.Fatalf("UTF-8 output valid=%v bytes=%d, want <= %d", utf8.ValidString(utf8Output), len(utf8Output), maxBytes)
 	}
 }
 
@@ -3192,28 +3198,6 @@ func TestNormalizedCompactionThresholdForModel_CapsToModelLimit(t *testing.T) {
 	}
 }
 
-func TestClampCompactionTranscript_PreservesHeadAndTail(t *testing.T) {
-	head := "USER:\nTask objective: move Idea Quality Grade off /history and redesign it to match How Am I Doing.\n\n"
-	middle := strings.Repeat("TOOL_RESULT read_file:\nnoise\n\n", 12000)
-	tail := "TOOL_RESULT grep_search:\nlatest matching lines near insights templ and history templ\n\n"
-
-	transcript := head + middle + tail
-	clamped := clampCompactionTranscript(transcript)
-
-	if len([]rune(clamped)) > openAICompactionTranscriptLimit {
-		t.Fatalf("clamped transcript length = %d, want <= %d", len([]rune(clamped)), openAICompactionTranscriptLimit)
-	}
-	if !strings.Contains(clamped, "Task objective: move Idea Quality Grade off /history") {
-		t.Fatalf("expected clamped transcript to preserve head, got %q", clamped[:min(len(clamped), 300)])
-	}
-	if !strings.Contains(clamped, "latest matching lines near insights templ and history templ") {
-		t.Fatalf("expected clamped transcript to preserve tail")
-	}
-	if !strings.Contains(clamped, "[Middle conversation content omitted before compaction]") {
-		t.Fatal("expected clamped transcript to include omission marker")
-	}
-}
-
 func TestIsCodexGeneratedInputItem_CoversToolCallTypes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -3289,7 +3273,7 @@ func TestTrimCompactionInputItemsToFitContextWindow_UsesConfiguredWindowForUnkno
 func TestTrimCompactionInputItemsToFitContextWindow_RemovesPairedFunctionCallAndOutput(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{"type": "message", "role": "user", "content": "Task objective"},
-		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 5000)},
+		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 12000)},
 		agenticInputItem{"type": "function_call_output", "call_id": "call_pair", "output": "small result"},
 	}
 
@@ -3423,11 +3407,15 @@ func TestTrimCompactionInputItemsToFitContextWindow_PreservesObjectiveAndRecentC
 	}
 }
 
-func TestAgenticContinuationPreflightConservativelyCountsToolArguments(t *testing.T) {
+func TestAgenticContinuationPreflightUsesByteEstimate(t *testing.T) {
 	items := []any{map[string]any{"type": "function_call", "arguments": strings.Repeat("{}", 4000)}}
-	err := ensureOpenAIAgenticRequestFits(items, nil, &AgenticOptions{Model: "custom", ContextWindow: 6000, MaxOutputTokens: 1000})
-	if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
-		t.Fatalf("err=%v, want typed preflight rejection", err)
+	opts := &AgenticOptions{Model: "custom", ContextWindow: 6000, MaxOutputTokens: 1000}
+	if err := ensureOpenAIAgenticRequestFits(items, nil, opts); err != nil {
+		t.Fatalf("moderate ASCII payload should fit: %v", err)
+	}
+	items[0].(map[string]any)["arguments"] = strings.Repeat("{}", 10000)
+	if err := ensureOpenAIAgenticRequestFits(items, nil, opts); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
 	}
 }
 
@@ -4265,16 +4253,6 @@ func TestOpenAIAgenticCompactionTranscriptAndImageHelpers(t *testing.T) {
 	}
 	if got := openAIInputItemsTranscript([]any{map[string]any{"type": "message", "role": "user", "content": "   "}}); got != "" {
 		t.Fatalf("blank transcript item should be omitted, got %q", got)
-	}
-
-	short := "short transcript"
-	if got := clampCompactionTranscript(short); got != short {
-		t.Fatalf("short transcript should not be clamped: %q", got)
-	}
-	long := strings.Repeat("a", openAICompactionTranscriptLimit+100) + "tail"
-	clamped := clampCompactionTranscript(long)
-	if len([]rune(clamped)) > openAICompactionTranscriptLimit || !strings.Contains(clamped, openAICompactionTranscriptGap) || !strings.HasSuffix(clamped, "tail") {
-		t.Fatalf("unexpected clamped transcript length=%d value suffix=%q", len([]rune(clamped)), clamped[len(clamped)-10:])
 	}
 
 	const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
