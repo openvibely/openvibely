@@ -35,8 +35,10 @@ WHERE connection.oauth_refresh_token != ''
       LIMIT 1
   );
 
--- Preserve current-generation snapshot eligibility on the canonical owner. Older
--- generations remain stale and therefore continue to fail closed.
+-- Preserve current-generation snapshot eligibility on the canonical owner. Revision
+-- numbers are connection-local, so every non-current generation must use the
+-- fail-closed sentinel rather than retaining a number that could collide with the
+-- canonical owner's current revision.
 UPDATE account_usage_snapshots AS snapshot
 SET oauth_config_revision = CASE
         WHEN snapshot.oauth_config_revision = (
@@ -50,7 +52,7 @@ SET oauth_config_revision = CASE
             JOIN oauth_connections canonical ON canonical.id = mapping.canonical_id
             WHERE mapping.old_id = snapshot.oauth_connection_id
         )
-        ELSE snapshot.oauth_config_revision
+        ELSE -1
     END,
     oauth_connection_id = (
         SELECT mapping.canonical_id

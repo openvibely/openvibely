@@ -2770,9 +2770,9 @@ func TestMigration190RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 		INSERT INTO account_usage_snapshots (id, provider, account_id, agent_config_id, oauth_connection_id, oauth_config_revision, raw_json)
 		VALUES
 			('openai-current', 'openai', 'openai-account', 'openai-model-old', 'openai-old', 4, '{}'),
-			('openai-stale', 'openai', 'openai-account', 'openai-model-old', 'openai-old', 3, '{}'),
+			('openai-stale', 'openai', 'openai-account', 'openai-model-old', 'openai-old', 7, '{}'),
 			('anthropic-current', 'anthropic', 'anthropic-account', 'anthropic-model-old', 'anthropic-old', 11, '{}'),
-			('anthropic-stale', 'anthropic', 'anthropic-account', 'anthropic-model-old', 'anthropic-old', 10, '{}');
+			('anthropic-stale', 'anthropic', 'anthropic-account', 'anthropic-model-old', 'anthropic-old', 13, '{}');
 	`); err != nil {
 		t.Fatalf("seed previously split OAuth connections: %v", err)
 	}
@@ -2816,10 +2816,7 @@ func TestMigration190RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, provider+"-stale").Scan(&staleConnection, &staleRevision); err != nil {
 			t.Fatalf("query %s stale snapshot: %v", provider, err)
 		}
-		wantStaleRevision := int64(3)
-		if provider == "anthropic" {
-			wantStaleRevision = 10
-		}
+		wantStaleRevision := int64(-1)
 		if staleConnection != wantCanonical || staleRevision != wantStaleRevision {
 			t.Fatalf("%s stale snapshot = connection %q revision %d, want %q/%d", provider, staleConnection, staleRevision, wantCanonical, wantStaleRevision)
 		}
