@@ -935,22 +935,14 @@ func TestCompactionBlockJSON_Marshal(t *testing.T) {
 
 func TestContextManagementConfig_Marshal(t *testing.T) {
 	cfg := contextManagementConfig{
-		Edits: []contextManagementEdit{
-			{
-				Type: "clear_tool_uses_20250919",
-				Trigger: &inputTokensTrigger{
-					Type:  "input_tokens",
-					Value: 150000,
-				},
+		Edits: []contextManagementEdit{{
+			Type: "compact_20260112",
+			Trigger: &inputTokensTrigger{
+				Type:  "input_tokens",
+				Value: 150000,
 			},
-			{
-				Type: "clear_thinking_20251015",
-				Trigger: &inputTokensTrigger{
-					Type:  "input_tokens",
-					Value: 150000,
-				},
-			},
-		},
+			Instructions: "Preserve implementation details.",
+		}},
 	}
 
 	data, err := json.Marshal(cfg)
@@ -964,13 +956,16 @@ func TestContextManagementConfig_Marshal(t *testing.T) {
 	}
 
 	edits, ok := m["edits"].([]interface{})
-	if !ok || len(edits) != 2 {
-		t.Fatalf("expected 2 edits, got %v", m["edits"])
+	if !ok || len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %v", m["edits"])
 	}
 
 	edit := edits[0].(map[string]interface{})
-	if edit["type"] != "clear_tool_uses_20250919" {
+	if edit["type"] != "compact_20260112" {
 		t.Errorf("type = %v", edit["type"])
+	}
+	if edit["instructions"] != "Preserve implementation details." {
+		t.Errorf("instructions = %v", edit["instructions"])
 	}
 
 	trigger := edit["trigger"].(map[string]interface{})
@@ -991,22 +986,13 @@ func TestAgenticRequest_WithCompaction(t *testing.T) {
 		},
 		Stream: true,
 		ContextManagement: &contextManagementConfig{
-			Edits: []contextManagementEdit{
-				{
-					Type: "clear_tool_uses_20250919",
-					Trigger: &inputTokensTrigger{
-						Type:  "input_tokens",
-						Value: 100000,
-					},
+			Edits: []contextManagementEdit{{
+				Type: "compact_20260112",
+				Trigger: &inputTokensTrigger{
+					Type:  "input_tokens",
+					Value: 100000,
 				},
-				{
-					Type: "clear_thinking_20251015",
-					Trigger: &inputTokensTrigger{
-						Type:  "input_tokens",
-						Value: 100000,
-					},
-				},
-			},
+			}},
 		},
 	}
 
@@ -1026,8 +1012,11 @@ func TestAgenticRequest_WithCompaction(t *testing.T) {
 	}
 
 	edits, ok := cm["edits"].([]interface{})
-	if !ok || len(edits) != 2 {
-		t.Fatalf("expected 2 edits, got %v", cm["edits"])
+	if !ok || len(edits) != 1 {
+		t.Fatalf("expected 1 edit, got %v", cm["edits"])
+	}
+	if edit := edits[0].(map[string]interface{}); edit["type"] != "compact_20260112" {
+		t.Fatalf("edit type = %v, want compact_20260112", edit["type"])
 	}
 }
 
@@ -1064,10 +1053,10 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		turnCount++
 
-		// Verify beta header includes context management
+		// Verify beta header includes server-side compaction.
 		betaHeader := r.Header.Get("anthropic-beta")
-		if !strings.Contains(betaHeader, "context-management-2025-06-27") {
-			t.Errorf("missing context management beta header, got: %s", betaHeader)
+		if !strings.Contains(betaHeader, CompactionBetaHeader) {
+			t.Errorf("missing compaction beta header, got: %s", betaHeader)
 		}
 
 		// Verify context_management is in the request body
@@ -1076,6 +1065,11 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 		json.Unmarshal(body, &reqBody)
 		if _, ok := reqBody["context_management"]; !ok {
 			t.Error("context_management not found in request body")
+		} else {
+			edits := reqBody["context_management"].(map[string]any)["edits"].([]any)
+			if len(edits) != 1 || edits[0].(map[string]any)["type"] != "compact_20260112" {
+				t.Errorf("unexpected compaction edits: %#v", edits)
+			}
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1109,21 +1103,20 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 			if msgsRaw, ok := reqBody["messages"].([]interface{}); ok {
 				msgs = msgsRaw
 			}
-			// First message should be the compaction block
-			if len(msgs) > 0 {
-				firstMsg := msgs[0].(map[string]interface{})
-				if firstMsg["role"] == "user" {
-					content, ok := firstMsg["content"].([]interface{})
-					if ok && len(content) > 0 {
-						block := content[0].(map[string]interface{})
-						if block["type"] != "compaction" {
-							t.Errorf("first message content type = %v, want compaction", block["type"])
-						}
-						if block["content"] != "Summary of prior context." {
-							t.Errorf("compaction content = %v", block["content"])
-						}
-					}
-				}
+			if len(msgs) == 0 {
+				t.Fatal("compacted request has no messages")
+			}
+			firstMsg := msgs[0].(map[string]interface{})
+			if firstMsg["role"] != "assistant" {
+				t.Errorf("compaction message role = %v, want assistant", firstMsg["role"])
+			}
+			content, ok := firstMsg["content"].([]interface{})
+			if !ok || len(content) < 2 {
+				t.Fatalf("compacted assistant content = %#v", firstMsg["content"])
+			}
+			block := content[0].(map[string]interface{})
+			if block["type"] != "compaction" || block["content"] != "Summary of prior context." {
+				t.Errorf("compaction block = %#v", block)
 			}
 
 			// Return final response
@@ -1191,6 +1184,20 @@ func TestDecodeNativeCompactionStateAcceptsLegacyBlock(t *testing.T) {
 	}
 	if len(messages) != 1 || !hasLeadingCompactionMessage(messages) {
 		t.Fatalf("legacy compaction messages = %#v", messages)
+	}
+}
+
+func TestDecodeNativeCompactionStateNormalizesLegacyEnvelope(t *testing.T) {
+	messages, err := decodeNativeCompactionState(`{"version":1,"messages":[{"role":"user","content":[{"type":"compaction","content":"legacy checkpoint"}]},{"role":"assistant","content":[{"type":"text","text":"continuing"}]}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].Role != "assistant" || !hasLeadingCompactionMessage(messages) {
+		t.Fatalf("normalized legacy compaction messages = %#v", messages)
+	}
+	blocks, err := contentBlocksJSON(messages[0].Content)
+	if err != nil || len(blocks) != 2 {
+		t.Fatalf("normalized legacy content = %#v, err=%v", messages[0].Content, err)
 	}
 }
 
@@ -1264,10 +1271,10 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-20250514", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
 		t.Fatal(err)
 	}
-	if len(replayedMessages) != 5 {
-		t.Fatalf("replayed messages = %#v, want compaction, assistant tool call, tool result, final assistant, and current user", replayedMessages)
+	if len(replayedMessages) != 4 {
+		t.Fatalf("replayed messages = %#v, want compacted assistant, tool result, final assistant, and current user", replayedMessages)
 	}
-	if replayedMessages[0]["role"] != "user" || replayedMessages[1]["role"] != "assistant" || replayedMessages[2]["role"] != "user" || replayedMessages[3]["role"] != "assistant" || replayedMessages[4]["role"] != "user" {
+	if replayedMessages[0]["role"] != "assistant" || replayedMessages[1]["role"] != "user" || replayedMessages[2]["role"] != "assistant" || replayedMessages[3]["role"] != "user" {
 		t.Fatalf("replayed message roles = %#v", replayedMessages)
 	}
 	stateBlocks, _ := replayedMessages[0]["content"].([]any)
@@ -1275,30 +1282,30 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	if stateBlock["type"] != "compaction" || stateBlock["content"] != "Durable native checkpoint." {
 		t.Fatalf("replayed native block = %#v", stateBlock)
 	}
-	assistantBlocks, _ := replayedMessages[1]["content"].([]any)
-	if len(assistantBlocks) != 2 || assistantBlocks[1].(map[string]any)["id"] != "toolu_after_compaction" {
+	assistantBlocks, _ := replayedMessages[0]["content"].([]any)
+	if len(assistantBlocks) != 3 || assistantBlocks[2].(map[string]any)["id"] != "toolu_after_compaction" {
 		t.Fatalf("replayed assistant continuation = %#v", assistantBlocks)
 	}
-	resultBlocks, _ := replayedMessages[2]["content"].([]any)
+	resultBlocks, _ := replayedMessages[1]["content"].([]any)
 	resultBlock, _ := resultBlocks[0].(map[string]any)
 	if resultBlock["tool_use_id"] != "toolu_after_compaction" || resultBlock["content"] != "tool output after compaction" {
 		t.Fatalf("replayed tool result = %#v", resultBlock)
 	}
-	finalBlocks, _ := replayedMessages[3]["content"].([]any)
+	finalBlocks, _ := replayedMessages[2]["content"].([]any)
 	if len(finalBlocks) != 1 || finalBlocks[0].(map[string]any)["text"] != "first done" {
 		t.Fatalf("replayed final assistant content = %#v", finalBlocks)
 	}
-	if replayedMessages[4]["content"] != "second prompt" {
-		t.Fatalf("current prompt = %#v", replayedMessages[4])
+	if replayedMessages[3]["content"] != "second prompt" {
+		t.Fatalf("current prompt = %#v", replayedMessages[3])
 	}
 }
 
 func TestSendAgentic_NoCompactionWhenDisabled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify context management beta header is NOT present
+		// Verify compaction beta header is NOT present.
 		betaHeader := r.Header.Get("anthropic-beta")
-		if strings.Contains(betaHeader, "context-management") {
-			t.Error("context management beta header should not be present when disabled")
+		if strings.Contains(betaHeader, CompactionBetaHeader) {
+			t.Error("compaction beta header should not be present when disabled")
 		}
 
 		// Verify context_management is NOT in request body
@@ -1878,18 +1885,21 @@ func TestCompactionThreshold_CustomValue(t *testing.T) {
 		found := false
 		for _, rawEdit := range edits {
 			edit := rawEdit.(map[string]interface{})
-			if edit["type"] != "clear_tool_uses_20250919" {
+			if edit["type"] != "compact_20260112" {
 				continue
 			}
 			trigger := edit["trigger"].(map[string]interface{})
 			if trigger["value"] != float64(50000) {
 				t.Errorf("threshold = %v, want 50000", trigger["value"])
 			}
+			if edit["instructions"] != "Preserve code and decisions." {
+				t.Errorf("instructions = %v", edit["instructions"])
+			}
 			found = true
 			break
 		}
 		if !found {
-			t.Error("clear_tool_uses_20250919 edit not found")
+			t.Error("compact_20260112 edit not found")
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1920,14 +1930,15 @@ func TestCompactionThreshold_CustomValue(t *testing.T) {
 		DisableTools:             true,
 		AutoCompaction:           true,
 		CompactionTokenThreshold: 50000,
+		CompactionInstructions:   "Preserve code and decisions.",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestContextManagementEdits_BothTypes(t *testing.T) {
-	// Verify that both clear_tool_uses and clear_thinking edits are sent when thinking is enabled
+func TestContextManagementEdit_WithThinking(t *testing.T) {
+	// Compaction is the only context edit, including when thinking is enabled.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var reqBody map[string]interface{}
@@ -1936,19 +1947,15 @@ func TestContextManagementEdits_BothTypes(t *testing.T) {
 		cm := reqBody["context_management"].(map[string]interface{})
 		edits := cm["edits"].([]interface{})
 
-		if len(edits) != 2 {
-			t.Errorf("expected 2 edits, got %d", len(edits))
+		if len(edits) != 1 {
+			t.Errorf("expected 1 edit, got %d", len(edits))
 		}
 		edit0 := edits[0].(map[string]interface{})
-		edit1 := edits[1].(map[string]interface{})
-		if edit0["type"] != "clear_thinking_20251015" {
-			t.Errorf("first edit type = %v, want clear_thinking_20251015", edit0["type"])
+		if edit0["type"] != "compact_20260112" {
+			t.Errorf("edit type = %v, want compact_20260112", edit0["type"])
 		}
-		if edit1["type"] != "clear_tool_uses_20250919" {
-			t.Errorf("second edit type = %v, want clear_tool_uses_20250919", edit1["type"])
-		}
-		if _, ok := edit1["trigger"]; !ok {
-			t.Error("clear_tool_uses_20250919 must include trigger")
+		if _, ok := edit0["trigger"]; !ok {
+			t.Error("compact_20260112 must include trigger")
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -2127,10 +2134,8 @@ func TestSendAgentic_RefusalStopReasonIsReturnedWithText(t *testing.T) {
 	}
 }
 
-func TestContextManagementEdits_NoClearThinkingWithoutThinking(t *testing.T) {
-	// Verify that clear_thinking is NOT included when thinking is disabled.
-	// The Anthropic API returns 400 "clear_thinking strategy requires thinking
-	// to be enabled or adaptive" if clear_thinking is sent without thinking.
+func TestContextManagementEdit_WithoutThinking(t *testing.T) {
+	// Compaction does not require thinking to be enabled.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var reqBody map[string]interface{}
@@ -2140,18 +2145,11 @@ func TestContextManagementEdits_NoClearThinkingWithoutThinking(t *testing.T) {
 		edits := cm["edits"].([]interface{})
 
 		if len(edits) != 1 {
-			t.Errorf("expected 1 edit (clear_tool_uses only), got %d", len(edits))
+			t.Errorf("expected 1 compaction edit, got %d", len(edits))
 		}
 		edit0 := edits[0].(map[string]interface{})
-		if edit0["type"] != "clear_tool_uses_20250919" {
-			t.Errorf("first edit type = %v, want clear_tool_uses_20250919", edit0["type"])
-		}
-		// Verify clear_thinking is NOT present
-		for _, edit := range edits {
-			e := edit.(map[string]interface{})
-			if e["type"] == "clear_thinking_20251015" {
-				t.Error("clear_thinking must NOT be included when thinking is disabled")
-			}
+		if edit0["type"] != "compact_20260112" {
+			t.Errorf("edit type = %v, want compact_20260112", edit0["type"])
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -2181,7 +2179,7 @@ func TestContextManagementEdits_NoClearThinkingWithoutThinking(t *testing.T) {
 		MaxTokens:      8192,
 		DisableTools:   true,
 		AutoCompaction: true,
-		// EnableThinking is false — clear_thinking must be omitted
+		// EnableThinking is false; server compaction still applies.
 	})
 	if err != nil {
 		t.Fatal(err)
