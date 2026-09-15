@@ -1092,6 +1092,17 @@ func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) 
 			OAuthConnectionID:   "openai-connection",
 			OAuthConnectionName: "OpenAI account",
 		},
+		{
+			ID:                  "healthy-oauth",
+			Name:                "Healthy OAuth",
+			Provider:            models.ProviderOpenAI,
+			AuthMethod:          models.AuthMethodOAuth,
+			Model:               "gpt-5.4",
+			OAuthConnectionID:   "healthy-connection",
+			OAuthConnectionName: "OpenAI account",
+			OAuthAccessToken:    "present",
+			OAuthExpiresAt:      time.Now().Add(time.Hour).UnixMilli(),
+		},
 	}
 	connections := []models.OAuthConnection{{
 		ID:          "openai-connection",
@@ -1110,8 +1121,17 @@ func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) 
 	if !strings.Contains(out, "return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)") {
 		t.Fatal("expected editor OAuth action to use the runtime-specific launch helper")
 	}
-	if strings.Contains(out, `data-oauth-path="/models/openai-oauth/oauth/initiate"`) || strings.Contains(out, `href="/models/openai-oauth/oauth/initiate"`) {
-		t.Fatal("expected model cards not to expose OAuth initiation actions")
+	if !strings.Contains(out, `data-oauth-path="/models/openai-oauth/oauth/initiate"`) || !strings.Contains(out, `href="/models/openai-oauth/oauth/initiate"`) {
+		t.Fatal("expected disconnected OAuth model cards to expose the OAuth connection action")
+	}
+	if !strings.Contains(out, `>Connect OAuth</a>`) {
+		t.Fatal("expected disconnected OAuth model cards to label the action Connect OAuth")
+	}
+	if strings.Contains(out, `data-oauth-path="/models/healthy-oauth/oauth/initiate"`) || strings.Contains(out, `href="/models/healthy-oauth/oauth/initiate"`) {
+		t.Fatal("expected healthy OAuth model cards not to expose a reconnect action")
+	}
+	if strings.Contains(out, "Disconnect account") || strings.Contains(out, "Reconnect account") {
+		t.Fatal("expected model cards not to expose connection-wide account controls")
 	}
 	if !strings.Contains(out, `'/models/' + encodeURIComponent(id) + '/oauth/initiate'`) {
 		t.Fatal("expected the editor to derive its OAuth path from the loaded model")

@@ -381,6 +381,15 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 											<span class={ "badge badge-sm", oauthStatusClass(agent) }>
 												{ oauthStatusText(agent) }
 											</span>
+											if !agent.HasValidOAuthToken() {
+												<a
+													href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) }
+													data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) }
+													data-oauth-external={ fmt.Sprintf("%t", desktopMode) }
+													class="btn btn-xs btn-outline"
+													onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)"
+												>Connect OAuth</a>
+											}
 										</div>
 									}
 								if agent.MaxWorkers > 0 {
