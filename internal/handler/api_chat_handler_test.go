@@ -946,6 +946,7 @@ func TestAPIChatMessage_QueuedBehindActiveTurnStoresSelectedModelWithoutFullList
 	require.NoError(t, err)
 	require.NotNil(t, queued)
 	require.Equal(t, agent.ID, queued.AgentConfigID)
+	assertAPIChatSelectionStatements(t, counter.Statements())
 	assertNoAPIChatFullListStatement(t, counter.Statements())
 }
 
