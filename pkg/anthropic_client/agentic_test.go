@@ -152,6 +152,71 @@ func TestParseAgenticStream_TextOnly(t *testing.T) {
 	}
 }
 
+func TestParseAgenticStreamUsesFinalUsageAndIncludesCompactionIterations(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-5","usage":{"input_tokens":160000,"cache_creation_input_tokens":2000,"cache_read_input_tokens":3000}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"compaction"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"summary"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"done"}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5,"iterations":[{"type":"compaction","input_tokens":180000,"output_tokens":3500,"cache_creation_input_tokens":100,"cache_read_input_tokens":200},{"type":"message","input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5}]}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	result, err := (&Client{}).parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.inputTokens != 23 || result.outputTokens != 1000 || result.cacheCreationInputTokens != 4 || result.cacheReadInputTokens != 5 {
+		t.Fatalf("final context usage = input:%d output:%d cache-create:%d cache-read:%d", result.inputTokens, result.outputTokens, result.cacheCreationInputTokens, result.cacheReadInputTokens)
+	}
+	if result.billedInputTokens != 180023 || result.billedOutputTokens != 4500 || result.billedCacheCreationInputTokens != 104 || result.billedCacheReadInputTokens != 205 {
+		t.Fatalf("billed usage = input:%d output:%d cache-create:%d cache-read:%d", result.billedInputTokens, result.billedOutputTokens, result.billedCacheCreationInputTokens, result.billedCacheReadInputTokens)
+	}
+}
+
+func TestSendAgenticReportsCompactionIterationUsageSeparatelyFromContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-5","usage":{"input_tokens":160000}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"compaction"}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"summary"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"done"}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5,"iterations":[{"type":"compaction","input_tokens":180000,"output_tokens":3500},{"type":"message","input_tokens":23,"output_tokens":1000,"cache_creation_input_tokens":4,"cache_read_input_tokens":5}]}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+		}
+	}))
+	defer server.Close()
+
+	originalHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = originalHost }()
+
+	response, err := NewWithAPIKey("test-key").SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:        "claude-opus-5",
+		MaxTokens:    8192,
+		MaxTurns:     1,
+		DisableTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.LastContextTokens != 1032 {
+		t.Fatalf("last context tokens = %d, want 1032", response.LastContextTokens)
+	}
+	if response.InputTokens != 180023 || response.OutputTokens != 4500 || response.CacheCreationInputTokens != 4 || response.CacheReadInputTokens != 5 {
+		t.Fatalf("response usage = input:%d output:%d cache-create:%d cache-read:%d", response.InputTokens, response.OutputTokens, response.CacheCreationInputTokens, response.CacheReadInputTokens)
+	}
+}
+
 func TestParseAgenticStream_WithToolUse(t *testing.T) {
 	stream := buildSSE([]string{
 		`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,

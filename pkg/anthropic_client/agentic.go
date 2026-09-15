@@ -445,14 +445,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return nil, categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
 		}
 
-		result.InputTokens += resp.inputTokens
+		result.InputTokens += resp.billedInputTokens
 		result.LastContextTokens = 0
 		if input := resp.inputTokens + resp.cacheCreationInputTokens + resp.cacheReadInputTokens; input > 0 {
 			result.LastContextTokens = input + resp.outputTokens
 		}
-		result.OutputTokens += resp.outputTokens
-		result.CacheCreationInputTokens += resp.cacheCreationInputTokens
-		result.CacheReadInputTokens += resp.cacheReadInputTokens
+		result.OutputTokens += resp.billedOutputTokens
+		result.CacheCreationInputTokens += resp.billedCacheCreationInputTokens
+		result.CacheReadInputTokens += resp.billedCacheReadInputTokens
 		result.StopReason = resp.stopReason
 		if resp.model != "" {
 			result.Model = resp.model
@@ -978,13 +978,21 @@ func allAnthropicToolsReadOnly(blocks []agenticBlock) bool {
 
 // turnResult holds the parsed result of a single API turn.
 type turnResult struct {
-	contentBlocks            []agenticBlock
-	stopReason               string
-	model                    string
+	contentBlocks []agenticBlock
+	stopReason    string
+	model         string
+	// Top-level usage describes the final message iteration and therefore the
+	// live context after server-side compaction.
 	inputTokens              int
 	outputTokens             int
 	cacheCreationInputTokens int
 	cacheReadInputTokens     int
+	// Billed usage includes compaction sampling passes, which Anthropic excludes
+	// from the top-level usage fields.
+	billedInputTokens              int
+	billedOutputTokens             int
+	billedCacheCreationInputTokens int
+	billedCacheReadInputTokens     int
 	// compaction holds the compaction summary if the API compacted context.
 	// nil = no compaction, non-nil with nil *string = failed compaction.
 	compaction *compactionResult
@@ -994,6 +1002,69 @@ type turnResult struct {
 type compactionResult struct {
 	// content is the compaction summary. nil means compaction failed.
 	content *string
+}
+
+type streamUsage struct {
+	InputTokens              *int                `json:"input_tokens"`
+	OutputTokens             *int                `json:"output_tokens"`
+	CacheCreationInputTokens *int                `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int                `json:"cache_read_input_tokens"`
+	CacheCreation            *usageCacheCreation `json:"cache_creation,omitempty"`
+	CacheRead                *usageCacheRead     `json:"cache_read,omitempty"`
+	Iterations               []UsageIteration    `json:"iterations,omitempty"`
+}
+
+func applyStreamUsage(result *turnResult, raw json.RawMessage, iterationUsage *[]UsageIteration) {
+	if len(raw) == 0 {
+		return
+	}
+	var usage streamUsage
+	if json.Unmarshal(raw, &usage) != nil {
+		return
+	}
+	if usage.InputTokens != nil {
+		result.inputTokens = *usage.InputTokens
+	}
+	if usage.OutputTokens != nil {
+		result.outputTokens = *usage.OutputTokens
+	}
+	if usage.CacheCreationInputTokens != nil || usage.CacheCreation != nil {
+		result.cacheCreationInputTokens = 0
+		if usage.CacheCreationInputTokens != nil {
+			result.cacheCreationInputTokens += *usage.CacheCreationInputTokens
+		}
+		if usage.CacheCreation != nil {
+			result.cacheCreationInputTokens += usage.CacheCreation.InputTokens
+		}
+	}
+	if usage.CacheReadInputTokens != nil || usage.CacheRead != nil {
+		result.cacheReadInputTokens = 0
+		if usage.CacheReadInputTokens != nil {
+			result.cacheReadInputTokens += *usage.CacheReadInputTokens
+		}
+		if usage.CacheRead != nil {
+			result.cacheReadInputTokens += usage.CacheRead.InputTokens
+		}
+	}
+	if usage.Iterations != nil {
+		*iterationUsage = usage.Iterations
+	}
+}
+
+func finalizeTurnUsage(result *turnResult, iterations []UsageIteration) {
+	if len(iterations) == 0 {
+		result.billedInputTokens = result.inputTokens
+		result.billedOutputTokens = result.outputTokens
+		result.billedCacheCreationInputTokens = result.cacheCreationInputTokens
+		result.billedCacheReadInputTokens = result.cacheReadInputTokens
+		return
+	}
+	for _, usage := range iterations {
+		result.billedInputTokens += usage.InputTokens
+		result.billedOutputTokens += usage.OutputTokens
+		result.billedCacheCreationInputTokens += usage.CacheCreationInputTokens + usage.CacheCreation.InputTokens
+		result.billedCacheReadInputTokens += usage.CacheReadInputTokens + usage.CacheRead.InputTokens
+	}
 }
 
 // CompactionBetaHeader is the beta feature flag for server-side compaction.
@@ -1346,6 +1417,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	}
 	seenProviderToolUses := make(map[string]struct{})
 	providerToolNamesByID := make(map[string]string)
+	var iterationUsage []UsageIteration
 
 	// Track content blocks being built
 	type blockState struct {
@@ -1419,14 +1491,12 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			seenMeaningfulEvent = true
 			if event.Message != nil {
 				var msg struct {
-					Model string `json:"model"`
-					Usage Usage  `json:"usage"`
+					Model string          `json:"model"`
+					Usage json.RawMessage `json:"usage"`
 				}
 				if err := json.Unmarshal(event.Message, &msg); err == nil {
 					result.model = msg.Model
-					result.inputTokens = msg.Usage.InputTokens
-					result.cacheCreationInputTokens = msg.Usage.CacheCreationInputTokens + msg.Usage.CacheCreation.InputTokens
-					result.cacheReadInputTokens = msg.Usage.CacheReadInputTokens + msg.Usage.CacheRead.InputTokens
+					applyStreamUsage(result, msg.Usage, &iterationUsage)
 				}
 			}
 
@@ -1700,12 +1770,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 				}
 			}
 			if event.Usage != nil {
-				var usage struct {
-					OutputTokens int `json:"output_tokens"`
-				}
-				if err := json.Unmarshal(event.Usage, &usage); err == nil {
-					result.outputTokens = usage.OutputTokens
-				}
+				applyStreamUsage(result, event.Usage, &iterationUsage)
 			}
 		}
 	}
@@ -1719,6 +1784,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	if !terminal {
 		return result, io.ErrUnexpectedEOF
 	}
+	finalizeTurnUsage(result, iterationUsage)
 	return result, nil
 }
 
