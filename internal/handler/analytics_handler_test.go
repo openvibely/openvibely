@@ -154,7 +154,7 @@ func TestGetAnalyticsUsage_WithDateRange(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
-func TestGetAnalyticsDashboardCancellationReleasesSoleReaderForConcurrentRequest(t *testing.T) {
+func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T) {
 	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-contention.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -193,8 +193,8 @@ func TestGetAnalyticsDashboardCancellationReleasesSoleReaderForConcurrentRequest
 	server := httptest.NewServer(e)
 	defer server.Close()
 
-	analyticsCtx, cancelAnalytics := context.WithCancel(context.Background())
-	defer cancelAnalytics()
+	analyticsCtx, cleanupAnalyticsRequest := context.WithCancel(context.Background())
+	defer cleanupAnalyticsRequest()
 	analyticsReq, err := http.NewRequestWithContext(analyticsCtx, http.MethodGet, server.URL+"/api/analytics/dashboard?project_id=analytics-project&view=overview&range=all", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -205,6 +205,9 @@ func TestGetAnalyticsDashboardCancellationReleasesSoleReaderForConcurrentRequest
 		if response != nil {
 			_, _ = io.Copy(io.Discard, response.Body)
 			_ = response.Body.Close()
+			if requestErr == nil && response.StatusCode != http.StatusOK {
+				requestErr = fmt.Errorf("Analytics status = %d", response.StatusCode)
+			}
 		}
 		analyticsDone <- requestErr
 	}()
@@ -252,25 +255,34 @@ func TestGetAnalyticsDashboardCancellationReleasesSoleReaderForConcurrentRequest
 		time.Sleep(time.Millisecond)
 	}
 
-	cancelAnalytics()
 	select {
 	case err := <-probeDone:
 		if err != nil {
-			t.Fatalf("concurrent request after Analytics cancellation: %v", err)
+			t.Fatalf("concurrent request while Analytics remained active: %v", err)
 		}
 		if elapsed := time.Since(probeStarted); elapsed > time.Second {
-			t.Fatalf("concurrent request waited %s after Analytics cancellation; want <= 1s", elapsed)
+			t.Fatalf("concurrent request waited %s while Analytics remained active; want <= 1s", elapsed)
 		}
+		if err := analyticsCtx.Err(); err != nil {
+			t.Fatalf("Analytics context was cancelled while the concurrent request completed: %v", err)
+		}
+		select {
+		case err := <-analyticsDone:
+			t.Fatalf("Analytics completed before the concurrent request could be observed: %v", err)
+		default:
+		}
+	case err := <-analyticsDone:
+		t.Fatalf("Analytics completed before the contending request: %v", err)
 	case <-time.After(2 * time.Second):
-		t.Fatal("concurrent request remained blocked after Analytics cancellation")
+		t.Fatal("concurrent request remained blocked while Analytics was active")
 	}
 	select {
 	case err := <-analyticsDone:
-		if err == nil {
-			t.Fatal("cancelled Analytics HTTP request unexpectedly succeeded")
+		if err != nil {
+			t.Fatalf("Analytics did not resume after yielding the reader: %v", err)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("cancelled Analytics HTTP request did not terminate")
+	case <-time.After(10 * time.Second):
+		t.Fatal("Analytics did not complete after yielding the reader")
 	}
 }
 
