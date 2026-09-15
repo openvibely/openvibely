@@ -110,6 +110,7 @@ type SwarmConfig struct {
 	RerunMergerAfterReviewer         bool     `json:"rerun_merger_after_reviewer,omitempty"`
 	RerunIntegratorAfterReviewer     bool     `json:"rerun_integrator_after_reviewer,omitempty"`
 	Generation                       int      `json:"generation,omitempty"`
+	StopRevision                     int      `json:"stop_revision,omitempty"`
 	ReviewedGeneration               int      `json:"reviewed_generation,omitempty"`
 	MergedGeneration                 int      `json:"merged_generation,omitempty"`
 	IntegratedGeneration             int      `json:"integrated_generation,omitempty"`
@@ -195,7 +196,6 @@ type Task struct {
 	Priority                 int          `json:"priority"`
 	Status                   TaskStatus   `json:"status"`
 	Prompt                   string       `json:"prompt"`
-	PromptTruncated          bool         `json:"-"`                             // Runtime-only: task-thread prompt is a bounded preview
 	AgentID                  *string      `json:"agent_id,omitempty"`            // Optional: LLM config (model) to use; uses default if nil
 	AgentDefinitionID        *string      `json:"agent_definition_id,omitempty"` // Optional: agent definition (system prompt, skills, MCP)
 	Tag                      TaskTag      `json:"tag"`
