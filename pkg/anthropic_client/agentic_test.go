@@ -49,6 +49,18 @@ func TestAnthropicContinuationPreflightUsesByteEstimate(t *testing.T) {
 	}
 }
 
+func TestAnthropicContinuationPreflightLeavesRoomForNativeCompaction(t *testing.T) {
+	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("a", 680000)}}
+	opts := &AgenticOptions{ContextWindow: 200000, MaxTokens: 64000, AutoCompaction: true}
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err != nil {
+		t.Fatalf("170k-token request should reach native compaction: %v", err)
+	}
+	opts.AutoCompaction = false
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err == nil {
+		t.Fatal("request should exceed the non-compacting 132k preflight limit")
+	}
+}
+
 func TestExecuteAnthropicToolUsesMakesRequestUserInputExclusive(t *testing.T) {
 	var executed []string
 	opts := &AgenticOptions{ToolExecutor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
@@ -871,7 +883,7 @@ func TestParseAgenticStream_CompactionBlock(t *testing.T) {
 		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":160000}}}`,
 		`{"type":"content_block_start","index":0,"content_block":{"type":"compaction"}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"Previous context summary: "}}`,
-		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"The user asked about Go programming."}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"compaction_delta","content":"The user asked about Go programming.","encrypted_content":"opaque-checkpoint"}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
 		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Here is my response."}}`,
@@ -896,6 +908,9 @@ func TestParseAgenticStream_CompactionBlock(t *testing.T) {
 	expected := "Previous context summary: The user asked about Go programming."
 	if *result.compaction.content != expected {
 		t.Errorf("compaction content = %q, want %q", *result.compaction.content, expected)
+	}
+	if result.compaction.encryptedContent == nil || *result.compaction.encryptedContent != "opaque-checkpoint" {
+		t.Fatalf("encrypted compaction content = %#v, want opaque-checkpoint", result.compaction.encryptedContent)
 	}
 
 	// Content blocks should only contain the text block (no compaction)
@@ -968,15 +983,17 @@ func TestParseAgenticStream_NoCompaction(t *testing.T) {
 func TestCompactionBlockJSON_Marshal(t *testing.T) {
 	t.Run("with content", func(t *testing.T) {
 		summary := "Summary of context"
+		encrypted := "opaque-checkpoint"
 		block := compactionBlockJSON{
-			Type:    "compaction",
-			Content: &summary,
+			Type:             "compaction",
+			Content:          &summary,
+			EncryptedContent: &encrypted,
 		}
 		data, err := json.Marshal(block)
 		if err != nil {
 			t.Fatal(err)
 		}
-		expected := `{"type":"compaction","content":"Summary of context"}`
+		expected := `{"type":"compaction","content":"Summary of context","encrypted_content":"opaque-checkpoint"}`
 		if string(data) != expected {
 			t.Errorf("got %s, want %s", data, expected)
 		}
@@ -1004,7 +1021,7 @@ func TestContextManagementConfig_Marshal(t *testing.T) {
 			Type: "compact_20260112",
 			Trigger: &inputTokensTrigger{
 				Type:  "input_tokens",
-				Value: 150000,
+				Value: 167000,
 			},
 			Instructions: "Preserve implementation details.",
 		}},
@@ -1037,7 +1054,7 @@ func TestContextManagementConfig_Marshal(t *testing.T) {
 	if trigger["type"] != "input_tokens" {
 		t.Errorf("trigger type = %v", trigger["type"])
 	}
-	if trigger["value"] != float64(150000) {
+	if trigger["value"] != float64(167000) {
 		t.Errorf("trigger value = %v", trigger["value"])
 	}
 }
@@ -1286,7 +1303,7 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 		case 1:
 			fmt.Fprint(w, "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-sonnet-4-20250514\",\"usage\":{\"input_tokens\":160000}}}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"compaction\"}}\n\n")
-			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"Durable native checkpoint.\"}}\n\n")
+			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"compaction_delta\",\"content\":\"Durable native checkpoint.\",\"encrypted_content\":\"opaque-native-state\"}}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
 			fmt.Fprint(w, "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"checking after compaction\"}}\n\n")
@@ -1344,7 +1361,7 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	}
 	stateBlocks, _ := replayedMessages[0]["content"].([]any)
 	stateBlock, _ := stateBlocks[0].(map[string]any)
-	if stateBlock["type"] != "compaction" || stateBlock["content"] != "Durable native checkpoint." {
+	if stateBlock["type"] != "compaction" || stateBlock["content"] != "Durable native checkpoint." || stateBlock["encrypted_content"] != "opaque-native-state" {
 		t.Fatalf("replayed native block = %#v", stateBlock)
 	}
 	assistantBlocks, _ := replayedMessages[0]["content"].([]any)

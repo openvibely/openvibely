@@ -411,19 +411,30 @@ func compactionLimitsForAgent(agent models.LLMConfig) compactionLimits {
 		}
 	}
 	autoLimit := (window * 90) / 100
-	triggerLimit := autoLimit
-	if agent.CompactionThreshold > 0 && agent.CompactionThreshold < triggerLimit {
-		triggerLimit = agent.CompactionThreshold
+	effectiveHardLimit := (window * 95) / 100
+	if agent.Provider == models.ProviderAnthropic {
+		autoLimit = anthropicclient.CompactionTriggerLimit(window)
+		effectiveHardLimit = anthropicclient.CompactionBlockingLimit(window)
 	}
-	return compactionLimits{ContextWindow: window, AutoLimit: autoLimit, TriggerLimit: triggerLimit, EffectiveHardLimit: (window * 95) / 100}
+	triggerLimit := autoLimit
+	configuredThreshold := agent.CompactionThreshold
+	if agent.Provider == models.ProviderAnthropic && configuredThreshold > 0 && configuredThreshold < anthropicclient.MinCompactionThreshold {
+		configuredThreshold = anthropicclient.MinCompactionThreshold
+	}
+	if configuredThreshold > 0 && configuredThreshold < triggerLimit {
+		triggerLimit = configuredThreshold
+	}
+	return compactionLimits{ContextWindow: window, AutoLimit: autoLimit, TriggerLimit: triggerLimit, EffectiveHardLimit: effectiveHardLimit}
 }
 
 func requestBudgetForAgent(agent models.LLMConfig) requestBudget {
 	limits := compactionLimitsForAgent(agent)
 	reserved := agent.GetDefaultMaxTokens(defaultReservedOutputTokens)
+	safety := limits.ContextWindow / 50
 	switch agent.Provider {
 	case models.ProviderAnthropic:
-		reserved = llmanthropic.OutputTokenBudget(agent.Model)
+		reserved = anthropicclient.CompactionOutputReserve(llmanthropic.OutputTokenBudget(agent.Model))
+		safety = limits.ContextWindow - limits.EffectiveHardLimit - reserved
 	case models.ProviderOllama:
 		reserved = agent.GetDefaultMaxTokens(4096)
 	}
@@ -435,7 +446,6 @@ func requestBudgetForAgent(agent models.LLMConfig) requestBudget {
 	if reserved < 1 {
 		reserved = 1
 	}
-	safety := limits.ContextWindow / 50
 	if safety < 64 {
 		safety = 64
 	}
@@ -443,9 +453,9 @@ func requestBudgetForAgent(agent models.LLMConfig) requestBudget {
 	if hardInput < 1 {
 		hardInput = 1
 	}
-	safe := limits.TriggerLimit
-	if safe <= 0 || hardInput < safe {
-		safe = hardInput
+	safe := hardInput
+	if agent.Provider != models.ProviderAnthropic && limits.TriggerLimit > 0 && limits.TriggerLimit < safe {
+		safe = limits.TriggerLimit
 	}
 	return requestBudget{ContextWindow: limits.ContextWindow, SafeInputLimit: safe, ReservedOutputTokens: reserved, SafetyMargin: safety}
 }
@@ -501,11 +511,11 @@ func estimateExecutionTokens(exec models.Execution) int {
 	return total
 }
 
-func historyNeedsCompaction(b requestBudget) bool {
+func historyNeedsCompaction(b requestBudget, triggerLimit int) bool {
 	if b.HistoryTokens+b.NativeStateTokens == 0 {
 		return false
 	}
-	if b.FixedTokens+b.HistoryTokens+b.NativeStateTokens > b.SafeInputLimit {
+	if b.FixedTokens+b.HistoryTokens+b.NativeStateTokens >= triggerLimit {
 		return true
 	}
 	// If pending input cannot fit by itself, compaction cannot solve that
@@ -513,7 +523,7 @@ func historyNeedsCompaction(b requestBudget) bool {
 	if pendingInputInfeasible(b) {
 		return false
 	}
-	return b.TotalInputTokens() > b.SafeInputLimit && b.HistoryTokens+b.NativeStateTokens >= max(256, b.SafeInputLimit/20)
+	return b.TotalInputTokens() >= triggerLimit && b.HistoryTokens+b.NativeStateTokens >= max(256, triggerLimit/20)
 }
 
 func pendingInputInfeasible(b requestBudget) bool {
@@ -839,11 +849,12 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 			budget.HistoryTokens = reportedHistory
 		}
 	}
-	historyPressure := historyNeedsCompaction(budget)
-	triggered, limits, used := historyPressure, compactionLimitsForAgent(req.Agent), budget.TotalInputTokens()
+	limits := compactionLimitsForAgent(req.Agent)
 	if budget.SafeInputLimit < limits.TriggerLimit {
 		limits.TriggerLimit = budget.SafeInputLimit
 	}
+	historyPressure := historyNeedsCompaction(budget, limits.TriggerLimit)
+	triggered, used := historyPressure, budget.TotalInputTokens()
 	if limits.TriggerLimit > 0 {
 		req.NativeCompactionTokenThreshold = limits.TriggerLimit
 		req.Agent.CompactionThreshold = limits.TriggerLimit
