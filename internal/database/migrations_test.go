@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 190 {
-		t.Fatalf("max goose version = %d, want 190", maxVersion)
+	if maxVersion != 191 {
+		t.Fatalf("max goose version = %d, want 191", maxVersion)
 	}
 }
 
@@ -1811,8 +1811,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 190 {
-		t.Fatalf("max goose version = %d, want 190", maxVersion)
+	if maxVersion != 191 {
+		t.Fatalf("max goose version = %d, want 191", maxVersion)
 	}
 }
 
@@ -2260,8 +2260,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 190 {
-		t.Fatalf("max goose version = %d, want 190", maxVersion)
+	if maxVersion != 191 {
+		t.Fatalf("max goose version = %d, want 191", maxVersion)
 	}
 }
 
@@ -2596,8 +2596,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 190 {
-		t.Fatalf("max goose version = %d, want 190", maxVersion)
+	if maxVersion != 191 {
+		t.Fatalf("max goose version = %d, want 191", maxVersion)
 	}
 }
 
@@ -2740,7 +2740,7 @@ func TestMigration187ConsolidatesExactRotatingCredentialsWithoutMergingAccountId
 	}
 }
 
-func TestMigration190RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
+func TestMigration191RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "repair-split-rotating-oauth-connections.db"))
 	goose.SetBaseFS(migrations.FS)
 	defer goose.SetBaseFS(nil)
@@ -2776,8 +2776,8 @@ func TestMigration190RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed previously split OAuth connections: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 190); err != nil {
-		t.Fatalf("migrate to 190: %v", err)
+	if err := goose.UpTo(db, ".", 191); err != nil {
+		t.Fatalf("migrate to 191: %v", err)
 	}
 
 	for _, provider := range []string{"openai", "anthropic"} {
@@ -2823,10 +2823,10 @@ func TestMigration190RepairsPreviouslySplitRotatingCredentials(t *testing.T) {
 	}
 
 	if err := goose.DownTo(db, ".", 189); err != nil {
-		t.Fatalf("roll back migration 190: %v", err)
+		t.Fatalf("roll back migration 191: %v", err)
 	}
-	if err := goose.UpTo(db, ".", 190); err != nil {
-		t.Fatalf("reapply migration 190: %v", err)
+	if err := goose.UpTo(db, ".", 191); err != nil {
+		t.Fatalf("reapply migration 191: %v", err)
 	}
 	for _, provider := range []string{"openai", "anthropic"} {
 		var firstConnection, secondConnection string
