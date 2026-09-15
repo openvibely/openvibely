@@ -1034,6 +1034,53 @@ func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	}
 }
 
+func TestModelsContent_OAuthAccountDropdownShowsOnlyProviderAccountLabel(t *testing.T) {
+	connections := []models.OAuthConnection{
+		{
+			ID:           "anthropic-connection",
+			Name:         "Claude Fable 5",
+			Provider:     models.ProviderAnthropic,
+			NeedsReauth:  true,
+			LinkedModels: 4,
+		},
+		{
+			ID:           "openai-connection",
+			Name:         "GPT Codex",
+			Provider:     models.ProviderOpenAI,
+			AccessToken:  "present",
+			LinkedModels: 3,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := modelsContent(nil, nil, connections, nil, false, false, CardListState{}).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+	selectStart := strings.Index(out, `id="model_oauth_connection_id"`)
+	if selectStart < 0 {
+		t.Fatal("expected OAuth Account dropdown")
+	}
+	selectEnd := strings.Index(out[selectStart:], `</select>`)
+	if selectEnd < 0 {
+		t.Fatal("expected OAuth Account dropdown closing tag")
+	}
+	dropdown := out[selectStart : selectStart+selectEnd]
+	for _, want := range []string{
+		`<option value="anthropic-connection" data-provider="anthropic" data-status="Reconnect required">Anthropic account</option>`,
+		`<option value="openai-connection" data-provider="openai" data-status="Connected">OpenAI account</option>`,
+	} {
+		if !strings.Contains(dropdown, want) {
+			t.Errorf("expected plain account option %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Claude Fable 5", "GPT Codex", "4 models", "3 models", "Anthropic account ·", "OpenAI account ·"} {
+		if strings.Contains(dropdown, unwanted) {
+			t.Errorf("OAuth Account dropdown exposed unwanted option text %q", unwanted)
+		}
+	}
+}
+
 func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) {
 	agents := []models.LLMConfig{
 		{

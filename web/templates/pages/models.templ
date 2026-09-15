@@ -69,6 +69,16 @@ templ ModelsPageWithOAuthConnectionsAndState(projects []models.Project, currentP
 	}
 }
 
+func oauthConnectionAccountLabel(connection models.OAuthConnection) string {
+	if connection.Provider == models.ProviderAnthropic {
+		return "Anthropic account"
+	}
+	if connection.Provider == models.ProviderOpenAI {
+		return "OpenAI account"
+	}
+	return "OAuth account"
+}
+
 func oauthConnectionStatusText(connection models.OAuthConnection) string {
 	if connection.NeedsReauth {
 		return "Reconnect required"
@@ -504,7 +514,7 @@ for _, agent := range modelOptions {
 						<select name="oauth_connection_id" id="model_oauth_connection_id" class="select select-bordered" onchange="updateOAuthConnectionAction()">
 							<option value="new">Connect another account</option>
 							for _, connection := range oauthConnections {
-								<option value={ connection.ID } data-provider={ string(connection.Provider) } data-status={ oauthConnectionStatusText(connection) }>{ connection.Name }</option>
+								<option value={ connection.ID } data-provider={ string(connection.Provider) } data-status={ oauthConnectionStatusText(connection) }>{ oauthConnectionAccountLabel(connection) }</option>
 							}
 						</select>
 						<label class="label"><span class="label-text-alt opacity-70">Models using the same account share refresh and reconnect state.</span></label>
