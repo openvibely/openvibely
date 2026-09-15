@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -788,6 +789,8 @@ func (s *SwarmService) handleChildCancelled(ctx context.Context, parent *models.
 }
 
 func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID string, message string) error {
+	unlock := repository.LockTaskLifecycle(parentTaskID)
+	defer unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
 	if err != nil || parent == nil {
 		return err
@@ -1148,6 +1151,46 @@ func swarmCompleteWithoutMerger(children []models.Task, parentCfg models.SwarmCo
 }
 
 func (s *SwarmService) CancelSwarm(ctx context.Context, parentTaskID string) error {
+	unlock := repository.LockTaskLifecycle(parentTaskID)
+	defer unlock()
+	return s.cancelSwarmLocked(ctx, parentTaskID)
+}
+
+// CancelSwarmObservedWithPending refuses to cascade an old Stop into a newer
+// parent follow-up generation. The pending-input sweep shares this guard.
+func (s *SwarmService) CancelSwarmObservedWithPending(ctx context.Context, observed *models.Task, cancelPending func() error) error {
+	if observed == nil {
+		return fmt.Errorf("swarm parent not found")
+	}
+	unlock := repository.LockTaskLifecycle(observed.ID)
+	defer unlock()
+	current, err := s.taskRepo.GetByID(ctx, observed.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("swarm parent not found: %s", observed.ID)
+	}
+	observedCfg, err := models.ParseSwarmConfig(observed.SwarmConfig)
+	if err != nil {
+		return err
+	}
+	currentCfg, err := models.ParseSwarmConfig(current.SwarmConfig)
+	if err != nil {
+		return err
+	}
+	if current.Status != observed.Status || current.Category != observed.Category || currentCfg.Generation != observedCfg.Generation {
+		return ErrTaskCancellationSuperseded
+	}
+	if cancelPending != nil {
+		if err := cancelPending(); err != nil {
+			applog.Infof("[swarm-svc] error cancelling pending thread inputs parent=%s: %v", observed.ID, err)
+		}
+	}
+	return s.cancelSwarmLocked(ctx, observed.ID)
+}
+
+func (s *SwarmService) cancelSwarmLocked(ctx context.Context, parentTaskID string) error {
 	children, err := s.taskRepo.ListSwarmChildren(ctx, parentTaskID)
 	if err != nil {
 		return err

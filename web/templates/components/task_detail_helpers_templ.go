@@ -832,7 +832,7 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 			TaskID:                 task.ID,
 			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
 			ActiveTurnID:           taskThreadActiveTurnID(executions),
-			StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
+			StopEndpoint:           SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID)),
 			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer", task.ID),
 			SelectedAgentID:        derefString(task.AgentID),
 			PendingInputs:          pendingInputs,
