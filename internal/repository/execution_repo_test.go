@@ -1069,8 +1069,22 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatalf("create execution: %v", err)
 	}
+	readiness, err := execRepo.SuccessCompletionReadiness(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("SuccessCompletionReadiness before cancellation: %v", err)
+	}
+	if readiness != CompleteSuccessCompleted {
+		t.Fatalf("expected completion-ready execution, got %s", readiness)
+	}
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecCancelled, "partial", "cancelled", 0, 10); err != nil {
 		t.Fatalf("cancel execution: %v", err)
+	}
+	readiness, err = execRepo.SuccessCompletionReadiness(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("SuccessCompletionReadiness after cancellation: %v", err)
+	}
+	if readiness != CompleteSuccessAlreadyTerminal {
+		t.Fatalf("expected terminal readiness after cancellation, got %s", readiness)
 	}
 
 	outcome, err := execRepo.CompleteSuccessIfNoPendingSteering(ctx, exec.ID, "late success", 1, 20)

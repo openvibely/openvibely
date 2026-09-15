@@ -5993,7 +5993,7 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPul
 	require.Equal(t, models.CategoryCompleted, updatedTask.Category)
 }
 
-func TestRepublishOpenPullRequestAfterStartupSyncUpdatesExistingPR(t *testing.T) {
+func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
 	prRepo := repository.NewTaskPullRequestRepo(db)
@@ -6037,7 +6037,7 @@ func TestRepublishOpenPullRequestAfterStartupSyncUpdatesExistingPR(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, publishedHead, reloaded.PublishedHeadSHA)
 	require.Equal(t, 1196, reloaded.PRNumber)
-	require.False(t, reloaded.NeedsRepublish)
+	require.True(t, reloaded.NeedsRepublish)
 }
 
 func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
@@ -6062,12 +6062,16 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 
 	publishedHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	publishCalls := 0
+	var executionID string
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			publishCalls++
+			duringPublish, err := h.execRepo.GetByID(ctx, executionID)
+			require.NoError(t, err)
+			require.Equal(t, models.ExecRunning, duringPublish.Status, "publication must precede execution and automation completion")
 			return &service.GitHubPublishBranchResult{HeadSHA: publishedHead}, nil
 		},
 		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
@@ -6083,6 +6087,7 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 		ex.PromptSent = "Reconcile synchronized branch"
 		ex.IsFollowup = true
 	})
+	executionID = exec.ID
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID: exec.ID, TaskID: task.ID, Message: exec.PromptSent, Agent: *agent, ProjectID: project.ID,
@@ -6118,11 +6123,15 @@ func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(
 		TaskID: task.ID, PRNumber: 1196, PRURL: "https://github.com/openvibely/openvibely/pull/1196", PRState: "open",
 		PublishedHeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", NeedsRepublish: true,
 	}))
+	var executionID string
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			duringPublish, err := h.execRepo.GetByID(ctx, executionID)
+			require.NoError(t, err)
+			require.Equal(t, models.ExecRunning, duringPublish.Status, "failed publication must not finalize execution or automation first")
 			return nil, errors.New("temporary publication failure")
 		},
 	})
@@ -6135,6 +6144,7 @@ func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(
 		ex.PromptSent = "Reconcile synchronized branch"
 		ex.IsFollowup = true
 	})
+	executionID = exec.ID
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID: exec.ID, TaskID: task.ID, Message: exec.PromptSent, Agent: *agent, ProjectID: project.ID,

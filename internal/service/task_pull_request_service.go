@@ -43,6 +43,9 @@ type OpenTaskPullRequestOptions struct {
 	CommitMessage string
 	IssueNumber   *int
 	IssueURL      string
+	// PreserveNeedsRepublish keeps a durable startup-sync publication marker
+	// until the caller has atomically completed the execution.
+	PreserveNeedsRepublish bool
 }
 
 type OpenTaskPullRequestResult struct {
@@ -225,10 +228,13 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 		return nil, fmt.Errorf("replacement pull request branch head is unavailable")
 	}
 	existingPR.PublishedHeadSHA = replacementHead
-	existingPR.NeedsRepublish = false
 	if err := s.repo.Upsert(ctx, existingPR); err != nil {
 		return nil, fmt.Errorf("recording replacement pull request branch head: %w", err)
 	}
+	if err := s.repo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
+		return nil, fmt.Errorf("clearing pull request publication requirement: %w", err)
+	}
+	existingPR.NeedsRepublish = false
 	return existingPR, nil
 }
 
@@ -350,16 +356,21 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			}
 			liveURL := strings.TrimSpace(livePR.URL)
 			liveState := strings.TrimSpace(livePR.State)
-			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA || existingPR.NeedsRepublish
+			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA
 			existingPR.PRURL = liveURL
 			existingPR.PRState = liveState
 			existingPR.PublishedHeadSHA = publishedHeadSHA
-			existingPR.NeedsRepublish = false
 			changed = mergeTaskPullRequestIssueMetadata(existingPR, opts) || changed
 			if changed {
 				if err := s.repo.Upsert(ctx, existingPR); err != nil {
 					return nil, fmt.Errorf("saving pull request publication state: %w", err)
 				}
+			}
+			if !opts.PreserveNeedsRepublish && existingPR.NeedsRepublish {
+				if err := s.repo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
+					return nil, fmt.Errorf("clearing pull request publication requirement: %w", err)
+				}
+				existingPR.NeedsRepublish = false
 			}
 			return &OpenTaskPullRequestResult{
 				PullRequest:          livePR,
@@ -431,6 +442,12 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}
 	if err := s.repo.Upsert(ctx, record); err != nil {
 		return nil, fmt.Errorf("saving pull request record: %w", err)
+	}
+	if !opts.PreserveNeedsRepublish {
+		if err := s.repo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
+			return nil, fmt.Errorf("clearing pull request publication requirement: %w", err)
+		}
+		record.NeedsRepublish = false
 	}
 
 	return &OpenTaskPullRequestResult{

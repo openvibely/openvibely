@@ -1965,6 +1965,18 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 
 func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (repository.CompleteSuccessOutcome, error) {
 	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
+	if republishOpenPR {
+		readiness, err := h.execRepo.SuccessCompletionReadiness(ctx, execID)
+		if err != nil {
+			return repository.CompleteSuccessAlreadyTerminal, err
+		}
+		if readiness != repository.CompleteSuccessCompleted {
+			return readiness, nil
+		}
+		if err := h.republishOpenPullRequestAfterStartupSync(ctx, taskID); err != nil {
+			return readiness, err
+		}
+	}
 	outcome, err := h.execRepo.CompleteSuccessIfNoPendingSteering(ctx, execID, output, tokensUsed, durationMs)
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess exec=%s error completing execution: %v", execID, err)
@@ -1979,8 +1991,8 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		return outcome, nil
 	}
 	if republishOpenPR {
-		if err := h.republishOpenPullRequestAfterStartupSync(ctx, taskID); err != nil {
-			return outcome, err
+		if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, taskID, false); err != nil {
+			applog.Infof("[handler] completeWithSuccess task=%s published startup-sync reconciliation but could not clear durable publication requirement: %v", taskID, err)
 		}
 	}
 
@@ -2793,9 +2805,10 @@ func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, 
 		return fmt.Errorf("synchronized task project not found")
 	}
 	result, err := h.newTaskPullRequestService().OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
-		Base:        task.MergeTargetBranch,
-		IssueNumber: pullRequest.IssueNumber,
-		IssueURL:    pullRequest.IssueURL,
+		Base:                   task.MergeTargetBranch,
+		IssueNumber:            pullRequest.IssueNumber,
+		IssueURL:               pullRequest.IssueURL,
+		PreserveNeedsRepublish: true,
 	})
 	if err != nil {
 		return fmt.Errorf("updating existing pull request #%d after startup synchronization: %w", pullRequest.PRNumber, err)

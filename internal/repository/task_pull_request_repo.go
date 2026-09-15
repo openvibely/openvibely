@@ -79,17 +79,16 @@ func (r *TaskPullRequestRepo) Upsert(ctx context.Context, pr *models.TaskPullReq
 					pr_url = excluded.pr_url,
 					pr_state = excluded.pr_state,
 					published_head_sha = excluded.published_head_sha,
-					needs_republish = excluded.needs_republish,
 					issue_number = excluded.issue_number,
 					issue_url = excluded.issue_url,
 					updated_at = datetime('now')
-				 RETURNING id, created_at, updated_at`,
-		pr.TaskID, pr.PRNumber, pr.PRURL, pr.PRState, pr.PublishedHeadSHA, pr.NeedsRepublish, pr.IssueNumber, pr.IssueURL).Scan(&pr.ID, &pr.CreatedAt, &pr.UpdatedAt)
+				 RETURNING id, created_at, updated_at, needs_republish`,
+		pr.TaskID, pr.PRNumber, pr.PRURL, pr.PRState, pr.PublishedHeadSHA, pr.NeedsRepublish, pr.IssueNumber, pr.IssueURL).Scan(&pr.ID, &pr.CreatedAt, &pr.UpdatedAt, &pr.NeedsRepublish)
 }
 
 func (r *TaskPullRequestRepo) SetNeedsRepublish(ctx context.Context, taskID string, needsRepublish bool) error {
 	result, err := execBoundSQLite(ctx, r.db,
-		`UPDATE task_pull_requests SET needs_republish = ?, updated_at = datetime('now') WHERE task_id = ?`,
+		`UPDATE task_pull_requests SET needs_republish = ? WHERE task_id = ?`,
 		needsRepublish, taskID)
 	if err != nil {
 		return fmt.Errorf("updating task pull request publication requirement: %w", err)

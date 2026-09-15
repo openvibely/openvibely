@@ -638,6 +638,35 @@ const (
 	CompleteSuccessAlreadyTerminal CompleteSuccessOutcome = "already_terminal"
 )
 
+// SuccessCompletionReadiness reports whether an execution can currently be
+// completed without mutating execution or automation state. The subsequent
+// CompleteSuccessIfNoPendingSteering call remains the atomic authority if
+// steering arrives after this check.
+func (r *ExecutionRepo) SuccessCompletionReadiness(ctx context.Context, id string) (CompleteSuccessOutcome, error) {
+	var status models.ExecutionStatus
+	var hasPendingSteering bool
+	err := r.db.QueryRowContext(ctx, `SELECT status, EXISTS (
+		SELECT 1 FROM thread_inputs
+		WHERE run_execution_id = executions.id
+		  AND turn_id = executions.id
+		  AND input_mode = 'steering'
+		  AND input_status = 'pending'
+	) FROM executions WHERE id = ?`, id).Scan(&status, &hasPendingSteering)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CompleteSuccessAlreadyTerminal, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("checking execution completion readiness: %w", err)
+	}
+	if status != models.ExecRunning {
+		return CompleteSuccessAlreadyTerminal, nil
+	}
+	if hasPendingSteering {
+		return CompleteSuccessPendingSteering, nil
+	}
+	return CompleteSuccessCompleted, nil
+}
+
 func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, id string, output string, tokensUsed int, durationMs int64) (CompleteSuccessOutcome, error) {
 	output = llmtranscript.NormalizeMarkers(output)
 	// When output is empty, preserve any partial output already written by the
