@@ -203,6 +203,20 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 	return &e, nil
 }
 
+// IsTaskExecutionAtHistoryCutoff checks whether a rendered Stop still names
+// the newest execution included in the task cancellation snapshot.
+func (r *ExecutionRepo) IsTaskExecutionAtHistoryCutoff(ctx context.Context, taskID, execID string, cutoff int64) (bool, error) {
+	var matches bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (
+		SELECT 1 FROM executions
+		WHERE task_id = ? AND id = ? AND history_order = ?
+	)`, taskID, execID, cutoff).Scan(&matches)
+	if err != nil {
+		return false, fmt.Errorf("checking Stop execution ownership: %w", err)
+	}
+	return matches, nil
+}
+
 // GetAPIChatStatusByID returns only the execution fields needed by
 // GET /api/chat/message/:id status polling. It intentionally omits prompt,
 // reasoning, diff, timestamps, and other execution-detail payloads.

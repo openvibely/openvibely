@@ -492,12 +492,11 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 		swarmSvc = swarmFromTaskService(opts.TaskSvc)
 	}
 	if task.SwarmRole == models.SwarmRoleParent && swarmSvc != nil {
+		var pendingSweep func() error
 		if opts.ThreadInputRepo != nil {
-			if err := opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
-				applog.Infof("[channel-runtime] cancel_task error cancelling pending thread inputs task=%s: %v", task.ID, err)
-			}
+			pendingSweep = func() error { return opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID) }
 		}
-		if err := swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
+		if err := swarmSvc.CancelSwarmObservedWithPending(ctx, task, pendingSweep); err != nil {
 			return "", err
 		}
 	} else if opts.TaskSvc != nil {

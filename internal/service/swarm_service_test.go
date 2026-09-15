@@ -51,6 +51,40 @@ func TestCancelSwarmMarksRunningChildCancellationBeforeRuntimeCancel(t *testing.
 	require.Equal(t, models.StatusCancelled, updatedChild.Status)
 }
 
+func TestCancelSwarmObservedDoesNotCancelNewParentFollowupGeneration(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(repo, nil, workerSvc)
+	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
+	parent := &models.Task{ProjectID: "default", Title: "Follow-up parent", Prompt: "parent", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, SwarmConfig: `{"generation":1}`}
+	require.NoError(t, repo.Create(ctx, parent))
+	parentID := parent.ID
+	planner := &models.Task{ProjectID: "default", Title: "Planner", Prompt: "old", Category: models.CategoryActive, Status: models.StatusCompleted, ParentTaskID: &parentID, SwarmRole: models.SwarmRolePlanner, SwarmConfig: `{"rerun_generation":1}`}
+	require.NoError(t, repo.Create(ctx, planner))
+	observed, _, err := taskSvc.ObserveTaskCancellation(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, observed)
+
+	require.NoError(t, svc.HandleParentFollowup(ctx, parent.ID, "new generation"))
+	swept := false
+	require.ErrorIs(t, svc.CancelSwarmObservedWithPending(ctx, observed, func() error {
+		swept = true
+		return nil
+	}), ErrTaskCancellationSuperseded)
+	require.False(t, swept)
+	require.False(t, workerSvc.IsCancellationRequested(parent.ID))
+	require.False(t, workerSvc.IsCancellationRequested(planner.ID))
+	currentParent := requireFullSwarmTestTask(t, repo, parent.ID)
+	currentCfg, err := models.ParseSwarmConfig(currentParent.SwarmConfig)
+	require.NoError(t, err)
+	require.Equal(t, 2, currentCfg.Generation)
+	require.Equal(t, models.StatusRunning, currentParent.Status)
+	currentPlanner := requireFullSwarmTestTask(t, repo, planner.ID)
+	require.Equal(t, models.StatusPending, currentPlanner.Status)
+}
+
 func TestStartPlannerClearsCancellationRequestsForRestartedParentAndPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
