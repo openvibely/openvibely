@@ -1328,6 +1328,36 @@ func TestDeleteSchedule_HTMX(t *testing.T) {
 	}
 }
 
+func TestDeleteSchedule_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).WithTitle("Deleted schedule card").Build()
+	schedule := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+
+	rec := tc.HTMX().Delete("/schedules/" + schedule.ID + "?project_id=" + project.ID + "&from=schedule").Execute()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for schedule-page HTMX delete, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="schedule-content"`) || !strings.Contains(body, `id="schedule-context-menu"`) {
+		t.Fatalf("expected refreshed Schedule page fragment, body=%s", body)
+	}
+	if strings.Contains(body, task.Title) {
+		t.Fatalf("deleted schedule card still rendered in refreshed Schedule page fragment: %s", body)
+	}
+	stored, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	if err != nil {
+		t.Fatalf("get deleted schedule: %v", err)
+	}
+	if stored != nil {
+		t.Fatal("expected schedule to be deleted")
+	}
+	if !strings.Contains(rec.Header().Get("HX-Trigger"), "Schedule deleted") {
+		t.Fatalf("expected delete toast trigger, got %q", rec.Header().Get("HX-Trigger"))
+	}
+}
+
 func TestDeleteSchedule_Redirect(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
@@ -1789,6 +1819,26 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 	}
 	if trigger.Toast.Message != "Schedule resumed" || trigger.Toast.Status != "success" {
 		t.Fatalf("unexpected resume toast: %#v", trigger.Toast)
+	}
+}
+
+func TestToggleScheduleEnabled_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).WithTitle("Schedule page toggle").Build()
+	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+
+	rec := tc.HTMX().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID + "&from=schedule").Execute()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 schedule-page HTMX response, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="schedule-content"`) || strings.Contains(body, `id="task-detail-content"`) {
+		t.Fatalf("expected Schedule page fragment instead of task detail, body=%s", body)
+	}
+	if !strings.Contains(body, `data-schedule-enabled="false"`) || !strings.Contains(body, "paused") {
+		t.Fatalf("expected authoritative paused card state in Schedule page fragment, body=%s", body)
 	}
 }
 
