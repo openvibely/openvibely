@@ -14,7 +14,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -31,6 +30,7 @@ const (
 	anthropicWebSearchToolType    = "web_search_20250305"
 	anthropicWebFetchToolType     = "web_fetch_20250910"
 	anthropicToolOutputTokenLimit = 10000
+	anthropicApproxBytesPerToken  = 4
 )
 
 // AgenticOptions configures an agentic send with tool use.
@@ -1059,7 +1059,7 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	if err != nil {
 		return err
 	}
-	tokens := utf8.RuneCount(encoded)
+	tokens := (len(encoded) + anthropicApproxBytesPerToken - 1) / anthropicApproxBytesPerToken
 	if tokens <= safe {
 		return nil
 	}

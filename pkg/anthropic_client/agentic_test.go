@@ -35,11 +35,15 @@ func TestCategorizeAnthropicAPIErrorUsesStructuredEnvelope(t *testing.T) {
 	}
 }
 
-func TestAnthropicContinuationPreflightConservativelyCountsToolPayload(t *testing.T) {
-	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("{}", 4000)}}
-	err := ensureAnthropicAgenticRequestFits(messages, nil, &AgenticOptions{ContextWindow: 6000, MaxTokens: 1000})
-	if err == nil {
-		t.Fatal("expected local complete-request rejection")
+func TestAnthropicContinuationPreflightUsesByteEstimate(t *testing.T) {
+	opts := &AgenticOptions{ContextWindow: 6000, MaxTokens: 1000}
+	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("a", 12000)}}
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err != nil {
+		t.Fatalf("moderate ASCII payload should fit: %v", err)
+	}
+	messages[0].Content = strings.Repeat("a", 20000)
+	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
 	}
 }
 

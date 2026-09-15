@@ -808,6 +808,10 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 	if anthropicBudget.ReservedOutputTokens != 64000 || anthropicBudget.SafeInputLimit != 132000 {
 		t.Fatalf("Anthropic request budget = %+v, want concrete Claude output reservation", anthropicBudget)
 	}
+	attachmentBudget := calculateRequestBudget(llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 10000}, Attachments: []models.Attachment{{FileSize: 4000}}})
+	if attachmentBudget.AttachmentTokens != 1000 {
+		t.Fatalf("attachment tokens = %d, want rounded bytes/4", attachmentBudget.AttachmentTokens)
+	}
 
 	limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000})
 	if limits.AutoLimit != 900 || limits.TriggerLimit != 900 || limits.EffectiveHardLimit != 950 {

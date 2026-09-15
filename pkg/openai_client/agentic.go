@@ -17,7 +17,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -1330,11 +1329,7 @@ func trimCompactionInputItemsToFitContextWindow(inputItems []any, tools []ToolDe
 }
 
 func inputItemTokenEstimate(item any) int {
-	estimate := estimateInputItemsTokens([]any{item})
-	if encoded, err := json.Marshal(item); err == nil {
-		estimate = max(estimate, utf8.RuneCount(encoded))
-	}
-	return estimate
+	return estimateInputItemsTokens([]any{item})
 }
 
 func compactionObjectiveIndex(items []any) int {
@@ -1520,16 +1515,6 @@ func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, i
 		if encoded, err := json.Marshal(tools); err == nil {
 			total += approxOpenAITokensFromByteCount(len(encoded))
 		}
-	}
-	// The byte/4 estimate is useful for trigger heuristics but cannot enforce a
-	// hard admission boundary for source, JSON, logs, or tool arguments. Treat
-	// every serialized rune as a token when that is more conservative.
-	if encoded, err := json.Marshal(struct {
-		Input        []any            `json:"input"`
-		Tools        []ToolDefinition `json:"tools,omitempty"`
-		Instructions string           `json:"instructions,omitempty"`
-	}{inputItems, tools, instructions}); err == nil {
-		total = max(total, utf8.RuneCount(encoded))
 	}
 	return total
 }

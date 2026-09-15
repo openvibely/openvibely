@@ -3289,7 +3289,7 @@ func TestTrimCompactionInputItemsToFitContextWindow_UsesConfiguredWindowForUnkno
 func TestTrimCompactionInputItemsToFitContextWindow_RemovesPairedFunctionCallAndOutput(t *testing.T) {
 	inputItems := []any{
 		agenticInputItem{"type": "message", "role": "user", "content": "Task objective"},
-		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 5000)},
+		agenticInputItem{"type": "function_call", "call_id": "call_pair", "name": "read_file", "arguments": strings.Repeat("A", 12000)},
 		agenticInputItem{"type": "function_call_output", "call_id": "call_pair", "output": "small result"},
 	}
 
@@ -3423,11 +3423,15 @@ func TestTrimCompactionInputItemsToFitContextWindow_PreservesObjectiveAndRecentC
 	}
 }
 
-func TestAgenticContinuationPreflightConservativelyCountsToolArguments(t *testing.T) {
+func TestAgenticContinuationPreflightUsesByteEstimate(t *testing.T) {
 	items := []any{map[string]any{"type": "function_call", "arguments": strings.Repeat("{}", 4000)}}
-	err := ensureOpenAIAgenticRequestFits(items, nil, &AgenticOptions{Model: "custom", ContextWindow: 6000, MaxOutputTokens: 1000})
-	if err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
-		t.Fatalf("err=%v, want typed preflight rejection", err)
+	opts := &AgenticOptions{Model: "custom", ContextWindow: 6000, MaxOutputTokens: 1000}
+	if err := ensureOpenAIAgenticRequestFits(items, nil, opts); err != nil {
+		t.Fatalf("moderate ASCII payload should fit: %v", err)
+	}
+	items[0].(map[string]any)["arguments"] = strings.Repeat("{}", 10000)
+	if err := ensureOpenAIAgenticRequestFits(items, nil, opts); err == nil || !llmcontracts.ErrorIs(err, llmcontracts.ErrorContextWindowExceeded) {
+		t.Fatalf("err=%v, want typed rejection for oversized payload", err)
 	}
 }
 
