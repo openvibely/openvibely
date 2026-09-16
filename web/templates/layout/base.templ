@@ -622,6 +622,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							padding-left: 2rem;
 						}
 					}
+					/* Pointer focus on catalog cards must not paint a transient outline/ring;
+					   keyboard focus-visible styles remain intact for focusable cards. */
+					[data-card-pagination-root] [data-search-card]:not([data-search-empty-state]):focus:not(:focus-visible) {
+						outline: none;
+						--tw-ring-offset-shadow: 0 0 #0000;
+						--tw-ring-shadow: 0 0 #0000;
+					}
 					/* Collection Filters are class-driven so trigger focus cannot reopen a dismissed popover. */
 					[data-card-list-toolbar] .dropdown:not(.dropdown-open) > [data-card-filters-popover] {
 						visibility: hidden !important;
@@ -4070,6 +4077,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								}						})();
 					</script>
 			</div>
+			<!-- Project dialogs are HTMX-loaded outside the sidebar so native dialog close transitions stay viewport-centered. -->
+			<div id="new-project-container"></div>
+			<div id="project-settings-container"></div>
 			<!-- Toast Notification Container -->
 			<div id="toast-container"></div>
 			<script>

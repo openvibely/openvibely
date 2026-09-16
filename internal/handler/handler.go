@@ -123,6 +123,7 @@ type Handler struct {
 	pendingRemovalHook         func(string)
 	pendingPublicationHook     func(string)
 	githubRuntimeHook          func()
+	oauthIdentityResolver      func(context.Context, string) (service.AnthropicOAuthIdentity, error)
 
 	loginFailuresMu   sync.Mutex
 	loginFailureTimes []time.Time
@@ -304,9 +305,10 @@ func New(
 		chatAttachmentRepo: chatAttachmentRepo,
 		chatInputRequests:  newChatInputRequestBroker(),
 		projectRepo:        projectRepo, settingsRepo: settingsRepo,
-		broadcaster:         broadcaster,
-		telegramService:     telegramSvc,
-		projectFolderPicker: pickProjectFolderNative,
+		broadcaster:           broadcaster,
+		telegramService:       telegramSvc,
+		projectFolderPicker:   pickProjectFolderNative,
+		oauthIdentityResolver: service.ResolveAnthropicOAuthIdentity,
 	}
 	if projectSvc != nil {
 		projectSvc.SetWorkerRepo(workerRepo)

@@ -130,20 +130,15 @@ func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (
 	if agentID := c.FormValue("default_agent_config_id"); agentID != "" {
 		settings.DefaultAgentConfigID = &agentID
 	}
-	if mw := strings.TrimSpace(c.FormValue("max_workers")); mw != "" {
-		v, err := strconv.Atoi(mw)
-		if err != nil {
-			return settings, fmt.Errorf("Max concurrent workers must be a whole number; use 0 for no project limit")
+	maxWorkers, err := parseNonNegativeWorkerLimit(c.FormValue("max_workers"))
+	if err != nil {
+		return settings, err
+	}
+	if maxWorkers >= projectMaxWorkersMin {
+		if opts.GlobalMaxWorkers > 0 && maxWorkers > opts.GlobalMaxWorkers {
+			return settings, fmt.Errorf("Max concurrent workers cannot exceed the global worker limit of %d", opts.GlobalMaxWorkers)
 		}
-		if v < 0 {
-			return settings, fmt.Errorf("Max concurrent workers must be 0 or a positive whole number")
-		}
-		if v >= projectMaxWorkersMin {
-			if opts.GlobalMaxWorkers > 0 && v > opts.GlobalMaxWorkers {
-				return settings, fmt.Errorf("Max concurrent workers cannot exceed the global worker limit of %d", opts.GlobalMaxWorkers)
-			}
-			settings.MaxWorkers = &v
-		}
+		settings.MaxWorkers = &maxWorkers
 	}
 	return settings, nil
 }

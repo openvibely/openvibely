@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -1811,8 +1811,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -2260,8 +2260,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -2596,8 +2596,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 191 {
-		t.Fatalf("max goose version = %d, want 191", maxVersion)
+	if maxVersion != 193 {
+		t.Fatalf("max goose version = %d, want 193", maxVersion)
 	}
 }
 
@@ -2615,6 +2615,44 @@ func TestMigration095_AllowsCreatedSkillAnalyticsEvents(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO skill_analytics_events (skill_scope, skill_handle, event_type, source, surface) VALUES ('global', 'created_skill', 'created', 'manual', 'task_thread')`); err != nil {
 		t.Fatalf("created skill analytics event rejected: %v", err)
+	}
+}
+
+func TestMigration193BackfillsSafeOAuthDisplayNameWithoutInferringPrincipal(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "oauth-provider-identity.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 192); err != nil {
+		t.Fatalf("migrate to 192: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO oauth_connections (id, provider, name, oauth_access_token, oauth_refresh_token, oauth_revision)
+		VALUES ('connection', 'anthropic', 'Legacy model name', 'access', 'refresh', 3);
+		INSERT INTO agent_configs (id, name, provider, model, auth_method, oauth_connection_id)
+		VALUES ('model', 'Model', 'anthropic', 'claude-test', 'oauth', 'connection');
+		INSERT INTO account_usage_snapshots (id, provider, agent_config_id, oauth_connection_id, oauth_config_revision, account_display_name, account_detail, raw_json)
+		VALUES ('current', 'anthropic', 'model', 'connection', 3, 'Provider Account', 'private@example.com', '{"account_id":"private"}'),
+		       ('stale', 'anthropic', 'model', 'connection', 2, 'Stale Account', 'stale@example.com', '{}');`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 193); err != nil {
+		t.Fatalf("migrate to 193: %v", err)
+	}
+	var displayName, principalHash string
+	if err := db.QueryRow(`SELECT oauth_provider_display_name, oauth_principal_hash FROM oauth_connections WHERE id = 'connection'`).Scan(&displayName, &principalHash); err != nil {
+		t.Fatal(err)
+	}
+	if displayName != "Provider Account" || principalHash != "" {
+		t.Fatalf("provider identity = display %q principal %q, want current safe name and no inferred principal", displayName, principalHash)
+	}
+	if err := goose.DownTo(db, ".", 192); err != nil {
+		t.Fatalf("rollback to 192: %v", err)
+	}
+	if testColumnExists(t, db, "oauth_connections", "oauth_provider_display_name") || testColumnExists(t, db, "oauth_connections", "oauth_principal_hash") {
+		t.Fatal("migration 193 rollback retained provider identity columns")
 	}
 }
 
@@ -2699,12 +2737,18 @@ func TestMigration187ConsolidatesExactRotatingCredentialsWithoutMergingAccountId
 	if _, err := db.Exec(`
 		INSERT INTO agent_configs (id, name, provider, model, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, oauth_config_revision)
 		VALUES
-			('openai-shared-one', 'OpenAI Shared One', 'openai', 'gpt-one', 'oauth', 'openai-access', 'openai-shared-refresh', 111, 'openai-account', 4),
+			('openai-shared-one', 'OpenAI Shared One', 'openai', 'gpt-one', 'oauth', 'openai-access', 'openai-shared-refresh', 222, 'openai-account', 7),
 			('openai-shared-two', 'OpenAI Shared Two', 'openai', 'gpt-two', 'oauth', 'openai-access', 'openai-shared-refresh', 111, 'openai-account', 4),
-			('openai-separate', 'OpenAI Separate', 'openai', 'gpt-three', 'oauth', 'openai-other-access', 'openai-other-refresh', 222, 'openai-account', 7),
-			('anthropic-shared-one', 'Anthropic Shared One', 'anthropic', 'claude-one', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 333, 'anthropic-account', 9),
-			('anthropic-shared-two', 'Anthropic Shared Two', 'anthropic', 'claude-two', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 333, 'anthropic-account', 9),
-			('anthropic-separate', 'Anthropic Separate', 'anthropic', 'claude-three', 'oauth', 'anthropic-other-access', 'anthropic-other-refresh', 444, 'anthropic-account', 12);
+			('openai-separate', 'OpenAI Separate', 'openai', 'gpt-three', 'oauth', 'openai-other-access', 'openai-other-refresh', 333, 'openai-account', 9),
+			('anthropic-shared-one', 'Anthropic Shared One', 'anthropic', 'claude-one', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 555, 'anthropic-account', 13),
+			('anthropic-shared-two', 'Anthropic Shared Two', 'anthropic', 'claude-two', 'oauth', 'anthropic-access', 'anthropic-shared-refresh', 444, 'anthropic-account', 11),
+			('anthropic-separate', 'Anthropic Separate', 'anthropic', 'claude-three', 'oauth', 'anthropic-other-access', 'anthropic-other-refresh', 666, 'anthropic-account', 15);
+		INSERT INTO account_usage_snapshots (id, provider, account_id, agent_config_id, oauth_config_revision, raw_json)
+		VALUES
+			('openai-current', 'openai', 'openai-account', 'openai-shared-two', 4, '{}'),
+			('openai-stale', 'openai', 'openai-account', 'openai-shared-two', 7, '{}'),
+			('anthropic-current', 'anthropic', 'anthropic-account', 'anthropic-shared-two', 11, '{}'),
+			('anthropic-stale', 'anthropic', 'anthropic-account', 'anthropic-shared-two', 13, '{}');
 	`); err != nil {
 		t.Fatalf("seed duplicate rotating OAuth credentials: %v", err)
 	}
@@ -2728,6 +2772,27 @@ func TestMigration187ConsolidatesExactRotatingCredentialsWithoutMergingAccountId
 		}
 		if separateConnection == firstConnection {
 			t.Fatalf("%s distinct refresh tokens were merged from account identity", provider)
+		}
+
+		wantCurrentRevision := int64(7)
+		if provider == "anthropic" {
+			wantCurrentRevision = 13
+		}
+		var currentConnection string
+		var currentRevision int64
+		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, provider+"-current").Scan(&currentConnection, &currentRevision); err != nil {
+			t.Fatalf("query %s current snapshot: %v", provider, err)
+		}
+		if currentConnection != firstConnection || currentRevision != wantCurrentRevision {
+			t.Fatalf("%s current snapshot = connection %q revision %d, want %q/%d", provider, currentConnection, currentRevision, firstConnection, wantCurrentRevision)
+		}
+		var staleConnection string
+		var staleRevision int64
+		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, provider+"-stale").Scan(&staleConnection, &staleRevision); err != nil {
+			t.Fatalf("query %s stale snapshot: %v", provider, err)
+		}
+		if staleConnection != firstConnection || staleRevision != -1 {
+			t.Fatalf("%s stale snapshot = connection %q revision %d, want %q/-1", provider, staleConnection, staleRevision, firstConnection)
 		}
 	}
 
@@ -3685,6 +3750,53 @@ func TestMigration164DeletesOrphanedSchedules(t *testing.T) {
 	}
 	if kept != 1 || orphan != 0 {
 		t.Fatalf("migration 164 schedules: kept=%d orphan=%d, want kept=1 orphan=0", kept, orphan)
+	}
+}
+
+func TestMigration192AddsCoveringAnalyticsExecutionIndex(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "analytics-covering-index-192.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 191); err != nil {
+		t.Fatal(err)
+	}
+
+	executionQuery := `SELECT e.id,e.task_id,e.status,e.started_at,e.history_order,e.agent_config_id,e.completed_at,e.is_followup
+		FROM executions e WHERE e.task_id=? AND e.started_at>=?`
+	executionBefore := explainQueryPlan(t, db, executionQuery, "task", "2026-01-01 00:00:00")
+	if strings.Contains(executionBefore, "USING COVERING INDEX idx_executions_task_analytics") {
+		t.Fatalf("migration 191 unexpectedly has Analytics execution covering index: %q", executionBefore)
+	}
+	usageQuery := `SELECT u.task_id,SUM(u.cost_usd),SUM(u.total_tokens),
+		MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END),COUNT(u.task_id)
+		FROM llm_usage_events u WHERE u.task_id=? AND u.project_id=? AND u.occurred_at>=? GROUP BY u.task_id`
+	usageBefore := explainQueryPlan(t, db, usageQuery, "task", "project", "2026-01-01 00:00:00")
+	if strings.Contains(usageBefore, "USING COVERING INDEX idx_llm_usage_events_task_project_time_cost") {
+		t.Fatalf("migration 191 unexpectedly has Analytics usage covering index: %q", usageBefore)
+	}
+	executionUsageQuery := `SELECT u.cost_usd FROM llm_usage_events u
+		WHERE u.execution_id=? AND u.project_id=? AND u.occurred_at>=?`
+	executionUsageBefore := explainQueryPlan(t, db, executionUsageQuery, "execution", "project", "2026-01-01 00:00:00")
+	if strings.Contains(executionUsageBefore, "USING COVERING INDEX idx_llm_usage_events_execution_project_time_cost") {
+		t.Fatalf("migration 191 unexpectedly has execution usage covering index: %q", executionUsageBefore)
+	}
+	if err := goose.UpTo(db, ".", 192); err != nil {
+		t.Fatal(err)
+	}
+	executionAfter := explainQueryPlan(t, db, executionQuery, "task", "2026-01-01 00:00:00")
+	if !strings.Contains(executionAfter, "USING COVERING INDEX idx_executions_task_analytics") {
+		t.Fatalf("migration 192 Analytics execution projection plan = %q, want covering index", executionAfter)
+	}
+	usageAfter := explainQueryPlan(t, db, usageQuery, "task", "project", "2026-01-01 00:00:00")
+	if !strings.Contains(usageAfter, "USING COVERING INDEX idx_llm_usage_events_task_project_time_cost") {
+		t.Fatalf("migration 192 Analytics usage projection plan = %q, want covering index", usageAfter)
+	}
+	executionUsageAfter := explainQueryPlan(t, db, executionUsageQuery, "execution", "project", "2026-01-01 00:00:00")
+	if !strings.Contains(executionUsageAfter, "USING COVERING INDEX idx_llm_usage_events_execution_project_time_cost") {
+		t.Fatalf("migration 192 execution usage projection plan = %q, want covering index", executionUsageAfter)
 	}
 }
 

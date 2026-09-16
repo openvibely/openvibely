@@ -44,7 +44,7 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "cycle_time_p90", Label: "P90 task cycle time", Definition: "90th percentile elapsed time from historical first execution start to latest terminal execution in the selected period.", Denominator: "Tasks with a terminal execution in the selected period and a persisted historical first execution start."},
 	{Key: "tokens_per_achieved_goal", Label: "Tokens per achieved goal", Definition: "Recorded tokens associated with achieved-goal tasks divided by represented achieved goals.", Denominator: "Achieved-goal tasks with usage records; coverage is disclosed."},
 	{Key: "agent_performance", Label: "Agent performance", Definition: "Task and execution outcomes attributed through tasks.agent_definition_id; duration uses historical first execution to the selected-period terminal outcome.", Denominator: "Selected-period tasks assigned to each reusable Agent definition, with unassigned work separate; duration samples are disclosed."},
-	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations; terminal-duration sample size is disclosed.", Denominator: "Selected-period workflow invocations; waiting and blocked values are explicitly current state."},
+	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations; selected-period invocation status counts are displayed as completed, failed, cancelled, skipped, or open, and terminal-duration sample size is disclosed.", Denominator: "All selected-period workflow invocations for completion rate; waiting and blocked values are explicitly current state."},
 	{Key: "agent_skill_outcomes", Label: "Observed Agent and skill outcomes", Definition: "Task outcomes grouped by assigned reusable Agent definition and selected or loaded skill.", Denominator: "Selected-period tasks with execution evidence and a selected or loaded skill event; association is observational, not causal."},
 	{Key: "skill_outcomes", Label: "Observed skill outcomes", Definition: "Observed task outcomes where a skill was selected or loaded; this is association, not causation.", Denominator: "Selected-period tasks with a selected or loaded skill event and execution evidence."},
 	{Key: "model_category", Label: "Model performance by task category", Definition: "Technical terminal completion grouped by configured model and task category.", Denominator: "Terminal executions in each model/category group during the selected period."},
@@ -340,7 +340,8 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 	query := `WITH scoped_tasks AS (
 			SELECT t.id,t.status FROM tasks t WHERE t.project_id=?` + dimension + `
 		), period_exec AS (
-			SELECT e.task_id,e.status,e.is_followup FROM executions e JOIN scoped_tasks t ON t.id=e.task_id WHERE 1=1` + window + `
+			SELECT e.task_id,e.status,e.is_followup FROM scoped_tasks t
+			CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id WHERE 1=1` + window + `
 		), period_terminal AS (
 			SELECT * FROM period_exec WHERE status IN ('completed','failed','cancelled')
 		), period_terminal_tasks AS (
@@ -459,14 +460,15 @@ func (r *ExecutionRepo) queryOutcomeCosts(ctx context.Context, filter AnalyticsD
 	goalWindow, goalWindowArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	query := `WITH period_tasks AS (
 		SELECT e.task_id,MAX(CASE WHEN e.status='completed' THEN 1 ELSE 0 END) technical_completed
-		FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + ` GROUP BY e.task_id
+		FROM tasks t CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id
+		WHERE t.project_id=?` + dimension + window + ` GROUP BY e.task_id
 	), achieved_tasks AS (
 		SELECT g.task_id FROM task_goals g JOIN period_tasks p ON p.task_id=g.task_id WHERE g.status='achieved'` + goalWindow + `
 	), task_usage AS (
-		SELECT u.task_id, SUM(u.cost_usd) known_cost, SUM(u.total_tokens) tokens,
-			MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) has_cost, COUNT(*) has_usage
-			FROM llm_usage_events u JOIN period_tasks p ON p.task_id=u.task_id
-			WHERE u.project_id=?` + usageWindow + ` GROUP BY u.task_id
+		SELECT p.task_id,SUM(u.cost_usd) known_cost,SUM(u.total_tokens) tokens,
+			MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) has_cost,COUNT(u.task_id) has_usage
+		FROM period_tasks p CROSS JOIN llm_usage_events u INDEXED BY idx_llm_usage_events_task_project_time_cost
+		ON u.task_id=p.task_id AND u.project_id=?` + usageWindow + ` GROUP BY p.task_id
 	)
 	SELECT
 		COALESCE(SUM(CASE WHEN a.task_id IS NOT NULL AND u.has_cost=1 THEN u.known_cost ELSE 0 END),0),
@@ -498,7 +500,9 @@ func (r *ExecutionRepo) queryOutcomeCosts(ctx context.Context, filter AnalyticsD
 		out.KnownCostPerCompletedTask = &models.CostCoverage{Value: completedCost / float64(completedCovered), Covered: completedCovered, Eligible: completedEligible}
 	}
 	failedQuery := `SELECT SUM(u.cost_usd),COUNT(DISTINCT CASE WHEN u.cost_usd IS NOT NULL THEN e.id END),COUNT(DISTINCT e.id)
-		FROM executions e JOIN tasks t ON t.id=e.task_id LEFT JOIN llm_usage_events u ON u.execution_id=e.id AND u.project_id=t.project_id` + usageWindow + `
+		FROM tasks t CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id
+		LEFT JOIN llm_usage_events u INDEXED BY idx_llm_usage_events_execution_project_time_cost
+		ON u.execution_id=e.id AND u.project_id=t.project_id` + usageWindow + `
 		WHERE t.project_id=? AND e.status='failed'` + dimension + window
 	failedArgs := append([]any{}, usageWindowArgs...)
 	failedArgs = append(failedArgs, filter.ProjectID)
@@ -807,9 +811,15 @@ func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter Ana
 		invocationWindow += " AND i.created_at<?"
 		args = append(args, filter.DateTo.UTC().Format("2006-01-02 15:04:05.999999999"))
 	}
-	query := `SELECT a.id,a.name,COUNT(DISTINCT i.id),COUNT(DISTINCT CASE WHEN i.status='completed' THEN i.id END),COUNT(DISTINCT CASE WHEN i.status='failed' THEN i.id END),
-		COALESCE(CAST(AVG(CASE WHEN i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN (julianday(i.completed_at)-julianday(i.started_at))*86400000 END) AS INTEGER),0),
-		COUNT(DISTINCT CASE WHEN i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN i.id END),
+	query := `SELECT a.id,a.name,
+		COUNT(DISTINCT i.id),
+		COUNT(DISTINCT CASE WHEN i.status='completed' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status='failed' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status='cancelled' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status='skipped' THEN i.id END),
+		COUNT(DISTINCT CASE WHEN i.status IN ('claimed','dispatched','running') THEN i.id END),
+		COALESCE(CAST(AVG(CASE WHEN i.status IN ('completed','failed','cancelled','skipped') AND i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN (julianday(i.completed_at)-julianday(i.started_at))*86400000 END) AS INTEGER),0),
+		COUNT(DISTINCT CASE WHEN i.status IN ('completed','failed','cancelled','skipped') AND i.completed_at IS NOT NULL AND i.started_at IS NOT NULL THEN i.id END),
 		(SELECT COUNT(*) FROM automation_work_items w WHERE w.project_id=a.project_id AND w.automation_id=a.id AND w.status='waiting'),
 		(SELECT COUNT(*) FROM automation_work_items w WHERE w.project_id=a.project_id AND w.automation_id=a.id AND w.status='blocked'),
 		a.health_state
@@ -825,7 +835,7 @@ func (r *ExecutionRepo) queryWorkflowPerformance(ctx context.Context, filter Ana
 	result := []models.WorkflowPerformance{}
 	for rows.Next() {
 		var row models.WorkflowPerformance
-		if err := rows.Scan(&row.WorkflowID, &row.WorkflowName, &row.InvocationCount, &row.CompletedCount, &row.FailedCount, &row.AverageDurationMs, &row.DurationSampleSize, &row.WaitingCount, &row.BlockedCount, &row.Health); err != nil {
+		if err := rows.Scan(&row.WorkflowID, &row.WorkflowName, &row.InvocationCount, &row.CompletedCount, &row.FailedCount, &row.CancelledCount, &row.SkippedCount, &row.OpenCount, &row.AverageDurationMs, &row.DurationSampleSize, &row.WaitingCount, &row.BlockedCount, &row.Health); err != nil {
 			return nil, err
 		}
 		if row.InvocationCount > 0 {
@@ -875,7 +885,7 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 	window, windowArgs := analyticsWindowClause("e", filter)
 	taskWindow, taskWindowArgs := analyticsTaskWindowClause("t", filter)
 	goalWindow, goalWindowArgs := analyticsGoalOutcomeWindowClause("g", filter)
-	usageWindow, usageWindowArgs := analyticsEventWindowClause("llm_usage_events", "occurred_at", filter)
+	usageWindow, usageWindowArgs := analyticsEventWindowClause("u", "occurred_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
 	skillEvidence, skillEvidenceArgs, skillEvidenceActive := analyticsSkillOutcomeEvidenceClause("t", filter)
 	evidenceTaskIDs := "SELECT task_id FROM period_task_ids UNION SELECT task_id FROM created_task_ids UNION SELECT task_id FROM evaluable_goals"
@@ -887,28 +897,42 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 	query := `WITH scoped_tasks AS (
 			SELECT t.id,t.title,t.status,t.merge_status,t.agent_definition_id,t.category,t.created_at,t.worktree_path FROM tasks t WHERE t.project_id=?` + dimension + skillEvidence + `
 		), period_exec AS (
-			SELECT e.id,e.task_id,e.status,e.started_at,e.history_order,e.agent_config_id,e.completed_at,e.is_followup FROM executions e JOIN scoped_tasks t ON t.id=e.task_id WHERE 1=1` + window + `
+			SELECT e.id,e.task_id,e.status,e.started_at,e.history_order,e.agent_config_id,e.completed_at,e.is_followup
+			FROM scoped_tasks t CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id WHERE 1=1` + window + `
 		), period_task_ids AS (SELECT DISTINCT task_id FROM period_exec),
 		created_task_ids AS (SELECT t.id task_id FROM scoped_tasks t WHERE 1=1` + taskWindow + `),
 		period_terminal_task_ids AS (SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')),
-		historical_terminal AS (
-			SELECT e.task_id,e.status,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn
-			FROM executions e JOIN period_terminal_task_ids p ON p.task_id=e.task_id WHERE e.status IN ('completed','failed','cancelled')
-		), historical_start AS (
-			SELECT e.task_id,MIN(e.started_at) first_started_at FROM executions e JOIN period_terminal_task_ids p ON p.task_id=e.task_id GROUP BY e.task_id
-		), evaluable_goals AS (
+		evaluable_goals AS (
 			SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
 			UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_task_ids p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
 		), evidence_task_ids AS (
 			` + evidenceTaskIDs + `
+		), selected_evidence_tasks AS (
+			SELECT t.id task_id,COALESCE(MAX(p.started_at),t.created_at) sort_at
+			FROM scoped_tasks t JOIN evidence_task_ids eti ON eti.task_id=t.id
+			LEFT JOIN period_exec p ON p.task_id=t.id
+			GROUP BY t.id ORDER BY sort_at DESC,t.id DESC LIMIT ? OFFSET ?
+		), selected_period_exec AS (
+			SELECT p.* FROM period_exec p JOIN selected_evidence_tasks s ON s.task_id=p.task_id
+		), selected_terminal_task_ids AS (
+			SELECT DISTINCT task_id FROM selected_period_exec WHERE status IN ('completed','failed','cancelled')
+		), historical_terminal AS (
+			SELECT e.task_id,e.status,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn
+			FROM selected_terminal_task_ids p CROSS JOIN executions e INDEXED BY idx_executions_task_analytics
+			ON e.task_id=p.task_id WHERE e.status IN ('completed','failed','cancelled')
+		), historical_start AS (
+			SELECT e.task_id,MIN(e.started_at) first_started_at FROM selected_terminal_task_ids p
+			CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=p.task_id GROUP BY e.task_id
 		), usage AS (
-			SELECT task_id,SUM(cost_usd) cost,MAX(CASE WHEN cost_usd IS NOT NULL THEN 1 ELSE 0 END) known
-			FROM llm_usage_events WHERE project_id=?` + usageWindow + ` GROUP BY task_id
+			SELECT u.task_id,SUM(u.cost_usd) cost,MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) known
+			FROM selected_evidence_tasks s CROSS JOIN llm_usage_events u INDEXED BY idx_llm_usage_events_task_project_time_cost
+			ON u.task_id=s.task_id
+			WHERE u.project_id=?` + usageWindow + ` GROUP BY u.task_id
 		), model_ids AS (
-			SELECT task_id,GROUP_CONCAT(DISTINCT agent_config_id) ids FROM period_exec GROUP BY task_id
+			SELECT task_id,GROUP_CONCAT(DISTINCT agent_config_id) ids FROM selected_period_exec GROUP BY task_id
 		), terminal_evidence AS (
 			SELECT task_id,GROUP_CONCAT(DISTINCT (` + terminalPeriodExpr + ` || '|' || status)) statuses
-			FROM period_exec WHERE status IN ('completed','failed','cancelled') GROUP BY task_id
+			FROM selected_period_exec WHERE status IN ('completed','failed','cancelled') GROUP BY task_id
 		)
 	SELECT t.id,t.title,
 		COALESCE((SELECT pe.status FROM period_exec pe WHERE pe.task_id=t.id ORDER BY pe.started_at DESC,pe.history_order DESC,pe.id DESC LIMIT 1),t.status),
@@ -933,8 +957,8 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 		CASE WHEN pt.task_id IS NOT NULL AND hs.first_started_at IS NOT NULL THEN 1 ELSE 0 END,
 		u.cost,u.known,COALESCE(mi.ids,''),COALESCE(te.statuses,''),
 		COALESCE(GROUP_CONCAT(DISTINCT CAST(strftime('%H',p.started_at,'localtime') AS INTEGER)),'')
-	FROM scoped_tasks t JOIN evidence_task_ids eti ON eti.task_id=t.id
-	LEFT JOIN period_exec p ON p.task_id=t.id
+	FROM selected_evidence_tasks selected JOIN scoped_tasks t ON t.id=selected.task_id
+	LEFT JOIN selected_period_exec p ON p.task_id=t.id
 	LEFT JOIN period_terminal_task_ids pt ON pt.task_id=t.id
 	LEFT JOIN created_task_ids ct ON ct.task_id=t.id
 	LEFT JOIN historical_start hs ON hs.task_id=t.id
@@ -944,15 +968,15 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 	LEFT JOIN usage u ON u.task_id=t.id
 	LEFT JOIN model_ids mi ON mi.task_id=t.id
 	LEFT JOIN terminal_evidence te ON te.task_id=t.id
-	GROUP BY t.id ORDER BY COALESCE(MAX(p.started_at),t.created_at) DESC,t.id DESC LIMIT ? OFFSET ?`
+	GROUP BY t.id ORDER BY selected.sort_at DESC,t.id DESC`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, skillEvidenceArgs...)
 	args = append(args, windowArgs...)
 	args = append(args, taskWindowArgs...)
 	args = append(args, goalWindowArgs...)
+	args = append(args, filter.Limit, filter.EvidenceOffset)
 	args = append(args, filter.ProjectID)
 	args = append(args, usageWindowArgs...)
-	args = append(args, filter.Limit, filter.EvidenceOffset)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting recent analytics outcomes: %w", err)

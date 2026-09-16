@@ -8,6 +8,77 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	canonical := &models.LLMConfig{Name: "Canonical", Provider: models.ProviderAnthropic, Model: "claude-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-a", OAuthRefreshToken: "refresh-a"}
+	source := &models.LLMConfig{Name: "Source", Provider: models.ProviderAnthropic, Model: "claude-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-b", OAuthRefreshToken: "refresh-b"}
+	if err := repo.Create(ctx, canonical); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE oauth_connections SET oauth_principal_hash = 'verified-principal' WHERE id IN (?, ?)`, canonical.OAuthConnectionID, source.OAuthConnectionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO account_usage_snapshots (id, provider, agent_config_id, oauth_connection_id, oauth_config_revision, raw_json)
+		VALUES ('source-current', 'anthropic', ?, ?, 0, '{}'),
+		       ('source-stale-collision', 'anthropic', ?, ?, 1, '{}')`,
+		source.ID, source.OAuthConnectionID, source.ID, source.OAuthConnectionID); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := repo.ReplaceLinkedOAuthConnectionWithProfileIfRevision(
+		ctx, canonical.ID, canonical.OAuthConnectionID, 0, models.ProviderAnthropic,
+		"new-access", "new-refresh", 1234, "organization:shared", "Real account", "verified-principal",
+	)
+	if err != nil || !updated {
+		t.Fatalf("replace and adopt = %v, %v", updated, err)
+	}
+	loadedSource, err := repo.GetByID(ctx, source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedSource.OAuthConnectionID != canonical.OAuthConnectionID {
+		t.Fatalf("source connection = %q, want %q", loadedSource.OAuthConnectionID, canonical.OAuthConnectionID)
+	}
+	for id, wantRevision := range map[string]int64{"source-current": 1, "source-stale-collision": -1} {
+		var connectionID string
+		var revision int64
+		if err := db.QueryRow(`SELECT oauth_connection_id, oauth_config_revision FROM account_usage_snapshots WHERE id = ?`, id).Scan(&connectionID, &revision); err != nil {
+			t.Fatal(err)
+		}
+		if connectionID != canonical.OAuthConnectionID || revision != wantRevision {
+			t.Fatalf("snapshot %s = %q/%d, want %q/%d", id, connectionID, revision, canonical.OAuthConnectionID, wantRevision)
+		}
+	}
+	removed, err := repo.GetOAuthConnectionByID(ctx, source.OAuthConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != nil {
+		t.Fatal("adopted source connection was not removed")
+	}
+	current, err := repo.GetByID(ctx, canonical.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disconnected, err := repo.DisconnectLinkedOAuthConnection(ctx, current.ID, current.OAuthConnectionID, current.OAuthConfigRevision, current.Provider)
+	if err != nil || !disconnected {
+		t.Fatalf("disconnect = %v, %v", disconnected, err)
+	}
+	connection, err := repo.GetOAuthConnectionByID(ctx, current.OAuthConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.ProviderDisplayName != "" || connection.PrincipalHash != "" || connection.AccountID != "" {
+		t.Fatalf("disconnect retained provider identity metadata: %+v", connection)
+	}
+}
+
 func TestLLMConfigRepo_CreateWithOAuthFields(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

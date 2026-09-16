@@ -286,6 +286,61 @@ func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T)
 	}
 }
 
+func TestGetAnalyticsDashboardLargePayloadOverviewIsBounded(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-large-payload.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	if got := connections.Reader.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("reader max connections = %d, want production topology of 1", got)
+	}
+	if _, err := connections.Writer.Exec(`
+		INSERT INTO projects(id,name) VALUES ('analytics-large-project','Analytics large project');
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<60)
+		INSERT INTO tasks(id,project_id,title,category,status,created_at)
+		SELECT printf('analytics-task-%03d',n),'analytics-large-project',printf('Analytics task %03d',n),'backlog','completed',CURRENT_TIMESTAMP FROM seq;
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<1200)
+		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order,output)
+		SELECT printf('analytics-exec-%05d',n),printf('analytics-task-%03d',((n-1)%60)+1),
+			CASE WHEN n%5=0 THEN 'failed' ELSE 'completed' END,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,
+			CASE WHEN n<=60 THEN 0 ELSE 1 END,n,zeroblob(65536) FROM seq;
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<6000)
+		INSERT INTO llm_usage_events(id,provider,project_id,task_id,model,operation,status,total_tokens,cost_usd,occurred_at)
+		SELECT printf('analytics-usage-%05d',n),'test','analytics-large-project',printf('analytics-task-%03d',((n-1)%60)+1),
+			'test-model','completion','completed',100,0.01,CURRENT_TIMESTAMP FROM seq;
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Handler{execRepo: repository.NewExecutionRepo(connections.Reader)}
+	e := echo.New()
+	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
+	server := httptest.NewServer(e)
+	defer server.Close()
+
+	started := time.Now()
+	response, err := server.Client().Get(server.URL + "/api/analytics/dashboard?project_id=analytics-large-project&view=overview&range=30d&group_by=day&compare=true&evidence_limit=20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("large-payload Overview took %s, want <= 1s with the sole reader", elapsed)
+	}
+	var dashboard models.AnalyticsDashboard
+	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
+		t.Fatal(err)
+	}
+	if len(dashboard.RecentOutcomes) != 20 {
+		t.Fatalf("recent outcomes = %d, want bounded page of 20", len(dashboard.RecentOutcomes))
+	}
+}
+
 func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T) {
 	tc := NewTestContext(t)
 	missing := tc.HTTP().Get("/api/analytics/dashboard?range=30d").Execute()
@@ -309,6 +364,47 @@ func TestGetAnalyticsDashboardRequiresProjectAndReturnsDefinitions(t *testing.T)
 	}
 	if dashboard.EvidenceLimit != 1 || dashboard.EvidenceOffset != 2 {
 		t.Fatalf("evidence pagination was not parsed: limit=%d offset=%d", dashboard.EvidenceLimit, dashboard.EvidenceOffset)
+	}
+}
+
+func TestGetAnalyticsDashboardExposesWorkflowInvocationStatusAccounting(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	if _, err := tc.db.ExecContext(ctx, `
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, published_version_id)
+		VALUES ('analytics-api-workflow', ?, 'analytics-api-workflow', 'API workflow', 'custom', 'active', 'analytics-api-version');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at)
+		VALUES ('analytics-api-version', ?, 'analytics-api-workflow', 1, 'published', 'manual', 'custom', '2026-01-01 00:00:00');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+		VALUES ('analytics-api-node', ?, 'analytics-api-workflow', 'analytics-api-version', 'trigger', 'Trigger', 'trigger', 'trigger');
+		INSERT INTO automation_invocations
+			(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, skipped_reason, started_at, completed_at, created_at)
+		VALUES
+			('api-completed', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-completed', 'occurrence-api-completed', 'completed', '', '2026-01-10 00:00:00', '2026-01-10 00:01:00', '2026-01-10 00:00:00'),
+			('api-cancelled', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-cancelled', 'occurrence-api-cancelled', 'cancelled', '', '2026-01-10 01:00:00', '2026-01-10 01:01:00', '2026-01-10 01:00:00'),
+			('api-skipped', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-skipped', 'occurrence-api-skipped', 'skipped', 'not applicable', '2026-01-10 02:00:00', '2026-01-10 02:00:00', '2026-01-10 02:00:00'),
+			('api-running', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-running', 'occurrence-api-running', 'running', '', '2026-01-10 03:00:00', NULL, '2026-01-10 03:00:00'),
+			('api-at-date-to', ?, 'analytics-api-workflow', 'analytics-api-version', 'analytics-api-node', 'schedule', 'schedule-api-at-date-to', 'occurrence-api-at-date-to', 'completed', '', '2026-01-11 00:00:00', '2026-01-11 00:01:00', '2026-01-11 00:00:00');
+	`, project.ID, project.ID, project.ID, project.ID, project.ID, project.ID, project.ID, project.ID); err != nil {
+		t.Fatalf("seed workflow analytics fixture: %v", err)
+	}
+
+	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&view=workflows&date_from=2026-01-10&date_to=2026-01-11").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	var dashboard models.AnalyticsDashboard
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if len(dashboard.Workflows) != 1 {
+		t.Fatalf("workflows = %+v, want one", dashboard.Workflows)
+	}
+	workflow := dashboard.Workflows[0]
+	if workflow.InvocationCount != 4 || workflow.CompletedCount != 1 || workflow.CancelledCount != 1 || workflow.SkippedCount != 1 || workflow.OpenCount != 1 {
+		t.Fatalf("workflow status accounting = %+v, want completed/cancelled/skipped/open visible and DateTo excluded", workflow)
+	}
+	if workflow.CompletionRate != 25 {
+		t.Fatalf("completion rate = %v, want 1/4 selected invocations", workflow.CompletionRate)
 	}
 }
 

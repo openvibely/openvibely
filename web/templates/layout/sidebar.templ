@@ -962,8 +962,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			}
 		</style>
 
-		<!-- New Project Dialog Container (loaded via HTMX) -->
-		<div id="new-project-container"></div>
 			<script>
 				(function() {
 					fetch('/auth/me', { credentials: 'same-origin' })						.then(function(resp) {
@@ -1002,8 +1000,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					});
 				})();		</script>
 
-		<!-- Project Settings Dialog Container (loaded via HTMX) -->
-		<div id="project-settings-container"></div>
 		<script>
 			(function() {
 				const btn = document.getElementById('project-settings-btn');

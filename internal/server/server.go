@@ -532,6 +532,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	// Services
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	oauthRefreshSvc := service.NewOAuthRefreshService(llmConfigRepo, nil)
+	oauthRefreshSvc.SetAnthropicIdentityResolver(service.ResolveAnthropicOAuthIdentity)
 	llmSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	llmSvc.SetExecutionStreamHub(executionStreamHub)
 

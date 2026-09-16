@@ -75,6 +75,7 @@ func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *rep
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 
 	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.oauthIdentityResolver = nil
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
@@ -129,6 +130,7 @@ func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLM
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 
 	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.oauthIdentityResolver = nil
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
@@ -2760,23 +2762,27 @@ func TestHandler_UpdateWorkerSettings(t *testing.T) {
 	})
 
 	t.Run("rejects malformed global worker limits", func(t *testing.T) {
-		h, e, _ := setupTestHandler(t)
-		ctx := context.Background()
-		before, err := h.workerRepo.GetMaxWorkers(ctx)
-		if err != nil {
-			t.Fatalf("GetMaxWorkers before: %v", err)
-		}
-		rec := htmxPost(e, "/workers", url.Values{"max_workers": {"-1"}})
-		assertCode(t, rec, http.StatusNoContent)
-		if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "Max concurrent workers") {
-			t.Fatalf("expected malformed-limit toast, got %q", trigger)
-		}
-		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
-		if err != nil {
-			t.Fatalf("GetMaxWorkers after: %v", err)
-		}
-		if maxWorkers != before {
-			t.Fatalf("expected malformed global limit to leave %d unchanged, got %d", before, maxWorkers)
+		for _, value := range []string{"-1", "not-a-number", " not-a-number "} {
+			t.Run(value, func(t *testing.T) {
+				h, e, _ := setupTestHandler(t)
+				ctx := context.Background()
+				before, err := h.workerRepo.GetMaxWorkers(ctx)
+				if err != nil {
+					t.Fatalf("GetMaxWorkers before: %v", err)
+				}
+				rec := htmxPost(e, "/workers", url.Values{"max_workers": {value}})
+				assertCode(t, rec, http.StatusNoContent)
+				if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "Max concurrent workers") {
+					t.Fatalf("expected malformed-limit toast, got %q", trigger)
+				}
+				maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
+				if err != nil {
+					t.Fatalf("GetMaxWorkers after: %v", err)
+				}
+				if maxWorkers != before {
+					t.Fatalf("expected malformed global limit to leave %d unchanged, got %d", before, maxWorkers)
+				}
+			})
 		}
 	})
 
@@ -3074,6 +3080,29 @@ func TestHandler_UpdateProjectWorkerLimit(t *testing.T) {
 			t.Errorf("expected max_workers=50, got %v", p.MaxWorkers)
 		}
 	})
+	t.Run("rejects malformed project worker limits", func(t *testing.T) {
+		limit := 7
+		malformedProject := &models.Project{Name: "Malformed Limit Project", MaxWorkers: &limit}
+		if err := h.projectSvc.Create(ctx, malformedProject); err != nil {
+			t.Fatalf("create malformed limit project: %v", err)
+		}
+		malformedPath := "/workers/projects/" + malformedProject.ID + "/limit"
+
+		for _, value := range []string{"-1", "not-a-number", " not-a-number "} {
+			t.Run(value, func(t *testing.T) {
+				rec := postLimit(t, malformedPath, value)
+				assertCode(t, rec, http.StatusNoContent)
+				if trigger := rec.Header().Get("HX-Trigger"); !strings.Contains(trigger, "Max concurrent workers") {
+					t.Fatalf("expected malformed-limit toast, got %q", trigger)
+				}
+				p, _ := h.projectSvc.GetByID(ctx, malformedProject.ID)
+				if p.MaxWorkers == nil || *p.MaxWorkers != 7 {
+					t.Fatalf("expected malformed limit to preserve max_workers=7, got %v", p.MaxWorkers)
+				}
+			})
+		}
+	})
+
 	t.Run("project limits respect a finite global limit", func(t *testing.T) {
 		globalRec := htmxPost(e, "/workers", url.Values{"max_workers": {"10"}})
 		assertCode(t, globalRec, http.StatusOK)
@@ -4321,7 +4350,10 @@ func TestHandler_ViewSchedule_DeleteConfirmationDialog(t *testing.T) {
 		`deleteScheduleTarget = button.dataset.scheduleTarget || '#schedule-content';`,
 		`deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML show:none';`,
 		`modal.showModal()`,
-		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
+		`function schedulePageMutationURL(path)`,
+		`params.set('from', 'schedule')`,
+		`htmx.ajax('DELETE', schedulePageMutationURL('/schedules/' + encodeURIComponent(scheduleID))`,
+		`data-schedule-context-action="delete"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected schedule delete confirmation markup/script to contain %q", want)
