@@ -85,7 +85,7 @@ func TestAutomationGraphServiceResolveAutomationCardPreservesChatTargetContract(
 
 func TestCurrentAutomationTemplateRevisionTracksMaintainedTemplateChanges(t *testing.T) {
 	require.Equal(t, 11, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
-	require.Equal(t, 15, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))
+	require.Equal(t, 16, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))
 	require.Zero(t, CurrentAutomationTemplateRevision(AutomationAdapterCustom))
 }
 
