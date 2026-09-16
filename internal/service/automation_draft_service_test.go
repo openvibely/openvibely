@@ -491,6 +491,8 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not call `execute_tasks` for a newly created Active task")
 	require.Contains(t, githubSDLCDevInboxPrompt, "After `create_task` succeeds for a newly created Active task, do not call `list_tasks` again for that issue")
 	require.Contains(t, githubSDLCDevInboxPrompt, "the successful `create_task` response is the confirmation")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Call `set_task_goal` for a newly created task or a reconciled task that is not completed")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Never call `set_task_goal` for a reconciled completed task; preserve its existing goal and terminal goal status")
 	require.Contains(t, githubSDLCDevInboxPrompt, "For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Never call `execute_tasks` for an Active pending, queued, running, or completed task")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "Finally, call execute_tasks with that exact task ID")
@@ -545,6 +547,7 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, prompt, "Do not call execute_tasks for a newly created Active task")
 	require.Contains(t, prompt, "For a reconciled existing task, call execute_tasks only when list_tasks shows category Backlog or status failed/cancelled")
 	require.Contains(t, prompt, "Never call execute_tasks for an Active pending, queued, running, or completed task")
+	require.Contains(t, prompt, "Never replace or refresh the goal of a reconciled completed task; preserve its existing goal and terminal goal status")
 	require.NotContains(t, prompt, "Finally, call execute_tasks with that exact task ID")
 }
 
