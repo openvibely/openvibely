@@ -78,7 +78,7 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 			</div>
 			<div class="stat">
 				<div class="stat-title">Blocked</div>
-				<div class="stat-value text-xl">{ fmt.Sprintf("%d", len(upcoming.BlockedTasks)) }</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", upcomingBlockedTaskCount(upcoming)) }</div>
 				<div class="stat-desc">Waiting on a parent or gate</div>
 			</div>
 			<div class="stat">
@@ -422,6 +422,16 @@ templ AISummaryResult(summary string, err error) {
 			</div>
 		</div>
 	}
+}
+
+func upcomingBlockedTaskCount(upcoming *models.Upcoming) int {
+	if upcoming == nil {
+		return 0
+	}
+	if upcoming.TaskSummary != nil {
+		return upcoming.TaskSummary.BlockedCount
+	}
+	return len(upcoming.BlockedTasks)
 }
 
 func upcomingTaskCanBeStopped(bt models.UpcomingTask, currentProjectID string) bool {

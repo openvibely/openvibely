@@ -135,6 +135,36 @@ func TestUpcomingContentRendersBlockedTaskAsDependencyWaiting(t *testing.T) {
 	}
 }
 
+func TestUpcomingContentUsesAggregateBlockedCountForCappedProjection(t *testing.T) {
+	upcoming := &models.Upcoming{
+		GeneratedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+		BlockedTasks: []models.UpcomingTask{{
+			Task: models.Task{
+				ID:        "blocked-task",
+				ProjectID: "project-1",
+				Title:     "Visible blocked task",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusBlocked,
+			},
+		}},
+		TaskSummary: &models.TaskSummary{BlockedCount: 201},
+	}
+	if got := upcomingBlockedTaskCount(upcoming); got != 201 {
+		t.Fatalf("blocked count = %d, want aggregate count 201", got)
+	}
+	if got := upcomingBlockedTaskCount(&models.Upcoming{BlockedTasks: upcoming.BlockedTasks}); got != 1 {
+		t.Fatalf("blocked fallback count = %d, want visible count 1", got)
+	}
+
+	var pulse bytes.Buffer
+	if err := UpcomingContent(upcoming, "project-1").Render(context.Background(), &pulse); err != nil {
+		t.Fatalf("render upcoming content: %v", err)
+	}
+	if want := `<div class="stat-title">Blocked</div><div class="stat-value text-xl">201</div>`; !strings.Contains(pulse.String(), want) {
+		t.Fatalf("blocked stat missing aggregate count %q: %s", want, pulse.String())
+	}
+}
+
 func TestUpcomingTaskCardsRenderStopOnlyForEligibleTasks(t *testing.T) {
 	currentProjectID := "project-1"
 	tests := []struct {

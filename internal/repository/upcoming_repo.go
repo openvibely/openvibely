@@ -52,6 +52,12 @@ type UpcomingTaskRow struct {
 // truncatePrompt on this preview matches truncating the full prompt.
 const upcomingTaskPromptPreviewLen = 200
 
+// upcomingBlockedTasksLimit bounds the blocked dependency rows shared by the
+// browser Pulse page and the compact view_pulse runtime response. TaskSummary
+// still reports the aggregate blocked count when more rows exist than can be
+// rendered in either projection.
+const upcomingBlockedTasksLimit = 200
+
 // upcomingTaskListColumns is the shared task and agent projection used by all
 // Pulse task-list queries. The prompt is deliberately bounded because these
 // rows only populate the dashboard preview.
@@ -82,7 +88,8 @@ const upcomingBlockedTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
  FROM tasks t
  LEFT JOIN agent_configs ac ON ac.id = t.agent_id
  WHERE t.project_id = ? AND t.category != 'chat' AND t.status = 'blocked'
- ORDER BY t.priority DESC, t.display_order ASC, t.updated_at ASC, t.id ASC`
+ ORDER BY t.priority DESC, t.display_order ASC, t.updated_at ASC, t.id ASC
+ LIMIT ?`
 
 const upcomingPendingActiveTasksQuery = `SELECT ` + upcomingTaskListColumns + `,
 	` + upcomingTaskListWithoutScheduleColumns + `
@@ -123,7 +130,7 @@ func (r *UpcomingRepo) ListWaitingActiveTasks(ctx context.Context, projectID str
 // deterministic priority/display order. It is a read-only projection and does
 // not make blocked tasks runnable.
 func (r *UpcomingRepo) ListBlockedTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
-	tasks, err := r.listUpcomingTasks(ctx, upcomingBlockedTasksQuery, upcomingTaskPromptPreviewLen, projectID)
+	tasks, err := r.listUpcomingTasks(ctx, upcomingBlockedTasksQuery, upcomingTaskPromptPreviewLen, projectID, upcomingBlockedTasksLimit)
 	if err != nil {
 		return nil, fmt.Errorf("listing blocked tasks: %w", err)
 	}

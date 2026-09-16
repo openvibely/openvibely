@@ -529,7 +529,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "view_pulse",
-		Description:  "Return the current project's read-only Pulse upcoming-work agenda: running tasks, pending active tasks, scheduled tasks due within seven days, and compact priority/status/category/schedule counts. Uses bounded task previews and does not expose full prompts, execution outputs, schedule history, or mutate work.",
+		Description:  "Return the current project's read-only Pulse upcoming-work agenda: running tasks, pending active tasks, blocked dependency tasks waiting for a parent or orchestration gate (up to 200 bounded entries in blocked_tasks), scheduled tasks due within seven days, and compact priority/status/category/schedule counts including the aggregate task_summary.status.blocked count. Uses project-scoped non-Chat projections and bounded task previews; it does not expose full prompts, execution outputs, or schedule history, and does not mutate work.",
 		Domain:       DomainPulse,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

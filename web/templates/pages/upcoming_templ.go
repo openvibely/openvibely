@@ -232,9 +232,9 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
-		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(upcoming.BlockedTasks)))
+		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcomingBlockedTaskCount(upcoming)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 81, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 81, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
@@ -1197,6 +1197,16 @@ func AISummaryResult(summary string, err error) templ.Component {
 		}
 		return nil
 	})
+}
+
+func upcomingBlockedTaskCount(upcoming *models.Upcoming) int {
+	if upcoming == nil {
+		return 0
+	}
+	if upcoming.TaskSummary != nil {
+		return upcoming.TaskSummary.BlockedCount
+	}
+	return len(upcoming.BlockedTasks)
 }
 
 func upcomingTaskCanBeStopped(bt models.UpcomingTask, currentProjectID string) bool {
