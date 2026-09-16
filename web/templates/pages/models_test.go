@@ -1034,21 +1034,25 @@ func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	}
 }
 
-func TestModelsContent_OAuthAccountDropdownShowsOnlyProviderAccountLabel(t *testing.T) {
+func TestModelsContent_OAuthAccountDropdownShowsProviderProfileNames(t *testing.T) {
 	connections := []models.OAuthConnection{
 		{
 			ID:           "anthropic-connection",
-			Name:         "Claude Fable 5",
+			Name:         "Alice",
 			Provider:     models.ProviderAnthropic,
 			NeedsReauth:  true,
 			LinkedModels: 4,
 		},
 		{
 			ID:           "openai-connection",
-			Name:         "GPT Codex",
+			Name:         "Engineering workspace",
 			Provider:     models.ProviderOpenAI,
 			AccessToken:  "present",
 			LinkedModels: 3,
+		},
+		{
+			ID:       "unnamed-anthropic-connection",
+			Provider: models.ProviderAnthropic,
 		},
 	}
 
@@ -1067,14 +1071,15 @@ func TestModelsContent_OAuthAccountDropdownShowsOnlyProviderAccountLabel(t *test
 	}
 	dropdown := out[selectStart : selectStart+selectEnd]
 	for _, want := range []string{
-		`<option value="anthropic-connection" data-provider="anthropic" data-status="Reconnect required">Anthropic account</option>`,
-		`<option value="openai-connection" data-provider="openai" data-status="Connected">OpenAI account</option>`,
+		`<option value="anthropic-connection" data-provider="anthropic" data-status="Reconnect required">Alice</option>`,
+		`<option value="openai-connection" data-provider="openai" data-status="Connected">Engineering workspace</option>`,
+		`<option value="unnamed-anthropic-connection" data-provider="anthropic" data-status="Not connected">Anthropic account</option>`,
 	} {
 		if !strings.Contains(dropdown, want) {
-			t.Errorf("expected plain account option %q", want)
+			t.Errorf("expected account option %q", want)
 		}
 	}
-	for _, unwanted := range []string{"Claude Fable 5", "GPT Codex", "4 models", "3 models", "Anthropic account ·", "OpenAI account ·"} {
+	for _, unwanted := range []string{"4 models", "3 models", "Alice ·", "Engineering workspace ·"} {
 		if strings.Contains(dropdown, unwanted) {
 			t.Errorf("OAuth Account dropdown exposed unwanted option text %q", unwanted)
 		}
@@ -1091,6 +1096,17 @@ func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) 
 			Model:               "gpt-5.4",
 			OAuthConnectionID:   "openai-connection",
 			OAuthConnectionName: "OpenAI account",
+		},
+		{
+			ID:                  "healthy-oauth",
+			Name:                "Healthy OAuth",
+			Provider:            models.ProviderOpenAI,
+			AuthMethod:          models.AuthMethodOAuth,
+			Model:               "gpt-5.4",
+			OAuthConnectionID:   "healthy-connection",
+			OAuthConnectionName: "OpenAI account",
+			OAuthAccessToken:    "present",
+			OAuthExpiresAt:      time.Now().Add(time.Hour).UnixMilli(),
 		},
 	}
 	connections := []models.OAuthConnection{{
@@ -1110,8 +1126,17 @@ func TestModelsContent_EditorOAuthActionUsesRuntimeSpecificLaunch(t *testing.T) 
 	if !strings.Contains(out, "return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)") {
 		t.Fatal("expected editor OAuth action to use the runtime-specific launch helper")
 	}
-	if strings.Contains(out, `data-oauth-path="/models/openai-oauth/oauth/initiate"`) || strings.Contains(out, `href="/models/openai-oauth/oauth/initiate"`) {
-		t.Fatal("expected model cards not to expose OAuth initiation actions")
+	if !strings.Contains(out, `data-oauth-path="/models/openai-oauth/oauth/initiate"`) || !strings.Contains(out, `href="/models/openai-oauth/oauth/initiate"`) {
+		t.Fatal("expected disconnected OAuth model cards to expose the OAuth connection action")
+	}
+	if !strings.Contains(out, `>Connect OAuth</a>`) {
+		t.Fatal("expected disconnected OAuth model cards to label the action Connect OAuth")
+	}
+	if strings.Contains(out, `data-oauth-path="/models/healthy-oauth/oauth/initiate"`) || strings.Contains(out, `href="/models/healthy-oauth/oauth/initiate"`) {
+		t.Fatal("expected healthy OAuth model cards not to expose a reconnect action")
+	}
+	if strings.Contains(out, "Disconnect account") || strings.Contains(out, "Reconnect account") {
+		t.Fatal("expected model cards not to expose connection-wide account controls")
 	}
 	if !strings.Contains(out, `'/models/' + encodeURIComponent(id) + '/oauth/initiate'`) {
 		t.Fatal("expected the editor to derive its OAuth path from the loaded model")

@@ -2031,6 +2031,9 @@ func (h *Handler) RunTask(c echo.Context) error {
 		applog.Infof("[handler] RunTask not found id=%s", taskID)
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
+	if projectID := h.mutationProjectID(c); projectID != "" && task.ProjectID != projectID {
+		return echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
+	}
 	if task.SwarmRole == models.SwarmRoleParent {
 		if h.swarmSvc == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
@@ -2048,6 +2051,10 @@ func (h *Handler) RunTask(c echo.Context) error {
 	// Return no content for HTMX requests — the dialog close handler on each page
 	// will refresh relevant content (e.g., kanban board on tasks page)
 	if isHTMX(c) {
+		setHTMXToast(c, "Task queued to run now", "success")
+		if isSchedulePageMutation(c) {
+			return h.renderScheduleContentForProject(c, task.ProjectID)
+		}
 		return c.NoContent(http.StatusNoContent)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
@@ -2091,12 +2098,11 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, cutoff 
 		return result, nil
 	}
 	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
+		var pendingSweep func() error
 		if !composerStop && h.threadInputRepo != nil {
-			if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
-				applog.Infof("[handler] %s error cancelling pending thread inputs task=%s: %v", operation, task.ID, err)
-			}
+			pendingSweep = func() error { return h.threadInputRepo.CancelPendingForTask(ctx, task.ID) }
 		}
-		if err := h.swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
+		if err := h.swarmSvc.CancelSwarmObservedWithPending(ctx, task, pendingSweep); err != nil {
 			applog.Infof("[handler] %s swarm cascade error: %v", operation, err)
 			return nil, err
 		}
@@ -2168,8 +2174,49 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
+	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_generation") != "" {
+		expectedGeneration, err := strconv.Atoi(c.QueryParam("expected_generation"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm generation")
+		}
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		if err != nil {
+			return err
+		}
+		if expectedGeneration != cfg.Generation {
+			return echo.NewHTTPError(http.StatusConflict, "swarm generation changed; Stop was not applied")
+		}
+	}
+	if composerStop && task.SwarmRole == models.SwarmRoleParent && c.QueryParam("expected_stop_revision") != "" {
+		expectedRevision, err := strconv.Atoi(c.QueryParam("expected_stop_revision"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid swarm Stop revision")
+		}
+		cfg, err := models.ParseSwarmConfig(task.SwarmConfig)
+		if err != nil {
+			return err
+		}
+		if expectedRevision != cfg.StopRevision {
+			return echo.NewHTTPError(http.StatusConflict, "swarm follow-up changed; Stop was not applied")
+		}
+	}
+	if composerStop && c.QueryParam("expected_turn_id") != "" {
+		matches, err := h.execRepo.IsTaskExecutionAtHistoryCutoff(c.Request().Context(), taskID, c.QueryParam("expected_turn_id"), cutoff)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return echo.NewHTTPError(http.StatusConflict, "response turn changed; Stop was not applied")
+		}
+	}
 	result, err := h.cancelTaskWork(c.Request().Context(), task, cutoff, composerStop, "CancelTask")
 	if err != nil {
+		if errors.Is(err, service.ErrTaskCancellationSuperseded) {
+			if pulseRequest {
+				return h.renderPulseCancelError(c, http.StatusConflict, taskID, "This task changed before Stop could be applied.")
+			}
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if pulseRequest {
 			return h.renderPulseCancelError(c, http.StatusBadRequest, taskID, "Unable to stop this task. Try again.")
 		}
@@ -2916,12 +2963,19 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 		return err
 	}
 	activeTurnID := ""
+	queuedTurnID := ""
 	for _, exec := range executions {
 		if exec.Status == models.ExecRunning {
 			activeTurnID = exec.ID
 		}
+		if exec.Status == models.ExecQueued {
+			queuedTurnID = exec.ID
+		}
 	}
-	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
+	if activeTurnID == "" {
+		activeTurnID = queuedTurnID
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", components.SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID)), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
 }
 
 // TaskThreadSelectModel persists a task-thread composer model selection
@@ -3224,7 +3278,13 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, taskID, beforeExecID, limit)
+	var executions []models.Execution
+	var hasEarlier bool
+	if isPoll && beforeExecID == "" {
+		executions, hasEarlier, err = h.loadTaskExecutionWindow(ctx, taskID, beforeExecID, limit)
+	} else {
+		executions, hasEarlier, err = h.loadTaskThreadExecutionWindow(ctx, taskID, beforeExecID, limit)
+	}
 	if err != nil {
 		applog.Infof("[handler] GetTaskThread error loading executions: %v", err)
 		executions = []models.Execution{}
@@ -3380,7 +3440,19 @@ func (h *Handler) loadTaskExecutionHistoryWindow(ctx context.Context, taskID, be
 }
 
 func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
-	return h.loadTaskExecutionWindow(ctx, taskID, beforeExecID, limit)
+	queryLimit := limit + 1
+	var rows []models.Execution
+	var err error
+	if beforeExecID != "" {
+		rows, err = h.execRepo.ListByTaskThreadChronologicalBefore(ctx, taskID, beforeExecID, queryLimit)
+	} else {
+		rows, err = h.execRepo.ListByTaskThreadChronologicalLimit(ctx, taskID, queryLimit)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	visible, hasEarlier := trimExecutionWindow(rows, limit)
+	return visible, hasEarlier, nil
 }
 
 func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
@@ -3427,4 +3499,42 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 		"task-thread-view",
 		task.ProjectID,
 	))
+}
+
+func (h *Handler) GetTaskThreadExecutionFullOutput(c echo.Context) error {
+	taskID := c.Param("taskId")
+	execID := c.Param("execId")
+	if taskID == "" || execID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task and execution are required")
+	}
+
+	ctx := c.Request().Context()
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	// Scope the full payload read through both the requested task and its
+	// project before selecting any execution output.
+	exec, err := h.execRepo.GetByIDForTaskAndProject(ctx, execID, taskID, task.ProjectID)
+	if err != nil {
+		return err
+	}
+	if exec == nil || exec.TaskID != taskID {
+		return echo.NewHTTPError(http.StatusNotFound, "execution not found")
+	}
+
+	switch exec.Status {
+	case models.ExecCompleted:
+		return render(c, http.StatusOK, components.ChatBubbleThreadPreview("Assistant", exec.Output, false, false, taskID, exec.ID))
+	case models.ExecFailed:
+		return render(c, http.StatusOK, components.ChatBubbleErrorThreadPreview("Assistant", exec.ErrorMessage, exec.Output, false, false, taskID, exec.ID))
+	case models.ExecCancelled:
+		return render(c, http.StatusOK, components.ChatBubbleErrorThreadPreview("Assistant", "Cancelled", exec.Output, false, false, taskID, exec.ID))
+	default:
+		return render(c, http.StatusOK, components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "task-thread-messages", "task-thread-view"))
+	}
 }

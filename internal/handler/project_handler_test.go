@@ -634,6 +634,42 @@ func TestNormalizeRepoSource(t *testing.T) {
 	}
 }
 
+func TestParseNonNegativeWorkerLimit(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    int
+		wantErr string
+	}{
+		{name: "empty", raw: "", want: 0},
+		{name: "whitespace empty", raw: "   ", want: 0},
+		{name: "zero", raw: "0", want: 0},
+		{name: "positive", raw: "25", want: 25},
+		{name: "whitespace positive", raw: " 5 ", want: 5},
+		{name: "malformed", raw: "abc", wantErr: "whole number"},
+		{name: "whitespace malformed", raw: " abc ", wantErr: "whole number"},
+		{name: "negative", raw: "-1", wantErr: "0 or a positive whole number"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseNonNegativeWorkerLimit(tc.raw)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected valid worker limit %q, got error %v", tc.raw, err)
+			}
+			if got != tc.want {
+				t.Fatalf("parseNonNegativeWorkerLimit(%q) = %d, want %d", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *testing.T) {
 	tc := NewTestContext(t)
 	form := url.Values{}

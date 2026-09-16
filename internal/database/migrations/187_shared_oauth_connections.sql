@@ -59,19 +59,48 @@ SET oauth_access_token = '', oauth_refresh_token = '', oauth_expires_at = 0,
     oauth_account_id = '', oauth_needs_reauth = 0
 WHERE auth_method = 'oauth' AND provider IN ('openai', 'anthropic');
 
+ALTER TABLE account_usage_snapshots ADD COLUMN oauth_connection_id TEXT REFERENCES oauth_connections(id) ON DELETE SET NULL;
+CREATE INDEX idx_account_usage_snapshots_connection_revision
+ON account_usage_snapshots(oauth_connection_id, oauth_config_revision, fetched_at DESC, created_at DESC, id DESC);
+
+-- Snapshot revisions are scoped to their original private connection. Translate only
+-- the original owner's current generation to the selected canonical generation; all
+-- other generations must fail closed so equal revision numbers cannot reactivate stale
+-- snapshots after exact rotating credentials are consolidated.
+UPDATE account_usage_snapshots AS snapshot
+SET oauth_config_revision = CASE
+        WHEN snapshot.oauth_config_revision = COALESCE(
+            (SELECT original.oauth_revision
+             FROM oauth_connections original
+             WHERE original.id = snapshot.agent_config_id
+               AND original.provider = snapshot.provider),
+            -1
+        )
+        THEN COALESCE(
+            (SELECT canonical.oauth_revision
+             FROM agent_configs model
+             JOIN oauth_connections canonical ON canonical.id = model.oauth_connection_id
+             WHERE model.id = snapshot.agent_config_id
+               AND model.provider = snapshot.provider
+               AND canonical.provider = snapshot.provider),
+            -1
+        )
+        ELSE -1
+    END,
+    oauth_connection_id = (
+        SELECT model.oauth_connection_id
+        FROM agent_configs model
+        JOIN oauth_connections canonical ON canonical.id = model.oauth_connection_id
+        WHERE model.id = snapshot.agent_config_id
+          AND model.provider = snapshot.provider
+          AND canonical.provider = snapshot.provider
+    )
+WHERE snapshot.oauth_config_revision >= 0;
+
 DELETE FROM oauth_connections
 WHERE NOT EXISTS (
     SELECT 1 FROM agent_configs WHERE agent_configs.oauth_connection_id = oauth_connections.id
 );
-
-ALTER TABLE account_usage_snapshots ADD COLUMN oauth_connection_id TEXT REFERENCES oauth_connections(id) ON DELETE SET NULL;
-CREATE INDEX idx_account_usage_snapshots_connection_revision
-ON account_usage_snapshots(oauth_connection_id, oauth_config_revision, fetched_at DESC, created_at DESC, id DESC);
-UPDATE account_usage_snapshots
-SET oauth_connection_id = (
-    SELECT oauth_connection_id FROM agent_configs WHERE agent_configs.id = account_usage_snapshots.agent_config_id
-)
-WHERE oauth_config_revision >= 0;
 
 -- +goose Down
 -- Rehydrate the legacy per-model ownership before removing shared connections.

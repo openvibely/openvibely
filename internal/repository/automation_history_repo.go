@@ -560,37 +560,71 @@ func (r *AutomationRepo) GetAutomationMetrics(ctx context.Context, projectID, au
 	return metrics, rows.Err()
 }
 
-func (r *AutomationRepo) RecomputeAutomationHealth(ctx context.Context, projectID, automationID string, now time.Time) (models.AutomationHealth, error) {
+type automationHealthKey struct {
+	projectID    string
+	automationID string
+}
+
+type automationHealthTarget struct {
+	key              automationHealthKey
+	currentState     models.AutomationHealthState
+	currentReason    string
+	evaluatedAtValid bool
+}
+
+type automationHealthInputs struct {
+	blocked        int
+	recentCount    int
+	recentFailures int
+	externalStale  bool
+}
+
+func calculateAutomationHealth(now time.Time, input automationHealthInputs) models.AutomationHealth {
 	health := models.AutomationHealth{State: models.AutomationHealthUnknown, Reason: "No terminal invocation yet", EvaluatedAt: now.UTC()}
-	var blocked int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_item_positions
-		WHERE project_id = ? AND automation_id = ? AND state IN ('blocked','failed')`, projectID, automationID).Scan(&blocked); err != nil {
-		return health, err
+	switch {
+	case input.recentCount == 3 && input.recentFailures == 3:
+		health.State = models.AutomationHealthUnhealthy
+		health.Reason = "Three consecutive trigger or dispatch failures"
+	case input.recentFailures > 0 || input.blocked > 0 || input.externalStale:
+		health.State = models.AutomationHealthDegraded
+		health.Reason = fmt.Sprintf("%d recent failed invocation(s), %d blocked or failed position(s)", input.recentFailures, input.blocked)
+		if input.externalStale {
+			health.Reason += ", external GitHub state is stale"
+		}
+	case input.recentCount > 0:
+		health.State = models.AutomationHealthHealthy
+		health.Reason = "Recent triggers and dispatches completed without systemic errors"
 	}
-	var recentCount, recentFailures int
+	return health
+}
+
+func (r *AutomationRepo) RecomputeAutomationHealth(ctx context.Context, projectID, automationID string, now time.Time) (models.AutomationHealth, error) {
+	input := automationHealthInputs{}
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_item_positions
+		WHERE project_id = ? AND automation_id = ? AND state IN ('blocked','failed')`, projectID, automationID).Scan(&input.blocked); err != nil {
+		return models.AutomationHealth{}, err
+	}
 	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) FROM (
 		SELECT status FROM automation_invocations WHERE project_id = ? AND automation_id = ?
 			AND status IN ('completed','failed')
-		ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC LIMIT 3)`, projectID, automationID).Scan(&recentCount, &recentFailures); err != nil {
-		return health, err
+		ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC LIMIT 3)`, projectID, automationID).Scan(&input.recentCount, &input.recentFailures); err != nil {
+		return models.AutomationHealth{}, err
 	}
 	externalState, err := r.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-AutomationExternalStaleAfter))
 	if err != nil {
-		return health, err
+		return models.AutomationHealth{}, err
 	}
-	switch {
-	case recentCount == 3 && recentFailures == 3:
-		health.State = models.AutomationHealthUnhealthy
-		health.Reason = "Three consecutive trigger or dispatch failures"
-	case recentFailures > 0 || blocked > 0 || externalState.Stale:
-		health.State = models.AutomationHealthDegraded
-		health.Reason = fmt.Sprintf("%d recent failed invocation(s), %d blocked or failed position(s)", recentFailures, blocked)
-		if externalState.Stale {
-			health.Reason += ", external GitHub state is stale"
-		}
-	case recentCount > 0:
-		health.State = models.AutomationHealthHealthy
-		health.Reason = "Recent triggers and dispatches completed without systemic errors"
+	input.externalStale = externalState.Stale
+	health := calculateAutomationHealth(now, input)
+	var currentState models.AutomationHealthState
+	var currentReason string
+	var evaluatedAt sql.NullString
+	if err := r.db.QueryRowContext(ctx, `SELECT health_state, health_reason, health_evaluated_at FROM automations
+		WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&currentState, &currentReason, &evaluatedAt); err != nil {
+		return models.AutomationHealth{}, err
+	}
+	if evaluatedAt.Valid && currentState == health.State && currentReason == health.Reason {
+		return health, nil
 	}
 	result, err := execBoundSQLite(ctx, r.db, `UPDATE automations SET health_state = ?, health_reason = ?,
 		health_evaluated_at = ? WHERE project_id = ? AND id = ?`, health.State, health.Reason, health.EvaluatedAt, projectID, automationID)
@@ -609,36 +643,190 @@ func (r *AutomationRepo) RecomputeAutomationHealthForAll(ctx context.Context, no
 	}
 	var afterAutomationID string
 	for {
-		rows, err := r.db.QueryContext(ctx, `SELECT project_id, id FROM automations
-			WHERE published_version_id IS NOT NULL AND id > ?
-			ORDER BY id LIMIT ?`, afterAutomationID, limit)
+		targets, hasMore, err := r.listPublishedAutomationHealthTargets(ctx, afterAutomationID, limit)
 		if err != nil {
 			return err
 		}
-		var ids [][2]string
-		for rows.Next() {
-			var value [2]string
-			if err := rows.Scan(&value[0], &value[1]); err != nil {
-				rows.Close()
-				return err
-			}
-			ids = append(ids, value)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		for _, value := range ids {
-			if _, err := r.RecomputeAutomationHealth(ctx, value[0], value[1], now); err != nil {
-				return err
-			}
-		}
-		if len(ids) < limit {
+		if len(targets) == 0 {
 			return nil
 		}
-		afterAutomationID = ids[len(ids)-1][1]
+		inputs, err := r.loadAutomationHealthInputs(ctx, targets, now.UTC().Add(-AutomationExternalStaleAfter))
+		if err != nil {
+			return err
+		}
+		for _, target := range targets {
+			health := calculateAutomationHealth(now, inputs[target.key])
+			if target.evaluatedAtValid && target.currentState == health.State && target.currentReason == health.Reason {
+				continue
+			}
+			if _, err := execBoundSQLite(ctx, r.db, `UPDATE automations SET health_state = ?, health_reason = ?,
+				health_evaluated_at = ? WHERE project_id = ? AND id = ?`, health.State, health.Reason, health.EvaluatedAt, target.key.projectID, target.key.automationID); err != nil {
+				return err
+			}
+		}
+		if !hasMore {
+			return nil
+		}
+		afterAutomationID = targets[len(targets)-1].key.automationID
 	}
+}
+
+func (r *AutomationRepo) listPublishedAutomationHealthTargets(ctx context.Context, afterAutomationID string, limit int) ([]automationHealthTarget, bool, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT project_id, id, health_state, health_reason, health_evaluated_at FROM automations
+		WHERE published_version_id IS NOT NULL AND id > ?
+		ORDER BY id LIMIT ?`, afterAutomationID, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	var targets []automationHealthTarget
+	for rows.Next() {
+		var target automationHealthTarget
+		var evaluatedAt sql.NullString
+		if err := rows.Scan(&target.key.projectID, &target.key.automationID, &target.currentState, &target.currentReason, &evaluatedAt); err != nil {
+			return nil, false, err
+		}
+		target.evaluatedAtValid = evaluatedAt.Valid
+		targets = append(targets, target)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(targets) > limit
+	if hasMore {
+		targets = targets[:limit]
+	}
+	return targets, hasMore, nil
+}
+
+func (r *AutomationRepo) loadAutomationHealthInputs(ctx context.Context, targets []automationHealthTarget, staleBefore time.Time) (map[automationHealthKey]automationHealthInputs, error) {
+	inputs := make(map[automationHealthKey]automationHealthInputs, len(targets))
+	for _, target := range targets {
+		inputs[target.key] = automationHealthInputs{}
+	}
+	if len(targets) == 0 {
+		return inputs, nil
+	}
+	if err := r.loadAutomationHealthBlockedInputs(ctx, targets, inputs); err != nil {
+		return nil, err
+	}
+	if err := r.loadAutomationHealthInvocationInputs(ctx, targets, inputs); err != nil {
+		return nil, err
+	}
+	if err := r.loadAutomationHealthExternalInputs(ctx, targets, staleBefore, inputs); err != nil {
+		return nil, err
+	}
+	return inputs, nil
+}
+
+func automationHealthTargetsCTE(targets []automationHealthTarget) (string, []interface{}) {
+	var b strings.Builder
+	args := make([]interface{}, 0, len(targets)*2)
+	for i, target := range targets {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString("(?, ?)")
+		args = append(args, target.key.projectID, target.key.automationID)
+	}
+	return b.String(), args
+}
+
+func (r *AutomationRepo) loadAutomationHealthBlockedInputs(ctx context.Context, targets []automationHealthTarget, inputs map[automationHealthKey]automationHealthInputs) error {
+	values, args := automationHealthTargetsCTE(targets)
+	rows, err := r.db.QueryContext(ctx, `WITH target(project_id, automation_id) AS (VALUES `+values+`)
+		SELECT p.project_id, p.automation_id, COUNT(*)
+		FROM automation_work_item_positions p
+		JOIN target t ON t.project_id = p.project_id AND t.automation_id = p.automation_id
+		WHERE p.state IN ('blocked','failed')
+		GROUP BY p.project_id, p.automation_id`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key automationHealthKey
+		var blocked int
+		if err := rows.Scan(&key.projectID, &key.automationID, &blocked); err != nil {
+			return err
+		}
+		input := inputs[key]
+		input.blocked = blocked
+		inputs[key] = input
+	}
+	return rows.Err()
+}
+
+func (r *AutomationRepo) loadAutomationHealthInvocationInputs(ctx context.Context, targets []automationHealthTarget, inputs map[automationHealthKey]automationHealthInputs) error {
+	values, args := automationHealthTargetsCTE(targets)
+	rows, err := r.db.QueryContext(ctx, `WITH target(project_id, automation_id) AS (VALUES `+values+`),
+		ranked AS (
+			SELECT i.project_id, i.automation_id, i.status,
+				ROW_NUMBER() OVER (PARTITION BY i.project_id, i.automation_id ORDER BY COALESCE(i.completed_at, i.updated_at) DESC, i.id DESC) AS rn
+			FROM automation_invocations i
+			JOIN target t ON t.project_id = i.project_id AND t.automation_id = i.automation_id
+			WHERE i.status IN ('completed','failed')
+		)
+		SELECT project_id, automation_id, COUNT(*), COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0)
+		FROM ranked WHERE rn <= 3 GROUP BY project_id, automation_id`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key automationHealthKey
+		var recentCount, recentFailures int
+		if err := rows.Scan(&key.projectID, &key.automationID, &recentCount, &recentFailures); err != nil {
+			return err
+		}
+		input := inputs[key]
+		input.recentCount = recentCount
+		input.recentFailures = recentFailures
+		inputs[key] = input
+	}
+	return rows.Err()
+}
+
+func (r *AutomationRepo) loadAutomationHealthExternalInputs(ctx context.Context, targets []automationHealthTarget, staleBefore time.Time, inputs map[automationHealthKey]automationHealthInputs) error {
+	values, args := automationHealthTargetsCTE(targets)
+	rows, err := r.db.QueryContext(ctx, `WITH target(project_id, automation_id) AS (VALUES `+values+`),
+		tracked_tasks AS (
+			SELECT DISTINCT a.project_id, a.automation_id, task_resource.resource_id AS task_id
+			FROM automation_activities a
+			JOIN target t ON t.project_id = a.project_id AND t.automation_id = a.automation_id
+			JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id AND task_resource.resource_type = 'task'
+			WHERE EXISTS (
+				SELECT 1 FROM automation_activity_resources pull_resource
+				WHERE pull_resource.activity_id = a.id AND pull_resource.resource_type = 'pull_request'
+			)
+		)
+		SELECT t.project_id, t.automation_id, COUNT(pr.id), datetime(MIN(pr.updated_at))
+		FROM target t
+		LEFT JOIN tracked_tasks tracked ON tracked.project_id = t.project_id AND tracked.automation_id = t.automation_id
+		LEFT JOIN tasks task ON task.id = tracked.task_id AND task.project_id = t.project_id
+		LEFT JOIN task_pull_requests pr ON pr.task_id = task.id
+		GROUP BY t.project_id, t.automation_id`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key automationHealthKey
+		var count int
+		var oldest sql.NullString
+		if err := rows.Scan(&key.projectID, &key.automationID, &count, &oldest); err != nil {
+			return err
+		}
+		if !oldest.Valid {
+			continue
+		}
+		updated := parseSQLiteTime(oldest.String)
+		if updated.IsZero() {
+			return fmt.Errorf("invalid Automation external update time")
+		}
+		input := inputs[key]
+		input.externalStale = updated.Before(staleBefore.UTC())
+		inputs[key] = input
+	}
+	return rows.Err()
 }

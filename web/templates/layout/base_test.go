@@ -13,6 +13,34 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBaseRendersProjectDialogHostsOutsideSidebar(t *testing.T) {
+	projects := []models.Project{{ID: "project-1", Name: "Project One"}}
+	var buf bytes.Buffer
+	if err := Base("Tasks", projects, "project-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	for _, id := range []string{`id="new-project-container"`, `id="project-settings-container"`} {
+		if !strings.Contains(html, id) {
+			t.Fatalf("base layout missing project dialog host %s", id)
+		}
+	}
+	sidebarStart := strings.Index(html, `id="sidebar"`)
+	if sidebarStart < 0 {
+		t.Fatal("rendered base layout missing sidebar")
+	}
+	sidebarEndOffset := strings.Index(html[sidebarStart:], `</aside>`)
+	if sidebarEndOffset < 0 {
+		t.Fatal("rendered base layout missing sidebar closing tag")
+	}
+	sidebarHTML := html[sidebarStart : sidebarStart+sidebarEndOffset]
+	for _, id := range []string{`id="new-project-container"`, `id="project-settings-container"`} {
+		if strings.Contains(sidebarHTML, id) {
+			t.Fatalf("project dialog host %s must not render inside the sidebar layout context", id)
+		}
+	}
+}
+
 func TestBaseKanbanMoveTransactionsPreventVisibleRollback(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Tasks", []models.Project{}, "project-1").Render(context.Background(), &buf); err != nil {

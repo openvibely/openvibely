@@ -46,6 +46,9 @@ type OpenTaskPullRequestOptions struct {
 	// PreserveNeedsRepublish keeps a durable startup-sync publication marker
 	// until the caller has atomically completed the execution.
 	PreserveNeedsRepublish bool
+	// RequireExistingOpenPR limits startup reconciliation to this PR number.
+	// It must never create or adopt a replacement when the PR was closed.
+	RequireExistingOpenPR int
 }
 
 type OpenTaskPullRequestResult struct {
@@ -310,6 +313,18 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if err := ConfigureGitHubRepoEndpoint(repoRef, s.github.GlobalAPIEndpoint(ctx)); err != nil {
 		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
 	}
+	if opts.RequireExistingOpenPR > 0 {
+		if existingPR == nil || existingPR.PRNumber != opts.RequireExistingOpenPR || !IsOpenPullRequestState(existingPR.PRState) {
+			return nil, fmt.Errorf("startup reconciliation pull request #%d is no longer the recorded open pull request", opts.RequireExistingOpenPR)
+		}
+		livePR, err := s.github.GetPullRequest(ctx, repoRef, opts.RequireExistingOpenPR)
+		if err != nil {
+			return nil, fmt.Errorf("checking startup reconciliation pull request #%d: %w", opts.RequireExistingOpenPR, err)
+		}
+		if err := ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err != nil {
+			return nil, fmt.Errorf("startup reconciliation pull request #%d is unavailable: %w", opts.RequireExistingOpenPR, err)
+		}
+	}
 
 	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)
 	commitMessage := strings.TrimSpace(opts.CommitMessage)
@@ -378,6 +393,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 				ReusedExistingRecord: true,
 			}, nil
 		}
+	}
+	if opts.RequireExistingOpenPR > 0 {
+		return nil, fmt.Errorf("startup reconciliation pull request #%d is no longer open or current; refusing to create a replacement", opts.RequireExistingOpenPR)
 	}
 
 	foundPR, err := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)

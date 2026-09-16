@@ -21,12 +21,20 @@ func TaskThreadHasActiveComposerStopState(task *models.Task, executions []models
 }
 
 func taskThreadActiveTurnID(executions []models.Execution) string {
+	runningTurnID := ""
+	queuedTurnID := ""
 	for _, exec := range executions {
 		if exec.Status == models.ExecRunning {
-			return exec.ID
+			runningTurnID = exec.ID
+		}
+		if exec.Status == models.ExecQueued {
+			queuedTurnID = exec.ID
 		}
 	}
-	return ""
+	if runningTurnID != "" {
+		return runningTurnID
+	}
+	return queuedTurnID
 }
 
 func taskQueuedSteerEndpoint(input models.ThreadInput) string {
@@ -384,7 +392,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			TaskID:                 task.ID,
 			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
 			ActiveTurnID:           taskThreadActiveTurnID(executions),
-			StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
+			StopEndpoint:           SwarmParentStopEndpoint(task, fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID)),
 			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer", task.ID),
 			SelectedAgentID:        derefString(task.AgentID),
 			PendingInputs:          pendingInputs,
@@ -854,7 +862,17 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 
 						document.body.addEventListener('htmx:afterSwap', function(event) {
 							var target = event.detail.target;
-							if (target && target.id === 'task-thread-messages') {
+							if (target && target.getAttribute && target.getAttribute('data-task-thread-execution-bubble') === 'true') {
+								// outerHTML swaps can leave event.detail.target detached; resolve the
+								// live bubble by its stable execution ID before hydrating raw content.
+								var fullOutputBubble = target.id ? document.getElementById(target.id) : target;
+								var chatMessages = document.getElementById('task-thread-messages');
+								if (fullOutputBubble && chatMessages && chatMessages.contains(fullOutputBubble)) {
+									var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(fullOutputBubble) : Promise.resolve([]);
+									_finishTaskThreadRenderScroll(chatMessages, renderPromise);
+								}
+							}
+							else if (target && target.id === 'task-thread-messages') {
 								// Skip expensive DOM work if navigating away via sidebar
 								if (window._sidebarNavigating) return;
 								// Re-attach tracker if the DOM element changed before binding image load handlers.

@@ -89,6 +89,73 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 	}
 }
 
+func TestScheduleContent_RightClickContextMenuContract(t *testing.T) {
+	runAt := time.Now().Local().Truncate(time.Hour)
+	pausedRunAt := runAt.Add(time.Hour)
+	tasks := []repository.TaskWithSchedule{
+		{
+			Task: models.Task{ID: "task-menu-enabled", ProjectID: "p1", Title: "Enabled menu schedule"},
+			Schedule: &models.Schedule{
+				ID:             "sched-menu-enabled",
+				TaskID:         "task-menu-enabled",
+				RunAt:          runAt,
+				NextRun:        &runAt,
+				RepeatType:     models.RepeatOnce,
+				RepeatInterval: 1,
+				Enabled:        true,
+			},
+		},
+		{
+			Task: models.Task{ID: "task-menu-paused", ProjectID: "p1", Title: "Paused menu schedule"},
+			Schedule: &models.Schedule{
+				ID:             "sched-menu-paused",
+				TaskID:         "task-menu-paused",
+				RunAt:          pausedRunAt,
+				NextRun:        &pausedRunAt,
+				RepeatType:     models.RepeatOnce,
+				RepeatInterval: 1,
+				Enabled:        false,
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := ScheduleContent(&models.Project{ID: "p1"}, tasks, 0, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render schedule content: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-schedule-card`,
+		`tabindex="0"`,
+		`oncontextmenu="openScheduleContextMenu(event)"`,
+		`data-schedule-title="Enabled menu schedule"`,
+		`data-schedule-enabled="true"`,
+		`data-schedule-enabled="false"`,
+		`id="schedule-context-menu" class="fixed z-[100] hidden rounded-box bg-base-100 shadow border border-base-300 w-52 max-w-[calc(100vw-2rem)]"`,
+		`<ul class="menu p-2">`,
+		`role="menu"`,
+		`data-schedule-context-action="toggle"`,
+		`data-schedule-context-action="run"`,
+		`data-schedule-context-action="edit"`,
+		`data-schedule-context-action="delete"`,
+		`function schedulePageMutationURL(path)`,
+		`params.set('from', 'schedule')`,
+		`window._scheduleContextMenuAbort`,
+		`document.addEventListener('keydown'`,
+		`document.addEventListener('pointerdown'`,
+		`document.body.addEventListener('htmx:beforeSwap'`,
+		`/toggle'), {target: '#schedule-content'`,
+		`/run'), {target: '#schedule-content'`,
+		`tab=schedules&from=schedule`,
+		`deleteSchedulePending`,
+		`modal.__openVibelyDestructiveTrigger = null`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected schedule context menu contract to contain %q, got %s", want, body)
+		}
+	}
+}
+
 func TestScheduleCalendarMonthlyProjectionClampsMonthEnd(t *testing.T) {
 	anchor := time.Date(2026, time.January, 31, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
