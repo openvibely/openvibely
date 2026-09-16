@@ -286,6 +286,67 @@ func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T)
 	}
 }
 
+func TestGetAnalyticsDashboardLargePayloadAgentsIsBounded(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-large-agents.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	if got := connections.Reader.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("reader max connections = %d, want production topology of 1", got)
+	}
+	if _, err := connections.Writer.Exec(`
+		INSERT INTO projects(id,name) VALUES ('analytics-agents-project','Analytics Agents project');
+		INSERT INTO agents(id,name,scope,enabled,created_at,updated_at)
+			VALUES ('analytics-agent','Analytics Agent','project',1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<120)
+		INSERT INTO tasks(id,project_id,title,category,status,agent_definition_id,created_at)
+		SELECT printf('analytics-agent-task-%03d',n),'analytics-agents-project',printf('Analytics Agent task %03d',n),'backlog','completed','analytics-agent',CURRENT_TIMESTAMP FROM seq;
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<6000)
+		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order,output)
+		SELECT printf('analytics-agent-exec-%05d',n),printf('analytics-agent-task-%03d',((n-1)%120)+1),
+			CASE WHEN n%5=0 THEN 'failed' ELSE 'completed' END,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,
+			CASE WHEN n<=120 THEN 0 ELSE 1 END,n,zeroblob(65536) FROM seq;
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<12000)
+		INSERT INTO llm_usage_events(id,provider,project_id,task_id,model,operation,status,total_tokens,cost_usd,occurred_at)
+		SELECT printf('analytics-agent-usage-%05d',n),'test','analytics-agents-project',printf('analytics-agent-task-%03d',((n-1)%120)+1),
+			'test-model','completion','completed',100,0.01,CURRENT_TIMESTAMP FROM seq;
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<120)
+		INSERT INTO skill_analytics_events(id,project_id,task_id,skill_handle,skill_scope,event_type,source,surface,created_at)
+		SELECT printf('analytics-agent-skill-%05d',n),'analytics-agents-project',printf('analytics-agent-task-%03d',((n-1)%120)+1),
+			'analytics-skill','project','selected','assigned_agent','task_thread',CURRENT_TIMESTAMP FROM seq;
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Handler{execRepo: repository.NewExecutionRepo(connections.Reader)}
+	e := echo.New()
+	e.GET("/api/analytics/dashboard", h.GetAnalyticsDashboard)
+	server := httptest.NewServer(e)
+	defer server.Close()
+
+	started := time.Now()
+	response, err := server.Client().Get(server.URL + "/api/analytics/dashboard?project_id=analytics-agents-project&view=agents&range=30d&group_by=day&evidence_limit=20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("large-payload Agents took %s, want <= 1s with the sole reader", elapsed)
+	}
+	var dashboard models.AnalyticsDashboard
+	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
+		t.Fatal(err)
+	}
+	if len(dashboard.Agents) != 1 || len(dashboard.SkillOutcomes) != 1 {
+		t.Fatalf("Agents response = agents %d skills %d, want one each", len(dashboard.Agents), len(dashboard.SkillOutcomes))
+	}
+}
+
 func TestGetAnalyticsDashboardLargePayloadOverviewIsBounded(t *testing.T) {
 	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-large-payload.db"))
 	if err != nil {

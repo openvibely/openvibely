@@ -615,25 +615,31 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 	comparisonFilter.AgentID = ""
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", comparisonFilter)
 	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
-	query := `WITH period_exec AS (
-			SELECT e.task_id,e.agent_config_id,e.status,e.started_at,e.completed_at,e.is_followup,t.agent_definition_id FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + `
-	), period_task_ids AS (
-		SELECT DISTINCT task_id FROM period_exec
+	query := `WITH scoped_tasks AS (
+			SELECT t.id,t.agent_definition_id FROM tasks t WHERE t.project_id=?` + dimension + `
+	), period_exec AS (
+			SELECT t.id task_id,e.agent_config_id,e.status,e.started_at,e.completed_at,e.is_followup,t.agent_definition_id
+			FROM scoped_tasks t CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id WHERE 1=1` + window + `
 	), period_terminal_task_ids AS (
 		SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')
 	), historical_terminal AS (
-		SELECT e.task_id,e.status,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn
-		FROM executions e JOIN period_terminal_task_ids p ON p.task_id=e.task_id WHERE e.status IN ('completed','failed','cancelled')
+		SELECT p.task_id,(
+			SELECT e.status FROM executions e INDEXED BY idx_executions_task_analytics
+			WHERE e.task_id=p.task_id AND e.status IN ('completed','failed','cancelled')
+			ORDER BY e.started_at,e.history_order,e.id LIMIT 1
+		) status FROM period_terminal_task_ids p
 		), historical_start AS (
-			SELECT e.task_id,MIN(e.started_at) first_started_at FROM executions e JOIN period_terminal_task_ids p ON p.task_id=e.task_id GROUP BY e.task_id
+			SELECT p.task_id,(
+				SELECT MIN(e.started_at) FROM executions e INDEXED BY idx_executions_task_analytics WHERE e.task_id=p.task_id
+			) first_started_at FROM period_terminal_task_ids p
 		), task_stats AS (
 			SELECT p.task_id,p.agent_definition_id,COUNT(*) executions,SUM(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END) followups,
 			SUM(CASE WHEN p.status='completed' THEN 1 ELSE 0 END) completed_execs,
 			SUM(CASE WHEN p.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_execs,
-			MAX(CASE WHEN f.rn=1 AND f.status='completed' THEN 1 ELSE 0 END) first_completed,
-			MAX(CASE WHEN f.rn=1 THEN 1 ELSE 0 END) has_first,
+			MAX(CASE WHEN f.status='completed' THEN 1 ELSE 0 END) first_completed,
+			MAX(CASE WHEN f.status IS NOT NULL THEN 1 ELSE 0 END) has_first,
 			CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(h.first_started_at))*86400000) AS INTEGER) duration_ms
-			FROM period_exec p LEFT JOIN historical_terminal f ON f.task_id=p.task_id AND f.rn=1
+			FROM period_exec p LEFT JOIN historical_terminal f ON f.task_id=p.task_id
 			LEFT JOIN historical_start h ON h.task_id=p.task_id GROUP BY p.task_id,p.agent_definition_id		), period_goals AS (
 			SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
 		), evaluable_goals AS (
@@ -653,13 +659,17 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 		SELECT agent_definition_id,agent_config_id,COUNT(*) use_count FROM period_exec GROUP BY agent_definition_id,agent_config_id
 	), ranked_models AS (
 		SELECT agent_definition_id,agent_config_id,ROW_NUMBER() OVER(PARTITION BY agent_definition_id ORDER BY use_count DESC,agent_config_id) rn FROM model_counts
+	), achieved_tasks AS (
+		SELECT s.task_id,s.agent_definition_id FROM task_stats s
+		JOIN period_goals g ON g.task_id=s.task_id AND g.status='achieved'
 	), usage AS (
-		SELECT u.task_id,SUM(u.cost_usd) known_cost,MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) has_cost
-		FROM llm_usage_events u JOIN period_task_ids p ON p.task_id=u.task_id WHERE u.project_id=?` + usageWindow + ` GROUP BY u.task_id
+		SELECT p.task_id,SUM(u.cost_usd) known_cost,MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) has_cost
+		FROM achieved_tasks p CROSS JOIN llm_usage_events u INDEXED BY idx_llm_usage_events_task_project_time_cost
+		ON u.task_id=p.task_id WHERE u.project_id=?` + usageWindow + ` GROUP BY p.task_id
 	), costs AS (
 		SELECT s.agent_definition_id,COALESCE(SUM(CASE WHEN u.has_cost=1 THEN u.known_cost ELSE 0 END),0) known_cost,
 		COUNT(DISTINCT CASE WHEN u.has_cost=1 THEN s.task_id END) covered,COUNT(DISTINCT s.task_id) eligible
-		FROM task_stats s JOIN period_goals g ON g.task_id=s.task_id AND g.status='achieved' LEFT JOIN usage u ON u.task_id=s.task_id GROUP BY s.agent_definition_id
+		FROM achieved_tasks s LEFT JOIN usage u ON u.task_id=s.task_id GROUP BY s.agent_definition_id
 	)
 	SELECT COALESCE(a.id,''),COALESCE(a.name,'Unassigned / Auto-routed'),r.tasks_evaluated,
 		r.completed_execs,r.terminal_execs,r.first_completed,r.first_denominator,r.followed,r.achieved,r.goal_denominator,
@@ -710,7 +720,8 @@ func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter
 		SELECT DISTINCT s.skill_handle,s.skill_scope,s.task_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
 		WHERE t.project_id=? AND s.project_id=t.project_id` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
 		), period_exec AS (
-			SELECT st.skill_handle,st.skill_scope,e.task_id,e.status,e.is_followup FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
+			SELECT st.skill_handle,st.skill_scope,e.task_id,e.status,e.is_followup FROM skill_tasks st
+			CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
 	), task_stats AS (
 		SELECT skill_handle,skill_scope,task_id,MAX(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,
 		MAX(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal,
@@ -759,7 +770,8 @@ func (r *ExecutionRepo) queryAgentSkillOutcomePerformance(ctx context.Context, f
 		SELECT DISTINCT s.skill_handle,s.skill_scope,s.task_id,t.agent_definition_id FROM skill_analytics_events s JOIN tasks t ON t.id=s.task_id
 		WHERE t.project_id=? AND s.project_id=t.project_id` + dimension + ` AND s.event_type IN ('selected','loaded') AND s.task_id IS NOT NULL AND s.task_id<>''` + eventWindow + `
 		), period_exec AS (
-			SELECT st.skill_handle,st.skill_scope,st.agent_definition_id,e.task_id,e.status,e.is_followup FROM skill_tasks st JOIN executions e ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
+			SELECT st.skill_handle,st.skill_scope,st.agent_definition_id,e.task_id,e.status,e.is_followup FROM skill_tasks st
+			CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=st.task_id WHERE 1=1` + execWindow + `
 	), task_stats AS (
 		SELECT skill_handle,skill_scope,agent_definition_id,task_id,MAX(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,
 		MAX(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal,
