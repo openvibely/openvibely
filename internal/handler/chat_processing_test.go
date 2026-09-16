@@ -5927,9 +5927,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
-	completedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.ExecCompleted, completedExec.Status)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "completed without publishing a pull request")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
@@ -5987,6 +5989,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPul
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	completedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCompleted, completedExec.Status)
+	require.Equal(t, "implementation complete", completedExec.Output)
+	require.Empty(t, completedExec.ErrorMessage)
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusCompleted, updatedTask.Status)
@@ -6336,6 +6343,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadF
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "not reviewable with the current published task work")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
@@ -6379,6 +6391,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFai
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "pull request #123 is closed")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
@@ -6414,6 +6431,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithClosedPullRequestFailsT
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "pull request #123 is closed")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
