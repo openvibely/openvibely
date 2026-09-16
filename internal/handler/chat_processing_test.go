@@ -6040,6 +6040,93 @@ func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion
 	require.True(t, reloaded.NeedsRepublish)
 }
 
+func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	project := &models.Project{Name: "Closed startup PR", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Closed PR follow-up", Prompt: "Continue work", Category: models.CategoryActive, Status: models.StatusRunning, WorktreeBranch: "task/closed-followup"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 1196, PRState: "open", NeedsRepublish: true}))
+	publishCalls := 0
+	createCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
+			require.Equal(t, 1196, number)
+			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: "closed"}, nil
+		},
+		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			publishCalls++
+			return nil, errors.New("closed PR must not publish")
+		},
+		createPRFn: func(context.Context, *service.GitHubRepoRef, service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			createCalls++
+			return nil, errors.New("closed PR must not be replaced")
+		},
+	})
+
+	reservation, err := h.reserveStartupSyncPublication(ctx, task)
+	require.NoError(t, err)
+	require.False(t, reservation.active)
+	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
+	require.Zero(t, publishCalls)
+	require.Zero(t, createCalls)
+	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1196, recorded.PRNumber)
+	require.Equal(t, "closed", recorded.PRState)
+	require.False(t, recorded.NeedsRepublish)
+}
+
+func TestStartupSyncPublicationHonorsPRClosedDuringPublish(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	project := &models.Project{Name: "PR closes during publication", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "PR closes during publication", Prompt: "Continue work", Category: models.CategoryActive, Status: models.StatusRunning, WorktreeBranch: "task/closes-during-publish", MergeTargetBranch: "main"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 1196, PRState: "open", NeedsRepublish: true}))
+	getCalls := 0
+	createCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
+			require.Equal(t, 1196, number)
+			getCalls++
+			state := "open"
+			if getCalls >= 3 {
+				state = "closed"
+			}
+			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: state, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		createPRFn: func(context.Context, *service.GitHubRepoRef, service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			createCalls++
+			return nil, errors.New("closed PR must not be replaced")
+		},
+	})
+
+	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
+	require.GreaterOrEqual(t, getCalls, 4)
+	require.Zero(t, createCalls)
+	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1196, recorded.PRNumber)
+	require.Equal(t, "closed", recorded.PRState)
+	require.False(t, recorded.NeedsRepublish)
+}
+
 func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
@@ -6127,6 +6214,9 @@ func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 1196, State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			duringPublish, err := h.execRepo.GetByID(ctx, executionID)

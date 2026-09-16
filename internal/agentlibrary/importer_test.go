@@ -317,7 +317,7 @@ func TestRemoveSkillIndexEntryPreservesUnrelatedContent(t *testing.T) {
 		},
 		{
 			name:        "with frontmatter",
-			index:       "---\nalways_use:\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
+			index:       "---\nalways_use:\n  - verify\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n",
 			wantChanged: true,
 		},
 		{
@@ -368,6 +368,10 @@ func TestRemoveSkillIndexEntryPreservesUnrelatedContent(t *testing.T) {
 				}
 			}
 			if strings.Contains(tt.index, "always_use:") {
+				meta := agentskills.ParseSkillsIndexMeta(text)
+				if len(meta.AlwaysUse) != 1 || meta.AlwaysUse[0] != "review" {
+					t.Fatalf("deleted handle should be removed from always_use, got %v; content:\n%s", meta.AlwaysUse, text)
+				}
 				for _, want := range []string{"always_use:", "custom: value"} {
 					if !strings.Contains(text, want) {
 						t.Fatalf("result lost frontmatter %q:\n%s", want, text)
@@ -417,7 +421,7 @@ func TestArchiveSkill_MarksSkillFileAndRemovesStandaloneIndexLink(t *testing.T) 
 		t.Fatalf("write support file: %v", err)
 	}
 	rootIndexPath := filepath.Join(root, "skills", "SKILLS.md")
-	rootIndex := "---\nalways_use:\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n"
+	rootIndex := "---\nalways_use:\n  - verify\n  - review\ncustom: value\n---\n\n# Standalone Skills\n\nIndex narrative stays.\n\n## verify\n\n[Verify](verify/SKILL.md)\n\n## verify_extended\n\n[Extended](verify_extended/SKILL.md)\n\n## review\n\n[Review](review/SKILL.md)\n"
 	if err := os.WriteFile(rootIndexPath, []byte(rootIndex), 0o644); err != nil {
 		t.Fatalf("write root index: %v", err)
 	}
@@ -436,7 +440,11 @@ func TestArchiveSkill_MarksSkillFileAndRemovesStandaloneIndexLink(t *testing.T) 
 	if strings.Contains(rootIndexText, "## verify\n") || !strings.Contains(rootIndexText, "## verify_extended\n") || !strings.Contains(rootIndexText, "## review\n") {
 		t.Fatalf("root index not consolidated:\n%s", rootIndexText)
 	}
-	for _, want := range []string{"always_use:\n  - review", "custom: value", "Index narrative stays."} {
+	meta := agentskills.ParseSkillsIndexMeta(rootIndexText)
+	if len(meta.AlwaysUse) != 1 || meta.AlwaysUse[0] != "review" {
+		t.Fatalf("archived skill should be removed from always_use, got %v; content:\n%s", meta.AlwaysUse, rootIndexText)
+	}
+	for _, want := range []string{"always_use:", "custom: value", "Index narrative stays."} {
 		if !strings.Contains(rootIndexText, want) {
 			t.Fatalf("root index lost %q:\n%s", want, rootIndexText)
 		}

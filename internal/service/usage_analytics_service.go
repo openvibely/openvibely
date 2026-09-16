@@ -1242,6 +1242,7 @@ func snapshotMatchesConfigAccount(snapshot models.AccountUsageSnapshot, cfg mode
 type anthropicOAuthProfile struct {
 	AccountID       string
 	DisplayName     string
+	PrincipalHash   string
 	Detail          string
 	PlanLabel       string
 	BillingLabel    string
@@ -1259,10 +1260,15 @@ func normalizeAnthropicOAuthProfile(raw map[string]any) anthropicOAuthProfile {
 		DisplayName: strings.TrimSpace(firstNonEmptyUsageString(stringValue(account["display_name"]), stringValue(account["name"]))),
 		Detail:      strings.TrimSpace(firstNonEmptyUsageString(stringValue(account["email"]), stringValue(account["display_name"]), stringValue(account["name"]))),
 	}
-	if id := firstNonEmptyUsageString(stringValue(firstPresent(org, "uuid", "id"))); id != "" {
-		profile.AccountID = "organization:" + id
-	} else if id := firstNonEmptyUsageString(stringValue(firstPresent(account, "uuid", "id"))); id != "" {
-		profile.AccountID = "account:" + id
+	orgID := firstNonEmptyUsageString(stringValue(firstPresent(org, "uuid", "id")))
+	userID := firstNonEmptyUsageString(stringValue(firstPresent(account, "uuid", "id")))
+	if userID != "" {
+		profile.PrincipalHash = anthropicOAuthPrincipalHash(orgID, userID)
+	}
+	if orgID != "" {
+		profile.AccountID = "organization:" + orgID
+	} else if userID != "" {
+		profile.AccountID = "account:" + userID
 	} else if id := firstNonEmptyUsageString(stringValue(firstPresent(raw, "organization_uuid", "organization_id", "account_uuid", "account_id", "uuid", "id"))); id != "" {
 		profile.AccountID = "account:" + id
 	}
@@ -1630,12 +1636,24 @@ func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cf
 	profileCfg, profile, profileErr := s.resolveAnthropicOAuthProfile(ctx, cfg)
 	if profileErr == nil {
 		cfg = profileCfg
-		if profile.AccountID != "" && cfg.OAuthAccountID != profile.AccountID {
-			var identityCurrent bool
-			cfg, identityCurrent = s.persistResolvedOAuthAccountID(ctx, cfg, profile.AccountID)
+		if cfg.OAuthConnectionID != "" {
+			identityCurrent, persistErr := s.llmConfigRepo.UpdateLinkedOAuthConnectionProfileIfRevision(
+				ctx, cfg.ID, cfg.OAuthConnectionID, cfg.OAuthConfigRevision, cfg.Provider,
+				profile.AccountID, profile.DisplayName, profile.PrincipalHash,
+			)
+			if persistErr != nil {
+				return nil, persistErr
+			}
 			if !identityCurrent {
 				// The profile belongs to a superseded credential generation. Do not
 				// issue or persist account usage from that stale identity.
+				return nil, nil
+			}
+			cfg.OAuthAccountID = profile.AccountID
+		} else if profile.AccountID != "" && cfg.OAuthAccountID != profile.AccountID {
+			var identityCurrent bool
+			cfg, identityCurrent = s.persistResolvedOAuthAccountID(ctx, cfg, profile.AccountID)
+			if !identityCurrent {
 				return nil, nil
 			}
 		}
