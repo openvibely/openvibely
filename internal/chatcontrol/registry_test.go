@@ -619,7 +619,7 @@ func TestViewPulseRegisteredReadOnlySupportedSurfacesBothModes(t *testing.T) {
 		t.Fatalf("expected view_pulse in pulse domain, got %q", def.Domain)
 	}
 	description := strings.ToLower(def.Description)
-	for _, want := range []string{"read-only", "bounded", "does not expose", "does not", "mutate"} {
+	for _, want := range []string{"read-only", "bounded", "blocked_tasks", "blocked dependency", "200", "status.blocked", "does not expose", "does not", "mutate"} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("view_pulse description must document safe bounded behavior; missing %q in %q", want, def.Description)
 		}

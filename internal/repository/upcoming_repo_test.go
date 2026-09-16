@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -277,6 +278,51 @@ func TestUpcomingRepo_ListBlockedTasksIsProjectScopedAndDeterministic(t *testing
 	}
 	if got, want := results[0].Task.Prompt, longPrompt[:upcomingTaskPromptPreviewLen]; got != want {
 		t.Fatalf("blocked prompt preview = %q, want %q", got, want)
+	}
+}
+
+func TestUpcomingRepo_ListBlockedTasksIsBounded(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	project := createTestProject(t, projectRepo)
+	urgent := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Highest priority blocked task",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusBlocked,
+		Priority:  4,
+		Prompt:    "urgent",
+	}
+	if err := taskRepo.Create(ctx, urgent); err != nil {
+		t.Fatalf("creating urgent blocked task: %v", err)
+	}
+	for i := 0; i < upcomingBlockedTasksLimit; i++ {
+		task := &models.Task{
+			ProjectID: project.ID,
+			Title:     fmt.Sprintf("Bounded blocked task %03d", i),
+			Category:  models.CategoryBacklog,
+			Status:    models.StatusBlocked,
+			Priority:  1,
+			Prompt:    "blocked",
+		}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("creating blocked task %d: %v", i, err)
+		}
+	}
+
+	results, err := upcomingRepo.ListBlockedTasks(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("listing blocked tasks: %v", err)
+	}
+	if len(results) != upcomingBlockedTasksLimit {
+		t.Fatalf("blocked result count = %d, want limit %d", len(results), upcomingBlockedTasksLimit)
+	}
+	if results[0].Task.ID != urgent.ID || results[0].Task.Priority != urgent.Priority {
+		t.Fatalf("highest-priority blocked task = %#v, want %q with priority %d", results[0].Task, urgent.ID, urgent.Priority)
 	}
 }
 
