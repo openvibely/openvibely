@@ -33,6 +33,95 @@ func renderedBaseMarkdownCodeHelpers(t *testing.T) string {
 	return content[start:end]
 }
 
+func TestChatThreadPreviewRenderingContract(t *testing.T) {
+	task := &models.Task{ID: "task-thread-preview", ProjectID: "project-preview", Prompt: "initial prompt"}
+	exec := models.Execution{
+		ID:              "exec-thread-preview",
+		TaskID:          task.ID,
+		Status:          models.ExecCompleted,
+		PromptSent:      "follow-up prompt preview",
+		Output:          "# Markdown preview\\n\\n```go\\nfmt.Println(\"tool marker\")\\n```",
+		IsFollowup:      true,
+		PromptTruncated: true,
+		OutputTruncated: true,
+	}
+	var buf bytes.Buffer
+	attachments := map[string][]models.ChatAttachment{
+		exec.ID: {{ID: "attachment-preview", FileName: "notes.md", MediaType: "text/markdown", FileSize: 12}},
+	}
+	if err := ChatExecutionPair(exec, task, []models.Execution{exec}, 0, true, attachments, "task-thread-messages", "task-thread-view", task.ProjectID).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render compact thread execution: %v", err)
+	}
+	body := buf.String()
+	for _, required := range []string{
+		`data-task-thread-preview-notice="true"`,
+		`data-task-thread-execution-bubble="true"`,
+		`id="task-thread-execution-exec-thread-preview"`,
+		`Preview truncated. Load full response for the complete execution.`,
+		`data-task-thread-load-full="true"`,
+		`hx-get="/tasks/task-thread-preview/thread/executions/exec-thread-preview/full"`,
+		`data-raw-content=`,
+		`notes.md`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("compact thread rendering missing %q: %s", required, body)
+		}
+	}
+	if strings.Contains(body, strings.Repeat("x", 128*1024)) {
+		t.Fatal("compact thread rendering contains an unbounded content body")
+	}
+
+	exec.OutputTruncated = false
+	exec.PromptTruncated = false
+	buf.Reset()
+	if err := ChatExecutionPair(exec, task, []models.Execution{exec}, 0, true, nil, "task-thread-messages", "task-thread-view", task.ProjectID).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render complete thread execution: %v", err)
+	}
+	if strings.Contains(buf.String(), `data-task-thread-load-full="true"`) || strings.Contains(buf.String(), `data-task-thread-preview-notice="true"`) {
+		t.Fatalf("untruncated thread rendering must use the normal bubble path: %s", buf.String())
+	}
+}
+
+func TestChatThreadPreviewMixedStatusContract(t *testing.T) {
+	task := &models.Task{ID: "task-thread-status-preview", ProjectID: "project-status-preview", Prompt: "prompt"}
+	cases := []struct {
+		name string
+		exec models.Execution
+	}{
+		{
+			name: "failed error preview",
+			exec: models.Execution{ID: "failed-preview", TaskID: task.ID, Status: models.ExecFailed, Output: "partial output", ErrorMessage: "long failure", ErrorTruncated: true},
+		},
+		{
+			name: "cancelled output preview",
+			exec: models.Execution{ID: "cancelled-preview", TaskID: task.ID, Status: models.ExecCancelled, Output: "partial cancellation output", OutputTruncated: true},
+		},
+		{
+			name: "running resumes from zero",
+			exec: models.Execution{ID: "running-preview", TaskID: task.ID, Status: models.ExecRunning, Output: "partial running output", OutputTruncated: true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := ChatExecutionPair(tc.exec, task, []models.Execution{tc.exec}, 0, true, nil, "task-thread-messages", "task-thread-view", task.ProjectID).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render mixed status preview: %v", err)
+			}
+			body := buf.String()
+			switch tc.exec.Status {
+			case models.ExecFailed, models.ExecCancelled:
+				if !strings.Contains(body, `data-task-thread-preview-notice="true"`) || !strings.Contains(body, `data-task-thread-load-full="true"`) {
+					t.Fatalf("terminal preview must expose the full-output action: %s", body)
+				}
+			case models.ExecRunning:
+				if !strings.Contains(body, `data-initial-byte-length="0"`) || strings.Contains(body, `data-task-thread-load-full="true"`) {
+					t.Fatalf("running preview must reconnect from byte zero without a terminal action: %s", body)
+				}
+			}
+		})
+	}
+}
+
 func TestChatRenderingPathsUseBaseSafeMarkdownRenderer(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
@@ -4783,6 +4872,18 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 	// afterSwap handler for task-thread-view must guard expensive work
 	if !strings.Contains(content, "target.id === 'task-thread-view'") {
 		t.Fatal("expected afterSwap handler for task-thread-view")
+	}
+
+	// Full-output outerHTML swaps must re-resolve and hydrate the live bubble.
+	for _, required := range []string{
+		"target.getAttribute('data-task-thread-execution-bubble') === 'true'",
+		"document.getElementById(target.id)",
+		"window.cleanAssistantMessages(fullOutputBubble)",
+		"_finishTaskThreadRenderScroll(chatMessages, renderPromise)",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("task-thread full-output hydration is missing %q", required)
+		}
 	}
 
 	// Both branches must check _sidebarNavigating to skip expensive work

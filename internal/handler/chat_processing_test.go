@@ -5927,9 +5927,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithoutPullRequestFailsTask
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
-	completedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.ExecCompleted, completedExec.Status)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "completed without publishing a pull request")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
@@ -5987,6 +5989,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithSuccessfullyReplacedPul
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	completedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCompleted, completedExec.Status)
+	require.Equal(t, "implementation complete", completedExec.Output)
+	require.Empty(t, completedExec.ErrorMessage)
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusCompleted, updatedTask.Status)
@@ -6038,6 +6045,93 @@ func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion
 	require.Equal(t, publishedHead, reloaded.PublishedHeadSHA)
 	require.Equal(t, 1196, reloaded.PRNumber)
 	require.True(t, reloaded.NeedsRepublish)
+}
+
+func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	project := &models.Project{Name: "Closed startup PR", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Closed PR follow-up", Prompt: "Continue work", Category: models.CategoryActive, Status: models.StatusRunning, WorktreeBranch: "task/closed-followup"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 1196, PRState: "open", NeedsRepublish: true}))
+	publishCalls := 0
+	createCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
+			require.Equal(t, 1196, number)
+			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: "closed"}, nil
+		},
+		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			publishCalls++
+			return nil, errors.New("closed PR must not publish")
+		},
+		createPRFn: func(context.Context, *service.GitHubRepoRef, service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			createCalls++
+			return nil, errors.New("closed PR must not be replaced")
+		},
+	})
+
+	reservation, err := h.reserveStartupSyncPublication(ctx, task)
+	require.NoError(t, err)
+	require.False(t, reservation.active)
+	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
+	require.Zero(t, publishCalls)
+	require.Zero(t, createCalls)
+	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1196, recorded.PRNumber)
+	require.Equal(t, "closed", recorded.PRState)
+	require.False(t, recorded.NeedsRepublish)
+}
+
+func TestStartupSyncPublicationHonorsPRClosedDuringPublish(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+	project := &models.Project{Name: "PR closes during publication", RepoURL: "https://github.com/openvibely/openvibely", RepoPath: t.TempDir()}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "PR closes during publication", Prompt: "Continue work", Category: models.CategoryActive, Status: models.StatusRunning, WorktreeBranch: "task/closes-during-publish", MergeTargetBranch: "main"}
+	require.NoError(t, h.taskSvc.Create(ctx, task))
+	require.NoError(t, prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 1196, PRState: "open", NeedsRepublish: true}))
+	getCalls := 0
+	createCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
+			require.Equal(t, 1196, number)
+			getCalls++
+			state := "open"
+			if getCalls >= 3 {
+				state = "closed"
+			}
+			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: state, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		createPRFn: func(context.Context, *service.GitHubRepoRef, service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			createCalls++
+			return nil, errors.New("closed PR must not be replaced")
+		},
+	})
+
+	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
+	require.GreaterOrEqual(t, getCalls, 4)
+	require.Zero(t, createCalls)
+	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1196, recorded.PRNumber)
+	require.Equal(t, "closed", recorded.PRState)
+	require.False(t, recorded.NeedsRepublish)
 }
 
 func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
@@ -6127,6 +6221,9 @@ func TestProcessStreamingResponseKeepsStartupSyncPublicationPendingAfterFailure(
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 1196, State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			duringPublish, err := h.execRepo.GetByID(ctx, executionID)
@@ -6246,6 +6343,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithOldOpenPullRequestHeadF
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "not reviewable with the current published task work")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
@@ -6289,6 +6391,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithStaleOpenPullRequestFai
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "pull request #123 is closed")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
@@ -6324,6 +6431,11 @@ func TestCompleteWithSuccess_GitHubSDLCImplementationWithClosedPullRequestFailsT
 
 	h.completeWithSuccess(ctx, exec.ID, task.ID, "implementation complete", "", 100, 5000)
 
+	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, failedExec.Status)
+	require.Equal(t, "implementation complete", failedExec.Output)
+	require.Contains(t, failedExec.ErrorMessage, "pull request #123 is closed")
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusFailed, updatedTask.Status)
@@ -8417,6 +8529,8 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, transcript, "Total executions: 40")
 	require.Contains(t, transcript, "Transcript size limit reached")
+	require.Contains(t, transcript, "output-00")
+	require.NotContains(t, transcript, "prompt-20")
 
 	executionQueries = nil
 	for _, statement := range counter.Statements() {
@@ -8424,10 +8538,35 @@ func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
 			executionQueries = append(executionQueries, statement)
 		}
 	}
-	require.GreaterOrEqual(t, len(executionQueries), 2)
-	for _, statement := range executionQueries[1:] {
-		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
-	}
+	require.Len(t, executionQueries, 2)
+	require.Contains(t, executionQueries[0], "COUNT(*)")
+	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+}
+
+func TestExecuteViewTaskThreadPreservesBrowserFormattingContract(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	h, _, agentRepo := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Browser Thread Formatting Project")
+	agent := createAgent(t, agentRepo)
+	task := createTask(t, h, project.ID, "Browser Thread Formatting Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "original prompt"
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.ID = "browser-thread-formatting-exec"
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "format prompt"
+	})
+	require.NoError(t, h.execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, "[Thinking]\ninternal browser thought\n[/Thinking]\nVisible browser answer.", "", 0, 0))
+
+	transcript, err := h.executeViewTaskThreadRequest(context.Background(), streamingResponseParams{ProjectID: project.ID}, service.ViewThreadRequest{
+		TaskID: task.ID,
+	})
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Visible browser answer.")
+	require.NotContains(t, transcript, "internal browser thought")
+	require.NotContains(t, transcript, "[Thinking]")
 }
 
 func TestQueuedFailedRetryPreservesSourceAndExcludesItOnPromotion(t *testing.T) {

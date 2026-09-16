@@ -159,7 +159,17 @@ func (h *Handler) CancelSwarm(c echo.Context) error {
 	if h.swarmSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
 	}
-	if err := h.swarmSvc.CancelSwarm(c.Request().Context(), c.Param("id")); err != nil {
+	observed, _, err := h.taskSvc.ObserveTaskCancellation(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if observed == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "swarm parent not found")
+	}
+	if err := h.swarmSvc.CancelSwarmObservedWithPending(c.Request().Context(), observed, nil); err != nil {
+		if errors.Is(err, service.ErrTaskCancellationSuperseded) {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return err
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})

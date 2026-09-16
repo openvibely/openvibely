@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,158 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 			t.Errorf("expected filtered paginated Automation portfolio to contain %q", want)
 		}
 	}
+}
+
+func TestCatalogCardsSuppressPointerFocusFlashButKeepKeyboardFocusVisible(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	projectID := "project-catalog-focus"
+	automations := []models.AutomationCard{{
+		Automation: models.Automation{
+			ID:             "automation-focus-card",
+			Name:           "Focus Automation",
+			LifecycleState: models.AutomationActive,
+			HealthState:    models.AutomationHealthHealthy,
+		},
+		Version: models.AutomationVersion{Version: 1, AdapterKey: "custom"},
+	}}
+	skills := []SkillCard{{
+		Handle:      "focus_skill",
+		Name:        "Focus Skill",
+		Scope:       "project",
+		Source:      "project",
+		Enabled:     true,
+		Description: "Mouse-down focus should stay visually quiet.",
+	}}
+
+	var base bytes.Buffer
+	if err := layout.Base("Catalog focus", nil, projectID).Render(context.Background(), &base); err != nil {
+		t.Fatalf("render catalog focus base: %v", err)
+	}
+	var automationFragment bytes.Buffer
+	if err := AutomationsContentPage(automations, projectID, false).Render(context.Background(), &automationFragment); err != nil {
+		t.Fatalf("render Automation focus fragment: %v", err)
+	}
+	var skillsFragment bytes.Buffer
+	if err := SkillsContentForProjectPage(skills, true, projectID, false).Render(context.Background(), &skillsFragment); err != nil {
+		t.Fatalf("render Skills focus fragment: %v", err)
+	}
+	page := strings.Replace(base.String(), "</body>", automationFragment.String()+skillsFragment.String()+"</body>", 1)
+	for _, external := range []string{
+		"https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css",
+		"https://cdn.tailwindcss.com",
+		"https://unpkg.com/htmx.org@2.0.4",
+		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
+		"https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js",
+		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+		"wails://wails/runtime.js",
+	} {
+		replacement := "/empty.js"
+		if strings.HasSuffix(external, ".css") {
+			replacement = "/empty.css"
+		}
+		page = strings.ReplaceAll(page, external, replacement)
+	}
+	page = strings.Replace(page, "</head>", `<style>
+		.card { display: block; width: 460px; min-height: 96px; margin: 24px; border: 1px solid rgb(61, 66, 77); border-radius: 12px; background: white; }
+		.card-body { padding: 16px; }
+		.hidden { display: none !important; }
+		.focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+		.focus-visible\:ring-2:focus-visible { --tw-ring-shadow: 0 0 0 2px rgb(116, 128, 255) inset; box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow, 0 0 #0000); }
+		.focus-visible\:ring-primary:focus-visible { --tw-ring-color: rgb(116, 128, 255); }
+		.dropdown-content { display: none; }
+	</style></head>`, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/empty.css":
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+			_, _ = w.Write([]byte(""))
+		case "/empty.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write([]byte(""))
+		default:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+		}
+	}))
+	defer server.Close()
+
+	runComposerFocusCDP(t, chrome, server.URL, "catalog-card-focus-flash", func(browser *composerFocusCDP) {
+		browser.waitFor("catalog focus cards", `(function() {
+			return document.readyState === 'complete' && document.querySelector('[data-automation-url]') && document.querySelector('[data-skill-handle="focus_skill"]') ? 'ready' : 'waiting';
+		})()`, "ready")
+
+		mousePress := func(selector string) {
+			coords := browser.evaluate(fmt.Sprintf(`(function(){
+				var el = document.querySelector(%q);
+				if (!el) return 'missing';
+				el.scrollIntoView({block:'center',inline:'center'});
+				var r = el.getBoundingClientRect();
+				return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});
+			})()`, selector))
+			if coords == "missing" {
+				t.Fatalf("mouse-down target %s missing", selector)
+			}
+			var point struct{ X, Y float64 }
+			if err := json.Unmarshal([]byte(coords), &point); err != nil {
+				t.Fatalf("decode mouse-down coordinates for %s: %v", selector, err)
+			}
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+		}
+		mouseRelease := func(selector string) {
+			coords := browser.evaluate(fmt.Sprintf(`(function(){var r=document.querySelector(%q).getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()`, selector))
+			var point struct{ X, Y float64 }
+			if err := json.Unmarshal([]byte(coords), &point); err != nil {
+				t.Fatalf("decode mouse-release coordinates for %s: %v", selector, err)
+			}
+			browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+		}
+		visualState := func(selector string) string {
+			return browser.evaluate(fmt.Sprintf(`(function(){
+				var el = document.querySelector(%q);
+				var cs = getComputedStyle(el);
+				return [document.activeElement === el, el.matches(':focus-visible'), cs.outlineStyle, cs.outlineWidth, cs.boxShadow, cs.borderTopColor].join('|');
+			})()`, selector))
+		}
+
+		for _, selector := range []string{`[data-automation-url]`, `[data-skill-handle="focus_skill"]`} {
+			beforeBorder := browser.evaluate(fmt.Sprintf(`getComputedStyle(document.querySelector(%q)).borderTopColor`, selector))
+			mousePress(selector)
+			got := visualState(selector)
+			parts := strings.Split(got, "|")
+			if len(parts) != 6 {
+				t.Fatalf("unexpected visual state for %s: %q", selector, got)
+			}
+			if parts[2] != "none" {
+				t.Fatalf("mouse-down on %s painted a focus outline: %q", selector, got)
+			}
+			if parts[4] != "none" {
+				t.Fatalf("mouse-down on %s painted a focus ring/shadow: %q", selector, got)
+			}
+			if parts[5] != beforeBorder {
+				t.Fatalf("mouse-down on %s changed border color: got %s, want %s (state %q)", selector, parts[5], beforeBorder, got)
+			}
+			mouseRelease(selector)
+		}
+
+		browser.click(`input[data-card-search="automations"]`)
+		for i := 0; i < 40; i++ {
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Tab", "code": "Tab"}, nil)
+			browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab"}, nil)
+			if got := browser.evaluate(`document.activeElement && document.activeElement.matches('[data-automation-url]') ? 'true' : 'false'`); got == "true" {
+				break
+			}
+			if i == 39 {
+				t.Fatalf("native Tab traversal did not reach Automation card; active element was %s", browser.evaluate(`document.activeElement && document.activeElement.outerHTML || ''`))
+			}
+		}
+		keyboardState := visualState(`[data-automation-url]`)
+		parts := strings.Split(keyboardState, "|")
+		if len(parts) != 6 || parts[1] != "true" || parts[4] == "none" {
+			t.Fatalf("keyboard focus did not keep visible Automation focus ring: %q", keyboardState)
+		}
+	})
 }
 
 func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPagination(t *testing.T) {

@@ -1615,14 +1615,14 @@ func TestHandler_Chat_RendersStopButtonWhileActive(t *testing.T) {
 		tk.Status = models.StatusRunning
 		tk.AgentID = &agent.ID
 	})
-	createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "active chat"
 	})
 
 	rec := htmxGet(e, "/chat?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `hx-post="/chat/stop?project_id=`+project.ID+`"`)
+	assertContains(t, rec, `hx-post="/chat/stop?project_id=`+project.ID+`&amp;expected_turn_id=`+activeExec.ID+`"`)
 	assertContains(t, rec, `title="Stop response"`)
 	assertContains(t, rec, `aria-label="Stop response"`)
 	assertContains(t, rec, `<rect x="6" y="6" width="12" height="12" rx="2"></rect>`)
@@ -1725,6 +1725,43 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 	}
 	_, ok := <-sub
 	assert.False(t, ok, "ChatStop should close the execution subscriber")
+}
+
+func TestHandler_ChatStopRejectsDelayedPreviousTurn(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Delayed Chat Stop Project")
+	oldTask := createTask(t, h, project.ID, "Old chat turn", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusCompleted
+		task.AgentID = &agent.ID
+	})
+	oldExec := createExec(t, h, oldTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecCompleted
+	})
+	newTask := createTask(t, h, project.ID, "New chat turn", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	newExec := createExec(t, h, newTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+	})
+
+	button := htmxGet(e, "/chat/composer-action?project_id="+project.ID)
+	assertCode(t, button, http.StatusOK)
+	assertContains(t, button, "/chat/stop?project_id="+project.ID+"&amp;expected_turn_id="+newExec.ID)
+	stale := htmxPost(e, "/chat/stop?project_id="+project.ID+"&expected_turn_id="+oldExec.ID, url.Values{})
+	assertCode(t, stale, http.StatusOK)
+	assertContains(t, stale, `data-active-turn-id="`+newExec.ID+`"`)
+	currentTask, err := h.taskRepo.GetByID(ctx, newTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusRunning, currentTask.Status)
+	currentExec, err := h.execRepo.GetByID(ctx, newExec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecRunning, currentExec.Status)
+	require.False(t, h.workerSvc.IsCancellationRequested(newTask.ID))
 }
 
 func TestHandler_Chat_HidesComposerSteeringAffordanceWhileActive(t *testing.T) {
@@ -3788,7 +3825,7 @@ func TestHandler_TaskThreadSend_QueuesWhenAtCapacity(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code, "task follow-up should be accepted and queued")
 	assertContains(t, rec, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`)
 	assertNotContains(t, rec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
-	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
+	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1&amp;expected_turn_id=`)
 	assertContains(t, rec, `title="Stop response"`)
 
 	// Message should be saved in an execution record

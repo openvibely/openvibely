@@ -147,6 +147,9 @@ type WorkflowPerformance struct {
 	InvocationCount    int     `json:"invocation_count"`
 	CompletedCount     int     `json:"completed_count"`
 	FailedCount        int     `json:"failed_count"`
+	CancelledCount     int     `json:"cancelled_count"`
+	SkippedCount       int     `json:"skipped_count"`
+	OpenCount          int     `json:"open_count"`
 	CompletionRate     float64 `json:"completion_rate"`
 	AverageDurationMs  int64   `json:"average_duration_ms"`
 	DurationSampleSize int     `json:"duration_sample_size"`

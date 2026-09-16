@@ -123,6 +123,7 @@ type Handler struct {
 	pendingRemovalHook         func(string)
 	pendingPublicationHook     func(string)
 	githubRuntimeHook          func()
+	oauthIdentityResolver      func(context.Context, string) (service.AnthropicOAuthIdentity, error)
 
 	loginFailuresMu   sync.Mutex
 	loginFailureTimes []time.Time
@@ -304,9 +305,10 @@ func New(
 		chatAttachmentRepo: chatAttachmentRepo,
 		chatInputRequests:  newChatInputRequestBroker(),
 		projectRepo:        projectRepo, settingsRepo: settingsRepo,
-		broadcaster:         broadcaster,
-		telegramService:     telegramSvc,
-		projectFolderPicker: pickProjectFolderNative,
+		broadcaster:           broadcaster,
+		telegramService:       telegramSvc,
+		projectFolderPicker:   pickProjectFolderNative,
+		oauthIdentityResolver: service.ResolveAnthropicOAuthIdentity,
 	}
 	if projectSvc != nil {
 		projectSvc.SetWorkerRepo(workerRepo)
@@ -801,6 +803,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/thread", h.GetTaskThread)
 	e.GET("/tasks/:taskId/thread/composer-action", h.TaskThreadComposerAction)
 	e.GET("/tasks/:taskId/thread/executions/:execId/fragment", h.GetTaskThreadExecutionFragment)
+	e.GET("/tasks/:taskId/thread/executions/:execId/full", h.GetTaskThreadExecutionFullOutput)
 	e.POST("/tasks/:taskId/thread", h.TaskThreadSend)
 	e.POST("/tasks/:taskId/thread/model", h.TaskThreadSelectModel)
 	e.POST("/tasks/:taskId/thread/steer", h.TaskThreadSteer)

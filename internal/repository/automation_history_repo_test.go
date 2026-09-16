@@ -151,12 +151,16 @@ func insertAutomationHistoryInvocation(t *testing.T, db SQLExecutor, fixture aut
 	if scheduled {
 		scheduledFor = sqliteTestTime(started.Add(-time.Hour))
 	}
+	skippedReason := ""
+	if status == string(models.AutomationInvocationSkipped) {
+		skippedReason = "not applicable"
+	}
 	if _, err := db.ExecContext(context.Background(), `INSERT INTO automation_invocations
 		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
-		 occurrence_key, scheduled_for, status, started_at, completed_at, error_message)
-		VALUES (?, ?, ?, ?, ?, 'schedule', ?, ?, ?, ?, ?, ?, ?)`,
+		 occurrence_key, scheduled_for, status, skipped_reason, started_at, completed_at, error_message)
+		VALUES (?, ?, ?, ?, ?, 'schedule', ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, fixture.ProjectID, fixture.AutomationID, fixture.VersionID, nodeID, "schedule-"+id, "occurrence-"+id,
-		scheduledFor, status, sqliteTestTime(started), sqliteTestTime(completed), "error-"+id); err != nil {
+		scheduledFor, status, skippedReason, sqliteTestTime(started), sqliteTestTime(completed), "error-"+id); err != nil {
 		t.Fatalf("insert invocation %s: %v", id, err)
 	}
 }

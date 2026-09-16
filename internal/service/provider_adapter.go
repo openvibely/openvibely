@@ -347,6 +347,9 @@ func providerTransport(req llmcontracts.AgentRequest) string {
 }
 
 func historyRetentionCounts(original, final []models.Execution) (retained, removed int) {
+	if len(original) == len(final) && (len(original) == 0 || &original[0] == &final[0]) {
+		return len(final), 0
+	}
 	matched := make([]bool, len(final))
 	for _, source := range original {
 		for i, candidate := range final {
@@ -376,17 +379,23 @@ func contextFailureCategory(err error) string {
 }
 
 func logContextDecision(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error) {
-	budget := calculateRequestBudget(req)
+	logContextDecisionWithBudget(originalHistory, req, strategy, externalized, trigger, calculateRequestBudget(req))
+}
+
+func logContextDecisionWithBudget(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error, budget requestBudget) {
 	retained, removed := historyRetentionCounts(originalHistory, req.ChatHistory)
 	applog.Infof("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, providerTransport(req), budget.ContextWindow, budget.SafeInputLimit, budget.FixedTokens, budget.HistoryTokens+budget.NativeStateTokens, budget.PendingTokens, budget.AttachmentTokens, budget.ReservedOutputTokens, budget.SafetyMargin, strategy, externalized, retained, removed, req.RetrySourceExecutionID, contextFailureCategory(trigger))
 }
 
 func logContextFailure(req llmcontracts.AgentRequest, err error) {
+	logContextFailureWithBudget(req, err, calculateRequestBudget(req))
+}
+
+func logContextFailureWithBudget(req llmcontracts.AgentRequest, err error, budget requestBudget) {
 	category := llmcontracts.ErrorCategoryOf(err)
 	if category == "" {
 		return
 	}
-	budget := calculateRequestBudget(req)
 	externalized := false
 	if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt != nil {
 		externalized = rt.HasDefinition(oversizedInputReaderTool)
@@ -588,7 +597,10 @@ func artifactReaderRuntime(path string) *llmcontracts.RuntimeTools {
 }
 
 func (s *LLMService) preparePendingInput(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, bool, func(), error) {
-	budget := calculateRequestBudget(req)
+	return s.preparePendingInputWithBudget(req, calculateRequestBudget(req))
+}
+
+func (s *LLMService) preparePendingInputWithBudget(req llmcontracts.AgentRequest, budget requestBudget) (llmcontracts.AgentRequest, bool, func(), error) {
 	if !pendingInputInfeasible(budget) {
 		return req, false, func() {}, nil
 	}
@@ -644,7 +656,10 @@ func (s *LLMService) preparePendingInput(req llmcontracts.AgentRequest) (llmcont
 }
 
 func ensureRequestFits(req llmcontracts.AgentRequest, op string) error {
-	budget := calculateRequestBudget(req)
+	return ensureRequestFitsWithBudget(req, calculateRequestBudget(req), op)
+}
+
+func ensureRequestFitsWithBudget(req llmcontracts.AgentRequest, budget requestBudget, op string) error {
 	if budget.TotalInputTokens() <= budget.SafeInputLimit {
 		return nil
 	}
@@ -826,13 +841,14 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		return adapter.Call(req)
 	}
 	if contextCompactionFallbackDisabled(req.Ctx) {
-		if err := ensureRequestFits(req, "provider request"); err != nil {
+		budget := calculateRequestBudget(req)
+		if err := ensureRequestFitsWithBudget(req, budget, "provider request"); err != nil {
 			return llmcontracts.AgentResult{}, err
 		}
 		return adapter.Call(req)
 	}
 	uncompactedReq := req
-	originalHistory := append([]models.Execution(nil), req.ChatHistory...)
+	originalHistory := req.ChatHistory
 	req = s.restoreCompactionCheckpoint(req)
 	compactionStrategy := "none"
 	if req.NativeCompactionStateJSON != "" {
@@ -868,7 +884,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.Agent.ForceNativeCompaction = true
 		compactionStrategy = "provider_native"
 	}
-	if triggered && shouldUseLocalSummaryBeforeProvider(req) {
+	if triggered && shouldUseLocalSummaryBeforeProviderWithBudget(req, budget) {
 		if req.NativeCompactionStateJSON != "" {
 			req.ChatHistory = uncompactedReq.ChatHistory
 			req.NativeCompactionStateJSON = ""
@@ -882,6 +898,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		s.persistCompactionCheckpoint(originalReq, compacted, historyCompactionSummary(compacted.ChatHistory), "local_summary")
 		lastResortBaseReq = originalReq
 		req = compacted
+		budget = calculateRequestBudget(req)
 		req.ForceNativeCompaction = false
 		req.Agent.ForceNativeCompaction = false
 		compactionStrategy = "local_summary"
@@ -891,29 +908,31 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	var externalized bool
 	var prepErr error
 	var cleanupArtifact func()
-	req, externalized, cleanupArtifact, prepErr = s.preparePendingInput(req)
+	req, externalized, cleanupArtifact, prepErr = s.preparePendingInputWithBudget(req, budget)
 	if prepErr != nil {
-		logContextFailure(req, prepErr)
+		logContextFailureWithBudget(req, prepErr, budget)
 		return llmcontracts.AgentResult{}, prepErr
 	}
 	defer cleanupArtifact()
-	postBudget := calculateRequestBudget(req)
+	if externalized {
+		budget = calculateRequestBudget(req)
+	}
 	openAIHistoryOnlyCompaction := req.Agent.Provider == models.ProviderOpenAI && (req.ForceNativeCompaction || req.Agent.ForceNativeCompaction)
 	if !openAIHistoryOnlyCompaction {
-		if err := ensureRequestFits(req, "provider request"); err != nil {
-			logContextFailure(req, err)
+		if err := ensureRequestFitsWithBudget(req, budget, "provider request"); err != nil {
+			logContextFailureWithBudget(req, err, budget)
 			return llmcontracts.AgentResult{}, err
 		}
-	} else if pendingInputInfeasible(postBudget) {
+	} else if pendingInputInfeasible(budget) {
 		err := llmcontracts.NewCategorizedError(llmcontracts.ErrorPendingInputInfeasible, "native compaction continuation", fmt.Errorf("pending request remains infeasible after preprocessing"))
-		logContextFailure(req, err)
+		logContextFailureWithBudget(req, err, budget)
 		return llmcontracts.AgentResult{}, err
 	}
-	logContextDecision(originalHistory, req, compactionStrategy, externalized, nil)
+	logContextDecisionWithBudget(originalHistory, req, compactionStrategy, externalized, nil, budget)
 	res, err := adapter.Call(req)
 	err = categorizeProviderError(err)
 	if err != nil {
-		logContextFailure(req, err)
+		logContextFailureWithBudget(req, err, budget)
 	}
 	if err == nil {
 		s.persistNativeCompactionCheckpoint(req, res)
@@ -1101,13 +1120,17 @@ func parseCompactionTransportScope(scope string) (compactionScope, bool) {
 }
 
 func shouldUseLocalSummaryBeforeProvider(req llmcontracts.AgentRequest) bool {
+	return shouldUseLocalSummaryBeforeProviderWithBudget(req, calculateRequestBudget(req))
+}
+
+func shouldUseLocalSummaryBeforeProviderWithBudget(req llmcontracts.AgentRequest, budget requestBudget) bool {
 	if len(req.ChatHistory) == 0 {
 		return false
 	}
 	if !providerSupportsNativeCompaction(req.Agent) {
 		return true
 	}
-	if req.Agent.Provider == models.ProviderAnthropic && calculateRequestBudget(req).TotalInputTokens() > calculateRequestBudget(req).SafeInputLimit {
+	if req.Agent.Provider == models.ProviderAnthropic && budget.TotalInputTokens() > budget.SafeInputLimit {
 		// Anthropic context_management is part of the ordinary complete request,
 		// not a separate history-only compaction request. Reduce history locally
 		// before dispatch when that complete request is already unsafe.
@@ -1124,21 +1147,25 @@ func knownNativeCompactionUnsupported(agent models.LLMConfig) bool {
 func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, originalReq, compactedReq llmcontracts.AgentRequest, trigger error) (llmcontracts.AgentResult, error) {
 	compactedReq.ForceNativeCompaction = false
 	compactedReq.Agent.ForceNativeCompaction = false
-	prepared, externalized, cleanupArtifact, prepErr := s.preparePendingInput(compactedReq)
+	budget := calculateRequestBudget(compactedReq)
+	prepared, externalized, cleanupArtifact, prepErr := s.preparePendingInputWithBudget(compactedReq, budget)
 	if prepErr != nil {
-		logContextFailure(compactedReq, prepErr)
+		logContextFailureWithBudget(compactedReq, prepErr, budget)
 		return llmcontracts.AgentResult{}, prepErr
 	}
 	defer cleanupArtifact()
-	if err := ensureRequestFits(prepared, "compacted retry"); err != nil {
-		logContextFailure(prepared, err)
+	if externalized {
+		budget = calculateRequestBudget(prepared)
+	}
+	if err := ensureRequestFitsWithBudget(prepared, budget, "compacted retry"); err != nil {
+		logContextFailureWithBudget(prepared, err, budget)
 		return s.callProviderWithLastResortTruncation(adapter, originalReq, err)
 	}
-	logContextDecision(originalReq.ChatHistory, prepared, "local_summary_retry", externalized, trigger)
+	logContextDecisionWithBudget(originalReq.ChatHistory, prepared, "local_summary_retry", externalized, trigger, budget)
 	res, err := adapter.Call(prepared)
 	err = categorizeProviderError(err)
 	if err != nil {
-		logContextFailure(prepared, err)
+		logContextFailureWithBudget(prepared, err, budget)
 	}
 	if err == nil || !recognizedContextLengthError(err) {
 		return res, err
@@ -1148,28 +1175,33 @@ func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, ori
 }
 
 func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapter, req llmcontracts.AgentRequest, cause error) (llmcontracts.AgentResult, error) {
-	truncated, externalized, cleanupArtifact, prepErr := s.preparePendingInput(req)
+	budget := calculateRequestBudget(req)
+	truncated, externalized, cleanupArtifact, prepErr := s.preparePendingInputWithBudget(req, budget)
 	if prepErr != nil {
-		logContextFailure(req, prepErr)
+		logContextFailureWithBudget(req, prepErr, budget)
 		return llmcontracts.AgentResult{}, prepErr
 	}
 	defer cleanupArtifact()
+	if externalized {
+		budget = calculateRequestBudget(truncated)
+	}
 	truncated.ForceNativeCompaction = false
 	truncated.Agent.ForceNativeCompaction = false
 	truncated.DisableNativeCompaction = true
 	truncated.Agent.DisableNativeCompaction = true
 	truncated.ChatHistory = historyWithinRequestBudget(truncated, llmprompt.LimitChatHistory(req.ChatHistory))
-	if err := ensureRequestFits(truncated, "last-resort request"); err != nil {
+	budget = calculateRequestBudget(truncated)
+	if err := ensureRequestFitsWithBudget(truncated, budget, "last-resort request"); err != nil {
 		combined := llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "last-resort request", fmt.Errorf("%v; original recovery error: %w", err, cause))
-		logContextFailure(truncated, combined)
+		logContextFailureWithBudget(truncated, combined, budget)
 		return llmcontracts.AgentResult{}, combined
 	}
-	logContextDecision(req.ChatHistory, truncated, "last_resort", externalized, cause)
+	logContextDecisionWithBudget(req.ChatHistory, truncated, "last_resort", externalized, cause, budget)
 	applog.Infof("[agent-svc] using token-budgeted last-resort truncation provider=%s model=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, contextFailureCategory(cause))
 	res, err := adapter.Call(truncated)
 	err = categorizeProviderError(err)
 	if err != nil {
-		logContextFailure(truncated, err)
+		logContextFailureWithBudget(truncated, err, budget)
 	}
 	return res, err
 }
@@ -1177,7 +1209,8 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.Execution) []models.Execution {
 	base := req
 	base.ChatHistory = nil
-	remaining := calculateRequestBudget(base).SafeInputLimit - calculateRequestBudget(base).TotalInputTokens()
+	baseBudget := calculateRequestBudget(base)
+	remaining := baseBudget.SafeInputLimit - baseBudget.TotalInputTokens()
 	if remaining <= 0 {
 		return nil
 	}
@@ -1271,14 +1304,15 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	if estimatedUTF8Tokens(summaryReq.Message) > budget.SafeInputLimit {
 		summaryReq.Message = truncateMiddleByEstimatedTokens(summaryReq.Message, budget.SafeInputLimit)
 	}
-	if err := ensureRequestFits(summaryReq, "textual compaction request"); err != nil {
+	budget = calculateRequestBudget(summaryReq)
+	if err := ensureRequestFitsWithBudget(summaryReq, budget, "textual compaction request"); err != nil {
 		return "", llmcontracts.NewCategorizedError(llmcontracts.ErrorCompactionInputInfeasible, "textual compaction request", err)
 	}
-	logContextDecision(history, summaryReq, "textual_summary", false, trigger)
+	logContextDecisionWithBudget(history, summaryReq, "textual_summary", false, trigger, budget)
 	res, err := adapter.Call(summaryReq)
 	err = categorizeProviderError(err)
 	if err != nil {
-		logContextFailure(summaryReq, err)
+		logContextFailureWithBudget(summaryReq, err, budget)
 		if recognizedContextLengthError(err) {
 			return "", err
 		}

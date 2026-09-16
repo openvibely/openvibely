@@ -984,8 +984,9 @@ func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, access
 func (r *LLMConfigRepo) UpdateStandardOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID string) (bool, error) {
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE oauth_connections
-		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
-		     oauth_needs_reauth = 0, oauth_revision = oauth_revision + 1, updated_at = datetime('now')
+			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
+			     oauth_provider_display_name = '', oauth_principal_hash = '',
+			     oauth_needs_reauth = 0, oauth_revision = oauth_revision + 1, updated_at = datetime('now')
 		 WHERE id = (SELECT oauth_connection_id FROM agent_configs WHERE id = ? AND provider = ? AND auth_method = ?)
 		   AND provider = ? AND oauth_revision = ?`,
 		accessToken, refreshToken, expiresAt, accountID, id, provider, models.AuthMethodOAuth, provider, expectedRevision)
