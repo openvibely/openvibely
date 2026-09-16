@@ -626,8 +626,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				</div>
 			</div>
 		</div>
-		<div id="schedule-context-menu" class="fixed z-50 hidden min-w-44 rounded-box bg-base-100 shadow-xl border border-base-300" role="menu" aria-label="Scheduled task actions" data-schedule-context-menu>
-			<ul class="menu menu-sm p-1">
+		<div id="schedule-context-menu" class="fixed z-[100] hidden rounded-box bg-base-100 shadow border border-base-300 w-52 max-w-[calc(100vw-2rem)]" role="menu" aria-label="Scheduled task actions" data-schedule-context-menu>
+			<ul class="menu p-2">
 				<li><button type="button" role="menuitem" data-schedule-context-action="toggle">Pause</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="run">Run Now</button></li>
 				<li><button type="button" role="menuitem" data-schedule-context-action="edit">Edit Schedule</button></li>
