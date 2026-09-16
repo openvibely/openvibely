@@ -731,7 +731,7 @@ modelLoop:
 	completionOutcome, completionErr := h.completeWithSuccessWithPRReconciliation(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.RepublishOpenPRAfterStartupSync, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionErr != nil {
 		finalizeLifecycle(completionErr, result.ChatContext)
-		applog.Infof("[handler] processStreamingResponse exec=%s task=%s startup-sync PR publication failed: %v", params.ExecID, params.TaskID, completionErr)
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s completion policy failed: %v", params.ExecID, params.TaskID, completionErr)
 		h.recordStreamingUsage(ctx, params, result, string(models.ExecFailed), completionErr.Error(), durationMs)
 		h.completeWithFailureAndOutput(ctx, params.ExecID, params.TaskID, completionErr.Error(), output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		h.finalizeStreamingTurn(params, output)
@@ -1954,7 +1954,8 @@ func (h *Handler) deregisterTaskCancellation(taskID string, registrationID uint6
 func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, completionOptions ...interface{}) repository.CompleteSuccessOutcome {
 	outcome, err := h.completeWithSuccessWithPRReconciliation(ctx, execID, taskID, output, workDir, tokensUsed, durationMs, false, completionOptions...)
 	if err != nil {
-		applog.Infof("[handler] completeWithSuccess exec=%s unexpected PR reconciliation error: %v", execID, err)
+		applog.Infof("[handler] completeWithSuccess exec=%s completion policy failed: %v", execID, err)
+		h.completeWithFailureAndOutput(ctx, execID, taskID, err.Error(), output, tokensUsed, durationMs, completionOptions...)
 		return repository.CompleteSuccessAlreadyTerminal
 	}
 	return outcome
@@ -2000,23 +2001,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		applog.Infof("[handler] completeWithSuccess task=%s error getting task: %v", taskID, err)
 	}
 	if blocked, reason := h.blockGitHubSDLCSuccessWithoutPullRequest(ctx, task); blocked {
-		if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
-			applog.Infof("[handler] completeWithSuccess task=%s error marking missing GitHub SDLC PR failure: %v", taskID, err)
-		}
-		if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
-			if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
-				applog.Infof("[handler] completeWithSuccess task=%s error moving missing GitHub SDLC PR failure to backlog: %v", taskID, err)
-			}
-		}
-		h.sendChannelResponse(ctx, task, channelReply, output, reason, telegramMessageID)
-		if task != nil && h.alertSvc != nil {
-			if err := h.alertSvc.CreateTaskFailedAlert(ctx, task.ProjectID, taskID, execID, task.Title, reason); err != nil {
-				applog.Infof("[handler] completeWithSuccess task=%s error creating missing GitHub SDLC PR failure alert: %v", taskID, err)
-			}
-		}
-		h.publishExecutionTerminal(execID, models.ExecCompleted, "")
-		h.notifySwarmChildTerminal(ctx, taskID)
-		return repository.CompleteSuccessCompleted, nil
+		return repository.CompleteSuccessCompleted, errors.New(reason)
 	}
 
 	// Update task status BEFORE git diff capture. The SSE handler detects
