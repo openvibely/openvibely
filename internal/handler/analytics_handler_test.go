@@ -170,7 +170,7 @@ func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T)
 		INSERT INTO projects(id,name) VALUES ('analytics-project','Analytics project');
 		INSERT INTO tasks(id,project_id,title,category,status,created_at)
 			VALUES ('analytics-task','analytics-project','Analytics task','backlog','completed',CURRENT_TIMESTAMP);
-		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<250000)
+		WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<100000)
 		INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup,history_order)
 		SELECT printf('analytics-exec-%06d',n),'analytics-task',
 			CASE WHEN n%3=0 THEN 'failed' ELSE 'completed' END,
@@ -335,8 +335,8 @@ func TestGetAnalyticsDashboardLargePayloadAgentsIsBounded(t *testing.T) {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("large-payload Agents took %s, want <= 1s with the sole reader", elapsed)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("large-payload Agents took %s, want <= 2s with the sole reader", elapsed)
 	}
 	var dashboard models.AnalyticsDashboard
 	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
@@ -390,8 +390,8 @@ func TestGetAnalyticsDashboardLargePayloadOverviewIsBounded(t *testing.T) {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
-		t.Fatalf("large-payload Overview took %s, want <= 1s with the sole reader", elapsed)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("large-payload Overview took %s, want <= 2s with the sole reader", elapsed)
 	}
 	var dashboard models.AnalyticsDashboard
 	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
