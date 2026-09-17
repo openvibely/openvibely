@@ -289,6 +289,12 @@ func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]Unr
 	return configs, rows.Err()
 }
 
+type OAuthProviderPresence struct {
+	AnyOAuth       bool
+	AnthropicOAuth bool
+	OpenAIOAuth    bool
+}
+
 func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_configs)`).Scan(&exists)
@@ -296,6 +302,23 @@ func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("checking model configs exist: %w", err)
 	}
 	return exists, nil
+}
+
+func (r *LLMConfigRepo) OAuthProviderPresence(ctx context.Context) (OAuthProviderPresence, error) {
+	var presence OAuthProviderPresence
+	err := r.db.QueryRowContext(ctx, `SELECT
+		COALESCE(MAX(auth_method = ? AND provider IN (?, ?, ?)), 0),
+		COALESCE(MAX(auth_method = ? AND provider = ?), 0),
+		COALESCE(MAX(auth_method = ? AND provider = ?), 0)
+		FROM agent_configs`,
+		models.AuthMethodOAuth, models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible,
+		models.AuthMethodOAuth, models.ProviderAnthropic,
+		models.AuthMethodOAuth, models.ProviderOpenAI,
+	).Scan(&presence.AnyOAuth, &presence.AnthropicOAuth, &presence.OpenAIOAuth)
+	if err != nil {
+		return OAuthProviderPresence{}, fmt.Errorf("checking OAuth provider presence: %w", err)
+	}
+	return presence, nil
 }
 
 // ListCards returns the bounded configuration needed to render the Models page.

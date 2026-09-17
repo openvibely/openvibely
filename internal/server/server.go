@@ -482,38 +482,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	taskRepo := repository.NewTaskRepo(db, broadcaster)
 	taskGoalRepo := repository.NewTaskGoalRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	if modelsList, listErr := llmConfigRepo.List(context.Background()); listErr != nil {
+	if presence, listErr := llmConfigRepo.OAuthProviderPresence(context.Background()); listErr != nil {
 		applog.Infof("warning: unable to check OAuth model configuration for APP_BASE_URL validation: %v", listErr)
 	} else {
-		hasOAuth := false
-		hasOAuthAnthropic := false
-		hasOAuthOpenAI := false
-		for _, modelCfg := range modelsList {
-			if !modelCfg.IsOAuth() {
-				continue
-			}
-			hasOAuth = true
-			if modelCfg.Provider == models.ProviderAnthropic {
-				hasOAuthAnthropic = true
-			}
-			if modelCfg.Provider == models.ProviderOpenAI {
-				hasOAuthOpenAI = true
-			}
-		}
-
-		if cfg.AppBaseURL == "" {
-			if hasOAuth {
-				applog.Infof("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")
-			}
-		} else {
-			applog.Infof("app base url configured for OAuth callbacks: %s", cfg.AppBaseURL)
-			if hasOAuthAnthropic && strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_CLIENT_ID")) == "" {
-				applog.Infof("warning: ANTHROPIC_OAUTH_CLIENT_ID not set; hosted Anthropic OAuth will use built-in client and may be rejected by provider redirect policy.")
-			}
-			if hasOAuthOpenAI && strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_ID")) == "" {
-				applog.Infof("warning: OPENAI_OAUTH_CLIENT_ID not set; hosted OpenAI OAuth will use built-in client and may be rejected by provider redirect policy.")
-			}
-		}
+		logStartupOAuthWarnings(cfg.AppBaseURL, presence, os.Getenv)
 	}
 	execRepo := repository.NewExecutionRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -1321,4 +1293,21 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		ShutdownRequested: shutdownRequested,
 		UpdateCoordinator: updateCoordinator,
 	}, nil
+}
+
+func logStartupOAuthWarnings(appBaseURL string, presence repository.OAuthProviderPresence, getenv func(string) string) {
+	if appBaseURL == "" {
+		if presence.AnyOAuth {
+			applog.Infof("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")
+		}
+		return
+	}
+
+	applog.Infof("app base url configured for OAuth callbacks: %s", appBaseURL)
+	if presence.AnthropicOAuth && strings.TrimSpace(getenv("ANTHROPIC_OAUTH_CLIENT_ID")) == "" {
+		applog.Infof("warning: ANTHROPIC_OAUTH_CLIENT_ID not set; hosted Anthropic OAuth will use built-in client and may be rejected by provider redirect policy.")
+	}
+	if presence.OpenAIOAuth && strings.TrimSpace(getenv("OPENAI_OAUTH_CLIENT_ID")) == "" {
+		applog.Infof("warning: OPENAI_OAUTH_CLIENT_ID not set; hosted OpenAI OAuth will use built-in client and may be rejected by provider redirect policy.")
+	}
 }
