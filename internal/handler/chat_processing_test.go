@@ -4180,6 +4180,80 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	}
 }
 
+func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = "partial output"
+	mock.Err = errors.New("provider failed after unavailable mid-turn steering")
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Unavailable Midturn Steering Project")
+	task := createTask(t, h, project.ID, "Unavailable Midturn Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	var steeringID string
+	var deliveredInstruction string
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		steering := &models.ThreadInput{
+			Scope:          models.ThreadInputScopeTask,
+			ProjectID:      project.ID,
+			TaskID:         task.ID,
+			RunExecutionID: exec.ID,
+			InputMode:      models.ThreadInputModeSteering,
+			InputStatus:    models.ThreadInputPending,
+			TurnID:         exec.ID,
+			ExpectedTurnID: exec.ID,
+			Content:        "preserve this unavailable mid-turn steering",
+		}
+		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+		steeringID = steering.ID
+		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
+		require.NotNil(t, callback)
+		require.NoError(t, callback(callCtx, func(_ context.Context, instruction string) (llmcontracts.SteeringDeliveryState, error) {
+			deliveredInstruction = instruction
+			return llmcontracts.SteeringDeliveryState{Status: llmcontracts.SteeringDeliveryUnavailable, PreviousResponseID: "resp_done"}, nil
+		}))
+		restored, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.ThreadInputPending, restored.InputStatus)
+		require.Equal(t, models.ThreadInputModeSteering, restored.InputMode)
+		require.Equal(t, exec.ID, restored.ExpectedTurnID)
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	require.NotEmpty(t, steeringID)
+	require.Contains(t, deliveredInstruction, "preserve this unavailable mid-turn steering")
+	require.NotContains(t, deliveredInstruction, "latest user instruction")
+	require.NotContains(t, deliveredInstruction, "Start the next visible assistant text")
+	requeued, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputPending, requeued.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, requeued.InputMode)
+	require.Empty(t, requeued.TurnID)
+	require.Empty(t, requeued.ExpectedTurnID)
+}
+
 func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
