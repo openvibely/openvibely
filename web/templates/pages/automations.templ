@@ -95,103 +95,67 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" data-automation-card-action onclick="event.stopPropagation()">
-								<div class="dropdown dropdown-end">
-									<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + card.Automation.Name } onclick="handleDropdownToggle(event)">
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-										</svg>
-									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
-											<li>
-												<button
-													type="button"
-													class="w-full"
-													data-automation-card-edit={ card.Automation.ID }
-													data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
-													data-project-id={ currentProjectID }
-													onclick="event.stopPropagation(); openAutomationCardEdit(this)"
-												>Edit</button>
-										</li>											@automationCardDuplicateAction(card.Automation.ID, currentProjectID, card.Version.AdapterKey)
-											if card.TemplateUpdateAvailable {
-												<li>
-													<button
-														type="button"
-														class="w-full"
-														data-automation-card-update-template={ card.Automation.ID }
-														data-automation-update-template-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
-														data-project-id={ currentProjectID }
-														onclick="event.stopPropagation(); openAutomationCardUpdateTemplate(this)"
-													>Update to latest template</button>
-												</li>
-											}										if card.Automation.LifecycleState == models.AutomationActive {
-											<li>
-												<button
-													class="w-full"
-													type="button"
-													hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/run-now", card.Automation.ID), state) }
-													hx-include={ fmt.Sprintf("#run-now-automation-card-form-%s", card.Automation.ID) }
-													hx-target="#automations-container"
-													hx-swap="outerHTML"
-													data-automation-card-run-now={ card.Automation.ID }
-													data-automation-lifecycle-form={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) }
-													onclick="submitAutomationLifecycleFallback(this)"
-												>Run now</button>
-											</li>
-											<li>
-												<button
-													class="w-full"
-													type="button"
-													hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/pause", card.Automation.ID), state) }
-													hx-include={ fmt.Sprintf("#pause-automation-card-form-%s", card.Automation.ID) }
-													hx-target="#automations-container"
-													hx-swap="outerHTML"
-													data-automation-card-pause={ card.Automation.ID }
-													data-automation-lifecycle-form={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) }
-													onclick="submitAutomationLifecycleFallback(this)"
-													>Disable</button>											</li>
-										}
-										if card.Automation.LifecycleState == models.AutomationPaused {
-											<li>
-												<button
-													class="w-full"
-													type="button"
-													hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/resume", card.Automation.ID), state) }
-													hx-include={ fmt.Sprintf("#resume-automation-card-form-%s", card.Automation.ID) }
-													hx-target="#automations-container"
-													hx-swap="outerHTML"
-													data-automation-card-resume={ card.Automation.ID }
-													data-automation-lifecycle-form={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) }
-													onclick="submitAutomationLifecycleFallback(this)"
-													>Enable</button>											</li>
-										}
+								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + card.Automation.Name}) {
+									<li>
+										<button
+											type="button"
+											class="w-full"
+											data-automation-card-edit={ card.Automation.ID }
+											data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+											data-project-id={ currentProjectID }
+											onclick="event.stopPropagation(); openAutomationCardEdit(this)"
+										>
+											Edit
+										</button>
+									</li>
+									@automationCardDuplicateAction(card.Automation.ID, currentProjectID, card.Version.AdapterKey)
+									if card.TemplateUpdateAvailable {
 										<li>
 											<button
-												class="text-error"
 												type="button"
-												data-automation-card-delete={ card.Automation.ID }
-												data-automation-name={ card.Automation.Name }
-												data-automation-delete-url={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/delete", card.Automation.ID), state) }
-												onclick="event.stopPropagation(); openAutomationCardDelete(this)"
-											>Delete</button>
+												class="w-full"
+												data-automation-card-update-template={ card.Automation.ID }
+												data-automation-update-template-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+												data-project-id={ currentProjectID }
+												onclick="event.stopPropagation(); openAutomationCardUpdateTemplate(this)"
+											>
+												Update to latest template
+											</button>
 										</li>
-									</ul>
+									}
 									if card.Automation.LifecycleState == models.AutomationActive {
-										<form id={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/run-now", card.Automation.ID), state)) }>
-											<input type="hidden" name="project_id" value={ currentProjectID }/>
-											<input type="hidden" name="return_to" value="portfolio"/>
-										</form>
-										<form id={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/pause", card.Automation.ID), state)) }>
-											<input type="hidden" name="project_id" value={ currentProjectID }/>
-											<input type="hidden" name="return_to" value="portfolio"/>
-										</form>
+										<li>
+											<button class="w-full" type="button" hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/run-now", card.Automation.ID), state) } hx-include={ fmt.Sprintf("#run-now-automation-card-form-%s", card.Automation.ID) } hx-target="#automations-container" hx-swap="outerHTML" data-automation-card-run-now={ card.Automation.ID } data-automation-lifecycle-form={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) } onclick="submitAutomationLifecycleFallback(this)">Run now</button>
+										</li>
+										<li>
+											<button class="w-full" type="button" hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/pause", card.Automation.ID), state) } hx-include={ fmt.Sprintf("#pause-automation-card-form-%s", card.Automation.ID) } hx-target="#automations-container" hx-swap="outerHTML" data-automation-card-pause={ card.Automation.ID } data-automation-lifecycle-form={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } onclick="submitAutomationLifecycleFallback(this)">Disable</button>
+										</li>
 									}
 									if card.Automation.LifecycleState == models.AutomationPaused {
-										<form id={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/resume", card.Automation.ID), state)) }>
-											<input type="hidden" name="project_id" value={ currentProjectID }/>
-											<input type="hidden" name="return_to" value="portfolio"/>
-										</form>
+										<li>
+											<button class="w-full" type="button" hx-post={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/resume", card.Automation.ID), state) } hx-include={ fmt.Sprintf("#resume-automation-card-form-%s", card.Automation.ID) } hx-target="#automations-container" hx-swap="outerHTML" data-automation-card-resume={ card.Automation.ID } data-automation-lifecycle-form={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) } onclick="submitAutomationLifecycleFallback(this)">Enable</button>
+										</li>
 									}
-								</div>
+									<li>
+										<button class="text-error" type="button" data-automation-card-delete={ card.Automation.ID } data-automation-name={ card.Automation.Name } data-automation-delete-url={ CardListActionURL("automations", fmt.Sprintf("/automations/%s/delete", card.Automation.ID), state) } onclick="event.stopPropagation(); openAutomationCardDelete(this)">Delete</button>
+									</li>
+								}
+								if card.Automation.LifecycleState == models.AutomationActive {
+									<form id={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/run-now", card.Automation.ID), state)) }>
+										<input type="hidden" name="project_id" value={ currentProjectID }/>
+										<input type="hidden" name="return_to" value="portfolio"/>
+									</form>
+									<form id={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/pause", card.Automation.ID), state)) }>
+										<input type="hidden" name="project_id" value={ currentProjectID }/>
+										<input type="hidden" name="return_to" value="portfolio"/>
+									</form>
+								}
+								if card.Automation.LifecycleState == models.AutomationPaused {
+									<form id={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(CardListActionURL("automations", fmt.Sprintf("/automations/%s/resume", card.Automation.ID), state)) }>
+										<input type="hidden" name="project_id" value={ currentProjectID }/>
+										<input type="hidden" name="return_to" value="portfolio"/>
+									</form>
+								}
 							</div>
 							<div class="pr-12 min-w-0 max-w-full">
 								<h3 class="font-bold">{ card.Automation.Name }</h3>
@@ -2264,13 +2228,8 @@ templ automationGraphThemeStyles() {
 }
 
 templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
-	<div class="dropdown dropdown-end shrink-0" data-automation-live-menu>
-		<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + graph.Automation.Name } onclick="handleDropdownToggle(event)">
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-			</svg>
-		</label>
-			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">				@automationLiveDuplicateAction(graph.Automation.ID, currentProjectID, graph.Version.AdapterKey)
+	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {
+		@automationLiveDuplicateAction(graph.Automation.ID, currentProjectID, graph.Version.AdapterKey)
 				if graph.TemplateUpdateAvailable {
 					<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
 				}
@@ -2283,18 +2242,11 @@ templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProject
 			if deleteAvailable {
 				<li><button class="text-error" type="button" data-automation-live-delete onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
 			}
-		</ul>
-	</div>
+				}
 }
 
 templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentProjectID string) {
-	<div class="dropdown dropdown-end shrink-0" data-automation-builder-actions>
-		<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + page.Result.Candidate.Name } onclick="handleDropdownToggle(event)">
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-			</svg>
-		</label>
-			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
+	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", MenuClass: "dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow", Label: "More actions for " + page.Result.Candidate.Name, AutomationBuilderActions: true}) {
 				if page.LifecycleState == models.AutomationActive {
 					<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>
 				}
@@ -2305,8 +2257,7 @@ templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentPro
 				<li><button type="button" data-update-automation-template-open onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
 			}
 			<li><button class="text-error" type="button" data-delete-automation-open onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
-		</ul>
-	</div>
+				}
 }
 
 templ automationNewEditableBreadcrumb(currentProjectID string, automationName string) {
