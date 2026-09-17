@@ -447,10 +447,30 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		defer close(streamDone)
 		var outputItems []any
 		responseID := ""
+		var deferredPrimaryCompleted []byte
+		deferredPrimaryCompletedID := ""
 		receivedFrame := false
+		forwardEventData := func(data []byte) bool {
+			if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
+				state.resetConnectionLocked()
+				return false
+			}
+			return true
+		}
+		recordCompletedResponse := func(id string) {
+			state.lastProperties = properties
+			state.lastBaseline = append(append([]any(nil), fullInput...), outputItems...)
+			state.lastResponseID = id
+		}
 		for {
 			messageType, data, readErr := conn.Read(ctx)
 			if readErr != nil {
+				if len(deferredPrimaryCompleted) > 0 {
+					if forwardEventData(deferredPrimaryCompleted) {
+						recordCompletedResponse(deferredPrimaryCompletedID)
+					}
+					return
+				}
 				state.resetConnectionLocked()
 				kind := errResponsesWebsocketTransport
 				if reusedConnection && !receivedFrame {
@@ -471,12 +491,19 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 				if eventType == "response.created" {
 					if response, ok := event["response"].(map[string]any); ok {
 						id := stringFromAny(response["id"])
+						successorResponse := false
 						steeringMu.Lock()
 						activeResponseID = id
 						if primaryResponseID == "" {
 							primaryResponseID = id
+						} else if acceptedSteering && id != "" && id != primaryResponseID {
+							successorResponse = true
 						}
 						steeringMu.Unlock()
+						if successorResponse {
+							deferredPrimaryCompleted = nil
+							deferredPrimaryCompletedID = ""
+						}
 					}
 				}
 				if eventType == "response.steer.accepted" || eventType == "response.steer.failed" {
@@ -492,17 +519,27 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 						outputItems = append(outputItems, item)
 					}
 				}
+				if eventType == "response.steer.pending" {
+					if len(deferredPrimaryCompleted) > 0 {
+						if forwardEventData(deferredPrimaryCompleted) {
+							recordCompletedResponse(deferredPrimaryCompletedID)
+						}
+						return
+					}
+					continue
+				}
 				if eventType == "response.completed" && acceptedSteering {
 					completedID := responseIDFromEvent(event)
 					if completedID != "" && completedID == primaryResponseID {
+						deferredPrimaryCompleted = append(deferredPrimaryCompleted[:0], data...)
+						deferredPrimaryCompletedID = completedID
 						continue
 					}
 				}
 				if !shouldForwardResponsesWebsocketEvent(eventType, event) {
 					continue
 				}
-				if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
-					state.resetConnectionLocked()
+				if !forwardEventData(data) {
 					return
 				}
 				if isTerminalResponsesWebsocketEvent(eventType) {
@@ -510,22 +547,14 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 						continue
 					}
 					if eventType == "response.completed" {
-						if response, ok := event["response"].(map[string]any); ok {
-							responseID = stringFromAny(response["id"])
-						}
-						if acceptedSteering && responseID != "" && responseID == primaryResponseID {
-							continue
-						}
-						state.lastProperties = properties
-						state.lastBaseline = append(append([]any(nil), fullInput...), outputItems...)
-						state.lastResponseID = responseID
+						responseID = responseIDFromEvent(event)
+						recordCompletedResponse(responseID)
 					}
 					return
 				}
 				continue
 			}
-			if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
-				state.resetConnectionLocked()
+			if !forwardEventData(data) {
 				return
 			}
 		}
@@ -624,7 +653,7 @@ func responseIncompleteReason(event map[string]any) string {
 
 func shouldForwardResponsesWebsocketEvent(eventType string, event map[string]any) bool {
 	switch eventType {
-	case "response.steer.accepted", "response.steer.failed":
+	case "response.steer.accepted", "response.steer.failed", "response.steer.pending":
 		return false
 	case "response.incomplete":
 		return responseIncompleteReason(event) != "steered"
