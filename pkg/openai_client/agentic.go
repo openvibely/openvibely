@@ -107,7 +107,16 @@ type AgenticOptions struct {
 	OnToolResult func(name string, output string, isError bool) // called when a tool completes
 	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
-	OnCompaction           func(summary string) // called when history is compacted
+	// EnableAstraMidTurnSteering allows active gpt-6-astra WebSocket streams to
+	// deliver steering through response.steer instead of waiting for the next
+	// OpenVibely-owned model boundary.
+	EnableAstraMidTurnSteering bool
+	OnAstraMidTurnSteering     AstraMidTurnSteeringCallback
+	// EnableAstraConfigurationUpdate allows gpt-6-astra to carry cache-preserving
+	// reasoning-effort changes as Responses input items between turns.
+	EnableAstraConfigurationUpdate bool
+	RequestLevelReasoningEffort    string
+	OnCompaction                   func(summary string) // called when history is compacted
 }
 
 // AgenticResponse is the result of an agentic send.
@@ -125,6 +134,30 @@ type AgenticResponse struct {
 	Compacted           bool       // true if history was compacted during this call
 	CompactedInputItems []any      // provider-native continuation state after compaction
 }
+
+// AstraSteeringDeliveryStatus describes provider-side mid-turn steering delivery state.
+type AstraSteeringDeliveryStatus string
+
+const (
+	AstraSteeringUnavailable AstraSteeringDeliveryStatus = "unavailable"
+	AstraSteeringDelivered   AstraSteeringDeliveryStatus = "delivered"
+	AstraSteeringAccepted    AstraSteeringDeliveryStatus = "accepted"
+	AstraSteeringFailed      AstraSteeringDeliveryStatus = "failed"
+)
+
+// AstraSteeringDelivery records response.steer delivery state for an active WebSocket response.
+type AstraSteeringDelivery struct {
+	Status             AstraSteeringDeliveryStatus
+	ResponseID         string
+	PreviousResponseID string
+	Error              string
+}
+
+// AstraSteeringDeliverer sends raw steering text to an active Astra WebSocket response.
+type AstraSteeringDeliverer func(context.Context, string) (AstraSteeringDelivery, error)
+
+// AstraMidTurnSteeringCallback claims and delivers steering during an active Astra stream.
+type AstraMidTurnSteeringCallback func(context.Context, AstraSteeringDeliverer) error
 
 // agenticInputItem represents an item in the Responses API input array.
 type agenticInputItem = map[string]any
@@ -175,7 +208,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	// Build initial input items from prior history.
-	inputItems := make([]any, 0, len(opts.InitialInputItems)+len(c.History)+1)
+	inputItems := make([]any, 0, len(opts.InitialInputItems)+len(c.History)+2)
 	inputItems = append(inputItems, opts.InitialInputItems...)
 	for _, msg := range c.History {
 		inputItems = append(inputItems, agenticInputItem{
@@ -183,6 +216,20 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			"role":    roleForMessage(msg.Role),
 			"content": msg.Content,
 		})
+	}
+	finalReasoningEffort := normalizedAstraReasoningEffort(opts.Model, opts.ReasoningEffort)
+	requestLevelReasoningEffort := ""
+	if opts.EnableAstraConfigurationUpdate && isGPT6AstraModel(opts.Model) && len(c.History) > 0 && c.responsesTransportState != nil {
+		previousEffort := c.responsesTransportState.lastAstraReasoningEffort(opts.Model)
+		if previousEffort != "" && finalReasoningEffort != "" && previousEffort != finalReasoningEffort {
+			inputItems = append(inputItems, astraConfigurationUpdateItem(finalReasoningEffort))
+			requestLevelReasoningEffort = previousEffort
+		}
+	}
+	if requestLevelReasoningEffort != "" {
+		optsCopy := *opts
+		optsCopy.RequestLevelReasoningEffort = requestLevelReasoningEffort
+		opts = &optsCopy
 	}
 
 	result := &AgenticResponse{Model: opts.Model}
@@ -410,6 +457,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	// Update client history
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
+	if c.responsesTransportState != nil && isGPT6AstraModel(opts.Model) && finalReasoningEffort != "" {
+		c.responsesTransportState.setAstraReasoningEffort(opts.Model, finalReasoningEffort)
+	}
 
 	return result, nil
 }
@@ -1608,6 +1658,25 @@ func (l *agenticSessionTokenLedger) reset() {
 	l.hasObservedTotalTokens = false
 }
 
+func normalizedAstraReasoningEffort(model, value string) string {
+	if !isGPT6AstraModel(model) {
+		return ""
+	}
+	if effort := normalizeReasoningEffort(value); effort != "" {
+		return effort
+	}
+	return responsesLiteDefaultReasoningEffort(model)
+}
+
+func astraConfigurationUpdateItem(effort string) agenticInputItem {
+	return agenticInputItem{
+		"type": "configuration_update",
+		"configuration": map[string]any{
+			"reasoning": map[string]any{"effort": effort},
+		},
+	}
+}
+
 func statelessOAuthOutputItems(items []any) []any {
 	filtered := make([]any, 0, len(items))
 	for _, raw := range items {
@@ -1688,7 +1757,11 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 	}
 
 	reasoningPayload := map[string]any{}
-	if effort := normalizeReasoningEffort(opts.ReasoningEffort); effort != "" {
+	reasoningEffort := opts.ReasoningEffort
+	if strings.TrimSpace(opts.RequestLevelReasoningEffort) != "" {
+		reasoningEffort = opts.RequestLevelReasoningEffort
+	}
+	if effort := normalizeReasoningEffort(reasoningEffort); effort != "" {
 		reasoningPayload["effort"] = effort
 	}
 	if summary := normalizeReasoningSummary(opts.ReasoningSummary); summary != "" {
@@ -1728,7 +1801,11 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
 			if useWebsocket {
-				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth)
+				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
+				if opts.EnableAstraMidTurnSteering {
+					wsOptions.OnMidTurnSteering = opts.OnAstraMidTurnSteering
+				}
+				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth, wsOptions)
 			}
 			return c.openResponsesLiteHTTPStream(ctx, wsPayload, isChatGPTOAuth)
 		}
@@ -2018,6 +2095,9 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 			}
 
 		case "response.failed", "response.incomplete", "response.error", "error":
+			if typ == "response.incomplete" && responseIncompleteReason(ev) == "steered" {
+				continue
+			}
 			return nil, responsesStreamTerminalError(typ, ev)
 
 		case "response.completed":
