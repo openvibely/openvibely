@@ -573,6 +573,31 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
 		return formatSteeringInstruction(combinedSteeringContent(batch.inputs)), nil
 	}
+	midTurnSteeringCallback := func(callbackCtx context.Context, deliver llmcontracts.SteeringDeliverer) error {
+		if steeringCallbackParams == nil || h.threadInputRepo == nil || deliver == nil {
+			return nil
+		}
+		batch, steeringErr := h.claimPendingTextSteeringInputs(callbackCtx, steeringCallbackParams)
+		if steeringErr != nil || batch.count() == 0 {
+			return steeringErr
+		}
+		instruction := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
+		delivery, deliveryErr := deliver(callbackCtx, instruction)
+		if deliveryErr != nil || delivery.Status != llmcontracts.SteeringDeliveryAccepted {
+			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), preparedSteeringInputIDs(batch), steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
+				return restoreErr
+			}
+			if deliveryErr != nil {
+				applog.Infof("[handler] processStreamingResponse exec=%s Astra mid-turn steering delivery failed: %v", steeringCallbackParams.ExecID, deliveryErr)
+			} else if delivery.Status != llmcontracts.SteeringDeliveryUnavailable {
+				applog.Infof("[handler] processStreamingResponse exec=%s Astra mid-turn steering not accepted status=%s error=%s", steeringCallbackParams.ExecID, delivery.Status, delivery.Error)
+			}
+			return nil
+		}
+		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
+		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
+		return nil
+	}
 	start := time.Now()
 	finalizeLifecycle := func(runErr error, chatContext llmcontracts.ChatContext) {
 		if lifecycleAfter != nil {
@@ -604,6 +629,7 @@ modelLoop:
 		steeringCallbackParams = &params
 		attemptSteering = preparedSteeringBatch{}
 		ctx = llmcontracts.WithSteeringCallback(ctx, steeringCallback)
+		ctx = llmcontracts.WithMidTurnSteeringCallback(ctx, midTurnSteeringCallback)
 		ctx = llmcontracts.WithSteeringRetryResetCallback(ctx, func(callbackCtx context.Context) error {
 			if attemptSteering.count() == 0 || h.threadInputRepo == nil {
 				return nil

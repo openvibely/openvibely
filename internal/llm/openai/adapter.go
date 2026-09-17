@@ -105,7 +105,15 @@ func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
 	})
 }
 
+type astraAsyncRuntimeToolTracker interface {
+	AstraAsyncToolCallTrackingEnabled(name string) bool
+}
+
 func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefinition {
+	return runtimeOpenAIToolsWithAstraAsync(rt, nil)
+}
+
+func runtimeOpenAIToolsWithAstraAsync(rt *llmcontracts.RuntimeTools, tracker astraAsyncRuntimeToolTracker) []openaiclient.ToolDefinition {
 	if rt == nil || len(rt.Definitions) == 0 {
 		return nil
 	}
@@ -115,14 +123,26 @@ func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefini
 		if name == "" {
 			continue
 		}
-		out = append(out, openaiclient.ToolDefinition{
+		tool := openaiclient.ToolDefinition{
 			Type:        "function",
 			Name:        name,
 			Description: strings.TrimSpace(def.Description),
 			Parameters:  def.Parameters,
-		})
+		}
+		if tracker != nil && def.Access == llmcontracts.RuntimeToolAccessRead && tracker.AstraAsyncToolCallTrackingEnabled(name) {
+			tool.Async = true
+		}
+		out = append(out, tool)
 	}
 	return out
+}
+
+func astraAsyncRuntimeTracker(rt *llmcontracts.RuntimeTools, agent models.LLMConfig) astraAsyncRuntimeToolTracker {
+	if rt == nil || !strings.EqualFold(strings.TrimSpace(agent.Model), "gpt-6-astra") {
+		return nil
+	}
+	tracker, _ := rt.Metadata.(astraAsyncRuntimeToolTracker)
+	return tracker
 }
 
 func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessage) (string, bool, error), rt *llmcontracts.RuntimeTools) func(context.Context, string, json.RawMessage) (string, bool, error) {
@@ -153,6 +173,24 @@ func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chat
 		return base
 	}
 	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
+}
+
+func openAIAstraMidTurnSteeringCallback(ctx context.Context) openaiclient.AstraMidTurnSteeringCallback {
+	callback := llmcontracts.MidTurnSteeringCallbackFromContext(ctx)
+	if callback == nil {
+		return nil
+	}
+	return func(callbackCtx context.Context, deliver openaiclient.AstraSteeringDeliverer) error {
+		return callback(callbackCtx, func(deliverCtx context.Context, text string) (llmcontracts.SteeringDeliveryState, error) {
+			state, err := deliver(deliverCtx, text)
+			return llmcontracts.SteeringDeliveryState{
+				Status:             llmcontracts.SteeringDeliveryStatus(state.Status),
+				ResponseID:         state.ResponseID,
+				PreviousResponseID: state.PreviousResponseID,
+				Error:              state.Error,
+			}, err
+		})
+	}
 }
 
 func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]openaiclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
@@ -275,20 +313,19 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	if rt != nil && len(rt.Definitions) > 0 && !disableTools {
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
-			Model:                  agent.Model,
-			ContextWindow:          agent.ContextWindow,
-			MaxOutputTokens:        openAIDirectOutputBudget,
-			System:                 systemPrompt,
-			ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
-			ReasoningSummary:       "auto",
-			WorkDir:                effectiveWorkDir,
-			Attachments:            oaAttachments,
-			ExtraTools:             runtimeOpenAITools(rt),
-			ToolExecutor:           composeRuntimeToolExecutor(nil, rt),
-			ToolFilter:             llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)),
-			OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
-			SkipDefaultTools:       rt.SkipDefaultTools,
-		})
+			Model:            agent.Model,
+			ContextWindow:    agent.ContextWindow,
+			MaxOutputTokens:  openAIDirectOutputBudget,
+			System:           systemPrompt,
+			ReasoningEffort:  reasoningEffort(agent.Model, agent.ReasoningEffort),
+			ReasoningSummary: "auto",
+			WorkDir:          effectiveWorkDir,
+			Attachments:      oaAttachments,
+			ExtraTools:       runtimeOpenAIToolsWithAstraAsync(rt, astraAsyncRuntimeTracker(rt, agent)), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
+			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)),
+			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+			EnableAstraConfigurationUpdate: true,
+			SkipDefaultTools:               rt.SkipDefaultTools})
 		if err != nil {
 			applog.Infof("[openai-adapter] CallDirect agentic error: %v", err)
 			return "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
@@ -343,7 +380,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	extraTools = append(extraTools, runtimeOpenAIToolsWithAstraAsync(rt, astraAsyncRuntimeTracker(rt, agent))...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
 
@@ -365,11 +402,14 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		InitialInputItems:         nativeCompactionInputItems(ctx),
 		WebSearchEnabled:          true,
 		WorkDir:                   effectiveWorkDir, Attachments: oaAttachments,
-		ExtraTools:             extraTools,
-		ToolExecutor:           toolExecutor,
-		ToolFilter:             toolFilter,
-		SkipDefaultTools:       skipDefaultTools,
-		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		ExtraTools:                     extraTools,
+		ToolExecutor:                   toolExecutor,
+		ToolFilter:                     toolFilter,
+		SkipDefaultTools:               skipDefaultTools,
+		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+		EnableAstraMidTurnSteering:     true,
+		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
+		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !inThinking {
 				inThinking = true
@@ -455,7 +495,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	extraTools = append(extraTools, runtimeOpenAIToolsWithAstraAsync(rt, astraAsyncRuntimeTracker(rt, agent))...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(isTaskFollowup, chatMode))
 
@@ -478,12 +518,15 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		InitialInputItems:         nativeCompactionInputItems(ctx),
 		WebSearchEnabled:          true,
 		DisableTools:              disableTools, WorkDir: effectiveWorkDir,
-		Attachments:            oaAttachments,
-		ExtraTools:             extraTools,
-		ToolExecutor:           toolExecutor,
-		ToolFilter:             toolFilter,
-		SkipDefaultTools:       skipDefaultTools,
-		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		Attachments:                    oaAttachments,
+		ExtraTools:                     extraTools,
+		ToolExecutor:                   toolExecutor,
+		ToolFilter:                     toolFilter,
+		SkipDefaultTools:               skipDefaultTools,
+		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+		EnableAstraMidTurnSteering:     true,
+		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
+		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !chatInThinking {
 				chatInThinking = true
