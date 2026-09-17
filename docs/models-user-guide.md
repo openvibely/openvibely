@@ -93,6 +93,19 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 - GPT-6 Astra does not support configurable temperature. OpenVibely hides the field and discards submitted or stale values for Astra configurations.
 - First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
 
+#### GPT-6 Astra Workflow Controls
+
+`gpt-6-astra` remains the same selectable model ID and uses the same OpenAI API key or OAuth configuration as other first-party OpenAI models. It does not change the default model, provider, credential type, or endpoint family.
+
+Astra-specific behavior is gated to active `gpt-6-astra` Responses WebSocket streams:
+
+- Mid-turn steering can be delivered as `response.steer` only while the active Astra WebSocket response is steerable. If the WebSocket is unavailable, the response already completed, the stream falls back to HTTP, or OpenAI rejects the steer event, OpenVibely falls back to its normal queued follow-up or cancellation semantics and does not claim mid-turn delivery.
+- Steering does not erase output that has already been emitted and does not interrupt an already-started local tool call. Existing approval, grant, and cancellation boundaries still apply.
+- Reasoning-effort changes between supported Astra Responses turns can be sent as a `configuration_update` input item so the request-level effort stays stable for cache reuse. This is Astra-only; non-Astra OpenAI models, OpenAI-compatible models, mixtures, and unsupported transports do not receive `configuration_update` items.
+- Provider-async function tools are not enabled by default. OpenVibely only serializes `async: true` for explicitly tracked read-only runtime tools when durable call tracking is available; write tools, side-effecting actions, approval-gated tools, built-in shell/file mutation tools, and ungranted tools are not made async.
+- Astra supports `low`, `medium`, `high`, `xhigh`, and `max` reasoning effort. `none` effort and temperature are unsupported for Astra.
+- OpenAI Fast mode and EU data-residency compatibility are provider/account constraints outside the standard text/task workflow. If those constraints make an Astra workflow unavailable, OpenVibely keeps the normal non-steered queued follow-up behavior.
+
 ### OpenAI-Compatible Chat Completions
 
 - Provider choices in the UI include OpenRouter, NVIDIA NIM, Local vLLM, LM Studio, SGLang, LiteLLM, DeepInfra, Fireworks, Groq, Mistral, Cerebras, Together, Hugging Face Router, DeepSeek, Moonshot, DashScope, DashScope Intl, Alibaba Coding Plan, Z.AI / GLM, NovitaAI, Venice, Qianfan, Kilo Code, Arcee AI, StepFun, StepFun Step Plan, GMI Cloud, Chutes, Tencent TokenHub, Tencent TokenHub Intl, Xiaomi MiMo, Inferrs Local, ds4 Local, and Custom OpenAI-Compatible.

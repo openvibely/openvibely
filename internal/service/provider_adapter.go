@@ -330,7 +330,7 @@ func providerTransport(req llmcontracts.AgentRequest) string {
 	switch req.Agent.Provider {
 	case models.ProviderOpenAI:
 		switch strings.ToLower(strings.TrimSpace(req.Agent.Model)) {
-		case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+		case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra":
 			return "responses_websocket_http_fallback"
 		default:
 			return "responses_http"

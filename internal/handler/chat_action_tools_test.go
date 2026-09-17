@@ -1566,6 +1566,97 @@ func TestScheduleTaskRuntimeToolDefaultsScheduleFields(t *testing.T) {
 	require.WithinDuration(t, schedules[0].RunAt, *schedules[0].NextRun, time.Second)
 }
 
+func TestScheduleRuntimeToolValidationErrorsAndNoChange(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Runtime Schedule Validation Project")
+	task := createTask(t, h, project.ID, "Schedule validation target")
+	baseline := createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
+	handlers := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "schedule-validation-exec", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+
+	for _, tc := range []struct {
+		name string
+		tool string
+		body string
+		want string
+	}{
+		{
+			name: "create invalid time",
+			tool: "schedule_task",
+			body: `{"task_id":"` + task.ID + `","time":"25:00"}`,
+			want: `Invalid time "25:00" for task "Schedule validation target"`,
+		},
+		{
+			name: "create invalid repeat",
+			tool: "schedule_task",
+			body: `{"task_id":"` + task.ID + `","time":"09:30","repeat":"yearly"}`,
+			want: `Unknown repeat type "yearly" for task "Schedule validation target"`,
+		},
+		{
+			name: "create invalid day",
+			tool: "schedule_task",
+			body: `{"task_id":"` + task.ID + `","time":"09:30","repeat":"weekly","days":["funday"]}`,
+			want: `Invalid weekly days for task "Schedule validation target"`,
+		},
+		{
+			name: "create invalid interval",
+			tool: "schedule_task",
+			body: `{"task_id":"` + task.ID + `","time":"09:30","interval":366}`,
+			want: `Invalid interval 366 for task "Schedule validation target"`,
+		},
+		{
+			name: "modify invalid time",
+			tool: "modify_schedule",
+			body: `{"schedule_id":"` + baseline.ID + `","time":"24:60"}`,
+			want: `Invalid time "24:60" for schedule on task "Schedule validation target"`,
+		},
+		{
+			name: "modify invalid repeat",
+			tool: "modify_schedule",
+			body: `{"schedule_id":"` + baseline.ID + `","repeat":"yearly"}`,
+			want: `Unknown repeat type "yearly" for schedule on task "Schedule validation target"`,
+		},
+		{
+			name: "modify invalid day",
+			tool: "modify_schedule",
+			body: `{"schedule_id":"` + baseline.ID + `","repeat":"weekly","days":["funday"]}`,
+			want: `Invalid weekly days for schedule on task "Schedule validation target"`,
+		},
+		{
+			name: "modify invalid interval",
+			tool: "modify_schedule",
+			body: `{"schedule_id":"` + baseline.ID + `","interval":0}`,
+			want: `Invalid interval 0 for schedule on task "Schedule validation target"`,
+		},
+		{
+			name: "modify no changes",
+			tool: "modify_schedule",
+			body: `{"schedule_id":"` + baseline.ID + `"}`,
+			want: `No changes specified for schedule on task "Schedule validation target"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := handlers[tc.tool](ctx, json.RawMessage(tc.body))
+			require.NoError(t, err)
+			require.Contains(t, out, tc.want)
+		})
+	}
+}
+
+func TestExecuteChatScheduleRequestsReturnEmptyForEmptyBatches(t *testing.T) {
+	h := &Handler{}
+	ctx := context.Background()
+
+	require.Empty(t, h.executeChatScheduleRequests(ctx, "project", nil))
+	require.Empty(t, h.executeChatDeleteScheduleRequests(ctx, "project", nil))
+	require.Empty(t, h.executeChatModifyScheduleRequests(ctx, "project", nil))
+}
+
 func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	ctx := context.Background()
 
@@ -2407,7 +2498,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+			return &service.GitHubPullRequest{Number: number, State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		replaceBranchHeadFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubReplaceBranchHeadRequest) (string, error) {
 			got = req
@@ -2437,6 +2528,58 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 	}
 	if !strings.Contains(titleOut, `"task_id":"`+task.ID+`"`) || !strings.Contains(titleOut, `"replaced_branch":"`+task.WorktreeBranch+`"`) {
 		t.Fatalf("expected title selector to replace task PR branch %s, got %s", task.ID, titleOut)
+	}
+}
+
+func TestGitHubReplacePullRequestBranchRuntimeToolRejectsClosedLivePR(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Closed GitHub PR Replacement", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Reject closed PR branch replacement", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: t.TempDir(), WorktreeBranch: "task/runtime-closed-replace-pr"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+	previousHead := strings.Repeat("a", 40)
+	if err := h.taskPullRequestRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 4, PRURL: "https://github.com/openvibely/openvibely/pull/4", PRState: "open", PublishedHeadSHA: previousHead, NeedsRepublish: true}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+
+	replaceCalled := false
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: number, State: "closed", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: previousHead}, nil
+		},
+		replaceBranchHeadFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubReplaceBranchHeadRequest) (string, error) {
+			replaceCalled = true
+			return strings.Repeat("b", 40), nil
+		},
+	})
+
+	params := streamingResponseParams{ProjectID: project.ID}
+	handler := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_replace_pull_request_branch"]
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","expected_head_sha":"`+previousHead+`","confirm_history_rewrite":true}`))
+	if err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("expected closed PR error, got output %q error %v", out, err)
+	}
+	if strings.Contains(out, `"ok":true`) {
+		t.Fatalf("closed PR replacement must not return ok payload: %s", out)
+	}
+	if replaceCalled {
+		t.Fatal("branch replacement must not run when live PR is closed")
+	}
+	reloaded, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload PR record: %v", err)
+	}
+	if reloaded == nil || reloaded.PublishedHeadSHA != previousHead || !reloaded.NeedsRepublish {
+		t.Fatalf("persisted PR changed after closed rejection: %#v", reloaded)
 	}
 }
 

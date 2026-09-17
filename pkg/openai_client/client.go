@@ -570,7 +570,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 			result, err := httpretry.DoStream(attemptCtx, policy, func(streamCtx context.Context) (*Response, bool, error) {
 				openStream := func(useWebsocket bool) (io.ReadCloser, error) {
 					if useWebsocket {
-						return c.openResponsesWebsocketStream(streamCtx, wsPayload, isChatGPTOAuth)
+						return c.openResponsesWebsocketStream(streamCtx, wsPayload, isChatGPTOAuth, responsesWebsocketStreamOptions{Model: opts.Model})
 					}
 					return c.openResponsesLiteHTTPStream(streamCtx, wsPayload, isChatGPTOAuth)
 				}

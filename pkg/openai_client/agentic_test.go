@@ -122,6 +122,50 @@ func TestStatelessOAuthOutputItemsDropsUnencryptedReasoning(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_AstraHTTPFallbackSuppressesMidTurnSteering(t *testing.T) {
+	var callbackCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("path = %q, want /responses", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"http done"}`,
+			`{"type":"response.completed","response":{"id":"resp_http","status":"completed","model":"gpt-6-astra"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("test-key")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	resp, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{
+		Model:                      "gpt-6-astra",
+		SkipDefaultTools:           true,
+		EnableAstraMidTurnSteering: true,
+		OnAstraMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
+			callbackCalls.Add(1)
+			_, _ = deliver(ctx, "must not send over HTTP")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "http done" {
+		t.Fatalf("Text = %q, want http done", resp.Text)
+	}
+	if callbackCalls.Load() != 0 {
+		t.Fatalf("HTTP fallback invoked mid-turn steering callback %d times", callbackCalls.Load())
+	}
+	if records := client.responsesTransportState.SteeringDeliveries(); len(records) != 0 {
+		t.Fatalf("HTTP fallback recorded steering deliveries: %#v", records)
+	}
+}
+
 func TestSendAgentic_APIKeyResponsesLiteDoesNotReplayUnencryptedReasoning(t *testing.T) {
 	requests := make(chan map[string]any, 2)
 	var turns atomic.Int32
@@ -4268,5 +4312,101 @@ func TestOpenAIAgenticCompactionTranscriptAndImageHelpers(t *testing.T) {
 	}
 	if got := estimateAgenticOriginalImageBytes("https://example.test/image.png"); got != openAIResizedImageBytesEstimate {
 		t.Fatalf("non-data URL estimate = %d", got)
+	}
+}
+
+func TestSendAgentic_AstraConfigurationUpdatePreservesRequestEffort(t *testing.T) {
+	requests := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.output_text.delta","delta":"ok"}`, `{"type":"response.completed","response":{"status":"completed","model":"gpt-6-astra"}}`})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
+	client.responsesTransportState.setAstraReasoningEffort("gpt-6-astra", "medium")
+	if _, err := client.SendAgentic(context.Background(), "next", &AgenticOptions{
+		Model:                          "gpt-6-astra",
+		ReasoningEffort:                "high",
+		SkipDefaultTools:               true,
+		EnableAstraConfigurationUpdate: true,
+	}); err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	request := <-requests
+	reasoning, _ := request["reasoning"].(map[string]any)
+	if reasoning["effort"] != "medium" {
+		t.Fatalf("request-level reasoning.effort = %#v, want previous medium", reasoning["effort"])
+	}
+	input, _ := request["input"].([]any)
+	var configUpdate map[string]any
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "configuration_update" {
+			configUpdate = item
+		}
+	}
+	if configUpdate == nil {
+		t.Fatalf("input missing configuration_update: %#v", input)
+	}
+	configuration, _ := configUpdate["configuration"].(map[string]any)
+	updateReasoning, _ := configuration["reasoning"].(map[string]any)
+	if updateReasoning["effort"] != "high" {
+		t.Fatalf("configuration_update reasoning.effort = %#v, want high", updateReasoning["effort"])
+	}
+	if got := client.responsesTransportState.lastAstraReasoningEffort("gpt-6-astra"); got != "high" {
+		t.Fatalf("remembered Astra effort = %q, want high", got)
+	}
+}
+
+func TestSendAgentic_NonAstraDoesNotEmitConfigurationUpdate(t *testing.T) {
+	requests := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.output_text.delta","delta":"ok"}`, `{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-sol"}}`})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
+	client.responsesTransportState.setAstraReasoningEffort("gpt-6-astra", "medium")
+	if _, err := client.SendAgentic(context.Background(), "next", &AgenticOptions{
+		Model:                          "gpt-5.6-sol",
+		ReasoningEffort:                "high",
+		SkipDefaultTools:               true,
+		EnableAstraConfigurationUpdate: true,
+	}); err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	request := <-requests
+	input, _ := request["input"].([]any)
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "configuration_update" {
+			t.Fatalf("non-Astra input contained configuration_update: %#v", input)
+		}
 	}
 }

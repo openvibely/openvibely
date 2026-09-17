@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -35,6 +36,21 @@ type ResponsesTransportState struct {
 	lastProperties    string
 	lastBaseline      []any
 	lastResponseID    string
+	lastAstraEffort   string
+	steeringRecordsMu sync.Mutex
+	steeringRecords   []ResponsesSteeringDelivery
+}
+
+type ResponsesSteeringDelivery struct {
+	Status             AstraSteeringDeliveryStatus
+	ResponseID         string
+	PreviousResponseID string
+	Error              string
+}
+
+type pendingSteeringAck struct {
+	previousResponseID string
+	ch                 chan AstraSteeringDelivery
 }
 
 func NewResponsesTransportState() *ResponsesTransportState {
@@ -77,15 +93,57 @@ const (
 
 func isResponsesLiteWebsocketModel(model string) bool {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
+	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra":
 		return true
 	default:
 		return false
 	}
 }
 
+func isGPT6AstraModel(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), "gpt-6-astra")
+}
+
 func responsesLiteDefaultReasoningEffort(model string) string {
 	return "medium"
+}
+
+func (s *ResponsesTransportState) lastAstraReasoningEffort(model string) string {
+	if s == nil || !isGPT6AstraModel(model) {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastAstraEffort
+}
+
+func (s *ResponsesTransportState) setAstraReasoningEffort(model, effort string) {
+	if s == nil || !isGPT6AstraModel(model) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastAstraEffort = strings.TrimSpace(effort)
+}
+
+func (s *ResponsesTransportState) recordSteeringDelivery(record ResponsesSteeringDelivery) {
+	if s == nil {
+		return
+	}
+	s.steeringRecordsMu.Lock()
+	defer s.steeringRecordsMu.Unlock()
+	s.steeringRecords = append(s.steeringRecords, record)
+}
+
+func (s *ResponsesTransportState) SteeringDeliveries() []ResponsesSteeringDelivery {
+	if s == nil {
+		return nil
+	}
+	s.steeringRecordsMu.Lock()
+	defer s.steeringRecordsMu.Unlock()
+	out := make([]ResponsesSteeringDelivery, len(s.steeringRecords))
+	copy(out, s.steeringRecords)
+	return out
 }
 
 func responsesLiteTools(tools any) []any {
@@ -206,7 +264,12 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	return request
 }
 
-func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool) (io.ReadCloser, error) {
+type responsesWebsocketStreamOptions struct {
+	Model             string
+	OnMidTurnSteering AstraMidTurnSteeringCallback
+}
+
+func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool, opts responsesWebsocketStreamOptions) (io.ReadCloser, error) {
 	state := c.responsesTransportState
 	state.mu.Lock()
 	endpoint, err := c.responsesWebsocketEndpoint(isChatGPTOAuth)
@@ -299,15 +362,126 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 	}
 
 	reader, writer := io.Pipe()
+	var steeringMu sync.Mutex
+	activeResponseID := ""
+	primaryResponseID := ""
+	acceptedSteering := false
+	pendingAcks := []*pendingSteeringAck{}
+	streamDone := make(chan struct{})
+	writeFrame := func(writeCtx context.Context, payload map[string]any) error {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		return conn.Write(writeCtx, websocket.MessageText, body)
+	}
+	deliverSteering := func(deliverCtx context.Context, text string) (AstraSteeringDelivery, error) {
+		if !isGPT6AstraModel(opts.Model) || opts.OnMidTurnSteering == nil {
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
+		}
+		select {
+		case <-streamDone:
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
+		default:
+		}
+		steeringMu.Lock()
+		select {
+		case <-streamDone:
+			steeringMu.Unlock()
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
+		default:
+		}
+		previousID := activeResponseID
+		if previousID == "" {
+			steeringMu.Unlock()
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
+		}
+		ack := &pendingSteeringAck{previousResponseID: previousID, ch: make(chan AstraSteeringDelivery, 1)}
+		pendingAcks = append(pendingAcks, ack)
+		steeringMu.Unlock()
+
+		event := map[string]any{
+			"type":                 "response.steer",
+			"previous_response_id": previousID,
+			"input":                text,
+		}
+		if err := writeFrame(deliverCtx, event); err != nil {
+			delivery := AstraSteeringDelivery{Status: AstraSteeringFailed, PreviousResponseID: previousID, Error: err.Error()}
+			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
+			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
+			return delivery, err
+		}
+		state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringDelivered, PreviousResponseID: previousID})
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		select {
+		case delivery := <-ack.ch:
+			return delivery, nil
+		case <-deliverCtx.Done():
+			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
+			return AstraSteeringDelivery{Status: AstraSteeringFailed, PreviousResponseID: previousID, Error: deliverCtx.Err().Error()}, deliverCtx.Err()
+		case <-streamDone:
+			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable, PreviousResponseID: previousID}, nil
+		case <-timer.C:
+			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
+			delivery := AstraSteeringDelivery{Status: AstraSteeringFailed, PreviousResponseID: previousID, Error: "response.steer acknowledgement timed out"}
+			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
+			return delivery, nil
+		}
+	}
+	if isGPT6AstraModel(opts.Model) && opts.OnMidTurnSteering != nil {
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-streamDone:
+					return
+				case <-ticker.C:
+					if err := opts.OnMidTurnSteering(ctx, deliverSteering); err != nil {
+						state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringFailed, Error: err.Error()})
+					}
+				}
+			}
+		}()
+	}
 	go func() {
-		defer state.mu.Unlock()
 		defer writer.Close()
+		defer state.mu.Unlock()
+		defer close(streamDone)
 		var outputItems []any
 		responseID := ""
+		var deferredPrimaryCompleted []byte
+		deferredPrimaryCompletedID := ""
 		receivedFrame := false
+		forwardEventData := func(data []byte) bool {
+			if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
+				state.resetConnectionLocked()
+				return false
+			}
+			return true
+		}
+		recordCompletedResponse := func(id string) {
+			state.lastProperties = properties
+			state.lastBaseline = append(append([]any(nil), fullInput...), outputItems...)
+			state.lastResponseID = id
+		}
 		for {
 			messageType, data, readErr := conn.Read(ctx)
 			if readErr != nil {
+				if len(deferredPrimaryCompleted) > 0 {
+					if forwardEventData(deferredPrimaryCompleted) {
+						recordCompletedResponse(deferredPrimaryCompletedID)
+					}
+					return
+				}
 				state.resetConnectionLocked()
 				kind := errResponsesWebsocketTransport
 				if reusedConnection && !receivedFrame {
@@ -322,33 +496,181 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 				writer.CloseWithError(fmt.Errorf("%w: unexpected binary frame", errResponsesWebsocketTransport))
 				return
 			}
-			if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
-				state.resetConnectionLocked()
-				return
-			}
 			var event map[string]any
 			if json.Unmarshal(data, &event) == nil {
 				eventType := stringFromAny(event["type"])
+				if eventType == "response.created" {
+					if response, ok := event["response"].(map[string]any); ok {
+						id := stringFromAny(response["id"])
+						successorResponse := false
+						steeringMu.Lock()
+						activeResponseID = id
+						if primaryResponseID == "" {
+							primaryResponseID = id
+						} else if acceptedSteering && id != "" && id != primaryResponseID {
+							successorResponse = true
+						}
+						steeringMu.Unlock()
+						if successorResponse {
+							deferredPrimaryCompleted = nil
+							deferredPrimaryCompletedID = ""
+						}
+					}
+				}
+				if eventType == "response.steer.accepted" || eventType == "response.steer.failed" {
+					delivery := steeringDeliveryFromEvent(eventType, event)
+					state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
+					notifyPendingSteeringAck(&steeringMu, &pendingAcks, delivery)
+					if delivery.Status == AstraSteeringAccepted {
+						acceptedSteering = true
+					}
+				}
 				if eventType == "response.output_item.done" {
 					if item, ok := event["item"].(map[string]any); ok {
 						outputItems = append(outputItems, item)
 					}
 				}
-				if isTerminalResponsesWebsocketEvent(eventType) {
-					if eventType == "response.completed" {
-						if response, ok := event["response"].(map[string]any); ok {
-							responseID = stringFromAny(response["id"])
+				if eventType == "response.steer.pending" {
+					if len(deferredPrimaryCompleted) > 0 {
+						if forwardEventData(deferredPrimaryCompleted) {
+							recordCompletedResponse(deferredPrimaryCompletedID)
 						}
-						state.lastProperties = properties
-						state.lastBaseline = append(append([]any(nil), fullInput...), outputItems...)
-						state.lastResponseID = responseID
+						return
+					}
+					continue
+				}
+				if eventType == "response.completed" && acceptedSteering {
+					completedID := responseIDFromEvent(event)
+					if completedID != "" && completedID == primaryResponseID {
+						deferredPrimaryCompleted = append(deferredPrimaryCompleted[:0], data...)
+						deferredPrimaryCompletedID = completedID
+						continue
+					}
+				}
+				if !shouldForwardResponsesWebsocketEvent(eventType, event) {
+					continue
+				}
+				if !forwardEventData(data) {
+					return
+				}
+				if isTerminalResponsesWebsocketEvent(eventType) {
+					if eventType == "response.incomplete" && responseIncompleteReason(event) == "steered" {
+						continue
+					}
+					if eventType == "response.completed" {
+						responseID = responseIDFromEvent(event)
+						recordCompletedResponse(responseID)
 					}
 					return
 				}
+				continue
+			}
+			if !forwardEventData(data) {
+				return
 			}
 		}
 	}()
 	return reader, nil
+}
+
+func removePendingSteeringAck(mu *sync.Mutex, pending *[]*pendingSteeringAck, target *pendingSteeringAck) {
+	if mu == nil || pending == nil || target == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	items := *pending
+	for i, ack := range items {
+		if ack == target {
+			copy(items[i:], items[i+1:])
+			items[len(items)-1] = nil
+			*pending = items[:len(items)-1]
+			return
+		}
+	}
+}
+
+func notifyPendingSteeringAck(mu *sync.Mutex, pending *[]*pendingSteeringAck, delivery AstraSteeringDelivery) {
+	if mu == nil || pending == nil {
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	items := *pending
+	for i, ack := range items {
+		if ack == nil {
+			continue
+		}
+		if delivery.PreviousResponseID != "" && ack.previousResponseID != "" && delivery.PreviousResponseID != ack.previousResponseID {
+			continue
+		}
+		copy(items[i:], items[i+1:])
+		items[len(items)-1] = nil
+		*pending = items[:len(items)-1]
+		select {
+		case ack.ch <- delivery:
+		default:
+		}
+		return
+	}
+}
+
+func steeringDeliveryFromEvent(eventType string, event map[string]any) AstraSteeringDelivery {
+	status := AstraSteeringAccepted
+	if eventType == "response.steer.failed" {
+		status = AstraSteeringFailed
+	}
+	delivery := AstraSteeringDelivery{
+		Status:             status,
+		ResponseID:         strings.TrimSpace(firstNonEmpty(stringFromAny(event["response_id"]), stringFromAny(event["response"]), stringFromAny(event["id"]))),
+		PreviousResponseID: strings.TrimSpace(stringFromAny(event["previous_response_id"])),
+		Error:              strings.TrimSpace(firstNonEmpty(stringFromAny(event["error"]), stringFromAny(event["message"]))),
+	}
+	if nested, ok := event["response"].(map[string]any); ok && delivery.ResponseID == "" {
+		delivery.ResponseID = stringFromAny(nested["id"])
+	}
+	if nested, ok := event["error"].(map[string]any); ok && delivery.Error == "" {
+		delivery.Error = firstNonEmpty(stringFromAny(nested["message"]), stringFromAny(nested["code"]), stringFromAny(nested["type"]))
+	}
+	return delivery
+}
+
+func responseIDFromEvent(event map[string]any) string {
+	if event == nil {
+		return ""
+	}
+	if response, ok := event["response"].(map[string]any); ok {
+		if id := strings.TrimSpace(stringFromAny(response["id"])); id != "" {
+			return id
+		}
+	}
+	return strings.TrimSpace(firstNonEmpty(stringFromAny(event["response_id"]), stringFromAny(event["id"])))
+}
+
+func responseIncompleteReason(event map[string]any) string {
+	if event == nil {
+		return ""
+	}
+	if response, ok := event["response"].(map[string]any); ok {
+		if details, ok := response["incomplete_details"].(map[string]any); ok {
+			return strings.ToLower(strings.TrimSpace(stringFromAny(details["reason"])))
+		}
+		if reason := strings.TrimSpace(stringFromAny(response["reason"])); reason != "" {
+			return strings.ToLower(reason)
+		}
+	}
+	return strings.ToLower(strings.TrimSpace(stringFromAny(event["reason"])))
+}
+
+func shouldForwardResponsesWebsocketEvent(eventType string, event map[string]any) bool {
+	switch eventType {
+	case "response.steer.accepted", "response.steer.failed", "response.steer.pending":
+		return false
+	case "response.incomplete":
+		return responseIncompleteReason(event) != "steered"
+	default:
+		return true
+	}
 }
 
 func incrementalResponsesWebsocketPayload(payload map[string]any, state *ResponsesTransportState) (map[string]any, []any, string) {
