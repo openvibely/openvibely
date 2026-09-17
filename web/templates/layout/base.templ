@@ -398,6 +398,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				/* Modal layering */
 				dialog.modal {
+					/* DaisyUI uses width: 100%, whose containing block changes when
+					   close() removes a native dialog from Chrome's top layer. Keep the
+					   fading close frame in the same viewport coordinate space. */
+					width: 100vw;
 					z-index: 1200;
 				}
 				dialog.modal::backdrop {
