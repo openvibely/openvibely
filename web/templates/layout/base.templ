@@ -2876,6 +2876,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// The portal lives outside the menu's normal CSS context. Normalize
 				// geometry-affecting styles so placement does not depend on a reset
 				// stylesheet loading before the submenu opens.
+				panel.style.position = 'fixed';
 				panel.style.boxSizing = 'border-box';
 				panel.style.margin = '0';
 				panel.style.right = 'auto';
