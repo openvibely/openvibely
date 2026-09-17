@@ -17,8 +17,14 @@ import (
 
 const SendMessageAllowExplicitTargetsSetting = "send_message_allow_explicit_targets"
 
+const (
+	SendMessageListDefaultLimit = 20
+	SendMessageListMaxLimit     = 100
+)
+
 type channelTargetStore interface {
 	ListByProject(ctx context.Context, projectID string) ([]models.ChannelTarget, error)
+	ListByProjectPage(ctx context.Context, projectID string, limit, offset int) ([]models.ChannelTarget, error)
 	FindHome(ctx context.Context, projectID, platform string) (*models.ChannelTarget, error)
 	FindByName(ctx context.Context, projectID, platform, name string) (*models.ChannelTarget, error)
 	FindByTarget(ctx context.Context, projectID, platform, targetID, threadID string) (*models.ChannelTarget, error)
@@ -105,6 +111,18 @@ type SendMessageRequest struct {
 	Target  string `json:"target"`
 	Message string `json:"message"`
 	Subject string `json:"subject,omitempty"`
+	Limit   int    `json:"limit,omitempty"`
+	Offset  int    `json:"offset,omitempty"`
+}
+
+type ChannelTargetListPage struct {
+	OK         bool            `json:"ok"`
+	Targets    []ChannelTarget `json:"targets"`
+	Limit      int             `json:"limit"`
+	Offset     int             `json:"offset"`
+	Returned   int             `json:"returned"`
+	HasMore    bool            `json:"has_more"`
+	NextOffset *int            `json:"next_offset,omitempty"`
 }
 
 type SendMessageResult struct {
@@ -153,23 +171,46 @@ func (r *ChannelMessageRouter) WithAuditContext(surface, user string) *ChannelMe
 	return &copy
 }
 
-func (r *ChannelMessageRouter) ListTargets(ctx context.Context, projectID string) ([]ChannelTarget, error) {
+func (r *ChannelMessageRouter) ListTargets(ctx context.Context, projectID string, limit, offset int) (ChannelTargetListPage, error) {
 	if r == nil || r.targets == nil {
-		return nil, fmt.Errorf("channel message router is not configured")
+		return ChannelTargetListPage{}, fmt.Errorf("channel message router is not configured")
 	}
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
-		return nil, fmt.Errorf("project id is required")
+		return ChannelTargetListPage{}, fmt.Errorf("project id is required")
 	}
-	stored, err := r.targets.ListByProject(ctx, projectID)
+	limit, offset = normalizeSendMessageListPagination(limit, offset)
+	stored, err := r.targets.ListByProjectPage(ctx, projectID, limit+1, offset)
 	if err != nil {
-		return nil, err
+		return ChannelTargetListPage{}, err
+	}
+	hasMore := len(stored) > limit
+	if hasMore {
+		stored = stored[:limit]
 	}
 	out := make([]ChannelTarget, 0, len(stored))
 	for _, t := range stored {
 		out = append(out, ChannelTarget{ProjectID: t.ProjectID, Platform: t.Platform, TargetKind: t.TargetKind, Name: t.Name, TargetID: t.TargetID, ThreadID: t.ThreadID, Home: t.Home, DefaultSubject: t.DefaultSubject})
 	}
-	return out, nil
+	page := ChannelTargetListPage{OK: true, Targets: out, Limit: limit, Offset: offset, Returned: len(out), HasMore: hasMore}
+	if hasMore {
+		next := offset + len(out)
+		page.NextOffset = &next
+	}
+	return page, nil
+}
+
+func normalizeSendMessageListPagination(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = SendMessageListDefaultLimit
+	}
+	if limit > SendMessageListMaxLimit {
+		limit = SendMessageListMaxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }
 
 func (r *ChannelMessageRouter) Send(ctx context.Context, projectID string, req SendMessageRequest) SendMessageResult {
@@ -185,11 +226,11 @@ func (r *ChannelMessageRouter) Send(ctx context.Context, projectID string, req S
 		action = "send"
 	}
 	if action == "list" {
-		targets, err := r.ListTargets(ctx, projectID)
+		page, err := r.ListTargets(ctx, projectID, req.Limit, req.Offset)
 		if err != nil {
 			return sendMessageError(err.Error())
 		}
-		b, _ := json.Marshal(map[string]interface{}{"ok": true, "targets": targets})
+		b, _ := json.Marshal(page)
 		return SendMessageResult{OK: true, MessageID: string(b)}
 	}
 	if action != "send" {
