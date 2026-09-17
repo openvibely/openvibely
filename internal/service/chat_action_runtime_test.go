@@ -568,6 +568,51 @@ func TestAlertRuntimeClaimAlertValidatesLeaseSeconds(t *testing.T) {
 	claimAndAssertDuration(t, oneDay.ID, json.RawMessage(`{"alert_id":"`+oneDay.ID+`","lease_seconds":86400}`), 24*time.Hour)
 }
 
+func TestAlertRuntimeOwnedNotificationMutationsRequireCallerAndService(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Owned notification preflight"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	createHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+	createdJSON, err := createHandlers["create_notification"](ctx, json.RawMessage(`{"type":"product","title":"Preflight target"}`))
+	require.NoError(t, err)
+	var created struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+
+	inputs := map[string]json.RawMessage{
+		"claim_alert":                      json.RawMessage(`{"alert_id":"` + created.Notification.ID + `"}`),
+		"create_alert_implementation_task": json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"x","prompt":"y"}`),
+		"link_alert_implementation_task":   json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","task_id":"` + caller.ID + `"}`),
+		"complete_alert_processing":        json.RawMessage(`{"alert_id":"` + created.Notification.ID + `"}`),
+		"fail_alert_processing":            json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","message":"failed"}`),
+		"release_alert_claim":              json.RawMessage(`{"alert_id":"` + created.Notification.ID + `"}`),
+	}
+
+	noCallerHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+	for name, input := range inputs {
+		t.Run(name+"/no_caller", func(t *testing.T) {
+			_, err := noCallerHandlers[name](ctx, input)
+			require.ErrorContains(t, err, "requires a persisted caller task")
+		})
+	}
+
+	noServiceHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task"})
+	for name, input := range inputs {
+		t.Run(name+"/no_service", func(t *testing.T) {
+			_, err := noServiceHandlers[name](ctx, input)
+			require.ErrorContains(t, err, "alert service not available")
+		})
+	}
+}
+
 func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
