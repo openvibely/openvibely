@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +48,86 @@ func mockUpdateServiceURL(t *testing.T) string {
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL
+}
+
+func TestLogStartupOAuthWarningsPreservesWarningMatrix(t *testing.T) {
+	cases := []struct {
+		name     string
+		baseURL  string
+		presence repository.OAuthProviderPresence
+		env      map[string]string
+		want     []string
+		deny     []string
+	}{
+		{
+			name:     "no OAuth models with missing APP_BASE_URL",
+			presence: repository.OAuthProviderPresence{},
+			deny:     []string{"APP_BASE_URL is not set", "ANTHROPIC_OAUTH_CLIENT_ID", "OPENAI_OAUTH_CLIENT_ID", "app base url configured"},
+		},
+		{
+			name:     "OpenAI-compatible OAuth only",
+			baseURL:  "https://app.example.com",
+			presence: repository.OAuthProviderPresence{AnyOAuth: true},
+			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com"},
+			deny:     []string{"ANTHROPIC_OAUTH_CLIENT_ID", "OPENAI_OAUTH_CLIENT_ID", "APP_BASE_URL is not set"},
+		},
+		{
+			name:     "Anthropic OAuth without client id",
+			baseURL:  "https://app.example.com",
+			presence: repository.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true},
+			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com", "warning: ANTHROPIC_OAUTH_CLIENT_ID not set"},
+			deny:     []string{"OPENAI_OAUTH_CLIENT_ID not set", "APP_BASE_URL is not set"},
+		},
+		{
+			name:     "OpenAI OAuth without client id",
+			baseURL:  "https://app.example.com",
+			presence: repository.OAuthProviderPresence{AnyOAuth: true, OpenAIOAuth: true},
+			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com", "warning: OPENAI_OAUTH_CLIENT_ID not set"},
+			deny:     []string{"ANTHROPIC_OAUTH_CLIENT_ID not set", "APP_BASE_URL is not set"},
+		},
+		{
+			name:     "missing APP_BASE_URL with OAuth provider",
+			presence: repository.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true},
+			want:     []string{"warning: APP_BASE_URL is not set while OAuth models are configured"},
+			deny:     []string{"app base url configured", "ANTHROPIC_OAUTH_CLIENT_ID", "OPENAI_OAUTH_CLIENT_ID"},
+		},
+		{
+			name:     "provider client ids suppress warnings",
+			baseURL:  "https://app.example.com",
+			presence: repository.OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true},
+			env:      map[string]string{"ANTHROPIC_OAUTH_CLIENT_ID": "anthropic-client", "OPENAI_OAUTH_CLIENT_ID": "openai-client"},
+			want:     []string{"app base url configured for OAuth callbacks: https://app.example.com"},
+			deny:     []string{"ANTHROPIC_OAUTH_CLIENT_ID not set", "OPENAI_OAUTH_CLIENT_ID not set", "APP_BASE_URL is not set"},
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			originalWriter := log.Writer()
+			originalFlags := log.Flags()
+			log.SetOutput(&output)
+			log.SetFlags(0)
+			t.Cleanup(func() {
+				log.SetOutput(originalWriter)
+				log.SetFlags(originalFlags)
+			})
+			getenv := func(key string) string { return tt.env[key] }
+
+			logStartupOAuthWarnings(tt.baseURL, tt.presence, getenv)
+			logged := output.String()
+			for _, want := range tt.want {
+				if !strings.Contains(logged, want) {
+					t.Fatalf("log output missing %q: %s", want, logged)
+				}
+			}
+			for _, denied := range tt.deny {
+				if strings.Contains(logged, denied) {
+					t.Fatalf("log output included %q: %s", denied, logged)
+				}
+			}
+		})
+	}
 }
 
 func TestStartUpdateCoordinatorAlwaysRunsRecoveryAndChecks(t *testing.T) {
