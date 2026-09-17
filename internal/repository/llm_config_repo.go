@@ -260,7 +260,8 @@ func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]mod
 		   ORDER BY linked.id LIMIT 1
 		 )
 		 WHERE c.provider = ? AND c.oauth_access_token != ''
-		   AND (c.oauth_needs_reauth = 1 OR c.oauth_refresh_token = '')
+		   AND (c.oauth_needs_reauth = 1 OR c.oauth_refresh_token = '' OR
+		        (c.oauth_expires_at > 0 AND c.oauth_expires_at <= CAST(strftime('%s', 'now') AS INTEGER) * 1000))
 		 ORDER BY c.id`, models.AuthMethodOAuth, models.ProviderOpenAI)
 	if err != nil {
 		return nil, fmt.Errorf("listing unrefreshable OpenAI OAuth connections: %w", err)
