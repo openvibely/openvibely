@@ -28,6 +28,7 @@ type OAuthRefreshService struct {
 	anthropicRefresh llmoauth.RefreshFunc
 	openAIRefresh    llmoauth.RefreshFunc
 	identityResolver func(context.Context, string) (AnthropicOAuthIdentity, error)
+	openAIIdentity   func(string) OpenAIOAuthIdentity
 	identityTimeout  time.Duration
 	interval         time.Duration
 	wg               sync.WaitGroup
@@ -42,6 +43,7 @@ func NewOAuthRefreshService(repo *repository.LLMConfigRepo, manager *llmoauth.Ma
 		manager:          manager,
 		anthropicRefresh: llmoauth.AnthropicRefreshFunc(),
 		openAIRefresh:    llmoauth.OpenAIRefreshFunc(),
+		openAIIdentity:   ResolveOpenAIOAuthIdentity,
 		identityTimeout:  oauthBackgroundIdentityLookupTimeout,
 		interval:         oauthBackgroundRefreshInterval,
 	}
@@ -58,6 +60,10 @@ func (s *OAuthRefreshService) SetRefreshers(anthropicRefresh, openAIRefresh llmo
 
 func (s *OAuthRefreshService) SetAnthropicIdentityResolver(resolver func(context.Context, string) (AnthropicOAuthIdentity, error)) {
 	s.identityResolver = resolver
+}
+
+func (s *OAuthRefreshService) SetOpenAIIdentityResolver(resolver func(string) OpenAIOAuthIdentity) {
+	s.openAIIdentity = resolver
 }
 
 func (s *OAuthRefreshService) Start(ctx context.Context) {
@@ -150,6 +156,19 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 					refreshErrors = append(refreshErrors, updateErr)
 				} else if !updated {
 					refreshErrors = append(refreshErrors, fmt.Errorf("OAuth connection changed while its provider profile was being resolved"))
+				}
+			}
+		} else if cfg.Provider == models.ProviderOpenAI && s.openAIIdentity != nil {
+			identity := s.openAIIdentity(fresh.OAuthAccessToken)
+			if identity.PrincipalHash != "" {
+				updated, updateErr := s.repo.UpdateLinkedOAuthConnectionProfileIfRevision(
+					ctx, fresh.ID, fresh.OAuthConnectionID, fresh.OAuthConfigRevision, fresh.Provider,
+					identity.AccountID, identity.DisplayName, identity.PrincipalHash,
+				)
+				if updateErr != nil {
+					refreshErrors = append(refreshErrors, updateErr)
+				} else if !updated {
+					refreshErrors = append(refreshErrors, fmt.Errorf("OAuth connection changed while its OpenAI identity was being resolved"))
 				}
 			}
 		}

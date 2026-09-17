@@ -101,6 +101,71 @@ func TestAnthropicOAuthCallbackPersistsProfileAndAdoptsVerifiedSameUser(t *testi
 	}
 }
 
+func TestOpenAIOAuthCallbackPersistsIdentityAndAdoptsVerifiedSameUserAndAccount(t *testing.T) {
+	identities := map[string]string{
+		"a": `{"sub":"user-shared","https://api.openai.com/auth":{"chatgpt_account_id":"account-shared"},"https://api.openai.com/profile":{"email":"owner@example.com"}}`,
+		"b": `{"sub":"user-shared","https://api.openai.com/auth":{"chatgpt_account_id":"account-shared"},"https://api.openai.com/profile":{"email":"owner@example.com"}}`,
+		"c": `{"sub":"user-other","https://api.openai.com/auth":{"chatgpt_account_id":"account-shared"},"https://api.openai.com/profile":{"email":"other@example.com"}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		suffix := strings.TrimPrefix(r.URL.Path, "/token/")
+		payload, ok := identities[suffix]
+		require.True(t, ok, "unexpected token path")
+		idToken := "header." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".signature"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "access-" + suffix,
+			"refresh_token": "refresh-" + suffix,
+			"id_token":      idToken,
+			"expires_in":    7200,
+		})
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	var configs []*models.LLMConfig
+	for _, suffix := range []string{"a", "b", "c"} {
+		cfg := &models.LLMConfig{
+			Name:              "OpenAI " + suffix,
+			Provider:          models.ProviderOpenAI,
+			Model:             "gpt-test-" + suffix,
+			AuthMethod:        models.AuthMethodOAuth,
+			OAuthAccessToken:  "old-access-" + suffix,
+			OAuthRefreshToken: "old-refresh-" + suffix,
+		}
+		require.NoError(t, repo.Create(context.Background(), cfg))
+		configs = append(configs, cfg)
+	}
+
+	for i, cfg := range configs {
+		current, err := repo.GetByID(context.Background(), cfg.ID)
+		require.NoError(t, err)
+		suffix := string(rune('a' + i))
+		_, err = h.exchangeOAuthCodeAndSaveTokens(&oauthPendingFlow{
+			ConfigID:       current.ID,
+			ConnectionID:   current.OAuthConnectionID,
+			Provider:       models.ProviderOpenAI,
+			TokenURL:       server.URL + "/token/" + suffix,
+			ConfigRevision: current.OAuthConfigRevision,
+		}, "code", "state")
+		require.NoError(t, err)
+	}
+
+	first, err := repo.GetByID(context.Background(), configs[0].ID)
+	require.NoError(t, err)
+	second, err := repo.GetByID(context.Background(), configs[1].ID)
+	require.NoError(t, err)
+	third, err := repo.GetByID(context.Background(), configs[2].ID)
+	require.NoError(t, err)
+	require.Equal(t, first.OAuthConnectionID, second.OAuthConnectionID)
+	require.NotEqual(t, first.OAuthConnectionID, third.OAuthConnectionID, "different users in one ChatGPT account must remain isolated")
+
+	connections, err := repo.ListOAuthConnections(context.Background(), models.ProviderOpenAI)
+	require.NoError(t, err)
+	require.Len(t, connections, 2)
+	require.ElementsMatch(t, []string{"owner@example.com", "other@example.com"}, []string{connections[0].Name, connections[1].Name})
+}
+
 func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavailable(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
