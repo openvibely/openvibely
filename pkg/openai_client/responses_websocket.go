@@ -102,7 +102,7 @@ func (s *ResponsesTransportState) resetConnectionLocked() {
 	s.lastProperties = ""
 	s.lastBaseline = nil
 	s.lastResponseID = ""
-	s.failAllPendingAstraSteeringLocked("websocket connection reset before steering continuation was confirmed")
+	s.commitAllPendingAstraSteeringLocked()
 }
 
 func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
@@ -262,6 +262,14 @@ func (s *ResponsesTransportState) takeUnresolvedAstraSteering() error {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	// response.steer.accepted transfers ownership to the server. If the stream
+	// ends before the successor response is observed, preserve that ownership
+	// locally so callers do not replay the same instruction as a queued turn.
+	for id, pending := range s.pendingAstraSteering {
+		pending.Status = AstraSteeringAccepted
+		s.appendAstraSteeringCommitLocked(pending)
+		delete(s.pendingAstraSteering, id)
+	}
 	s.pendingAstraSteering = nil
 	return fmt.Errorf("astra steering remained pending without a successor response: %s", strings.Join(ids, ", "))
 }
@@ -602,9 +610,6 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			select {
 			case delivery := <-ack.ch:
 				return delivery, nil
-			case <-deliverCtx.Done():
-				removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-				return AstraSteeringDelivery{Status: AstraSteeringFailed, PreviousResponseID: previousID, Error: deliverCtx.Err().Error()}, deliverCtx.Err()
 			case <-streamDone:
 				select {
 				case delivery := <-ack.ch:
@@ -612,7 +617,14 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 				default:
 				}
 				removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-				return AstraSteeringDelivery{Status: AstraSteeringUnavailable, PreviousResponseID: previousID}, nil
+				delivery := ResponsesSteeringDelivery{
+					Status:             AstraSteeringAccepted,
+					SteeringID:         ack.steeringID,
+					PreviousResponseID: previousID,
+				}
+				state.appendAstraSteeringCommitLocked(delivery)
+				state.recordSteeringDelivery(delivery)
+				return AstraSteeringDelivery(delivery), nil
 			}
 		case <-deliverCtx.Done():
 			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
@@ -724,11 +736,11 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 							waitForSteeringCallback.Store(true)
 						}
 						for _, delivery := range committed {
-							state.astraSteeringCommits = append(state.astraSteeringCommits, ResponsesSteeringDelivery(delivery))
+							state.appendAstraSteeringCommitLocked(ResponsesSteeringDelivery(delivery))
 							state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
 						}
 						for _, delivery := range persistedCommitted {
-							state.astraSteeringCommits = append(state.astraSteeringCommits, delivery)
+							state.appendAstraSteeringCommitLocked(delivery)
 							state.recordSteeringDelivery(delivery)
 						}
 						if successorResponse {
@@ -748,6 +760,9 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 					}
 					if delivery.Status == AstraSteeringAccepted {
 						acceptedSteering = true
+						// Wait for the delivery callback to resolve accepted
+						// ownership before returning a stream error to the caller.
+						waitForSteeringCallback.Store(true)
 					} else {
 						steeringMu.Lock()
 						acceptedSteering = hasAcceptedSteeringLocked(pendingAcks)
@@ -984,14 +999,27 @@ func (s *ResponsesTransportState) failPendingAstraSteeringLocked(delivery AstraS
 	return true
 }
 
-func (s *ResponsesTransportState) failAllPendingAstraSteeringLocked(message string) {
+func (s *ResponsesTransportState) appendAstraSteeringCommitLocked(delivery ResponsesSteeringDelivery) {
+	if s == nil || delivery.SteeringID == "" {
+		return
+	}
+	for _, existing := range s.astraSteeringCommits {
+		if existing.SteeringID == delivery.SteeringID {
+			return
+		}
+	}
+	delivery.Status = AstraSteeringAccepted
+	s.astraSteeringCommits = append(s.astraSteeringCommits, delivery)
+}
+
+func (s *ResponsesTransportState) commitAllPendingAstraSteeringLocked() {
 	if s == nil || len(s.pendingAstraSteering) == 0 {
 		return
 	}
 	for id, pending := range s.pendingAstraSteering {
-		pending.Status = AstraSteeringFailed
-		pending.Error = message
-		s.astraSteeringFailures = append(s.astraSteeringFailures, pending)
+		pending.Status = AstraSteeringAccepted
+		s.appendAstraSteeringCommitLocked(pending)
+		s.recordSteeringDelivery(pending)
 		delete(s.pendingAstraSteering, id)
 	}
 }
