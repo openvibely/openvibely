@@ -1787,7 +1787,7 @@ func TestOpenResponsesWebsocketStream_AstraPendingSteeringCanFailBeforeSuccessor
 	}
 }
 
-func TestResponsesTransportState_ResetFailsAndClearsPendingAstraSteering(t *testing.T) {
+func TestResponsesTransportState_ResetCommitsAndClearsServerOwnedAstraSteering(t *testing.T) {
 	state := NewResponsesTransportState()
 	state.pendingAstraSteering = map[string]ResponsesSteeringDelivery{
 		"steer_reset": {
@@ -1802,8 +1802,12 @@ func TestResponsesTransportState_ResetFailsAndClearsPendingAstraSteering(t *test
 	if len(state.pendingAstraSteering) != 0 {
 		t.Fatalf("pending steering survived reset: %#v", state.pendingAstraSteering)
 	}
-	if err := state.takeAstraSteeringFailure(); err == nil || !strings.Contains(err.Error(), "connection reset") {
-		t.Fatalf("reset steering failure = %v", err)
+	if err := state.takeAstraSteeringFailure(); err != nil {
+		t.Fatalf("reset treated server-owned steering as failed: %v", err)
+	}
+	commits := state.takeAstraSteeringCommits()
+	if len(commits) != 1 || commits[0].SteeringID != "steer_reset" || commits[0].Status != AstraSteeringAccepted {
+		t.Fatalf("reset steering commits = %#v", commits)
 	}
 	if err := state.takeUnresolvedAstraSteering(); err != nil {
 		t.Fatalf("reset left unresolved steering: %v", err)
@@ -2063,6 +2067,73 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringDisconnectReturnsUnava
 		if record.Status == AstraSteeringAccepted {
 			t.Fatalf("disconnected steering must not be recorded as accepted: %#v", records)
 		}
+	}
+}
+
+func TestOpenResponsesWebsocketStream_AstraAcceptedSteeringDisconnectPreservesServerOwnership(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusInternalError, "disconnect after acceptance")
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read initial request: %v", err)
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_disconnect_accepted"}}`)); err != nil {
+			t.Errorf("write created: %v", err)
+			return
+		}
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read steer: %v", err)
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.steer.accepted","steer":{"id":"steer_disconnect_accepted","previous_response_id":"resp_disconnect_accepted"}}`)); err != nil {
+			t.Errorf("write steer accepted: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	var callbackCalls atomic.Int32
+	deliveries := make(chan AstraSteeringDelivery, 1)
+	body, err := client.openResponsesWebsocketStream(context.Background(), map[string]any{
+		"type": "response.create", "model": "gpt-6-astra", "input": []any{},
+	}, false, responsesWebsocketStreamOptions{
+		Model: "gpt-6-astra",
+		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
+			if !callbackCalls.CompareAndSwap(0, 1) {
+				return nil
+			}
+			delivery, err := deliver(ctx, "do not replay after acceptance")
+			deliveries <- delivery
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("openResponsesWebsocketStream: %v", err)
+	}
+	defer body.Close()
+	if _, err := io.ReadAll(body); err == nil {
+		t.Fatal("expected stream read error after accepted steering disconnect")
+	}
+	select {
+	case delivery := <-deliveries:
+		if delivery.Status != AstraSteeringAccepted || delivery.SteeringID != "steer_disconnect_accepted" || delivery.PreviousResponseID != "resp_disconnect_accepted" || delivery.ResponseID != "" {
+			t.Fatalf("delivery = %#v", delivery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("steering callback did not preserve accepted ownership")
+	}
+	commits := client.responsesTransportState.takeAstraSteeringCommits()
+	if len(commits) != 1 || commits[0].SteeringID != "steer_disconnect_accepted" {
+		t.Fatalf("accepted disconnect commits = %#v", commits)
 	}
 }
 
