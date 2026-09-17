@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
@@ -57,31 +56,6 @@ const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?
 // detail-only payloads that the formatter never reads.
 const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, output, error_message, is_followup, started_at`
 
-const (
-	taskThreadPromptPreviewBytes = 4 * 1024
-	taskThreadOutputPreviewBytes = 24 * 1024
-	taskThreadErrorPreviewBytes  = 4 * 1024
-)
-
-// taskThreadPageSelectColumns is the browser Task Detail projection. Text is
-// sliced as a BLOB so the database never returns more than the byte budget for
-// a selected execution. The flags let the renderer distinguish a real short
-// value from a bounded preview without loading the complete source text.
-const taskThreadPageSelectColumns = `id, task_id, status, duration_ms,
-	CASE WHEN length(CAST(COALESCE(prompt_sent, '') AS BLOB)) > 4096
-		THEN substr(CAST(COALESCE(prompt_sent, '') AS BLOB), 1, 4096)
-		ELSE COALESCE(prompt_sent, '') END,
-	CASE WHEN length(CAST(COALESCE(output, '') AS BLOB)) > 24576
-		THEN substr(CAST(COALESCE(output, '') AS BLOB), 1, 24576)
-		ELSE COALESCE(output, '') END,
-	CASE WHEN length(CAST(COALESCE(error_message, '') AS BLOB)) > 4096
-		THEN substr(CAST(COALESCE(error_message, '') AS BLOB), 1, 4096)
-		ELSE COALESCE(error_message, '') END,
-	is_followup, started_at, completed_at,
-	length(CAST(COALESCE(prompt_sent, '') AS BLOB)) > 4096,
-	length(CAST(COALESCE(output, '') AS BLOB)) > 24576,
-	length(CAST(COALESCE(error_message, '') AS BLOB)) > 4096`
-
 const taskExecutionChronologicalPageSQL = `SELECT ` + taskThreadExecutionSelectColumns + ` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?`
 
 const taskExecutionMetricsSQL = `SELECT
@@ -107,35 +81,6 @@ func scanTaskThreadExecutionRow(scanner interface {
 	var e models.Execution
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.PromptSent, &e.Output, &e.ErrorMessage, &e.IsFollowup, &e.StartedAt)
 	return e, err
-}
-
-func scanTaskThreadPageExecutionRow(scanner interface {
-	Scan(dest ...interface{}) error
-}) (models.Execution, error) {
-	var e models.Execution
-	var promptTruncated, outputTruncated, errorTruncated bool
-	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.DurationMs, &e.PromptSent, &e.Output, &e.ErrorMessage,
-		&e.IsFollowup, &e.StartedAt, &e.CompletedAt, &promptTruncated, &outputTruncated, &errorTruncated)
-	if err != nil {
-		return e, err
-	}
-	e.PromptTruncated = promptTruncated
-	e.OutputTruncated = outputTruncated
-	e.ErrorTruncated = errorTruncated
-	e.PromptSent = trimTaskThreadPreviewUTF8(e.PromptSent, e.PromptTruncated, taskThreadPromptPreviewBytes)
-	e.Output = trimTaskThreadPreviewUTF8(e.Output, e.OutputTruncated, taskThreadOutputPreviewBytes)
-	e.ErrorMessage = trimTaskThreadPreviewUTF8(e.ErrorMessage, e.ErrorTruncated, taskThreadErrorPreviewBytes)
-	return e, nil
-}
-
-func trimTaskThreadPreviewUTF8(value string, truncated bool, maxBytes int) string {
-	if !truncated || len(value) <= maxBytes || utf8.ValidString(value) {
-		return value
-	}
-	for len(value) > 0 && !utf8.ValidString(value) {
-		value = value[:len(value)-1]
-	}
-	return value
 }
 
 func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models.Execution, error) {
@@ -291,32 +236,14 @@ func (r *ExecutionRepo) GetAPIChatStatusByID(ctx context.Context, id string) (*m
 func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.Execution, error) {
 	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
 		`SELECT `+executionSelectColumnsAlias+`
-			 FROM executions e
-			 JOIN tasks t ON t.id = e.task_id
-			 WHERE e.id = ? AND t.project_id = ?`, id, projectID))
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 WHERE e.id = ? AND t.project_id = ?`, id, projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting project execution: %w", err)
-	}
-	return &e, nil
-}
-
-// GetByIDForTaskAndProject reads one execution only when both its task and
-// project ownership match. The ownership predicates are applied before the
-// complete execution projection is selected and scanned.
-func (r *ExecutionRepo) GetByIDForTaskAndProject(ctx context.Context, id, taskID, projectID string) (*models.Execution, error) {
-	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+executionSelectColumnsAlias+`
-			 FROM executions e
-			 JOIN tasks t ON t.id = e.task_id
-			 WHERE e.id = ? AND e.task_id = ? AND t.id = ? AND t.project_id = ?`, id, taskID, taskID, projectID))
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting task project execution: %w", err)
 	}
 	return &e, nil
 }
@@ -1269,56 +1196,6 @@ func (r *ExecutionRepo) GetLatestFailedFollowupByTask(ctx context.Context, taskI
 	return &e, nil
 }
 
-// ListByTaskThreadChronologicalLimit returns the newest executions for the
-// browser Task Detail thread, ordered chronologically. This is deliberately
-// separate from ListByTaskChronologicalLimit because follow-up context readers
-// require complete prompt/output text.
-func (r *ExecutionRepo) ListByTaskThreadChronologicalLimit(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
-	return r.listTaskThreadExecutionPage(ctx, taskID, "", limit)
-}
-
-// ListByTaskThreadChronologicalBefore returns executions older than beforeExecID
-// for the browser Task Detail thread, ordered chronologically.
-func (r *ExecutionRepo) ListByTaskThreadChronologicalBefore(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, error) {
-	return r.listTaskThreadExecutionPage(ctx, taskID, beforeExecID, limit)
-}
-
-func (r *ExecutionRepo) listTaskThreadExecutionPage(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, error) {
-	if limit <= 0 {
-		return []models.Execution{}, nil
-	}
-	query, args := taskThreadPageSQL(taskID, beforeExecID, limit)
-
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("listing task-thread executions chronological page: %w", err)
-	}
-	defer rows.Close()
-
-	execs := make([]models.Execution, 0, minTaskThreadPageCapacity(limit))
-	for rows.Next() {
-		e, scanErr := scanTaskThreadPageExecutionRow(rows)
-		if scanErr != nil {
-			return nil, fmt.Errorf("scanning task-thread execution page: %w", scanErr)
-		}
-		execs = append(execs, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i, j := 0, len(execs)-1; i < j; i, j = i+1, j-1 {
-		execs[i], execs[j] = execs[j], execs[i]
-	}
-	return execs, nil
-}
-
-func minTaskThreadPageCapacity(limit int) int {
-	if limit > 101 {
-		return 101
-	}
-	return limit
-}
-
 // ListByTaskChronologicalLimit returns the latest executions for a task, ordered chronologically.
 func (r *ExecutionRepo) ListByTaskChronologicalLimit(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
 	return r.listTaskExecutionPage(ctx, taskID, "", limit)
@@ -1346,15 +1223,7 @@ func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, befor
 }
 
 func taskExecutionPageSQL(taskID, beforeExecID string, limit int) (string, []interface{}) {
-	return executionPageSQL(executionSelectColumnsLight, taskID, beforeExecID, limit)
-}
-
-func taskThreadPageSQL(taskID, beforeExecID string, limit int) (string, []interface{}) {
-	return executionPageSQL(taskThreadPageSelectColumns, taskID, beforeExecID, limit)
-}
-
-func executionPageSQL(selectColumns, taskID, beforeExecID string, limit int) (string, []interface{}) {
-	query := `SELECT ` + selectColumns + ` FROM executions WHERE task_id = ?`
+	query := `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ?`
 	args := []interface{}{taskID}
 	if beforeExecID != "" {
 		query += ` AND (started_at < (SELECT started_at FROM executions WHERE id = ?)
