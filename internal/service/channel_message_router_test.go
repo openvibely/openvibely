@@ -120,14 +120,95 @@ func TestExecuteSendMessageToolNormalizesAndDecodesInput(t *testing.T) {
 
 func TestChannelMessageRouter_ListTargets(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "t1", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "C123", Home: true}))
-	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "t2", ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U0AQYLJR14Y"}))
-	out, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list"}`))
+
+	empty, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list"}`))
 	require.NoError(t, err)
-	require.Contains(t, out, `"ok":true`)
-	require.Contains(t, out, `"name":"ops"`)
-	require.Contains(t, out, `"target_kind":"channel"`, "list output must include target_kind for channel targets")
-	require.Contains(t, out, `"target_kind":"user"`, "list output must include target_kind for user DM targets")
+	emptyPage := decodeChannelTargetListPage(t, empty)
+	require.True(t, emptyPage.OK)
+	require.Empty(t, emptyPage.Targets)
+	require.Equal(t, SendMessageListDefaultLimit, emptyPage.Limit)
+	require.Equal(t, 0, emptyPage.Offset)
+	require.Equal(t, 0, emptyPage.Returned)
+	require.False(t, emptyPage.HasMore)
+	require.Nil(t, emptyPage.NextOffset)
+
+	fixtures := []models.ChannelTarget{
+		{ID: "slack-home", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "C123", Home: true, DefaultSubject: "ignored"},
+		{ID: "email-home", ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", Home: true, DefaultSubject: "Default Subject"},
+		{ID: "slack-alerts", ProjectID: project.ID, Platform: "slack", Name: "alerts", TargetID: "C222"},
+		{ID: "slack-user", ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U0AQYLJR14Y"},
+		{ID: "telegram-home", ProjectID: project.ID, Platform: "telegram", TargetKind: "chat", Name: "ops", TargetID: "-100123", Home: true, ThreadID: "42"},
+	}
+	for _, target := range fixtures {
+		require.NoError(t, targetRepo.Upsert(ctx, target))
+	}
+
+	first, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list","limit":2,"offset":0}`))
+	require.NoError(t, err)
+	firstPage := decodeChannelTargetListPage(t, first)
+	require.Equal(t, 2, firstPage.Limit)
+	require.Equal(t, 0, firstPage.Offset)
+	require.Equal(t, 2, firstPage.Returned)
+	require.True(t, firstPage.HasMore)
+	require.NotNil(t, firstPage.NextOffset)
+	require.Equal(t, 2, *firstPage.NextOffset)
+	require.Equal(t, []string{"email-home", "slack-home"}, channelTargetIDsForListPage(firstPage.Targets))
+	require.Equal(t, ChannelTarget{ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", Home: true, DefaultSubject: "Default Subject"}, firstPage.Targets[0])
+	require.Equal(t, ChannelTarget{ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "C123", Home: true, DefaultSubject: "ignored"}, firstPage.Targets[1])
+
+	second, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list","limit":2,"offset":2}`))
+	require.NoError(t, err)
+	secondPage := decodeChannelTargetListPage(t, second)
+	require.Equal(t, []string{"slack-user", "slack-alerts"}, channelTargetIDsForListPage(secondPage.Targets))
+	require.True(t, secondPage.HasMore)
+	require.NotNil(t, secondPage.NextOffset)
+	require.Equal(t, 4, *secondPage.NextOffset)
+
+	third, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list","limit":2,"offset":4}`))
+	require.NoError(t, err)
+	thirdPage := decodeChannelTargetListPage(t, third)
+	require.Equal(t, []string{"telegram-home"}, channelTargetIDsForListPage(thirdPage.Targets))
+	require.False(t, thirdPage.HasMore)
+	require.Nil(t, thirdPage.NextOffset)
+
+	defaultPage, err := ExecuteSendMessageTool(ctx, router, project.ID, json.RawMessage(`{"action":"list","limit":1000,"offset":-20}`))
+	require.NoError(t, err)
+	capped := decodeChannelTargetListPage(t, defaultPage)
+	require.Equal(t, SendMessageListMaxLimit, capped.Limit)
+	require.Equal(t, 0, capped.Offset)
+	require.Equal(t, len(fixtures), capped.Returned)
+}
+
+func decodeChannelTargetListPage(t *testing.T, raw string) ChannelTargetListPage {
+	t.Helper()
+	var page ChannelTargetListPage
+	require.NoError(t, json.Unmarshal([]byte(raw), &page))
+	return page
+}
+
+func channelTargetIDsForListPage(targets []ChannelTarget) []string {
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, targetIDFromListedTarget(target))
+	}
+	return ids
+}
+
+func targetIDFromListedTarget(target ChannelTarget) string {
+	switch {
+	case target.Platform == "email" && target.TargetID == "team@example.com":
+		return "email-home"
+	case target.Platform == "slack" && target.TargetID == "C123":
+		return "slack-home"
+	case target.Platform == "slack" && target.TargetID == "C222":
+		return "slack-alerts"
+	case target.Platform == "slack" && target.TargetID == "U0AQYLJR14Y":
+		return "slack-user"
+	case target.Platform == "telegram" && target.TargetID == "-100123":
+		return "telegram-home"
+	default:
+		return target.Platform + ":" + target.TargetID
+	}
 }
 
 func TestChannelMessageRouter_ResolvesHomeTargets(t *testing.T) {

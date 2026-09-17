@@ -74,25 +74,36 @@ func (r *ChannelTargetRepo) SummarizeByProject(ctx context.Context, projectID st
 	return out, nil
 }
 
+const channelTargetListByProjectOrder = `
+	ORDER BY platform ASC, is_home DESC, name ASC, target_id ASC`
+
 func (r *ChannelTargetRepo) ListByProject(ctx context.Context, projectID string) ([]models.ChannelTarget, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
-		FROM channel_targets
-		WHERE project_id = ?
-		ORDER BY platform ASC, is_home DESC, name ASC, target_id ASC`, projectID)
+			SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+			FROM channel_targets
+			WHERE project_id = ?`+channelTargetListByProjectOrder, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list channel targets: %w", err)
 	}
-	defer rows.Close()
-	var targets []models.ChannelTarget
-	for rows.Next() {
-		t, err := scanChannelTarget(rows)
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, t)
+	return scanChannelTargetRows(rows)
+}
+
+func (r *ChannelTargetRepo) ListByProjectPage(ctx context.Context, projectID string, limit, offset int) ([]models.ChannelTarget, error) {
+	if limit <= 0 {
+		return []models.ChannelTarget{}, nil
 	}
-	return targets, rows.Err()
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := r.db.QueryContext(ctx, `
+			SELECT project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject
+			FROM channel_targets
+			WHERE project_id = ?`+channelTargetListByProjectOrder+`
+			LIMIT ? OFFSET ?`, projectID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list channel targets page: %w", err)
+	}
+	return scanChannelTargetListPageRows(rows)
 }
 
 func (r *ChannelTargetRepo) GetByID(ctx context.Context, id string) (*models.ChannelTarget, error) {
@@ -274,6 +285,39 @@ func (r *ChannelTargetRepo) findOne(ctx context.Context, query string, args ...i
 
 type channelTargetScanner interface {
 	Scan(dest ...interface{}) error
+}
+
+type channelTargetRows interface {
+	channelTargetScanner
+	Next() bool
+	Close() error
+	Err() error
+}
+
+func scanChannelTargetRows(rows channelTargetRows) ([]models.ChannelTarget, error) {
+	defer rows.Close()
+	var targets []models.ChannelTarget
+	for rows.Next() {
+		t, err := scanChannelTarget(rows)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, t)
+	}
+	return targets, rows.Err()
+}
+
+func scanChannelTargetListPageRows(rows channelTargetRows) ([]models.ChannelTarget, error) {
+	defer rows.Close()
+	var targets []models.ChannelTarget
+	for rows.Next() {
+		var t models.ChannelTarget
+		if err := rows.Scan(&t.ProjectID, &t.Platform, &t.TargetKind, &t.Name, &t.TargetID, &t.ThreadID, &t.Home, &t.DefaultSubject); err != nil {
+			return nil, fmt.Errorf("scan channel target list page: %w", err)
+		}
+		targets = append(targets, t)
+	}
+	return targets, rows.Err()
 }
 
 func scanChannelTarget(row channelTargetScanner) (models.ChannelTarget, error) {

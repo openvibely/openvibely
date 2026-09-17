@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -252,6 +253,146 @@ func TestChannelTargetRepoLookupQueriesUseDedicatedIndexes(t *testing.T) {
 	require.Equal(t, "saved-target", byTarget.ID)
 }
 
+func TestChannelTargetRepo_ListByProjectPageOrderingAndPlan(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Target List Page Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	repo := NewChannelTargetRepo(db)
+
+	fixtures := []models.ChannelTarget{
+		{ID: "slack-z", ProjectID: project.ID, Platform: "slack", Name: "zulu", TargetID: "CZ"},
+		{ID: "email-home", ProjectID: project.ID, Platform: "email", Name: "team", TargetID: "team@example.com", Home: true},
+		{ID: "slack-home", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "COPS", Home: true},
+		{ID: "slack-a", ProjectID: project.ID, Platform: "slack", Name: "alerts", TargetID: "CA"},
+		{ID: "telegram-home", ProjectID: project.ID, Platform: "telegram", Name: "ops", TargetID: "-100", Home: true},
+	}
+	for _, target := range fixtures {
+		require.NoError(t, repo.Upsert(ctx, target))
+	}
+
+	first, err := repo.ListByProjectPage(ctx, project.ID, 2, 0)
+	require.NoError(t, err)
+	require.Equal(t, []string{"team@example.com", "COPS"}, channelTargetTargetIDs(first))
+	second, err := repo.ListByProjectPage(ctx, project.ID, 2, 2)
+	require.NoError(t, err)
+	require.Equal(t, []string{"CA", "CZ"}, channelTargetTargetIDs(second))
+	third, err := repo.ListByProjectPage(ctx, project.ID, 2, 4)
+	require.NoError(t, err)
+	require.Equal(t, []string{"-100"}, channelTargetTargetIDs(third))
+
+	plan := channelTargetExplainQueryPlan(t, db, `
+		SELECT project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject
+		FROM channel_targets
+		WHERE project_id = ?`+channelTargetListByProjectOrder+`
+		LIMIT ? OFFSET ?`, project.ID, 2, 0)
+	require.Contains(t, plan, "idx_channel_targets_project_list_order")
+	require.Contains(t, plan, "project_id=?")
+	require.NotContains(t, plan, "USE TEMP B-TREE FOR ORDER BY")
+}
+
+func channelTargetTargetIDs(targets []models.ChannelTarget) []string {
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		ids = append(ids, target.TargetID)
+	}
+	return ids
+}
+
+func BenchmarkChannelTargetRepoListDiscovery(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	projectID := "channel-target-list-bench-project"
+	seedChannelTargetListBenchFixture(b, db, projectID, 20000)
+	repo := NewChannelTargetRepo(db)
+	ctx := context.Background()
+
+	fullPlan := channelTargetExplainQueryPlan(b, db, `
+		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at
+		FROM channel_targets
+		WHERE project_id = ?`+channelTargetListByProjectOrder, projectID)
+	pagePlan := channelTargetExplainQueryPlan(b, db, `
+		SELECT project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject
+		FROM channel_targets
+		WHERE project_id = ?`+channelTargetListByProjectOrder+`
+		LIMIT ? OFFSET ?`, projectID, 51, 0)
+	require.Contains(b, pagePlan, "idx_channel_targets_project_list_order")
+	require.NotContains(b, pagePlan, "USE TEMP B-TREE FOR ORDER BY")
+	b.Logf("full_list_query_plan=%s", fullPlan)
+	b.Logf("bounded_page_query_plan=%s", pagePlan)
+
+	b.Run("current_full_list", func(b *testing.B) {
+		var sqlElapsed time.Duration
+		var rows, jsonBytes int
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			start := time.Now()
+			targets, err := repo.ListByProject(ctx, projectID)
+			sqlElapsed += time.Since(start)
+			if err != nil {
+				b.Fatalf("list full targets: %v", err)
+			}
+			payload, err := json.Marshal(map[string]any{"ok": true, "targets": channelTargetListBenchTargets(targets)})
+			if err != nil {
+				b.Fatalf("marshal full targets: %v", err)
+			}
+			rows = len(targets)
+			jsonBytes = len(payload)
+		}
+		b.ReportMetric(float64(rows), "rows/op")
+		b.ReportMetric(float64(jsonBytes), "json_bytes/op")
+		b.ReportMetric(float64(sqlElapsed.Nanoseconds())/float64(b.N), "sql_ns/op")
+	})
+
+	b.Run("bounded_indexed_first_page", func(b *testing.B) {
+		var sqlElapsed time.Duration
+		var rows, jsonBytes int
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			start := time.Now()
+			targets, err := repo.ListByProjectPage(ctx, projectID, 51, 0)
+			sqlElapsed += time.Since(start)
+			if err != nil {
+				b.Fatalf("list target page: %v", err)
+			}
+			hasMore := len(targets) > 50
+			if hasMore {
+				targets = targets[:50]
+			}
+			payload, err := json.Marshal(map[string]any{"ok": true, "targets": channelTargetListBenchTargets(targets), "limit": 50, "offset": 0, "returned": len(targets), "has_more": hasMore, "next_offset": 50})
+			if err != nil {
+				b.Fatalf("marshal target page: %v", err)
+			}
+			rows = len(targets)
+			jsonBytes = len(payload)
+		}
+		b.ReportMetric(float64(rows), "rows/op")
+		b.ReportMetric(float64(jsonBytes), "json_bytes/op")
+		b.ReportMetric(float64(sqlElapsed.Nanoseconds())/float64(b.N), "sql_ns/op")
+	})
+}
+
+type channelTargetListBenchTarget struct {
+	ProjectID      string `json:"project_id"`
+	Platform       string `json:"platform"`
+	TargetKind     string `json:"target_kind,omitempty"`
+	Name           string `json:"name,omitempty"`
+	TargetID       string `json:"target_id"`
+	ThreadID       string `json:"thread_id,omitempty"`
+	Home           bool   `json:"home"`
+	DefaultSubject string `json:"default_subject,omitempty"`
+}
+
+func channelTargetListBenchTargets(targets []models.ChannelTarget) []channelTargetListBenchTarget {
+	out := make([]channelTargetListBenchTarget, 0, len(targets))
+	for _, target := range targets {
+		out = append(out, channelTargetListBenchTarget{ProjectID: target.ProjectID, Platform: target.Platform, TargetKind: target.TargetKind, Name: target.Name, TargetID: target.TargetID, ThreadID: target.ThreadID, Home: target.Home, DefaultSubject: target.DefaultSubject})
+	}
+	return out
+}
+
 func BenchmarkChannelTargetRepoFindHomeLookup(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	projectID := "channel-target-bench-project"
@@ -302,6 +443,39 @@ func seedChannelTargetLookupFixture(t *testing.T, db *sql.DB, projectID string) 
 			VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
 			fmt.Sprintf("noise-%03d", i), projectID, platform, models.DefaultChannelTargetKind(platform), fmt.Sprintf("noise-%03d", i), fmt.Sprintf("T%03d", i), fmt.Sprintf("thread-%03d", i), time.Date(2024, 1, 5, 0, i%60, 0, 0, time.UTC).Format("2006-01-02 15:04:05")); err != nil {
 			t.Fatalf("seed noise target %d: %v", i, err)
+		}
+	}
+}
+
+func seedChannelTargetListBenchFixture(tb testing.TB, db *sql.DB, projectID string, rows int) {
+	tb.Helper()
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES (?, 'Channel Target List Bench', '', '')`, projectID); err != nil {
+		tb.Fatalf("seed list benchmark project: %v", err)
+	}
+	for i := 0; i < rows; i++ {
+		platform := "slack"
+		targetKind := "channel"
+		switch i % 4 {
+		case 0:
+			platform = "discord"
+		case 1:
+			platform = "email"
+			targetKind = "email"
+		case 2:
+			platform = "slack"
+		default:
+			platform = "telegram"
+			targetKind = "chat"
+		}
+		isHome := 0
+		if i%5000 == 0 {
+			isHome = 1
+		}
+		if _, err := db.Exec(`
+			INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("list-bench-target-%05d", i), projectID, platform, targetKind, fmt.Sprintf("target-%05d", i), fmt.Sprintf("DEST%05d", i), fmt.Sprintf("thread-%05d", i), isHome, fmt.Sprintf("Subject %05d", i), time.Date(2024, 1, 1, 0, 0, i%60, 0, time.UTC).Add(time.Duration(i)*time.Second).Format("2006-01-02 15:04:05")); err != nil {
+			tb.Fatalf("seed list benchmark target %d: %v", i, err)
 		}
 	}
 }
