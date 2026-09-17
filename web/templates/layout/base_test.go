@@ -50,6 +50,9 @@ func TestBaseReservesSymmetricRootScrollbarGutters(t *testing.T) {
 	if !strings.Contains(html, "scrollbar-gutter: stable both-edges;") {
 		t.Fatal("base layout must reserve symmetric root gutters so dialogs retain their horizontal center while leaving the top layer")
 	}
+	if !strings.Contains(html, ":root:has(:is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open]))") {
+		t.Fatal("base layout must override DaisyUI's higher-specificity open-modal scrollbar gutter rule")
+	}
 	if !strings.Contains(html, "DaisyUI uses width: 100%") || !strings.Contains(html, "fading close frame in the same viewport coordinate space. */\n\t\t\t\t\twidth: 100vw;") {
 		t.Fatal("native modal width must use viewport units so Chrome retains its horizontal center while leaving the top layer")
 	}
