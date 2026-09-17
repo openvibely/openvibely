@@ -121,35 +121,6 @@ func TestOAuthRefreshServiceRunOnceAdoptsVerifiedAnthropicPrincipal(t *testing.T
 	}
 }
 
-func TestOAuthRefreshServiceRunOnceLinksReconnectRequiredAnthropicModelsToOnlyHealthyAccount(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	repo := repository.NewLLMConfigRepo(db)
-	ctx := context.Background()
-	healthy := &models.LLMConfig{Name: "Healthy", Provider: models.ProviderAnthropic, Model: "claude-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "healthy-access", OAuthRefreshToken: "healthy-refresh", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()}
-	stale := &models.LLMConfig{Name: "Reconnect required", Provider: models.ProviderAnthropic, Model: "claude-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-access", OAuthRefreshToken: "expired-refresh", OAuthNeedsReauth: true}
-	for _, cfg := range []*models.LLMConfig{healthy, stale} {
-		if err := repo.Create(ctx, cfg); err != nil {
-			t.Fatalf("create %s: %v", cfg.Name, err)
-		}
-	}
-
-	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
-	worker.SetAnthropicIdentityResolver(func(context.Context, string) (AnthropicOAuthIdentity, error) {
-		return AnthropicOAuthIdentity{AccountID: "organization:shared", DisplayName: "Dubee", PrincipalHash: "verified-dubee"}, nil
-	})
-	if err := worker.RunOnce(ctx); err != nil {
-		t.Fatalf("RunOnce: %v", err)
-	}
-
-	loaded, err := repo.GetByID(ctx, stale.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.OAuthConnectionID != healthy.OAuthConnectionID || loaded.OAuthNeedsReauth || loaded.OAuthAccessToken != "healthy-access" {
-		t.Fatalf("reconnect-required model was not linked to the only healthy account: %#v", loaded)
-	}
-}
-
 func TestOAuthRefreshServiceRunOnceAdoptsVerifiedOpenAIPrincipal(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
@@ -200,6 +171,42 @@ func TestOAuthRefreshServiceRunOnceAdoptsVerifiedOpenAIPrincipal(t *testing.T) {
 	}
 	if len(connections) != 2 {
 		t.Fatalf("connections = %d, want 2", len(connections))
+	}
+}
+
+func TestOAuthRefreshServiceRunOnceLinksExpiredOpenAIJWTWithMatchingIdentity(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	sharedToken := openAITestJWT(`{"sub":"user-shared","chatgpt_account_id":"account-shared","email":"owner@example.com"}`)
+	differentToken := openAITestJWT(`{"sub":"user-other","chatgpt_account_id":"account-shared","email":"other@example.com"}`)
+	healthy := &models.LLMConfig{Name: "Codex 5.5", Provider: models.ProviderOpenAI, Model: "gpt-5.5-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: sharedToken, OAuthRefreshToken: "healthy-refresh", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()}
+	matchingExpired := &models.LLMConfig{Name: "Codex older", Provider: models.ProviderOpenAI, Model: "codex-old", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: sharedToken, OAuthRefreshToken: "expired-refresh", OAuthNeedsReauth: true}
+	differentExpired := &models.LLMConfig{Name: "Codex other user", Provider: models.ProviderOpenAI, Model: "codex-other", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: differentToken, OAuthRefreshToken: "other-expired-refresh", OAuthNeedsReauth: true}
+	for _, cfg := range []*models.LLMConfig{healthy, matchingExpired, differentExpired} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	matched, err := repo.GetByID(ctx, matchingExpired.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matched.OAuthConnectionID != healthy.OAuthConnectionID || matched.OAuthNeedsReauth || matched.OAuthAccessToken != sharedToken {
+		t.Fatalf("matching expired Codex model was not linked: %#v", matched)
+	}
+	different, err := repo.GetByID(ctx, differentExpired.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if different.OAuthConnectionID != differentExpired.OAuthConnectionID || !different.OAuthNeedsReauth {
+		t.Fatalf("different Codex identity was linked: %#v", different)
 	}
 }
 

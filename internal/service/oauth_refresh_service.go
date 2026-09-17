@@ -173,5 +173,24 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 			}
 		}
 	}
+	if s.openAIIdentity != nil {
+		staleConfigs, staleErr := s.repo.ListUnrefreshableOpenAIOAuth(ctx)
+		if staleErr != nil {
+			refreshErrors = append(refreshErrors, staleErr)
+		} else {
+			for _, stale := range staleConfigs {
+				identity := s.openAIIdentity(stale.OAuthAccessToken)
+				if identity.PrincipalHash == "" {
+					continue
+				}
+				_, adoptErr := s.repo.AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(
+					ctx, stale.ID, stale.OAuthConnectionID, stale.OAuthConfigRevision, identity.PrincipalHash,
+				)
+				if adoptErr != nil {
+					refreshErrors = append(refreshErrors, adoptErr)
+				}
+			}
+		}
+	}
 	return errors.Join(refreshErrors...)
 }
