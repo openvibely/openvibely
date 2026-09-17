@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
@@ -1811,8 +1811,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
@@ -2260,8 +2260,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
@@ -2596,8 +2596,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
@@ -2653,6 +2653,42 @@ func TestMigration193BackfillsSafeOAuthDisplayNameWithoutInferringPrincipal(t *t
 	}
 	if testColumnExists(t, db, "oauth_connections", "oauth_provider_display_name") || testColumnExists(t, db, "oauth_connections", "oauth_principal_hash") {
 		t.Fatal("migration 193 rollback retained provider identity columns")
+	}
+}
+
+func TestMigration194RequiresFreshVerificationForExistingOAuthPrincipals(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "oauth-principal-verification.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 193); err != nil {
+		t.Fatalf("migrate to 193: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO oauth_connections (id, provider, name, oauth_access_token, oauth_refresh_token, oauth_principal_hash)
+		VALUES ('openai-legacy', 'openai', 'Legacy OpenAI', 'access', 'refresh', 'unverified-hash'),
+		       ('anthropic-legacy', 'anthropic', 'Legacy Anthropic', 'access', 'refresh', 'unverified-hash')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 194); err != nil {
+		t.Fatalf("migrate to 194: %v", err)
+	}
+	for _, id := range []string{"openai-legacy", "anthropic-legacy"} {
+		var verified bool
+		if err := db.QueryRow(`SELECT oauth_principal_verified FROM oauth_connections WHERE id = ?`, id).Scan(&verified); err != nil {
+			t.Fatal(err)
+		}
+		if verified {
+			t.Fatalf("legacy principal %q was trusted without fresh verification", id)
+		}
+	}
+	if err := goose.DownTo(db, ".", 193); err != nil {
+		t.Fatalf("rollback to 193: %v", err)
+	}
+	if testColumnExists(t, db, "oauth_connections", "oauth_principal_verified") {
+		t.Fatal("migration 194 rollback retained principal verification column")
 	}
 }
 
