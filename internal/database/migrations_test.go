@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 194 {
-		t.Fatalf("max goose version = %d, want 194", maxVersion)
+	if maxVersion != 195 {
+		t.Fatalf("max goose version = %d, want 195", maxVersion)
 	}
 }
 
@@ -1664,8 +1664,8 @@ func TestMigration174UsesOrderedTaskDiscoveryAccessPath(t *testing.T) {
 	}
 }
 
-func TestMigration194_ChannelTargetListOrderIndex(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "channel-target-list-order-194.db")
+func TestMigration195_ChannelTargetListOrderIndex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "channel-target-list-order-195.db")
 	db := openMigrationTestDB(t, dbPath)
 
 	goose.SetBaseFS(migrations.FS)
@@ -1677,7 +1677,7 @@ func TestMigration194_ChannelTargetListOrderIndex(t *testing.T) {
 	}
 	if _, err := db.Exec(`
 		INSERT INTO projects(id, name, description, repo_path)
-		VALUES('channel-target-list-order-project-194', 'Channel target list order', '', '');
+		VALUES('channel-target-list-order-project-195', 'Channel target list order', '', '');
 		WITH RECURSIVE seq(n) AS (
 			SELECT 1
 			UNION ALL
@@ -1685,8 +1685,8 @@ func TestMigration194_ChannelTargetListOrderIndex(t *testing.T) {
 		)
 		INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
 		SELECT
-			'channel-target-list-order-194-' || printf('%05d', n),
-			'channel-target-list-order-project-194',
+			'channel-target-list-order-195-' || printf('%05d', n),
+			'channel-target-list-order-project-195',
 			CASE n % 4 WHEN 0 THEN 'discord' WHEN 1 THEN 'email' WHEN 2 THEN 'slack' ELSE 'telegram' END,
 			CASE n % 4 WHEN 1 THEN 'email' WHEN 3 THEN 'chat' ELSE 'channel' END,
 			'name-' || printf('%05d', n),
@@ -1706,28 +1706,28 @@ func TestMigration194_ChannelTargetListOrderIndex(t *testing.T) {
 		WHERE project_id = ?
 		ORDER BY platform ASC, is_home DESC, name ASC, target_id ASC
 		LIMIT ? OFFSET ?`
-	before := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-194", 50, 0)
+	before := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-195", 50, 0)
 	if !strings.Contains(before, "USE TEMP B-TREE") {
-		t.Fatalf("pre-194 channel target page plan = %q, want temporary sort baseline", before)
+		t.Fatalf("pre-195 channel target page plan = %q, want temporary sort baseline", before)
 	}
 
-	if err := goose.UpTo(db, ".", 194); err != nil {
+	if err := goose.UpTo(db, ".", 195); err != nil {
 		t.Fatalf("apply channel target list order index migration: %v", err)
 	}
-	after := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-194", 50, 0)
+	after := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-195", 50, 0)
 	if strings.Contains(after, "USE TEMP B-TREE") {
-		t.Fatalf("post-194 channel target page plan = %q, want no temporary sort", after)
+		t.Fatalf("post-195 channel target page plan = %q, want no temporary sort", after)
 	}
 	if !strings.Contains(after, "idx_channel_targets_project_list_order") || !strings.Contains(after, "project_id=?") {
-		t.Fatalf("post-194 channel target page plan = %q, want list-order index", after)
+		t.Fatalf("post-195 channel target page plan = %q, want list-order index", after)
 	}
 
 	if err := goose.DownTo(db, ".", 193); err != nil {
 		t.Fatalf("roll back channel target list order index migration: %v", err)
 	}
-	afterDown := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-194", 50, 0)
+	afterDown := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-195", 50, 0)
 	if !strings.Contains(afterDown, "USE TEMP B-TREE") {
-		t.Fatalf("post-194-down channel target page plan = %q, want temporary sort restored", afterDown)
+		t.Fatalf("post-195-down channel target page plan = %q, want temporary sort restored", afterDown)
 	}
 }
 
@@ -1878,8 +1878,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 194 {
-		t.Fatalf("max goose version = %d, want 194", maxVersion)
+	if maxVersion != 195 {
+		t.Fatalf("max goose version = %d, want 195", maxVersion)
 	}
 }
 
@@ -2327,8 +2327,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 194 {
-		t.Fatalf("max goose version = %d, want 194", maxVersion)
+	if maxVersion != 195 {
+		t.Fatalf("max goose version = %d, want 195", maxVersion)
 	}
 }
 
@@ -2663,8 +2663,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 194 {
-		t.Fatalf("max goose version = %d, want 194", maxVersion)
+	if maxVersion != 195 {
+		t.Fatalf("max goose version = %d, want 195", maxVersion)
 	}
 }
 
