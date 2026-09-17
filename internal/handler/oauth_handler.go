@@ -676,15 +676,11 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	profileDisplayName := ""
 	principalHash := ""
 	if flow.Provider == models.ProviderOpenAI {
-		identity := service.ResolveOpenAIOAuthIdentity(tokenResult.IDToken)
-		accessIdentity := service.ResolveOpenAIOAuthIdentity(tokenResult.AccessToken)
-		if identity.AccountID == "" || (identity.PrincipalHash == "" && identity.AccountID == accessIdentity.AccountID) {
-			if identity.DisplayName != "" && accessIdentity.DisplayName == "" {
-				accessIdentity.DisplayName = identity.DisplayName
-			}
-			identity = accessIdentity
-		} else if identity.DisplayName == "" {
-			identity.DisplayName = accessIdentity.DisplayName
+		identityCtx, cancelIdentity := context.WithTimeout(context.Background(), 10*time.Second)
+		identity, identityErr := h.resolveConsistentOpenAIOAuthIdentity(identityCtx, tokenResult.IDToken, tokenResult.AccessToken)
+		cancelIdentity()
+		if identityErr != nil {
+			return 0, identityErr
 		}
 		accountID = identity.AccountID
 		profileDisplayName = identity.DisplayName
@@ -992,8 +988,32 @@ func (h *Handler) OAuthStatus(c echo.Context) error {
 	})
 }
 
-func extractOpenAIAccountIDFromIDToken(idToken string) string {
-	return service.ResolveOpenAIOAuthIdentity(idToken).AccountID
+func (h *Handler) resolveConsistentOpenAIOAuthIdentity(ctx context.Context, idToken, accessToken string) (service.OpenAIOAuthIdentity, error) {
+	if h.openAIIdentityResolver == nil {
+		return service.OpenAIOAuthIdentity{}, nil
+	}
+	resolve := func(token string) (service.OpenAIOAuthIdentity, bool) {
+		if strings.TrimSpace(token) == "" {
+			return service.OpenAIOAuthIdentity{}, false
+		}
+		identity, err := h.openAIIdentityResolver(ctx, token)
+		return identity, err == nil && identity.PrincipalHash != ""
+	}
+	idIdentity, idOK := resolve(idToken)
+	accessIdentity, accessOK := resolve(accessToken)
+	if idOK && accessOK && idIdentity.PrincipalHash != accessIdentity.PrincipalHash {
+		return service.OpenAIOAuthIdentity{}, fmt.Errorf("OpenAI OAuth identity claims were inconsistent")
+	}
+	if idOK {
+		if idIdentity.DisplayName == "" && accessOK {
+			idIdentity.DisplayName = accessIdentity.DisplayName
+		}
+		return idIdentity, nil
+	}
+	if accessOK {
+		return accessIdentity, nil
+	}
+	return service.OpenAIOAuthIdentity{}, nil
 }
 
 // buildTokenExchangeBody constructs the token exchange request body and content type.

@@ -123,6 +123,18 @@ func TestOpenAIOAuthCallbackPersistsIdentityAndAdoptsVerifiedSameUserAndAccount(
 	defer server.Close()
 
 	h, _, repo := setupTestHandler(t)
+	h.openAIIdentityResolver = func(_ context.Context, token string) (service.OpenAIOAuthIdentity, error) {
+		for suffix, payload := range identities {
+			expected := "header." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".signature"
+			if token == expected {
+				if suffix == "c" {
+					return service.OpenAIOAuthIdentity{AccountID: "account-shared", DisplayName: "other@example.com", PrincipalHash: "user-other"}, nil
+				}
+				return service.OpenAIOAuthIdentity{AccountID: "account-shared", DisplayName: "owner@example.com", PrincipalHash: "user-shared"}, nil
+			}
+		}
+		return service.OpenAIOAuthIdentity{}, nil
+	}
 	var configs []*models.LLMConfig
 	for _, suffix := range []string{"a", "b", "c"} {
 		cfg := &models.LLMConfig{
@@ -164,6 +176,18 @@ func TestOpenAIOAuthCallbackPersistsIdentityAndAdoptsVerifiedSameUserAndAccount(
 	require.NoError(t, err)
 	require.Len(t, connections, 2)
 	require.ElementsMatch(t, []string{"owner@example.com", "other@example.com"}, []string{connections[0].Name, connections[1].Name})
+}
+
+func TestResolveConsistentOpenAIOAuthIdentityRejectsTokenMismatch(t *testing.T) {
+	h := &Handler{openAIIdentityResolver: func(_ context.Context, token string) (service.OpenAIOAuthIdentity, error) {
+		if token == "id-token" {
+			return service.OpenAIOAuthIdentity{AccountID: "account", PrincipalHash: "user-a"}, nil
+		}
+		return service.OpenAIOAuthIdentity{AccountID: "account", PrincipalHash: "user-b"}, nil
+	}}
+	if _, err := h.resolveConsistentOpenAIOAuthIdentity(context.Background(), "id-token", "access-token"); err == nil {
+		t.Fatal("accepted inconsistent ID and access token identities")
+	}
 }
 
 func TestStandardOAuthCallbackClearsStaleAccountIdentityWhenNewIdentityIsUnavailable(t *testing.T) {
@@ -2445,77 +2469,6 @@ func Test_OAuthFlowCleanup(t *testing.T) {
 
 	require.False(t, oldExists, "Old flow should have been cleaned up")
 	require.True(t, recentExists, "Recent flow should still exist")
-}
-
-func Test_extractOpenAIAccountIDFromIDToken(t *testing.T) {
-	t.Run("extracts account ID from auth claim", func(t *testing.T) {
-		// Create a minimal JWT with account ID in auth claim
-		payload := `{"https://api.openai.com/auth":{"chatgpt_account_id":"test-account-123"}}`
-		encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
-		idToken := "header." + encoded + ".signature"
-
-		accountID := extractOpenAIAccountIDFromIDToken(idToken)
-		require.Equal(t, "test-account-123", accountID)
-	})
-
-	t.Run("extracts account ID from top-level claim", func(t *testing.T) {
-		// Create a minimal JWT with account ID at top level
-		payload := `{"chatgpt_account_id":"test-account-456"}`
-		encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
-		idToken := "header." + encoded + ".signature"
-
-		accountID := extractOpenAIAccountIDFromIDToken(idToken)
-		require.Equal(t, "test-account-456", accountID)
-	})
-
-	t.Run("prefers auth claim over top-level", func(t *testing.T) {
-		// Create a JWT with account ID in both locations
-		payload := `{"https://api.openai.com/auth":{"chatgpt_account_id":"auth-account"},"chatgpt_account_id":"top-level-account"}`
-		encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
-		idToken := "header." + encoded + ".signature"
-
-		accountID := extractOpenAIAccountIDFromIDToken(idToken)
-		require.Equal(t, "auth-account", accountID)
-	})
-
-	t.Run("returns empty for invalid JWT format", func(t *testing.T) {
-		testCases := []string{
-			"",                     // empty token
-			"invalid",              // no parts
-			"only.two",             // only 2 parts
-			"four.parts.not.three", // 4 parts
-			"header..signature",    // empty payload
-		}
-
-		for _, tc := range testCases {
-			accountID := extractOpenAIAccountIDFromIDToken(tc)
-			require.Empty(t, accountID, "Should return empty for token: %s", tc)
-		}
-	})
-
-	t.Run("returns empty for invalid base64", func(t *testing.T) {
-		idToken := "header.!!!invalid-base64!!!.signature"
-		accountID := extractOpenAIAccountIDFromIDToken(idToken)
-		require.Empty(t, accountID)
-	})
-
-	t.Run("returns empty for invalid JSON", func(t *testing.T) {
-		payload := `{invalid json`
-		encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
-		idToken := "header." + encoded + ".signature"
-
-		accountID := extractOpenAIAccountIDFromIDToken(idToken)
-		require.Empty(t, accountID)
-	})
-
-	t.Run("returns empty when no account ID present", func(t *testing.T) {
-		payload := `{"sub":"user123","exp":1234567890}`
-		encoded := base64.RawURLEncoding.EncodeToString([]byte(payload))
-		idToken := "header." + encoded + ".signature"
-
-		accountID := extractOpenAIAccountIDFromIDToken(idToken)
-		require.Empty(t, accountID)
-	})
 }
 
 func Test_resolveOAuthExpiryAt(t *testing.T) {

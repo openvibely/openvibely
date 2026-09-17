@@ -351,6 +351,7 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 		WHERE provider = ? AND id != ? AND oauth_principal_hash = ?
 		  AND oauth_needs_reauth = 0
 		  AND oauth_access_token != '' AND oauth_refresh_token != ''
+		  AND oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
 		ORDER BY id`, models.ProviderOpenAI, sourceID, principalHash)
 	if err != nil {
 		return false, fmt.Errorf("finding matching healthy OpenAI OAuth connection: %w", err)

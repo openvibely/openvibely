@@ -137,11 +137,11 @@ func TestOAuthRefreshServiceRunOnceAdoptsVerifiedOpenAIPrincipal(t *testing.T) {
 	}
 
 	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
-	worker.SetOpenAIIdentityResolver(func(token string) OpenAIOAuthIdentity {
+	worker.SetOpenAIIdentityResolver(func(_ context.Context, token string) (OpenAIOAuthIdentity, error) {
 		if token == "access-c" {
-			return OpenAIOAuthIdentity{AccountID: "account-other", DisplayName: "other@example.com", PrincipalHash: "other-user-account"}
+			return OpenAIOAuthIdentity{AccountID: "account-other", DisplayName: "other@example.com", PrincipalHash: "other-user-account"}, nil
 		}
-		return OpenAIOAuthIdentity{AccountID: "account-shared", DisplayName: "owner@example.com", PrincipalHash: "same-user-account"}
+		return OpenAIOAuthIdentity{AccountID: "account-shared", DisplayName: "owner@example.com", PrincipalHash: "same-user-account"}, nil
 	})
 	if err := worker.RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce: %v", err)
@@ -190,6 +190,12 @@ func TestOAuthRefreshServiceRunOnceLinksExpiredOpenAIJWTWithMatchingIdentity(t *
 	}
 
 	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	worker.SetOpenAIIdentityResolver(func(_ context.Context, token string) (OpenAIOAuthIdentity, error) {
+		if token == differentToken {
+			return OpenAIOAuthIdentity{AccountID: "account-shared", PrincipalHash: "different-user"}, nil
+		}
+		return OpenAIOAuthIdentity{AccountID: "account-shared", PrincipalHash: "shared-user"}, nil
+	})
 	if err := worker.RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
