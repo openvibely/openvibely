@@ -2873,6 +2873,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					document.body.appendChild(panel);
 				}
 				panel.style.setProperty('display', 'block', 'important');
+				// The portal lives outside the menu's normal CSS context. Normalize
+				// geometry-affecting styles so placement does not depend on a reset
+				// stylesheet loading before the submenu opens.
+				panel.style.boxSizing = 'border-box';
+				panel.style.margin = '0';
+				panel.style.right = 'auto';
+				panel.style.bottom = 'auto';
+				panel.style.transform = 'none';
 				const visibleTop = 0;
 				const visibleBottom = window.innerHeight;
 				const availableHeight = Math.max(0, visibleBottom - visibleTop - 16);
