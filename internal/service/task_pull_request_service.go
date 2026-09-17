@@ -208,15 +208,8 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 	if linkedPR == nil {
 		return nil, fmt.Errorf("linked pull request #%d was not found", existingPR.PRNumber)
 	}
-	expectedRepo := strings.TrimSpace(repoRef.FullName)
-	if expectedRepo == "" {
-		expectedRepo = strings.Trim(strings.TrimSpace(repoRef.Owner)+"/"+strings.TrimSpace(repoRef.Name), "/")
-	}
-	if expectedRepo == "" || !strings.EqualFold(strings.TrimSpace(linkedPR.HeadRepoFullName), expectedRepo) {
-		return nil, fmt.Errorf("linked pull request #%d head repository %q does not match project repository %q", existingPR.PRNumber, linkedPR.HeadRepoFullName, expectedRepo)
-	}
-	if strings.TrimSpace(linkedPR.HeadRef) != strings.TrimSpace(task.WorktreeBranch) {
-		return nil, fmt.Errorf("linked pull request #%d head branch %q does not match task worktree branch %q", existingPR.PRNumber, linkedPR.HeadRef, task.WorktreeBranch)
+	if err := ValidateTaskPullRequestLiveState(project, task, repoRef, linkedPR); err != nil {
+		return nil, err
 	}
 	replacementHead, err := replacer.ReplaceBranchHead(ctx, repoRef, GitHubReplaceBranchHeadRequest{
 		WorktreePath: task.WorktreePath,
