@@ -46,8 +46,12 @@ func TestBaseReservesSymmetricRootScrollbarGutters(t *testing.T) {
 	if err := Base("Tasks", nil, "default").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render Base: %v", err)
 	}
-	if !strings.Contains(buf.String(), "scrollbar-gutter: stable both-edges;") {
+	html := buf.String()
+	if !strings.Contains(html, "scrollbar-gutter: stable both-edges;") {
 		t.Fatal("base layout must reserve symmetric root gutters so dialogs retain their horizontal center while leaving the top layer")
+	}
+	if !strings.Contains(html, "DaisyUI uses width: 100%") || !strings.Contains(html, "fading close frame in the same viewport coordinate space. */\n\t\t\t\t\twidth: 100vw;") {
+		t.Fatal("native modal width must use viewport units so Chrome retains its horizontal center while leaving the top layer")
 	}
 }
 
