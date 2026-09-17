@@ -862,17 +862,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 
 						document.body.addEventListener('htmx:afterSwap', function(event) {
 							var target = event.detail.target;
-							if (target && target.getAttribute && target.getAttribute('data-task-thread-execution-bubble') === 'true') {
-								// outerHTML swaps can leave event.detail.target detached; resolve the
-								// live bubble by its stable execution ID before hydrating raw content.
-								var fullOutputBubble = target.id ? document.getElementById(target.id) : target;
-								var chatMessages = document.getElementById('task-thread-messages');
-								if (fullOutputBubble && chatMessages && chatMessages.contains(fullOutputBubble)) {
-									var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(fullOutputBubble) : Promise.resolve([]);
-									_finishTaskThreadRenderScroll(chatMessages, renderPromise);
-								}
-							}
-							else if (target && target.id === 'task-thread-messages') {
+							if (target && target.id === 'task-thread-messages') {
 								// Skip expensive DOM work if navigating away via sidebar
 								if (window._sidebarNavigating) return;
 								// Re-attach tracker if the DOM element changed before binding image load handlers.

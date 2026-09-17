@@ -3278,13 +3278,7 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	var executions []models.Execution
-	var hasEarlier bool
-	if isPoll && beforeExecID == "" {
-		executions, hasEarlier, err = h.loadTaskExecutionWindow(ctx, taskID, beforeExecID, limit)
-	} else {
-		executions, hasEarlier, err = h.loadTaskThreadExecutionWindow(ctx, taskID, beforeExecID, limit)
-	}
+	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, taskID, beforeExecID, limit)
 	if err != nil {
 		applog.Infof("[handler] GetTaskThread error loading executions: %v", err)
 		executions = []models.Execution{}
@@ -3440,19 +3434,7 @@ func (h *Handler) loadTaskExecutionHistoryWindow(ctx context.Context, taskID, be
 }
 
 func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
-	queryLimit := limit + 1
-	var rows []models.Execution
-	var err error
-	if beforeExecID != "" {
-		rows, err = h.execRepo.ListByTaskThreadChronologicalBefore(ctx, taskID, beforeExecID, queryLimit)
-	} else {
-		rows, err = h.execRepo.ListByTaskThreadChronologicalLimit(ctx, taskID, queryLimit)
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	visible, hasEarlier := trimExecutionWindow(rows, limit)
-	return visible, hasEarlier, nil
+	return h.loadTaskExecutionWindow(ctx, taskID, beforeExecID, limit)
 }
 
 func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
@@ -3499,42 +3481,4 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 		"task-thread-view",
 		task.ProjectID,
 	))
-}
-
-func (h *Handler) GetTaskThreadExecutionFullOutput(c echo.Context) error {
-	taskID := c.Param("taskId")
-	execID := c.Param("execId")
-	if taskID == "" || execID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "task and execution are required")
-	}
-
-	ctx := c.Request().Context()
-	task, err := h.taskSvc.GetByID(ctx, taskID)
-	if err != nil {
-		return err
-	}
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	// Scope the full payload read through both the requested task and its
-	// project before selecting any execution output.
-	exec, err := h.execRepo.GetByIDForTaskAndProject(ctx, execID, taskID, task.ProjectID)
-	if err != nil {
-		return err
-	}
-	if exec == nil || exec.TaskID != taskID {
-		return echo.NewHTTPError(http.StatusNotFound, "execution not found")
-	}
-
-	switch exec.Status {
-	case models.ExecCompleted:
-		return render(c, http.StatusOK, components.ChatBubbleThreadPreview("Assistant", exec.Output, false, false, taskID, exec.ID))
-	case models.ExecFailed:
-		return render(c, http.StatusOK, components.ChatBubbleErrorThreadPreview("Assistant", exec.ErrorMessage, exec.Output, false, false, taskID, exec.ID))
-	case models.ExecCancelled:
-		return render(c, http.StatusOK, components.ChatBubbleErrorThreadPreview("Assistant", "Cancelled", exec.Output, false, false, taskID, exec.ID))
-	default:
-		return render(c, http.StatusOK, components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "task-thread-messages", "task-thread-view"))
-	}
 }
