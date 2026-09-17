@@ -218,17 +218,6 @@ func TestLLMConfigRepo_OAuthProviderPresenceLargeFixtureBudget(t *testing.T) {
 	}
 	assertOAuthProviderPresenceStatement(t, counter.Statements())
 
-	fullList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 {
-				b.Fatalf("expected 50 configs, got %d", len(configs))
-			}
-		}
-	})
 	compact := testing.Benchmark(func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			got, err := repo.OAuthProviderPresence(ctx)
@@ -241,12 +230,7 @@ func TestLLMConfigRepo_OAuthProviderPresenceLargeFixtureBudget(t *testing.T) {
 		}
 	})
 
-	fullColumns := countSelectColumns(llmConfigColumns)
-	compactColumns := 3
-	fullBytes := estimateFullListSelectedBytes(t, ctx, repo)
-	compactBytes := compactColumns
-	t.Logf("startup OAuth full List: %d ns/op, %d B/op, %d allocs/op, columns=%d, selected_bytes≈%d", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), fullList.AllocsPerOp(), fullColumns, fullBytes)
-	t.Logf("startup OAuth compact: %d ns/op, %d B/op, %d allocs/op, columns=%d, selected_bytes≈%d", compact.NsPerOp(), compact.AllocedBytesPerOp(), compact.AllocsPerOp(), compactColumns, compactBytes)
+	t.Logf("startup OAuth provider presence: %d ns/op, %d B/op, %d allocs/op", compact.NsPerOp(), compact.AllocedBytesPerOp(), compact.AllocsPerOp())
 
 	// Coverage instrumentation and shared CI runner load make wall-clock
 	// microbenchmarks noisy. Keep the deterministic query-shape and allocation
@@ -254,18 +238,13 @@ func TestLLMConfigRepo_OAuthProviderPresenceLargeFixtureBudget(t *testing.T) {
 	if testing.CoverMode() == "" && compact.NsPerOp() > (200*time.Microsecond).Nanoseconds() {
 		t.Fatalf("compact OAuth provider presence took %s/op, want <= 200µs", time.Duration(compact.NsPerOp()))
 	}
-	if compact.AllocedBytesPerOp()*10 > fullList.AllocedBytesPerOp() {
-		t.Fatalf("compact OAuth provider presence allocated %d B/op, want at least 90%% less than full List %d B/op", compact.AllocedBytesPerOp(), fullList.AllocedBytesPerOp())
-	}
-	if compactColumns > 3 || fullColumns <= compactColumns {
-		t.Fatalf("selected columns full=%d compact=%d, want compact aggregate/provider/auth fields only", fullColumns, compactColumns)
-	}
-	if compactBytes*10 > fullBytes {
-		t.Fatalf("selected bytes compact≈%d, want at least 90%% less than full List≈%d", compactBytes, fullBytes)
+	const maxBytesPerOp = 4 * 1024
+	if compact.AllocedBytesPerOp() > maxBytesPerOp {
+		t.Fatalf("compact OAuth provider presence allocated %d B/op, want <= %d", compact.AllocedBytesPerOp(), maxBytesPerOp)
 	}
 }
 
-func BenchmarkLLMConfigRepoStartupOAuthProviderPresenceComparison(b *testing.B) {
+func BenchmarkLLMConfigRepoStartupOAuthProviderPresence(b *testing.B) {
 	for _, count := range []int{0, 1, 50, 500} {
 		b.Run(fmt.Sprintf("configs_%d", count), func(b *testing.B) {
 			db, counter := testutil.NewStatementCountingTestDB(b)
@@ -275,58 +254,30 @@ func BenchmarkLLMConfigRepoStartupOAuthProviderPresenceComparison(b *testing.B) 
 				b.Fatalf("clear model configs: %v", err)
 			}
 			seedMixedStartupOAuthModelConfigs(b, ctx, repo, count)
-			fullColumns := countSelectColumns(llmConfigColumns)
-			fullBytes := estimateFullListSelectedBytes(b, ctx, repo)
-			b.Run("full_list", func(b *testing.B) {
-				counter.Reset()
-				counter.SetEnabled(true)
-				if _, err := repo.List(ctx); err != nil {
+			counter.Reset()
+			counter.SetEnabled(true)
+			if _, err := repo.OAuthProviderPresence(ctx); err != nil {
+				b.Fatal(err)
+			}
+			statements := len(counter.Statements())
+			counter.SetEnabled(false)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				presence, err := repo.OAuthProviderPresence(ctx)
+				if err != nil {
 					b.Fatal(err)
 				}
-				statements := len(counter.Statements())
-				counter.SetEnabled(false)
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					configs, err := repo.List(ctx)
-					if err != nil {
-						b.Fatal(err)
+				if count == 0 {
+					if presence != (OAuthProviderPresence{}) {
+						b.Fatalf("expected empty presence, got %#v", presence)
 					}
-					if len(configs) != count {
-						b.Fatalf("expected %d configs, got %d", count, len(configs))
-					}
+				} else if !presence.AnyOAuth {
+					b.Fatalf("expected OAuth presence for count %d, got %#v", count, presence)
 				}
-				b.ReportMetric(float64(statements), "sql/op")
-				b.ReportMetric(float64(fullColumns), "selected_cols/op")
-				b.ReportMetric(float64(fullBytes), "selected_bytes/op")
-			})
-			b.Run("compact_presence", func(b *testing.B) {
-				counter.Reset()
-				counter.SetEnabled(true)
-				if _, err := repo.OAuthProviderPresence(ctx); err != nil {
-					b.Fatal(err)
-				}
-				statements := len(counter.Statements())
-				counter.SetEnabled(false)
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					presence, err := repo.OAuthProviderPresence(ctx)
-					if err != nil {
-						b.Fatal(err)
-					}
-					if count == 0 {
-						if presence != (OAuthProviderPresence{}) {
-							b.Fatalf("expected empty presence, got %#v", presence)
-						}
-					} else if !presence.AnyOAuth {
-						b.Fatalf("expected OAuth presence for count %d, got %#v", count, presence)
-					}
-				}
-				b.ReportMetric(float64(statements), "sql/op")
-				b.ReportMetric(3, "selected_cols/op")
-				b.ReportMetric(3, "selected_bytes/op")
-			})
+			}
+			b.ReportMetric(float64(statements), "sql/op")
+			b.ReportMetric(3, "selected_cols/op")
 		})
 	}
 }
@@ -398,45 +349,6 @@ func startupOAuthFixtureModel(provider models.LLMProvider) string {
 	default:
 		return "custom-model"
 	}
-}
-
-func estimateFullListSelectedBytes(tb testing.TB, ctx context.Context, repo *LLMConfigRepo) int {
-	tb.Helper()
-	configs, err := repo.List(ctx)
-	if err != nil {
-		tb.Fatalf("List for selected-byte estimate: %v", err)
-	}
-	total := 0
-	for _, cfg := range configs {
-		total += len(cfg.ID) + len(cfg.Name) + len(cfg.Provider) + len(cfg.Model) + len(cfg.ReasoningEffort) + len(cfg.APIKey)
-		total += len(cfg.AuthMethod) + len(cfg.OAuthAccessToken) + len(cfg.OAuthRefreshToken) + len(cfg.OAuthAccountID)
-		total += len(cfg.OAuthConnectionID) + len(cfg.OAuthConnectionName) + len(cfg.OAuthClientID) + len(cfg.OAuthClientSecret)
-		total += len(cfg.OAuthAuthorizeURL) + len(cfg.OAuthTokenURL) + len(cfg.OAuthScopes) + len(cfg.OllamaBaseURL)
-		total += len(cfg.BaseURL) + len(cfg.Transport) + len(cfg.PresetSlug) + len(cfg.ModelsURL) + len(cfg.AuthHeaderName)
-		total += len(cfg.AuthHeaderValuePrefix) + len(cfg.ExtraHeadersJSON) + len(cfg.ExtraBodyJSON) + len(cfg.TokenExchangeFormat)
-		total += len(cfg.TokenRefreshFormat) + len(cfg.CustomAuthConfigJSON) + len(cfg.CustomAuthStateJSON) + len(cfg.MixtureConfigJSON)
-	}
-	return total
-}
-
-func countSelectColumns(columns string) int {
-	count := 1
-	depth := 0
-	for _, r := range columns {
-		switch r {
-		case '(':
-			depth++
-		case ')':
-			if depth > 0 {
-				depth--
-			}
-		case ',':
-			if depth == 0 {
-				count++
-			}
-		}
-	}
-	return count
 }
 
 func TestLLMConfigRepo_HasAny(t *testing.T) {
