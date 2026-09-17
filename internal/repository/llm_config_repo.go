@@ -246,13 +246,21 @@ func (r *LLMConfigRepo) ListRefreshableOAuth(ctx context.Context) ([]models.LLMC
 	return configs, rows.Err()
 }
 
+type UnrefreshableOpenAIOAuth struct {
+	models.LLMConfig
+	PrincipalHash     string
+	PrincipalVerified bool
+}
+
 // ListUnrefreshableOpenAIOAuth returns one representative model for legacy
-// Codex connections whose stored access JWT may still identify their owner.
-func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]models.LLMConfig, error) {
+// Codex connections whose stored access JWT or previously verified principal
+// may still identify their owner.
+func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]UnrefreshableOpenAIOAuth, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT a.id, a.name, a.provider, a.model, a.auth_method,
 		        c.oauth_access_token, c.oauth_refresh_token, c.oauth_expires_at,
-		        c.oauth_account_id, c.oauth_needs_reauth, c.oauth_revision, c.id
+		        c.oauth_account_id, c.oauth_needs_reauth, c.oauth_revision, c.id,
+		        c.oauth_principal_hash, c.oauth_principal_verified
 		 FROM oauth_connections c
 		 JOIN agent_configs a ON a.id = (
 		   SELECT linked.id FROM agent_configs linked
@@ -267,12 +275,13 @@ func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]mod
 		return nil, fmt.Errorf("listing unrefreshable OpenAI OAuth connections: %w", err)
 	}
 	defer rows.Close()
-	var configs []models.LLMConfig
+	var configs []UnrefreshableOpenAIOAuth
 	for rows.Next() {
-		var cfg models.LLMConfig
+		var cfg UnrefreshableOpenAIOAuth
 		if err := rows.Scan(&cfg.ID, &cfg.Name, &cfg.Provider, &cfg.Model, &cfg.AuthMethod,
 			&cfg.OAuthAccessToken, &cfg.OAuthRefreshToken, &cfg.OAuthExpiresAt,
-			&cfg.OAuthAccountID, &cfg.OAuthNeedsReauth, &cfg.OAuthConfigRevision, &cfg.OAuthConnectionID); err != nil {
+			&cfg.OAuthAccountID, &cfg.OAuthNeedsReauth, &cfg.OAuthConfigRevision, &cfg.OAuthConnectionID,
+			&cfg.PrincipalHash, &cfg.PrincipalVerified); err != nil {
 			return nil, fmt.Errorf("scanning unrefreshable OpenAI OAuth connection: %w", err)
 		}
 		configs = append(configs, cfg)
@@ -1019,7 +1028,7 @@ func (r *LLMConfigRepo) UpdateStandardOAuthConnectionIfRevision(ctx context.Cont
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE oauth_connections
 			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
-			     oauth_provider_display_name = '', oauth_principal_hash = '',
+			     oauth_provider_display_name = '', oauth_principal_hash = '', oauth_principal_verified = 0,
 			     oauth_needs_reauth = 0, oauth_revision = oauth_revision + 1, updated_at = datetime('now')
 		 WHERE id = (SELECT oauth_connection_id FROM agent_configs WHERE id = ? AND provider = ? AND auth_method = ?)
 		   AND provider = ? AND oauth_revision = ?`,

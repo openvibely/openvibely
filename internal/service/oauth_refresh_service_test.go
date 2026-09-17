@@ -216,6 +216,37 @@ func TestOAuthRefreshServiceRunOnceLinksExpiredOpenAIJWTWithMatchingIdentity(t *
 	}
 }
 
+func TestOAuthRefreshServiceRunOnceUsesPersistedVerifiedOpenAIPrincipalAfterKeyRetirement(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	healthy := &models.LLMConfig{Name: "Current Codex", Provider: models.ProviderOpenAI, Model: "codex-current", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "current-token", OAuthRefreshToken: "current-refresh", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()}
+	stale := &models.LLMConfig{Name: "Old Codex", Provider: models.ProviderOpenAI, Model: "codex-old", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "retired-key-token", OAuthRefreshToken: "old-refresh", OAuthNeedsReauth: true}
+	for _, cfg := range []*models.LLMConfig{healthy, stale} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE oauth_connections SET oauth_principal_hash = 'persisted-verified-principal', oauth_principal_verified = 1 WHERE id IN (?, ?)`, healthy.OAuthConnectionID, stale.OAuthConnectionID); err != nil {
+		t.Fatal(err)
+	}
+
+	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	worker.SetOpenAIIdentityResolver(func(_ context.Context, _ string) (OpenAIOAuthIdentity, error) {
+		return OpenAIOAuthIdentity{}, errors.New("signing key retired")
+	})
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.GetByID(ctx, stale.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OAuthConnectionID != healthy.OAuthConnectionID || loaded.OAuthNeedsReauth {
+		t.Fatalf("persisted verified principal was not adopted: %#v", loaded)
+	}
+}
+
 func TestOAuthRefreshServiceRunOnceRefreshesEachExpiringConfigIndependently(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)

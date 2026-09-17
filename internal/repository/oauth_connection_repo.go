@@ -21,6 +21,7 @@ func scanOAuthConnection(row interface{ Scan(...any) error }, connection *models
 		&connection.ID, &connection.Provider, &connection.Name,
 		&connection.AccessToken, &connection.RefreshToken, &connection.ExpiresAt,
 		&connection.AccountID, &connection.ProviderDisplayName, &connection.PrincipalHash,
+		&connection.PrincipalVerified,
 		&connection.NeedsReauth, &connection.Revision,
 		&connection.CreatedAt, &connection.UpdatedAt, &connection.LinkedModels,
 	)
@@ -28,7 +29,7 @@ func scanOAuthConnection(row interface{ Scan(...any) error }, connection *models
 
 const oauthConnectionColumns = `c.id, c.provider, c.name,
 		c.oauth_access_token, c.oauth_refresh_token, c.oauth_expires_at,
-		c.oauth_account_id, c.oauth_provider_display_name, c.oauth_principal_hash,
+			c.oauth_account_id, c.oauth_provider_display_name, c.oauth_principal_hash, c.oauth_principal_verified,
 		c.oauth_needs_reauth, c.oauth_revision,
 	c.created_at, c.updated_at,
 	(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
@@ -50,7 +51,7 @@ const oauthConnectionSummaryColumns = `c.id, c.provider,
 			END
 		),
 			CASE WHEN c.oauth_access_token != '' THEN 'present' ELSE '' END, '', c.oauth_expires_at,
-			'', '', '', c.oauth_needs_reauth, 0,
+				'', '', '', 0, c.oauth_needs_reauth, 0,
 		c.created_at, c.updated_at,
 		(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
 
@@ -66,15 +67,15 @@ func (r *LLMConfigRepo) CreateOAuthConnection(ctx context.Context, connection *m
 		connection.Name = string(connection.Provider) + " account"
 	}
 	return queryRowBoundSQLite(ctx, r.db, `
-		INSERT INTO oauth_connections (
-			provider, name, oauth_access_token, oauth_refresh_token, oauth_expires_at,
-			oauth_account_id, oauth_provider_display_name, oauth_principal_hash,
-			oauth_needs_reauth, oauth_revision
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			INSERT INTO oauth_connections (
+				provider, name, oauth_access_token, oauth_refresh_token, oauth_expires_at,
+				oauth_account_id, oauth_provider_display_name, oauth_principal_hash, oauth_principal_verified,
+				oauth_needs_reauth, oauth_revision
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at, updated_at`,
 		connection.Provider, connection.Name, connection.AccessToken, connection.RefreshToken,
 		connection.ExpiresAt, connection.AccountID, connection.ProviderDisplayName,
-		connection.PrincipalHash, connection.NeedsReauth, connection.Revision,
+		connection.PrincipalHash, connection.PrincipalVerified, connection.NeedsReauth, connection.Revision,
 	).Scan(&connection.ID, &connection.CreatedAt, &connection.UpdatedAt)
 }
 
@@ -191,15 +192,15 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx co
 	principalHash = strings.TrimSpace(principalHash)
 	result, err := tx.ExecContext(ctx, `
 		UPDATE oauth_connections
-		SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
-			oauth_provider_display_name = ?, oauth_principal_hash = ?,
+			SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?,
+				oauth_provider_display_name = ?, oauth_principal_hash = ?, oauth_principal_verified = CASE WHEN ? != '' THEN 1 ELSE 0 END,
 			oauth_needs_reauth = 0, oauth_revision = oauth_revision + 1, updated_at = datetime('now')
 		WHERE id = ? AND provider = ? AND oauth_revision = ?
 		  AND EXISTS (
 			SELECT 1 FROM agent_configs
 			WHERE id = ? AND provider = ? AND auth_method = ? AND oauth_connection_id = oauth_connections.id
 		  )`, accessToken, refreshToken, expiresAt, accountID, displayName, principalHash,
-		connectionID, provider, expectedRevision, modelID, provider, models.AuthMethodOAuth)
+		principalHash, connectionID, provider, expectedRevision, modelID, provider, models.AuthMethodOAuth)
 	if err != nil {
 		return false, fmt.Errorf("conditionally replacing linked OAuth connection: %w", err)
 	}
@@ -233,12 +234,13 @@ func (r *LLMConfigRepo) UpdateLinkedOAuthConnectionProfileIfRevision(ctx context
 	principalHash = strings.TrimSpace(principalHash)
 	result, err := tx.ExecContext(ctx, `
 		UPDATE oauth_connections
-		SET oauth_account_id = ?, oauth_provider_display_name = ?, oauth_principal_hash = ?, updated_at = datetime('now')
+			SET oauth_account_id = ?, oauth_provider_display_name = ?, oauth_principal_hash = ?,
+				oauth_principal_verified = CASE WHEN ? != '' THEN 1 ELSE 0 END, updated_at = datetime('now')
 		WHERE id = ? AND provider = ? AND oauth_revision = ?
 		  AND EXISTS (
 			SELECT 1 FROM agent_configs
 			WHERE id = ? AND provider = ? AND auth_method = ? AND oauth_connection_id = oauth_connections.id
-		  )`, accountID, displayName, principalHash, connectionID, provider, expectedRevision,
+			  )`, accountID, displayName, principalHash, principalHash, connectionID, provider, expectedRevision,
 		modelID, provider, models.AuthMethodOAuth)
 	if err != nil {
 		return false, fmt.Errorf("conditionally updating linked OAuth connection profile: %w", err)
@@ -262,7 +264,7 @@ func adoptVerifiedOAuthPrincipalTx(ctx context.Context, tx *manualTx, canonicalI
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, oauth_revision
 		FROM oauth_connections
-		WHERE provider = ? AND oauth_principal_hash = ? AND id != ?
+			WHERE provider = ? AND oauth_principal_hash = ? AND oauth_principal_verified = 1 AND id != ?
 		ORDER BY id`, provider, principalHash, canonicalID)
 	if err != nil {
 		return fmt.Errorf("listing verified OAuth principal connections: %w", err)
@@ -307,9 +309,9 @@ func adoptVerifiedOAuthPrincipalTx(ctx context.Context, tx *manualTx, canonicalI
 	return nil
 }
 
-// AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches links an expired legacy
-// Codex connection to a healthy connection only when their decoded JWT identity
-// matches a provider-verified principal exactly.
+// AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches records freshly verified
+// ownership evidence for an expired Codex connection, then links it to a healthy
+// connection only when their provider-verified principals match exactly.
 func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx context.Context, modelID, sourceID string, expectedRevision int64, principalHash string) (bool, error) {
 	principalHash = strings.TrimSpace(principalHash)
 	if principalHash == "" {
@@ -340,6 +342,12 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 	if err != nil {
 		return false, fmt.Errorf("loading unrefreshable OpenAI OAuth connection: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE oauth_connections
+		SET oauth_principal_hash = ?, oauth_principal_verified = 1, updated_at = datetime('now')
+		WHERE id = ? AND provider = ? AND oauth_revision = ?`, principalHash, sourceID, models.ProviderOpenAI, sourceRevision); err != nil {
+		return false, fmt.Errorf("persisting verified OpenAI OAuth principal: %w", err)
+	}
 
 	type targetConnection struct {
 		id       string
@@ -348,7 +356,7 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, oauth_revision
 		FROM oauth_connections
-		WHERE provider = ? AND id != ? AND oauth_principal_hash = ?
+			WHERE provider = ? AND id != ? AND oauth_principal_hash = ? AND oauth_principal_verified = 1
 		  AND oauth_needs_reauth = 0
 		  AND oauth_access_token != '' AND oauth_refresh_token != ''
 		  AND oauth_expires_at > CAST(strftime('%s', 'now') AS INTEGER) * 1000
@@ -372,6 +380,9 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 		return false, err
 	}
 	if len(targets) != 1 {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	target := targets[0]
@@ -453,8 +464,8 @@ func (r *LLMConfigRepo) MarkLinkedOAuthConnectionNeedsReauthIfRevision(ctx conte
 func (r *LLMConfigRepo) DisconnectLinkedOAuthConnection(ctx context.Context, modelID, connectionID string, expectedRevision int64, provider models.LLMProvider) (bool, error) {
 	result, err := execBoundSQLite(ctx, r.db, `
 		UPDATE oauth_connections
-		SET oauth_access_token = '', oauth_refresh_token = '', oauth_expires_at = 0,
-			oauth_account_id = '', oauth_provider_display_name = '', oauth_principal_hash = '',
+			SET oauth_access_token = '', oauth_refresh_token = '', oauth_expires_at = 0,
+				oauth_account_id = '', oauth_provider_display_name = '', oauth_principal_hash = '', oauth_principal_verified = 0,
 			oauth_needs_reauth = 1,
 			oauth_revision = oauth_revision + 1, updated_at = datetime('now')
 		WHERE id = ? AND provider = ? AND oauth_revision = ?
