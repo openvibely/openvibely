@@ -178,9 +178,9 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionIfRevision(ctx context.Conte
 }
 
 // ReplaceLinkedOAuthConnectionWithProfileIfRevision atomically replaces one
-// connection generation and adopts other connections only when the provider has
-// supplied the same strong user/account principal. Organization and account-card
-// grouping identities are never used as credential-interchange evidence.
+// connection generation and adopts other connections when the provider has
+// supplied the same strong user/account principal. Anthropic reconnect-required
+// legacy connections may also be recovered when this is the sole healthy account.
 func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx context.Context, modelID, connectionID string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID, displayName, principalHash string) (bool, error) {
 	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
@@ -211,6 +211,9 @@ func (r *LLMConfigRepo) ReplaceLinkedOAuthConnectionWithProfileIfRevision(ctx co
 
 	if principalHash != "" {
 		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, expectedRevision+1, principalHash); err != nil {
+			return false, err
+		}
+		if err := adoptReconnectRequiredAnthropicConnectionsTx(ctx, tx, connectionID, provider, expectedRevision+1, accountID); err != nil {
 			return false, err
 		}
 	}
@@ -250,6 +253,9 @@ func (r *LLMConfigRepo) UpdateLinkedOAuthConnectionProfileIfRevision(ctx context
 	}
 	if principalHash != "" {
 		if err := adoptVerifiedOAuthPrincipalTx(ctx, tx, connectionID, provider, expectedRevision, principalHash); err != nil {
+			return false, err
+		}
+		if err := adoptReconnectRequiredAnthropicConnectionsTx(ctx, tx, connectionID, provider, expectedRevision, accountID); err != nil {
 			return false, err
 		}
 	}
@@ -303,6 +309,76 @@ func adoptVerifiedOAuthPrincipalTx(ctx context.Context, tx *manualTx, canonicalI
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_connections WHERE id = ? AND provider = ?`, source.id, provider); err != nil {
 			return fmt.Errorf("deleting adopted OAuth principal connection: %w", err)
+		}
+	}
+	return nil
+}
+
+// adoptReconnectRequiredAnthropicConnectionsTx recovers legacy models whose
+// credentials can no longer prove their user identity. It only does so when the
+// verified canonical connection is the sole healthy Anthropic connection. A
+// stale connection with a known, different organization remains isolated.
+func adoptReconnectRequiredAnthropicConnectionsTx(ctx context.Context, tx *manualTx, canonicalID string, provider models.LLMProvider, canonicalRevision int64, accountID string) error {
+	if provider != models.ProviderAnthropic {
+		return nil
+	}
+	var healthyConnections int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM oauth_connections
+		WHERE provider = ? AND oauth_needs_reauth = 0
+		  AND oauth_access_token != '' AND oauth_refresh_token != ''`, provider).Scan(&healthyConnections); err != nil {
+		return fmt.Errorf("counting healthy Anthropic OAuth connections: %w", err)
+	}
+	if healthyConnections != 1 {
+		return nil
+	}
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, oauth_revision
+		FROM oauth_connections
+		WHERE provider = ? AND id != ?
+		  AND oauth_needs_reauth = 1 AND oauth_principal_hash = ''
+		  AND (oauth_account_id = '' OR oauth_account_id = ?)
+		ORDER BY id`, provider, canonicalID, strings.TrimSpace(accountID))
+	if err != nil {
+		return fmt.Errorf("listing reconnect-required Anthropic OAuth connections: %w", err)
+	}
+	type sourceConnection struct {
+		id       string
+		revision int64
+	}
+	var sources []sourceConnection
+	for rows.Next() {
+		var source sourceConnection
+		if err := rows.Scan(&source.id, &source.revision); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning reconnect-required Anthropic OAuth connection: %w", err)
+		}
+		sources = append(sources, source)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, source := range sources {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE account_usage_snapshots
+			SET oauth_connection_id = ?,
+				oauth_config_revision = CASE WHEN oauth_config_revision = ? THEN ? ELSE -1 END
+			WHERE provider = ? AND oauth_connection_id = ?`, canonicalID, source.revision, canonicalRevision, provider, source.id); err != nil {
+			return fmt.Errorf("moving reconnect-required Anthropic OAuth snapshots: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE agent_configs SET oauth_connection_id = ?, updated_at = datetime('now')
+			WHERE provider = ? AND auth_method = ? AND oauth_connection_id = ?`, canonicalID, provider, models.AuthMethodOAuth, source.id); err != nil {
+			return fmt.Errorf("moving reconnect-required Anthropic OAuth models: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_connections WHERE id = ? AND provider = ?`, source.id, provider); err != nil {
+			return fmt.Errorf("deleting reconnect-required Anthropic OAuth connection: %w", err)
 		}
 	}
 	return nil

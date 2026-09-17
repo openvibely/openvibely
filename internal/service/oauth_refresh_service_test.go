@@ -121,6 +121,88 @@ func TestOAuthRefreshServiceRunOnceAdoptsVerifiedAnthropicPrincipal(t *testing.T
 	}
 }
 
+func TestOAuthRefreshServiceRunOnceLinksReconnectRequiredAnthropicModelsToOnlyHealthyAccount(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	healthy := &models.LLMConfig{Name: "Healthy", Provider: models.ProviderAnthropic, Model: "claude-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "healthy-access", OAuthRefreshToken: "healthy-refresh", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()}
+	stale := &models.LLMConfig{Name: "Reconnect required", Provider: models.ProviderAnthropic, Model: "claude-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-access", OAuthRefreshToken: "expired-refresh", OAuthNeedsReauth: true}
+	for _, cfg := range []*models.LLMConfig{healthy, stale} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	worker.SetAnthropicIdentityResolver(func(context.Context, string) (AnthropicOAuthIdentity, error) {
+		return AnthropicOAuthIdentity{AccountID: "organization:shared", DisplayName: "Dubee", PrincipalHash: "verified-dubee"}, nil
+	})
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	loaded, err := repo.GetByID(ctx, stale.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OAuthConnectionID != healthy.OAuthConnectionID || loaded.OAuthNeedsReauth || loaded.OAuthAccessToken != "healthy-access" {
+		t.Fatalf("reconnect-required model was not linked to the only healthy account: %#v", loaded)
+	}
+}
+
+func TestOAuthRefreshServiceRunOnceAdoptsVerifiedOpenAIPrincipal(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	configs := []*models.LLMConfig{
+		{Name: "First", Provider: models.ProviderOpenAI, Model: "gpt-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-a", OAuthRefreshToken: "refresh-a", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
+		{Name: "Second", Provider: models.ProviderOpenAI, Model: "gpt-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-b", OAuthRefreshToken: "refresh-b", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
+		{Name: "Other account", Provider: models.ProviderOpenAI, Model: "gpt-three", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-c", OAuthRefreshToken: "refresh-c", OAuthExpiresAt: time.Now().Add(3 * time.Hour).UnixMilli()},
+	}
+	for _, cfg := range configs {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	worker := NewOAuthRefreshService(repo, llmoauth.NewManager(repo))
+	worker.SetOpenAIIdentityResolver(func(token string) OpenAIOAuthIdentity {
+		if token == "access-c" {
+			return OpenAIOAuthIdentity{AccountID: "account-other", DisplayName: "other@example.com", PrincipalHash: "other-user-account"}
+		}
+		return OpenAIOAuthIdentity{AccountID: "account-shared", DisplayName: "owner@example.com", PrincipalHash: "same-user-account"}
+	})
+	if err := worker.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	first, err := repo.GetByID(ctx, configs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.GetByID(ctx, configs[1].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := repo.GetByID(ctx, configs[2].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.OAuthConnectionID != second.OAuthConnectionID {
+		t.Fatalf("verified same OpenAI user/account connections remain split: %q != %q", first.OAuthConnectionID, second.OAuthConnectionID)
+	}
+	if third.OAuthConnectionID == first.OAuthConnectionID {
+		t.Fatal("different OpenAI account was adopted")
+	}
+	connections, err := repo.ListOAuthConnections(ctx, models.ProviderOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(connections) != 2 {
+		t.Fatalf("connections = %d, want 2", len(connections))
+	}
+}
+
 func TestOAuthRefreshServiceRunOnceRefreshesEachExpiringConfigIndependently(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)

@@ -24,6 +24,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/pkg/browser"
 )
 
@@ -675,7 +676,19 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	profileDisplayName := ""
 	principalHash := ""
 	if flow.Provider == models.ProviderOpenAI {
-		accountID = extractOpenAIAccountIDFromIDToken(tokenResult.IDToken)
+		identity := service.ResolveOpenAIOAuthIdentity(tokenResult.IDToken)
+		accessIdentity := service.ResolveOpenAIOAuthIdentity(tokenResult.AccessToken)
+		if identity.AccountID == "" || (identity.PrincipalHash == "" && identity.AccountID == accessIdentity.AccountID) {
+			if identity.DisplayName != "" && accessIdentity.DisplayName == "" {
+				accessIdentity.DisplayName = identity.DisplayName
+			}
+			identity = accessIdentity
+		} else if identity.DisplayName == "" {
+			identity.DisplayName = accessIdentity.DisplayName
+		}
+		accountID = identity.AccountID
+		profileDisplayName = identity.DisplayName
+		principalHash = identity.PrincipalHash
 	} else if flow.Provider == models.ProviderAnthropic && h.oauthIdentityResolver != nil {
 		profileCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		profile, profileErr := h.oauthIdentityResolver(profileCtx, tokenResult.AccessToken)
@@ -980,30 +993,7 @@ func (h *Handler) OAuthStatus(c echo.Context) error {
 }
 
 func extractOpenAIAccountIDFromIDToken(idToken string) string {
-	parts := bytes.Split([]byte(idToken), []byte("."))
-	if len(parts) != 3 || len(parts[1]) == 0 {
-		return ""
-	}
-
-	payload, err := base64.RawURLEncoding.DecodeString(string(parts[1]))
-	if err != nil {
-		return ""
-	}
-
-	var claims struct {
-		Auth struct {
-			ChatGPTAccountID string `json:"chatgpt_account_id"`
-		} `json:"https://api.openai.com/auth"`
-		ChatGPTAccountID string `json:"chatgpt_account_id"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return ""
-	}
-
-	if claims.Auth.ChatGPTAccountID != "" {
-		return claims.Auth.ChatGPTAccountID
-	}
-	return claims.ChatGPTAccountID
+	return service.ResolveOpenAIOAuthIdentity(idToken).AccountID
 }
 
 // buildTokenExchangeBody constructs the token exchange request body and content type.

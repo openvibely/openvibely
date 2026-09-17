@@ -79,6 +79,74 @@ func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *
 	}
 }
 
+func TestLLMConfigRepo_VerifiedAnthropicAccountAdoptsReconnectRequiredLegacyModels(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	canonical := &models.LLMConfig{Name: "Connected", Provider: models.ProviderAnthropic, Model: "claude-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-a", OAuthRefreshToken: "refresh-a"}
+	matching := &models.LLMConfig{Name: "Matching legacy", Provider: models.ProviderAnthropic, Model: "claude-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-b", OAuthRefreshToken: "expired-refresh-b", OAuthAccountID: "organization:shared", OAuthNeedsReauth: true}
+	unknown := &models.LLMConfig{Name: "Unknown legacy", Provider: models.ProviderAnthropic, Model: "claude-three", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-c", OAuthRefreshToken: "expired-refresh-c", OAuthNeedsReauth: true}
+	different := &models.LLMConfig{Name: "Different organization", Provider: models.ProviderAnthropic, Model: "claude-four", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-d", OAuthRefreshToken: "expired-refresh-d", OAuthAccountID: "organization:other", OAuthNeedsReauth: true}
+	for _, cfg := range []*models.LLMConfig{canonical, matching, unknown, different} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	updated, err := repo.UpdateLinkedOAuthConnectionProfileIfRevision(
+		ctx, canonical.ID, canonical.OAuthConnectionID, canonical.OAuthConfigRevision, canonical.Provider,
+		"organization:shared", "Dubee", "verified-dubee",
+	)
+	if err != nil || !updated {
+		t.Fatalf("update verified profile = %v, %v", updated, err)
+	}
+	for _, cfg := range []*models.LLMConfig{matching, unknown} {
+		loaded, loadErr := repo.GetByID(ctx, cfg.ID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if loaded.OAuthConnectionID != canonical.OAuthConnectionID || loaded.OAuthNeedsReauth {
+			t.Fatalf("legacy model %q was not linked to the healthy account: %#v", cfg.Name, loaded)
+		}
+	}
+	loadedDifferent, err := repo.GetByID(ctx, different.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedDifferent.OAuthConnectionID != different.OAuthConnectionID || !loadedDifferent.OAuthNeedsReauth {
+		t.Fatalf("different organization was adopted: %#v", loadedDifferent)
+	}
+}
+
+func TestLLMConfigRepo_VerifiedAnthropicAccountDoesNotAdoptWhenAnotherHealthyConnectionExists(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	canonical := &models.LLMConfig{Name: "Connected", Provider: models.ProviderAnthropic, Model: "claude-one", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-a", OAuthRefreshToken: "refresh-a"}
+	otherHealthy := &models.LLMConfig{Name: "Other healthy", Provider: models.ProviderAnthropic, Model: "claude-two", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "access-b", OAuthRefreshToken: "refresh-b"}
+	stale := &models.LLMConfig{Name: "Legacy", Provider: models.ProviderAnthropic, Model: "claude-three", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-c", OAuthRefreshToken: "expired-refresh-c", OAuthNeedsReauth: true}
+	for _, cfg := range []*models.LLMConfig{canonical, otherHealthy, stale} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	updated, err := repo.UpdateLinkedOAuthConnectionProfileIfRevision(
+		ctx, canonical.ID, canonical.OAuthConnectionID, canonical.OAuthConfigRevision, canonical.Provider,
+		"organization:shared", "Dubee", "verified-dubee",
+	)
+	if err != nil || !updated {
+		t.Fatalf("update verified profile = %v, %v", updated, err)
+	}
+	loaded, err := repo.GetByID(ctx, stale.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OAuthConnectionID != stale.OAuthConnectionID || !loaded.OAuthNeedsReauth {
+		t.Fatalf("ambiguous legacy model was adopted: %#v", loaded)
+	}
+}
+
 func TestLLMConfigRepo_CreateWithOAuthFields(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
