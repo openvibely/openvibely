@@ -383,7 +383,18 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		if text == "" {
 			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
 		}
+		select {
+		case <-streamDone:
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
+		default:
+		}
 		steeringMu.Lock()
+		select {
+		case <-streamDone:
+			steeringMu.Unlock()
+			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
+		default:
+		}
 		previousID := activeResponseID
 		if previousID == "" {
 			steeringMu.Unlock()
