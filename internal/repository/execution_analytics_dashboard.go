@@ -349,8 +349,12 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 		), task_stats AS (
 			SELECT task_id,COUNT(*) execution_count,SUM(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followups FROM period_exec GROUP BY task_id
 		), first_terminal AS (
-			SELECT e.task_id,e.status,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn
-			FROM executions e JOIN period_terminal_tasks p ON p.task_id=e.task_id WHERE e.status IN ('completed','failed','cancelled')
+			SELECT p.task_id,(
+				SELECT e.status FROM executions e INDEXED BY idx_executions_task_analytics
+				WHERE e.task_id=p.task_id AND e.status IN ('completed','failed','cancelled')
+				ORDER BY e.started_at,e.history_order,e.id LIMIT 1
+			) status
+			FROM period_terminal_tasks p
 		), period_goal_outcomes AS (
 			SELECT g.task_id,g.status FROM task_goals g JOIN scoped_tasks t ON t.id=g.task_id
 			WHERE g.status IN ('achieved','failed')` + goalWindow + `
@@ -363,8 +367,8 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 			(SELECT COUNT(*) FROM period_terminal WHERE status='completed'),
 			(SELECT COUNT(*) FROM period_terminal),
 			(SELECT COUNT(*) FROM period_terminal WHERE status='cancelled'),
-			(SELECT COUNT(*) FROM first_terminal WHERE rn=1 AND status='completed'),
-			(SELECT COUNT(*) FROM first_terminal WHERE rn=1),
+			(SELECT COUNT(*) FROM first_terminal WHERE status='completed'),
+			(SELECT COUNT(*) FROM first_terminal),
 			(SELECT COUNT(*) FROM task_stats WHERE followups>0),
 			(SELECT COUNT(*) FROM task_stats),
 			(SELECT COUNT(*) FROM evaluable_goals WHERE status='achieved'),
