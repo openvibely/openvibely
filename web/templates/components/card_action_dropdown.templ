@@ -1,0 +1,108 @@
+package components
+
+type CardActionDropdownConfig struct {
+	WrapperClass             string
+	TriggerClass             string
+	MenuClass                string
+	IconClass                string
+	Label                    string
+	Title                    string
+	StopPropagation          bool
+	KanbanMenuKey            string
+	TriggerAriaExpanded      string
+	TriggerKanbanMenu        bool
+	TriggerTaskCardMenu      bool
+	MenuKanbanContent        bool
+	AutomationLiveMenu       bool
+	AutomationBuilderActions bool
+}
+
+func cardActionDropdownWrapperClass(config CardActionDropdownConfig) string {
+	if config.WrapperClass != "" {
+		return config.WrapperClass
+	}
+	return "dropdown dropdown-end"
+}
+
+func cardActionDropdownTriggerClass(config CardActionDropdownConfig) string {
+	if config.TriggerClass != "" {
+		return config.TriggerClass
+	}
+	return "btn btn-ghost btn-sm"
+}
+
+func cardActionDropdownMenuClass(config CardActionDropdownConfig) string {
+	if config.MenuClass != "" {
+		return config.MenuClass
+	}
+	return "dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300"
+}
+
+func cardActionDropdownIconClass(config CardActionDropdownConfig) string {
+	if config.IconClass != "" {
+		return config.IconClass
+	}
+	return "h-4 w-4"
+}
+
+func cardActionDropdownLabel(config CardActionDropdownConfig) string {
+	if config.Label != "" {
+		return config.Label
+	}
+	return "More actions"
+}
+
+func cardActionDropdownTitle(config CardActionDropdownConfig) string {
+	if config.Title != "" {
+		return config.Title
+	}
+	return cardActionDropdownLabel(config)
+}
+
+templ CardActionDropdown(config CardActionDropdownConfig) {
+	<div
+		class={ cardActionDropdownWrapperClass(config) }
+		if config.StopPropagation {
+			onclick="event.stopPropagation()"
+		}
+		if config.KanbanMenuKey != "" {
+			data-kanban-menu-key={ config.KanbanMenuKey }
+		}
+		if config.AutomationLiveMenu {
+			data-automation-live-menu
+		}
+		if config.AutomationBuilderActions {
+			data-automation-builder-actions
+		}
+	>
+		<label
+			tabindex="0"
+			class={ cardActionDropdownTriggerClass(config) }
+			title={ cardActionDropdownTitle(config) }
+			aria-label={ cardActionDropdownLabel(config) }
+			onclick="handleDropdownToggle(event)"
+			if config.TriggerAriaExpanded != "" {
+				aria-expanded={ config.TriggerAriaExpanded }
+			}
+			if config.TriggerKanbanMenu {
+				data-kanban-menu-trigger
+			}
+			if config.TriggerTaskCardMenu {
+				data-task-card-menu-trigger
+			}
+		>
+			<svg xmlns="http://www.w3.org/2000/svg" class={ cardActionDropdownIconClass(config) } fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+			</svg>
+		</label>
+		<ul
+			tabindex="0"
+			class={ cardActionDropdownMenuClass(config) }
+			if config.MenuKanbanContent {
+				data-kanban-menu-content
+			}
+		>
+			{ children... }
+		</ul>
+	</div>
+}
