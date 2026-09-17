@@ -246,6 +246,39 @@ func (r *LLMConfigRepo) ListRefreshableOAuth(ctx context.Context) ([]models.LLMC
 	return configs, rows.Err()
 }
 
+// ListUnrefreshableOpenAIOAuth returns one representative model for legacy
+// Codex connections whose stored access JWT may still identify their owner.
+func (r *LLMConfigRepo) ListUnrefreshableOpenAIOAuth(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT a.id, a.name, a.provider, a.model, a.auth_method,
+		        c.oauth_access_token, c.oauth_refresh_token, c.oauth_expires_at,
+		        c.oauth_account_id, c.oauth_needs_reauth, c.oauth_revision, c.id
+		 FROM oauth_connections c
+		 JOIN agent_configs a ON a.id = (
+		   SELECT linked.id FROM agent_configs linked
+		   WHERE linked.oauth_connection_id = c.id AND linked.auth_method = ? AND linked.provider = c.provider
+		   ORDER BY linked.id LIMIT 1
+		 )
+		 WHERE c.provider = ? AND c.oauth_access_token != ''
+		   AND (c.oauth_needs_reauth = 1 OR c.oauth_refresh_token = '')
+		 ORDER BY c.id`, models.AuthMethodOAuth, models.ProviderOpenAI)
+	if err != nil {
+		return nil, fmt.Errorf("listing unrefreshable OpenAI OAuth connections: %w", err)
+	}
+	defer rows.Close()
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var cfg models.LLMConfig
+		if err := rows.Scan(&cfg.ID, &cfg.Name, &cfg.Provider, &cfg.Model, &cfg.AuthMethod,
+			&cfg.OAuthAccessToken, &cfg.OAuthRefreshToken, &cfg.OAuthExpiresAt,
+			&cfg.OAuthAccountID, &cfg.OAuthNeedsReauth, &cfg.OAuthConfigRevision, &cfg.OAuthConnectionID); err != nil {
+			return nil, fmt.Errorf("scanning unrefreshable OpenAI OAuth connection: %w", err)
+		}
+		configs = append(configs, cfg)
+	}
+	return configs, rows.Err()
+}
+
 func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
 	var exists bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_configs)`).Scan(&exists)
