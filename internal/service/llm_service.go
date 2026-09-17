@@ -2186,6 +2186,7 @@ func (s *LLMService) callAgentDirectWithDefinitionMode(ctx context.Context, mess
 	req, err := llmnormalize.NormalizeRequest(llmcontracts.AgentRequest{
 		Ctx:               callCtx,
 		Operation:         llmcontracts.OperationDirect,
+		ExecID:            llmcontracts.ArtifactExecutionIDFromContext(ctx),
 		Message:           message,
 		Attachments:       attachments,
 		Agent:             agent,

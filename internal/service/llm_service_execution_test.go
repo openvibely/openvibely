@@ -1030,12 +1030,16 @@ func TestLLMService_CallAgentDirectWithDefinition_PropagatesAgentDefinitionAndSc
 		},
 	}
 
-	_, _, err := svc.CallAgentDirectWithDefinition(context.Background(), "review", nil, agent, repo, agentDef)
+	ctx := llmcontracts.WithArtifactExecutionID(context.Background(), "lifecycle-exec-1")
+	_, _, err := svc.CallAgentDirectWithDefinition(ctx, "review", nil, agent, repo, agentDef)
 	if err != nil {
 		t.Fatalf("CallAgentDirectWithDefinition error: %v", err)
 	}
 	if capture.lastReq.AgentDefinition == nil || capture.lastReq.AgentDefinition.ID != agentDef.ID {
 		t.Fatalf("expected agent definition propagated, got %#v", capture.lastReq.AgentDefinition)
+	}
+	if capture.lastReq.ExecID != "lifecycle-exec-1" {
+		t.Fatalf("artifact execution ID = %q, want lifecycle-exec-1", capture.lastReq.ExecID)
 	}
 	rt := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx)
 	if rt == nil || !rt.HasDefinition("write_file") {
@@ -1054,6 +1058,33 @@ func TestLLMService_CallAgentDirectWithDefinition_PropagatesAgentDefinitionAndSc
 	}
 	if _, err := os.Stat(filepath.Join(globalRoot, "agents", "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("global agents index must not be writable through scoped files, stat err=%v", err)
+	}
+}
+
+func TestLLMService_LifecycleDirectCallExternalizesOversizedInput(t *testing.T) {
+	root := t.TempDir()
+	capture := &captureProviderAdapter{}
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
+	svc.SetGlobalSkillRoot(root)
+	ctx := llmcontracts.WithArtifactExecutionID(context.Background(), "lifecycle-exec-oversized")
+	original := strings.Repeat("oversized lifecycle transcript ", 2000)
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 4096}
+
+	if _, _, err := svc.CallAgentDirect(ctx, original, nil, agent, t.TempDir()); err != nil {
+		t.Fatalf("CallAgentDirect: %v", err)
+	}
+	if capture.lastReq.ExecID != "lifecycle-exec-oversized" {
+		t.Fatalf("artifact execution ID = %q", capture.lastReq.ExecID)
+	}
+	if capture.lastReq.Message == original || !strings.Contains(capture.lastReq.Message, "Full input:") {
+		t.Fatal("oversized lifecycle input was not externalized")
+	}
+	if runtime := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx); runtime == nil || !runtime.HasDefinition(oversizedInputReaderTool) {
+		t.Fatal("oversized lifecycle input reader was not attached")
+	}
+	if _, err := os.Stat(filepath.Join(root, "task-inputs", "lifecycle-exec-oversized")); !os.IsNotExist(err) {
+		t.Fatalf("oversized lifecycle artifact was not cleaned up: %v", err)
 	}
 }
 
