@@ -175,13 +175,7 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 				}
 			</div>
 			if category == models.CategoryCompleted {
-				<div class="dropdown dropdown-end" data-kanban-menu-key="column-completed">
-					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-expanded="false">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-						</svg>
-					</label>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content>
+				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-completed"}) {
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<button type="button" tabindex="0"
@@ -280,17 +274,11 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								</button>
 							</li>
 						}
-					</ul>
-				</div>
+
+					}
 			}
 			if category == models.CategoryBacklog {
-				<div class="dropdown dropdown-end" data-kanban-menu-key="column-backlog">
-					<label tabindex="0" class="btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0" title="More actions" onclick="handleDropdownToggle(event)" data-kanban-menu-trigger aria-label="More actions" aria-expanded="false">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-						</svg>
-					</label>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]" data-kanban-menu-content>
+				@CardActionDropdown(CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end", TriggerClass: "btn btn-xs btn-ghost min-h-11 h-11 w-11 p-0", IconClass: "h-5 w-5", MenuClass: "dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 max-w-[calc(100vw-2rem)] z-[100]", Label: "More actions", TriggerAriaExpanded: "false", TriggerKanbanMenu: true, MenuKanbanContent: true, KanbanMenuKey: "column-backlog"}) {
 						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<button type="button" tabindex="0"
@@ -419,8 +407,8 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 								</button>
 							</li>
 						}
-					</ul>
-				</div>
+
+					}
 			}
 		</div>
 		if category == models.CategoryActive {

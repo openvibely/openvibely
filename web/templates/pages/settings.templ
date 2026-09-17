@@ -339,7 +339,9 @@ templ settingsContent(view ChannelsSettingsView) {
 						<div class="card-body p-5">
 							<div class="flex items-start justify-between gap-3">
 								<div><h3 class="card-title">X (formerly Twitter)</h3><p class="text-sm opacity-60">Receive authorized mentions and post replies using X API v2.</p></div>
-								<div class="dropdown dropdown-end" onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" aria-label="X channel actions">⋮</button><ul class="dropdown-content menu bg-base-100 rounded-box shadow z-10 w-32"><li><button type="button" onclick="openXConfigModal()">Edit</button></li><li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('X (formerly Twitter)', '/channels/x/remove', 'POST')">Delete</button></li></ul></div>
+								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for X (formerly Twitter)", WrapperClass: "dropdown dropdown-end", MenuClass: "dropdown-content menu bg-base-100 rounded-box shadow z-10 w-32", StopPropagation: true}) {
+										<li><button type="button" onclick="openXConfigModal()">Edit</button></li><li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('X (formerly Twitter)', '/channels/x/remove', 'POST')">Delete</button></li>
+									}
 							</div>
 							<div class="mt-3 flex gap-2">
 								if view.XStatus.Connected {
@@ -375,13 +377,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				>
 					<div class="card-body relative">
 						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-							<div class="dropdown dropdown-end">
-								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-									</svg>
-								</label>
-								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for GitHub"}) {
 									<li><button type="button" onclick="openGitHubConfigModal()">Edit</button></li>
 									<li>
 											<button
@@ -391,8 +387,8 @@ templ settingsContent(view ChannelsSettingsView) {
 											>
 												Delete
 											</button>									</li>
-								</ul>
-							</div>
+
+								}
 						</div>
 						<div class="pr-12">
 							<h3 class="font-bold flex items-center gap-2">
@@ -453,13 +449,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				>
 					<div class="card-body relative">
 						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-							<div class="dropdown dropdown-end">
-								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-									</svg>
-								</label>
-								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Slack"}) {
 									<li><button type="button" onclick="openSlackConfigModal()">Edit</button></li>
 									<li>
 										<button
@@ -479,8 +469,8 @@ templ settingsContent(view ChannelsSettingsView) {
 											>
 												Delete
 											</button>									</li>
-								</ul>
-							</div>
+
+								}
 						</div>
 						<div class="pr-12">
 							<h3 class="font-bold flex items-center gap-2">
@@ -537,13 +527,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					<div class="card-body relative">
 						<!-- Kebab menu in top right -->
 						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-							<div class="dropdown dropdown-end">
-								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-									</svg>
-								</label>
-								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Telegram Bot"}) {
 									<li>
 										<button onclick="editChannelFromData(this.closest('[data-channel-type]'))">
 											Edit
@@ -566,8 +550,8 @@ templ settingsContent(view ChannelsSettingsView) {
 											>
 												Delete
 											</button>									</li>
-								</ul>
-							</div>
+
+								}
 						</div>
 						<!-- Channel content with padding for kebab menu -->
 						<div class="pr-12">
@@ -611,11 +595,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-								<div class="dropdown dropdown-end">
-									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01"></path></svg>
-									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Discord"}) {
 										<li><button type="button" onclick="openDiscordConfigModal()">Edit</button></li>
 										<li><button type="button" hx-post="/channels/discord/test" hx-target="#test-result-discord" hx-swap="innerHTML">Test Connection</button></li>
 										<li>
@@ -630,8 +610,8 @@ templ settingsContent(view ChannelsSettingsView) {
 												Delete
 											</button>
 										</li>
-									</ul>
-								</div>
+
+								}
 							</div>
 							<div class="pr-12">
 								<h3 class="font-bold flex items-center gap-2">
@@ -678,16 +658,12 @@ templ settingsContent(view ChannelsSettingsView) {
 					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-								<div class="dropdown dropdown-end">
-									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01"></path></svg>
-									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Email"}) {
 										<li><button type="button" onclick="openEmailConfigModal()">Edit</button></li>
 										<li><button type="button" hx-post="/channels/email/test" hx-target="#test-result-email" hx-swap="innerHTML">Test Connection</button></li>
 										<li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('Email', '/channels/email/remove', 'POST')">Delete</button></li>
-									</ul>
-								</div>
+
+								}
 							</div>
 							<div class="pr-12">
 								<h3 class="font-bold flex items-center gap-2">
@@ -730,13 +706,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				>
 				<div class="card-body relative">
 					<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-						<div class="dropdown dropdown-end">
-							<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-								</svg>
-							</label>
-							<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+						@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Webhook"}) {
 								<li><button type="button" onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }>Edit</button></li>									<li>
 										<button
 											type="button"
@@ -767,8 +737,8 @@ templ settingsContent(view ChannelsSettingsView) {
 											>
 												Delete
 											</button>									</li>
-								</ul>
-							</div>
+
+								}
 						</div>
 						<div class="pr-12">
 							<h3 class="font-bold flex items-center gap-2">
@@ -1710,13 +1680,13 @@ templ settingsContent(view ChannelsSettingsView) {
 					if (secretRow) secretRow.style.display = 'none';
 					var urlRow = document.getElementById('webhook_url_row');
 					if (urlRow) urlRow.style.display = 'none';
-					
+
 					// Initialize webhook agents from page data
 					initializeWebhookAgents();
 					selectedWebhookAgentIDs = [];
 					renderWebhookAgentList();
 					setWebhookSection('config');
-					
+
 					htmx.process(form);
 					modal.showModal();
 				}
@@ -2428,16 +2398,10 @@ templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarge
 	>
 		<div class="card-body relative">
 			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-				<div class="dropdown dropdown-end">
-					<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-						</svg>
-					</label>
-					<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+				@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Outbound Message Targets"}) {
 						<li><button type="button" onclick="openOutboundTargetsModal()">Edit</button></li>
-					</ul>
-				</div>
+
+								}
 			</div>
 			<div class="pr-12">
 				<h3 class="font-bold flex items-center gap-2">

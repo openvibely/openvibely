@@ -14,6 +14,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -510,7 +511,7 @@ func builtInPersonalityCard(card PersonalityListCard, personality string, state 
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(card.Key)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 216, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 217, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -523,7 +524,7 @@ func builtInPersonalityCard(card PersonalityListCard, personality string, state 
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(card.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 217, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 218, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -536,7 +537,7 @@ func builtInPersonalityCard(card PersonalityListCard, personality string, state 
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(card.Description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 218, Col: 49}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 219, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -549,7 +550,7 @@ func builtInPersonalityCard(card PersonalityListCard, personality string, state 
 		var templ_7745c5c3_Var16 string
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(card.Preview)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 219, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 220, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 		if templ_7745c5c3_Err != nil {
@@ -562,7 +563,7 @@ func builtInPersonalityCard(card PersonalityListCard, personality string, state 
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolString(card.HasCustom))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 222, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 223, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -575,91 +576,113 @@ func builtInPersonalityCard(card PersonalityListCard, personality string, state 
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(card.Name + " " + card.Description + " " + card.Preview)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 224, Col: 76}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 225, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" onclick=\"editPersonalityFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button onclick=\"editPersonalityFromData(this.closest('[data-personality-key]'))\">Edit</button></li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" onclick=\"editPersonalityFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if personality != card.Key {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<li><button hx-post=\"")
+		templ_7745c5c3_Var19 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<li><button onclick=\"editPersonalityFromData(this.closest('[data-personality-key]'))\">Edit</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var19 string
-			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/save?personality="+card.Key, personalityCardListState(state)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 242, Col: 129}
+			if personality != card.Key {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<li><button hx-post=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var20 string
+				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/save?personality="+card.Key, personalityCardListState(state)))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 237, Col: 129}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\">Set as Default</button></li>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\">Set as Default</button></li>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold\">")
+			return nil
+		})
+		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + card.Name}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(card.Name)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 255, Col: 16}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if personality == card.Key {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<span class=\"badge badge-sm ml-2 ov-badge-default\">Active</span> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		if card.HasCustom {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"badge badge-warning badge-sm ml-1\">Override</span>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</h3><p class=\"text-sm opacity-60 mt-1\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</div><div class=\"pr-12\"><h3 class=\"font-bold\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(card.Description)
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(card.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 263, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 250, Col: 16}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</p><p class=\"text-sm opacity-40 mt-1 line-clamp-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, " ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if personality == card.Key {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"badge badge-sm ml-2 ov-badge-default\">Active</span> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		if card.HasCustom {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"badge badge-warning badge-sm ml-1\">Override</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</h3><p class=\"text-sm opacity-60 mt-1\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(card.Preview)
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(card.Description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 264, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 258, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</p></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</p><p class=\"text-sm opacity-40 mt-1 line-clamp-2\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var23 string
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(card.Preview)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 259, Col: 66}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</p></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -693,224 +716,250 @@ func customPersonalityCard(cp models.CustomPersonality, personality string, pagi
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var23 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var23 == nil {
-			templ_7745c5c3_Var23 = templ.NopComponent
+		templ_7745c5c3_Var24 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var24 == nil {
+			templ_7745c5c3_Var24 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-personality-key=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Key)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 283, Col: 31}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" data-personality-name=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-personality-key=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 string
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name)
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Key)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 284, Col: 33}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 278, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" data-personality-description=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" data-personality-name=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Description)
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 285, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 279, Col: 33}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" data-personality-preview=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" data-personality-description=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var27 string
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.SystemPromptPreview)
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Description)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 286, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 280, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" data-personality-is-preset=\"false\" data-personality-pagination-card=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" data-personality-preview=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var28 string
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(paginationCard))
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.SystemPromptPreview)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 288, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 281, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" data-personality-has-custom=\"true\" data-card-select-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" data-personality-is-preset=\"false\" data-personality-pagination-card=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Key)
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(paginationCard))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 290, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 283, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" data-card-select-eligible=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" data-personality-has-custom=\"true\" data-card-select-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var30 string
-		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolString(personality != cp.Key && !service.IsPresetPersonality(cp.Key)))
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Key)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 291, Col: 103}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 285, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" data-card-select-disabled-reason=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" data-card-select-eligible=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalitySelectionDisabledReason(cp, personality))
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolString(personality != cp.Key && !service.IsPresetPersonality(cp.Key)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 292, Col: 88}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 286, Col: 103}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" data-search-card data-search-text=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" data-card-select-disabled-reason=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var32 string
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview)
+		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalitySelectionDisabledReason(cp, personality))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 294, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 287, Col: 88}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" onclick=\"editPersonalityFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button onclick=\"editPersonalityFromData(this.closest('[data-personality-key]'))\">Edit</button></li>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" data-search-card data-search-text=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if personality != cp.Key {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<li><button hx-post=\"")
+		var templ_7745c5c3_Var33 string
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 289, Col: 82}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" onclick=\"editPersonalityFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Var34 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+			if !templ_7745c5c3_IsBuffer {
+				defer func() {
+					templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err == nil {
+						templ_7745c5c3_Err = templ_7745c5c3_BufErr
+					}
+				}()
+			}
+			ctx = templ.InitializeContext(ctx)
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<li><button onclick=\"editPersonalityFromData(this.closest('[data-personality-key]'))\">Edit</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var33 string
-			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/save?personality="+cp.Key, personalityCardListState(state)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 312, Col: 127}
+			if personality != cp.Key {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<li><button hx-post=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var35 string
+				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/save?personality="+cp.Key, personalityCardListState(state)))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 301, Col: 127}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\">Set as Default</button></li>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\">Set as Default</button></li>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<li><button class=\"text-error\" hx-delete=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var34 string
-		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/custom/"+cp.Key, personalityCardListState(state)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 323, Col: 118}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\" hx-confirm=\"Delete this custom personality?\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var35 string
-		templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(cp.Name)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 336, Col: 14}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if personality == cp.Key {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<span class=\"badge badge-sm ml-2 ov-badge-default\">Active</span> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<span class=\"badge badge-ghost badge-sm ml-1\">Custom</span></h3>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if cp.Description != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<p class=\"text-sm opacity-60 mt-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, " <li><button class=\"text-error\" hx-delete=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var36 string
-			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(cp.Description)
+			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/custom/"+cp.Key, personalityCardListState(state)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 343, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 312, Col: 118}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</p>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\" hx-confirm=\"Delete this custom personality?\">Delete</button></li>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			return nil
+		})
+		templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + cp.Name}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var34), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<p class=\"text-sm opacity-40 mt-1 line-clamp-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</div><div class=\"pr-12\"><h3 class=\"font-bold\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var37 string
-		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(cp.SystemPromptPreview)
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(cp.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 345, Col: 76}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 325, Col: 14}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</p></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, " ")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if personality == cp.Key {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span class=\"badge badge-sm ml-2 ov-badge-default\">Active</span> ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"badge badge-ghost badge-sm ml-1\">Custom</span></h3>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if cp.Description != "" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<p class=\"text-sm opacity-60 mt-1\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var38 string
+			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(cp.Description)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 332, Col: 56}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<p class=\"text-sm opacity-40 mt-1 line-clamp-2\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var39 string
+		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(cp.SystemPromptPreview)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 334, Col: 76}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</p></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -935,9 +984,9 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var38 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var38 == nil {
-			templ_7745c5c3_Var38 = templ.NopComponent
+		templ_7745c5c3_Var40 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var40 == nil {
+			templ_7745c5c3_Var40 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = personalitySection(personality, BuildPersonalityListCards(personality, customPersonalities, PersonalityListState{}), false, PersonalityListState{}).Render(ctx, templ_7745c5c3_Buffer)
@@ -965,9 +1014,9 @@ func PersonalitySectionPage(personality string, customPersonalities []models.Cus
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var39 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var39 == nil {
-			templ_7745c5c3_Var39 = templ.NopComponent
+		templ_7745c5c3_Var41 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var41 == nil {
+			templ_7745c5c3_Var41 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = personalitySection(personality, BuildPersonalityListCards(personality, customPersonalities, PersonalityListState{}), false, PersonalityListState{}).Render(ctx, templ_7745c5c3_Buffer)
@@ -996,9 +1045,9 @@ func PersonalitySectionWithPagination(personality string, customPersonalities []
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var40 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var40 == nil {
-			templ_7745c5c3_Var40 = templ.NopComponent
+		templ_7745c5c3_Var42 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var42 == nil {
+			templ_7745c5c3_Var42 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = personalitySection(personality, BuildPersonalityListCards(personality, customPersonalities, PersonalityListState{}), hasMore, PersonalityListState{}).Render(ctx, templ_7745c5c3_Buffer)
@@ -1027,9 +1076,9 @@ func PersonalitySectionPageWithPagination(personality string, customPersonalitie
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var41 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var41 == nil {
-			templ_7745c5c3_Var41 = templ.NopComponent
+		templ_7745c5c3_Var43 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var43 == nil {
+			templ_7745c5c3_Var43 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = personalitySection(personality, BuildPersonalityListCards(personality, customPersonalities, PersonalityListState{}), hasMore, PersonalityListState{}).Render(ctx, templ_7745c5c3_Buffer)
@@ -1057,9 +1106,9 @@ func PersonalitySectionPageWithPaginationState(personality string, cards []Perso
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var42 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var42 == nil {
-			templ_7745c5c3_Var42 = templ.NopComponent
+		templ_7745c5c3_Var44 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var44 == nil {
+			templ_7745c5c3_Var44 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = personalitySection(personality, cards, hasMore, state).Render(ctx, templ_7745c5c3_Buffer)
@@ -1086,51 +1135,51 @@ func personalitySection(personality string, cards []PersonalityListCard, hasMore
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var43 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var43 == nil {
-			templ_7745c5c3_Var43 = templ.NopComponent
+		templ_7745c5c3_Var45 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var45 == nil {
+			templ_7745c5c3_Var45 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<div id=\"personality-section\" data-selected-personality=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var44 string
-		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(personality)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 379, Col: 71}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" data-search-container data-card-pagination-root data-card-pagination-url=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var45 string
-		templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListURL("personality", personalityCardListState(state)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 379, Col: 208}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" data-card-pagination-list=\"#personality-card-list\" data-card-pagination-card-selector=\"[data-personality-pagination-card='true']\" data-card-pagination-replacement-card-selector=\"[data-personality-key]\" data-card-pagination-key=\"data-personality-key\" data-card-pagination-page-size=\"20\" data-card-pagination-has-more=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<div id=\"personality-section\" data-selected-personality=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var46 string
-		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(hasMore))
+		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue(personality)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 379, Col: 568}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 368, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\"><div class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Personality</h2><button class=\"btn btn-primary btn-sm\" onclick=\"openNewPersonalityModal()\">+ Add Personality</button></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" data-search-container data-card-pagination-root data-card-pagination-url=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var47 string
+		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListURL("personality", personalityCardListState(state)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 368, Col: 208}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" data-card-pagination-list=\"#personality-card-list\" data-card-pagination-card-selector=\"[data-personality-pagination-card='true']\" data-card-pagination-replacement-card-selector=\"[data-personality-key]\" data-card-pagination-key=\"data-personality-key\" data-card-pagination-page-size=\"20\" data-card-pagination-has-more=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var48 string
+		templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(cardPaginationHasMoreAttribute(hasMore))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 368, Col: 568}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\"><div class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Personality</h2><button class=\"btn btn-primary btn-sm\" onclick=\"openNewPersonalityModal()\">+ Add Personality</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1138,7 +1187,7 @@ func personalitySection(personality string, cards []PersonalityListCard, hasMore
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div id=\"personality-card-list\" data-card-pagination-list><div class=\"grid gap-4\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div id=\"personality-card-list\" data-card-pagination-list><div class=\"grid gap-4\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1154,46 +1203,72 @@ func personalitySection(personality string, cards []PersonalityListCard, hasMore
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<!-- Base (No Personality) card — non-clickable --> <div class=\"card bg-base-100 shadow-sm border border-base-300\" data-personality-key=\"\" data-personality-name=\"Base\" data-personality-description=\"\" data-personality-is-preset=\"true\" data-personality-pagination-card=\"true\" data-personality-has-custom=\"false\" data-personality-is-default-card=\"true\" data-search-card data-search-text=\"Base No personality prompt applied\"><div class=\"card-body relative\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<!-- Base (No Personality) card — non-clickable --> <div class=\"card bg-base-100 shadow-sm border border-base-300\" data-personality-key=\"\" data-personality-name=\"Base\" data-personality-description=\"\" data-personality-is-preset=\"true\" data-personality-pagination-card=\"true\" data-personality-has-custom=\"false\" data-personality-is-default-card=\"true\" data-search-card data-search-text=\"Base No personality prompt applied\"><div class=\"card-body relative\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if personality != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\"><li><button hx-post=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var47 string
-					templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/save?personality=", personalityCardListState(state)))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 418, Col: 120}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
+					templ_7745c5c3_Var49 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+						templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+						templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+						if !templ_7745c5c3_IsBuffer {
+							defer func() {
+								templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+								if templ_7745c5c3_Err == nil {
+									templ_7745c5c3_Err = templ_7745c5c3_BufErr
+								}
+							}()
+						}
+						ctx = templ.InitializeContext(ctx)
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<li><button hx-post=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var50 string
+						templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(CardListActionURL("personality", "/personality/save?personality=", personalityCardListState(state)))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 401, Col: 120}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\">Set as Default</button></li>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						return nil
+					})
+					templ_7745c5c3_Err = components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Base"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var49), templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" hx-target=\"#personality-section\" hx-swap=\"outerHTML\">Set as Default</button></li></ul></div></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div class=\"pr-12\"><h3 class=\"font-bold\">Base ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<div class=\"pr-12\"><h3 class=\"font-bold\">Base ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if personality == "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<span class=\"badge badge-sm ml-2 ov-badge-default\">Default</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<span class=\"badge badge-sm ml-2 ov-badge-default\">Default</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</h3><p class=\"text-sm opacity-50 mt-1 italic\">No personality prompt applied.</p></div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</h3><p class=\"text-sm opacity-50 mt-1 italic\">No personality prompt applied.</p></div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1201,7 +1276,7 @@ func personalitySection(personality string, cards []PersonalityListCard, hasMore
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<!-- Create/Edit Personality Modal --><dialog id=\"personality_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closePersonalityModal()\" aria-label=\"Close personality dialog\" title=\"Close personality dialog\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"personality_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">New Custom Personality</h3><form id=\"personality_form\" method=\"post\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name *</span></label> <input type=\"text\" id=\"personality_name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Custom Personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <input type=\"text\" id=\"personality_description\" name=\"description\" class=\"input input-bordered\" placeholder=\"Short description of this personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Prompt * (min 20 chars)</span></label> <textarea id=\"personality_prompt\" name=\"system_prompt\" class=\"textarea textarea-bordered w-full h-32\" required minlength=\"20\" placeholder=\"Describe how the AI should behave...\"></textarea></div><div class=\"modal-action\"><div class=\"flex gap-2 w-full justify-between\"><div id=\"personality_modal_extra_actions\" class=\"flex gap-2\"></div><div class=\"flex gap-2\"><button type=\"button\" class=\"btn\" onclick=\"closePersonalityModal()\">Cancel</button> <button type=\"submit\" id=\"personality_submit_btn\" class=\"btn btn-primary\">Create</button></div></div></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script type=\"text/javascript\">\n\t\t\twindow.openVibelyPersonalityEditGeneration = window.openVibelyPersonalityEditGeneration || 0;\n\n\t\t\tfunction personalityMutationURL(path) {\n\t\t\t\tvar root = document.getElementById('personality-section');\n\t\t\t\tif (window.cardCollectionActionURL) return window.cardCollectionActionURL(root, path);\n\t\t\t\treturn path;\n\t\t\t}\n\n\t\t\tfunction openNewPersonalityModal() {\n\t\t\t\twindow.openVibelyPersonalityEditGeneration++;\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'New Custom Personality';\n\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\tform.setAttribute('hx-post', personalityMutationURL('/personality/custom'));\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\t\t\t\tdocument.getElementById('personality_name').value = '';\n\t\t\t\tdocument.getElementById('personality_description').value = '';\n\t\t\t\tdocument.getElementById('personality_prompt').value = '';\n\t\t\t\tdocument.getElementById('personality_submit_btn').textContent = 'Create';\n\t\t\t\tdocument.getElementById('personality_submit_btn').disabled = false;\n\t\t\t\tdocument.getElementById('personality_modal_extra_actions').innerHTML = '';\n\t\t\t\tpersonality_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction editPersonalityFromData(card) {\n\t\t\t\tif (!card) return;\n\t\t\t\tvar key = card.dataset.personalityKey || '';\n\t\t\t\tvar name = card.dataset.personalityName || '';\n\t\t\t\tvar description = card.dataset.personalityDescription || '';\n\t\t\t\tvar isPreset = card.dataset.personalityIsPreset === 'true';\n\t\t\t\tvar hasCustom = card.dataset.personalityHasCustom === 'true';\n\t\t\t\tvar requestGeneration = ++window.openVibelyPersonalityEditGeneration;\n\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'Edit: ' + name;\n\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\tform.setAttribute('hx-put', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\n\t\t\t\tdocument.getElementById('personality_name').value = name;\n\t\t\t\tdocument.getElementById('personality_description').value = description;\n\t\t\t\tdocument.getElementById('personality_prompt').value = '';\n\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Loading full prompt...';\n\n\t\t\t\tvar submitBtn = document.getElementById('personality_submit_btn');\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Changes';\n\t\t\t\t} else if (isPreset && !hasCustom) {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Override';\n\t\t\t\t} else {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Changes';\n\t\t\t\t}\n\t\t\t\tsubmitBtn.disabled = true;\n\n\t\t\t\t// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)\n\t\t\t\tvar extras = document.getElementById('personality_modal_extra_actions');\n\t\t\t\textras.innerHTML = '';\n\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tvar resetBtn = document.createElement('button');\n\t\t\t\t\tresetBtn.type = 'button';\n\t\t\t\t\tresetBtn.className = 'btn btn-outline btn-warning btn-sm';\n\t\t\t\t\tresetBtn.textContent = 'Reset to Default';\n\t\t\t\t\tresetBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));\n\t\t\t\t\tresetBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tresetBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tresetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(resetBtn);\n\t\t\t\t\t\thtmx.process(resetBtn);\n\t\t\t\t\t}\n\t\t\t\t} else if (!isPreset) {\n\t\t\t\t\tvar delBtn = document.createElement('button');\n\t\t\t\t\tdelBtn.type = 'button';\n\t\t\t\t\tdelBtn.className = 'btn btn-outline btn-error btn-sm';\n\t\t\t\t\tdelBtn.textContent = 'Delete';\n\t\t\t\t\tdelBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));\n\t\t\t\t\tdelBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tdelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tdelBtn.setAttribute('hx-confirm', 'Delete this custom personality?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(delBtn);\n\t\t\t\t\t\thtmx.process(delBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// Add \"Set as Default\" button when editing a non-default personality\n\t\t\t\tvar section = document.getElementById('personality-section');\n\t\t\t\tvar selectedPersonality = section ? (section.dataset.selectedPersonality || '') : '';\n\t\t\t\tif (key !== selectedPersonality) {\n\t\t\t\t\tvar setDefaultBtn = document.createElement('button');\n\t\t\t\t\tsetDefaultBtn.type = 'button';\n\t\t\t\t\tsetDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';\n\t\t\t\t\tsetDefaultBtn.textContent = 'Set as Default';\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-post', personalityMutationURL('/personality/save?personality=' + encodeURIComponent(key)));\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(setDefaultBtn);\n\t\t\t\t\t\thtmx.process(setDefaultBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tpersonality_modal.showModal();\n\n\t\t\t\tfetch(personalityMutationURL('/personality/custom/' + encodeURIComponent(key)), { headers: { 'Accept': 'application/json' } })\n\t\t\t\t\t.then(function(response) {\n\t\t\t\t\t\tif (!response.ok) throw new Error('Failed to load personality');\n\t\t\t\t\t\treturn response.json();\n\t\t\t\t\t})\n\t\t\t\t\t.then(function(detail) {\n\t\t\t\t\t\tif (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;\n\t\t\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'Edit: ' + (detail.name || name);\n\t\t\t\t\t\tdocument.getElementById('personality_name').value = detail.name || name;\n\t\t\t\t\t\tdocument.getElementById('personality_description').value = detail.description || '';\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').value = detail.system_prompt || '';\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Describe how the AI should behave...';\n\t\t\t\t\t\tsubmitBtn.disabled = false;\n\t\t\t\t\t})\n\t\t\t\t\t.catch(function() {\n\t\t\t\t\t\tif (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Unable to load prompt. Close and try again.';\n\t\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction closePersonalityModal() {\n\t\t\t\tpersonality_modal.close();\n\t\t\t}\n\n\t\t\t// Close modal after successful HTMX swap\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tif (event.detail.target && event.detail.target.id === 'personality-section') {\n\t\t\t\t\tvar modal = document.getElementById('personality_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t});\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<!-- Create/Edit Personality Modal --><dialog id=\"personality_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closePersonalityModal()\" aria-label=\"Close personality dialog\" title=\"Close personality dialog\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"personality_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">New Custom Personality</h3><form id=\"personality_form\" method=\"post\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name *</span></label> <input type=\"text\" id=\"personality_name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Custom Personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <input type=\"text\" id=\"personality_description\" name=\"description\" class=\"input input-bordered\" placeholder=\"Short description of this personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Prompt * (min 20 chars)</span></label> <textarea id=\"personality_prompt\" name=\"system_prompt\" class=\"textarea textarea-bordered w-full h-32\" required minlength=\"20\" placeholder=\"Describe how the AI should behave...\"></textarea></div><div class=\"modal-action\"><div class=\"flex gap-2 w-full justify-between\"><div id=\"personality_modal_extra_actions\" class=\"flex gap-2\"></div><div class=\"flex gap-2\"><button type=\"button\" class=\"btn\" onclick=\"closePersonalityModal()\">Cancel</button> <button type=\"submit\" id=\"personality_submit_btn\" class=\"btn btn-primary\">Create</button></div></div></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script type=\"text/javascript\">\n\t\t\twindow.openVibelyPersonalityEditGeneration = window.openVibelyPersonalityEditGeneration || 0;\n\n\t\t\tfunction personalityMutationURL(path) {\n\t\t\t\tvar root = document.getElementById('personality-section');\n\t\t\t\tif (window.cardCollectionActionURL) return window.cardCollectionActionURL(root, path);\n\t\t\t\treturn path;\n\t\t\t}\n\n\t\t\tfunction openNewPersonalityModal() {\n\t\t\t\twindow.openVibelyPersonalityEditGeneration++;\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'New Custom Personality';\n\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\tform.setAttribute('hx-post', personalityMutationURL('/personality/custom'));\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\t\t\t\tdocument.getElementById('personality_name').value = '';\n\t\t\t\tdocument.getElementById('personality_description').value = '';\n\t\t\t\tdocument.getElementById('personality_prompt').value = '';\n\t\t\t\tdocument.getElementById('personality_submit_btn').textContent = 'Create';\n\t\t\t\tdocument.getElementById('personality_submit_btn').disabled = false;\n\t\t\t\tdocument.getElementById('personality_modal_extra_actions').innerHTML = '';\n\t\t\t\tpersonality_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction editPersonalityFromData(card) {\n\t\t\t\tif (!card) return;\n\t\t\t\tvar key = card.dataset.personalityKey || '';\n\t\t\t\tvar name = card.dataset.personalityName || '';\n\t\t\t\tvar description = card.dataset.personalityDescription || '';\n\t\t\t\tvar isPreset = card.dataset.personalityIsPreset === 'true';\n\t\t\t\tvar hasCustom = card.dataset.personalityHasCustom === 'true';\n\t\t\t\tvar requestGeneration = ++window.openVibelyPersonalityEditGeneration;\n\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'Edit: ' + name;\n\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\tform.setAttribute('hx-put', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\n\t\t\t\tdocument.getElementById('personality_name').value = name;\n\t\t\t\tdocument.getElementById('personality_description').value = description;\n\t\t\t\tdocument.getElementById('personality_prompt').value = '';\n\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Loading full prompt...';\n\n\t\t\t\tvar submitBtn = document.getElementById('personality_submit_btn');\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Changes';\n\t\t\t\t} else if (isPreset && !hasCustom) {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Override';\n\t\t\t\t} else {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Changes';\n\t\t\t\t}\n\t\t\t\tsubmitBtn.disabled = true;\n\n\t\t\t\t// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)\n\t\t\t\tvar extras = document.getElementById('personality_modal_extra_actions');\n\t\t\t\textras.innerHTML = '';\n\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tvar resetBtn = document.createElement('button');\n\t\t\t\t\tresetBtn.type = 'button';\n\t\t\t\t\tresetBtn.className = 'btn btn-outline btn-warning btn-sm';\n\t\t\t\t\tresetBtn.textContent = 'Reset to Default';\n\t\t\t\t\tresetBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));\n\t\t\t\t\tresetBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tresetBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tresetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(resetBtn);\n\t\t\t\t\t\thtmx.process(resetBtn);\n\t\t\t\t\t}\n\t\t\t\t} else if (!isPreset) {\n\t\t\t\t\tvar delBtn = document.createElement('button');\n\t\t\t\t\tdelBtn.type = 'button';\n\t\t\t\t\tdelBtn.className = 'btn btn-outline btn-error btn-sm';\n\t\t\t\t\tdelBtn.textContent = 'Delete';\n\t\t\t\t\tdelBtn.setAttribute('hx-delete', personalityMutationURL('/personality/custom/' + encodeURIComponent(key)));\n\t\t\t\t\tdelBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tdelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tdelBtn.setAttribute('hx-confirm', 'Delete this custom personality?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(delBtn);\n\t\t\t\t\t\thtmx.process(delBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// Add \"Set as Default\" button when editing a non-default personality\n\t\t\t\tvar section = document.getElementById('personality-section');\n\t\t\t\tvar selectedPersonality = section ? (section.dataset.selectedPersonality || '') : '';\n\t\t\t\tif (key !== selectedPersonality) {\n\t\t\t\t\tvar setDefaultBtn = document.createElement('button');\n\t\t\t\t\tsetDefaultBtn.type = 'button';\n\t\t\t\t\tsetDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';\n\t\t\t\t\tsetDefaultBtn.textContent = 'Set as Default';\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-post', personalityMutationURL('/personality/save?personality=' + encodeURIComponent(key)));\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(setDefaultBtn);\n\t\t\t\t\t\thtmx.process(setDefaultBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tpersonality_modal.showModal();\n\n\t\t\t\tfetch(personalityMutationURL('/personality/custom/' + encodeURIComponent(key)), { headers: { 'Accept': 'application/json' } })\n\t\t\t\t\t.then(function(response) {\n\t\t\t\t\t\tif (!response.ok) throw new Error('Failed to load personality');\n\t\t\t\t\t\treturn response.json();\n\t\t\t\t\t})\n\t\t\t\t\t.then(function(detail) {\n\t\t\t\t\t\tif (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;\n\t\t\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'Edit: ' + (detail.name || name);\n\t\t\t\t\t\tdocument.getElementById('personality_name').value = detail.name || name;\n\t\t\t\t\t\tdocument.getElementById('personality_description').value = detail.description || '';\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').value = detail.system_prompt || '';\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Describe how the AI should behave...';\n\t\t\t\t\t\tsubmitBtn.disabled = false;\n\t\t\t\t\t})\n\t\t\t\t\t.catch(function() {\n\t\t\t\t\t\tif (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Unable to load prompt. Close and try again.';\n\t\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction closePersonalityModal() {\n\t\t\t\tpersonality_modal.close();\n\t\t\t}\n\n\t\t\t// Close modal after successful HTMX swap\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tif (event.detail.target && event.detail.target.id === 'personality-section') {\n\t\t\t\t\tvar modal = document.getElementById('personality_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t});\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

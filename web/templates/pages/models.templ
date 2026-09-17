@@ -289,13 +289,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						<div class="card-body relative">
 							<!-- Kebab menu in top right -->
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-								<div class="dropdown dropdown-end">
-									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-										</svg>
-									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + agent.Name}) {
 										<li>
 										<button onclick="event.stopPropagation(); editModelFromData(this.closest('[data-model-id]'))">
 											Edit
@@ -320,8 +314,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 												Delete
 											</button>
 										</li>
-									</ul>
-								</div>
+								}
 							</div>
 							<!-- Model content with padding for kebab menu -->
 							<div class="pr-12">

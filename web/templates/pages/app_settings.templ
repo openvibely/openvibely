@@ -6,6 +6,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -226,13 +227,7 @@ templ builtInPersonalityCard(card PersonalityListCard, personality string, state
 	>
 		<div class="card-body relative">
 			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-				<div class="dropdown dropdown-end">
-					<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-						</svg>
-					</label>
-					<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+				@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + card.Name}) {
 						<li>
 							<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
 						</li>
@@ -247,8 +242,8 @@ templ builtInPersonalityCard(card PersonalityListCard, personality string, state
 								</button>
 							</li>
 						}
-					</ul>
-				</div>
+
+					}
 			</div>
 			<div class="pr-12">
 				<h3 class="font-bold">
@@ -296,13 +291,7 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string, pag
 	>
 		<div class="card-body relative">
 			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-				<div class="dropdown dropdown-end">
-					<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-						</svg>
-					</label>
-					<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+				@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + cp.Name}) {
 						<li>
 							<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
 						</li>
@@ -328,8 +317,8 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string, pag
 								Delete
 							</button>
 						</li>
-					</ul>
-				</div>
+
+					}
 			</div>
 			<div class="pr-12">
 				<h3 class="font-bold">
@@ -406,13 +395,7 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 				<div class="card-body relative">
 					if personality != "" {
 						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-							<div class="dropdown dropdown-end">
-								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-									</svg>
-								</label>
-								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+							@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for Base"}) {
 									<li>
 										<button
 											hx-post={ CardListActionURL("personality", "/personality/save?personality=", personalityCardListState(state)) }
@@ -422,8 +405,8 @@ templ personalitySection(personality string, cards []PersonalityListCard, hasMor
 											Set as Default
 										</button>
 									</li>
-								</ul>
-							</div>
+
+					}
 						</div>
 					}
 					<div class="pr-12">

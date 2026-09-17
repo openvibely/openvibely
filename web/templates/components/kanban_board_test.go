@@ -92,10 +92,17 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 	}
 	html := buf.String()
 
-	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
-		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
-		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-expanded="false"`) {
-		t.Fatal("expected backlog kebab trigger to use <label> for stable dropdown focus behavior")
+	for _, want := range []string{
+		`<label tabindex="0" class="btn btn-xs btn-ghost`,
+		`title="More actions"`,
+		`onclick="handleDropdownToggle(event)"`,
+		`data-kanban-menu-trigger`,
+		`aria-label="More actions"`,
+		`aria-expanded="false"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected backlog kebab trigger to contain %q for stable dropdown focus behavior", want)
+		}
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
 		t.Fatal("unexpected <button> dropdown trigger in backlog column")
@@ -107,10 +114,17 @@ func TestKanbanColumn_DropdownTriggersUseLabelForDesktopWebviewCompatibility(t *
 		t.Fatalf("render completed column: %v", err)
 	}
 	html = buf.String()
-	if !strings.Contains(html, `<label tabindex="0" class="btn btn-xs btn-ghost`) ||
-		!strings.Contains(html, `title="More actions" onclick="handleDropdownToggle(event)"`) ||
-		!strings.Contains(html, `data-kanban-menu-trigger aria-label="More actions" aria-expanded="false"`) {
-		t.Fatal("expected completed kebab trigger to use <label> for stable dropdown focus behavior")
+	for _, want := range []string{
+		`<label tabindex="0" class="btn btn-xs btn-ghost`,
+		`title="More actions"`,
+		`onclick="handleDropdownToggle(event)"`,
+		`data-kanban-menu-trigger`,
+		`aria-label="More actions"`,
+		`aria-expanded="false"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected completed kebab trigger to contain %q for stable dropdown focus behavior", want)
+		}
 	}
 	if strings.Contains(html, `<button tabindex="0" class="btn btn-xs btn-ghost`) {
 		t.Fatal("unexpected <button> dropdown trigger in completed column")
