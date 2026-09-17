@@ -1842,6 +1842,11 @@ func (s *summaryOnlyChannelTargetStore) ListByProject(ctx context.Context, proje
 	return nil, fmt.Errorf("ListByProject should not be called")
 }
 
+func (s *summaryOnlyChannelTargetStore) ListByProjectPage(ctx context.Context, projectID string, limit, offset int) ([]models.ChannelTarget, error) {
+	s.listCalled = true
+	return nil, fmt.Errorf("ListByProjectPage should not be called")
+}
+
 func (s *summaryOnlyChannelTargetStore) FindHome(ctx context.Context, projectID, platform string) (*models.ChannelTarget, error) {
 	return nil, nil
 }

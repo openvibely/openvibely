@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
@@ -1664,6 +1664,73 @@ func TestMigration174UsesOrderedTaskDiscoveryAccessPath(t *testing.T) {
 	}
 }
 
+func TestMigration194_ChannelTargetListOrderIndex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "channel-target-list-order-194.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 193); err != nil {
+		t.Fatalf("migrate to channel target schema 193: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path)
+		VALUES('channel-target-list-order-project-194', 'Channel target list order', '', '');
+		WITH RECURSIVE seq(n) AS (
+			SELECT 1
+			UNION ALL
+			SELECT n + 1 FROM seq WHERE n < 2000
+		)
+		INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
+		SELECT
+			'channel-target-list-order-194-' || printf('%05d', n),
+			'channel-target-list-order-project-194',
+			CASE n % 4 WHEN 0 THEN 'discord' WHEN 1 THEN 'email' WHEN 2 THEN 'slack' ELSE 'telegram' END,
+			CASE n % 4 WHEN 1 THEN 'email' WHEN 3 THEN 'chat' ELSE 'channel' END,
+			'name-' || printf('%05d', n),
+			'dest-' || printf('%05d', n),
+			'',
+			CASE WHEN n % 500 = 0 THEN 1 ELSE 0 END,
+			'Subject ' || n,
+			datetime('2026-01-01 00:00:00', '+' || n || ' seconds')
+		FROM seq;
+	`); err != nil {
+		t.Fatalf("seed channel target list order fixture: %v", err)
+	}
+
+	pageQuery := `
+		SELECT project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject
+		FROM channel_targets
+		WHERE project_id = ?
+		ORDER BY platform ASC, is_home DESC, name ASC, target_id ASC
+		LIMIT ? OFFSET ?`
+	before := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-194", 50, 0)
+	if !strings.Contains(before, "USE TEMP B-TREE") {
+		t.Fatalf("pre-194 channel target page plan = %q, want temporary sort baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 194); err != nil {
+		t.Fatalf("apply channel target list order index migration: %v", err)
+	}
+	after := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-194", 50, 0)
+	if strings.Contains(after, "USE TEMP B-TREE") {
+		t.Fatalf("post-194 channel target page plan = %q, want no temporary sort", after)
+	}
+	if !strings.Contains(after, "idx_channel_targets_project_list_order") || !strings.Contains(after, "project_id=?") {
+		t.Fatalf("post-194 channel target page plan = %q, want list-order index", after)
+	}
+
+	if err := goose.DownTo(db, ".", 193); err != nil {
+		t.Fatalf("roll back channel target list order index migration: %v", err)
+	}
+	afterDown := explainQueryPlan(t, db, pageQuery, "channel-target-list-order-project-194", 50, 0)
+	if !strings.Contains(afterDown, "USE TEMP B-TREE") {
+		t.Fatalf("post-194-down channel target page plan = %q, want temporary sort restored", afterDown)
+	}
+}
+
 func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "system-channel-auth.db")
@@ -1811,8 +1878,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
@@ -2260,8 +2327,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
@@ -2596,8 +2663,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 193 {
-		t.Fatalf("max goose version = %d, want 193", maxVersion)
+	if maxVersion != 194 {
+		t.Fatalf("max goose version = %d, want 194", maxVersion)
 	}
 }
 
