@@ -21,7 +21,7 @@ func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *
 	if err := repo.Create(ctx, source); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE oauth_connections SET oauth_principal_hash = 'verified-principal' WHERE id IN (?, ?)`, canonical.OAuthConnectionID, source.OAuthConnectionID); err != nil {
+	if _, err := db.Exec(`UPDATE oauth_connections SET oauth_principal_hash = 'verified-principal', oauth_principal_verified = 1 WHERE id IN (?, ?)`, canonical.OAuthConnectionID, source.OAuthConnectionID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`
@@ -75,8 +75,42 @@ func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connection.ProviderDisplayName != "" || connection.PrincipalHash != "" || connection.AccountID != "" {
+	if connection.ProviderDisplayName != "" || connection.PrincipalHash != "" || connection.PrincipalVerified || connection.AccountID != "" {
 		t.Fatalf("disconnect retained provider identity metadata: %+v", connection)
+	}
+}
+
+func TestLLMConfigRepo_DoesNotAdoptLegacyUnverifiedPrincipalHash(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	canonical := &models.LLMConfig{Name: "Canonical", Provider: models.ProviderOpenAI, Model: "codex-current", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "current-access", OAuthRefreshToken: "current-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+	legacy := &models.LLMConfig{Name: "Legacy", Provider: models.ProviderOpenAI, Model: "codex-legacy", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "legacy-access", OAuthRefreshToken: "legacy-refresh", OAuthNeedsReauth: true}
+	for _, cfg := range []*models.LLMConfig{canonical, legacy} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE oauth_connections SET oauth_principal_hash = 'same-hash' WHERE id = ?`, legacy.OAuthConnectionID); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repo.UpdateLinkedOAuthConnectionProfileIfRevision(ctx, canonical.ID, canonical.OAuthConnectionID, 0, canonical.Provider, "account", "owner", "same-hash")
+	if err != nil || !updated {
+		t.Fatalf("set verified canonical profile = %v, %v", updated, err)
+	}
+	loaded, err := repo.GetByID(ctx, legacy.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OAuthConnectionID != legacy.OAuthConnectionID {
+		t.Fatal("legacy unverified principal hash was adopted")
+	}
+	connection, err := repo.GetOAuthConnectionByID(ctx, legacy.OAuthConnectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection == nil || connection.PrincipalVerified {
+		t.Fatalf("legacy connection verification = %#v, want unverified", connection)
 	}
 }
 

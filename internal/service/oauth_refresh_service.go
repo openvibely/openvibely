@@ -181,14 +181,21 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 			refreshErrors = append(refreshErrors, staleErr)
 		} else {
 			for _, stale := range staleConfigs {
-				identityCtx, cancelIdentity := context.WithTimeout(ctx, s.identityTimeout)
-				identity, identityErr := s.openAIIdentity(identityCtx, stale.OAuthAccessToken)
-				cancelIdentity()
-				if identityErr != nil || identity.PrincipalHash == "" {
-					continue
+				principalHash := ""
+				if stale.PrincipalVerified {
+					principalHash = strings.TrimSpace(stale.PrincipalHash)
+				}
+				if principalHash == "" {
+					identityCtx, cancelIdentity := context.WithTimeout(ctx, s.identityTimeout)
+					identity, identityErr := s.openAIIdentity(identityCtx, stale.OAuthAccessToken)
+					cancelIdentity()
+					if identityErr != nil || identity.PrincipalHash == "" {
+						continue
+					}
+					principalHash = identity.PrincipalHash
 				}
 				_, adoptErr := s.repo.AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(
-					ctx, stale.ID, stale.OAuthConnectionID, stale.OAuthConfigRevision, identity.PrincipalHash,
+					ctx, stale.ID, stale.OAuthConnectionID, stale.OAuthConfigRevision, principalHash,
 				)
 				if adoptErr != nil {
 					refreshErrors = append(refreshErrors, adoptErr)

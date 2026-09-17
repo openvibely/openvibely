@@ -35,6 +35,7 @@ type OAuthConnection struct {
 	AccountID           string      `json:"-"`
 	ProviderDisplayName string      `json:"-"`
 	PrincipalHash       string      `json:"-"`
+	PrincipalVerified   bool        `json:"-"`
 	NeedsReauth         bool        `json:"oauth_needs_reauth,omitempty"`
 	Revision            int64       `json:"-"`
 	LinkedModels        int         `json:"linked_models"`
