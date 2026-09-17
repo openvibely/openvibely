@@ -13,6 +13,7 @@ type ToolDefinition struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+	Async       bool            `json:"async,omitempty"`
 }
 
 // ToolCall records a single tool invocation and its result.
