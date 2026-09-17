@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -76,6 +77,47 @@ func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *
 	}
 	if connection.ProviderDisplayName != "" || connection.PrincipalHash != "" || connection.AccountID != "" {
 		t.Fatalf("disconnect retained provider identity metadata: %+v", connection)
+	}
+}
+
+func TestLLMConfigRepo_AdoptsExpiredOpenAIConnectionThatStillHasRefreshToken(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	canonical := &models.LLMConfig{Name: "Codex 5.5", Provider: models.ProviderOpenAI, Model: "gpt-5.5-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "healthy-access", OAuthRefreshToken: "healthy-refresh", OAuthExpiresAt: time.Now().Add(time.Hour).UnixMilli()}
+	expired := &models.LLMConfig{Name: "Codex Luna", Provider: models.ProviderOpenAI, Model: "codex-luna", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-jwt", OAuthRefreshToken: "present-but-old-refresh", OAuthExpiresAt: time.Now().Add(-time.Hour).UnixMilli()}
+	for _, cfg := range []*models.LLMConfig{canonical, expired} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+	updated, err := repo.UpdateLinkedOAuthConnectionProfileIfRevision(
+		ctx, canonical.ID, canonical.OAuthConnectionID, canonical.OAuthConfigRevision, canonical.Provider,
+		"account-shared", "owner@example.com", "verified-user-account",
+	)
+	if err != nil || !updated {
+		t.Fatalf("set canonical profile = %v, %v", updated, err)
+	}
+
+	candidates, err := repo.ListUnrefreshableOpenAIOAuth(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].OAuthConnectionID != expired.OAuthConnectionID {
+		t.Fatalf("expired connection candidates = %#v", candidates)
+	}
+	adopted, err := repo.AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(
+		ctx, expired.ID, expired.OAuthConnectionID, expired.OAuthConfigRevision, "verified-user-account",
+	)
+	if err != nil || !adopted {
+		t.Fatalf("adopt expired connection = %v, %v", adopted, err)
+	}
+	loaded, err := repo.GetByID(ctx, expired.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OAuthConnectionID != canonical.OAuthConnectionID || loaded.OAuthAccessToken != "healthy-access" {
+		t.Fatalf("expired model was not linked to healthy connection: %#v", loaded)
 	}
 }
 

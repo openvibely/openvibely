@@ -327,7 +327,8 @@ func (r *LLMConfigRepo) AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx
 		FROM oauth_connections
 		WHERE id = ? AND provider = ? AND oauth_revision = ?
 		  AND oauth_access_token != ''
-		  AND (oauth_needs_reauth = 1 OR oauth_refresh_token = '')
+		  AND (oauth_needs_reauth = 1 OR oauth_refresh_token = '' OR
+		       (oauth_expires_at > 0 AND oauth_expires_at <= CAST(strftime('%s', 'now') AS INTEGER) * 1000))
 		  AND EXISTS (
 			SELECT 1 FROM agent_configs
 			WHERE id = ? AND provider = ? AND auth_method = ? AND oauth_connection_id = oauth_connections.id
