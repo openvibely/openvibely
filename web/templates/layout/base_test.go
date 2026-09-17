@@ -41,6 +41,16 @@ func TestBaseRendersProjectDialogHostsOutsideSidebar(t *testing.T) {
 	}
 }
 
+func TestBaseReservesSymmetricRootScrollbarGutters(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Tasks", nil, "default").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	if !strings.Contains(buf.String(), "scrollbar-gutter: stable both-edges;") {
+		t.Fatal("base layout must reserve symmetric root gutters so dialogs retain their horizontal center while leaving the top layer")
+	}
+}
+
 func TestBaseKanbanMoveTransactionsPreventVisibleRollback(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Tasks", []models.Project{}, "project-1").Render(context.Background(), &buf); err != nil {
