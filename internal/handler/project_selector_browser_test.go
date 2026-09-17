@@ -49,6 +49,8 @@ func TestProjectRelatedModalClosePositionStaysStationaryInChrome(t *testing.T) {
 		async function assertStationaryClose(name, openFn, dialogSelector) {
 			await openFn();
 			var dialog = await waitFor(dialogSelector, function(node) { return node.open; });
+			var rootGutter = getComputedStyle(document.documentElement).scrollbarGutter;
+			if (rootGutter.indexOf('both-edges') === -1) fail(name + ' modal overrode the symmetric root scrollbar gutter: ' + rootGutter);
 			var box = dialog.querySelector('.modal-box');
 			if (!box) fail(name + ' modal missing .modal-box');
 			await nextFrame();

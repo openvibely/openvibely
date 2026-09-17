@@ -313,7 +313,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						/* Theme toggle is intentionally immediate (no global transition choreography). */
 					/* Keep viewport-centered overlays stationary when native dialogs enter
 					   or leave the top layer by reserving equal scrollbar space on both sides. */
-					html {
+					html,
+					:root:has(:is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open])) {
 						scrollbar-gutter: stable both-edges;
 						overflow: hidden;
 					}
