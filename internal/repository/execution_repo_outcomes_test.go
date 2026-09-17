@@ -158,6 +158,22 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	if got := dashboard.Current.FollowUp; got.Numerator != 2 || got.Denominator != 4 {
 		t.Errorf("follow-up = %+v, want tasks with follow-ups over executed tasks", got)
 	}
+	trendByPeriod := map[string]models.OutcomeTrendPoint{}
+	for _, point := range dashboard.OutcomeTrend {
+		trendByPeriod[point.Period] = point
+	}
+	if len(trendByPeriod) != 5 {
+		t.Fatalf("outcome trend periods = %+v, want five project-scoped days", dashboard.OutcomeTrend)
+	}
+	if got := trendByPeriod["2026-01-10"]; got.TechnicalCompletion.Numerator != 1 || got.TechnicalCompletion.Denominator != 1 || got.GoalAchievement.Numerator != 1 || got.GoalAchievement.Denominator != 1 || got.FirstPass.Numerator != 1 || got.FirstPass.Denominator != 1 || got.FollowUp.Numerator != 0 || got.FollowUp.Denominator != 1 {
+		t.Errorf("January 10 outcome trend = %+v", got)
+	}
+	if got := trendByPeriod["2026-01-12"]; got.TechnicalCompletion.Numerator != 1 || got.TechnicalCompletion.Denominator != 1 || got.GoalAchievement.Numerator != 0 || got.GoalAchievement.Denominator != 1 || got.FirstPass.Numerator != 0 || got.FirstPass.Denominator != 1 || got.FollowUp.Numerator != 1 || got.FollowUp.Denominator != 1 {
+		t.Errorf("January 12 outcome trend = %+v", got)
+	}
+	if _, leaked := trendByPeriod["2026-01-14"]; leaked {
+		t.Fatalf("foreign project leaked into outcome trend: %+v", dashboard.OutcomeTrend)
+	}
 	if dashboard.Current.KnownCostPerAchievedGoal == nil || dashboard.Current.KnownCostPerAchievedGoal.Covered != 1 || dashboard.Current.KnownCostPerAchievedGoal.Eligible != 1 || dashboard.Current.KnownCostPerAchievedGoal.Value != 2 {
 		t.Errorf("known cost per achieved goal = %+v", dashboard.Current.KnownCostPerAchievedGoal)
 	}
@@ -365,20 +381,21 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 			view: "overview",
 			want: analyticsDashboardSections{
 				outcomeMetrics: true,
+				outcomeTrend:   true,
 				comparison:     true,
+				funnel:         true,
 				workflows:      true,
 				evidenceRows:   true,
 				insights:       true,
-			},
-		},
+			}},
 		{
 			view: "outcomes",
 			want: analyticsDashboardSections{
 				outcomeMetrics:       true,
-				followUpDistribution: true,
-				funnel:               true,
-				evidenceRows:         true,
-				evidenceTotal:        true,
+				outcomeTrend:         true,
+				followUpDistribution: true, funnel: true,
+				evidenceRows:  true,
+				evidenceTotal: true,
 			},
 		},
 		{
@@ -401,12 +418,11 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 			view: "usage",
 			want: analyticsDashboardSections{
 				outcomeMetrics:  true,
-				modelCategories: true,
-			},
+				outcomeTrend:    true,
+				modelCategories: true},
 		},
 		{
-			view: "workflows",
-			want: analyticsDashboardSections{
+			view: "automations", want: analyticsDashboardSections{
 				workflows:      true,
 				workflowDetail: true,
 			},
@@ -420,7 +436,7 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 		})
 	}
 	all := analyticsDashboardSectionsForView("")
-	if !all.outcomeMetrics || !all.followUpDistribution || !all.comparison || !all.funnel || !all.agents || !all.skills || !all.agentSkills || !all.modelCategories || !all.workflows || !all.evidenceRows || !all.evidenceTotal || !all.agentDetail || !all.workflowDetail || !all.insights {
+	if !all.outcomeMetrics || !all.outcomeTrend || !all.followUpDistribution || !all.comparison || !all.funnel || !all.agents || !all.skills || !all.agentSkills || !all.modelCategories || !all.workflows || !all.evidenceRows || !all.evidenceTotal || !all.agentDetail || !all.workflowDetail || !all.insights {
 		t.Fatalf("legacy empty view must retain all dashboard sections: %+v", all)
 	}
 }
