@@ -14,6 +14,9 @@ type ChatCompactionCheckpoint struct {
 	Summary           string
 	Strategy          string
 	ProviderStateJSON string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// ProviderSessionStateJSON is independent from provider-native compaction
+	// state and survives transport cache eviction and process restarts.
+	ProviderSessionStateJSON string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }

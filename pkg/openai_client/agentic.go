@@ -133,6 +133,9 @@ type AgenticResponse struct {
 	ToolCalls           []ToolCall // log of all tool calls made
 	Compacted           bool       // true if history was compacted during this call
 	CompactedInputItems []any      // provider-native continuation state after compaction
+	// AstraReasoningStateJSON is durable provider session state for preserving
+	// request-level effort and configuration-update history across cold starts.
+	AstraReasoningStateJSON string
 }
 
 // AstraSteeringDeliveryStatus describes provider-side mid-turn steering delivery state.
@@ -141,6 +144,7 @@ type AstraSteeringDeliveryStatus string
 const (
 	AstraSteeringUnavailable AstraSteeringDeliveryStatus = "unavailable"
 	AstraSteeringDelivered   AstraSteeringDeliveryStatus = "delivered"
+	AstraSteeringPending     AstraSteeringDeliveryStatus = "pending"
 	AstraSteeringAccepted    AstraSteeringDeliveryStatus = "accepted"
 	AstraSteeringFailed      AstraSteeringDeliveryStatus = "failed"
 )
@@ -152,6 +156,43 @@ type AstraSteeringDelivery struct {
 	ResponseID         string
 	PreviousResponseID string
 	Error              string
+}
+
+type astraSteeringCommittedError struct {
+	err error
+	ids []string
+}
+
+func wrapAstraSteeringCommits(err error, state *ResponsesTransportState) error {
+	if err == nil || state == nil {
+		return err
+	}
+	commits := state.takeAstraSteeringCommits()
+	if len(commits) == 0 {
+		return err
+	}
+	seen := make(map[string]struct{}, len(commits))
+	ids := make([]string, 0, len(commits))
+	for _, commit := range commits {
+		if commit.SteeringID == "" {
+			continue
+		}
+		if _, exists := seen[commit.SteeringID]; exists {
+			continue
+		}
+		seen[commit.SteeringID] = struct{}{}
+		ids = append(ids, commit.SteeringID)
+	}
+	if len(ids) == 0 {
+		return err
+	}
+	return &astraSteeringCommittedError{err: err, ids: ids}
+}
+
+func (e *astraSteeringCommittedError) Error() string { return e.err.Error() }
+func (e *astraSteeringCommittedError) Unwrap() error { return e.err }
+func (e *astraSteeringCommittedError) CommittedSteeringIDs() []string {
+	return append([]string(nil), e.ids...)
 }
 
 // AstraSteeringDeliverer sends raw steering text to an active Astra WebSocket response.
@@ -208,30 +249,59 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		tools = filterToolDefinitions(tools, opts.ToolFilter)
 	}
 
-	// Build initial input items from prior history.
-	inputItems := make([]any, 0, len(opts.InitialInputItems)+len(c.History)+2)
-	inputItems = append(inputItems, opts.InitialInputItems...)
-	for _, msg := range c.History {
-		inputItems = append(inputItems, agenticInputItem{
-			"type":    "message",
-			"role":    roleForMessage(msg.Role),
-			"content": msg.Content,
-		})
-	}
 	finalReasoningEffort := normalizedAstraReasoningEffort(opts.Model, opts.ReasoningEffort)
 	requestLevelReasoningEffort := ""
 	astraConfigurationUpdateEffort := ""
-	if opts.EnableAstraConfigurationUpdate && isGPT6AstraModel(opts.Model) && len(c.History) > 0 && c.responsesTransportState != nil {
-		previousEffort := c.responsesTransportState.lastAstraReasoningEffort(opts.Model)
-		if previousEffort != "" && finalReasoningEffort != "" && previousEffort != finalReasoningEffort {
+	astraPostCompactionEffort := ""
+	var astraConfigurationHistory []astraConfigurationUpdate
+	if opts.EnableAstraConfigurationUpdate && isGPT6AstraModel(opts.Model) && (len(c.History) > 0 || len(opts.InitialInputItems) > 0) && c.responsesTransportState != nil {
+		requestBaseline, configuredEffort, configurationHistory := c.responsesTransportState.astraReasoningState(opts.Model)
+		if requestBaseline != "" && configuredEffort != "" && finalReasoningEffort != "" {
+			// Keep the request-level effort pinned to the original prefix baseline.
+			requestLevelReasoningEffort = requestBaseline
+			astraConfigurationHistory = configurationHistory
+		}
+		if configuredEffort != "" && finalReasoningEffort != "" && configuredEffort != finalReasoningEffort {
 			astraConfigurationUpdateEffort = finalReasoningEffort
-			requestLevelReasoningEffort = previousEffort
+		}
+		if requestBaseline != "" && finalReasoningEffort != "" && requestBaseline != finalReasoningEffort {
+			astraPostCompactionEffort = finalReasoningEffort
 		}
 	}
 	if requestLevelReasoningEffort != "" {
 		optsCopy := *opts
 		optsCopy.RequestLevelReasoningEffort = requestLevelReasoningEffort
 		opts = &optsCopy
+	}
+
+	// Build initial input items from prior history, replaying configuration
+	// updates at their original turn boundary so the cacheable prefix is stable.
+	inputItems := make([]any, 0, len(opts.InitialInputItems)+len(c.History)+len(astraConfigurationHistory)+2)
+	inputItems = append(inputItems, opts.InitialInputItems...)
+	configurationIndex := 0
+	userHistoryIndex := 0
+	for _, msg := range c.History {
+		role := roleForMessage(msg.Role)
+		if role == "user" {
+			for configurationIndex < len(astraConfigurationHistory) && astraConfigurationHistory[configurationIndex].UserHistoryIndex <= userHistoryIndex {
+				if astraConfigurationHistory[configurationIndex].UserHistoryIndex == userHistoryIndex {
+					inputItems = append(inputItems, astraConfigurationUpdateItem(astraConfigurationHistory[configurationIndex].Effort))
+				}
+				configurationIndex++
+			}
+			userHistoryIndex++
+		}
+		inputItems = append(inputItems, agenticInputItem{
+			"type":    "message",
+			"role":    role,
+			"content": msg.Content,
+		})
+	}
+	// A locally summarized or otherwise rewritten history may no longer contain
+	// the saved update position. Re-establish the selected effort from the
+	// request we actually reconstructed, not from the transport bookkeeping.
+	if astraPostCompactionEffort != "" && latestConfigurationUpdateEffort(inputItems) != normalizeReasoningEffort(astraPostCompactionEffort) {
+		astraConfigurationUpdateEffort = astraPostCompactionEffort
 	}
 
 	result := &AgenticResponse{Model: opts.Model}
@@ -265,8 +335,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// Explicit compaction retires prior configuration updates. Re-establish
 		// the selected effort after the compaction item so the request-level
 		// effort can remain pinned to the original cacheable baseline.
-		if astraConfigurationUpdateEffort != "" {
-			compactedItems = append(compactedItems, astraConfigurationUpdateItem(astraConfigurationUpdateEffort))
+		if astraPostCompactionEffort != "" {
+			compactedItems = append(compactedItems, astraConfigurationUpdateItem(astraPostCompactionEffort))
 		}
 		tokenLedger.reset()
 		return compactedItems, nil
@@ -283,11 +353,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return nil, fmt.Errorf("pre-turn compaction: %w", err)
 		}
 	}
-	if astraConfigurationUpdateEffort != "" && !hasTrailingConfigurationUpdate(inputItems) {
+	if astraConfigurationUpdateEffort != "" {
 		// The update must immediately precede the next user message. Waiting until
 		// after pre-turn compaction also avoids sending an update into compaction
 		// without re-establishing it afterward.
-		inputItems = append(inputItems, astraConfigurationUpdateItem(astraConfigurationUpdateEffort))
+		inputItems = upsertTrailingConfigurationUpdate(inputItems, astraConfigurationUpdateEffort)
 	}
 
 	// Add current prompt with optional attachments
@@ -320,19 +390,22 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	var allText strings.Builder
+	wrapSteeringCommits := func(err error) error {
+		return wrapAstraSteeringCommits(err, c.responsesTransportState)
+	}
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
 			if turn == 0 || !opts.AutoCompaction {
-				return nil, err
+				return nil, wrapSteeringCommits(err)
 			}
 			var compactErr error
 			inputItems, compactErr = compactIfNeeded(inputItems, compactionThreshold, true)
 			if compactErr != nil {
-				return nil, fmt.Errorf("turn %d preflight compaction: %w", turn+1, compactErr)
+				return nil, wrapSteeringCommits(fmt.Errorf("turn %d preflight compaction: %w", turn+1, compactErr))
 			}
 			if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
-				return nil, err
+				return nil, wrapSteeringCommits(err)
 			}
 		}
 		var turnResult *agenticTurnResult
@@ -364,7 +437,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
 		})
 		if err != nil {
-			return nil, CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
+			if steeringFailure := c.responsesTransportState.takeAstraSteeringFailure(); steeringFailure != nil {
+				return nil, wrapSteeringCommits(steeringFailure)
+			}
+			return nil, wrapSteeringCommits(CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err)))
+		}
+		if steeringFailure := c.responsesTransportState.takeAstraSteeringFailure(); steeringFailure != nil {
+			return nil, wrapSteeringCommits(steeringFailure)
 		}
 
 		result.InputTokens += turnResult.inputTokens
@@ -445,7 +524,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if opts.OnToolBoundarySteering != nil {
 			steering, err := opts.OnToolBoundarySteering(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("turn %d tool-boundary steering: %w", turn+1, err)
+				return nil, wrapSteeringCommits(fmt.Errorf("turn %d tool-boundary steering: %w", turn+1, err))
 			}
 			if steering = strings.TrimSpace(steering); steering != "" {
 				inputItems = append(inputItems, agenticInputItem{
@@ -458,10 +537,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		compactedItems, err := compactIfNeeded(inputItems, tokenLedger.projectedTokens(localItemsAfterResponse), false)
 		if err != nil {
-			return nil, fmt.Errorf("turn %d compaction: %w", turn+1, err)
+			return nil, wrapSteeringCommits(fmt.Errorf("turn %d compaction: %w", turn+1, err))
 		}
 		inputItems = compactedItems
 	}
+	if unresolved := c.responsesTransportState.takeUnresolvedAstraSteering(); unresolved != nil {
+		return nil, wrapSteeringCommits(unresolved)
+	}
+	c.responsesTransportState.clearAstraSteeringCommits()
 
 	result.Text = allText.String()
 	if result.Compacted {
@@ -472,10 +555,26 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 	if c.responsesTransportState != nil && isGPT6AstraModel(opts.Model) && finalReasoningEffort != "" {
-		c.responsesTransportState.setAstraReasoningEffort(opts.Model, finalReasoningEffort)
+		c.responsesTransportState.commitAstraReasoningEffort(
+			opts.Model,
+			finalReasoningEffort,
+			userHistoryIndex,
+			astraConfigurationUpdateEffort != "",
+			result.Compacted,
+		)
+		result.AstraReasoningStateJSON = c.responsesTransportState.astraReasoningStateJSON(opts.Model)
 	}
 
 	return result, nil
+}
+
+// RestoreAstraReasoningState restores a durable Astra reasoning session into a
+// cold transport. Existing live transport state remains authoritative.
+func (c *Client) RestoreAstraReasoningState(model, stateJSON string) error {
+	if c == nil || c.responsesTransportState == nil {
+		return nil
+	}
+	return c.responsesTransportState.restoreAstraReasoningStateJSON(model, stateJSON)
 }
 
 type openAIToolExecutionTask struct {
@@ -1689,12 +1788,29 @@ func astraConfigurationUpdateItem(effort string) agenticInputItem {
 	}
 }
 
-func hasTrailingConfigurationUpdate(items []any) bool {
+func latestConfigurationUpdateEffort(items []any) string {
+	for i := len(items) - 1; i >= 0; i-- {
+		item, ok := items[i].(map[string]any)
+		if !ok || !strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "configuration_update") {
+			continue
+		}
+		reasoning, _ := item["reasoning"].(map[string]any)
+		return normalizeReasoningEffort(stringFromAny(reasoning["effort"]))
+	}
+	return ""
+}
+
+func upsertTrailingConfigurationUpdate(items []any, effort string) []any {
+	update := astraConfigurationUpdateItem(effort)
 	if len(items) == 0 {
-		return false
+		return append(items, update)
 	}
 	item, ok := items[len(items)-1].(map[string]any)
-	return ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "configuration_update")
+	if ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "configuration_update") {
+		items[len(items)-1] = update
+		return items
+	}
+	return append(items, update)
 }
 
 func statelessOAuthOutputItems(items []any) []any {

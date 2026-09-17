@@ -18,6 +18,7 @@ type SteeringDeliveryStatus string
 const (
 	SteeringDeliveryUnavailable SteeringDeliveryStatus = "unavailable"
 	SteeringDeliveryDelivered   SteeringDeliveryStatus = "delivered"
+	SteeringDeliveryPending     SteeringDeliveryStatus = "pending"
 	SteeringDeliveryAccepted    SteeringDeliveryStatus = "accepted"
 	SteeringDeliveryFailed      SteeringDeliveryStatus = "failed"
 )

@@ -111,8 +111,11 @@ type AgentRequest struct {
 	// NativeCompactionStateJSON contains provider-native compacted input items
 	// that must be replayed structurally rather than rendered as chat text.
 	NativeCompactionStateJSON string
-	ContextTokenEstimate      int  // Reported last-response usage plus locally added context.
-	ProviderRuntimeResolved   bool // Transient: plugin/model resolution already ran before request budgeting.
+	// ProviderSessionStateJSON contains provider-specific conversational state
+	// that is durable across transport-cache eviction and process restarts.
+	ProviderSessionStateJSON string
+	ContextTokenEstimate     int  // Reported last-response usage plus locally added context.
+	ProviderRuntimeResolved  bool // Transient: plugin/model resolution already ran before request budgeting.
 }
 
 type lifecycleHookCallContextKey struct{}
@@ -138,7 +141,9 @@ func LifecycleHookCallFromContext(ctx context.Context) bool {
 
 type transportScopeContextKey struct{}
 type nativeCompactionStateContextKey struct{}
+type providerSessionStateContextKey struct{}
 type retrySourceExecutionIDContextKey struct{}
+type artifactExecutionIDContextKey struct{}
 
 func WithNativeCompactionStateJSON(ctx context.Context, state string) context.Context {
 	if ctx == nil {
@@ -152,6 +157,21 @@ func NativeCompactionStateJSONFromContext(ctx context.Context) string {
 		return ""
 	}
 	state, _ := ctx.Value(nativeCompactionStateContextKey{}).(string)
+	return state
+}
+
+func WithProviderSessionStateJSON(ctx context.Context, state string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, providerSessionStateContextKey{}, state)
+}
+
+func ProviderSessionStateJSONFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	state, _ := ctx.Value(providerSessionStateContextKey{}).(string)
 	return state
 }
 
@@ -185,6 +205,23 @@ func RetrySourceExecutionIDFromContext(ctx context.Context) string {
 	return executionID
 }
 
+// WithArtifactExecutionID carries the persisted execution identity used to
+// scope temporary oversized-input artifacts for direct LLM calls.
+func WithArtifactExecutionID(ctx context.Context, executionID string) context.Context {
+	if ctx == nil || executionID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, artifactExecutionIDContextKey{}, executionID)
+}
+
+func ArtifactExecutionIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	executionID, _ := ctx.Value(artifactExecutionIDContextKey{}).(string)
+	return executionID
+}
+
 // Usage tracks provider usage in a canonical shape.
 // Only TotalTokens is guaranteed across all transports; the other fields are best-effort.
 type Usage struct {
@@ -197,6 +234,7 @@ type Usage struct {
 	ProviderRaw               map[string]int
 	ProviderIDs               map[string]string
 	NativeCompactionStateJSON string
+	ProviderSessionStateJSON  string
 }
 
 // AgentResult is the canonical provider-agnostic adapter response.
@@ -220,4 +258,5 @@ type AgentResult struct {
 	NativeCompactionSummary   string
 	NativeCompactionStrategy  string
 	NativeCompactionStateJSON string
+	ProviderSessionStateJSON  string
 }

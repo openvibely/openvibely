@@ -560,6 +560,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	var err error
 	var pendingSteering preparedSteeringBatch
 	var attemptSteering preparedSteeringBatch
+	steeringBatchesByID := make(map[string]preparedSteeringBatch)
 	var steeringCallbackParams *streamingResponseParams
 	steeringCallback := func(callbackCtx context.Context) (string, error) {
 		if steeringCallbackParams == nil {
@@ -583,7 +584,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		instruction := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		delivery, deliveryErr := deliver(callbackCtx, instruction)
-		if deliveryErr != nil || delivery.Status != llmcontracts.SteeringDeliveryAccepted {
+		if deliveryErr != nil || (delivery.Status != llmcontracts.SteeringDeliveryAccepted && delivery.Status != llmcontracts.SteeringDeliveryPending) {
 			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), preparedSteeringInputIDs(batch), steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
 				return restoreErr
 			}
@@ -596,6 +597,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
+		if delivery.SteeringID != "" {
+			steeringBatchesByID[delivery.SteeringID] = batch
+		}
 		return nil
 	}
 	start := time.Now()
@@ -663,6 +667,18 @@ modelLoop:
 		steeringCallbackParams = nil
 		attemptSteering = preparedSteeringBatch{}
 		if err != nil || ctx.Err() != nil {
+			for _, steeringID := range committedSteeringIDs(err) {
+				batch := steeringBatchesByID[steeringID]
+				if batch.count() == 0 {
+					continue
+				}
+				if commitErr := h.commitPreparedSteeringInputs(steeringCleanupContext(ctx), params, batch); commitErr != nil {
+					applog.Infof("[handler] processStreamingResponse exec=%s error committing confirmed Astra steering %s during recovery: %v", params.ExecID, steeringID, commitErr)
+					continue
+				}
+				pendingSteering = removePreparedSteeringInputs(pendingSteering, batch)
+				delete(steeringBatchesByID, steeringID)
+			}
 			h.requeuePendingSteeringForExecution(ctx, params.ExecID)
 			pendingSteering = preparedSteeringBatch{}
 			break
@@ -832,6 +848,21 @@ modelLoop:
 
 type preparedSteeringBatch struct {
 	inputs []models.ThreadInput
+}
+
+type committedSteeringError interface {
+	CommittedSteeringIDs() []string
+}
+
+func committedSteeringIDs(err error) []string {
+	if err == nil {
+		return nil
+	}
+	var committed committedSteeringError
+	if !errors.As(err, &committed) {
+		return nil
+	}
+	return committed.CommittedSteeringIDs()
 }
 
 func (b preparedSteeringBatch) count() int {
