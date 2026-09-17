@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 195 {
-		t.Fatalf("max goose version = %d, want 195", maxVersion)
+	if maxVersion != 196 {
+		t.Fatalf("max goose version = %d, want 196", maxVersion)
 	}
 }
 
@@ -1731,6 +1731,44 @@ func TestMigration195_ChannelTargetListOrderIndex(t *testing.T) {
 	}
 }
 
+func TestMigration196AddsProviderSessionStateWithoutChangingCompactionState(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "provider-session-state-196.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 195); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO chat_compaction_checkpoints (
+		scope_type, scope_id, model_config_id, compatibility_key, source_execution_id,
+		history_json, summary, strategy, provider_state_json
+	) VALUES ('chat_project', 'project-196', 'model-196', 'compat-196', 'exec-196',
+		'[]', 'summary-196', 'openai_responses', '[{"type":"compaction"}]')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 196); err != nil {
+		t.Fatal(err)
+	}
+	var summary, providerState, sessionState string
+	if err := db.QueryRow(`SELECT summary, provider_state_json, provider_session_state_json
+		FROM chat_compaction_checkpoints WHERE scope_type = 'chat_project' AND scope_id = 'project-196'`).
+		Scan(&summary, &providerState, &sessionState); err != nil {
+		t.Fatal(err)
+	}
+	if summary != "summary-196" || providerState != `[{"type":"compaction"}]` || sessionState != "" {
+		t.Fatalf("migrated state = summary %q provider %q session %q", summary, providerState, sessionState)
+	}
+	if err := goose.DownTo(db, ".", 195); err != nil {
+		t.Fatal(err)
+	}
+	if tableHasColumn(t, db, "chat_compaction_checkpoints", "provider_session_state_json") {
+		t.Fatal("migration 196 rollback retained provider_session_state_json")
+	}
+}
+
 func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "system-channel-auth.db")
@@ -1878,8 +1916,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 195 {
-		t.Fatalf("max goose version = %d, want 195", maxVersion)
+	if maxVersion != 196 {
+		t.Fatalf("max goose version = %d, want 196", maxVersion)
 	}
 }
 
@@ -2327,8 +2365,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 195 {
-		t.Fatalf("max goose version = %d, want 195", maxVersion)
+	if maxVersion != 196 {
+		t.Fatalf("max goose version = %d, want 196", maxVersion)
 	}
 }
 
@@ -2663,8 +2701,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 195 {
-		t.Fatalf("max goose version = %d, want 195", maxVersion)
+	if maxVersion != 196 {
+		t.Fatalf("max goose version = %d, want 196", maxVersion)
 	}
 }
 

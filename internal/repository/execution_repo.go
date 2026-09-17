@@ -1012,6 +1012,10 @@ func (r *ExecutionRepo) UpsertChatCompactionCheckpoint(ctx context.Context, chec
 			scope_type, scope_id, model_config_id, compatibility_key, source_execution_id, history_json, summary, strategy, provider_state_json, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
 		ON CONFLICT(scope_type, scope_id) DO UPDATE SET
+			provider_session_state_json = CASE
+				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				THEN chat_compaction_checkpoints.provider_session_state_json ELSE '' END,
 			model_config_id = excluded.model_config_id,
 			compatibility_key = excluded.compatibility_key,
 			source_execution_id = excluded.source_execution_id,
@@ -1034,10 +1038,10 @@ func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeTy
 	var checkpoint models.ChatCompactionCheckpoint
 	var historyJSON string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT scope_type, scope_id, model_config_id, compatibility_key, source_execution_id, history_json, summary, strategy, provider_state_json, created_at, updated_at
+		SELECT scope_type, scope_id, model_config_id, compatibility_key, source_execution_id, history_json, summary, strategy, provider_state_json, provider_session_state_json, created_at, updated_at
 		FROM chat_compaction_checkpoints
 		WHERE scope_type = ? AND scope_id = ?`, scopeType, scopeID).
-		Scan(&checkpoint.ScopeType, &checkpoint.ScopeID, &checkpoint.ModelConfigID, &checkpoint.CompatibilityKey, &checkpoint.SourceExecutionID, &historyJSON, &checkpoint.Summary, &checkpoint.Strategy, &checkpoint.ProviderStateJSON, &checkpoint.CreatedAt, &checkpoint.UpdatedAt)
+		Scan(&checkpoint.ScopeType, &checkpoint.ScopeID, &checkpoint.ModelConfigID, &checkpoint.CompatibilityKey, &checkpoint.SourceExecutionID, &historyJSON, &checkpoint.Summary, &checkpoint.Strategy, &checkpoint.ProviderStateJSON, &checkpoint.ProviderSessionStateJSON, &checkpoint.CreatedAt, &checkpoint.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1048,6 +1052,48 @@ func (r *ExecutionRepo) GetChatCompactionCheckpoint(ctx context.Context, scopeTy
 		return nil, fmt.Errorf("unmarshal chat compaction checkpoint: %w", err)
 	}
 	return &checkpoint, nil
+}
+
+// UpsertChatProviderSessionState updates provider conversational state without
+// replacing a separately maintained compaction checkpoint for the same scope.
+func (r *ExecutionRepo) UpsertChatProviderSessionState(ctx context.Context, checkpoint models.ChatCompactionCheckpoint) error {
+	if r == nil || r.db == nil {
+		return nil
+	}
+	_, err := execBoundSQLite(ctx, r.db, `
+		INSERT INTO chat_compaction_checkpoints (
+			scope_type, scope_id, model_config_id, compatibility_key, history_json, provider_session_state_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, '[]', ?, datetime('now'), datetime('now'))
+		ON CONFLICT(scope_type, scope_id) DO UPDATE SET
+			source_execution_id = CASE
+				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				THEN chat_compaction_checkpoints.source_execution_id ELSE '' END,
+			history_json = CASE
+				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				THEN chat_compaction_checkpoints.history_json ELSE '[]' END,
+			summary = CASE
+				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				THEN chat_compaction_checkpoints.summary ELSE '' END,
+			strategy = CASE
+				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				THEN chat_compaction_checkpoints.strategy ELSE '' END,
+			provider_state_json = CASE
+				WHEN chat_compaction_checkpoints.compatibility_key = excluded.compatibility_key
+					AND (chat_compaction_checkpoints.model_config_id = '' OR excluded.model_config_id = '' OR chat_compaction_checkpoints.model_config_id = excluded.model_config_id)
+				THEN chat_compaction_checkpoints.provider_state_json ELSE '' END,
+			model_config_id = excluded.model_config_id,
+			compatibility_key = excluded.compatibility_key,
+			provider_session_state_json = excluded.provider_session_state_json,
+			updated_at = datetime('now')`,
+		checkpoint.ScopeType, checkpoint.ScopeID, checkpoint.ModelConfigID, checkpoint.CompatibilityKey, checkpoint.ProviderSessionStateJSON)
+	if err != nil {
+		return fmt.Errorf("upserting chat provider session state: %w", err)
+	}
+	return nil
 }
 
 func (r *ExecutionRepo) DeleteChatCompactionCheckpoint(ctx context.Context, scopeType, scopeID string) error {

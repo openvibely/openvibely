@@ -4254,6 +4254,135 @@ func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable
 	require.Empty(t, requeued.ExpectedTurnID)
 }
 
+func TestProcessStreamingResponse_CommitsMidTurnSteeringAfterPendingDeliveryCompletes(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "completed after tool continuation"
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Pending Midturn Steering Project")
+	task := createTask(t, h, project.ID, "Pending Midturn Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	var steeringID string
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		steering := &models.ThreadInput{
+			Scope:          models.ThreadInputScopeTask,
+			ProjectID:      project.ID,
+			TaskID:         task.ID,
+			RunExecutionID: exec.ID,
+			InputMode:      models.ThreadInputModeSteering,
+			InputStatus:    models.ThreadInputPending,
+			TurnID:         exec.ID,
+			ExpectedTurnID: exec.ID,
+			Content:        "apply after the required tool output",
+		}
+		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+		steeringID = steering.ID
+		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
+		require.NotNil(t, callback)
+		require.NoError(t, callback(callCtx, func(_ context.Context, _ string) (llmcontracts.SteeringDeliveryState, error) {
+			return llmcontracts.SteeringDeliveryState{
+				Status:             llmcontracts.SteeringDeliveryPending,
+				SteeringID:         "steer_pending",
+				PreviousResponseID: "resp_original",
+			}, nil
+		}))
+		prepared, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+		require.NoError(t, err)
+		require.Equal(t, models.ThreadInputPending, prepared.InputStatus)
+		require.Empty(t, prepared.ExpectedTurnID)
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	require.NotEmpty(t, steeringID)
+	applied, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+}
+
+type committedSteeringTestError struct {
+	ids []string
+}
+
+func (e committedSteeringTestError) Error() string                  { return "stream failed after steering commit" }
+func (e committedSteeringTestError) CommittedSteeringIDs() []string { return e.ids }
+
+func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFailure(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = mock.Response
+	mock.Err = committedSteeringTestError{ids: []string{"steer_committed"}}
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Committed Midturn Steering Project")
+	task := createTask(t, h, project.ID, "Committed Midturn Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	var steeringID string
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		steering := &models.ThreadInput{
+			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
+			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
+			Content: "do not replay this confirmed steering",
+		}
+		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+		steeringID = steering.ID
+		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
+		require.NotNil(t, callback)
+		require.NoError(t, callback(callCtx, func(_ context.Context, _ string) (llmcontracts.SteeringDeliveryState, error) {
+			return llmcontracts.SteeringDeliveryState{
+				Status: llmcontracts.SteeringDeliveryAccepted, SteeringID: "steer_committed",
+				ResponseID: "resp_successor", PreviousResponseID: "resp_original",
+			}, nil
+		}))
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
+		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
+	})
+
+	require.NotEmpty(t, steeringID)
+	applied, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+	require.Equal(t, models.ThreadInputModeSteering, applied.InputMode)
+}
+
 func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

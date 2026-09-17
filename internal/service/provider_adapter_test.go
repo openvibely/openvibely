@@ -942,6 +942,49 @@ func TestProviderContextCompactionFallback_RestoresDurableCheckpointOnFollowingT
 	}
 }
 
+func TestProviderSessionState_PersistsWithoutReplacingCompactionCheckpoint(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewExecutionRepo(db)
+	checkpointHistory := []models.Execution{{Output: compactedHistorySummaryPrefix + "\n\nsummary", Status: models.ExecCompleted}}
+	agent := models.LLMConfig{ID: "astra-model", Provider: models.ProviderOpenAI, Model: "gpt-6-astra"}
+	if err := repo.UpsertChatCompactionCheckpoint(context.Background(), models.ChatCompactionCheckpoint{
+		ScopeType: "chat_project", ScopeID: "astra-project", ModelConfigID: agent.ID,
+		CompatibilityKey: providerCompatibilityKey(agent), SourceExecutionID: "source",
+		History: checkpointHistory, Summary: "summary", Strategy: "local_summary", ProviderStateJSON: `[{"type":"compaction"}]`,
+	}); err != nil {
+		t.Fatalf("UpsertChatCompactionCheckpoint: %v", err)
+	}
+
+	svc := NewLLMService(nil, repo, nil, nil, nil, nil)
+	state := `{"version":1,"model":"gpt-6-astra","request_effort":"medium","configured_effort":"high"}`
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, ProjectID: "astra-project", Agent: agent}
+	svc.persistProviderSessionState(req, state)
+
+	checkpoint, err := repo.GetChatCompactionCheckpoint(context.Background(), "chat_project", "astra-project")
+	if err != nil {
+		t.Fatalf("GetChatCompactionCheckpoint: %v", err)
+	}
+	if checkpoint == nil || checkpoint.ProviderSessionStateJSON != state || checkpoint.ProviderStateJSON != `[{"type":"compaction"}]` || len(checkpoint.History) != 1 || checkpoint.Summary != "summary" {
+		t.Fatalf("checkpoint = %#v", checkpoint)
+	}
+	restored := svc.restoreCompactionCheckpoint(req)
+	if restored.ProviderSessionStateJSON != state || restored.NativeCompactionStateJSON != `[{"type":"compaction"}]` || len(restored.ChatHistory) != 1 {
+		t.Fatalf("restored request = %#v", restored)
+	}
+
+	otherAgent := models.LLMConfig{ID: "other-astra-model", Provider: models.ProviderOpenAI, Model: "gpt-6-astra"}
+	otherReq := req
+	otherReq.Agent = otherAgent
+	svc.persistProviderSessionState(otherReq, `{"version":1,"model":"gpt-6-astra","request_effort":"low","configured_effort":"low"}`)
+	checkpoint, err = repo.GetChatCompactionCheckpoint(context.Background(), "chat_project", "astra-project")
+	if err != nil {
+		t.Fatalf("GetChatCompactionCheckpoint after incompatible state: %v", err)
+	}
+	if checkpoint == nil || checkpoint.ProviderStateJSON != "" || len(checkpoint.History) != 0 || checkpoint.Summary != "" {
+		t.Fatalf("incompatible session state retained compaction checkpoint: %#v", checkpoint)
+	}
+}
+
 func TestProviderContextCompactionFallback_NativeFailureFallsBackAndCachesUnsupported(t *testing.T) {
 	model := "native-unsupported-test"
 	knownUnsupportedNativeCompaction.Delete(nativeCompactionSessionKey(models.LLMConfig{Provider: models.ProviderOpenAI, Model: model}))

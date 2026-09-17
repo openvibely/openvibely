@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/stretchr/testify/require"
 )
 
 // buildSSE constructs a server-sent events stream from JSON data lines.
@@ -4371,6 +4372,202 @@ func TestSendAgentic_AstraConfigurationUpdatePreservesRequestEffort(t *testing.T
 	if got := client.responsesTransportState.lastAstraReasoningEffort("gpt-6-astra"); got != "high" {
 		t.Fatalf("remembered Astra effort = %q, want high", got)
 	}
+}
+
+func TestSendAgentic_AstraConfigurationUpdateReplaysPinnedBaseline(t *testing.T) {
+	requests := make(chan map[string]any, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		requests <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.output_text.delta","delta":"ok"}`, `{"type":"response.completed","response":{"status":"completed","model":"gpt-6-astra"}}`})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
+	client.responsesTransportState.setAstraReasoningEffort("gpt-6-astra", "medium")
+	for _, prompt := range []string{"change effort", "keep effort"} {
+		if _, err := client.SendAgentic(context.Background(), prompt, &AgenticOptions{
+			Model:                          "gpt-6-astra",
+			ReasoningEffort:                "high",
+			SkipDefaultTools:               true,
+			EnableAstraConfigurationUpdate: true,
+		}); err != nil {
+			t.Fatalf("SendAgentic(%q): %v", prompt, err)
+		}
+	}
+
+	for requestNumber := 1; requestNumber <= 2; requestNumber++ {
+		request := <-requests
+		reasoning, _ := request["reasoning"].(map[string]any)
+		if reasoning["effort"] != "medium" {
+			t.Fatalf("request %d reasoning.effort = %#v, want pinned medium", requestNumber, reasoning["effort"])
+		}
+		input, _ := request["input"].([]any)
+		updates := 0
+		updateIndex := -1
+		for i, raw := range input {
+			item, _ := raw.(map[string]any)
+			if item["type"] != "configuration_update" {
+				continue
+			}
+			updates++
+			updateIndex = i
+			updateReasoning, _ := item["reasoning"].(map[string]any)
+			if updateReasoning["effort"] != "high" {
+				t.Fatalf("request %d configuration update = %#v, want high", requestNumber, item)
+			}
+		}
+		if updates != 1 {
+			t.Fatalf("request %d configuration updates = %d, want 1 in %#v", requestNumber, updates, input)
+		}
+		if updateIndex != 3 {
+			t.Fatalf("request %d configuration update index = %d, want stable index 3 in %#v", requestNumber, updateIndex, input)
+		}
+	}
+}
+
+func TestAstraReasoningState_RestoresAcrossColdTransport(t *testing.T) {
+	original := NewResponsesTransportState()
+	original.commitAstraReasoningEffort("gpt-6-astra", "medium", 1, false, false)
+	original.commitAstraReasoningEffort("gpt-6-astra", "high", 2, true, false)
+	raw := original.astraReasoningStateJSON("gpt-6-astra")
+	require.NotEmpty(t, raw)
+
+	restored := NewResponsesTransportState()
+	require.NoError(t, restored.restoreAstraReasoningStateJSON("gpt-6-astra", raw))
+	requestEffort, configuredEffort, updates := restored.astraReasoningState("gpt-6-astra")
+	require.Equal(t, "medium", requestEffort)
+	require.Equal(t, "high", configuredEffort)
+	require.Equal(t, []astraConfigurationUpdate{{UserHistoryIndex: 2, Effort: "high"}}, updates)
+
+	// Durable state must not rewind a transport that has already advanced.
+	restored.commitAstraReasoningEffort("gpt-6-astra", "low", 3, true, false)
+	require.NoError(t, restored.restoreAstraReasoningStateJSON("gpt-6-astra", raw))
+	require.Equal(t, "low", restored.lastAstraReasoningEffort("gpt-6-astra"))
+}
+
+func TestAstraReasoningState_RejectsInvalidDurableState(t *testing.T) {
+	state := NewResponsesTransportState()
+	require.Error(t, state.restoreAstraReasoningStateJSON("gpt-6-astra", `{"version":1,"model":"gpt-6-astra","request_effort":"bogus","configured_effort":"high"}`))
+	requestEffort, configuredEffort, updates := state.astraReasoningState("gpt-6-astra")
+	require.Empty(t, requestEffort)
+	require.Empty(t, configuredEffort)
+	require.Empty(t, updates)
+}
+
+func TestSendAgentic_AstraConfigurationUpdateSurvivesRewrittenHistory(t *testing.T) {
+	requests := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		requests <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.output_text.delta","delta":"ok"}`, `{"type":"response.completed","response":{"status":"completed","model":"gpt-6-astra"}}`})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	client.History = []Message{{Role: "user", Content: "compacted summary"}, {Role: "assistant", Content: "summary acknowledged"}}
+	client.responsesTransportState.mu.Lock()
+	client.responsesTransportState.astraRequestEffort = "medium"
+	client.responsesTransportState.astraConfiguredEffort = "high"
+	client.responsesTransportState.astraConfigUpdates = []astraConfigurationUpdate{{UserHistoryIndex: 5, Effort: "high"}}
+	client.responsesTransportState.mu.Unlock()
+
+	_, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
+		Model:                          "gpt-6-astra",
+		ReasoningEffort:                "high",
+		SkipDefaultTools:               true,
+		EnableAstraConfigurationUpdate: true,
+	})
+	require.NoError(t, err)
+	request := <-requests
+	reasoning := request["reasoning"].(map[string]any)
+	require.Equal(t, "medium", reasoning["effort"])
+	input := request["input"].([]any)
+	updates := 0
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "configuration_update" {
+			updates++
+			require.Equal(t, "high", item["reasoning"].(map[string]any)["effort"])
+		}
+	}
+	require.Equal(t, 1, updates)
+	require.Equal(t, "user", input[len(input)-1].(map[string]any)["role"])
+}
+
+func TestSendAgentic_AstraConfigurationUpdateReplacesConflictingTrailingUpdate(t *testing.T) {
+	requests := make(chan map[string]any, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		requests <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.output_text.delta","delta":"ok"}`, `{"type":"response.completed","response":{"status":"completed","model":"gpt-6-astra"}}`})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	client.responsesTransportState.mu.Lock()
+	client.responsesTransportState.astraRequestEffort = "medium"
+	client.responsesTransportState.astraConfiguredEffort = "high"
+	client.responsesTransportState.mu.Unlock()
+	_, err := client.SendAgentic(context.Background(), "use less reasoning", &AgenticOptions{
+		Model:                          "gpt-6-astra",
+		ReasoningEffort:                "low",
+		InitialInputItems:              []any{astraConfigurationUpdateItem("high")},
+		SkipDefaultTools:               true,
+		EnableAstraConfigurationUpdate: true,
+	})
+	require.NoError(t, err)
+	input := (<-requests)["input"].([]any)
+	updates := make([]map[string]any, 0, 1)
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "configuration_update" {
+			updates = append(updates, item)
+		}
+	}
+	require.Len(t, updates, 1)
+	require.Equal(t, "low", updates[0]["reasoning"].(map[string]any)["effort"])
+}
+
+func TestWrapAstraSteeringCommitsPreservesConfirmedIDs(t *testing.T) {
+	state := NewResponsesTransportState()
+	state.astraSteeringCommits = []ResponsesSteeringDelivery{
+		{Status: AstraSteeringAccepted, SteeringID: "steer_1"},
+		{Status: AstraSteeringAccepted, SteeringID: "steer_1"},
+		{Status: AstraSteeringAccepted, SteeringID: "steer_2"},
+	}
+	want := errors.New("stream disconnected")
+	err := wrapAstraSteeringCommits(want, state)
+	require.ErrorIs(t, err, want)
+	var committed interface{ CommittedSteeringIDs() []string }
+	require.ErrorAs(t, err, &committed)
+	require.Equal(t, []string{"steer_1", "steer_2"}, committed.CommittedSteeringIDs())
+	require.Empty(t, state.astraSteeringCommits)
 }
 
 func TestSendAgentic_AstraConfigurationUpdateIsReestablishedAfterCompaction(t *testing.T) {

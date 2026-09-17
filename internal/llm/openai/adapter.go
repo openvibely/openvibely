@@ -313,6 +313,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	if rt != nil && len(rt.Definitions) > 0 && !disableTools {
+		restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 			Model:            agent.Model,
 			ContextWindow:    agent.ContextWindow,
@@ -332,6 +333,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			return "", llmusage.FromTotal(0), wrapAuthScopeError(agent, err)
 		}
 		usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
+		recordOpenAINativeCompactionState(&usage, resp)
 		return resp.Text, usage, nil
 	}
 
@@ -390,6 +392,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	inThinking := false
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
+	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
@@ -506,6 +509,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
+	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
@@ -944,6 +948,7 @@ func nativeCompactionInputItems(ctx context.Context) []any {
 func recordOpenAINativeCompactionState(usage *llmcontracts.Usage, resp *openaiclient.AgenticResponse) {
 	if usage != nil && resp != nil {
 		usage.LastContextTokens = resp.LastContextTokens
+		usage.ProviderSessionStateJSON = strings.TrimSpace(resp.AstraReasoningStateJSON)
 	}
 	if usage == nil || resp == nil || len(resp.CompactedInputItems) == 0 {
 		return
@@ -958,6 +963,19 @@ func recordOpenAINativeCompactionState(usage *llmcontracts.Usage, resp *openaicl
 		usage.ProviderIDs = make(map[string]string)
 	}
 	usage.ProviderIDs["native_compaction_strategy"] = "openai_responses"
+}
+
+func restoreOpenAIAstraReasoningState(ctx context.Context, client *openaiclient.Client, model string) {
+	if client == nil {
+		return
+	}
+	raw := strings.TrimSpace(llmcontracts.ProviderSessionStateJSONFromContext(ctx))
+	if raw == "" {
+		return
+	}
+	if err := client.RestoreAstraReasoningState(model, raw); err != nil {
+		applog.Infof("[openai-adapter] ignoring invalid Astra reasoning session state: %v", err)
+	}
 }
 
 func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {

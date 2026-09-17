@@ -1544,6 +1544,30 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringPendingAfterToolStopCo
 			t.Errorf("write steer pending: %v", err)
 			return
 		}
+		_, continuationBytes, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("read continuation: %v", err)
+			return
+		}
+		var continuation map[string]any
+		if err := json.Unmarshal(continuationBytes, &continuation); err != nil {
+			t.Errorf("decode continuation: %v", err)
+			return
+		}
+		if continuation["previous_response_id"] != "resp_original" {
+			t.Errorf("continuation previous_response_id = %#v, want resp_original", continuation["previous_response_id"])
+			return
+		}
+		for _, event := range []string{
+			`{"type":"response.created","response":{"id":"resp_continued"}}`,
+			`{"type":"response.output_text.delta","delta":"continued"}`,
+			`{"type":"response.completed","response":{"id":"resp_continued","status":"completed","model":"gpt-6-astra"}}`,
+		} {
+			if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write continuation event: %v", err)
+				return
+			}
+		}
 		close(serverDone)
 		select {
 		case <-r.Context().Done():
@@ -1560,7 +1584,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringPendingAfterToolStopCo
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var callbackCalls atomic.Int32
-	accepted := make(chan AstraSteeringDelivery, 1)
+	pending := make(chan AstraSteeringDelivery, 1)
 	body, err := client.openResponsesWebsocketStream(ctx, map[string]any{
 		"type":  "response.create",
 		"model": "gpt-6-astra",
@@ -1573,7 +1597,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringPendingAfterToolStopCo
 			}
 			delivery, err := deliver(ctx, "steer now")
 			if err == nil {
-				accepted <- delivery
+				pending <- delivery
 			}
 			return err
 		},
@@ -1602,17 +1626,187 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringPendingAfterToolStopCo
 		t.Fatal("server did not receive response.steer")
 	}
 	select {
-	case delivery := <-accepted:
-		if delivery.Status != AstraSteeringAccepted || delivery.SteeringID != "steer_pending" || delivery.PreviousResponseID != "resp_original" || delivery.ResponseID != "" {
+	case delivery := <-pending:
+		if delivery.Status != AstraSteeringPending || delivery.SteeringID != "steer_pending" || delivery.PreviousResponseID != "resp_original" || delivery.ResponseID != "" {
 			t.Fatalf("delivery = %#v", delivery)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("steering callback did not observe acceptance")
+		t.Fatal("steering callback did not observe pending state")
+	}
+	toolCall := map[string]any{"id": "call_1", "type": "function_call", "name": "read_file", "call_id": "call_1", "arguments": "{}"}
+	continuation, err := client.openResponsesWebsocketStream(ctx, map[string]any{
+		"type": "response.create", "model": "gpt-6-astra", "input": []any{
+			toolCall,
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "done"},
+		},
+	}, false, responsesWebsocketStreamOptions{Model: "gpt-6-astra"})
+	if err != nil {
+		t.Fatalf("open continuation stream: %v", err)
+	}
+	continuedRaw, err := io.ReadAll(continuation)
+	if err != nil {
+		t.Fatalf("read continuation stream: %v", err)
+	}
+	_ = continuation.Close()
+	if !strings.Contains(string(continuedRaw), "continued") {
+		t.Fatalf("continuation stream = %s, want continued output", continuedRaw)
+	}
+	records := client.responsesTransportState.SteeringDeliveries()
+	if len(records) == 0 || records[len(records)-1].Status != AstraSteeringAccepted || records[len(records)-1].ResponseID != "resp_continued" {
+		t.Fatalf("steering records = %#v, want successor commit", records)
+	}
+	if unresolved := client.responsesTransportState.takeUnresolvedAstraSteering(); unresolved != nil {
+		t.Fatalf("pending steering was not committed: %v", unresolved)
 	}
 	select {
 	case <-serverDone:
 	case <-time.After(time.Second):
 		t.Fatal("server did not send pending event")
+	}
+}
+
+func TestOpenResponsesWebsocketStream_AstraPendingSteeringCanFailBeforeSuccessor(t *testing.T) {
+	serverDone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		defer close(serverDone)
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read initial request: %v", err)
+			return
+		}
+		for _, event := range []string{
+			`{"type":"response.created","response":{"id":"resp_original"}}`,
+		} {
+			if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write initial event: %v", err)
+				return
+			}
+		}
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read steer: %v", err)
+			return
+		}
+		for _, event := range []string{
+			`{"type":"response.steer.accepted","steer":{"id":"steer_pending_failure","previous_response_id":"resp_original"}}`,
+			`{"type":"response.output_item.done","item":{"id":"call_1","type":"function_call","name":"read_file","call_id":"call_1","arguments":"{}"}}`,
+			`{"type":"response.completed","response":{"id":"resp_original","status":"completed","model":"gpt-6-astra"}}`,
+			`{"type":"response.steer.pending","steer":{"id":"steer_pending_failure","previous_response_id":"resp_original"},"reason":"waiting_for_required_input","required_input":[{"type":"function_call_output","call_id":"call_1"}]}`,
+		} {
+			if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write pending sequence: %v", err)
+				return
+			}
+		}
+
+		_, continuationBytes, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("read continuation: %v", err)
+			return
+		}
+		var continuation map[string]any
+		if err := json.Unmarshal(continuationBytes, &continuation); err != nil {
+			t.Errorf("decode continuation: %v", err)
+			return
+		}
+		if continuation["previous_response_id"] != "resp_original" {
+			t.Errorf("continuation previous_response_id = %#v, want resp_original", continuation["previous_response_id"])
+			return
+		}
+		for _, event := range []string{
+			`{"type":"response.steer.failed","steer":{"id":"steer_pending_failure","previous_response_id":"resp_original"},"error":{"code":"server_error","message":"could not apply queued steering"}}`,
+			`{"type":"response.created","response":{"id":"resp_tool_continuation"}}`,
+			`{"type":"response.output_text.delta","delta":"continued"}`,
+			`{"type":"response.completed","response":{"id":"resp_tool_continuation","status":"completed","model":"gpt-6-astra"}}`,
+		} {
+			if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write failure sequence: %v", err)
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	pending := make(chan AstraSteeringDelivery, 1)
+	first, err := client.openResponsesWebsocketStream(context.Background(), map[string]any{
+		"type": "response.create", "model": "gpt-6-astra", "input": []any{},
+	}, false, responsesWebsocketStreamOptions{
+		Model: "gpt-6-astra",
+		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
+			delivery, err := deliver(ctx, "change course")
+			pending <- delivery
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("open first stream: %v", err)
+	}
+	if _, err := io.ReadAll(first); err != nil {
+		t.Fatalf("read first stream: %v", err)
+	}
+	_ = first.Close()
+	select {
+	case delivery := <-pending:
+		if delivery.Status != AstraSteeringPending {
+			t.Fatalf("delivery = %#v, want pending", delivery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("steering callback did not observe pending state")
+	}
+
+	toolCall := map[string]any{"id": "call_1", "type": "function_call", "name": "read_file", "call_id": "call_1", "arguments": "{}"}
+	second, err := client.openResponsesWebsocketStream(context.Background(), map[string]any{
+		"type": "response.create", "model": "gpt-6-astra", "input": []any{
+			toolCall,
+			map[string]any{"type": "function_call_output", "call_id": "call_1", "output": "done"},
+		},
+	}, false, responsesWebsocketStreamOptions{Model: "gpt-6-astra"})
+	if err != nil {
+		t.Fatalf("open continuation stream: %v", err)
+	}
+	if _, err := io.ReadAll(second); err != nil {
+		t.Fatalf("read continuation stream: %v", err)
+	}
+	_ = second.Close()
+	if err := client.responsesTransportState.takeAstraSteeringFailure(); err == nil || !strings.Contains(err.Error(), "could not apply queued steering") {
+		t.Fatalf("queued steering failure = %v", err)
+	}
+	select {
+	case <-serverDone:
+	case <-time.After(time.Second):
+		t.Fatal("server did not finish pending failure sequence")
+	}
+}
+
+func TestResponsesTransportState_ResetFailsAndClearsPendingAstraSteering(t *testing.T) {
+	state := NewResponsesTransportState()
+	state.pendingAstraSteering = map[string]ResponsesSteeringDelivery{
+		"steer_reset": {
+			Status:             AstraSteeringPending,
+			SteeringID:         "steer_reset",
+			PreviousResponseID: "resp_original",
+		},
+	}
+	state.mu.Lock()
+	state.resetConnectionLocked()
+	state.mu.Unlock()
+	if len(state.pendingAstraSteering) != 0 {
+		t.Fatalf("pending steering survived reset: %#v", state.pendingAstraSteering)
+	}
+	if err := state.takeAstraSteeringFailure(); err == nil || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("reset steering failure = %v", err)
+	}
+	if err := state.takeUnresolvedAstraSteering(); err != nil {
+		t.Fatalf("reset left unresolved steering: %v", err)
 	}
 }
 
