@@ -4361,13 +4361,103 @@ func TestSendAgentic_AstraConfigurationUpdatePreservesRequestEffort(t *testing.T
 	if configUpdate == nil {
 		t.Fatalf("input missing configuration_update: %#v", input)
 	}
-	configuration, _ := configUpdate["configuration"].(map[string]any)
-	updateReasoning, _ := configuration["reasoning"].(map[string]any)
+	updateReasoning, _ := configUpdate["reasoning"].(map[string]any)
 	if updateReasoning["effort"] != "high" {
 		t.Fatalf("configuration_update reasoning.effort = %#v, want high", updateReasoning["effort"])
 	}
+	if _, exists := configUpdate["configuration"]; exists {
+		t.Fatalf("configuration_update contains unsupported configuration wrapper: %#v", configUpdate)
+	}
 	if got := client.responsesTransportState.lastAstraReasoningEffort("gpt-6-astra"); got != "high" {
 		t.Fatalf("remembered Astra effort = %q, want high", got)
+	}
+}
+
+func TestSendAgentic_AstraConfigurationUpdateIsReestablishedAfterCompaction(t *testing.T) {
+	requestNumber := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestNumber++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request %d: %v", requestNumber, err)
+		}
+		input, _ := body["input"].([]any)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch requestNumber {
+		case 1:
+			for _, raw := range input {
+				item, _ := raw.(map[string]any)
+				if item["type"] == "configuration_update" {
+					t.Fatalf("pre-compaction input contains configuration_update: %#v", input)
+				}
+			}
+			last, _ := input[len(input)-1].(map[string]any)
+			if last["type"] != "compaction_trigger" {
+				t.Fatalf("last compaction input = %#v, want compaction_trigger", last)
+			}
+			_, _ = w.Write([]byte(buildSSE([]string{
+				`{"type":"response.output_item.done","item":{"type":"compaction","encrypted_content":"summary"}}`,
+				`{"type":"response.completed","response":{"id":"resp_compact","status":"completed","model":"gpt-6-astra"}}`,
+			})))
+		case 2:
+			configurationUpdates := 0
+			configurationIndex := -1
+			for i, raw := range input {
+				item, _ := raw.(map[string]any)
+				if item["type"] != "configuration_update" {
+					continue
+				}
+				configurationUpdates++
+				configurationIndex = i
+				reasoning, _ := item["reasoning"].(map[string]any)
+				if reasoning["effort"] != "high" {
+					t.Fatalf("configuration update = %#v, want high effort", item)
+				}
+			}
+			if configurationUpdates != 1 {
+				t.Fatalf("configuration updates = %d, want 1 in %#v", configurationUpdates, input)
+			}
+			if configurationIndex != len(input)-2 {
+				t.Fatalf("configuration update index = %d, want immediately before user message in %#v", configurationIndex, input)
+			}
+			user, _ := input[len(input)-1].(map[string]any)
+			if user["role"] != "user" || user["content"] != "next" {
+				t.Fatalf("last input = %#v, want current user message", user)
+			}
+			reasoning, _ := body["reasoning"].(map[string]any)
+			if reasoning["effort"] != "medium" {
+				t.Fatalf("request-level effort = %#v, want medium", reasoning["effort"])
+			}
+			_, _ = w.Write([]byte(buildSSE([]string{
+				`{"type":"response.output_text.delta","delta":"ok"}`,
+				`{"type":"response.completed","response":{"id":"resp_final","status":"completed","model":"gpt-6-astra"}}`,
+			})))
+		default:
+			t.Fatalf("unexpected request %d", requestNumber)
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
+	client.responsesTransportState.setAstraReasoningEffort("gpt-6-astra", "medium")
+	if _, err := client.SendAgentic(context.Background(), "next", &AgenticOptions{
+		Model:                          "gpt-6-astra",
+		ReasoningEffort:                "high",
+		SkipDefaultTools:               true,
+		EnableAstraConfigurationUpdate: true,
+		AutoCompaction:                 true,
+		CompactionTokenThreshold:       1,
+	}); err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if requestNumber != 2 {
+		t.Fatalf("requests = %d, want 2", requestNumber)
 	}
 }
 

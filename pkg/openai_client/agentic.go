@@ -148,6 +148,7 @@ const (
 // AstraSteeringDelivery records response.steer delivery state for an active WebSocket response.
 type AstraSteeringDelivery struct {
 	Status             AstraSteeringDeliveryStatus
+	SteeringID         string
 	ResponseID         string
 	PreviousResponseID string
 	Error              string
@@ -219,10 +220,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 	finalReasoningEffort := normalizedAstraReasoningEffort(opts.Model, opts.ReasoningEffort)
 	requestLevelReasoningEffort := ""
+	astraConfigurationUpdateEffort := ""
 	if opts.EnableAstraConfigurationUpdate && isGPT6AstraModel(opts.Model) && len(c.History) > 0 && c.responsesTransportState != nil {
 		previousEffort := c.responsesTransportState.lastAstraReasoningEffort(opts.Model)
 		if previousEffort != "" && finalReasoningEffort != "" && previousEffort != finalReasoningEffort {
-			inputItems = append(inputItems, astraConfigurationUpdateItem(finalReasoningEffort))
+			astraConfigurationUpdateEffort = finalReasoningEffort
 			requestLevelReasoningEffort = previousEffort
 		}
 	}
@@ -260,6 +262,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if opts.OnCompaction != nil {
 			opts.OnCompaction(strings.TrimSpace(summary))
 		}
+		// Explicit compaction retires prior configuration updates. Re-establish
+		// the selected effort after the compaction item so the request-level
+		// effort can remain pinned to the original cacheable baseline.
+		if astraConfigurationUpdateEffort != "" {
+			compactedItems = append(compactedItems, astraConfigurationUpdateItem(astraConfigurationUpdateEffort))
+		}
 		tokenLedger.reset()
 		return compactedItems, nil
 	}
@@ -274,6 +282,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if err != nil {
 			return nil, fmt.Errorf("pre-turn compaction: %w", err)
 		}
+	}
+	if astraConfigurationUpdateEffort != "" && !hasTrailingConfigurationUpdate(inputItems) {
+		// The update must immediately precede the next user message. Waiting until
+		// after pre-turn compaction also avoids sending an update into compaction
+		// without re-establishing it afterward.
+		inputItems = append(inputItems, astraConfigurationUpdateItem(astraConfigurationUpdateEffort))
 	}
 
 	// Add current prompt with optional attachments
@@ -1670,11 +1684,17 @@ func normalizedAstraReasoningEffort(model, value string) string {
 
 func astraConfigurationUpdateItem(effort string) agenticInputItem {
 	return agenticInputItem{
-		"type": "configuration_update",
-		"configuration": map[string]any{
-			"reasoning": map[string]any{"effort": effort},
-		},
+		"type":      "configuration_update",
+		"reasoning": map[string]any{"effort": effort},
 	}
+}
+
+func hasTrailingConfigurationUpdate(items []any) bool {
+	if len(items) == 0 {
+		return false
+	}
+	item, ok := items[len(items)-1].(map[string]any)
+	return ok && strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "configuration_update")
 }
 
 func statelessOAuthOutputItems(items []any) []any {
