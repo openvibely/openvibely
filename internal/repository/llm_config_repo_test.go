@@ -99,6 +99,343 @@ func TestLLMConfigRepoRejectsBlankRunnableModelSlug(t *testing.T) {
 	}
 }
 
+func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactAggregate(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	assertPresence := func(name string, want OAuthProviderPresence) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		got, err := repo.OAuthProviderPresence(ctx)
+		counter.SetEnabled(false)
+		if err != nil {
+			t.Fatalf("%s OAuthProviderPresence: %v", name, err)
+		}
+		if got != want {
+			t.Fatalf("%s presence = %#v, want %#v", name, got, want)
+		}
+		assertOAuthProviderPresenceStatement(t, counter.Statements())
+	}
+
+	assertPresence("empty", OAuthProviderPresence{})
+
+	for i, cfg := range []*models.LLMConfig{
+		{Name: "Anthropic API Key", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet"},
+		{Name: "OpenAI CLI Legacy", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodCLI, Model: "gpt-test"},
+		{Name: "Ollama OAuth Unsupported", Provider: models.ProviderOllama, AuthMethod: models.AuthMethodOAuth, Model: "llama3"},
+	} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create non-oauth config %d: %v", i, err)
+		}
+	}
+	assertPresence("non oauth rows", OAuthProviderPresence{})
+
+	compatible := &models.LLMConfig{Name: "Compatible OAuth", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth, Model: "custom-model"}
+	if err := repo.Create(ctx, compatible); err != nil {
+		t.Fatalf("create compatible oauth: %v", err)
+	}
+	assertPresence("compatible oauth", OAuthProviderPresence{AnyOAuth: true})
+
+	anthropic := &models.LLMConfig{Name: "Anthropic OAuth", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, Model: "claude-sonnet"}
+	if err := repo.Create(ctx, anthropic); err != nil {
+		t.Fatalf("create anthropic oauth: %v", err)
+	}
+	assertPresence("anthropic oauth", OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true})
+
+	openai := &models.LLMConfig{Name: "OpenAI OAuth", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, Model: "gpt-test"}
+	if err := repo.Create(ctx, openai); err != nil {
+		t.Fatalf("create openai oauth: %v", err)
+	}
+	assertPresence("openai oauth", OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true})
+}
+
+func assertOAuthProviderPresenceStatement(t *testing.T, statements []string) {
+	t.Helper()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact OAuth-provider aggregate query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	if !strings.Contains(stmt, "from agent_configs") {
+		t.Fatalf("OAuth provider presence query must read agent_configs: %s", statements[0])
+	}
+	if strings.Contains(stmt, "join") || strings.Contains(stmt, "oauth_connections") || strings.Contains(stmt, "order by") {
+		t.Fatalf("OAuth provider presence query must not join/order: %s", statements[0])
+	}
+	projection := strings.Split(stmt, " from agent_configs")[0]
+	if count := strings.Count(projection, "coalesce(max("); count != 3 {
+		t.Fatalf("OAuth provider presence projection has %d aggregate columns, want 3: %s", count, statements[0])
+	}
+	for _, required := range []string{"auth_method", "provider"} {
+		if !strings.Contains(projection, required) {
+			t.Fatalf("OAuth provider presence projection missing %q: %s", required, statements[0])
+		}
+	}
+	for _, forbidden := range startupOAuthPresenceForbiddenColumns() {
+		if strings.Contains(stmt, forbidden) {
+			t.Fatalf("OAuth provider presence query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+}
+
+func startupOAuthPresenceForbiddenColumns() []string {
+	return []string{
+		"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret",
+		"oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "models_url",
+		"auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "default_max_tokens",
+		"context_window", "compaction_threshold", "token_exchange_format", "token_refresh_format",
+		"custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision", "mixture_config_json",
+		"max_workers", "worker_timeout", "created_at", "updated_at", "oauth_expires_at", "oauth_account_id",
+		"oauth_needs_reauth", "oauth_revision",
+	}
+}
+
+func TestLLMConfigRepo_OAuthProviderPresenceLargeFixtureBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping startup OAuth provider presence performance guard in short mode")
+	}
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedMixedStartupOAuthModelConfigs(t, ctx, repo, 50)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	presence, err := repo.OAuthProviderPresence(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if presence != (OAuthProviderPresence{AnyOAuth: true, AnthropicOAuth: true, OpenAIOAuth: true}) {
+		t.Fatalf("presence = %#v", presence)
+	}
+	assertOAuthProviderPresenceStatement(t, counter.Statements())
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	compact := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			got, err := repo.OAuthProviderPresence(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if !got.AnyOAuth || !got.AnthropicOAuth || !got.OpenAIOAuth {
+				b.Fatalf("unexpected presence: %#v", got)
+			}
+		}
+	})
+
+	fullColumns := countSelectColumns(llmConfigColumns)
+	compactColumns := 3
+	fullBytes := estimateFullListSelectedBytes(t, ctx, repo)
+	compactBytes := compactColumns
+	t.Logf("startup OAuth full List: %d ns/op, %d B/op, %d allocs/op, columns=%d, selected_bytes≈%d", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), fullList.AllocsPerOp(), fullColumns, fullBytes)
+	t.Logf("startup OAuth compact: %d ns/op, %d B/op, %d allocs/op, columns=%d, selected_bytes≈%d", compact.NsPerOp(), compact.AllocedBytesPerOp(), compact.AllocsPerOp(), compactColumns, compactBytes)
+
+	if compact.NsPerOp() > (200 * time.Microsecond).Nanoseconds() {
+		t.Fatalf("compact OAuth provider presence took %s/op, want <= 200µs", time.Duration(compact.NsPerOp()))
+	}
+	if compact.AllocedBytesPerOp()*10 > fullList.AllocedBytesPerOp() {
+		t.Fatalf("compact OAuth provider presence allocated %d B/op, want at least 90%% less than full List %d B/op", compact.AllocedBytesPerOp(), fullList.AllocedBytesPerOp())
+	}
+	if compactColumns > 3 || fullColumns <= compactColumns {
+		t.Fatalf("selected columns full=%d compact=%d, want compact aggregate/provider/auth fields only", fullColumns, compactColumns)
+	}
+	if compactBytes*10 > fullBytes {
+		t.Fatalf("selected bytes compact≈%d, want at least 90%% less than full List≈%d", compactBytes, fullBytes)
+	}
+}
+
+func BenchmarkLLMConfigRepoStartupOAuthProviderPresenceComparison(b *testing.B) {
+	for _, count := range []int{0, 1, 50, 500} {
+		b.Run(fmt.Sprintf("configs_%d", count), func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			repo := NewLLMConfigRepo(db)
+			ctx := context.Background()
+			if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+				b.Fatalf("clear model configs: %v", err)
+			}
+			seedMixedStartupOAuthModelConfigs(b, ctx, repo, count)
+			fullColumns := countSelectColumns(llmConfigColumns)
+			fullBytes := estimateFullListSelectedBytes(b, ctx, repo)
+			b.Run("full_list", func(b *testing.B) {
+				counter.Reset()
+				counter.SetEnabled(true)
+				if _, err := repo.List(ctx); err != nil {
+					b.Fatal(err)
+				}
+				statements := len(counter.Statements())
+				counter.SetEnabled(false)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					configs, err := repo.List(ctx)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if len(configs) != count {
+						b.Fatalf("expected %d configs, got %d", count, len(configs))
+					}
+				}
+				b.ReportMetric(float64(statements), "sql/op")
+				b.ReportMetric(float64(fullColumns), "selected_cols/op")
+				b.ReportMetric(float64(fullBytes), "selected_bytes/op")
+			})
+			b.Run("compact_presence", func(b *testing.B) {
+				counter.Reset()
+				counter.SetEnabled(true)
+				if _, err := repo.OAuthProviderPresence(ctx); err != nil {
+					b.Fatal(err)
+				}
+				statements := len(counter.Statements())
+				counter.SetEnabled(false)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					presence, err := repo.OAuthProviderPresence(ctx)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if count == 0 {
+						if presence != (OAuthProviderPresence{}) {
+							b.Fatalf("expected empty presence, got %#v", presence)
+						}
+					} else if !presence.AnyOAuth {
+						b.Fatalf("expected OAuth presence for count %d, got %#v", count, presence)
+					}
+				}
+				b.ReportMetric(float64(statements), "sql/op")
+				b.ReportMetric(3, "selected_cols/op")
+				b.ReportMetric(3, "selected_bytes/op")
+			})
+		})
+	}
+}
+
+func seedMixedStartupOAuthModelConfigs(tb testing.TB, ctx context.Context, repo *LLMConfigRepo, count int) {
+	tb.Helper()
+	largeBody := strings.Repeat("x", 64*1024)
+	for i := 0; i < count; i++ {
+		provider, authMethod := startupOAuthFixtureProviderAuth(i)
+		cfg := &models.LLMConfig{
+			Name:                  fmt.Sprintf("Startup OAuth Fixture %03d", i),
+			Provider:              provider,
+			AuthMethod:            authMethod,
+			Model:                 startupOAuthFixtureModel(provider),
+			APIKey:                "secret-key",
+			OAuthAccessToken:      "secret-token",
+			OAuthRefreshToken:     "secret-refresh",
+			OAuthClientID:         "client-id",
+			OAuthClientSecret:     "secret-client",
+			OAuthAuthorizeURL:     "https://auth.example.com/authorize",
+			OAuthTokenURL:         "https://auth.example.com/token",
+			OAuthScopes:           "models",
+			OllamaBaseURL:         "http://localhost:11434",
+			BaseURL:               "https://example.com/v1/",
+			Transport:             "chat_completions",
+			PresetSlug:            "custom",
+			ModelsURL:             "https://example.com/v1/models",
+			AuthHeaderName:        "X-API-Key",
+			AuthHeaderValuePrefix: "Bearer",
+			ExtraHeadersJSON:      `{"secret":"header"}`,
+			ExtraBodyJSON:         largeBody,
+			CustomAuthConfigJSON:  `{"signing_secret":"secret"}`,
+			CustomAuthStateJSON:   `{"token":"secret"}`,
+			MixtureConfigJSON:     `{"large":"` + largeBody + `"}`,
+			MaxWorkers:            (i % 4) + 1,
+			WorkerTimeout:         60 + i,
+		}
+		if err := repo.Create(ctx, cfg); err != nil {
+			tb.Fatalf("Create startup OAuth fixture %d: %v", i, err)
+		}
+	}
+}
+
+func startupOAuthFixtureProviderAuth(i int) (models.LLMProvider, models.AuthMethod) {
+	switch i % 6 {
+	case 0:
+		return models.ProviderOpenAICompatible, models.AuthMethodOAuth
+	case 1:
+		return models.ProviderAnthropic, models.AuthMethodOAuth
+	case 2:
+		return models.ProviderOpenAI, models.AuthMethodOAuth
+	case 3:
+		return models.ProviderOpenAICompatible, models.AuthMethodAPIKey
+	case 4:
+		return models.ProviderAnthropic, models.AuthMethodAPIKey
+	default:
+		return models.ProviderOllama, models.AuthMethodOAuth
+	}
+}
+
+func startupOAuthFixtureModel(provider models.LLMProvider) string {
+	switch provider {
+	case models.ProviderAnthropic:
+		return "claude-sonnet"
+	case models.ProviderOpenAI:
+		return "gpt-test"
+	case models.ProviderOllama:
+		return "llama3"
+	default:
+		return "custom-model"
+	}
+}
+
+func estimateFullListSelectedBytes(tb testing.TB, ctx context.Context, repo *LLMConfigRepo) int {
+	tb.Helper()
+	configs, err := repo.List(ctx)
+	if err != nil {
+		tb.Fatalf("List for selected-byte estimate: %v", err)
+	}
+	total := 0
+	for _, cfg := range configs {
+		total += len(cfg.ID) + len(cfg.Name) + len(cfg.Provider) + len(cfg.Model) + len(cfg.ReasoningEffort) + len(cfg.APIKey)
+		total += len(cfg.AuthMethod) + len(cfg.OAuthAccessToken) + len(cfg.OAuthRefreshToken) + len(cfg.OAuthAccountID)
+		total += len(cfg.OAuthConnectionID) + len(cfg.OAuthConnectionName) + len(cfg.OAuthClientID) + len(cfg.OAuthClientSecret)
+		total += len(cfg.OAuthAuthorizeURL) + len(cfg.OAuthTokenURL) + len(cfg.OAuthScopes) + len(cfg.OllamaBaseURL)
+		total += len(cfg.BaseURL) + len(cfg.Transport) + len(cfg.PresetSlug) + len(cfg.ModelsURL) + len(cfg.AuthHeaderName)
+		total += len(cfg.AuthHeaderValuePrefix) + len(cfg.ExtraHeadersJSON) + len(cfg.ExtraBodyJSON) + len(cfg.TokenExchangeFormat)
+		total += len(cfg.TokenRefreshFormat) + len(cfg.CustomAuthConfigJSON) + len(cfg.CustomAuthStateJSON) + len(cfg.MixtureConfigJSON)
+	}
+	return total
+}
+
+func countSelectColumns(columns string) int {
+	count := 1
+	depth := 0
+	for _, r := range columns {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func TestLLMConfigRepo_HasAny(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewLLMConfigRepo(db)
