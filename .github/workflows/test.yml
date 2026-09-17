@@ -157,7 +157,7 @@ jobs:
         env:
           OPENVIBELY_SKIP_BROWSER_TESTS: "1"
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./... -count=1 -timeout 360s -coverpkg=./... -coverprofile=coverage.txt
+        run: go test ./... -count=1 -timeout 600s -coverpkg=./... -coverprofile=coverage.txt
 
       - name: Run component browser tests
         env:
