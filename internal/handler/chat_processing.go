@@ -3227,103 +3227,125 @@ func (h *Handler) executeViewTaskThreadRequest(ctx context.Context, params strea
 	return strings.TrimSpace(h.formatThreadTranscriptWithTotal(task, executions, total, offset)), nil
 }
 
-// executeChatScheduleRequests schedules tasks from typed runtime-tool requests.
-func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID string, requests []service.ScheduleTaskRequest) string {
-	if len(requests) == 0 {
+type scheduleActionExecutor[Req any] struct {
+	header        string
+	logName       string
+	warningLabel  string
+	requests      []Req
+	execute       func(*service.ScheduleActionService, context.Context, string, Req) (*service.ScheduleActionResult, error)
+	formatError   func(Req, *service.ScheduleActionResult, error, *service.ScheduleActionError) string
+	formatSuccess func(Req, *service.ScheduleActionResult) string
+}
+
+func executeChatScheduleActionRequests[Req any](ctx context.Context, h *Handler, projectID string, executor scheduleActionExecutor[Req]) string {
+	if len(executor.requests) == 0 {
 		return ""
 	}
 	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc)
-	var results []string
-	for _, req := range requests {
-		result, err := actions.Create(ctx, projectID, req)
+	results := make([]string, 0, len(executor.requests))
+	for _, req := range executor.requests {
+		result, err := executor.execute(actions, ctx, projectID, req)
 		if err != nil {
 			var actionErr *service.ScheduleActionError
 			errors.As(err, &actionErr)
+			results = append(results, executor.formatError(req, result, err, actionErr))
+			continue
+		}
+		for _, warning := range result.Warnings {
+			applog.Infof("[handler] %s %s: %v", executor.logName, executor.warningLabel, warning)
+		}
+		results = append(results, executor.formatSuccess(req, result))
+	}
+	return executor.header + "\n" + strings.Join(results, "\n")
+}
+
+// executeChatScheduleRequests schedules tasks from typed runtime-tool requests.
+func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID string, requests []service.ScheduleTaskRequest) string {
+	return executeChatScheduleActionRequests(ctx, h, projectID, scheduleActionExecutor[service.ScheduleTaskRequest]{
+		header:       "Schedule Results:",
+		logName:      "executeChatScheduleRequests",
+		warningLabel: "task transition warning",
+		requests:     requests,
+		execute: func(actions *service.ScheduleActionService, ctx context.Context, projectID string, req service.ScheduleTaskRequest) (*service.ScheduleActionResult, error) {
+			return actions.Create(ctx, projectID, req)
+		},
+		formatError: func(req service.ScheduleTaskRequest, result *service.ScheduleActionResult, err error, actionErr *service.ScheduleActionError) string {
 			switch {
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionReferenceError:
 				applog.Infof("[handler] executeChatScheduleRequests error resolving task: %v", err)
-				results = append(results, fmt.Sprintf("- Could not find task: %v", err))
+				return fmt.Sprintf("- Could not find task: %v", err)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionTimeError:
 				applog.Infof("[handler] executeChatScheduleRequests invalid time: %s", req.Time)
-				results = append(results, fmt.Sprintf("- Invalid time %q for task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, result.Task.Title))
+				return fmt.Sprintf("- Invalid time %q for task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, result.Task.Title)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionRepeatError:
-				results = append(results, fmt.Sprintf("- Unknown repeat type %q for task \"%s\"", req.Repeat, result.Task.Title))
+				return fmt.Sprintf("- Unknown repeat type %q for task \"%s\"", req.Repeat, result.Task.Title)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionDaysError:
-				results = append(results, fmt.Sprintf("- Invalid weekly days for task \"%s\": %v", result.Task.Title, err))
+				return fmt.Sprintf("- Invalid weekly days for task \"%s\": %v", result.Task.Title, err)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionIntervalError:
-				results = append(results, fmt.Sprintf("- Invalid interval %d for task \"%s\" (%v)", req.Interval, result.Task.Title, err))
+				return fmt.Sprintf("- Invalid interval %d for task \"%s\" (%v)", req.Interval, result.Task.Title, err)
 			default:
 				title := req.Title
 				if result != nil && result.Task != nil {
 					title = result.Task.Title
 				}
 				applog.Infof("[handler] executeChatScheduleRequests error creating schedule: %v", err)
-				results = append(results, fmt.Sprintf("- Error scheduling task \"%s\": %v", title, err))
+				return fmt.Sprintf("- Error scheduling task \"%s\": %v", title, err)
 			}
-			continue
-		}
-		for _, warning := range result.Warnings {
-			applog.Infof("[handler] executeChatScheduleRequests task transition warning: %v", warning)
-		}
-		repeatDesc := service.FormatRepeatPattern(result.Schedule.RepeatType, result.Schedule.RepeatInterval)
-		if result.Schedule.RepeatType == models.RepeatWeekly && len(req.Days) > 0 {
-			repeatDesc = fmt.Sprintf("weekly on %s", strings.Join(req.Days, ", "))
-			if result.Schedule.RepeatInterval > 1 {
-				repeatDesc = fmt.Sprintf("every %d weeks on %s", result.Schedule.RepeatInterval, strings.Join(req.Days, ", "))
+		},
+		formatSuccess: func(req service.ScheduleTaskRequest, result *service.ScheduleActionResult) string {
+			repeatDesc := service.FormatRepeatPattern(result.Schedule.RepeatType, result.Schedule.RepeatInterval)
+			if result.Schedule.RepeatType == models.RepeatWeekly && len(req.Days) > 0 {
+				repeatDesc = fmt.Sprintf("weekly on %s", strings.Join(req.Days, ", "))
+				if result.Schedule.RepeatInterval > 1 {
+					repeatDesc = fmt.Sprintf("every %d weeks on %s", result.Schedule.RepeatInterval, strings.Join(req.Days, ", "))
+				}
 			}
-		}
-		results = append(results, fmt.Sprintf("- Scheduled task \"%s\" [TASK_ID:%s] at %s (%s)", result.Task.Title, result.Task.ID, req.Time, repeatDesc))
-		applog.Infof("[handler] executeChatScheduleRequests scheduled task=%s schedule=%s at %s repeat=%s", result.Task.ID, result.Schedule.ID, req.Time, result.Schedule.RepeatType)
-	}
-	return "Schedule Results:\n" + strings.Join(results, "\n")
+			applog.Infof("[handler] executeChatScheduleRequests scheduled task=%s schedule=%s at %s repeat=%s", result.Task.ID, result.Schedule.ID, req.Time, result.Schedule.RepeatType)
+			return fmt.Sprintf("- Scheduled task \"%s\" [TASK_ID:%s] at %s (%s)", result.Task.Title, result.Task.ID, req.Time, repeatDesc)
+		},
+	})
 }
 
 // executeChatDeleteScheduleRequests deletes schedules from typed runtime-tool requests.
 func (h *Handler) executeChatDeleteScheduleRequests(ctx context.Context, projectID string, requests []service.DeleteScheduleRequest) string {
-	if len(requests) == 0 {
-		return ""
-	}
-	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc)
-	var results []string
-	for _, req := range requests {
-		result, err := actions.Delete(ctx, projectID, req)
-		if err != nil {
-			var actionErr *service.ScheduleActionError
-			errors.As(err, &actionErr)
+	return executeChatScheduleActionRequests(ctx, h, projectID, scheduleActionExecutor[service.DeleteScheduleRequest]{
+		header:       "Schedule Delete Results:",
+		logName:      "executeChatDeleteScheduleRequests",
+		warningLabel: "transition warning",
+		requests:     requests,
+		execute: func(actions *service.ScheduleActionService, ctx context.Context, projectID string, req service.DeleteScheduleRequest) (*service.ScheduleActionResult, error) {
+			return actions.Delete(ctx, projectID, req)
+		},
+		formatError: func(req service.DeleteScheduleRequest, result *service.ScheduleActionResult, err error, actionErr *service.ScheduleActionError) string {
 			if actionErr != nil && actionErr.Kind == service.ScheduleActionReferenceError {
 				applog.Infof("[handler] executeChatDeleteScheduleRequests error resolving schedule: %v", err)
-				results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
-			} else {
-				title := req.Title
-				if result != nil && result.Task != nil {
-					title = result.Task.Title
-				}
-				applog.Infof("[handler] executeChatDeleteScheduleRequests error deleting schedule: %v", err)
-				results = append(results, fmt.Sprintf("- Error deleting schedule for task \"%s\": %v", title, err))
+				return fmt.Sprintf("- Could not find schedule: %v", err)
 			}
-			continue
-		}
-		for _, warning := range result.Warnings {
-			applog.Infof("[handler] executeChatDeleteScheduleRequests transition warning: %v", warning)
-		}
-		results = append(results, fmt.Sprintf("- Deleted schedule for task \"%s\" [TASK_ID:%s]", result.Task.Title, result.Task.ID))
-		applog.Infof("[handler] executeChatDeleteScheduleRequests deleted schedule=%s task=%s", result.Schedule.ID, result.Task.ID)
-	}
-	return "Schedule Delete Results:\n" + strings.Join(results, "\n")
+			title := req.Title
+			if result != nil && result.Task != nil {
+				title = result.Task.Title
+			}
+			applog.Infof("[handler] executeChatDeleteScheduleRequests error deleting schedule: %v", err)
+			return fmt.Sprintf("- Error deleting schedule for task \"%s\": %v", title, err)
+		},
+		formatSuccess: func(_ service.DeleteScheduleRequest, result *service.ScheduleActionResult) string {
+			applog.Infof("[handler] executeChatDeleteScheduleRequests deleted schedule=%s task=%s", result.Schedule.ID, result.Task.ID)
+			return fmt.Sprintf("- Deleted schedule for task \"%s\" [TASK_ID:%s]", result.Task.Title, result.Task.ID)
+		},
+	})
 }
 
 // executeChatModifyScheduleRequests modifies schedules from typed runtime-tool requests.
 func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, projectID string, requests []service.ModifyScheduleRequest) string {
-	if len(requests) == 0 {
-		return ""
-	}
-	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc)
-	var results []string
-	for _, req := range requests {
-		result, err := actions.Modify(ctx, projectID, req)
-		if err != nil {
-			var actionErr *service.ScheduleActionError
-			errors.As(err, &actionErr)
+	return executeChatScheduleActionRequests(ctx, h, projectID, scheduleActionExecutor[service.ModifyScheduleRequest]{
+		header:       "Schedule Modify Results:",
+		logName:      "executeChatModifyScheduleRequests",
+		warningLabel: "transition warning",
+		requests:     requests,
+		execute: func(actions *service.ScheduleActionService, ctx context.Context, projectID string, req service.ModifyScheduleRequest) (*service.ScheduleActionResult, error) {
+			return actions.Modify(ctx, projectID, req)
+		},
+		formatError: func(req service.ModifyScheduleRequest, result *service.ScheduleActionResult, err error, actionErr *service.ScheduleActionError) string {
 			title := req.Title
 			if result != nil && result.Task != nil {
 				title = result.Task.Title
@@ -3331,31 +3353,30 @@ func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, project
 			switch {
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionReferenceError:
 				applog.Infof("[handler] executeChatModifyScheduleRequests error resolving schedule: %v", err)
-				results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
+				return fmt.Sprintf("- Could not find schedule: %v", err)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionTimeError:
 				applog.Infof("[handler] executeChatModifyScheduleRequests invalid time: %s", req.Time)
-				results = append(results, fmt.Sprintf("- Invalid time %q for schedule on task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, title))
+				return fmt.Sprintf("- Invalid time %q for schedule on task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, title)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionRepeatError:
 				applog.Infof("[handler] executeChatModifyScheduleRequests unknown repeat type %q", req.Repeat)
-				results = append(results, fmt.Sprintf("- Unknown repeat type %q for schedule on task \"%s\"", req.Repeat, title))
+				return fmt.Sprintf("- Unknown repeat type %q for schedule on task \"%s\"", req.Repeat, title)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionDaysError:
-				results = append(results, fmt.Sprintf("- Invalid weekly days for schedule on task \"%s\": %v", title, err))
+				return fmt.Sprintf("- Invalid weekly days for schedule on task \"%s\": %v", title, err)
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionIntervalError:
-				results = append(results, fmt.Sprintf("- Invalid interval %d for schedule on task \"%s\" (%v)", *req.Interval, title, err))
+				return fmt.Sprintf("- Invalid interval %d for schedule on task \"%s\" (%v)", *req.Interval, title, err)
 			default:
 				applog.Infof("[handler] executeChatModifyScheduleRequests error updating schedule: %v", err)
-				results = append(results, fmt.Sprintf("- Error updating schedule for task \"%s\": %v", title, err))
+				return fmt.Sprintf("- Error updating schedule for task \"%s\": %v", title, err)
 			}
-			continue
-		}
-		if len(result.Changes) == 0 {
-			results = append(results, fmt.Sprintf("- No changes specified for schedule on task \"%s\"", result.Task.Title))
-			continue
-		}
-		results = append(results, fmt.Sprintf("- Updated schedule for task \"%s\" [TASK_ID:%s]: %s", result.Task.Title, result.Task.ID, strings.Join(result.Changes, ", ")))
-		applog.Infof("[handler] executeChatModifyScheduleRequests updated schedule=%s task=%s changes=%s", result.Schedule.ID, result.Task.ID, strings.Join(result.Changes, ", "))
-	}
-	return "Schedule Modify Results:\n" + strings.Join(results, "\n")
+		},
+		formatSuccess: func(_ service.ModifyScheduleRequest, result *service.ScheduleActionResult) string {
+			if len(result.Changes) == 0 {
+				return fmt.Sprintf("- No changes specified for schedule on task \"%s\"", result.Task.Title)
+			}
+			applog.Infof("[handler] executeChatModifyScheduleRequests updated schedule=%s task=%s changes=%s", result.Schedule.ID, result.Task.ID, strings.Join(result.Changes, ", "))
+			return fmt.Sprintf("- Updated schedule for task \"%s\" [TASK_ID:%s]: %s", result.Task.Title, result.Task.ID, strings.Join(result.Changes, ", "))
+		},
+	})
 }
 
 // resolveTaskReference finds a task by ID or title within the current project.
