@@ -25,6 +25,7 @@ const (
 // SteeringDeliveryState records whether a provider accepted or rejected a mid-turn steering event.
 type SteeringDeliveryState struct {
 	Status             SteeringDeliveryStatus
+	SteeringID         string
 	ResponseID         string
 	PreviousResponseID string
 	Error              string

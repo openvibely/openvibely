@@ -185,6 +185,7 @@ func openAIAstraMidTurnSteeringCallback(ctx context.Context) openaiclient.AstraM
 			state, err := deliver(deliverCtx, text)
 			return llmcontracts.SteeringDeliveryState{
 				Status:             llmcontracts.SteeringDeliveryStatus(state.Status),
+				SteeringID:         state.SteeringID,
 				ResponseID:         state.ResponseID,
 				PreviousResponseID: state.PreviousResponseID,
 				Error:              state.Error,
