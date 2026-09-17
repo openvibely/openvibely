@@ -121,6 +121,30 @@ func TestLLMConfigRepo_AdoptsExpiredOpenAIConnectionThatStillHasRefreshToken(t *
 	}
 }
 
+func TestLLMConfigRepo_DoesNotAdoptIntoExpiredOpenAIConnection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	target := &models.LLMConfig{Name: "Expired target", Provider: models.ProviderOpenAI, Model: "codex-target", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-target", OAuthRefreshToken: "target-refresh", OAuthExpiresAt: time.Now().Add(-time.Hour).UnixMilli()}
+	source := &models.LLMConfig{Name: "Expired source", Provider: models.ProviderOpenAI, Model: "codex-source", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "expired-source", OAuthRefreshToken: "source-refresh", OAuthExpiresAt: time.Now().Add(-time.Hour).UnixMilli()}
+	for _, cfg := range []*models.LLMConfig{target, source} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updated, err := repo.UpdateLinkedOAuthConnectionProfileIfRevision(ctx, target.ID, target.OAuthConnectionID, 0, target.Provider, "account", "owner", "same-principal")
+	if err != nil || !updated {
+		t.Fatalf("set target profile = %v, %v", updated, err)
+	}
+	adopted, err := repo.AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(ctx, source.ID, source.OAuthConnectionID, 0, "same-principal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adopted {
+		t.Fatal("adopted into an expired target connection")
+	}
+}
+
 func TestLLMConfigRepo_CreateWithOAuthFields(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

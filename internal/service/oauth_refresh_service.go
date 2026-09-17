@@ -28,7 +28,7 @@ type OAuthRefreshService struct {
 	anthropicRefresh llmoauth.RefreshFunc
 	openAIRefresh    llmoauth.RefreshFunc
 	identityResolver func(context.Context, string) (AnthropicOAuthIdentity, error)
-	openAIIdentity   func(string) OpenAIOAuthIdentity
+	openAIIdentity   OpenAIOAuthIdentityResolver
 	identityTimeout  time.Duration
 	interval         time.Duration
 	wg               sync.WaitGroup
@@ -43,7 +43,7 @@ func NewOAuthRefreshService(repo *repository.LLMConfigRepo, manager *llmoauth.Ma
 		manager:          manager,
 		anthropicRefresh: llmoauth.AnthropicRefreshFunc(),
 		openAIRefresh:    llmoauth.OpenAIRefreshFunc(),
-		openAIIdentity:   ResolveOpenAIOAuthIdentity,
+		openAIIdentity:   ResolveVerifiedOpenAIOAuthIdentity,
 		identityTimeout:  oauthBackgroundIdentityLookupTimeout,
 		interval:         oauthBackgroundRefreshInterval,
 	}
@@ -62,7 +62,7 @@ func (s *OAuthRefreshService) SetAnthropicIdentityResolver(resolver func(context
 	s.identityResolver = resolver
 }
 
-func (s *OAuthRefreshService) SetOpenAIIdentityResolver(resolver func(string) OpenAIOAuthIdentity) {
+func (s *OAuthRefreshService) SetOpenAIIdentityResolver(resolver OpenAIOAuthIdentityResolver) {
 	s.openAIIdentity = resolver
 }
 
@@ -159,8 +159,10 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 				}
 			}
 		} else if cfg.Provider == models.ProviderOpenAI && s.openAIIdentity != nil {
-			identity := s.openAIIdentity(fresh.OAuthAccessToken)
-			if identity.PrincipalHash != "" {
+			identityCtx, cancelIdentity := context.WithTimeout(ctx, s.identityTimeout)
+			identity, identityErr := s.openAIIdentity(identityCtx, fresh.OAuthAccessToken)
+			cancelIdentity()
+			if identityErr == nil && identity.PrincipalHash != "" {
 				updated, updateErr := s.repo.UpdateLinkedOAuthConnectionProfileIfRevision(
 					ctx, fresh.ID, fresh.OAuthConnectionID, fresh.OAuthConfigRevision, fresh.Provider,
 					identity.AccountID, identity.DisplayName, identity.PrincipalHash,
@@ -179,8 +181,10 @@ func (s *OAuthRefreshService) RunOnce(ctx context.Context) error {
 			refreshErrors = append(refreshErrors, staleErr)
 		} else {
 			for _, stale := range staleConfigs {
-				identity := s.openAIIdentity(stale.OAuthAccessToken)
-				if identity.PrincipalHash == "" {
+				identityCtx, cancelIdentity := context.WithTimeout(ctx, s.identityTimeout)
+				identity, identityErr := s.openAIIdentity(identityCtx, stale.OAuthAccessToken)
+				cancelIdentity()
+				if identityErr != nil || identity.PrincipalHash == "" {
 					continue
 				}
 				_, adoptErr := s.repo.AdoptUnrefreshableOpenAIConnectionIfPrincipalMatches(
