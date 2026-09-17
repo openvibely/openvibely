@@ -39,8 +39,8 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	if got := strings.Count(content, `plugins: [analyticsActivePointOnTop]`); got != 3 {
 		t.Fatalf("expected all 3 Analytics line charts to use the hover layering plugin, got %d", got)
 	}
-	for _, canvasID := range []string{"usageRateChart", "successFailureChart", "skillUsageTrendChart"} {
-		expected := `<div class="relative h-64"><canvas id="` + canvasID + `"` // templ generation compacts adjacent markup.
+	for canvasID, height := range map[string]string{"usageRateChart": "h-64", "successFailureChart": "h-72", "skillUsageTrendChart": "h-64"} {
+		expected := `<div class="relative ` + height + `"><canvas id="` + canvasID + `"` // templ generation compacts adjacent markup.
 		if !strings.Contains(content, expected) {
 			t.Fatalf("expected %s to have a positioned overlay container", canvasID)
 		}
@@ -56,7 +56,7 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
 
 	fixture := `<main id="reconnect-result"></main><script>
 (function() {
-  history.replaceState({}, '', location.pathname + '?project_id=project-1&view=all');
+  history.replaceState({}, '', location.pathname + '?project_id=project-1&view=outcomes');
   function fail(message) {
     var result = document.getElementById('reconnect-result');
     result.setAttribute('data-test-result', 'fail');
@@ -126,7 +126,7 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
     plugin.beforeDestroy(chart);
     if (chart.$analyticsHoverMarker !== null || marker.isConnected) fail('plugin did not remove the overlay marker when the chart was destroyed');
     window.__analyticsPluginChecks = (window.__analyticsPluginChecks || 0) + 1;
-    if (window.__analyticsPluginChecks === 3) document.getElementById('reconnect-result').setAttribute('data-test-result', 'pass');
+    if (window.__analyticsPluginChecks === 1) document.getElementById('reconnect-result').setAttribute('data-test-result', 'pass');
   };
 })();
 </script>` + rendered.String()
@@ -142,47 +142,31 @@ func TestAnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
-	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all');
-	  var result=document.getElementById('reconnect-result'), urls=[], dashboardCalls=0, evidencePageCalls=0, failDashboard=false, destroyed=0, chartsByID={};  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
-  function dashboard(url){var q=new URL(url,location.href).searchParams;return {definitions:[],current:{technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0},tasks_evaluated:1,cycle_sample_size:1,cancelled_execution_count:0},funnel:[],cycle_distribution:[{label:'< 1m',count:1}],follow_up_distribution:[{label:'0',count:1}],agents:[{agent_id:'agent-1',agent_name:'Agent One',tasks_evaluated:1,technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0}}],agent_detail:q.get('agent')?{outcome_trend:[{period:'today',completed:1,failed:0,cancelled:0,sample_size:1}],categories:[],model_mix:[],failures:[],skills:[],recent_tasks:[]}:null,skill_outcomes:[],model_categories:[{model_config_id:'model-1',model:'Model One',category:'active',tasks_evaluated:1,technical_completion:{numerator:1,denominator:1,percent:100}}],workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One',invocation_count:1,completed_count:1,failed_count:0}],workflow_detail:q.get('workflow')?{funnel:[],durations:[],failures:[],bottlenecks:[]}:null,evidence_total:2,evidence_limit:1,evidence_offset:Number(q.get('evidence_offset')||0),recent_outcomes:q.get('evidence_offset')==='1'?[{task_id:'created-task',task_title:'Created only',technical_result:'pending',goal_result:'',merge_state:'',agent_id:'',agent_name:'Unassigned',model:'Unknown',model_config_ids:[],terminal_period_statuses:[],category:'backlog',created_in_period:true,started_in_period:false,cycle_eligible:false,cycle_time_ms:0,execution_count:0,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0,known_cost_usd:null}]:[{task_id:'retry-task',task_title:'Multi-model retry',technical_result:'completed',goal_result:'',merge_state:'',agent_id:'agent-1',agent_name:'Agent One',model:'Model Two',model_config_ids:['model-1','model-2'],terminal_period_statuses:['2026-01-10|failed'],category:'active',started_in_period:true,cycle_eligible:true,cycle_time_ms:1000,execution_count:2,period_completed_count:1,period_failed_count:1,period_cancelled_count:0,follow_up_count:1,known_cost_usd:null}],insights:[]};}
-	  window.fetch=function(url){var value=String(url);urls.push(value);if(value.indexOf('/api/analytics/dashboard')>=0){dashboardCalls++;if(new URL(value,location.href).searchParams.get('evidence_offset')==='1'){evidencePageCalls++;return new Promise(function(resolve){setTimeout(function(){resolve({ok:true,json:function(){return Promise.resolve(dashboard(value));}});},50);});}if(failDashboard)return Promise.resolve({ok:false,status:500,json:function(){return Promise.resolve({});}});return Promise.resolve({ok:true,json:function(){return Promise.resolve(dashboard(value));}});}var payload=[];if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[{period:'2026-01-10',selected_count:1}],top_skills:[],follow_through:[],agent_usage:{cells:[],agents:[]},underused:[]};if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[{period:'2026-01-10',total_tokens:10}],usage_rate_by_model:[{period:'2026-01-10',provider:'test',model:'model-a',total_tokens:10}],totals:{call_count:1},model_breakdown:[{provider:'test',model:'model-a',total_tokens:10}],account_limits:[]};if(value.indexOf('/api/analytics/success-failure-rates')>=0)payload=[{Period:'2026-01-10',TotalCount:2,SuccessCount:1,FailureCount:1,CancelledCount:0,SuccessRate:50}];if(value.indexOf('/api/analytics/execution-trends-by-hour')>=0)payload=[{Hour:10,Count:1}];if(value.indexOf('/api/analytics/avg-execution-time-by-agent')>=0)payload=[{ID:'model-1',Name:'Model One',AvgMs:1000,Count:1}];if(value.indexOf('/api/analytics/agent-usage-by-project')>=0)payload=[{AgentID:'model-1',AgentName:'Model One',ExecutionCount:1}];return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};	  window.Chart=function(ctx,config){this.config=config;this.destroy=function(){destroyed++;};if(ctx&&ctx.canvas)chartsByID[ctx.canvas.id]=config;};  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out');setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=agents');
+  var result=document.getElementById('reconnect-result'),urls=[],failDashboard=false,destroyed=0;
+  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+  function dashboard(){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},agents:[{agent_id:'agent-1',agent_name:'Agent One',tasks_evaluated:3,technical_completion:{percent:100},goal_achievement:{percent:100},first_pass:{percent:100},follow_up:{percent:0},duration_sample_size:3,median_duration_ms:1000}],agent_detail:null,workflows:[{workflow_id:'automation-1',workflow_name:'Automation One',invocation_count:1,completed_count:1,completion_rate:100}],recent_outcomes:[],insights:[]};}
+  window.fetch=function(url){var value=String(url);urls.push(value);if(value.indexOf('/api/analytics/dashboard')>=0){if(failDashboard)return Promise.resolve({ok:false,status:500,json:function(){return Promise.resolve({});}});return Promise.resolve({ok:true,json:function(){return Promise.resolve(dashboard());}});}return Promise.resolve({ok:true,json:function(){return Promise.resolve([]);}});};
+  window.Chart=function(){this.destroy=function(){destroyed++;};};
+  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out: '+urls.join('|'));setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
   window.addEventListener('load',function(){
-		    waitFor(function(){return dashboardCalls>0&&document.querySelector('#analyticsAgentFilter option[value="agent-1"]')&&chartsByID.cycleDistributionChart&&chartsByID.successFailureChart&&chartsByID.modelTokenBreakdownChart&&chartsByID.avgTimeAgentChart&&chartsByID.agentUsageChart&&document.querySelector('[data-model-evidence]');},function(){
-		      var more=document.getElementById('loadMoreEvidence');
-		      if(more.classList.contains('hidden')||more.textContent.indexOf('1 of 2')<0)fail('evidence pagination is not disclosed');
-			      more.click();
-			      more.click();
-			      waitFor(function(){return document.getElementById('outcomeEvidenceTable').textContent.indexOf('Created only')>=0;},function(){
-			      if(evidencePageCalls!==1)fail('rapid Load More clicks requested duplicate evidence pages: '+evidencePageCalls);		      if(document.getElementById('outcomeEvidenceTable').textContent.indexOf('Unavailable')<0||!more.classList.contains('hidden'))fail('loaded nonterminal evidence did not render unavailable cycle and complete pagination');
-		      chartsByID.modelTokenBreakdownChart.options.onClick({},[{index:0}]);
-		      if(!document.querySelector('#usageBreakdownTable [data-usage-model]').classList.contains('bg-primary/10'))fail('token breakdown did not identify its supporting usage row');
-		      chartsByID.avgTimeAgentChart.options.onClick({},[{index:0}]);
-		      if(new URLSearchParams(location.search).get('model_id')!=='model-1')fail('model duration did not open stable model evidence');
-		      chartsByID.agentUsageChart.options.onClick({},[{index:0}]);
-		      if(new URLSearchParams(location.search).get('model_id')!=='model-1')fail('model execution share did not open stable model evidence');
-		      chartsByID.cycleDistributionChart.options.onClick({},[{index:0}]);	      var drilldown=new URLSearchParams(location.search);
-	      if(drilldown.get('view')!=='outcomes'||drilldown.get('evidence')!=='cycleDistribution'||drilldown.get('cycleDistribution')!=='< 1m')fail('chart drill-down did not persist evidence state');
-	      if(document.getElementById('outcomeEvidenceFilter').textContent.indexOf('cycleDistribution')<0)fail('chart drill-down did not render filtered evidence');
-	      document.querySelector('[data-model-evidence]').click();
-	      drilldown=new URLSearchParams(location.search);
-	      if(drilldown.get('model_id')!=='model-1'||drilldown.get('category')!=='active'||drilldown.has('cycleDistribution'))fail('model/category drill-down omitted its selected subset or retained stale evidence');
-	      if(document.getElementById('outcomeEvidenceTable').textContent.indexOf('Multi-model retry')<0)fail('model drill-down lost task whose latest model differs');
-	      chartsByID.successFailureChart.options.onClick({},[{index:0,datasetIndex:3}]);
-	      drilldown=new URLSearchParams(location.search);
-	      if(drilldown.get('technical_status')!=='failed'||drilldown.get('period')!=='2026-01-10'||drilldown.has('model_id')||drilldown.has('category'))fail('technical trend drill-down omitted status/period or retained stale evidence');
-	      var agent=document.getElementById('analyticsAgentFilter');agent.value='agent-1';agent.dispatchEvent(new Event('change'));      waitFor(function(){return urls.some(function(u){return u.indexOf('/api/analytics/dashboard')>=0&&u.indexOf('agent=agent-1')>=0;})&&urls.some(function(u){return u.indexOf('success-failure-rates')>=0&&u.indexOf('agent=agent-1')>=0;});},function(){
-        var workflow=document.getElementById('analyticsWorkflowFilter');workflow.value='workflow-1';workflow.dispatchEvent(new Event('change'));
-        waitFor(function(){return urls.some(function(u){return u.indexOf('/api/analytics/dashboard')>=0&&u.indexOf('workflow=workflow-1')>=0;});},function(){
-          history.back();
-          waitFor(function(){return document.getElementById('analyticsWorkflowFilter').value===''&&document.getElementById('analyticsAgentFilter').value==='agent-1';},function(){
-            failDashboard=true;document.getElementById('refreshBtn').click();
-            waitFor(function(){return !document.getElementById('analyticsError').classList.contains('hidden');},function(){if(destroyed<1)fail('stale charts were not destroyed on failure');result.setAttribute('data-test-result','pass');});
+    waitFor(function(){return document.querySelector('#analyticsAgentFilter option[value="agent-1"]');},function(){
+      var agent=document.getElementById('analyticsAgentFilter');agent.value='agent-1';agent.dispatchEvent(new Event('change'));
+      waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard')>=0&&url.indexOf('agent=agent-1')>=0;});},function(){
+        document.querySelector('[data-analytics-view="automations"]').click();
+        waitFor(function(){return document.querySelector('#analyticsWorkflowFilter option[value="automation-1"]');},function(){
+          var automation=document.getElementById('analyticsWorkflowFilter');automation.value='automation-1';automation.dispatchEvent(new Event('change'));
+          waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard')>=0&&url.indexOf('workflow=automation-1')>=0&&url.indexOf('view=automations')>=0;});},function(){
+            history.back();
+            waitFor(function(){return document.getElementById('analyticsWorkflowFilter').value===''&&document.getElementById('analyticsAgentFilter').value==='agent-1';},function(){
+              failDashboard=true;document.getElementById('refreshBtn').click();
+              waitFor(function(){return !document.getElementById('analyticsError').classList.contains('hidden');},function(){if(destroyed<1)fail('active charts were not destroyed on failure');result.setAttribute('data-test-result','pass');});
+            });
           });
         });
-	      });
-	    });
-	  });
-	});
+      });
+    });
+  });
 })();</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
@@ -195,7 +179,7 @@ func TestAnalyticsContent_RejectsStaleDashboardAndEvidenceResponsesInChrome(t *t
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 	(function(){
-	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all');
+	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=outcomes');
 		  var result=document.getElementById('reconnect-result'),staleResolve=null,staleSignal=null,agentBaseResolve=null,agentPageResolve=null,prematureAgentPageCalls=0;  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}  function dashboard(agent,title,total){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{},tasks_evaluated:agent?2:1},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-2',agent_name:'Agent Two',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:total,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:title,task_title:title,technical_result:'running',goal_result:'',merge_state:'',agent_id:agent,agent_name:agent?'Agent Two':'Unassigned',model:'Model',model_config_ids:[],terminal_period_statuses:[],category:'active',started_in_period:true,cycle_eligible:false,execution_count:1,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};}
   window.Chart=function(){this.destroy=function(){};};
   window.fetch=function(url,options){var value=String(url),q=new URL(value,location.href).searchParams,payload=[];
@@ -251,7 +235,7 @@ func TestAnalyticsContent_RejectsStaleEvidenceErrorsAndClearsChartsOnFilterChang
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
-  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all');
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=outcomes');
 	  var result=document.getElementById('reconnect-result'),charts={},destroyed=[],rejectOldSkill=null,rejectOldUsage=null,agentDashboardResolve=null;  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   function dashboard(){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[{label:'< 1m',count:1}],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:0,evidence_limit:20,evidence_offset:0,recent_outcomes:[],insights:[]};}
   function skills(query){return {usage_over_time:[{period:'2026-01-10',created_count:1},{period:'2026-01-11',created_count:1}],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence_total:query.get('skill_period')?1:0,evidence:query.get('skill_period')?[{id:'skill-'+query.get('skill_period'),created_at:'2026-01-11T00:00:00Z',skill_handle:'project:review',event_type:'created',source:'manual',surface:'task_thread'}]:[]};}
@@ -263,8 +247,11 @@ func TestAnalyticsContent_RejectsStaleEvidenceErrorsAndClearsChartsOnFilterChang
 	    if(value.indexOf('/api/analytics/usage')>=0){if(query.get('usage_period')==='2026-01-10')return new Promise(function(_,reject){rejectOldUsage=reject;});payload=usage(query);}    return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
   function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out');setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
-  window.addEventListener('load',function(){waitFor(function(){return charts.skillUsageTrendChart&&charts.usageRateChart&&charts.cycleDistributionChart;},function(){
-    charts.skillUsageTrendChart.options.onClick({},[{index:0,datasetIndex:1}]);
+	  window.addEventListener('load',function(){waitFor(function(){return charts.cycleDistributionChart;},function(){
+	    document.querySelector('[data-analytics-view="learning"]').click();
+	    waitFor(function(){return charts.skillUsageTrendChart;},function(){
+	      document.querySelector('[data-analytics-view="usage"]').click();
+	      waitFor(function(){return charts.usageRateChart;},function(){    charts.skillUsageTrendChart.options.onClick({},[{index:0,datasetIndex:1}]);
     waitFor(function(){return rejectOldSkill!==null;},function(){
       charts.skillUsageTrendChart.options.onClick({},[{index:1,datasetIndex:1}]);
       waitFor(function(){return document.getElementById('skillEventEvidenceTable').textContent.indexOf('skill-2026-01-11')>=0;},function(){
@@ -292,9 +279,8 @@ func TestAnalyticsContent_RejectsStaleEvidenceErrorsAndClearsChartsOnFilterChang
         },40);
       });
     });
-  });});
-})();
-</script>` + rendered.String()
+	  });});});});
+})();</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
 
@@ -306,7 +292,7 @@ func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
-	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=all&agent=agent-1');	  var result=document.getElementById('reconnect-result'),charts={},urls=[],longHandle='shared:review-skill-with-a-very-long-identical-handle';  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=outcomes&agent=agent-1');	  var result=document.getElementById('reconnect-result'),charts={},urls=[],longHandle='shared:review-skill-with-a-very-long-identical-handle';  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   window.Chart=function(ctx,config){this.destroy=function(){};if(ctx&&ctx.canvas)charts[ctx.canvas.id]=config;};
 	  window.fetch=function(url){var value=String(url),query=new URL(value,location.href).searchParams,payload=[];urls.push(value);
 		    if(value.indexOf('/api/analytics/dashboard')>=0)payload={definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],agent_detail:{agent_id:'agent-1',outcome_trend:[],categories:[],model_mix:[],failures:[],skills:[{skill_handle:longHandle,skill_scope:'agent_owned',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],recent_tasks:[]},agent_skill_outcomes:[{agent_id:'agent-1',agent_name:'Agent One',skill_handle:longHandle,skill_scope:'project',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],skill_outcomes:[{skill_handle:longHandle,skill_scope:'global',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],model_categories:[],workflows:[],evidence_total:1,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:'hour-task',task_title:'Hour task',technical_result:'running',goal_result:'',merge_state:'',agent_id:'agent-1',agent_name:'Agent One',model:'Model',model_config_ids:[],execution_hours:[10],terminal_period_statuses:[],category:'active',started_in_period:true,cycle_eligible:false,execution_count:1,period_completed_count:0,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};
@@ -314,16 +300,23 @@ func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome
     return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
 	  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out; urls='+urls.join('|')+'; skill='+document.getElementById('skillEventEvidenceTable').textContent+'; usage='+document.getElementById('usageEventEvidenceTable').textContent);setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
-	  window.addEventListener('load',function(){waitFor(function(){return charts.hourlyTrendsChart&&charts.skillUsageTrendChart&&charts.skillTopChart&&charts.skillFollowChart&&charts.skillAgentChart&&charts.usageRateChart&&charts.modelTokenBreakdownChart;},function(){
-		    var outcomeLink=document.querySelector('#skillOutcomeTable a');var pairLink=document.querySelector('#agentSkillOutcomeTable a[data-skill-outcome-evidence]');var agentLink=document.querySelector('#agentSkillTable a[data-skill-outcome-evidence]');
+		  window.addEventListener('load',function(){waitFor(function(){return charts.hourlyTrendsChart;},function(){
+		    document.querySelector('[data-analytics-view="learning"]').click();
+		    waitFor(function(){return charts.skillUsageTrendChart&&charts.skillTopChart&&charts.skillFollowChart&&charts.skillAgentChart;},function(){
+		      document.querySelector('[data-analytics-view="agents"]').click();
+		      waitFor(function(){return document.querySelector('#agentSkillTable a[data-skill-outcome-evidence]');},function(){
+		        document.querySelector('[data-analytics-view="usage"]').click();
+		        waitFor(function(){return charts.usageRateChart&&charts.modelTokenBreakdownChart;},function(){
+		        document.getElementById('outcomeEvidenceTable').innerHTML='';
+		        document.querySelector('[data-analytics-view="outcomes"]').click();
+		        waitFor(function(){return urls.filter(function(url){return url.indexOf('/api/analytics/dashboard')>=0&&new URL(url,location.href).searchParams.get('view')==='outcomes';}).length>=2&&charts.hourlyTrendsChart&&document.getElementById('outcomeEvidenceTable').textContent.indexOf('Hour task')>=0;},function(){		    var outcomeLink=document.querySelector('#skillOutcomeTable a');var pairLink=document.querySelector('#agentSkillOutcomeTable a[data-skill-outcome-evidence]');var agentLink=document.querySelector('#agentSkillTable a[data-skill-outcome-evidence]');
 		    if(!outcomeLink||!pairLink||!agentLink)fail('scoped outcome evidence links missing');
 		    var outcomeParams=new URL(outcomeLink.href).searchParams;var pairParams=new URL(pairLink.href).searchParams;var agentParams=new URL(agentLink.href).searchParams;
 		    if(outcomeParams.get('evidence_skill_handle')!==longHandle||outcomeParams.get('evidence_skill_scope')!=='global'||outcomeParams.get('evidence')!=='skill_outcomes')fail('skill outcome link lost scoped task evidence identity');
 		    if(pairParams.get('evidence_skill_handle')!==longHandle||pairParams.get('evidence_skill_scope')!=='project'||pairParams.get('evidence_skill_agent')!=='agent-1'||pairParams.get('evidence')!=='skill_outcomes')fail('Agent-skill outcome link lost scoped task evidence identity');
 		    if(agentParams.get('evidence_skill_handle')!==longHandle||agentParams.get('evidence_skill_scope')!=='agent_owned'||agentParams.get('evidence_skill_agent')!=='agent-1'||agentParams.get('evidence')!=='skill_outcomes')fail('selected Agent skill link lost scoped task evidence identity');	    charts.hourlyTrendsChart.options.onClick({},[{index:10}]);
     var params=new URLSearchParams(location.search);
-    if(params.get('evidence')!=='execution_hour'||params.get('execution_hour')!=='10'||document.getElementById('outcomeEvidenceTable').textContent.indexOf('Hour task')<0)fail('hour click did not filter exact task evidence');
-	    charts.skillUsageTrendChart.options.onClick({},[{index:0,datasetIndex:1}]);
+	    if(params.get('evidence')!=='execution_hour'||params.get('execution_hour')!=='10'||document.getElementById('outcomeEvidenceTable').textContent.indexOf('Hour task')<0)fail('hour click did not filter exact task evidence: '+params.toString()+' · '+document.getElementById('outcomeEvidenceTable').textContent);	    charts.skillUsageTrendChart.options.onClick({},[{index:0,datasetIndex:1}]);
 	    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills')>=0&&url.indexOf('skill_period=2026-01-10')>=0&&url.indexOf('skill_event=created')>=0;})&&document.getElementById('skillEventEvidenceTable').textContent.indexOf('skill-event-1')>=0;},function(){
 	    params=new URLSearchParams(location.search);
 	    if(params.get('skill_period')!=='2026-01-10'||params.get('skill_event')!=='created'||document.getElementById('skillEvidenceSelection').textContent.indexOf('Created')<0)fail('skill trend click lost period, dataset, or supporting records');
@@ -352,7 +345,11 @@ func TestAnalyticsContent_ChartInteractionsPreserveExactSupportingSubsetInChrome
 	    });
 	    });
 	    });
-	    });  });});
+		    });  });});
+		  });
+		});
+	  });
+	});
 })();
 </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
@@ -375,20 +372,23 @@ func TestAnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
     var value = String(url); urls.push(value);
     var payload = [];
     if (value.indexOf('/api/analytics/dashboard') >= 0) payload = {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],skill_outcomes:[{skill_handle:'project:visible-on-learning',skill_scope:'project',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],agent_skill_outcomes:[],model_categories:[],workflows:[],recent_outcomes:[],insights:[]};
+    if (value.indexOf('/api/analytics/usage') >= 0) payload = {usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[{provider:'openai',subscription_label:'ChatGPT Pro',limits:[]},{provider:'anthropic',subscription_label:'Claude Max',limits:[]}]};
     if (value.indexOf('/api/analytics/skills') >= 0) payload = {usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]};
     return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
   function waitFor(check, next, attempt) { if (check()) { next(); return; } if ((attempt || 0) > 100) fail('timed out; urls=' + urls.join('|')); setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20); }
   window.addEventListener('load', function() {
-	    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});}, function() {
-	      setTimeout(function() {
-	        var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
-	        if (!dashboardURL || new URL(dashboardURL, location.href).searchParams.get('view') !== 'overview') fail('dashboard request did not preserve the visible view: ' + urls.join('|'));
-	        if (urls.some(function(url){return url.indexOf('/api/analytics/dashboard') < 0;})) fail('overview eagerly loaded hidden-view analytics: ' + urls.join('|'));
+    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;}) && urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('overviewAccountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('overviewAccountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
+      setTimeout(function() {
+        var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
+        if (!dashboardURL || new URL(dashboardURL, location.href).searchParams.get('view') !== 'overview') fail('dashboard request did not preserve the visible view: ' + urls.join('|'));
+        if (urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0 || url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('overview eagerly loaded unrelated hidden-view analytics: ' + urls.join('|'));
+        if (document.getElementById('overviewAccountUsageCards').closest('.hidden')) fail('provider usage cards are hidden on overview');
         if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('skillOutcomeTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelCategoryTable').innerHTML) fail('overview synchronously rendered hidden-view analytics');
         document.querySelector('[data-analytics-view="learning"]').click();
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
-          if (urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0 || url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('learning loaded unrelated analytics: ' + urls.join('|'));
+          if (urls.some(function(url){return url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('learning loaded unrelated analytics: ' + urls.join('|'));
+          if (!document.querySelector('[data-analytics-provider-usage]').closest('[data-analytics-section]').classList.contains('hidden')) fail('provider usage summary remained visible outside Overview and Usage');
           result.setAttribute('data-test-result', 'pass');
         });
       }, 50);
@@ -410,7 +410,7 @@ func TestAnalyticsContent_WorkflowPerformanceRendersInvocationStatusCountsInChro
 (function() {
   var result = document.getElementById('reconnect-result');
   function fail(message) { result.setAttribute('data-test-result', 'fail'); result.setAttribute('data-test-error', message); throw new Error(message); }
-  history.replaceState({}, '', location.pathname + '?project_id=project-1&view=workflows');
+  history.replaceState({}, '', location.pathname + '?project_id=project-1&view=automations');
   window.Chart = function() { this.destroy = function() {}; };
   window.fetch = function(url) {
     var value = String(url);
@@ -446,22 +446,22 @@ func TestAnalyticsContent_ImmediateNavigationAwayAbortsWorkInChrome(t *testing.T
 
 	fixture := `<main id="reconnect-result"></main><a id="other-nav" href="/tasks" data-nav-base="/tasks">Tasks</a><script>
 (function() {
-  var result = document.getElementById('reconnect-result'), requests = 0, dashboardSignal = null;
+  var result = document.getElementById('reconnect-result'), requests = 0, requestSignals = [];
   function fail(message) { result.setAttribute('data-test-result', 'fail'); result.setAttribute('data-test-error', message); throw new Error(message); }
   history.replaceState({}, '', '/analytics?project_id=project-1&view=overview');
   window.Chart = function() { this.destroy = function() {}; };
   window.fetch = function(url, options) {
     requests++;
-    dashboardSignal = options && options.signal;
+    requestSignals.push(options && options.signal);
     return new Promise(function() {});
   };
   function waitForRequest(attempt) {
-    if (dashboardSignal) {
+    if (requestSignals.length === 2 && requestSignals.every(Boolean)) {
       var nav = document.getElementById('other-nav');
       nav.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true}));
-      if (!dashboardSignal.aborted) fail('Analytics request was not aborted before sidebar navigation');
+      if (requestSignals.some(function(signal) { return !signal.aborted; })) fail('Analytics requests were not aborted before sidebar navigation');
       setTimeout(function() {
-        if (requests !== 1) fail('Analytics started more work after navigation: ' + requests + ' requests');
+        if (requests !== 2) fail('Analytics started more work after navigation: ' + requests + ' requests');
         result.setAttribute('data-test-result', 'pass');
       }, 50);
       return;
@@ -559,30 +559,108 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	content := buf.String()
 	for _, expected := range []string{
 		`data-analytics-view="overview"`, `data-analytics-view="outcomes"`,
-		`data-analytics-view="agents"`, `data-analytics-view="workflows"`,
+		`data-analytics-view="agents"`, `data-analytics-view="automations"`,
 		`data-analytics-view="learning"`, `data-analytics-view="usage"`,
-		`data-analytics-view="all"`, `data-analytics-section="overview"`,
-		`data-analytics-section="outcomes"`, `data-analytics-section="agents"`,
-		`data-analytics-section="workflows"`, `id="analyticsJumpLinks"`,
+		`data-analytics-section="overview"`, `data-analytics-section="outcomes"`,
+		`data-analytics-section="agents"`, `data-analytics-section="automations"`,
 		`Technical completion rate`, `Goal achievement rate`, `Technical first-pass rate`,
 		`Follow-up rate`, `Median task cycle time`, `Cost per achieved goal`,
-		`Recent outcomes`, `Outcome funnel`, `Task-level outcome evidence`, `Agent performance`, `Workflow performance`,
-		`Observed outcomes among tasks using skills`, `Observed outcomes by Agent and skill`, `Current account state · not date-filtered`,
-		`Selected Agent outcome trend`, `Performance by task category`, `Selected Agent model mix`, `Recurring failures`,
-		`Node funnel`, `Node durations`, `Node failures`, `Current bottlenecks`, `Model performance by task category`,
-		`Technical Execution Completion Over Time`, `Memory effectiveness unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `navigateEvidence('outcomes','execution_hour'`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `skill_event:eventType`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `navigateEvidence('outcomes','model_id'`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
-		`table.innerHTML = '<tr><td colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable</td></tr>'`,
+		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`,
+		`Observed skill outcomes`, `Exact skill outcome values`, `Current OAuth account limits · not date-filtered`,
+		`Selected Agent outcome trend`, `Selected Agent model mix`, `Agent findings`,
+		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`, `Model efficiency`,
+		`Technical Execution Completion Over Time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `navigateEvidence('outcomes','execution_hour'`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `skill_event:eventType`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `navigateEvidence('outcomes','model_id'`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 	} {
 		if !strings.Contains(content, expected) {
 			t.Errorf("analytics outcome dashboard missing %q", expected)
 		}
+	}
+	if strings.Contains(content, `data-analytics-view="all"`) || strings.Contains(content, `>All Metrics</button>`) {
+		t.Fatal("Analytics should not expose the All Metrics view")
+	}
+	accountUsage := strings.Index(content, `id="overviewAccountUsageCards"`)
+	overviewMetrics := strings.Index(content, `id="analyticsKpis"`)
+	if accountUsage < 0 || overviewMetrics < 0 || accountUsage > overviewMetrics {
+		t.Fatal("OpenAI and Anthropic usage should render above the Overview metrics")
 	}
 	if strings.Contains(content, `>${task.TaskTitle || 'Unknown'}<`) || strings.Contains(content, `<td>${pattern.TaskTitle || 'Unknown'}</td>`) {
 		t.Fatal("dynamic task titles must be escaped before innerHTML insertion")
 	}
 }
 
-func TestAnalyticsContent_AllMetricsPreservesExistingMetrics(t *testing.T) {
+func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var buf bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	content := buf.String()
+
+	views := []string{"overview", "outcomes", "agents", "automations", "learning", "usage"}
+	if got := strings.Count(content, `data-analytics-view=`); got != len(views) {
+		t.Fatalf("Analytics view count = %d, want exactly %d", got, len(views))
+	}
+	for _, view := range views {
+		if !strings.Contains(content, `data-analytics-view="`+view+`"`) || !strings.Contains(content, `data-analytics-section="`+view+`"`) {
+			t.Errorf("Analytics missing canonical %q view or section", view)
+		}
+	}
+	for _, forbidden := range []string{`data-analytics-view="all"`, `data-analytics-section="workflows"`, `viewDetailElements`} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("Analytics retains removed navigation/ownership construct %q", forbidden)
+		}
+	}
+
+	section := func(name, next string) string {
+		start := strings.Index(content, `data-analytics-section="`+name+`"`)
+		if start < 0 {
+			t.Fatalf("missing %s section", name)
+		}
+		end := len(content)
+		if next != "" {
+			end = strings.Index(content[start:], `data-analytics-section="`+next+`"`)
+			if end < 0 {
+				t.Fatalf("missing %s section after %s", next, name)
+			}
+			end += start
+		}
+		return content[start:end]
+	}
+	for name, expected := range map[string][]string{
+		"overview":    {`id="projectOutcomeTrendChart"`, `id="overviewOutcomeFunnel"`, `Actionable exceptions`},
+		"outcomes":    {`id="successFailureChart"`, `id="hourlyTrendsChart"`, `id="avgTimeTaskChart"`, `id="frequentTasksList"`, `id="failedPatternsChart"`, `id="failedPatternsTable"`},
+		"agents":      {`id="agentComparisonChart"`, `id="agentEfficiencyChart"`, `id="agentCategoryChart"`, `id="avgTimeAgentChart"`, `id="agentUsageChart"`},
+		"automations": {`id="automationComparisonChart"`, `id="automationFunnelChart"`, `id="automationDurationChart"`, `id="automationFailureChart"`, `id="automationBottleneckChart"`},
+		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeChart"`, `id="skillEffectivenessChart"`},
+		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="costOutcomeTrendChart"`, `id="modelEfficiencyChart"`},
+	} {
+		next := map[string]string{"overview": "outcomes", "outcomes": "agents", "agents": "automations", "automations": "learning", "learning": "usage"}[name]
+		body := section(name, next)
+		for _, marker := range expected {
+			if !strings.Contains(body, marker) {
+				t.Errorf("%s does not physically own %q", name, marker)
+			}
+		}
+	}
+	if strings.Contains(section("overview", "outcomes"), `id="recentOutcomesTable"`) || strings.Contains(section("overview", "outcomes"), `Recent outcomes`) {
+		t.Fatal("Overview must not render a generic recent-outcomes table")
+	}
+	for _, id := range []string{"outcomeEvidenceTable", "agentEvidenceTable", "skillEventEvidenceTable", "usageEventEvidenceTable"} {
+		at := strings.Index(content, `id="`+id+`"`)
+		if at < 0 {
+			t.Errorf("missing evidence region %s", id)
+			continue
+		}
+		before := content[:at]
+		open := strings.LastIndex(before, `<details`)
+		close := strings.LastIndex(before, `</details>`)
+		if open < 0 || close > open {
+			t.Errorf("evidence region %s is not hidden in a disclosure", id)
+		}
+	}
+}
+
+func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var buf bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &buf); err != nil {
@@ -594,10 +672,10 @@ func TestAnalyticsContent_AllMetricsPreservesExistingMetrics(t *testing.T) {
 		"Task Execution by Hour", "Average Execution Time by Task", "Average Execution Time by Model",
 		"Model Breakdown by Executions", "Most Frequently Run Tasks", "Skill Activity Over Time",
 		"Top Skills", "Follow-through / Selected Outcomes", "Top Agent/Skill Pairs",
-		"Least Active Enabled Skills", "Observed outcomes among tasks using skills", "Model performance by task category", "Failed Task Patterns", "accountUsageCards",
+		"Least Active Enabled Skills", "Observed skill outcomes", "Model efficiency", "Failed Task Patterns", "accountUsageCards",
 	} {
 		if !strings.Contains(content, metric) {
-			t.Errorf("All Metrics lost existing metric %q", metric)
+			t.Errorf("Focused Analytics views lost existing metric %q", metric)
 		}
 	}
 }

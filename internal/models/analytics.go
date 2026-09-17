@@ -86,6 +86,14 @@ type AgentSkillOutcomePerformance struct {
 	FollowUp            AnalyticsMetric `json:"follow_up"`
 }
 
+type OutcomeTrendPoint struct {
+	Period              string          `json:"period"`
+	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
+	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`
+	FirstPass           AnalyticsMetric `json:"first_pass"`
+	FollowUp            AnalyticsMetric `json:"follow_up"`
+}
+
 type AnalyticsTrendPoint struct {
 	Period     string `json:"period"`
 	Completed  int    `json:"completed"`
@@ -213,6 +221,7 @@ type AnalyticsDashboard struct {
 	Current              OutcomeMetrics                 `json:"current"`
 	Previous             *OutcomeMetrics                `json:"previous,omitempty"`
 	Funnel               []OutcomeFunnelStage           `json:"funnel"`
+	OutcomeTrend         []OutcomeTrendPoint            `json:"outcome_trend"`
 	CycleDistribution    []AnalyticsDistributionPoint   `json:"cycle_distribution"`
 	FollowUpDistribution []AnalyticsDistributionPoint   `json:"follow_up_distribution"`
 	Agents               []AgentPerformance             `json:"agents"`

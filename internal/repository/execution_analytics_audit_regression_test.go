@@ -201,6 +201,9 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 	if dashboard.Current.TasksEvaluated != 1 || len(dashboard.RecentOutcomes) != 1 || dashboard.RecentOutcomes[0].TaskID != linked.ID {
 		t.Fatalf("workflow task filter not applied: current=%+v evidence=%+v", dashboard.Current, dashboard.RecentOutcomes)
 	}
+	if len(dashboard.OutcomeTrend) != 1 || dashboard.OutcomeTrend[0].TechnicalCompletion.Denominator != 1 || dashboard.OutcomeTrend[0].FollowUp.Denominator != 1 {
+		t.Fatalf("workflow filter not applied to outcome trend: %+v", dashboard.OutcomeTrend)
+	}
 	if dashboard.WorkflowDetail == nil || len(dashboard.WorkflowDetail.Funnel) != 2 || len(dashboard.WorkflowDetail.Durations) == 0 || len(dashboard.WorkflowDetail.Failures) == 0 || len(dashboard.WorkflowDetail.Bottlenecks) == 0 {
 		t.Fatalf("workflow node detail missing: %+v", dashboard.WorkflowDetail)
 	}
@@ -264,6 +267,24 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 	if err := NewSkillAnalyticsRepo(db).RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: time.Date(2026, 1, 10, 12, 0, 0, 0, time.UTC), ProjectID: project.ID, TaskID: task.ID, AgentID: agent.ID, SkillScope: models.SkillScopeProject, SkillHandle: "project:category", EventType: models.SkillEventSelected}); err != nil {
 		t.Fatal(err)
 	}
+	otherAgent := &models.Agent{Name: "Other Agent", SystemPrompt: "work", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := NewAgentRepo(db).Create(ctx, otherAgent); err != nil {
+		t.Fatal(err)
+	}
+	otherTask := &models.Task{ProjectID: project.ID, Title: "Other agent feature", Category: models.CategoryCompleted, Tag: models.TagFeature, Status: models.StatusCompleted, Prompt: "work", AgentDefinitionID: &otherAgent.ID}
+	if err := NewTaskRepo(db, nil).Create(ctx, otherTask); err != nil {
+		t.Fatal(err)
+	}
+	otherExecution := &models.Execution{TaskID: otherTask.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "other work"}
+	if err := executions.Create(ctx, otherExecution); err != nil {
+		t.Fatal(err)
+	}
+	if err := executions.Complete(ctx, otherExecution.ID, models.ExecCompleted, "", "", 0, 100); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at='2026-01-12 10:00:00',completed_at='2026-01-12 10:00:00' WHERE id=?`, otherExecution.ID); err != nil {
+		t.Fatal(err)
+	}
 	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, AgentID: agent.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)})
 	if err != nil {
 		t.Fatal(err)
@@ -278,11 +299,25 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 	if len(dashboard.ModelCategories) != 1 || dashboard.ModelCategories[0].Category != string(models.CategoryActive) || dashboard.ModelCategories[0].TechnicalCompletion.Denominator != 2 {
 		t.Fatalf("model category projection is inconsistent: %+v", dashboard.ModelCategories)
 	}
-	if len(dashboard.Agents) != 1 || dashboard.Agents[0].DurationSampleSize != 1 || dashboard.Agents[0].MedianDurationMs < int64(20*24*time.Hour/time.Millisecond) {
+	var selectedAgentPerformance *models.AgentPerformance
+	for i := range dashboard.Agents {
+		if dashboard.Agents[i].AgentID == agent.ID {
+			selectedAgentPerformance = &dashboard.Agents[i]
+			break
+		}
+	}
+	if selectedAgentPerformance == nil || selectedAgentPerformance.DurationSampleSize != 1 || selectedAgentPerformance.MedianDurationMs < int64(20*24*time.Hour/time.Millisecond) {
 		t.Fatalf("Agent duration must use historical first start and disclose one sample: %+v", dashboard.Agents)
 	}
 	if len(dashboard.AgentSkillOutcomes) != 1 || dashboard.AgentSkillOutcomes[0].AgentID != agent.ID || dashboard.AgentSkillOutcomes[0].SkillHandle != "project:category" || dashboard.AgentSkillOutcomes[0].TasksEvaluated != 1 {
 		t.Fatalf("Agent/skill outcome association missing: %+v", dashboard.AgentSkillOutcomes)
+	}
+	trendTechnicalDenominator := 0
+	for _, point := range dashboard.OutcomeTrend {
+		trendTechnicalDenominator += point.TechnicalCompletion.Denominator
+	}
+	if trendTechnicalDenominator != 2 {
+		t.Fatalf("Agent filter not applied to outcome trend: %+v", dashboard.OutcomeTrend)
 	}
 }
 

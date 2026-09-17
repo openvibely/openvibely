@@ -188,6 +188,7 @@ func metric(numerator, denominator int) models.AnalyticsMetric {
 
 type analyticsDashboardSections struct {
 	outcomeMetrics       bool
+	outcomeTrend         bool
 	followUpDistribution bool
 	comparison           bool
 	funnel               bool
@@ -206,20 +207,20 @@ type analyticsDashboardSections struct {
 func analyticsDashboardSectionsForView(view string) analyticsDashboardSections {
 	switch strings.ToLower(strings.TrimSpace(view)) {
 	case "overview":
-		return analyticsDashboardSections{outcomeMetrics: true, comparison: true, workflows: true, evidenceRows: true, insights: true}
+		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, comparison: true, funnel: true, workflows: true, evidenceRows: true, insights: true}
 	case "outcomes":
-		return analyticsDashboardSections{outcomeMetrics: true, followUpDistribution: true, funnel: true, evidenceRows: true, evidenceTotal: true}
+		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, followUpDistribution: true, funnel: true, evidenceRows: true, evidenceTotal: true}
 	case "agents":
 		return analyticsDashboardSections{agents: true, skills: true, evidenceRows: true, agentDetail: true}
 	case "learning":
 		return analyticsDashboardSections{skills: true, agentSkills: true}
 	case "usage":
-		return analyticsDashboardSections{outcomeMetrics: true, modelCategories: true}
-	case "workflows":
+		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, modelCategories: true}
+	case "automations":
 		return analyticsDashboardSections{workflows: true, workflowDetail: true}
 	default:
 		return analyticsDashboardSections{
-			outcomeMetrics: true, followUpDistribution: true, comparison: true, funnel: true, agents: true, skills: true,
+			outcomeMetrics: true, outcomeTrend: true, followUpDistribution: true, comparison: true, funnel: true, agents: true, skills: true,
 			agentSkills: true, modelCategories: true, workflows: true, evidenceRows: true, evidenceTotal: true,
 			agentDetail: true, workflowDetail: true, insights: true,
 		}
@@ -239,6 +240,7 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 	dashboard := models.AnalyticsDashboard{
 		Definitions:          append([]models.MetricDefinition(nil), analyticsMetricDefinitions...),
 		Funnel:               []models.OutcomeFunnelStage{},
+		OutcomeTrend:         []models.OutcomeTrendPoint{},
 		CycleDistribution:    []models.AnalyticsDistributionPoint{},
 		FollowUpDistribution: []models.AnalyticsDistributionPoint{},
 		Agents:               []models.AgentPerformance{},
@@ -260,6 +262,11 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		dashboard.CycleDistribution = cycleDistribution(cycles)
 		if sections.followUpDistribution {
 			dashboard.FollowUpDistribution = followUpDistribution(followups)
+		}
+	}
+	if sections.outcomeTrend {
+		if dashboard.OutcomeTrend, err = r.queryOutcomeTrend(ctx, filter); err != nil {
+			return dashboard, err
 		}
 	}
 	if sections.comparison && filter.Compare && !filter.DateFrom.IsZero() && !filter.DateTo.IsZero() && filter.DateTo.After(filter.DateFrom) {
@@ -330,6 +337,82 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		dashboard.Insights = buildAnalyticsInsights(dashboard.Current, dashboard.Previous, dashboard.Workflows, filter)
 	}
 	return dashboard, nil
+}
+
+func (r *ExecutionRepo) queryOutcomeTrend(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.OutcomeTrendPoint, error) {
+	execWindow, execArgs := analyticsWindowClause("e", filter)
+	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
+	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
+	execPeriod := analyticsPeriodExpression(filter.GroupBy, "e.started_at")
+	goalPeriod := analyticsPeriodExpression(filter.GroupBy, "COALESCE(g.achieved_at,g.updated_at)")
+	query := `WITH scoped_tasks AS (
+		SELECT t.id FROM tasks t WHERE t.project_id=?` + dimension + `
+	), period_exec AS (
+		SELECT ` + execPeriod + ` period,e.task_id,e.status,e.is_followup
+		FROM scoped_tasks t CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id
+		WHERE 1=1` + execWindow + `
+	), task_period AS (
+		SELECT period,task_id,MAX(CASE WHEN is_followup=1 THEN 1 ELSE 0 END) followed,
+			MAX(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal
+		FROM period_exec GROUP BY period,task_id
+	), historical_first AS (
+		SELECT p.period,p.task_id,(
+			SELECT e.status FROM executions e INDEXED BY idx_executions_task_analytics
+			WHERE e.task_id=p.task_id AND e.status IN ('completed','failed','cancelled')
+			ORDER BY e.started_at,e.history_order,e.id LIMIT 1
+		) status FROM task_period p WHERE p.terminal=1
+	), technical AS (
+		SELECT period,SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed,COUNT(*) terminal
+		FROM period_exec WHERE status IN ('completed','failed','cancelled') GROUP BY period
+	), task_rates AS (
+		SELECT p.period,SUM(p.followed) followed,COUNT(*) tasks,
+			SUM(CASE WHEN f.status='completed' THEN 1 ELSE 0 END) first_completed,
+			SUM(CASE WHEN f.status IS NOT NULL THEN 1 ELSE 0 END) first_terminal
+		FROM task_period p LEFT JOIN historical_first f ON f.period=p.period AND f.task_id=p.task_id GROUP BY p.period
+	), goal_outcomes AS (
+		SELECT ` + goalPeriod + ` period,g.task_id,g.status FROM task_goals g JOIN scoped_tasks t ON t.id=g.task_id
+		WHERE g.status IN ('achieved','failed')` + goalWindow + `
+	), active_goal_outcomes AS (
+		SELECT p.period,g.task_id,g.status FROM task_period p JOIN task_goals g ON g.task_id=p.task_id
+		WHERE p.terminal=1 AND g.status IN ('active','paused','blocked')
+	), evaluable_goals AS (
+		SELECT period,task_id,status FROM goal_outcomes
+		UNION SELECT period,task_id,status FROM active_goal_outcomes
+	), goals AS (
+		SELECT period,SUM(CASE WHEN status='achieved' THEN 1 ELSE 0 END) achieved,COUNT(*) evaluable
+		FROM evaluable_goals GROUP BY period
+	), periods AS (
+		SELECT period FROM task_period UNION SELECT period FROM goal_outcomes
+	)
+	SELECT p.period,COALESCE(t.completed,0),COALESCE(t.terminal,0),
+		COALESCE(g.achieved,0),COALESCE(g.evaluable,0),
+		COALESCE(r.first_completed,0),COALESCE(r.first_terminal,0),
+		COALESCE(r.followed,0),COALESCE(r.tasks,0)
+	FROM periods p LEFT JOIN technical t ON t.period=p.period
+	LEFT JOIN task_rates r ON r.period=p.period LEFT JOIN goals g ON g.period=p.period
+	ORDER BY p.period`
+	args := append([]any{filter.ProjectID}, dimensionArgs...)
+	args = append(args, execArgs...)
+	args = append(args, goalArgs...)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("getting analytics outcome trend: %w", err)
+	}
+	defer rows.Close()
+	result := []models.OutcomeTrendPoint{}
+	for rows.Next() {
+		var point models.OutcomeTrendPoint
+		var technicalCompleted, technicalTerminal, achieved, evaluable, firstCompleted, firstTerminal, followed, tasks int
+		if err := rows.Scan(&point.Period, &technicalCompleted, &technicalTerminal, &achieved, &evaluable, &firstCompleted, &firstTerminal, &followed, &tasks); err != nil {
+			return nil, fmt.Errorf("scanning analytics outcome trend: %w", err)
+		}
+		point.TechnicalCompletion = metric(technicalCompleted, technicalTerminal)
+		point.GoalAchievement = metric(achieved, evaluable)
+		point.FirstPass = metric(firstCompleted, firstTerminal)
+		point.FollowUp = metric(followed, tasks)
+		result = append(result, point)
+	}
+	return result, rows.Err()
 }
 
 func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter AnalyticsDashboardFilter, includeFollowUpDistribution bool) (models.OutcomeMetrics, []int64, []int, error) {

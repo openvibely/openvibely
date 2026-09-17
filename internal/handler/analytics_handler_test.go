@@ -148,6 +148,19 @@ func TestGetAnalyticsUsage_WithProjectFilter(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusOK)
 }
 
+func TestAnalyticsDashboardViewAllowsOnlyCanonicalViews(t *testing.T) {
+	for _, view := range []string{"overview", "outcomes", "agents", "automations", "learning", "usage"} {
+		if got := analyticsDashboardView(view); got != view {
+			t.Errorf("analyticsDashboardView(%q) = %q", view, got)
+		}
+	}
+	for _, view := range []string{"", "all", "workflows", "activity", "unknown"} {
+		if got := analyticsDashboardView(view); got != "overview" {
+			t.Errorf("analyticsDashboardView(%q) = %q, want overview", view, got)
+		}
+	}
+}
+
 func TestGetAnalyticsUsage_WithDateRange(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage?date_from=2024-01-01T00:00:00Z&date_to=2024-12-31T23:59:59Z").Execute()
@@ -497,7 +510,7 @@ func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
 		}
 	}
 
-	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&range=all&evidence_skill_handle=shared:evaluator&evidence_skill_scope=project").Execute()
+	rec := tc.HTTP().Get("/api/analytics/dashboard?project_id=" + project.ID + "&view=outcomes&range=all&evidence_skill_handle=shared:evaluator&evidence_skill_scope=project").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 	var dashboard models.AnalyticsDashboard
 	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
