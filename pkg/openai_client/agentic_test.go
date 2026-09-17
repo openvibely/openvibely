@@ -122,6 +122,50 @@ func TestStatelessOAuthOutputItemsDropsUnencryptedReasoning(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_AstraHTTPFallbackSuppressesMidTurnSteering(t *testing.T) {
+	var callbackCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			t.Fatalf("path = %q, want /responses", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"http done"}`,
+			`{"type":"response.completed","response":{"id":"resp_http","status":"completed","model":"gpt-6-astra"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("test-key")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	resp, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{
+		Model:                      "gpt-6-astra",
+		SkipDefaultTools:           true,
+		EnableAstraMidTurnSteering: true,
+		OnAstraMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
+			callbackCalls.Add(1)
+			_, _ = deliver(ctx, "must not send over HTTP")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "http done" {
+		t.Fatalf("Text = %q, want http done", resp.Text)
+	}
+	if callbackCalls.Load() != 0 {
+		t.Fatalf("HTTP fallback invoked mid-turn steering callback %d times", callbackCalls.Load())
+	}
+	if records := client.responsesTransportState.SteeringDeliveries(); len(records) != 0 {
+		t.Fatalf("HTTP fallback recorded steering deliveries: %#v", records)
+	}
+}
+
 func TestSendAgentic_APIKeyResponsesLiteDoesNotReplayUnencryptedReasoning(t *testing.T) {
 	requests := make(chan map[string]any, 2)
 	var turns atomic.Int32
