@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -106,11 +107,13 @@ type fakeInvoker struct {
 	delay   map[string]time.Duration
 	outputs map[string]json.RawMessage
 	errors  map[string]error
+	execIDs []string
 }
 
 func (f *fakeInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleHook, in HookInput) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, hook.ID)
+	f.execIDs = append(f.execIDs, llmcontracts.ArtifactExecutionIDFromContext(ctx))
 	d := f.delay[hook.ID]
 	out := f.outputs[hook.ID]
 	err := f.errors[hook.ID]
@@ -119,6 +122,22 @@ func (f *fakeInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleHook
 		time.Sleep(d)
 	}
 	return out, err
+}
+
+func TestRunSlot_ProvidesLifecycleExecutionIDForArtifacts(t *testing.T) {
+	store := &memStore{hooks: []models.AgentLifecycleHook{{
+		ID: "hook", AgentID: "agent", When: models.LifecycleAfterComplete,
+		OutputContract: models.OutputContractActivitySummary, Enabled: true,
+	}}}
+	inv := &fakeInvoker{outputs: map[string]json.RawMessage{"hook": json.RawMessage(`{"summary":"ok"}`)}}
+	runner := NewRunner(store, inv, nil)
+
+	if _, err := runner.RunSlot(context.Background(), models.LifecycleAfterComplete, HookInput{TaskID: "task", TaskRunID: "run"}); err != nil {
+		t.Fatalf("RunSlot: %v", err)
+	}
+	if len(inv.execIDs) != 1 || inv.execIDs[0] != "exec-1" {
+		t.Fatalf("artifact execution IDs = %#v, want [exec-1]", inv.execIDs)
+	}
 }
 
 func TestRunSlot_RecordsLifecycleTraceEvents(t *testing.T) {

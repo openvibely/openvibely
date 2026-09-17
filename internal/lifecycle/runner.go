@@ -388,6 +388,7 @@ func (r *Runner) runHook(ctx context.Context, hook models.AgentLifecycleHook, in
 	// invoker is rejected. Attach the trace recorder after the execution row has
 	// an ID so hidden reviewer/tool activity can be inspected from the task UI.
 	hookCtx := markInsideHook(ctx)
+	hookCtx = llmcontracts.WithArtifactExecutionID(hookCtx, exec.ID)
 	hookCtx = WithTraceRecorder(hookCtx, traceRecorder)
 	hookCtx = llmcontracts.WithRuntimeToolTraceRecorder(hookCtx, traceRecorder)
 	raw, err := r.invoker.Invoke(hookCtx, hook, hookInput)
