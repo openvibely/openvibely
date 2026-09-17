@@ -2866,6 +2866,11 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 		}
 		return nil
 	}
+	ownedNotificationPreflight := ownedNotificationRuntimePreflight{
+		assertProject:  assertProject,
+		requireCaller:  requireCaller,
+		requireService: requireService,
+	}
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
@@ -3145,30 +3150,25 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			if err := assertProject(req.ProjectID); err != nil {
-				return "", err
+			validateLease := func() error {
+				if req.LeaseSeconds != nil && (*req.LeaseSeconds < 1 || *req.LeaseSeconds > 86400) {
+					return fmt.Errorf("lease_seconds must be between 1 and 86400")
+				}
+				return nil
 			}
-			if req.LeaseSeconds != nil && (*req.LeaseSeconds < 1 || *req.LeaseSeconds > 86400) {
-				return "", fmt.Errorf("lease_seconds must be between 1 and 86400")
-			}
-			if err := requireCaller(); err != nil {
-				return "", err
-			}
-			if err := requireService(); err != nil {
-				return "", err
-			}
-			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
-				return "", err
-			}
-			var lease time.Duration
-			if req.LeaseSeconds != nil {
-				lease = time.Duration(*req.LeaseSeconds) * time.Second
-			}
-			a, err := opts.AlertSvc.ClaimApproved(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, lease)
-			if err != nil {
-				return "", err
-			}
-			return resultJSON(map[string]any{"notification": a})
+			preflight := ownedNotificationPreflight
+			preflight.validateProject = validateLease
+			return ownedNotificationMutationRuntimeHandler(ctx, opts, ownedNotificationRuntimeInput{ProjectID: req.ProjectID, AlertID: req.AlertID}, preflight, func(alertID string) (string, error) {
+				var lease time.Duration
+				if req.LeaseSeconds != nil {
+					lease = time.Duration(*req.LeaseSeconds) * time.Second
+				}
+				a, err := opts.AlertSvc.ClaimApproved(ctx, opts.ProjectID, alertID, opts.CallerTaskID, lease)
+				if err != nil {
+					return "", err
+				}
+				return resultJSON(map[string]any{"notification": a})
+			})
 		},
 		"create_alert_implementation_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
@@ -3183,34 +3183,24 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			if err := assertProject(req.ProjectID); err != nil {
-				return "", err
-			}
-			if err := requireCaller(); err != nil {
-				return "", err
-			}
-			if err := requireService(); err != nil {
-				return "", err
-			}
-			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
-				return "", err
-			}
-			implementation := models.AlertImplementationTaskInput{
-				Title: req.Title, Prompt: req.Prompt, Goal: req.Goal, Priority: req.Priority, Tag: req.Tag,
-			}
-			if opts.PrepareImplementationTask != nil {
-				if err := opts.PrepareImplementationTask(ctx, &implementation); err != nil {
+			return ownedNotificationMutationRuntimeHandler(ctx, opts, ownedNotificationRuntimeInput{ProjectID: req.ProjectID, AlertID: req.AlertID}, ownedNotificationPreflight, func(alertID string) (string, error) {
+				implementation := models.AlertImplementationTaskInput{
+					Title: req.Title, Prompt: req.Prompt, Goal: req.Goal, Priority: req.Priority, Tag: req.Tag,
+				}
+				if opts.PrepareImplementationTask != nil {
+					if err := opts.PrepareImplementationTask(ctx, &implementation); err != nil {
+						return "", err
+					}
+				}
+				if len(strings.TrimSpace(implementation.Goal)) > MaxTaskGoalLength {
+					return "", ErrTaskGoalTooLong
+				}
+				task, err := opts.AlertSvc.CreateImplementationTask(ctx, opts.ProjectID, alertID, opts.CallerTaskID, implementation)
+				if err != nil {
 					return "", err
 				}
-			}
-			if len(strings.TrimSpace(implementation.Goal)) > MaxTaskGoalLength {
-				return "", ErrTaskGoalTooLong
-			}
-			task, err := opts.AlertSvc.CreateImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, implementation)
-			if err != nil {
-				return "", err
-			}
-			return resultJSON(map[string]any{"alert_id": req.AlertID, "implementation_task_id": task.ID, "task": task})
+				return resultJSON(map[string]any{"alert_id": alertID, "implementation_task_id": task.ID, "task": task})
+			})
 		},
 		"link_alert_implementation_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
@@ -3221,25 +3211,15 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			if err := assertProject(req.ProjectID); err != nil {
-				return "", err
-			}
-			if err := requireCaller(); err != nil {
-				return "", err
-			}
-			if err := requireService(); err != nil {
-				return "", err
-			}
-			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
-				return "", err
-			}
-			if err := opts.AlertSvc.LinkImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, req.TaskID); err != nil {
-				return "", err
-			}
-			return resultJSON(map[string]any{"alert_id": req.AlertID, "implementation_task_id": req.TaskID})
+			return ownedNotificationMutationRuntimeHandler(ctx, opts, ownedNotificationRuntimeInput{ProjectID: req.ProjectID, AlertID: req.AlertID}, ownedNotificationPreflight, func(alertID string) (string, error) {
+				if err := opts.AlertSvc.LinkImplementationTask(ctx, opts.ProjectID, alertID, opts.CallerTaskID, req.TaskID); err != nil {
+					return "", err
+				}
+				return resultJSON(map[string]any{"alert_id": alertID, "implementation_task_id": req.TaskID})
+			})
 		},
-		"complete_alert_processing": alertTerminalRuntimeHandler(opts, models.AlertProcessingCompleted, assertProject, requireCaller, resultJSON),
-		"fail_alert_processing":     alertTerminalRuntimeHandler(opts, models.AlertProcessingFailed, assertProject, requireCaller, resultJSON),
+		"complete_alert_processing": alertTerminalRuntimeHandler(opts, models.AlertProcessingCompleted, ownedNotificationPreflight, resultJSON),
+		"fail_alert_processing":     alertTerminalRuntimeHandler(opts, models.AlertProcessingFailed, ownedNotificationPreflight, resultJSON),
 		"release_alert_claim": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
 				ProjectID string `json:"project_id"`
@@ -3248,27 +3228,60 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			if err := assertProject(req.ProjectID); err != nil {
-				return "", err
-			}
-			if err := requireCaller(); err != nil {
-				return "", err
-			}
-			if err := requireService(); err != nil {
-				return "", err
-			}
-			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
-				return "", err
-			}
-			if err := opts.AlertSvc.ReleaseClaim(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID); err != nil {
-				return "", err
-			}
-			return resultJSON(map[string]any{"alert_id": req.AlertID, "processing_state": models.AlertProcessingUnclaimed})
+			return ownedNotificationMutationRuntimeHandler(ctx, opts, ownedNotificationRuntimeInput{ProjectID: req.ProjectID, AlertID: req.AlertID}, ownedNotificationPreflight, func(alertID string) (string, error) {
+				if err := opts.AlertSvc.ReleaseClaim(ctx, opts.ProjectID, alertID, opts.CallerTaskID); err != nil {
+					return "", err
+				}
+				return resultJSON(map[string]any{"alert_id": alertID, "processing_state": models.AlertProcessingUnclaimed})
+			})
 		},
 	}
 }
 
-func alertTerminalRuntimeHandler(opts AlertRuntimeOptions, state models.AlertProcessingState, assertProject func(string) error, requireCaller func() error, resultJSON func(any) (string, error)) chatcontrol.RuntimeActionHandler {
+type ownedNotificationRuntimeInput struct {
+	ProjectID string
+	AlertID   string
+}
+
+type ownedNotificationRuntimePreflight struct {
+	assertProject   func(string) error
+	requireCaller   func() error
+	requireService  func() error
+	validateProject func() error
+	validateCaller  func() error
+}
+
+func ownedNotificationMutationRuntimeHandler(ctx context.Context, opts AlertRuntimeOptions, req ownedNotificationRuntimeInput, preflight ownedNotificationRuntimePreflight, operation func(alertID string) (string, error)) (string, error) {
+	if err := preflight.assertProject(req.ProjectID); err != nil {
+		return "", err
+	}
+	if preflight.validateProject != nil {
+		if err := preflight.validateProject(); err != nil {
+			return "", err
+		}
+	}
+	if err := preflight.requireCaller(); err != nil {
+		return "", err
+	}
+	if preflight.validateCaller != nil {
+		if err := preflight.validateCaller(); err != nil {
+			return "", err
+		}
+	}
+	if err := preflight.requireService(); err != nil {
+		return "", err
+	}
+	alertID := strings.TrimSpace(req.AlertID)
+	if alertID == "" {
+		return "", fmt.Errorf("alert_id is required")
+	}
+	if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, alertID); err != nil {
+		return "", err
+	}
+	return operation(alertID)
+}
+
+func alertTerminalRuntimeHandler(opts AlertRuntimeOptions, state models.AlertProcessingState, preflight ownedNotificationRuntimePreflight, resultJSON func(any) (string, error)) chatcontrol.RuntimeActionHandler {
 	return func(ctx context.Context, input json.RawMessage) (string, error) {
 		var req struct {
 			ProjectID string `json:"project_id"`
@@ -3278,25 +3291,20 @@ func alertTerminalRuntimeHandler(opts AlertRuntimeOptions, state models.AlertPro
 		if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 			return "", err
 		}
-		if err := assertProject(req.ProjectID); err != nil {
-			return "", err
+		validateMessage := func() error {
+			if len(req.Message) > 2000 {
+				return fmt.Errorf("message must be at most 2000 characters")
+			}
+			return nil
 		}
-		if err := requireCaller(); err != nil {
-			return "", err
-		}
-		if len(req.Message) > 2000 {
-			return "", fmt.Errorf("message must be at most 2000 characters")
-		}
-		if opts.AlertSvc == nil {
-			return "", fmt.Errorf("alert service not available")
-		}
-		if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
-			return "", err
-		}
-		if err := opts.AlertSvc.MarkProcessing(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, state, req.Message); err != nil {
-			return "", err
-		}
-		return resultJSON(map[string]any{"alert_id": req.AlertID, "processing_state": state})
+		terminalPreflight := preflight
+		terminalPreflight.validateCaller = validateMessage
+		return ownedNotificationMutationRuntimeHandler(ctx, opts, ownedNotificationRuntimeInput{ProjectID: req.ProjectID, AlertID: req.AlertID}, terminalPreflight, func(alertID string) (string, error) {
+			if err := opts.AlertSvc.MarkProcessing(ctx, opts.ProjectID, alertID, opts.CallerTaskID, state, req.Message); err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"alert_id": alertID, "processing_state": state})
+		})
 	}
 }
 
