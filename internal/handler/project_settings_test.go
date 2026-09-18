@@ -1907,3 +1907,111 @@ func TestGlobalPersonality(t *testing.T) {
 		}
 	})
 }
+
+func TestEditProjectDialogShowsRepositoryPathHealth(t *testing.T) {
+	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
+
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectSvc := service.NewProjectService(projectRepo)
+	h := New(projectSvc, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, nil, nil, nil, nil, nil, nil, projectRepo, nil, events.NewBroadcaster(), nil)
+	e := echo.New()
+
+	renderDialog := func(t *testing.T, project *models.Project) string {
+		t.Helper()
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatalf("failed to create project: %v", err)
+		}
+		before, err := projectSvc.GetByID(ctx, project.ID)
+		if err != nil {
+			t.Fatalf("load project before render: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/projects/"+project.ID+"/edit", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+		if err := h.EditProjectDialog(c); err != nil {
+			t.Fatalf("EditProjectDialog failed: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+
+		after, err := projectSvc.GetByID(ctx, project.ID)
+		if err != nil {
+			t.Fatalf("load project after render: %v", err)
+		}
+		if after.RepoPath != before.RepoPath || after.RepoURL != before.RepoURL || after.UpdatedAt != before.UpdatedAt {
+			t.Fatalf("settings render mutated project row: before=%+v after=%+v", before, after)
+		}
+		var taskCount int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&taskCount); err != nil {
+			t.Fatalf("count tasks: %v", err)
+		}
+		if taskCount != 0 {
+			t.Fatalf("settings render created tasks, count=%d", taskCount)
+		}
+		return rec.Body.String()
+	}
+
+	t.Run("existing path shows healthy status", func(t *testing.T) {
+		repoPath := t.TempDir()
+		body := renderDialog(t, &models.Project{Name: "Existing Repo", RepoPath: repoPath})
+		if !strings.Contains(body, `data-repo-path-health="healthy"`) {
+			t.Fatalf("dialog should show healthy repo path status, body=%s", body)
+		}
+		if !strings.Contains(body, "Repository path status: Healthy") {
+			t.Fatal("dialog should label existing repo path as healthy")
+		}
+		if strings.Contains(body, "Repository path status: Missing") || strings.Contains(body, "Local folder missing") || strings.Contains(body, "Managed checkout missing") {
+			t.Fatal("healthy repo path should not show missing-path warning copy")
+		}
+	})
+
+	t.Run("missing local path shows mount guidance", func(t *testing.T) {
+		repoPath := filepath.Join(t.TempDir(), "missing-local")
+		body := renderDialog(t, &models.Project{Name: "Missing Local", RepoPath: repoPath})
+		if !strings.Contains(body, `data-repo-path-health="missing"`) {
+			t.Fatalf("dialog should show missing repo path status, body=%s", body)
+		}
+		if !strings.Contains(body, "Local folder missing; mount the folder or choose a valid repository path.") {
+			t.Fatal("missing local repo path should show local mount/path guidance")
+		}
+	})
+
+	t.Run("missing github managed checkout shows re-clone guidance", func(t *testing.T) {
+		repoPath := filepath.Join(t.TempDir(), "missing-managed-checkout")
+		body := renderDialog(t, &models.Project{Name: "Missing GitHub", RepoPath: repoPath, RepoURL: "https://github.com/openvibely/example"})
+		if !strings.Contains(body, `data-repo-path-health="missing"`) {
+			t.Fatalf("dialog should show missing repo path status, body=%s", body)
+		}
+		if !strings.Contains(body, "Managed checkout missing; re-clone the repository or fix persistent storage.") {
+			t.Fatal("missing GitHub checkout should show re-clone or persistent storage guidance")
+		}
+		if strings.Contains(body, "Local folder missing") {
+			t.Fatal("missing GitHub checkout should not show local-folder-only guidance")
+		}
+	})
+
+	t.Run("uninspectable path shows unknown status", func(t *testing.T) {
+		repoPath := strings.Repeat("x", 5000)
+		body := renderDialog(t, &models.Project{Name: "Unknown Repo", RepoPath: repoPath})
+		if !strings.Contains(body, `data-repo-path-health="unknown"`) {
+			t.Fatalf("dialog should show unknown repo path status, body=%s", body)
+		}
+		if !strings.Contains(body, "OpenVibely could not inspect this path. Check permissions or the filesystem mount.") {
+			t.Fatal("unknown repo path status should show inspection guidance")
+		}
+	})
+
+	t.Run("empty path shows no warning", func(t *testing.T) {
+		body := renderDialog(t, &models.Project{Name: "No Repo Path", RepoPath: ""})
+		if strings.Contains(body, "Repository path status:") || strings.Contains(body, "data-repo-path-health=") || strings.Contains(body, "missing") {
+			t.Fatalf("project without repo path should not show repository health warning, body=%s", body)
+		}
+	})
+}
