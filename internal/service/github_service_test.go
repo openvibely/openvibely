@@ -2030,7 +2030,9 @@ func TestGitHubClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) 
 	}))
 	defer target.Close()
 
+	var sourceCalls int
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceCalls++
 		if got := r.Header.Get("Authorization"); got != "Bearer ghp_redirect_secret" {
 			t.Fatalf("expected source request authorization, got %q", got)
 		}
@@ -2040,6 +2042,11 @@ func TestGitHubClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) 
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = source.URL
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
 	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
 
 	if _, err := svc.GetIssue(ctx, repo, 7); err == nil || !strings.Contains(err.Error(), "redirect") {
@@ -2047,6 +2054,9 @@ func TestGitHubClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) 
 	}
 	if targetCalls != 0 {
 		t.Fatalf("redirect target received %d request(s), authorization %q", targetCalls, targetAuthorization)
+	}
+	if sourceCalls != 1 {
+		t.Fatalf("redirecting GitHub endpoint received %d requests, want 1", sourceCalls)
 	}
 }
 
