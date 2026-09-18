@@ -23,6 +23,8 @@ import (
 var errResponsesWebsocketTransport = errors.New("Responses websocket transport error")
 var errResponsesWebsocketStale = errors.New("Responses websocket stale connection")
 
+var astraSteeringAckTimeout = 5 * time.Second
+
 func isRetryableResponsesTransportError(err error) bool {
 	return errors.Is(err, errResponsesWebsocketTransport) || errors.Is(err, errResponsesWebsocketStale)
 }
@@ -609,13 +611,13 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		if err := writeFrame(deliverCtx, event); err != nil {
 			removePendingSteeringAckLocked(&pendingAcks, ack)
 			steeringMu.Unlock()
-			delivery := AstraSteeringDelivery{Status: AstraSteeringFailed, PreviousResponseID: previousID, Error: err.Error()}
+			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: err.Error()}
 			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
-			return delivery, err
+			return delivery, nil
 		}
 		state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringDelivered, PreviousResponseID: previousID})
 		steeringMu.Unlock()
-		timer := time.NewTimer(5 * time.Second)
+		timer := time.NewTimer(astraSteeringAckTimeout)
 		defer timer.Stop()
 		select {
 		case delivery := <-ack.ch:
@@ -651,7 +653,9 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			}
 		case <-deliverCtx.Done():
 			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-			return AstraSteeringDelivery{Status: AstraSteeringFailed, PreviousResponseID: previousID, Error: deliverCtx.Err().Error()}, deliverCtx.Err()
+			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: deliverCtx.Err().Error()}
+			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
+			return delivery, nil
 		case <-streamDone:
 			select {
 			case delivery := <-ack.ch:
@@ -659,10 +663,12 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			default:
 			}
 			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-			return AstraSteeringDelivery{Status: AstraSteeringUnavailable, PreviousResponseID: previousID}, nil
+			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: "response.steer acknowledgement unavailable after stream closed"}
+			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
+			return delivery, nil
 		case <-timer.C:
 			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-			delivery := AstraSteeringDelivery{Status: AstraSteeringFailed, PreviousResponseID: previousID, Error: "response.steer acknowledgement timed out"}
+			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: "response.steer acknowledgement timed out"}
 			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
 			return delivery, nil
 		}

@@ -1983,7 +1983,7 @@ func TestOpenResponsesWebsocketStream_AstraAcceptedSteeringCanFailBeforeCommit(t
 	}
 }
 
-func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringDisconnectReturnsUnavailable(t *testing.T) {
+func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringDisconnectReturnsAmbiguous(t *testing.T) {
 	steerSeen := make(chan map[string]any, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
@@ -2022,7 +2022,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringDisconnectReturnsUnava
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	var callbackCalls atomic.Int32
-	unavailable := make(chan AstraSteeringDelivery, 1)
+	ambiguous := make(chan AstraSteeringDelivery, 1)
 	body, err := client.openResponsesWebsocketStream(ctx, map[string]any{
 		"type":  "response.create",
 		"model": "gpt-6-astra",
@@ -2034,7 +2034,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringDisconnectReturnsUnava
 				return nil
 			}
 			delivery, err := deliver(ctx, "steer before disconnect")
-			unavailable <- delivery
+			ambiguous <- delivery
 			return err
 		},
 	})
@@ -2055,12 +2055,12 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringDisconnectReturnsUnava
 		t.Fatal("server did not receive response.steer before disconnect")
 	}
 	select {
-	case delivery := <-unavailable:
-		if delivery.Status != AstraSteeringUnavailable || delivery.PreviousResponseID != "resp_disconnect" {
+	case delivery := <-ambiguous:
+		if delivery.Status != AstraSteeringAmbiguous || delivery.PreviousResponseID != "resp_disconnect" {
 			t.Fatalf("delivery = %#v", delivery)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("steering callback did not observe unavailable delivery")
+		t.Fatal("steering callback did not observe ambiguous delivery")
 	}
 	records := client.responsesTransportState.SteeringDeliveries()
 	for _, record := range records {
@@ -2346,6 +2346,78 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCallbackErrorFailsStre
 	_, err = io.ReadAll(body)
 	if err == nil || !strings.Contains(err.Error(), "persisting Astra steering delivery: store steering receipt") {
 		t.Fatalf("read error = %v, want callback persistence failure", err)
+	}
+}
+
+func TestOpenResponsesWebsocketStream_AstraMissingAcknowledgementIsAmbiguous(t *testing.T) {
+	originalTimeout := astraSteeringAckTimeout
+	astraSteeringAckTimeout = 25 * time.Millisecond
+	t.Cleanup(func() { astraSteeringAckTimeout = originalTimeout })
+
+	deliveryObserved := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read initial request: %v", err)
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_no_ack"}}`)); err != nil {
+			t.Errorf("write created: %v", err)
+			return
+		}
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read steer: %v", err)
+			return
+		}
+		select {
+		case <-deliveryObserved:
+		case <-time.After(time.Second):
+			t.Error("steering callback did not observe acknowledgement timeout")
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_no_ack","status":"completed","model":"gpt-6-astra"}}`)); err != nil {
+			t.Errorf("write completed: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	originalURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	t.Cleanup(func() { OpenAIAPIBaseURL = originalURL })
+
+	client := NewWithAPIKey("sk-test")
+	deliveryResult := make(chan AstraSteeringDelivery, 1)
+	body, err := client.openResponsesWebsocketStream(context.Background(), map[string]any{
+		"type": "response.create", "model": "gpt-6-astra", "input": []any{},
+	}, false, responsesWebsocketStreamOptions{
+		Model: "gpt-6-astra",
+		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
+			delivery, err := deliver(ctx, "steer without an acknowledgement")
+			deliveryResult <- delivery
+			close(deliveryObserved)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatalf("openResponsesWebsocketStream: %v", err)
+	}
+	defer body.Close()
+	if _, err := io.ReadAll(body); err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+
+	select {
+	case delivery := <-deliveryResult:
+		if delivery.Status != AstraSteeringAmbiguous || delivery.PreviousResponseID != "resp_no_ack" || !strings.Contains(delivery.Error, "timed out") {
+			t.Fatalf("delivery = %#v, want ambiguous timeout", delivery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("steering callback did not return delivery state")
 	}
 }
 
