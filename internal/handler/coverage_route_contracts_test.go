@@ -439,6 +439,21 @@ func TestUpdateTaskChainConfigCreatesAndRemovesBlockedChild(t *testing.T) {
 	require.NotNil(t, child)
 	require.Equal(t, models.StatusBlocked, child.Status)
 
+	retitle := tc.HTTP().Put("/tasks/" + parent.ID + "/chain").WithForm(url.Values{
+		"chain_enabled":        {"true"},
+		"chain_trigger":        {"on_completion"},
+		"chain_child_title":    {"Updated waiting child"},
+		"chain_child_model":    {"inherit"},
+		"chain_child_category": {string(models.CategoryBacklog)},
+	}).Execute()
+	require.Equal(t, http.StatusOK, retitle.Code)
+	retitledChild, err := tc.taskRepo.FindBlockedChildByParent(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retitledChild)
+	require.Equal(t, child.ID, retitledChild.ID)
+	require.Equal(t, "Updated waiting child", retitledChild.Title)
+	require.Equal(t, models.StatusBlocked, retitledChild.Status)
+
 	disable := tc.HTTP().Put("/tasks/" + parent.ID + "/chain").WithForm(url.Values{
 		"chain_enabled": {"false"},
 	}).Execute()
