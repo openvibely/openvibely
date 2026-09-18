@@ -57,7 +57,7 @@ func TestSidebarProjectSelectorSearchAndSwitchInChrome(t *testing.T) {
 		t.Fatalf("render BreadcrumbSelector: %v", err)
 	}
 	var breadcrumbResults bytes.Buffer
-	if err := components.BreadcrumbSelectorResults("Task", "task-current", []models.BreadcrumbSelectorItem{{ID: "task-current", Name: "Current Task", URL: "/tasks/task-current"}}, false).Render(context.Background(), &breadcrumbResults); err != nil {
+	if err := components.BreadcrumbSelectorResults("Task", "task-current", []models.BreadcrumbSelectorItem{{ID: "task-current", Name: "Current Task", URL: "/tasks/task-current"}}, false, false).Render(context.Background(), &breadcrumbResults); err != nil {
 		t.Fatalf("render BreadcrumbSelectorResults: %v", err)
 	}
 	breadcrumbHTML := scriptPattern.ReplaceAllString(breadcrumbRendered.String(), "") + `<div data-parity-breadcrumb-results>` + breadcrumbResults.String() + `</div>`

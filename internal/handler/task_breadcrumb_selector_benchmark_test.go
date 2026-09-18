@@ -204,7 +204,7 @@ func breadcrumbSelectorHTMLBytes(items []models.BreadcrumbSelectorItem, currentI
 		page[i].URL = "/tasks/" + page[i].ID + "?project_id=default"
 	}
 	var output bytes.Buffer
-	if err := components.BreadcrumbSelectorResults("Task", currentID, page, hasMore).Render(context.Background(), &output); err != nil {
+	if err := components.BreadcrumbSelectorResults("Task", currentID, page, hasMore, false).Render(context.Background(), &output); err != nil {
 		return 0, err
 	}
 	return output.Len(), nil

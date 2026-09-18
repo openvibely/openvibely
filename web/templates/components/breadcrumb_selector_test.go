@@ -83,7 +83,7 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 	var results bytes.Buffer
-	if err := BreadcrumbSelectorResults("Task", "one", []models.BreadcrumbSelectorItem{{ID: "one", Name: "Current", URL: "/tasks/one"}, {ID: "two", Name: "Other", URL: "/tasks/two"}}, false).Render(context.Background(), &results); err != nil {
+	if err := BreadcrumbSelectorResults("Task", "one", []models.BreadcrumbSelectorItem{{ID: "one", Name: "Current", URL: "/tasks/one"}, {ID: "two", Name: "Other", URL: "/tasks/two"}}, false, false).Render(context.Background(), &results); err != nil {
 		t.Fatal(err)
 	}
 	runner := `<script>
@@ -319,7 +319,7 @@ func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testin
 	err := BreadcrumbSelectorResults("Task", "task-1", []models.BreadcrumbSelectorItem{
 		{ID: "task-1", Name: "Current", URL: "/tasks/task-1?project_id=project-1&tab=changes"},
 		{ID: "task-2", Name: "Other", URL: "/tasks/task-2?project_id=project-1&tab=changes"},
-	}, false).Render(context.Background(), &out)
+	}, false, false).Render(context.Background(), &out)
 	if err != nil {
 		t.Fatal(err)
 	}

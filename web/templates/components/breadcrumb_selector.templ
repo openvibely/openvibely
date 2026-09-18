@@ -43,29 +43,37 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 	</div>
 }
 
-templ BreadcrumbSelectorResults(kind string, currentID string, items []models.BreadcrumbSelectorItem, hasMore bool) {
+templ BreadcrumbSelectorResults(kind string, currentID string, items []models.BreadcrumbSelectorItem, hasMore bool, searchActive bool) {
 	if len(items) == 0 {
 		<div class="px-3 py-8 text-center" data-breadcrumb-selector-empty data-searchable-selector-empty>
 			<p class="font-medium">No { kind }s found</p>
 			<p class="mt-1 text-sm text-base-content/60">Try a different search.</p>
 		</div>
-	} else {
-		<div role="listbox" aria-label={ kind + "s" } class={ templateui.SearchableSelectorMenuClass }>
-			for _, item := range items {
-				<a
-					class={ templateui.SearchableSelectorOptionClass }
-					href={ templ.URL(item.URL) }
-					role="option"
-					aria-selected={ fmt.Sprintf("%t", item.ID == currentID) }
-					aria-current={ fmt.Sprintf("%t", item.ID == currentID) }
-					data-breadcrumb-selector-option
-					data-searchable-selector-option
-				>
-					<span class="w-4 shrink-0" aria-hidden="true">{ breadcrumbSelectorCheck(item.ID == currentID) }</span>
-					<span class="min-w-0 break-words">{ item.Name }</span>
-				</a>
-			}
-		</div>
+		} else {
+			<div role="listbox" aria-label={ kind + "s" } class={ templateui.SearchableSelectorMenuClass }>
+				for index, item := range items {
+					if breadcrumbSelectorShowSectionLabel(kind, currentID, items, index) {
+						<div class="menu-title px-4 pb-1 pt-2" role="presentation" data-breadcrumb-selector-section>
+							<span>{ breadcrumbSelectorSectionLabel(item, searchActive) }</span>
+						</div>
+					}
+					<a
+						class={ templateui.SearchableSelectorOptionClass }
+						href={ templ.URL(item.URL) }
+						role="option"
+						aria-selected={ fmt.Sprintf("%t", item.ID == currentID) }
+						aria-current={ fmt.Sprintf("%t", item.ID == currentID) }
+						data-breadcrumb-selector-option
+						data-searchable-selector-option
+					>
+						<span class="w-4 shrink-0" aria-hidden="true">{ breadcrumbSelectorCheck(item.ID == currentID) }</span>
+						<span class="min-w-0 break-words">{ item.Name }</span>
+						if item.Status == models.StatusRunning {
+							<span class="loading loading-spinner loading-xs ml-auto shrink-0 text-warning" title="Running" aria-label="Running" data-breadcrumb-selector-running></span>
+						}
+					</a>
+				}
+			</div>
 		if hasMore {
 			<p class="px-3 py-2 text-center text-xs text-base-content/60">More matches are available. Refine your search.</p>
 		}
@@ -77,4 +85,39 @@ func breadcrumbSelectorCheck(current bool) string {
 		return "✓"
 	}
 	return ""
+}
+
+func breadcrumbSelectorShowSectionLabel(kind, currentID string, items []models.BreadcrumbSelectorItem, index int) bool {
+	if kind != "Task" || index < 0 || index >= len(items) {
+		return false
+	}
+	item := items[index]
+	if item.ID == currentID {
+		return false
+	}
+	section := breadcrumbSelectorSectionKey(item)
+	for previous := index - 1; previous >= 0; previous-- {
+		if items[previous].ID == currentID {
+			continue
+		}
+		return breadcrumbSelectorSectionKey(items[previous]) != section
+	}
+	return true
+}
+
+func breadcrumbSelectorSectionKey(item models.BreadcrumbSelectorItem) string {
+	if item.Status == models.StatusRunning {
+		return "running"
+	}
+	return "other"
+}
+
+func breadcrumbSelectorSectionLabel(item models.BreadcrumbSelectorItem, searchActive bool) string {
+	if item.Status == models.StatusRunning {
+		return "Running"
+	}
+	if searchActive {
+		return "Matches"
+	}
+	return "Recent"
 }

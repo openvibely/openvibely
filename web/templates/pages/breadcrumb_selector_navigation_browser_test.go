@@ -68,7 +68,7 @@ func TestBreadcrumbSelectorsNavigateAndCleanUpAcrossHTMXHistoryInChrome(t *testi
 	renderResults := func(kind, currentID string, items []models.BreadcrumbSelectorItem) string {
 		t.Helper()
 		var out bytes.Buffer
-		if err := components.BreadcrumbSelectorResults(kind, currentID, items, false).Render(context.Background(), &out); err != nil {
+		if err := components.BreadcrumbSelectorResults(kind, currentID, items, false, false).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render selector results: %v", err)
 		}
 		return out.String()

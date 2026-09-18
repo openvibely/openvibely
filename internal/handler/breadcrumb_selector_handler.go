@@ -57,7 +57,7 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 	for i := range items {
 		items[i].URL = breadcrumbSelectorItemURL(c.Param("resource"), items[i].ID, projectID, c.QueryParam("tab"), c.QueryParam("view"), c.QueryParam("from"))
 	}
-	return render(c, http.StatusOK, components.BreadcrumbSelectorResults(kind, currentID, items, hasMore))
+	return render(c, http.StatusOK, components.BreadcrumbSelectorResults(kind, currentID, items, hasMore, search != ""))
 }
 
 func breadcrumbSelectorItemURL(resource, id, projectID, tab, view, from string) string {
