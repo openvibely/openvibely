@@ -3,12 +3,20 @@ package pages
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
+
+func exactTaskScheduleNextRun(schedule models.Schedule) string {
+	if schedule.NextRun == nil {
+		return ""
+	}
+	return schedule.NextRun.Local().Format(time.RFC3339Nano)
+}
 
 // TaskChangesContent renders just the changes tab content (for HTMX partial updates)
 templ TaskChangesContent(diffOutput string, taskID string, reviewComments []models.ReviewComment) {
@@ -668,7 +676,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					<!-- Existing Schedules List -->
 					if len(schedules) > 0 {
 						for _, s := range schedules {
-							<div class="card bg-base-100 shadow-sm border border-base-300 mb-2" id={ fmt.Sprintf("schedule-card-%s", s.ID) }>
+							<div class="card bg-base-100 shadow-sm border border-base-300 mb-2" id={ fmt.Sprintf("schedule-card-%s", s.ID) } data-schedule-next-run={ exactTaskScheduleNextRun(s) }>
 								<div class="card-body p-3">
 									<!-- Schedule View -->
 									<div id={ fmt.Sprintf("schedule-view-%s", s.ID) }>

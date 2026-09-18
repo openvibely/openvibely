@@ -364,6 +364,13 @@ func formatTime(t *time.Time) string {
 	return t.Local().Format("3:04 PM")
 }
 
+func exactScheduleNextRun(schedule *models.Schedule) string {
+	if schedule == nil || schedule.NextRun == nil {
+		return ""
+	}
+	return schedule.NextRun.Local().Format(time.RFC3339Nano)
+}
+
 func formatWeekRange(weekDays []WeekDay) string {
 	if len(weekDays) == 0 {
 		return ""
@@ -571,9 +578,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												data-schedule-card
 												data-schedule-id={ getScheduleID(occurrence.Task) }
 												data-task-id={ occurrence.Task.Task.ID }
-												data-schedule-title={ scheduleDisplayTitle(occurrence.Task) }
-												data-schedule-enabled="false"
-												data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
+											data-schedule-title={ scheduleDisplayTitle(occurrence.Task) }
+											data-schedule-next-run={ exactScheduleNextRun(occurrence.Task.Schedule) }
+											data-schedule-enabled="false"
+											data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
 												onclick="handleScheduleSelect(event)"
 												oncontextmenu="openScheduleContextMenu(event)"
 												onpointerdown="handleSchedulePointerDown(event)"
@@ -590,9 +598,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 												data-schedule-card
 												data-schedule-id={ getScheduleID(occurrence.Task) }
 												data-task-id={ occurrence.Task.Task.ID }
-												data-schedule-title={ scheduleDisplayTitle(occurrence.Task) }
-												data-schedule-enabled="true"
-												data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
+											data-schedule-title={ scheduleDisplayTitle(occurrence.Task) }
+											data-schedule-next-run={ exactScheduleNextRun(occurrence.Task.Schedule) }
+											data-schedule-enabled="true"
+											data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
 												onclick="handleScheduleSelect(event)"
 												oncontextmenu="openScheduleContextMenu(event)"
 												onpointerdown="handleSchedulePointerDown(event)"
