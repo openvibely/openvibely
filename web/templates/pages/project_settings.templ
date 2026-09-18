@@ -59,7 +59,29 @@ script deleteProjectAction(projectID string) {
 	htmx.ajax('DELETE', requestPath, {target: 'body', swap: 'none'});
 }
 
-templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int) {
+templ projectRepoPathHealth(health models.ProjectRepoPathHealth) {
+	if health.Status == models.RepoPathHealthHealthy {
+		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm" data-repo-path-health="healthy">
+			<div class="font-medium text-success">Repository path status: Healthy</div>
+			<p class="mt-1 text-base-content/70">{ health.Message }</p>
+			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
+		</div>
+	} else if health.Status == models.RepoPathHealthMissing {
+		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" data-repo-path-health="missing" role="alert">
+			<div class="font-medium text-warning">Repository path status: Missing</div>
+			<p class="mt-1 text-base-content/80">{ health.Message } { health.Guidance }</p>
+			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
+		</div>
+	} else if health.Status == models.RepoPathHealthUnknown {
+		<div id="edit-project-repo-path-health" class="mb-3 rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-sm" data-repo-path-health="unknown">
+			<div class="font-medium text-info">Repository path status: Unknown</div>
+			<p class="mt-1 text-base-content/80">{ health.Message } { health.Guidance }</p>
+			<code class="mt-1 block break-all text-xs text-base-content/60">{ health.Path }</code>
+		</div>
+	}
+}
+
+templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool, globalMaxWorkers int, repoPathHealth models.ProjectRepoPathHealth) {
 	<dialog id="edit_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
 			<div class="modal-box">
 				@ModalCloseButton("edit_project_modal", "Close project settings")
@@ -95,10 +117,11 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<label class="label">
 							<span class="label-text-alt opacity-70">Switch to GitHub URL to configure a remote repository, or keep the existing local path.</span>
 						</label>
-					}
-				</div>
-				if localRepoPathEnabled {
-					<div id="edit-project-local-fields" class="form-control mb-3">
+						}
+					</div>
+					@projectRepoPathHealth(repoPathHealth)
+					if localRepoPathEnabled {
+						<div id="edit-project-local-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">Repository Path</span></label>
 						<div class="flex gap-2">
 							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>

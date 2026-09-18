@@ -543,7 +543,8 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 		return err
 	}
 
-	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled(), globalMaxWorkers))
+	repoPathHealth := h.projectSvc.RepoPathHealth(p)
+	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled(), globalMaxWorkers, repoPathHealth))
 }
 
 func (h *Handler) DeleteProject(c echo.Context) error {

@@ -503,6 +503,42 @@ func (s *projectDeletionFileStage) finalize(ctx context.Context) error {
 	return errors.Join(cleanupErrors...)
 }
 
+func (s *ProjectService) RepoPathHealth(project *models.Project) models.ProjectRepoPathHealth {
+	if project == nil || project.RepoPath == "" {
+		return models.ProjectRepoPathHealth{Status: models.RepoPathHealthNone}
+	}
+	return projectRepoPathHealth(project.RepoPath, project.RepoURL)
+}
+
+func projectRepoPathHealth(repoPath, repoURL string) models.ProjectRepoPathHealth {
+	health := models.ProjectRepoPathHealth{
+		Status: models.RepoPathHealthUnknown,
+		Path:   repoPath,
+	}
+	if repoPath == "" {
+		health.Status = models.RepoPathHealthNone
+		return health
+	}
+	if _, err := os.Stat(repoPath); err == nil {
+		health.Status = models.RepoPathHealthHealthy
+		health.Message = "Repository path exists."
+		return health
+	} else if os.IsNotExist(err) {
+		health.Status = models.RepoPathHealthMissing
+		health.Message = "Repository path is missing."
+		if repoURL != "" {
+			health.Guidance = "Managed checkout missing; re-clone the repository or fix persistent storage."
+		} else {
+			health.Guidance = "Local folder missing; mount the folder or choose a valid repository path."
+		}
+		return health
+	} else {
+		health.Message = "Repository path status is unknown."
+		health.Guidance = "OpenVibely could not inspect this path. Check permissions or the filesystem mount."
+		return health
+	}
+}
+
 // ValidateRepoPaths checks all projects with configured repo_path values and
 // logs actionable warnings for paths that no longer exist on disk. This is
 // critical for containerized deployments where ephemeral filesystem paths can
