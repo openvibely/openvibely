@@ -112,6 +112,7 @@ type AgenticOptions struct {
 	// OpenVibely-owned model boundary.
 	EnableAstraMidTurnSteering bool
 	OnAstraMidTurnSteering     AstraMidTurnSteeringCallback
+	AstraMidTurnSteeringWakeup <-chan struct{}
 	// EnableAstraConfigurationUpdate allows gpt-6-astra to carry cache-preserving
 	// reasoning-effort changes as Responses input items between turns.
 	EnableAstraConfigurationUpdate bool
@@ -1985,6 +1986,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
 				if opts.EnableAstraMidTurnSteering {
 					wsOptions.OnMidTurnSteering = opts.OnAstraMidTurnSteering
+					wsOptions.MidTurnSteeringWakeup = opts.AstraMidTurnSteeringWakeup
 				}
 				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth, wsOptions)
 			}

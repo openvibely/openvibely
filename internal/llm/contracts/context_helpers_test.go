@@ -44,6 +44,11 @@ func TestLifecycleHookAndSteeringContextHelpers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("mid-turn steering callback error = %v", err)
 	}
+	wakeup := make(chan struct{}, 1)
+	ctx = WithMidTurnSteeringWakeup(context.Background(), wakeup)
+	if MidTurnSteeringWakeupFromContext(ctx) != wakeup || MidTurnSteeringWakeupFromContext(nil) != nil {
+		t.Fatal("mid-turn steering wakeup helpers should preserve the channel and be nil-safe")
+	}
 }
 
 type fakeRuntimeToolTraceRecorder struct {

@@ -5,6 +5,7 @@ import "context"
 type steeringCallbackKey struct{}
 type steeringRetryResetCallbackKey struct{}
 type midTurnSteeringCallbackKey struct{}
+type midTurnSteeringWakeupKey struct{}
 
 // SteeringCallback returns raw steering text to inject before the next provider/tool-loop model request.
 type SteeringCallback func(context.Context) (string, error)
@@ -82,4 +83,21 @@ func MidTurnSteeringCallbackFromContext(ctx context.Context) MidTurnSteeringCall
 	}
 	callback, _ := ctx.Value(midTurnSteeringCallbackKey{}).(MidTurnSteeringCallback)
 	return callback
+}
+
+// WithMidTurnSteeringWakeup attaches an event source that is signalled when
+// steering becomes available for the active execution.
+func WithMidTurnSteeringWakeup(ctx context.Context, wakeup <-chan struct{}) context.Context {
+	if wakeup == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, midTurnSteeringWakeupKey{}, wakeup)
+}
+
+func MidTurnSteeringWakeupFromContext(ctx context.Context) <-chan struct{} {
+	if ctx == nil {
+		return nil
+	}
+	wakeup, _ := ctx.Value(midTurnSteeringWakeupKey{}).(<-chan struct{})
+	return wakeup
 }
