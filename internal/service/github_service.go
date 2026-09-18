@@ -51,6 +51,8 @@ const (
 	defaultGitHubWebBaseURL     = "https://github.com"
 )
 
+var errGitHubRedirectNotAllowed = errors.New("github redirects are not allowed")
+
 type GitHubConnectionStatus struct {
 	Configured     bool
 	Connected      bool
@@ -237,7 +239,7 @@ func NewGitHubService(settingsRepo *repository.SettingsRepo, appID, appSlug, app
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-				return fmt.Errorf("github redirects are not allowed")
+				return errGitHubRedirectNotAllowed
 			},
 		},
 		retryPolicy: httpretry.DefaultPolicy(),
@@ -3226,6 +3228,9 @@ func (s *GitHubService) doGitHubJSONResponse(req *http.Request, target any) (htt
 		}
 		resp, requestErr := s.httpClient.Do(attempt)
 		if requestErr != nil {
+			if errors.Is(requestErr, errGitHubRedirectNotAllowed) {
+				return githubJSONResponse{}, false, errGitHubRedirectNotAllowed
+			}
 			return githubJSONResponse{}, false, requestErr
 		}
 		defer resp.Body.Close()
