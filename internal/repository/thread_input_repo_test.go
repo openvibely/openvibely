@@ -772,13 +772,25 @@ func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testi
 	if err := repo.CreateQueued(ctx, queued); err != nil {
 		t.Fatalf("CreateQueued guarded: %v", err)
 	}
+	wakeup, unsubscribe := repo.SubscribeSteeringWakeups(active.ID)
+	defer unsubscribe()
 
 	if _, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, "stale-turn"); !errors.Is(err, ErrActiveTurnChanged) {
 		t.Fatalf("expected stale turn conflict, got %v", err)
 	}
+	select {
+	case <-wakeup:
+		t.Fatal("failed queued-to-steering conversion notified the active execution subscriber")
+	default:
+	}
 	steering, err := repo.ConvertQueuedToSteering(ctx, queued.ID, active.ID, active.ID)
 	if err != nil {
 		t.Fatalf("ConvertQueuedToSteering: %v", err)
+	}
+	select {
+	case <-wakeup:
+	default:
+		t.Fatal("queued-to-steering conversion did not notify the active execution subscriber")
 	}
 	if steering == nil {
 		t.Fatal("expected converted steering input")

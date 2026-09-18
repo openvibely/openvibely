@@ -745,6 +745,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 	if err != nil {
 		return nil, err
 	}
+	r.notifySteeringWakeups(runExecutionID)
 	return converted, nil
 }
 
