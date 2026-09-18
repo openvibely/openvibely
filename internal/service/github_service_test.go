@@ -28,6 +28,12 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+type githubRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn githubRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
 func TestResolveRepoUsesUpstreamWhenOriginMissing(t *testing.T) {
 	ctx := context.Background()
 	repoDir := createTestGitRepo(t)
@@ -829,6 +835,76 @@ func TestGetPullRequestReturnsHeadRefAndMergedStateFromResolvedRepository(t *tes
 	}
 	if pr.Number != 4 || pr.State != "closed" || !pr.Merged || pr.HeadRef != "task/clean-history" || pr.HeadRepoFullName != "openvibely/openvibely-hosted" {
 		t.Fatalf("unexpected pull request: %#v", pr)
+	}
+}
+
+func TestGetPullRequestRetriesTransientGitHubFailures(t *testing.T) {
+	svc := newPATGitHubService(t, "https://api.github.test")
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
+	var attempts atomic.Int32
+	svc.httpClient = &http.Client{Transport: githubRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch attempts.Add(1) {
+		case 1:
+			return nil, errors.New("dial tcp: lookup api.github.test: no such host")
+		case 2:
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"message":"temporarily unavailable"}`)),
+				Request:    req,
+			}, nil
+		default:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"number":4,"state":"open","head":{"ref":"task/retry","sha":"abc123","repo":{"full_name":"openvibely/openvibely"}}}`)),
+				Request:    req,
+			}, nil
+		}
+	})}
+
+	pr, err := svc.GetPullRequest(t.Context(), &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 4)
+	if err != nil {
+		t.Fatalf("GetPullRequest after transient failures: %v", err)
+	}
+	if pr.Number != 4 || pr.HeadSHA != "abc123" {
+		t.Fatalf("unexpected pull request after retry: %#v", pr)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("GitHub API attempts = %d, want 3", got)
+	}
+}
+
+func TestCreatePullRequestDoesNotRetryWithoutReplayPermission(t *testing.T) {
+	svc := newPATGitHubService(t, "https://api.github.test")
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
+	var attempts atomic.Int32
+	svc.httpClient = &http.Client{Transport: githubRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"message":"temporarily unavailable"}`)),
+			Request:    req,
+		}, nil
+	})}
+
+	_, err := svc.CreatePullRequest(t.Context(), &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubCreatePullRequestRequest{
+		Title: "Retry safety", Head: "task/retry-safety", Base: "main", Body: "body",
+	})
+	if err == nil {
+		t.Fatal("CreatePullRequest accepted a failed GitHub response")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("GitHub POST attempts = %d, want 1", got)
 	}
 }
 
