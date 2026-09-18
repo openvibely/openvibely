@@ -13,7 +13,7 @@ const (
 	SearchableSelectorPanelClass       = "flex max-h-[inherit] min-h-0 flex-col overflow-hidden"
 	SearchableSelectorSearchShellClass = "card border border-base-300 bg-base-100 shadow-sm"
 	SearchableSelectorSearchClass      = "w-full border-0 bg-transparent px-4 py-2 text-sm focus:outline-none focus:ring-0"
-	SearchableSelectorResultsClass     = "min-h-0 flex-1 overflow-y-auto overscroll-contain p-2"
-	SearchableSelectorMenuClass        = "menu w-full gap-1 p-0"
-	SearchableSelectorOptionClass      = "flex min-w-0 items-center gap-2 rounded-btn px-4 py-2 hover:bg-base-content/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+	SearchableSelectorResultsClass     = "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain p-2"
+	SearchableSelectorMenuClass        = "menu w-full min-w-0 gap-1 overflow-x-hidden p-0"
+	SearchableSelectorOptionClass      = "flex w-full max-w-full min-w-0 items-center gap-2 overflow-hidden rounded-btn px-4 py-2 hover:bg-base-content/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
 )
