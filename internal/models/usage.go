@@ -159,6 +159,12 @@ type AccountUsageView struct {
 	Error                string             `json:"error,omitempty"`
 }
 
+type AnalyticsUsageAccountLimitsViewModel struct {
+	AccountLimits []AccountUsageView `json:"account_limits"`
+	LastUpdatedAt *time.Time         `json:"last_updated_at,omitempty"`
+	Errors        []string           `json:"errors,omitempty"`
+}
+
 type AnalyticsUsageViewModel struct {
 	AccountLimits     []AccountUsageView `json:"account_limits"`
 	Totals            UsageTotals        `json:"totals"`

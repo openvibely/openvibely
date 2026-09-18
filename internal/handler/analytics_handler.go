@@ -66,6 +66,7 @@ func (h *Handler) Analytics(c echo.Context) error {
 // @Param usage_period query string false "Exact grouped period for supporting usage events"
 // @Param usage_provider query string false "Exact provider for supporting usage events"
 // @Param usage_model_name query string false "Exact model for supporting usage events"
+// @Param projection query string false "Optional compact projection; account_limits returns only provider/account-limit rows"
 // @Success 200 {object} models.AnalyticsUsageViewModel "Usage analytics"
 // @Failure 400 {object} ErrorResponse "Supporting evidence requires project_id"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -77,6 +78,14 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 	filter := parseUsageFilter(c)
 	if usageEvidenceRequested(filter) && strings.TrimSpace(filter.ProjectID) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for supporting usage evidence")
+	}
+	if analyticsUsageProjection(c) == "account_limits" {
+		view, err := h.usageAnalyticsSvc.BuildAnalyticsAccountLimits(c.Request().Context(), filter)
+		if err != nil {
+			applog.Infof("[handler] GetAnalyticsUsage account_limits error: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.JSON(http.StatusOK, view)
 	}
 	view, err := h.usageAnalyticsSvc.BuildAnalyticsUsage(c.Request().Context(), filter)
 	if err != nil {
@@ -217,6 +226,10 @@ func serviceProjectSkillRoot(c echo.Context, h *Handler, projectID string) strin
 		return ""
 	}
 	return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, projectID)
+}
+
+func analyticsUsageProjection(c echo.Context) string {
+	return strings.ToLower(strings.TrimSpace(c.QueryParam("projection")))
 }
 
 func parseUsageFilter(c echo.Context) repository.UsageFilter {

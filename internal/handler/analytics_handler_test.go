@@ -66,6 +66,80 @@ func TestAnalyticsSupportingEvidenceRequiresProject(t *testing.T) {
 	tc.Assert(skill).StatusCode(http.StatusBadRequest)
 }
 
+func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{
+		Name:             "OpenAI OAuth",
+		Provider:         models.ProviderOpenAI,
+		Model:            "gpt-5.3-codex",
+		AuthMethod:       models.AuthMethodOAuth,
+		OAuthAccessToken: "oauth-token",
+		OAuthAccountID:   "acct-compact",
+	}
+	if err := tc.llmConfigRepo.Create(ctx, cfg); err != nil {
+		t.Fatalf("create oauth config: %v", err)
+	}
+	usedPercent := 12.5
+	if err := tc.usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+		Provider:           "openai",
+		AccountID:          cfg.OAuthAccountID,
+		AgentConfigID:      cfg.ID,
+		PlanType:           "ChatGPT Pro",
+		PrimaryLabel:       "5-hour session",
+		PrimaryUsedPercent: &usedPercent,
+		FetchedAt:          time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create account snapshot: %v", err)
+	}
+	if err := tc.usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+		Provider:      "openai",
+		AgentConfigID: cfg.ID,
+		Model:         "gpt-5.3-codex",
+		Operation:     "task",
+		Status:        "completed",
+		InputTokens:   100,
+		OutputTokens:  50,
+		OccurredAt:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("record usage event: %v", err)
+	}
+
+	full := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all").Execute()
+	tc.Assert(full).StatusCode(http.StatusOK)
+	var fullPayload map[string]json.RawMessage
+	if err := json.Unmarshal(full.Body.Bytes(), &fullPayload); err != nil {
+		t.Fatalf("decode full usage API: %v", err)
+	}
+	for _, key := range []string{"account_limits", "totals", "daily_usage", "usage_rate", "model_breakdown", "evidence", "evidence_total"} {
+		if _, ok := fullPayload[key]; !ok {
+			t.Fatalf("full usage response missing %q: %s", key, full.Body.String())
+		}
+	}
+
+	compact := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all&projection=account_limits").Execute()
+	tc.Assert(compact).StatusCode(http.StatusOK)
+	var compactPayload map[string]json.RawMessage
+	if err := json.Unmarshal(compact.Body.Bytes(), &compactPayload); err != nil {
+		t.Fatalf("decode compact usage API: %v", err)
+	}
+	if _, ok := compactPayload["account_limits"]; !ok {
+		t.Fatalf("compact usage response missing account_limits: %s", compact.Body.String())
+	}
+	for _, key := range []string{"totals", "daily_usage", "daily_usage_by_model", "usage_rate", "usage_rate_by_model", "model_breakdown", "evidence", "evidence_total"} {
+		if _, ok := compactPayload[key]; ok {
+			t.Fatalf("compact usage response unexpectedly included %q: %s", key, compact.Body.String())
+		}
+	}
+	var view models.AnalyticsUsageAccountLimitsViewModel
+	if err := json.Unmarshal(compact.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode compact account limits: %v", err)
+	}
+	if len(view.AccountLimits) != 1 || view.AccountLimits[0].Provider != "openai" || len(view.AccountLimits[0].Limits) != 1 {
+		t.Fatalf("compact account limits = %+v", view.AccountLimits)
+	}
+}
+
 func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
