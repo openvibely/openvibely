@@ -141,6 +141,7 @@ func TestChannelTargetRepo_SummarizeByProjectMatchesMaterializedSummary(t *testi
 		{ID: "discord-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", Name: "guild", TargetID: "C456"},
 		{ID: "discord-user", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "D789"},
 		{ID: "email-team", ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com"},
+		{ID: "matrix-room", ProjectID: project.ID, Platform: "matrix", TargetKind: "room", Name: "bridge", TargetID: "!room"},
 		{ID: "other-slack", ProjectID: otherProject.ID, Platform: "slack", TargetKind: "channel", Name: "other", TargetID: "COTHER", Home: true},
 	}
 	for _, target := range fixtures {
@@ -152,12 +153,13 @@ func TestChannelTargetRepo_SummarizeByProjectMatchesMaterializedSummary(t *testi
 	materialized, err := repo.ListByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Equal(t, channelTargetMaterializedSummary(materialized), summary)
-	require.Equal(t, 6, summary.Total)
+	require.Equal(t, 7, summary.Total)
 	require.True(t, summary.Configured)
 	require.Equal(t, ChannelTargetPlatformSummary{Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["slack"])
 	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 1, Named: 1, ByKind: map[string]int{"chat": 1}}, summary.ByPlatform["telegram"])
 	require.Equal(t, ChannelTargetPlatformSummary{Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["discord"])
 	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"email": 1}}, summary.ByPlatform["email"])
+	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"room": 1}}, summary.ByPlatform["matrix"])
 
 	emptySummary, err := repo.SummarizeByProject(ctx, "missing-project")
 	require.NoError(t, err)

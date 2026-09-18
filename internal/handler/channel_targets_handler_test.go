@@ -1,16 +1,23 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 type outboundTargetTestDiscord struct {
@@ -276,6 +283,86 @@ func TestOutboundTargetFragmentsShareResolvedProjectContext(t *testing.T) {
 	policyToggle := `name="enabled" value="true" class="toggle toggle-primary toggle-sm"`
 	if strings.Contains(modalBody, policyToggle+` checked`) {
 		t.Fatalf("empty modal response should preserve the disabled policy state: %s", modalBody)
+	}
+}
+
+func TestOutboundTargetsCardFragmentUsesAggregateSummaryWithoutMaterializedRows(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Aggregate Card Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	targetRepo := repository.NewChannelTargetRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	if err := settingsRepo.Set(ctx, service.SendMessageAllowExplicitTargetsSetting+":"+project.ID, "true"); err != nil {
+		t.Fatalf("set explicit target policy: %v", err)
+	}
+	for i := 0; i < 1200; i++ {
+		platform := []string{"email", "slack", "telegram", "discord", "matrix"}[i%5]
+		targetKind := models.DefaultChannelTargetKind(platform)
+		if platform == "matrix" {
+			targetKind = "room"
+		}
+		if err := targetRepo.Upsert(ctx, models.ChannelTarget{
+			ID:             fmt.Sprintf("aggregate-card-target-%04d", i),
+			ProjectID:      project.ID,
+			Platform:       platform,
+			TargetKind:     targetKind,
+			Name:           fmt.Sprintf("target-%04d", i),
+			TargetID:       fmt.Sprintf("DESTINATION-WITH-LONG-MATERIALIZED-ID-%04d", i),
+			ThreadID:       fmt.Sprintf("thread-%04d", i),
+			Home:           i%300 == 0,
+			DefaultSubject: fmt.Sprintf("Subject %04d", i),
+		}); err != nil {
+			t.Fatalf("upsert target %d: %v", i, err)
+		}
+	}
+
+	h := &Handler{channelTargetRepo: targetRepo, settingsRepo: settingsRepo}
+	e := echo.New()
+	e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
+	e.GET("/channels/outbound-targets", h.handleOutboundTargetsFragment)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	cardRec := httptest.NewRecorder()
+	e.ServeHTTP(cardRec, httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id="+url.QueryEscape(project.ID), nil))
+	counter.SetEnabled(false)
+	if cardRec.Code != http.StatusOK {
+		t.Fatalf("card fragment returned %d: %s", cardRec.Code, cardRec.Body.String())
+	}
+	cardBody := cardRec.Body.String()
+	for _, want := range []string{"email: 240", "slack: 240", "telegram: 240", "discord: 240", "Explicit targets allowed"} {
+		if !strings.Contains(cardBody, want) {
+			t.Fatalf("card summary missing %q: %s", want, cardBody)
+		}
+	}
+	if strings.Contains(cardBody, "matrix: 240") || strings.Contains(cardBody, "DESTINATION-WITH-LONG-MATERIALIZED-ID") || strings.Contains(cardBody, "Subject 0001") {
+		t.Fatalf("card fragment should not render unknown platform labels or materialized row fields: %s", cardBody)
+	}
+	statements := strings.Join(counter.Statements(), "\n")
+	if !strings.Contains(statements, "GROUP BY platform, target_kind") {
+		t.Fatalf("card fragment should use aggregate summary query, got statements:\n%s", statements)
+	}
+	if strings.Contains(statements, "SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at") {
+		t.Fatalf("card fragment must not call ListByProject, got statements:\n%s", statements)
+	}
+	if selectedBytes := counter.SelectedTextBytes(); selectedBytes > 2000 {
+		t.Fatalf("card fragment selected too much row text for aggregate summary: %d bytes; statements:\n%s", selectedBytes, statements)
+	}
+
+	fullRec := httptest.NewRecorder()
+	e.ServeHTTP(fullRec, httptest.NewRequest(http.MethodGet, "/channels/outbound-targets?project_id="+url.QueryEscape(project.ID), nil))
+	if fullRec.Code != http.StatusOK {
+		t.Fatalf("full fragment returned %d: %s", fullRec.Code, fullRec.Body.String())
+	}
+	fullBody := fullRec.Body.String()
+	for _, want := range []string{"DESTINATION-WITH-LONG-MATERIALIZED-ID-0000", "thread-0000", "target-0000", "Subject 0000", `data-outbound-target-test-label`, `name="target_row_id" value="aggregate-card-target-0000"`, `<span class="badge badge-sm badge-primary">Home</span>`} {
+		if !strings.Contains(fullBody, want) {
+			t.Fatalf("full fragment should still render editable target field %q: %s", want, fullBody)
+		}
 	}
 }
 
@@ -816,6 +903,168 @@ func TestDiscordOutboundTargetDraftTestUserDMDispatchesAsDM(t *testing.T) {
 
 // TestAuthorizedUsersMutationDoesNotAffectOutboundTargets verifies that adding and removing
 // Slack or Discord authorized users does not mutate the outbound channel_targets table.
+func BenchmarkOutboundTargetsCardRefreshUsesAggregateSummary(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	projectID := "outbound-card-refresh-bench-project"
+	seedOutboundTargetsCardBenchFixture(b, db, projectID, 20000)
+	targetRepo := repository.NewChannelTargetRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, service.SendMessageAllowExplicitTargetsSetting+":"+projectID, "true"); err != nil {
+		b.Fatalf("set explicit policy: %v", err)
+	}
+	h := &Handler{channelTargetRepo: targetRepo, settingsRepo: settingsRepo}
+	e := echo.New()
+	e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
+
+	baselineTargets, err := targetRepo.ListByProject(ctx, projectID)
+	if err != nil {
+		b.Fatalf("load baseline targets: %v", err)
+	}
+	baselineHTML := renderOutboundTargetsCardBenchmarkHTML(b, projectID, channelTargetProjectSummaryForHandlerTest(baselineTargets), true)
+	candidateRec := httptest.NewRecorder()
+	e.ServeHTTP(candidateRec, httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id="+url.QueryEscape(projectID), nil))
+	if candidateRec.Code != http.StatusOK {
+		b.Fatalf("candidate card status %d: %s", candidateRec.Code, candidateRec.Body.String())
+	}
+	if candidateHTML := candidateRec.Body.String(); candidateHTML != baselineHTML {
+		b.Fatalf("rendered HTML parity mismatch: baseline %d bytes candidate %d bytes", len(baselineHTML), len(candidateHTML))
+	}
+	b.Logf("card_refresh_fixture_targets=%d baseline_rendered_html_bytes=%d", len(baselineTargets), len(baselineHTML))
+
+	b.Run("baseline_full_list_card_render", func(b *testing.B) {
+		var sqlElapsed time.Duration
+		var rows, htmlBytes, selectedTextBytes int
+		counter.SetEnabled(true)
+		b.Cleanup(func() { counter.SetEnabled(false) })
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			counter.Reset()
+			start := time.Now()
+			targets, err := targetRepo.ListByProject(ctx, projectID)
+			sqlElapsed += time.Since(start)
+			if err != nil {
+				b.Fatalf("list full targets: %v", err)
+			}
+			html := renderOutboundTargetsCardBenchmarkHTML(b, projectID, channelTargetProjectSummaryForHandlerTest(targets), true)
+			if html != baselineHTML {
+				b.Fatalf("baseline render changed: got %d bytes want %d", len(html), len(baselineHTML))
+			}
+			rows = len(targets)
+			htmlBytes = len(html)
+			selectedTextBytes = counter.SelectedTextBytes()
+		}
+		b.ReportMetric(float64(rows), "rows/op")
+		b.ReportMetric(11, "materialized_fields/op")
+		b.ReportMetric(float64(htmlBytes), "html_bytes/op")
+		b.ReportMetric(float64(selectedTextBytes), "selected_text_bytes/op")
+		b.ReportMetric(float64(sqlElapsed.Nanoseconds())/float64(b.N), "sql_ns/op")
+	})
+
+	b.Run("aggregate_card_route", func(b *testing.B) {
+		var sqlElapsed time.Duration
+		var rows, htmlBytes, selectedTextBytes int
+		counter.SetEnabled(true)
+		b.Cleanup(func() { counter.SetEnabled(false) })
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			counter.Reset()
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id="+url.QueryEscape(projectID), nil)
+			start := time.Now()
+			e.ServeHTTP(rec, req)
+			sqlElapsed += time.Since(start)
+			if rec.Code != http.StatusOK {
+				b.Fatalf("card route returned %d: %s", rec.Code, rec.Body.String())
+			}
+			html := rec.Body.String()
+			if html != baselineHTML {
+				b.Fatalf("aggregate render changed: got %d bytes want %d", len(html), len(baselineHTML))
+			}
+			rows = 4
+			htmlBytes = len(html)
+			selectedTextBytes = counter.SelectedTextBytes()
+		}
+		b.ReportMetric(float64(rows), "rows/op")
+		b.ReportMetric(5, "materialized_fields/op")
+		b.ReportMetric(float64(htmlBytes), "html_bytes/op")
+		b.ReportMetric(float64(selectedTextBytes), "selected_text_bytes/op")
+		b.ReportMetric(float64(sqlElapsed.Nanoseconds())/float64(b.N), "route_ns/op")
+	})
+}
+
+func seedOutboundTargetsCardBenchFixture(tb testing.TB, db *sql.DB, projectID string, rows int) {
+	tb.Helper()
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES (?, 'Outbound Card Bench', '', '')`, projectID); err != nil {
+		tb.Fatalf("seed project: %v", err)
+	}
+	for i := 0; i < rows; i++ {
+		platform := "slack"
+		targetKind := "channel"
+		switch i % 4 {
+		case 0:
+			platform = "email"
+			targetKind = "email"
+		case 1:
+			platform = "slack"
+		case 2:
+			platform = "telegram"
+			targetKind = "chat"
+		case 3:
+			platform = "discord"
+		}
+		isHome := 0
+		if i%5000 == 0 {
+			isHome = 1
+		}
+		if _, err := db.Exec(`
+			INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			fmt.Sprintf("card-bench-target-%05d", i), projectID, platform, targetKind, fmt.Sprintf("target-%05d", i), fmt.Sprintf("DESTINATION-%05d", i), fmt.Sprintf("thread-%05d", i), isHome, fmt.Sprintf("Subject %05d", i), time.Date(2024, 1, 1, 0, 0, i%60, 0, time.UTC).Add(time.Duration(i)*time.Second).Format("2006-01-02 15:04:05")); err != nil {
+			tb.Fatalf("seed target %d: %v", i, err)
+		}
+	}
+}
+
+func channelTargetProjectSummaryForHandlerTest(targets []models.ChannelTarget) repository.ChannelTargetProjectSummary {
+	out := repository.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{}}
+	for _, target := range targets {
+		platform := strings.ToLower(strings.TrimSpace(target.Platform))
+		if platform == "" {
+			platform = "unknown"
+		}
+		kind := strings.ToLower(strings.TrimSpace(target.TargetKind))
+		if kind == "" {
+			kind = models.DefaultChannelTargetKind(platform)
+		}
+		platformSummary := out.ByPlatform[platform]
+		platformSummary.Total++
+		if target.Home {
+			platformSummary.Home++
+		}
+		if strings.TrimSpace(target.Name) != "" {
+			platformSummary.Named++
+		}
+		if platformSummary.ByKind == nil {
+			platformSummary.ByKind = map[string]int{}
+		}
+		platformSummary.ByKind[kind]++
+		out.ByPlatform[platform] = platformSummary
+	}
+	return out
+}
+
+func renderOutboundTargetsCardBenchmarkHTML(tb testing.TB, projectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) string {
+	tb.Helper()
+	var buf bytes.Buffer
+	if err := pages.OutboundTargetsCardFragment(projectID, summary, explicitAllowed).Render(context.Background(), &buf); err != nil {
+		tb.Fatalf("render outbound targets card: %v", err)
+	}
+	return buf.String()
+}
+
 func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Auth Isolation Project")
