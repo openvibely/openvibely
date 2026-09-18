@@ -347,6 +347,77 @@ func TestAlertRuntimeCreateNotificationIgnoresHiddenIdempotencyKey(t *testing.T)
 	require.Zero(t, storedWithHiddenKey)
 }
 
+func TestAlertRuntimeCreateNotificationUsesUnicodeCharacterLimits(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Unicode notification limits"}
+	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
+
+	create := func(t *testing.T, input map[string]any) (models.Alert, error) {
+		t.Helper()
+		data, err := json.Marshal(input)
+		require.NoError(t, err)
+		out, err := handlers["create_notification"](ctx, data)
+		if err != nil {
+			return models.Alert{}, err
+		}
+		var payload struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &payload))
+		return payload.Notification, nil
+	}
+
+	emojiTitle := strings.Repeat("🚀", 51)
+	created, err := create(t, map[string]any{"type": "bug_suggestion", "title": emojiTitle})
+	require.NoError(t, err)
+	require.NotEmpty(t, created.ID)
+	stored, err := alertSvc.GetByID(ctx, project.ID, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, emojiTitle, stored.Title)
+
+	emojiMessage := strings.Repeat("🚀", 600)
+	emojiBody := strings.Repeat("🚀", 6000)
+	created, err = create(t, map[string]any{"type": "bug_suggestion", "title": "Unicode content", "message": emojiMessage, "body": emojiBody})
+	require.NoError(t, err)
+	require.Equal(t, emojiMessage, created.Message)
+	require.Equal(t, emojiBody, created.Body)
+
+	emojiSource := strings.Repeat("🚀", 30)
+	created, err = create(t, map[string]any{"type": "bug_suggestion", "title": "Unicode source", "source": emojiSource})
+	require.NoError(t, err)
+	require.Equal(t, emojiSource, created.Source)
+
+	asciiTitle := strings.Repeat("a", 200)
+	created, err = create(t, map[string]any{"type": strings.Repeat("t", 100), "title": asciiTitle, "source": strings.Repeat("s", 100), "message": strings.Repeat("m", 2000), "body": strings.Repeat("b", 20000)})
+	require.NoError(t, err)
+	require.Equal(t, asciiTitle, created.Title)
+
+	rejected := map[string]struct {
+		input   map[string]any
+		message string
+	}{
+		"unicode title over limit":   {input: map[string]any{"type": "bug_suggestion", "title": strings.Repeat("界", 201)}, message: "title is required and must be at most 200 characters"},
+		"unicode message over limit": {input: map[string]any{"type": "bug_suggestion", "title": "Unicode message over", "message": strings.Repeat("界", 2001)}, message: "message must be at most 2000 characters"},
+		"unicode body over limit":    {input: map[string]any{"type": "bug_suggestion", "title": "Unicode body over", "body": strings.Repeat("界", 20001)}, message: "body must be at most 20000 characters"},
+		"unicode source over limit":  {input: map[string]any{"type": "bug_suggestion", "title": "Unicode source over", "source": strings.Repeat("界", 101)}, message: "source must be at most 100 characters"},
+		"unicode type over limit":    {input: map[string]any{"type": strings.Repeat("界", 101), "title": "Unicode type over"}, message: "type is required and must be at most 100 characters"},
+		"ascii title over limit":     {input: map[string]any{"type": "bug_suggestion", "title": strings.Repeat("a", 201)}, message: "title is required and must be at most 200 characters"},
+		"ascii message over limit":   {input: map[string]any{"type": "bug_suggestion", "title": "ASCII message over", "message": strings.Repeat("m", 2001)}, message: "message must be at most 2000 characters"},
+		"ascii body over limit":      {input: map[string]any{"type": "bug_suggestion", "title": "ASCII body over", "body": strings.Repeat("b", 20001)}, message: "body must be at most 20000 characters"},
+		"ascii source over limit":    {input: map[string]any{"type": "bug_suggestion", "title": "ASCII source over", "source": strings.Repeat("s", 101)}, message: "source must be at most 100 characters"},
+		"ascii type over limit":      {input: map[string]any{"type": strings.Repeat("t", 101), "title": "ASCII type over"}, message: "type is required and must be at most 100 characters"},
+	}
+	for name, tt := range rejected {
+		t.Run(name, func(t *testing.T) {
+			_, err := create(t, tt.input)
+			require.ErrorContains(t, err, tt.message)
+		})
+	}
+}
+
 func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
