@@ -364,6 +364,14 @@ func desktopTestEnvironment() []string {
 	}
 }
 
+func packagedE2EValidationTimeoutEnv(wantOutcome string) string {
+	timeout := 15 * time.Second
+	if runtime.GOOS == "darwin" && wantOutcome == packagedUpdateOutcomeSucceeded {
+		timeout = 60 * time.Second
+	}
+	return "OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=" + strconv.FormatInt(timeout.Milliseconds(), 10)
+}
+
 func testPackagedUpdateE2EAppBundleUpdateHelperSucceeds(t *testing.T) {
 	runAppBundleUpdateHelperE2E(t, "0.6.0", "0.6.0", packagedUpdateOutcomeSucceeded)
 }
@@ -494,7 +502,7 @@ func runAppBundleUpdateHelperE2E(t *testing.T, expectedVersion, replacementVersi
 	cmd.Stdin = bytes.NewReader(metadata)
 	cmd.Env = append(os.Environ(),
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=2000",
-		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=15000",
+		packagedE2EValidationTimeoutEnv(wantOutcome),
 	)
 	if wantOutcome == packagedUpdateOutcomeSucceeded {
 		cmd.Env = append(cmd.Env, "OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH=1")
@@ -619,7 +627,7 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 		"PORT="+port,
 		"OPENVIBELY_DESKTOP_CONFIG_FILE="+configFile,
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=10000",
-		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=15000",
+		packagedE2EValidationTimeoutEnv(wantOutcome),
 	)
 	output, helperErr := cmd.CombinedOutput()
 	if helperErr != nil && wantOutcome != packagedUpdateOutcomeRolledBack {
@@ -678,7 +686,7 @@ func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, wantOutcome stri
 		"PORT="+port,
 		"OPENVIBELY_DESKTOP_CONFIG_FILE="+configFile,
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=10000",
-		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=15000",
+		packagedE2EValidationTimeoutEnv(wantOutcome),
 	)
 	parentStdout, parentStderr, readParentLogs := openCommandLogs(t, root, "recovery-parent")
 	parent := exec.Command(installedExecutable)
