@@ -233,6 +233,65 @@ func TestTaskRepo_BreadcrumbSelectorIsProjectScopedAndBounded(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_BreadcrumbSelectorPrioritizesRunningTasks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewTaskRepo(db, nil)
+
+	current := &models.Task{ProjectID: "default", Title: "Selected current", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	runningOld := &models.Task{ProjectID: "default", Title: "deploy running old", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusRunning}
+	runningNew := &models.Task{ProjectID: "default", Title: "deploy running new", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusRunning}
+	exactPending := &models.Task{ProjectID: "default", Title: "deploy", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	recentPending := &models.Task{ProjectID: "default", Title: "recent pending", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	fixtures := []struct {
+		task      *models.Task
+		updatedAt string
+	}{
+		{current, "2026-01-01 00:00:00"},
+		{runningOld, "2026-01-02 00:00:00"},
+		{runningNew, "2026-01-03 00:00:00"},
+		{exactPending, "2026-01-04 00:00:00"},
+		{recentPending, "2026-01-05 00:00:00"},
+	}
+	for _, fixture := range fixtures {
+		if err := repo.Create(ctx, fixture.task); err != nil {
+			t.Fatalf("create %q: %v", fixture.task.Title, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id = ?`, fixture.updatedAt, fixture.task.ID); err != nil {
+			t.Fatalf("set timestamp for %q: %v", fixture.task.Title, err)
+		}
+	}
+
+	items, err := repo.ListBreadcrumbSelector(ctx, "default", "", current.ID, false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector empty: %v", err)
+	}
+	wantEmpty := []string{current.ID, runningNew.ID, runningOld.ID, recentPending.ID, exactPending.ID}
+	gotEmpty := make([]string, len(items))
+	for i, item := range items {
+		gotEmpty[i] = item.ID
+		if item.ID == runningNew.ID && item.Status != models.StatusRunning {
+			t.Fatalf("running selector item status = %q, want running", item.Status)
+		}
+	}
+	if !slices.Equal(gotEmpty, wantEmpty) {
+		t.Fatalf("empty running order = %v, want %v", gotEmpty, wantEmpty)
+	}
+
+	items, err = repo.ListBreadcrumbSelector(ctx, "default", "deploy", current.ID, false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector search: %v", err)
+	}
+	wantSearch := []string{runningNew.ID, runningOld.ID, exactPending.ID}
+	gotSearch := make([]string, len(items))
+	for i, item := range items {
+		gotSearch[i] = item.ID
+	}
+	if !slices.Equal(gotSearch, wantSearch) {
+		t.Fatalf("search running order = %v, want running matches before other matches and no nonmatching current %v", gotSearch, wantSearch)
+	}
+}
+
 func TestTaskRepo_BreadcrumbSelectorScheduleScopeRequiresScheduleRow(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

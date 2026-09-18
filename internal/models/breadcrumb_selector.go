@@ -16,7 +16,8 @@ type BreadcrumbSelector struct {
 
 // BreadcrumbSelectorItem is the compact, authoritative result rendered by a selector endpoint.
 type BreadcrumbSelectorItem struct {
-	ID   string
-	Name string
-	URL  string
+	ID     string
+	Name   string
+	URL    string
+	Status TaskStatus
 }

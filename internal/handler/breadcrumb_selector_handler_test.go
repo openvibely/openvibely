@@ -41,6 +41,43 @@ func TestBreadcrumbSelectorTaskResultsAreProjectScopedAndPreserveAllowlistedTab(
 	require.NotContains(t, rec.Body.String(), secret.Title)
 }
 
+func TestBreadcrumbSelectorTaskResultsGroupRunningTasksBelowSelected(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Task selector running project")
+	current := createTask(t, h, project.ID, "Selected task")
+	running := createTask(t, h, project.ID, "Running selector task", func(task *models.Task) {
+		task.Status = models.StatusRunning
+	})
+	recent := createTask(t, h, project.ID, "Recent selector task")
+
+	req := httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+current.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	require.Contains(t, body, current.Title)
+	require.Contains(t, body, running.Title)
+	require.Contains(t, body, recent.Title)
+	require.Contains(t, body, `data-breadcrumb-selector-section`)
+	require.Contains(t, body, `<span>Running</span>`)
+	require.Contains(t, body, `<span>Recent</span>`)
+	require.Contains(t, body, `data-breadcrumb-selector-running`)
+	require.Less(t, strings.Index(body, current.Title), strings.Index(body, `<span>Running</span>`))
+	require.Less(t, strings.Index(body, `<span>Running</span>`), strings.Index(body, running.Title))
+	require.Less(t, strings.Index(body, running.Title), strings.Index(body, `<span>Recent</span>`))
+
+	req = httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+current.ID+"&search=running", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body = rec.Body.String()
+	require.NotContains(t, body, current.Title)
+	require.NotContains(t, body, `aria-selected="true"`)
+	require.Contains(t, body, running.Title)
+	require.Contains(t, body, `<span>Running</span>`)
+	require.NotContains(t, body, recent.Title)
+}
+
 func TestBreadcrumbSelectorTaskResultsExposeTwentyRowBoundaryAndHasMore(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Task selector boundary project")
