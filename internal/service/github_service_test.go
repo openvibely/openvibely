@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -857,6 +858,13 @@ func TestGetPullRequestRetriesTransientGitHubFailures(t *testing.T) {
 				Body:       io.NopCloser(strings.NewReader(`{"message":"temporarily unavailable"}`)),
 				Request:    req,
 			}, nil
+		case 3:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF)),
+				Request:    req,
+			}, nil
 		default:
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -874,8 +882,46 @@ func TestGetPullRequestRetriesTransientGitHubFailures(t *testing.T) {
 	if pr.Number != 4 || pr.HeadSHA != "abc123" {
 		t.Fatalf("unexpected pull request after retry: %#v", pr)
 	}
+	if got := attempts.Load(); got != 4 {
+		t.Fatalf("GitHub API attempts = %d, want 4", got)
+	}
+}
+
+func TestPaginatedGitHubJSONRetriesEachPage(t *testing.T) {
+	var attempts atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		attempt := attempts.Add(1)
+		if attempt == 1 {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if req.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"id":2}]`))
+			return
+		}
+		w.Header().Set("Link", "<"+server.URL+"/items?page=2>; rel=\"next\"")
+		_, _ = w.Write([]byte(`[{"id":1}]`))
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
+	items, err := getPaginatedGitHubJSON[struct {
+		ID int `json:"id"`
+	}](t.Context(), svc, "token", server.URL+"/items", "")
+	if err != nil {
+		t.Fatalf("getPaginatedGitHubJSON after transient failure: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != 1 || items[1].ID != 2 {
+		t.Fatalf("paginated items = %#v", items)
+	}
 	if got := attempts.Load(); got != 3 {
-		t.Fatalf("GitHub API attempts = %d, want 3", got)
+		t.Fatalf("paginated GitHub API attempts = %d, want 3", got)
 	}
 }
 
@@ -1050,6 +1096,11 @@ func TestListPullRequestFeedbackCancelsOutstandingSourcesOnError(t *testing.T) {
 	}
 	resultCh := make(chan result, 1)
 	svc := newPATGitHubService(t, server.URL)
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
 	go func() {
 		feedback, err := svc.ListPullRequestFeedback(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 17)
 		resultCh <- result{feedback: feedback, err: err}
