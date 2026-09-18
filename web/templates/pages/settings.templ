@@ -219,22 +219,50 @@ func agentsJSON(agents []repository.AgentPickerOption) string {
 	return string(b)
 }
 
-func outboundTargetSummary(targets []models.ChannelTarget) string {
-	if len(targets) == 0 {
-		return "No saved outbound targets"
-	}
-	counts := map[string]int{}
+func outboundTargetProjectSummary(targets []models.ChannelTarget) repository.ChannelTargetProjectSummary {
+	out := repository.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{}}
 	for _, target := range targets {
-		counts[strings.ToLower(target.Platform)]++
+		platform := strings.ToLower(strings.TrimSpace(target.Platform))
+		if platform == "" {
+			platform = "unknown"
+		}
+		kind := strings.ToLower(strings.TrimSpace(target.TargetKind))
+		if kind == "" {
+			kind = models.DefaultChannelTargetKind(platform)
+		}
+		platformSummary := out.ByPlatform[platform]
+		platformSummary.Total++
+		if target.Home {
+			platformSummary.Home++
+		}
+		if strings.TrimSpace(target.Name) != "" {
+			platformSummary.Named++
+		}
+		if platformSummary.ByKind == nil {
+			platformSummary.ByKind = map[string]int{}
+		}
+		platformSummary.ByKind[kind]++
+		out.ByPlatform[platform] = platformSummary
+	}
+	return out
+}
+
+func outboundTargetSummary(targets []models.ChannelTarget) string {
+	return outboundTargetProjectSummaryText(outboundTargetProjectSummary(targets))
+}
+
+func outboundTargetProjectSummaryText(summary repository.ChannelTargetProjectSummary) string {
+	if summary.Total == 0 {
+		return "No saved outbound targets"
 	}
 	parts := []string{}
 	for _, platform := range []string{"email", "slack", "telegram", "discord"} {
-		if counts[platform] > 0 {
-			parts = append(parts, fmt.Sprintf("%s: %d", platform, counts[platform]))
+		if platformSummary := summary.ByPlatform[platform]; platformSummary.Total > 0 {
+			parts = append(parts, fmt.Sprintf("%s: %d", platform, platformSummary.Total))
 		}
 	}
 	if len(parts) == 0 {
-		return fmt.Sprintf("%d saved outbound target(s)", len(targets))
+		return fmt.Sprintf("%d saved outbound target(s)", summary.Total)
 	}
 	return strings.Join(parts, " • ")
 }
@@ -332,7 +360,7 @@ templ settingsContent(view ChannelsSettingsView) {
 				<div class="grid gap-4">
 					for _, card := range channelSettingsCards(view) {
 						if card.Kind == "outbound_targets" {
-							@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
+							@OutboundTargetsCard(view.CurrentProjectID, outboundTargetProjectSummary(view.ChannelTargets), view.SendMessageExplicitTargets)
 						}
 						if card.Kind == "x" {
 					<div class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40" data-channel-type="x" data-card-sort-name="X (formerly Twitter)" data-card-select-id="channel:x" data-card-select-eligible="true" data-search-card data-search-text="X formerly Twitter mentions posts" onclick="openXConfigModal()" hidden?={ !channelCardMatchesFilters(view, "x", view.XStatus.Configured, view.XStatus.Connected, "X formerly Twitter mentions posts") }>
@@ -2358,7 +2386,7 @@ templ settingsContent(view ChannelsSettingsView) {
 	</div>
 }
 
-templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) {
+templ OutboundTargetsCard(currentProjectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) {
 	<div
 		id="outbound-targets-card"
 		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -2388,7 +2416,7 @@ templ OutboundTargetsCard(currentProjectID string, targets []models.ChannelTarge
 				</h3>
 				<p class="text-sm opacity-60">Safety controls for where the `send_message` chat tool can send.</p>
 				<div class="mt-2 flex flex-wrap items-center gap-2">
-					<span class="badge badge-sm badge-ghost">{ outboundTargetSummary(targets) }</span>
+					<span class="badge badge-sm badge-ghost">{ outboundTargetProjectSummaryText(summary) }</span>
 					if explicitAllowed {
 						<span class="badge badge-sm badge-warning">Explicit targets allowed</span>
 					} else {
@@ -2418,8 +2446,8 @@ templ OutboundTargetsFragment(currentProjectID string, targets []models.ChannelT
 	@OutboundTargetsSection(currentProjectID, targets, explicitAllowed, notice)
 }
 
-templ OutboundTargetsCardFragment(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool) {
-	@OutboundTargetsCard(currentProjectID, targets, explicitAllowed)
+templ OutboundTargetsCardFragment(currentProjectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) {
+	@OutboundTargetsCard(currentProjectID, summary, explicitAllowed)
 }
 
 templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTarget, explicitAllowed bool, notice string) {

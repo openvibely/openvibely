@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/repository"
 	"golang.org/x/sync/errgroup"
 )
@@ -218,6 +220,7 @@ type GitHubService struct {
 	appPrivateKey   string
 	projectRepoRoot string
 	httpClient      *http.Client
+	retryPolicy     httpretry.Policy
 	apiBaseURL      string
 	webBaseURL      string
 	runGit          runGitFunc
@@ -237,10 +240,11 @@ func NewGitHubService(settingsRepo *repository.SettingsRepo, appID, appSlug, app
 				return fmt.Errorf("github redirects are not allowed")
 			},
 		},
-		apiBaseURL: defaultGitHubAPIBaseURL,
-		webBaseURL: defaultGitHubWebBaseURL,
-		runGit:     defaultRunGit,
-		nowFn:      time.Now,
+		retryPolicy: httpretry.DefaultPolicy(),
+		apiBaseURL:  defaultGitHubAPIBaseURL,
+		webBaseURL:  defaultGitHubWebBaseURL,
+		runGit:      defaultRunGit,
+		nowFn:       time.Now,
 	}
 }
 
@@ -3098,29 +3102,13 @@ func getPaginatedGitHubJSON[T any](ctx context.Context, s *GitHubService, bearer
 			req.Header.Set("Accept", accept)
 		}
 
-		resp, err := s.httpClient.Do(req)
+		var page []T
+		headers, err := s.doGitHubJSONResponse(req, &page)
 		if err != nil {
 			return nil, err
 		}
-		body, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			detail := formatGitHubAPIError(body)
-			if detail != "" {
-				return nil, fmt.Errorf("github API request failed (%d): %s", resp.StatusCode, detail)
-			}
-			return nil, fmt.Errorf("github API request failed (%d)", resp.StatusCode)
-		}
-
-		var page []T
-		if err := json.Unmarshal(body, &page); err != nil {
-			return nil, err
-		}
 		items = append(items, page...)
-		next, err = nextGitHubPageURL(resp.Header.Get("Link"), req.URL)
+		next, err = nextGitHubPageURL(headers.Get("Link"), req.URL)
 		if err != nil {
 			return nil, err
 		}
@@ -3194,30 +3182,92 @@ func (s *GitHubService) applyGitHubHeaders(req *http.Request, bearerToken string
 }
 
 func (s *GitHubService) doGitHubJSON(req *http.Request, target any) error {
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	_, err := s.doGitHubJSONResponse(req, target)
+	return err
+}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
+type githubJSONResponse struct {
+	body    []byte
+	headers http.Header
+}
+
+func (s *GitHubService) doGitHubJSONResponse(req *http.Request, target any) (http.Header, error) {
+	if req == nil {
+		return nil, fmt.Errorf("github API request is required")
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		detail := formatGitHubAPIError(body)
-		if detail != "" {
-			return fmt.Errorf("github API request failed (%d): %s", resp.StatusCode, detail)
+	policy := s.retryPolicy
+	policy.AllowReplay = githubRequestReplayable(req)
+	configuredOnRetry := policy.OnRetry
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		if configuredOnRetry != nil {
+			configuredOnRetry(event)
 		}
-		return fmt.Errorf("github API request failed (%d)", resp.StatusCode)
+		var responseErr *httpretry.ResponseError
+		if errors.As(event.Err, &responseErr) {
+			applog.Infof("[github-service] received HTTP %d, retry attempt %d/%d in %v", responseErr.StatusCode, event.Attempt, event.MaxRetries, event.Delay)
+		} else if event.Err != nil {
+			applog.Infof("[github-service] network error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+		}
+	}
+	if req.Body != nil {
+		defer req.Body.Close()
+	}
+	result, err := httpretry.DoStream(req.Context(), policy, func(attemptCtx context.Context) (githubJSONResponse, bool, error) {
+		attempt := req.Clone(attemptCtx)
+		if req.Body != nil {
+			if req.GetBody == nil {
+				return githubJSONResponse{}, false, fmt.Errorf("github API request body cannot be replayed")
+			}
+			body, bodyErr := req.GetBody()
+			if bodyErr != nil {
+				return githubJSONResponse{}, false, bodyErr
+			}
+			attempt.Body = body
+		}
+		resp, requestErr := s.httpClient.Do(attempt)
+		if requestErr != nil {
+			return githubJSONResponse{}, false, requestErr
+		}
+		defer resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return githubJSONResponse{}, false, httpretry.NewStreamError(readErr)
+		}
+		result := githubJSONResponse{body: body, headers: resp.Header.Clone()}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			responseErr := fmt.Errorf("github API request failed (%d)", resp.StatusCode)
+			if detail := formatGitHubAPIError(body); detail != "" {
+				responseErr = fmt.Errorf("github API request failed (%d): %s", resp.StatusCode, detail)
+			}
+			return result, false, httpretry.NewResponseError(resp, responseErr)
+		}
+		return result, true, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	if target == nil {
-		return nil
+		return result.headers, nil
 	}
-	if err := json.Unmarshal(body, target); err != nil {
-		return err
+	if err := json.Unmarshal(result.body, target); err != nil {
+		return nil, err
 	}
-	return nil
+	return result.headers, nil
+}
+
+func githubRequestReplayable(req *http.Request) bool {
+	if req == nil {
+		return false
+	}
+	if strings.TrimSpace(req.Header.Get("Idempotency-Key")) != "" {
+		return true
+	}
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
 }
 
 func formatGitHubAPIError(body []byte) string {

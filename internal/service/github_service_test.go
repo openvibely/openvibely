@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -27,6 +28,12 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+type githubRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn githubRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func TestResolveRepoUsesUpstreamWhenOriginMissing(t *testing.T) {
 	ctx := context.Background()
@@ -832,6 +839,121 @@ func TestGetPullRequestReturnsHeadRefAndMergedStateFromResolvedRepository(t *tes
 	}
 }
 
+func TestGetPullRequestRetriesTransientGitHubFailures(t *testing.T) {
+	svc := newPATGitHubService(t, "https://api.github.test")
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
+	var attempts atomic.Int32
+	svc.httpClient = &http.Client{Transport: githubRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		switch attempts.Add(1) {
+		case 1:
+			return nil, errors.New("dial tcp: lookup api.github.test: no such host")
+		case 2:
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"message":"temporarily unavailable"}`)),
+				Request:    req,
+			}, nil
+		case 3:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF)),
+				Request:    req,
+			}, nil
+		default:
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"number":4,"state":"open","head":{"ref":"task/retry","sha":"abc123","repo":{"full_name":"openvibely/openvibely"}}}`)),
+				Request:    req,
+			}, nil
+		}
+	})}
+
+	pr, err := svc.GetPullRequest(t.Context(), &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 4)
+	if err != nil {
+		t.Fatalf("GetPullRequest after transient failures: %v", err)
+	}
+	if pr.Number != 4 || pr.HeadSHA != "abc123" {
+		t.Fatalf("unexpected pull request after retry: %#v", pr)
+	}
+	if got := attempts.Load(); got != 4 {
+		t.Fatalf("GitHub API attempts = %d, want 4", got)
+	}
+}
+
+func TestPaginatedGitHubJSONRetriesEachPage(t *testing.T) {
+	var attempts atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		attempt := attempts.Add(1)
+		if attempt == 1 {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if req.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"id":2}]`))
+			return
+		}
+		w.Header().Set("Link", "<"+server.URL+"/items?page=2>; rel=\"next\"")
+		_, _ = w.Write([]byte(`[{"id":1}]`))
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
+	items, err := getPaginatedGitHubJSON[struct {
+		ID int `json:"id"`
+	}](t.Context(), svc, "token", server.URL+"/items", "")
+	if err != nil {
+		t.Fatalf("getPaginatedGitHubJSON after transient failure: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != 1 || items[1].ID != 2 {
+		t.Fatalf("paginated items = %#v", items)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("paginated GitHub API attempts = %d, want 3", got)
+	}
+}
+
+func TestCreatePullRequestDoesNotRetryWithoutReplayPermission(t *testing.T) {
+	svc := newPATGitHubService(t, "https://api.github.test")
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
+	var attempts atomic.Int32
+	svc.httpClient = &http.Client{Transport: githubRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"message":"temporarily unavailable"}`)),
+			Request:    req,
+		}, nil
+	})}
+
+	_, err := svc.CreatePullRequest(t.Context(), &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubCreatePullRequestRequest{
+		Title: "Retry safety", Head: "task/retry-safety", Base: "main", Body: "body",
+	})
+	if err == nil {
+		t.Fatal("CreatePullRequest accepted a failed GitHub response")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("GitHub POST attempts = %d, want 1", got)
+	}
+}
+
 func TestDefaultGitHubSDLCLabelsDoNotUseProductPrefix(t *testing.T) {
 	for _, label := range DefaultGitHubSDLCLabels {
 		if strings.HasPrefix(label, "openvibely:") {
@@ -974,6 +1096,11 @@ func TestListPullRequestFeedbackCancelsOutstandingSourcesOnError(t *testing.T) {
 	}
 	resultCh := make(chan result, 1)
 	svc := newPATGitHubService(t, server.URL)
+	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
+		ready := make(chan time.Time)
+		close(ready)
+		return ready
+	}
 	go func() {
 		feedback, err := svc.ListPullRequestFeedback(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 17)
 		resultCh <- result{feedback: feedback, err: err}
