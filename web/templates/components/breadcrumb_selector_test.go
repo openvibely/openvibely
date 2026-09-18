@@ -324,12 +324,14 @@ func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testin
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-breadcrumb-selector-running`, `loading loading-spinner loading-xs`, `text-primary`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
+	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-breadcrumb-selector-running`, `loading loading-spinner loading-xs`, `text-primary`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in results markup", want)
 		}
 	}
-	if strings.Contains(body, `text-warning`) {
-		t.Errorf("running breadcrumb selector indicator should use primary styling, got warning styling")
+	for _, forbidden := range []string{`text-warning`, `break-words`} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("breadcrumb selector results should not contain %q", forbidden)
+		}
 	}
 }
