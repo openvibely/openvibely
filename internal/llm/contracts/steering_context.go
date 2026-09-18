@@ -19,6 +19,7 @@ const (
 	SteeringDeliveryUnavailable SteeringDeliveryStatus = "unavailable"
 	SteeringDeliveryDelivered   SteeringDeliveryStatus = "delivered"
 	SteeringDeliveryPending     SteeringDeliveryStatus = "pending"
+	SteeringDeliveryAmbiguous   SteeringDeliveryStatus = "ambiguous"
 	SteeringDeliveryAccepted    SteeringDeliveryStatus = "accepted"
 	SteeringDeliveryFailed      SteeringDeliveryStatus = "failed"
 )

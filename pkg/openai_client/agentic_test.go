@@ -4570,6 +4570,23 @@ func TestWrapAstraSteeringCommitsPreservesConfirmedIDs(t *testing.T) {
 	require.Empty(t, state.astraSteeringCommits)
 }
 
+func TestWrapAstraSteeringCommitsPreservesAmbiguousIDsWithoutConfirmingThem(t *testing.T) {
+	state := NewResponsesTransportState()
+	state.astraSteeringAmbiguous = []ResponsesSteeringDelivery{
+		{Status: AstraSteeringAmbiguous, SteeringID: "steer_unknown"},
+		{Status: AstraSteeringAmbiguous, SteeringID: "steer_unknown"},
+	}
+	want := errors.New("stream disconnected")
+	err := wrapAstraSteeringCommits(want, state)
+	require.ErrorIs(t, err, want)
+	var ambiguous interface{ AmbiguousSteeringIDs() []string }
+	require.ErrorAs(t, err, &ambiguous)
+	require.Equal(t, []string{"steer_unknown"}, ambiguous.AmbiguousSteeringIDs())
+	var committed interface{ CommittedSteeringIDs() []string }
+	require.False(t, errors.As(err, &committed))
+	require.Empty(t, state.astraSteeringAmbiguous)
+}
+
 func TestSendAgentic_AstraConfigurationUpdateIsReestablishedAfterCompaction(t *testing.T) {
 	requestNumber := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

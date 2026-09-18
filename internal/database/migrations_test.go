@@ -1243,8 +1243,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 196 {
-		t.Fatalf("max goose version = %d, want 196", maxVersion)
+	if maxVersion != 197 {
+		t.Fatalf("max goose version = %d, want 197", maxVersion)
 	}
 }
 
@@ -1769,6 +1769,38 @@ func TestMigration196AddsProviderSessionStateWithoutChangingCompactionState(t *t
 	}
 }
 
+func TestMigration197AddsDurableProviderSteeringLedger(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "provider-steering-197.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 196); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 197); err != nil {
+		t.Fatal(err)
+	}
+	var tableCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'thread_input_provider_steering'`).Scan(&tableCount); err != nil {
+		t.Fatal(err)
+	}
+	if tableCount != 1 {
+		t.Fatalf("provider steering table count = %d, want 1", tableCount)
+	}
+	if err := goose.DownTo(db, ".", 196); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'thread_input_provider_steering'`).Scan(&tableCount); err != nil {
+		t.Fatal(err)
+	}
+	if tableCount != 0 {
+		t.Fatal("migration 197 rollback retained provider steering table")
+	}
+}
+
 func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "system-channel-auth.db")
@@ -1916,8 +1948,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 196 {
-		t.Fatalf("max goose version = %d, want 196", maxVersion)
+	if maxVersion != 197 {
+		t.Fatalf("max goose version = %d, want 197", maxVersion)
 	}
 }
 
@@ -2365,8 +2397,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 196 {
-		t.Fatalf("max goose version = %d, want 196", maxVersion)
+	if maxVersion != 197 {
+		t.Fatalf("max goose version = %d, want 197", maxVersion)
 	}
 }
 
@@ -2701,8 +2733,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 196 {
-		t.Fatalf("max goose version = %d, want 196", maxVersion)
+	if maxVersion != 197 {
+		t.Fatalf("max goose version = %d, want 197", maxVersion)
 	}
 }
 
