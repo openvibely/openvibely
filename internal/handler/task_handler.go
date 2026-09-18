@@ -2893,13 +2893,17 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 	childAgentID := c.FormValue("chain_child_agent_id")
 	childModel := c.FormValue("chain_child_model")
 	childCategory := c.FormValue("chain_child_category")
+	childTitle := c.FormValue("chain_child_title")
+	childPromptPrefix := c.FormValue("chain_child_prompt_prefix")
 
 	config := &models.ChainConfiguration{
-		Enabled:       enabled,
-		Trigger:       trigger,
-		ChildAgentID:  childAgentID,
-		ChildModel:    childModel,
-		ChildCategory: childCategory,
+		Enabled:           enabled,
+		Trigger:           trigger,
+		ChildAgentID:      childAgentID,
+		ChildModel:        childModel,
+		ChildCategory:     childCategory,
+		ChildTitle:        childTitle,
+		ChildPromptPrefix: childPromptPrefix,
 	}
 
 	applog.Infof("[handler] UpdateTaskChainConfig id=%s enabled=%v trigger=%s child_agent=%s child_model=%s child_category=%s",
@@ -2922,14 +2926,26 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 	if enabled {
 		existing, _ := h.taskRepo.FindBlockedChildByParent(c.Request().Context(), taskID)
 		if existing == nil {
-			blockedChild := llmworkflow.BuildBlockedChild(*task, config)
-			if createErr := h.taskSvc.Create(c.Request().Context(), blockedChild); createErr != nil {
-				applog.Infof("[handler] UpdateTaskChainConfig error creating blocked child: %v", createErr)
+			chainChild, findChildErr := h.taskRepo.FindChainChildByParent(c.Request().Context(), taskID)
+			if findChildErr != nil {
+				applog.Infof("[handler] UpdateTaskChainConfig error checking existing chain child for parent=%s: %v", taskID, findChildErr)
+			} else if chainChild != nil {
+				applog.Infof("[handler] UpdateTaskChainConfig chain child already left blocked status id=%s status=%s for parent=%s", chainChild.ID, chainChild.Status, taskID)
 			} else {
-				applog.Infof("[handler] UpdateTaskChainConfig pre-created blocked child id=%s for parent=%s", blockedChild.ID, taskID)
+				blockedChild := llmworkflow.BuildBlockedChild(*task, config)
+				if createErr := h.taskSvc.Create(c.Request().Context(), blockedChild); createErr != nil {
+					applog.Infof("[handler] UpdateTaskChainConfig error creating blocked child: %v", createErr)
+				} else {
+					applog.Infof("[handler] UpdateTaskChainConfig pre-created blocked child id=%s for parent=%s", blockedChild.ID, taskID)
+				}
 			}
 		} else {
-			applog.Infof("[handler] UpdateTaskChainConfig blocked child already exists id=%s for parent=%s", existing.ID, taskID)
+			llmworkflow.ApplyBlockedChildMaterialization(*task, config, existing)
+			if updateErr := h.taskSvc.Update(c.Request().Context(), existing); updateErr != nil {
+				applog.Infof("[handler] UpdateTaskChainConfig error refreshing blocked child id=%s for parent=%s: %v", existing.ID, taskID, updateErr)
+			} else {
+				applog.Infof("[handler] UpdateTaskChainConfig refreshed blocked child id=%s for parent=%s", existing.ID, taskID)
+			}
 		}
 	} else {
 		if delErr := h.taskRepo.DeleteBlockedChildrenByParent(c.Request().Context(), taskID); delErr != nil {

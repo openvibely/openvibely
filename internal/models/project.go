@@ -41,3 +41,19 @@ type ProjectWorkerCapacity struct {
 	Name       string
 	MaxWorkers *int
 }
+
+type RepoPathHealthStatus string
+
+const (
+	RepoPathHealthNone    RepoPathHealthStatus = "none"
+	RepoPathHealthHealthy RepoPathHealthStatus = "healthy"
+	RepoPathHealthMissing RepoPathHealthStatus = "missing"
+	RepoPathHealthUnknown RepoPathHealthStatus = "unknown"
+)
+
+type ProjectRepoPathHealth struct {
+	Status   RepoPathHealthStatus
+	Path     string
+	Message  string
+	Guidance string
+}

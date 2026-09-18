@@ -161,6 +161,28 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 	return nil
 }
 
+// ApplyBlockedChildMaterialization updates an existing blocked child with the
+// same fields BuildBlockedChild would use when pre-creating it. The caller must
+// only pass children that are still blocked so already-started follow-up work is
+// not rewritten.
+func ApplyBlockedChildMaterialization(parentTask models.Task, config *models.ChainConfiguration, childTask *models.Task) {
+	if childTask == nil {
+		return
+	}
+	materialized := BuildBlockedChild(parentTask, config)
+	childTask.ProjectID = materialized.ProjectID
+	childTask.Title = materialized.Title
+	childTask.Category = materialized.Category
+	childTask.Priority = materialized.Priority
+	childTask.Status = materialized.Status
+	childTask.Prompt = materialized.Prompt
+	childTask.AgentID = materialized.AgentID
+	childTask.Tag = materialized.Tag
+	childTask.ParentTaskID = materialized.ParentTaskID
+	childTask.ChainConfig = materialized.ChainConfig
+	childTask.LineageDepth = materialized.LineageDepth
+}
+
 // BuildBlockedChild creates a blocked child task from a parent's chain config.
 // The child has StatusBlocked and a placeholder prompt (the real prompt comes
 // from the parent's output when TriggerTaskChain runs at completion).

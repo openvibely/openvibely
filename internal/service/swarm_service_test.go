@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -781,14 +783,247 @@ func TestSwarmServiceCreateAssignsProjectDefaultModelToChildren(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSwarmChildren: %v", err)
 	}
+	seenRoles := map[models.SwarmRole]bool{}
 	for _, child := range children {
+		seenRoles[child.SwarmRole] = true
 		if child.AgentID == nil || *child.AgentID != projectAgent.ID {
 			t.Fatalf("child %s role=%s agent id = %v, want project default %s", child.ID, child.SwarmRole, child.AgentID, projectAgent.ID)
+		}
+	}
+	for _, role := range []models.SwarmRole{models.SwarmRolePlanner, models.SwarmRoleWorker, models.SwarmRoleReviewer, models.SwarmRoleMerger} {
+		if !seenRoles[role] {
+			t.Fatalf("expected swarm child role %s to be created; saw %#v", role, seenRoles)
 		}
 	}
 	if parent.AgentID != nil && *parent.AgentID == globalAgent.ID {
 		t.Fatalf("parent used global default %s instead of project default %s", globalAgent.ID, projectAgent.ID)
 	}
+}
+
+func TestSwarmServiceResolveAssignedAgentIDFallbacks(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	svc := NewSwarmService(nil, nil, nil, nil)
+	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
+
+	globalAgent := &models.LLMConfig{Name: "Resolver Global Default", Provider: models.ProviderTest, Model: "global-default", MaxTokens: 4096, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, globalAgent))
+	projectAgent := &models.LLMConfig{Name: "Resolver Project Default", Provider: models.ProviderTest, Model: "project-default", MaxTokens: 4096}
+	require.NoError(t, llmConfigRepo.Create(ctx, projectAgent))
+	project := &models.Project{Name: "Resolver Project", DefaultAgentConfigID: &projectAgent.ID}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	explicit := " " + projectAgent.ID + " "
+	resolved := svc.resolveAssignedAgentID(ctx, project.ID, &explicit)
+	require.NotNil(t, resolved)
+	require.Equal(t, projectAgent.ID, *resolved)
+
+	for _, requestedValue := range []*string{nil, swarmPtrString("auto"), swarmPtrString("default")} {
+		resolved = svc.resolveAssignedAgentID(ctx, project.ID, requestedValue)
+		require.NotNil(t, resolved)
+		require.Equal(t, projectAgent.ID, *resolved)
+	}
+
+	staleID := "missing-project-default"
+	staleProject := &models.Project{Name: "Resolver Stale Project"}
+	require.NoError(t, projectRepo.Create(ctx, staleProject))
+	require.NoError(t, setStaleProjectDefaultModelForTest(ctx, db, staleProject.ID, staleID))
+	resolved = svc.resolveAssignedAgentID(ctx, staleProject.ID, nil)
+	require.NotNil(t, resolved)
+	require.Equal(t, globalAgent.ID, *resolved)
+}
+
+func TestSwarmServiceResolveAssignedAgentIDNoModelPreservesRequestedState(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	_, err := db.ExecContext(ctx, `DELETE FROM agent_configs WHERE 1 = 1`)
+	require.NoError(t, err)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	svc := NewSwarmService(nil, nil, nil, nil)
+	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
+	project := &models.Project{Name: "No Model Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	require.Nil(t, svc.resolveAssignedAgentID(ctx, project.ID, nil))
+	auto := "auto"
+	resolved := svc.resolveAssignedAgentID(ctx, project.ID, &auto)
+	require.NotNil(t, resolved)
+	require.Equal(t, "auto", *resolved)
+}
+
+func TestSwarmServiceAssignedAgentIDResolutionUsesCompactProjection(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	svc := NewSwarmService(nil, nil, nil, nil)
+	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
+	projectID, projectDefaultID := createWideSwarmModelResolutionFixture(t, ctx, projectRepo, llmConfigRepo)
+
+	counter.SetEnabled(true)
+	counter.Reset()
+	resolved := svc.resolveAssignedAgentID(ctx, projectID, nil)
+	require.NotNil(t, resolved)
+	require.Equal(t, projectDefaultID, *resolved)
+	compactStatements := counter.Statements()
+	compactSelectedBytes := counter.SelectedTextBytes()
+	require.NotEmpty(t, compactStatements)
+	for _, statement := range compactStatements {
+		lower := strings.ToLower(statement)
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+			require.NotContains(t, lower, forbidden, "compact resolver SQL selected a forbidden column")
+		}
+	}
+
+	counter.Reset()
+	resolved = resolveAssignedAgentIDFullHydrationForTest(ctx, projectRepo, llmConfigRepo, projectID, nil)
+	require.NotNil(t, resolved)
+	require.Equal(t, projectDefaultID, *resolved)
+	fullSelectedBytes := counter.SelectedTextBytes()
+	require.Greater(t, fullSelectedBytes, compactSelectedBytes*5, "compact projection should select at least 5x fewer string bytes than full hydration")
+
+	const iterations = 1000
+	compactDuration, compactBytesPerOp := measureSwarmAgentResolutionForTest(t, iterations, func() *string {
+		return svc.resolveAssignedAgentID(ctx, projectID, nil)
+	})
+	fullDuration, fullBytesPerOp := measureSwarmAgentResolutionForTest(t, iterations, func() *string {
+		return resolveAssignedAgentIDFullHydrationForTest(ctx, projectRepo, llmConfigRepo, projectID, nil)
+	})
+	compactPerOp := compactDuration / iterations
+	fullPerOp := fullDuration / iterations
+	require.Less(t, compactPerOp, 50*time.Microsecond, "compact default-ID resolution should stay below the interactive path budget")
+	require.Less(t, compactBytesPerOp, int64(50*1024), "compact default-ID resolution should allocate less than 50 KB/op")
+	require.Greater(t, fullPerOp, compactPerOp*2, "compact resolver should be at least 2x faster than full hydration")
+	require.Greater(t, fullBytesPerOp, compactBytesPerOp*5, "compact resolver should allocate at least 5x fewer bytes than full hydration")
+}
+
+func BenchmarkSwarmAssignedAgentIDResolutionCompactVsFullHydration(b *testing.B) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(b)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	svc := NewSwarmService(nil, nil, nil, nil)
+	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
+	projectID, projectDefaultID := createWideSwarmModelResolutionFixture(b, ctx, projectRepo, llmConfigRepo)
+
+	b.Run("full_hydration", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			resolved := resolveAssignedAgentIDFullHydrationForTest(ctx, projectRepo, llmConfigRepo, projectID, nil)
+			if resolved == nil || *resolved != projectDefaultID {
+				b.Fatalf("resolved id = %v, want %s", resolved, projectDefaultID)
+			}
+		}
+	})
+	b.Run("compact", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			resolved := svc.resolveAssignedAgentID(ctx, projectID, nil)
+			if resolved == nil || *resolved != projectDefaultID {
+				b.Fatalf("resolved id = %v, want %s", resolved, projectDefaultID)
+			}
+		}
+	})
+}
+
+func swarmPtrString(value string) *string {
+	return &value
+}
+
+func setStaleProjectDefaultModelForTest(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, projectID, modelID string) error {
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE projects SET default_agent_config_id = ? WHERE id = ?`, modelID, projectID); err != nil {
+		_, _ = db.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+		return err
+	}
+	_, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	return err
+}
+
+func createWideSwarmModelResolutionFixture(t testing.TB, ctx context.Context, projectRepo *repository.ProjectRepo, llmConfigRepo *repository.LLMConfigRepo) (string, string) {
+	t.Helper()
+	wide := strings.Repeat("wide-payload-", 400)
+	var projectDefaultID string
+	for i := 0; i < 50; i++ {
+		cfg := &models.LLMConfig{
+			Name:                  fmt.Sprintf("Wide Custom Provider %02d", i),
+			Provider:              models.ProviderOpenAICompatible,
+			Model:                 fmt.Sprintf("wide-model-%02d", i),
+			APIKey:                wide,
+			MaxTokens:             4096,
+			IsDefault:             i == 0,
+			AuthMethod:            models.AuthMethodAPIKey,
+			OAuthClientSecret:     wide,
+			BaseURL:               "https://example.invalid/" + wide,
+			ModelsURL:             "https://example.invalid/models/" + wide,
+			AuthHeaderName:        "X-Test-Auth",
+			AuthHeaderValuePrefix: wide,
+			ExtraHeadersJSON:      `{"X-Wide":"` + wide + `"}`,
+			ExtraBodyJSON:         `{"wide":"` + wide + `"}`,
+			CustomAuthConfigJSON:  `{"secret":"` + wide + `"}`,
+			CustomAuthStateJSON:   `{"state":"` + wide + `"}`,
+			MixtureConfigJSON:     `{"wide":"` + wide + `"}`,
+		}
+		require.NoError(t, llmConfigRepo.Create(ctx, cfg))
+		if i == 37 {
+			projectDefaultID = cfg.ID
+		}
+	}
+	project := &models.Project{
+		Name:                 "Wide Swarm Resolver Project",
+		Description:          wide + wide,
+		RepoPath:             "/tmp/" + wide,
+		RepoURL:              "https://example.invalid/repo/" + wide,
+		DefaultAgentConfigID: &projectDefaultID,
+	}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	return project.ID, projectDefaultID
+}
+
+func resolveAssignedAgentIDFullHydrationForTest(ctx context.Context, projectRepo *repository.ProjectRepo, llmConfigRepo *repository.LLMConfigRepo, projectID string, requested *string) *string {
+	if requested != nil {
+		trimmed := strings.TrimSpace(*requested)
+		if trimmed != "" && trimmed != "auto" && trimmed != "default" {
+			return &trimmed
+		}
+	}
+	if strings.TrimSpace(projectID) != "" && projectRepo != nil {
+		project, err := projectRepo.GetByID(ctx, projectID)
+		if err == nil && project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
+			id := strings.TrimSpace(*project.DefaultAgentConfigID)
+			if agent, agentErr := llmConfigRepo.GetByID(ctx, id); agentErr == nil && agent != nil {
+				return &id
+			}
+		}
+	}
+	if agent, err := llmConfigRepo.GetDefault(ctx); err == nil && agent != nil {
+		id := agent.ID
+		return &id
+	}
+	return requested
+}
+
+func measureSwarmAgentResolutionForTest(t testing.TB, iterations int, resolve func() *string) (time.Duration, int64) {
+	t.Helper()
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	for i := 0; i < iterations; i++ {
+		if resolved := resolve(); resolved == nil || strings.TrimSpace(*resolved) == "" {
+			t.Fatalf("resolver returned empty id on iteration %d", i)
+		}
+	}
+	duration := time.Since(start)
+	runtime.ReadMemStats(&after)
+	return duration, int64(after.TotalAlloc-before.TotalAlloc) / int64(iterations)
 }
 
 func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testing.T) {
