@@ -2137,8 +2137,9 @@ func TestOpenResponsesWebsocketStream_AstraAcceptedSteeringDisconnectPreservesSe
 	}
 }
 
-func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseReturnsUnavailable(t *testing.T) {
+func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseCancelsAndJoinsCallback(t *testing.T) {
 	callbackStarted := make(chan struct{})
+	callbackFinished := make(chan struct{})
 	deliveryAllowed := make(chan struct{})
 	serverReadDone := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2186,7 +2187,6 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseRetur
 	client := NewWithAPIKey("sk-test")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	unavailable := make(chan AstraSteeringDelivery, 1)
 	body, err := client.openResponsesWebsocketStream(ctx, map[string]any{
 		"type":  "response.create",
 		"model": "gpt-6-astra",
@@ -2194,6 +2194,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseRetur
 	}, false, responsesWebsocketStreamOptions{
 		Model: "gpt-6-astra",
 		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
+			defer close(callbackFinished)
 			select {
 			case <-callbackStarted:
 			default:
@@ -2204,8 +2205,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseRetur
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			delivery, err := deliver(ctx, "late steer")
-			unavailable <- delivery
+			_, err := deliver(ctx, "late steer")
 			return err
 		},
 	})
@@ -2222,12 +2222,9 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseRetur
 	}
 	close(deliveryAllowed)
 	select {
-	case delivery := <-unavailable:
-		if delivery.Status != AstraSteeringUnavailable || delivery.PreviousResponseID != "" {
-			t.Fatalf("delivery = %#v", delivery)
-		}
+	case <-callbackFinished:
 	case <-time.After(time.Second):
-		t.Fatal("steering callback did not observe completed-response unavailable delivery")
+		t.Fatal("steering callback was not joined before the completed response returned")
 	}
 	select {
 	case <-serverReadDone:
@@ -2423,6 +2420,7 @@ func TestOpenResponsesWebsocketStream_AstraMissingAcknowledgementIsAmbiguous(t *
 
 func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringAccepted(t *testing.T) {
 	steerSeen := make(chan map[string]any, 1)
+	steeringWakeup := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -2438,6 +2436,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringAccepted(t *testing.T)
 			t.Errorf("write created: %v", err)
 			return
 		}
+		steeringWakeup <- struct{}{}
 		_, steerBytes, err := conn.Read(r.Context())
 		if err != nil {
 			t.Errorf("read steer: %v", err)
@@ -2484,7 +2483,8 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringAccepted(t *testing.T)
 		"model": "gpt-6-astra",
 		"input": []any{},
 	}, false, responsesWebsocketStreamOptions{
-		Model: "gpt-6-astra",
+		Model:                 "gpt-6-astra",
+		MidTurnSteeringWakeup: steeringWakeup,
 		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
 			if !callbackCalls.CompareAndSwap(0, 1) {
 				return nil

@@ -457,8 +457,9 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 }
 
 type responsesWebsocketStreamOptions struct {
-	Model             string
-	OnMidTurnSteering AstraMidTurnSteeringCallback
+	Model                 string
+	OnMidTurnSteering     AstraMidTurnSteeringCallback
+	MidTurnSteeringWakeup <-chan struct{}
 }
 
 func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool, opts responsesWebsocketStreamOptions) (io.ReadCloser, error) {
@@ -562,8 +563,10 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 	acceptedSteering := false
 	pendingAcks := []*pendingSteeringAck{}
 	streamDone := make(chan struct{})
+	responseStarted := make(chan struct{})
+	var responseStartedOnce sync.Once
 	var steeringCallbackDone <-chan struct{}
-	var waitForSteeringCallback atomic.Bool
+	var cancelSteeringCallback context.CancelFunc
 	writeFrame := func(writeCtx context.Context, payload map[string]any) error {
 		body, err := json.Marshal(payload)
 		if err != nil {
@@ -674,23 +677,57 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		}
 	}
 	if isGPT6AstraModel(opts.Model) && opts.OnMidTurnSteering != nil {
+		steeringCallbackCtx, cancelCallback := context.WithCancel(ctx)
+		cancelSteeringCallback = cancelCallback
 		done := make(chan struct{})
 		steeringCallbackDone = done
 		go func() {
 			defer close(done)
-			ticker := time.NewTicker(100 * time.Millisecond)
+			fallbackInterval := 100 * time.Millisecond
+			if opts.MidTurnSteeringWakeup != nil {
+				fallbackInterval = 2 * time.Second
+			}
+			ticker := time.NewTicker(fallbackInterval)
 			defer ticker.Stop()
+			runCallback := func() bool {
+				if err := opts.OnMidTurnSteering(steeringCallbackCtx, deliverSteering); err != nil {
+					select {
+					case <-streamDone:
+						return false
+					default:
+					}
+					if steeringCallbackCtx.Err() != nil {
+						return false
+					}
+					state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringFailed, Error: err.Error()})
+					callbackErrors <- fmt.Errorf("persisting Astra steering delivery: %w", err)
+					_ = conn.CloseNow()
+					return false
+				}
+				return true
+			}
+			runCallbackWhenReady := func() bool {
+				select {
+				case <-responseStarted:
+				case <-steeringCallbackCtx.Done():
+					return false
+				case <-streamDone:
+					return false
+				}
+				return runCallback()
+			}
 			for {
 				select {
-				case <-ctx.Done():
+				case <-steeringCallbackCtx.Done():
 					return
 				case <-streamDone:
 					return
+				case <-opts.MidTurnSteeringWakeup:
+					if !runCallbackWhenReady() {
+						return
+					}
 				case <-ticker.C:
-					if err := opts.OnMidTurnSteering(ctx, deliverSteering); err != nil {
-						state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringFailed, Error: err.Error()})
-						callbackErrors <- fmt.Errorf("persisting Astra steering delivery: %w", err)
-						_ = conn.CloseNow()
+					if !runCallbackWhenReady() {
 						return
 					}
 				}
@@ -700,7 +737,10 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 	go func() {
 		defer func() {
 			close(streamDone)
-			if steeringCallbackDone != nil && waitForSteeringCallback.Load() {
+			if cancelSteeringCallback != nil {
+				cancelSteeringCallback()
+			}
+			if steeringCallbackDone != nil {
 				<-steeringCallbackDone
 			}
 			state.mu.Unlock()
@@ -763,6 +803,9 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 						steeringMu.Lock()
 						previousActiveResponseID := activeResponseID
 						activeResponseID = id
+						if id != "" {
+							responseStartedOnce.Do(func() { close(responseStarted) })
+						}
 						if primaryResponseID == "" {
 							primaryResponseID = id
 						} else if acceptedSteering && id != "" && id != primaryResponseID {
@@ -771,9 +814,6 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 						committed := commitAcceptedSteeringLocked(&pendingAcks, previousActiveResponseID, id, "")
 						persistedCommitted := state.commitPendingAstraSteeringLocked(requestPreviousResponseID, id)
 						steeringMu.Unlock()
-						if len(committed) > 0 || len(persistedCommitted) > 0 {
-							waitForSteeringCallback.Store(true)
-						}
 						for _, delivery := range committed {
 							state.appendAstraSteeringCommitLocked(ResponsesSteeringDelivery(delivery))
 							state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
@@ -793,15 +833,9 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 					if delivery.Status == AstraSteeringFailed {
 						state.failPendingAstraSteeringLocked(delivery)
 					}
-					notified := recordAndHandlePendingSteeringAck(state, &steeringMu, &pendingAcks, delivery)
-					if notified {
-						waitForSteeringCallback.Store(true)
-					}
+					recordAndHandlePendingSteeringAck(state, &steeringMu, &pendingAcks, delivery)
 					if delivery.Status == AstraSteeringAccepted {
 						acceptedSteering = true
-						// Wait for the delivery callback to resolve accepted
-						// ownership before returning a stream error to the caller.
-						waitForSteeringCallback.Store(true)
 					} else {
 						steeringMu.Lock()
 						acceptedSteering = hasAcceptedSteeringLocked(pendingAcks)
@@ -821,9 +855,6 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 						state.addPendingAstraSteeringLocked(pendingDelivery)
 					}
 					steeringMu.Unlock()
-					if len(pendingDeliveries) > 0 {
-						waitForSteeringCallback.Store(true)
-					}
 					for _, pendingDelivery := range pendingDeliveries {
 						state.recordSteeringDelivery(ResponsesSteeringDelivery(pendingDelivery))
 					}

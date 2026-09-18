@@ -393,6 +393,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		EnableAstraMidTurnSteering:     true,
 		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
+		AstraMidTurnSteeringWakeup:     llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !inThinking {
@@ -511,6 +512,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		EnableAstraMidTurnSteering:     true,
 		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
+		AstraMidTurnSteeringWakeup:     llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !chatInThinking {

@@ -696,6 +696,41 @@ func TestThreadInputRepo_CancelPendingAllowsUnpreparedSteeringAndPreservesPrepar
 	}
 }
 
+func TestThreadInputRepo_CreateSteeringNotifiesActiveExecutionSubscriber(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, NewExecutionRepo(db).Create(ctx, active))
+
+	wakeup, unsubscribe := repo.SubscribeSteeringWakeups(active.ID)
+	steering := &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+		AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "wake the active stream",
+	}
+	require.NoError(t, repo.CreateSteeringForActiveExecution(ctx, steering, active.ID))
+	select {
+	case <-wakeup:
+	default:
+		t.Fatal("steering creation did not notify the active execution subscriber")
+	}
+
+	unsubscribe()
+	steering = &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+		AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "no listener",
+	}
+	require.NoError(t, repo.CreateSteeringForActiveExecution(ctx, steering, active.ID))
+	select {
+	case <-wakeup:
+		t.Fatal("unsubscribed steering listener received a notification")
+	default:
+	}
+}
+
 func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

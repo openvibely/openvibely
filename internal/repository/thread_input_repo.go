@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -15,6 +17,8 @@ type ThreadInputRepo struct {
 	emailTaskContextRepo   *EmailTaskContextRepo
 	discordTaskContextRepo *DiscordTaskContextRepo
 	xTaskContextRepo       *XTaskContextRepo
+	steeringWakeupsMu      sync.Mutex
+	steeringWakeups        map[string]map[chan struct{}]struct{}
 }
 
 var (
@@ -173,7 +177,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 	if input.ExpectedTurnID != activeExecutionID {
 		return ErrActiveTurnChanged
 	}
-	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		input.RunExecutionID = activeExecutionID
 		input.TurnID = activeExecutionID
 		input.InputMode = models.ThreadInputModeSteering
@@ -257,6 +261,56 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 		*input = created
 		return nil
 	})
+	if err == nil {
+		r.notifySteeringWakeups(activeExecutionID)
+	}
+	return err
+}
+
+// SubscribeSteeringWakeups returns a coalescing notification channel for new
+// steering inputs targeting an active execution. The database remains the
+// source of truth; notifications only avoid polling it continuously.
+func (r *ThreadInputRepo) SubscribeSteeringWakeups(activeExecutionID string) (<-chan struct{}, func()) {
+	activeExecutionID = strings.TrimSpace(activeExecutionID)
+	if r == nil || activeExecutionID == "" {
+		return nil, func() {}
+	}
+	wakeup := make(chan struct{}, 1)
+	r.steeringWakeupsMu.Lock()
+	if r.steeringWakeups == nil {
+		r.steeringWakeups = make(map[string]map[chan struct{}]struct{})
+	}
+	listeners := r.steeringWakeups[activeExecutionID]
+	if listeners == nil {
+		listeners = make(map[chan struct{}]struct{})
+		r.steeringWakeups[activeExecutionID] = listeners
+	}
+	listeners[wakeup] = struct{}{}
+	r.steeringWakeupsMu.Unlock()
+
+	return wakeup, func() {
+		r.steeringWakeupsMu.Lock()
+		listeners := r.steeringWakeups[activeExecutionID]
+		delete(listeners, wakeup)
+		if len(listeners) == 0 {
+			delete(r.steeringWakeups, activeExecutionID)
+		}
+		r.steeringWakeupsMu.Unlock()
+	}
+}
+
+func (r *ThreadInputRepo) notifySteeringWakeups(activeExecutionID string) {
+	if r == nil {
+		return
+	}
+	r.steeringWakeupsMu.Lock()
+	defer r.steeringWakeupsMu.Unlock()
+	for wakeup := range r.steeringWakeups[strings.TrimSpace(activeExecutionID)] {
+		select {
+		case wakeup <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (r *ThreadInputRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, input *models.ThreadInput) error {
@@ -416,13 +470,21 @@ func (r *ThreadInputRepo) PreparePendingTextSteering(ctx context.Context, runExe
 }
 
 func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecutionID, turnID string, textOnly bool) ([]models.ThreadInput, error) {
+	pendingWhere := `run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`
+	if textOnly {
+		pendingWhere += ` AND COALESCE(attachment_session_id, '') = ''`
+	}
+	var exists int
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM thread_inputs WHERE `+pendingWhere+`)`, runExecutionID, turnID).Scan(&exists); err != nil {
+		return nil, fmt.Errorf("checking pending steering input: %w", err)
+	}
+	if exists == 0 {
+		return nil, nil
+	}
+
 	var prepared []models.ThreadInput
 	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
-		where := `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`
-		if textOnly {
-			where += ` AND COALESCE(attachment_session_id, '') = ''`
-		}
-		where += ` ORDER BY created_at ASC, rowid ASC`
+		where := `WHERE ` + pendingWhere + ` ORDER BY created_at ASC, rowid ASC`
 		inputs, err := r.listWithExecutor(ctx, tx, where, runExecutionID, turnID)
 		if err != nil {
 			return err

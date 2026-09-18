@@ -418,6 +418,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 
 	startRuntimeCancellation()
+	if h.threadInputRepo != nil {
+		steeringWakeup, unsubscribeSteeringWakeup := h.threadInputRepo.SubscribeSteeringWakeups(params.ExecID)
+		defer unsubscribeSteeringWakeup()
+		ctx = llmcontracts.WithMidTurnSteeringWakeup(ctx, steeringWakeup)
+	}
 	if err := h.prepareAutomationTaskFollowup(ctx, &params); err != nil {
 		applog.Infof("[handler] processStreamingResponse exec=%s task=%s Automation follow-up context error: %v", params.ExecID, params.TaskID, err)
 		h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), 0, params.ChannelReply)
