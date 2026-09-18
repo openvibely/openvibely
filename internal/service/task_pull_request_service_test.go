@@ -1334,3 +1334,66 @@ func TestTaskPullRequestServiceOpenForTaskRequiresWorktreeBranch(t *testing.T) {
 		t.Fatalf("expected missing branch error, got %v", err)
 	}
 }
+
+func TestTaskPullRequestServiceOpenForTaskReusedRecordAppliesDefaultIssueBody(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Existing PR Default Body", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Fix reused PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/default-body"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 23, PRURL: "https://github.com/openvibely/openvibely/pull/23", PRState: "open"}); err != nil {
+		t.Fatalf("seed PR: %v", err)
+	}
+	updatedBody := ""
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 23, URL: "https://github.com/openvibely/openvibely/pull/23", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error { updatedBody = body; return nil },
+	}, prRepo)
+	issueNumber := 123
+	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}); err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if !strings.Contains(updatedBody, "Closes #123") {
+		t.Fatalf("updated body = %q, want default closing line", updatedBody)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskReusedRemoteAppliesDefaultIssueBody(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Remote PR Default Body", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Fix remote PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/remote-default-body"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	updatedBody := ""
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		findPRFn: func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 24, URL: "https://github.com/openvibely/openvibely/pull/24", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error { updatedBody = body; return nil },
+	}, prRepo)
+	issueNumber := 456
+	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}); err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if !strings.Contains(updatedBody, "Closes #456") {
+		t.Fatalf("updated body = %q, want default closing line", updatedBody)
+	}
+}
