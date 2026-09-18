@@ -22,6 +22,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/repository"
 	"golang.org/x/sync/errgroup"
 )
@@ -218,6 +219,7 @@ type GitHubService struct {
 	appPrivateKey   string
 	projectRepoRoot string
 	httpClient      *http.Client
+	retryPolicy     httpretry.Policy
 	apiBaseURL      string
 	webBaseURL      string
 	runGit          runGitFunc
@@ -237,10 +239,11 @@ func NewGitHubService(settingsRepo *repository.SettingsRepo, appID, appSlug, app
 				return fmt.Errorf("github redirects are not allowed")
 			},
 		},
-		apiBaseURL: defaultGitHubAPIBaseURL,
-		webBaseURL: defaultGitHubWebBaseURL,
-		runGit:     defaultRunGit,
-		nowFn:      time.Now,
+		retryPolicy: httpretry.DefaultPolicy(),
+		apiBaseURL:  defaultGitHubAPIBaseURL,
+		webBaseURL:  defaultGitHubWebBaseURL,
+		runGit:      defaultRunGit,
+		nowFn:       time.Now,
 	}
 }
 
@@ -3194,7 +3197,35 @@ func (s *GitHubService) applyGitHubHeaders(req *http.Request, bearerToken string
 }
 
 func (s *GitHubService) doGitHubJSON(req *http.Request, target any) error {
-	resp, err := s.httpClient.Do(req)
+	if req == nil {
+		return fmt.Errorf("github API request is required")
+	}
+	policy := s.retryPolicy
+	configuredOnRetry := policy.OnRetry
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		if configuredOnRetry != nil {
+			configuredOnRetry(event)
+		}
+		if event.Err != nil {
+			applog.Infof("[github-service] network error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			return
+		}
+		applog.Infof("[github-service] received HTTP %d, retry attempt %d/%d in %v", event.StatusCode, event.Attempt, event.MaxRetries, event.Delay)
+	}
+	resp, err := httpretry.Do(req.Context(), s.httpClient, func() (*http.Request, error) {
+		attempt := req.Clone(req.Context())
+		if req.Body != nil {
+			if req.GetBody == nil {
+				return nil, fmt.Errorf("github API request body cannot be replayed")
+			}
+			body, bodyErr := req.GetBody()
+			if bodyErr != nil {
+				return nil, bodyErr
+			}
+			attempt.Body = body
+		}
+		return attempt, nil
+	}, policy)
 	if err != nil {
 		return err
 	}
