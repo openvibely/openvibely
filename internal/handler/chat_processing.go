@@ -582,18 +582,39 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if steeringErr != nil || batch.count() == 0 {
 			return steeringErr
 		}
+		inputIDs := preparedSteeringInputIDs(batch)
+		claimID := "unknown:" + batch.inputs[0].ID
+		// Persist an unknown-outcome claim before contacting the provider. If the
+		// process or the receipt update fails after the frame is sent, recovery must
+		// not replay input whose provider ownership is uncertain.
+		if claimErr := h.threadInputRepo.RecordProviderSteering(
+			steeringCleanupContext(callbackCtx), inputIDs, claimID, "", "",
+			repository.ProviderSteeringAcceptedAmbiguous,
+		); claimErr != nil {
+			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), inputIDs, steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
+				return errors.Join(claimErr, restoreErr)
+			}
+			return claimErr
+		}
 		instruction := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		delivery, deliveryErr := deliver(callbackCtx, instruction)
-		if deliveryErr != nil || (delivery.Status != llmcontracts.SteeringDeliveryAccepted && delivery.Status != llmcontracts.SteeringDeliveryPending && delivery.Status != llmcontracts.SteeringDeliveryAmbiguous) {
-			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), preparedSteeringInputIDs(batch), steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
+		if deliveryErr == nil && (delivery.Status == llmcontracts.SteeringDeliveryUnavailable || delivery.Status == llmcontracts.SteeringDeliveryFailed) {
+			if clearErr := h.threadInputRepo.ClearProviderSteering(steeringCleanupContext(callbackCtx), []string{claimID}); clearErr != nil {
+				return clearErr
+			}
+			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), inputIDs, steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
 				return restoreErr
 			}
-			if deliveryErr != nil {
-				applog.Infof("[handler] processStreamingResponse exec=%s Astra mid-turn steering delivery failed: %v", steeringCallbackParams.ExecID, deliveryErr)
-			} else if delivery.Status != llmcontracts.SteeringDeliveryUnavailable {
+			if delivery.Status != llmcontracts.SteeringDeliveryUnavailable {
 				applog.Infof("[handler] processStreamingResponse exec=%s Astra mid-turn steering not accepted status=%s error=%s", steeringCallbackParams.ExecID, delivery.Status, delivery.Error)
 			}
 			return nil
+		}
+		if deliveryErr != nil || (delivery.Status != llmcontracts.SteeringDeliveryAccepted && delivery.Status != llmcontracts.SteeringDeliveryPending && delivery.Status != llmcontracts.SteeringDeliveryAmbiguous) {
+			delivery.Status = llmcontracts.SteeringDeliveryAmbiguous
+			if deliveryErr != nil {
+				delivery.Error = deliveryErr.Error()
+			}
 		}
 		deliveryState := repository.ProviderSteeringAcceptedConfirmed
 		if delivery.Status == llmcontracts.SteeringDeliveryPending {
@@ -603,10 +624,10 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		steeringID := strings.TrimSpace(delivery.SteeringID)
 		if steeringID == "" {
-			steeringID = "unknown:" + batch.inputs[0].ID
+			steeringID = claimID
 		}
 		if recordErr := h.threadInputRepo.RecordProviderSteering(
-			steeringCleanupContext(callbackCtx), preparedSteeringInputIDs(batch), steeringID,
+			steeringCleanupContext(callbackCtx), inputIDs, steeringID,
 			delivery.PreviousResponseID, delivery.ResponseID, deliveryState,
 		); recordErr != nil {
 			return recordErr
