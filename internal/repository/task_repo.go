@@ -2233,6 +2233,28 @@ func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// FindChainChildByParent finds an ordinary chained child task for the given parent task ID.
+// Returns nil, nil if no child exists. Swarm children are excluded because they
+// are orchestrated by separate swarm lifecycle code.
+func (r *TaskRepo) FindChainChildByParent(ctx context.Context, parentTaskID string) (*models.Task, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT `+taskSelectColumns+`
+		 FROM tasks WHERE parent_task_id = ? AND swarm_role = ''
+		 ORDER BY created_at ASC, id ASC
+		 LIMIT 1`,
+		parentTaskID)
+
+	var t models.Task
+	if err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
+		&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding chain child: %w", err)
+	}
+	return &t, nil
+}
+
 // FindBlockedChildByParent finds a blocked child task for the given parent task ID.
 // Returns nil, nil if no blocked child exists.
 func (r *TaskRepo) FindBlockedChildByParent(ctx context.Context, parentTaskID string) (*models.Task, error) {

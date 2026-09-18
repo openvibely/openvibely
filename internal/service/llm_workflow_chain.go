@@ -137,6 +137,7 @@ func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Tas
 		}
 		if blockedChild != nil {
 			applog.Infof("[agent-svc] triggerTaskChain activating blocked child id=%s parent=%s", blockedChild.ID, parentTask.ID)
+			llmworkflow.ApplyBlockedChildMaterialization(parentTask, config, blockedChild)
 
 			// Build the real prompt from parent output
 			childPrompt := llmworkflow.CleanOutputForChain(parentOutput)
