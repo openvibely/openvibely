@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -2844,6 +2845,9 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 		data, err := json.Marshal(value)
 		return string(data), err
 	}
+	withinCharacterLimit := func(value string, limit int) bool {
+		return utf8.RuneCountInString(value) <= limit
+	}
 	assertProject := func(requested string) error {
 		requested = strings.TrimSpace(requested)
 		if strings.TrimSpace(opts.ProjectID) == "" {
@@ -2938,14 +2942,17 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			req.Title = strings.TrimSpace(req.Title)
 			req.Type = strings.TrimSpace(req.Type)
 			req.Source = strings.TrimSpace(req.Source)
-			if req.Title == "" || len(req.Title) > 200 {
+			if req.Title == "" || !withinCharacterLimit(req.Title, 200) {
 				return "", fmt.Errorf("title is required and must be at most 200 characters")
 			}
-			if req.Type == "" || len(req.Type) > 100 {
+			if req.Type == "" || !withinCharacterLimit(req.Type, 100) {
 				return "", fmt.Errorf("type is required and must be at most 100 characters")
 			}
-			if len(req.Message) > 2000 || len(req.Body) > 20000 {
-				return "", fmt.Errorf("notification content exceeds the allowed size")
+			if !withinCharacterLimit(req.Message, 2000) {
+				return "", fmt.Errorf("message must be at most 2000 characters")
+			}
+			if !withinCharacterLimit(req.Body, 20000) {
+				return "", fmt.Errorf("body must be at most 20000 characters")
 			}
 			severity, severityErr := channelAlertSeverity(req.Severity)
 			if severityErr != "" {
@@ -2958,7 +2965,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if source == "" {
 				source = "agent"
 			}
-			if len(source) > 100 {
+			if !withinCharacterLimit(source, 100) {
 				return "", fmt.Errorf("source must be at most 100 characters")
 			}
 			delete(req.Metadata, models.AlertAutomationProvenanceMetadataKey)
