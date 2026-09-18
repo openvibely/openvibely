@@ -2895,10 +2895,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				const panelWidth = Math.min(224, sideRoom);
 				const desiredLeft = openRight ? menuRect.right - 1 : menuRect.left + 1 - panelWidth;
 				const desiredTop = Math.max(visibleTop + 8, Math.min(containerRect.top, visibleBottom - panelHeight - 8));
-				panel.style.left = Math.max(8, Math.min(desiredLeft, window.innerWidth - panelWidth - 8)) + 'px';
+				let positionedLeft = Math.max(8, Math.min(desiredLeft, window.innerWidth - panelWidth - 8));
+				panel.style.left = positionedLeft + 'px';
 				panel.style.top = desiredTop + 'px';
 				panel.style.width = panelWidth + 'px';
 				panel.style.maxHeight = availableHeight + 'px';
+				// Root scrollbar gutters and transformed containing blocks can offset
+				// fixed descendants from their CSS left coordinate. Correct against
+				// the rendered edge, since menuRect is also viewport-relative.
+				let positionedRect = panel.getBoundingClientRect();
+				const targetEdge = openRight ? menuRect.right - 1 : menuRect.left + 1;
+				const renderedEdge = openRight ? positionedRect.left : positionedRect.right;
+				positionedLeft += targetEdge - renderedEdge;
+				panel.style.left = positionedLeft + 'px';
+				positionedRect = panel.getBoundingClientRect();
+				if (positionedRect.left < 8) positionedLeft += 8 - positionedRect.left;
+				if (positionedRect.right > window.innerWidth - 8) positionedLeft -= positionedRect.right - (window.innerWidth - 8);
+				panel.style.left = positionedLeft + 'px';
 			}
 
 			function handleKanbanSubmenuKeydown(event, container) {
