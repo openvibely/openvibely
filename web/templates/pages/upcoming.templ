@@ -249,7 +249,7 @@ templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 		if len(upcoming.RunningTasks) > 0 {
 			<div class="mb-6">
 				<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-					<span class="loading loading-spinner loading-xs text-primary"></span>
+					@components.RunningSpinner("")
 					Running Now
 				</h3>
 				<div class="space-y-2">
