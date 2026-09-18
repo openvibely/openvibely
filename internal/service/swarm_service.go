@@ -105,17 +105,17 @@ func (s *SwarmService) resolveAssignedAgentID(ctx context.Context, projectID str
 		return requested
 	}
 	if strings.TrimSpace(projectID) != "" && s.projectRepo != nil {
-		project, err := s.projectRepo.GetByID(ctx, projectID)
-		if err == nil && project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
-			id := strings.TrimSpace(*project.DefaultAgentConfigID)
-			if agent, agentErr := s.llmConfigRepo.GetByID(ctx, id); agentErr == nil && agent != nil {
+		projectDefaultID, err := s.projectRepo.GetDefaultAgentConfigID(ctx, projectID)
+		if err == nil && projectDefaultID != nil && strings.TrimSpace(*projectDefaultID) != "" {
+			id := strings.TrimSpace(*projectDefaultID)
+			if exists, agentErr := s.llmConfigRepo.ExistsByID(ctx, id); agentErr == nil && exists {
 				return &id
 			}
 		}
 	}
-	if agent, err := s.llmConfigRepo.GetDefault(ctx); err == nil && agent != nil {
-		id := agent.ID
-		return &id
+	if id, err := s.llmConfigRepo.GetDefaultID(ctx); err == nil && id != nil && strings.TrimSpace(*id) != "" {
+		trimmed := strings.TrimSpace(*id)
+		return &trimmed
 	}
 	return requested
 }

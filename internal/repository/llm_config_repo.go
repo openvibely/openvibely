@@ -758,6 +758,27 @@ func (r *LLMConfigRepo) ListMixtureDefinitions(ctx context.Context) ([]models.LL
 	return configs, rows.Err()
 }
 
+func (r *LLMConfigRepo) ExistsByID(ctx context.Context, id string) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_configs WHERE id = ? LIMIT 1)`, id).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("checking model config existence: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *LLMConfigRepo) GetDefaultID(ctx context.Context) (*string, error) {
+	var id string
+	err := r.db.QueryRowContext(ctx, `SELECT id FROM agent_configs WHERE is_default = 1 LIMIT 1`).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting default model config id: %w", err)
+	}
+	return &id, nil
+}
+
 func (r *LLMConfigRepo) GetByID(ctx context.Context, id string) (*models.LLMConfig, error) {
 	var a models.LLMConfig
 	err := scanLLMConfig(r.db.QueryRowContext(ctx,
