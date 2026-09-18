@@ -67,7 +67,7 @@ templ BreadcrumbSelectorResults(kind string, currentID string, items []models.Br
 						data-searchable-selector-option
 					>
 						<span class="w-4 shrink-0" aria-hidden="true">{ breadcrumbSelectorCheck(item.ID == currentID) }</span>
-						<span class="min-w-0 break-words">{ item.Name }</span>
+						<span class="min-w-0 flex-1 truncate">{ item.Name }</span>
 						if item.Status == models.StatusRunning {
 							<span class="ml-auto shrink-0" data-breadcrumb-selector-running>
 								@RunningSpinner("")
