@@ -675,6 +675,12 @@ const docTemplate = `{
                         "description": "Exact model for supporting usage events",
                         "name": "usage_model_name",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional compact projection; account_limits returns only provider/account-limit rows",
+                        "name": "projection",
+                        "in": "query"
                     }
                 ],
                 "responses": {

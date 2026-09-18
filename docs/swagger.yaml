@@ -1995,6 +1995,11 @@ paths:
         in: query
         name: usage_model_name
         type: string
+      - description: Optional compact projection; account_limits returns only provider/account-limit
+          rows
+        in: query
+        name: projection
+        type: string
       produces:
       - application/json
       responses:

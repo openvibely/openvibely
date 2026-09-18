@@ -80,12 +80,37 @@ func (s *UsageAnalyticsService) SetOAuthRefreshers(anthropicRefresh, openAIRefre
 }
 
 func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, refreshErrors); err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
+	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.populateAnalyticsAccountLimits(ctx, filter, view, configsByID, refreshErrors); err != nil {
+		return nil, err
+	}
+	return &models.AnalyticsUsageAccountLimitsViewModel{
+		AccountLimits: view.AccountLimits,
+		LastUpdatedAt: view.LastUpdatedAt,
+		Errors:        view.Errors,
+	}, nil
+}
+
+func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, map[string]models.LLMConfig, map[string]string, error) {
 	if s == nil || s.usageRepo == nil {
-		return nil, fmt.Errorf("usage analytics service is not configured")
+		return nil, nil, nil, fmt.Errorf("usage analytics service is not configured")
 	}
 
 	view := &models.AnalyticsUsageViewModel{}
-	var oauthAccounts []models.AccountUsageView
 	configsByID := map[string]models.LLMConfig{}
 	refreshErrors := map[string]string{}
 	if s.llmConfigRepo != nil {
@@ -97,8 +122,7 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 				configs[i] = s.resolveAccountUsageOAuthAccountID(ctx, configs[i])
 				configsByID[configs[i].ID] = configs[i]
 			}
-			oauthAccounts = s.oauthAccountPlaceholders(configs, filter.Provider)
-			view.AccountLimits = append(view.AccountLimits, oauthAccounts...)
+			view.AccountLimits = append(view.AccountLimits, s.oauthAccountPlaceholders(configs, filter.Provider)...)
 			if fetched, errs := s.refreshAccountSnapshots(ctx, configs, filter.Provider, filter.Refresh); len(fetched) > 0 || len(errs) > 0 {
 				view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, fetched, configsByID)
 				for key, value := range errs {
@@ -107,11 +131,7 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 			}
 		}
 	}
-
-	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, refreshErrors); err != nil {
-		return nil, err
-	}
-	return view, nil
+	return view, configsByID, refreshErrors, nil
 }
 
 func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
@@ -481,20 +501,27 @@ func compactUsageAnalyticsAccountRows(accounts []models.AccountUsageView) []usag
 	return out
 }
 
-func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
+func (s *UsageAnalyticsService) populateAnalyticsAccountLimits(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
 	snapshots, err := s.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
 	if err != nil {
 		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
-	} else {
-		view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, snapshots, configsByID)
-		view.AccountLimits = dedupeAccountUsageViews(view.AccountLimits, configsByID)
-		view.AccountLimits = applyAccountErrors(view.AccountLimits, refreshErrors, configsByID)
-		for _, snapshot := range snapshots {
-			if view.LastUpdatedAt == nil || snapshot.FetchedAt.After(*view.LastUpdatedAt) {
-				updated := snapshot.FetchedAt
-				view.LastUpdatedAt = &updated
-			}
+		return nil
+	}
+	view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, snapshots, configsByID)
+	view.AccountLimits = dedupeAccountUsageViews(view.AccountLimits, configsByID)
+	view.AccountLimits = applyAccountErrors(view.AccountLimits, refreshErrors, configsByID)
+	for _, snapshot := range snapshots {
+		if view.LastUpdatedAt == nil || snapshot.FetchedAt.After(*view.LastUpdatedAt) {
+			updated := snapshot.FetchedAt
+			view.LastUpdatedAt = &updated
 		}
+	}
+	return nil
+}
+
+func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
+	if err := s.populateAnalyticsAccountLimits(ctx, filter, view, configsByID, refreshErrors); err != nil {
+		return err
 	}
 
 	totals, err := s.usageRepo.GetUsageTotals(ctx, filter)
