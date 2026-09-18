@@ -64,4 +64,5 @@ type ThreadInput struct {
 	CreatedAt              time.Time         `json:"created_at"`
 	UpdatedAt              time.Time         `json:"updated_at"`
 	AppliedAt              *time.Time        `json:"applied_at"`
+	ProviderSteeringState  string            `json:"provider_steering_state,omitempty"`
 }

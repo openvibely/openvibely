@@ -354,14 +354,53 @@ func (r *ThreadInputRepo) BindPreExecutionQueuedTaskInputs(ctx context.Context, 
 func (r *ThreadInputRepo) ListPendingForTask(ctx context.Context, taskID string) ([]models.ThreadInput, error) {
 	// Exclude prepared/in-flight steering rows (expected_turn_id cleared by PreparePendingTextSteering).
 	// These rows have been sent to the provider but not yet committed; the SSE applied event already
-	// removed them from the composer UI at prepare time. Including them on refresh would show a stale
-	// "Steering pending" row that the user cannot delete (it's protected while in-flight).
-	return r.list(ctx, `WHERE task_id = ? AND input_status = 'pending' AND NOT (input_mode = 'steering' AND COALESCE(expected_turn_id, '') = '') ORDER BY queue_position ASC, created_at ASC, rowid ASC`, taskID)
+	// removed them from the composer UI at prepare time. Ambiguous deliveries become visible after
+	// their execution stops so the user can resolve them without risking an automatic replay.
+	inputs, err := r.list(ctx, `WHERE task_id = ? AND input_status = 'pending' AND NOT (
+		input_mode = 'steering' AND COALESCE(expected_turn_id, '') = ''
+		AND NOT (
+			EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id AND ps.delivery_state = 'accepted_ambiguous')
+			AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.id = thread_inputs.run_execution_id AND e.status = 'running')
+		)
+	) ORDER BY queue_position ASC, created_at ASC, rowid ASC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return r.populateProviderSteeringStates(ctx, inputs)
 }
 
 func (r *ThreadInputRepo) ListPendingForChat(ctx context.Context, projectID string) ([]models.ThreadInput, error) {
-	// Exclude prepared/in-flight steering rows for the same reason as ListPendingForTask.
-	return r.list(ctx, `WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (input_mode = 'steering' AND COALESCE(expected_turn_id, '') = '') ORDER BY queue_position ASC, created_at ASC, rowid ASC`, projectID)
+	// Exclude prepared/in-flight steering rows for the same reason as ListPendingForTask, while
+	// surfacing ambiguous deliveries after their execution stops.
+	inputs, err := r.list(ctx, `WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (
+		input_mode = 'steering' AND COALESCE(expected_turn_id, '') = ''
+		AND NOT (
+			EXISTS (SELECT 1 FROM thread_input_provider_steering ps WHERE ps.thread_input_id = thread_inputs.id AND ps.delivery_state = 'accepted_ambiguous')
+			AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.id = thread_inputs.run_execution_id AND e.status = 'running')
+		)
+	) ORDER BY queue_position ASC, created_at ASC, rowid ASC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return r.populateProviderSteeringStates(ctx, inputs)
+}
+
+func (r *ThreadInputRepo) populateProviderSteeringStates(ctx context.Context, inputs []models.ThreadInput) ([]models.ThreadInput, error) {
+	for i := range inputs {
+		if inputs[i].InputMode != models.ThreadInputModeSteering {
+			continue
+		}
+		var state string
+		err := r.db.QueryRowContext(ctx, `SELECT delivery_state FROM thread_input_provider_steering WHERE thread_input_id = ?`, inputs[i].ID).Scan(&state)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("loading provider steering state: %w", err)
+		}
+		inputs[i].ProviderSteeringState = state
+	}
+	return inputs, nil
 }
 
 func (r *ThreadInputRepo) ListPendingSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {
@@ -658,6 +697,19 @@ func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, t
 		}
 		changed, _ := res.RowsAffected()
 		if changed == 0 {
+			var confirmed int
+			if err := tx.QueryRowContext(ctx, `
+					SELECT EXISTS(
+						SELECT 1
+						FROM thread_inputs input
+						JOIN thread_input_provider_steering steering ON steering.thread_input_id = input.id
+						WHERE input.id = ? AND input.input_status = 'applied' AND steering.delivery_state = ?
+					)`, id, ProviderSteeringAcceptedConfirmed).Scan(&confirmed); err != nil {
+				return fmt.Errorf("checking confirmed provider steering delivery: %w", err)
+			}
+			if confirmed != 0 {
+				return nil
+			}
 			return ErrInputNotPending
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -699,6 +751,19 @@ func (r *ThreadInputRepo) RecordProviderSteering(ctx context.Context, inputIDs [
 			changed, _ := res.RowsAffected()
 			if changed == 0 {
 				return fmt.Errorf("recording provider steering delivery for input %s: %w", inputID, ErrInputNotPending)
+			}
+			if deliveryState == ProviderSteeringAcceptedConfirmed {
+				confirmed, confirmErr := tx.ExecContext(ctx, `
+					UPDATE thread_inputs
+					SET input_status = 'applied', applied_at = datetime('now'), updated_at = datetime('now')
+					WHERE id = ? AND input_status = 'pending'`, inputID)
+				if confirmErr != nil {
+					return fmt.Errorf("applying confirmed provider steering for input %s: %w", inputID, confirmErr)
+				}
+				confirmedRows, _ := confirmed.RowsAffected()
+				if confirmedRows == 0 {
+					return fmt.Errorf("applying confirmed provider steering for input %s: %w", inputID, ErrInputNotPending)
+				}
 			}
 		}
 		return nil
