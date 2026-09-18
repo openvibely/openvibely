@@ -43,6 +43,20 @@ const (
 	defaultSkillsMarketplaceSource   = "https://github.com/anthropics/skills.git"
 )
 
+type defaultPluginMarketplace struct {
+	Name   string
+	Source string
+}
+
+var defaultPluginMarketplaceCatalogue = []defaultPluginMarketplace{
+	{Name: defaultOfficialMarketplaceName, Source: defaultOfficialMarketplaceSource},
+	{Name: defaultSkillsMarketplaceName, Source: defaultSkillsMarketplaceSource},
+}
+
+func defaultPluginMarketplaces() []defaultPluginMarketplace {
+	return append([]defaultPluginMarketplace(nil), defaultPluginMarketplaceCatalogue...)
+}
+
 // RuntimeBundle is the plugin-derived runtime payload merged into an agent.
 type RuntimeBundle struct {
 	PluginIDs    []string
@@ -213,15 +227,8 @@ func discoverStateLocal() models.PluginState {
 }
 
 func seedDefaultMarketplaces(ctx context.Context) error {
-	defaults := []struct {
-		Name   string
-		Source string
-	}{
-		{Name: defaultOfficialMarketplaceName, Source: defaultOfficialMarketplaceSource},
-		{Name: defaultSkillsMarketplaceName, Source: defaultSkillsMarketplaceSource},
-	}
 	var errs []string
-	for _, d := range defaults {
+	for _, d := range defaultPluginMarketplaces() {
 		if err := importMarketplaceFn(ctx, d.Source); err != nil {
 			errs = append(errs, fmt.Sprintf("%s import: %v", d.Name, err))
 			continue
@@ -374,16 +381,8 @@ func ResetDefaultMarketplaces(ctx context.Context) error {
 		}
 	}
 
-	defaults := []struct {
-		Name   string
-		Source string
-	}{
-		{Name: defaultOfficialMarketplaceName, Source: defaultOfficialMarketplaceSource},
-		{Name: defaultSkillsMarketplaceName, Source: defaultSkillsMarketplaceSource},
-	}
-
 	var errs []string
-	for _, d := range defaults {
+	for _, d := range defaultPluginMarketplaces() {
 		_, exists := existing[strings.ToLower(d.Name)]
 		if !exists {
 			if err := AddMarketplace(ctx, d.Source, defaultPluginScope); err != nil {

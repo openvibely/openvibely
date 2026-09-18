@@ -233,6 +233,96 @@ func TestDiscoverState_SeedsDefaultMarketplacesInAppRootWhenEmpty(t *testing.T) 
 	}
 }
 
+func TestDefaultMarketplaceCatalogueDrivesSeedAndReset(t *testing.T) {
+	tmp := t.TempDir()
+	seedRoot := filepath.Join(tmp, "seed")
+	resetRoot := filepath.Join(tmp, "reset")
+
+	origCatalogue := defaultPluginMarketplaceCatalogue
+	origImportMarketplace := importMarketplaceFn
+	origUserPluginBase := userPluginBaseFn
+	defer func() {
+		defaultPluginMarketplaceCatalogue = origCatalogue
+		importMarketplaceFn = origImportMarketplace
+		userPluginBaseFn = origUserPluginBase
+	}()
+
+	thirdDefault := defaultPluginMarketplace{Name: "third-default-marketplace", Source: "openvibely/third-default-marketplace"}
+	defaultPluginMarketplaceCatalogue = append(append([]defaultPluginMarketplace(nil), origCatalogue...), thirdDefault)
+	catalogue := defaultPluginMarketplaces()
+
+	expectedSources := make([]string, 0, len(catalogue))
+	sourceToName := make(map[string]string, len(catalogue))
+	for _, d := range catalogue {
+		expectedSources = append(expectedSources, d.Source)
+		sourceToName[d.Source] = d.Name
+	}
+
+	writeMarketplaceManifest := func(root, name string) error {
+		manifestDir := filepath.Join(root, "marketplaces", name, ".claude-plugin")
+		if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+			return err
+		}
+		manifest := `{"name":"` + name + `","metadata":{"description":"default"},"plugins":[{"name":"playwright","description":"browser plugin","source":"./plugins/playwright"}]}`
+		return os.WriteFile(filepath.Join(manifestDir, "marketplace.json"), []byte(manifest), 0o644)
+	}
+
+	phase := "seed"
+	var seedSources []string
+	var resetSources []string
+	userPluginBaseFn = func() string {
+		if phase == "seed" {
+			return seedRoot
+		}
+		return resetRoot
+	}
+	importMarketplaceFn = func(ctx context.Context, source string) error {
+		name, ok := sourceToName[strings.TrimSpace(source)]
+		if !ok {
+			return errors.New("unexpected source: " + source)
+		}
+		root := seedRoot
+		if phase == "seed" {
+			seedSources = append(seedSources, source)
+		} else {
+			root = resetRoot
+			resetSources = append(resetSources, source)
+		}
+		return writeMarketplaceManifest(root, name)
+	}
+
+	if err := seedDefaultMarketplaces(context.Background()); err != nil {
+		t.Fatalf("seed default marketplaces: %v", err)
+	}
+	if !reflect.DeepEqual(seedSources, expectedSources) {
+		t.Fatalf("seed sources = %#v, want %#v", seedSources, expectedSources)
+	}
+	for _, d := range catalogue {
+		if _, err := os.Stat(filepath.Join(seedRoot, "marketplaces", d.Name, ".claude-plugin", "marketplace.json")); err != nil {
+			t.Fatalf("expected seeded marketplace %s: %v", d.Name, err)
+		}
+	}
+
+	phase = "reset"
+	if err := writeMarketplaceManifest(resetRoot, "temp_old"); err != nil {
+		t.Fatalf("write temp marketplace: %v", err)
+	}
+	if err := ResetDefaultMarketplaces(context.Background()); err != nil {
+		t.Fatalf("reset default marketplaces: %v", err)
+	}
+	if !reflect.DeepEqual(resetSources, expectedSources) {
+		t.Fatalf("reset sources = %#v, want %#v", resetSources, expectedSources)
+	}
+	if _, err := os.Stat(filepath.Join(resetRoot, "marketplaces", "temp_old")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected reset to remove temp marketplace, err=%v", err)
+	}
+	for _, d := range catalogue {
+		if _, err := os.Stat(filepath.Join(resetRoot, "marketplaces", d.Name, ".claude-plugin", "marketplace.json")); err != nil {
+			t.Fatalf("expected reset marketplace %s: %v", d.Name, err)
+		}
+	}
+}
+
 func TestDisablePlugin_ReturnsError(t *testing.T) {
 	err := DisablePlugin(context.Background(), "playwright@demo-marketplace")
 	if err == nil {
