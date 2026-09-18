@@ -27,12 +27,36 @@ func (h *Handler) outboundTargetsDataForProject(c echo.Context, projectID string
 	if projectID != "" && h.channelTargetRepo != nil {
 		targets, _ = h.channelTargetRepo.ListByProject(c.Request().Context(), projectID)
 	}
-	explicitAllowed := false
+	explicitAllowed := h.sendMessageExplicitTargetsAllowed(c, projectID)
+	return targets, explicitAllowed
+}
+
+func (h *Handler) outboundTargetsCardData(c echo.Context) (string, repository.ChannelTargetProjectSummary, bool) {
+	projectID := c.QueryParam("project_id")
+	if projectID == "" {
+		projectID, _ = h.getCurrentProjectID(c)
+	}
+	summary, explicitAllowed := h.outboundTargetsCardDataForProject(c, projectID)
+	return projectID, summary, explicitAllowed
+}
+
+func (h *Handler) outboundTargetsCardDataForProject(c echo.Context, projectID string) (repository.ChannelTargetProjectSummary, bool) {
+	summary := repository.ChannelTargetProjectSummary{ByPlatform: map[string]repository.ChannelTargetPlatformSummary{}}
+	if projectID != "" && h.channelTargetRepo != nil {
+		loaded, err := h.channelTargetRepo.SummarizeByProject(c.Request().Context(), projectID)
+		if err == nil {
+			summary = loaded
+		}
+	}
+	return summary, h.sendMessageExplicitTargetsAllowed(c, projectID)
+}
+
+func (h *Handler) sendMessageExplicitTargetsAllowed(c echo.Context, projectID string) bool {
 	if h.settingsRepo != nil && projectID != "" {
 		val, _ := h.settingsRepo.Get(c.Request().Context(), service.SendMessageAllowExplicitTargetsSetting+":"+projectID)
-		explicitAllowed = strings.EqualFold(strings.TrimSpace(val), "true")
+		return strings.EqualFold(strings.TrimSpace(val), "true")
 	}
-	return targets, explicitAllowed
+	return false
 }
 
 func (h *Handler) handleOutboundTargetsFragment(c echo.Context) error {
@@ -41,8 +65,8 @@ func (h *Handler) handleOutboundTargetsFragment(c echo.Context) error {
 }
 
 func (h *Handler) handleOutboundTargetsCardFragment(c echo.Context) error {
-	projectID, targets, explicitAllowed := h.outboundTargetsData(c)
-	return render(c, http.StatusOK, pages.OutboundTargetsCardFragment(projectID, targets, explicitAllowed))
+	projectID, summary, explicitAllowed := h.outboundTargetsCardData(c)
+	return render(c, http.StatusOK, pages.OutboundTargetsCardFragment(projectID, summary, explicitAllowed))
 }
 
 func (h *Handler) handleOutboundTargetTest(c echo.Context) error {
