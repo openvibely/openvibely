@@ -3830,7 +3830,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 237, "\" data-input-mode=\"steering\" title=\"The provider accepted this instruction, but the connection ended before application could be confirmed\"><div class=\"min-w-0 flex-1\"><div class=\"text-xs font-semibold text-warning\">Steering delivery uncertain</div><div class=\"truncate\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 237, "\" data-input-mode=\"steering\" title=\"The delivery outcome is unknown, so this instruction was not replayed automatically\"><div class=\"min-w-0 flex-1\"><div class=\"text-xs font-semibold text-warning\">Steering delivery uncertain</div><div class=\"truncate\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -3843,7 +3843,7 @@ func ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "</div><div class=\"text-xs opacity-60\">It was not replayed automatically. Discard it here, or resend the instruction if needed.</div></div><div class=\"ml-auto flex shrink-0 items-center gap-2\"><button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 238, "</div><div class=\"text-xs opacity-60\">The provider may or may not have received it. Discard it here, or resend it if needed.</div></div><div class=\"ml-auto flex shrink-0 items-center gap-2\"><button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

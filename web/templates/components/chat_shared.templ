@@ -6114,11 +6114,11 @@ func chatPendingSteeringInputRowForTask(input models.ThreadInput, taskID string)
 }
 
 templ ChatAmbiguousSteeringInputRowForTask(inputID, message string, taskID string) {
-	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-warning/10 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" title="The provider accepted this instruction, but the connection ended before application could be confirmed">
+	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-warning/10 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" title="The delivery outcome is unknown, so this instruction was not replayed automatically">
 		<div class="min-w-0 flex-1">
 			<div class="text-xs font-semibold text-warning">Steering delivery uncertain</div>
 			<div class="truncate">{ message }</div>
-			<div class="text-xs opacity-60">It was not replayed automatically. Discard it here, or resend the instruction if needed.</div>
+			<div class="text-xs opacity-60">The provider may or may not have received it. Discard it here, or resend it if needed.</div>
 		</div>
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Discard uncertain steering" aria-label="Discard uncertain steering">Discard</button>
