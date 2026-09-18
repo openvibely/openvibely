@@ -2092,7 +2092,7 @@ func TestChatComposerQueuedInputRows_RendersAmbiguousSteeringRecovery(t *testing
 		t.Fatalf("render ambiguous steering row: %v", err)
 	}
 	content := buf.String()
-	for _, want := range []string{"Steering delivery uncertain", "It was not replayed automatically", `/thread-inputs/steer-ambiguous/cancel`, "Discard"} {
+	for _, want := range []string{"Steering delivery uncertain", "The provider may or may not have received it", `/thread-inputs/steer-ambiguous/cancel`, "Discard"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("ambiguous steering row missing %q: %s", want, content)
 		}

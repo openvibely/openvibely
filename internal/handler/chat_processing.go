@@ -594,7 +594,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), inputIDs, steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
 				return errors.Join(claimErr, restoreErr)
 			}
-			return claimErr
+			applog.Infof("[handler] processStreamingResponse exec=%s unable to persist Astra steering claim; retaining queued fallback: %v", steeringCallbackParams.ExecID, claimErr)
+			return nil
 		}
 		instruction := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		delivery, deliveryErr := deliver(callbackCtx, instruction)

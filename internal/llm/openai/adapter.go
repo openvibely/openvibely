@@ -105,15 +105,7 @@ func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
 	})
 }
 
-type astraAsyncRuntimeToolTracker interface {
-	AstraAsyncToolCallTrackingEnabled(name string) bool
-}
-
 func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefinition {
-	return runtimeOpenAIToolsWithAstraAsync(rt, nil)
-}
-
-func runtimeOpenAIToolsWithAstraAsync(rt *llmcontracts.RuntimeTools, tracker astraAsyncRuntimeToolTracker) []openaiclient.ToolDefinition {
 	if rt == nil || len(rt.Definitions) == 0 {
 		return nil
 	}
@@ -123,26 +115,14 @@ func runtimeOpenAIToolsWithAstraAsync(rt *llmcontracts.RuntimeTools, tracker ast
 		if name == "" {
 			continue
 		}
-		tool := openaiclient.ToolDefinition{
+		out = append(out, openaiclient.ToolDefinition{
 			Type:        "function",
 			Name:        name,
 			Description: strings.TrimSpace(def.Description),
 			Parameters:  def.Parameters,
-		}
-		if tracker != nil && def.Access == llmcontracts.RuntimeToolAccessRead && tracker.AstraAsyncToolCallTrackingEnabled(name) {
-			tool.Async = true
-		}
-		out = append(out, tool)
+		})
 	}
 	return out
-}
-
-func astraAsyncRuntimeTracker(rt *llmcontracts.RuntimeTools, agent models.LLMConfig) astraAsyncRuntimeToolTracker {
-	if rt == nil || !strings.EqualFold(strings.TrimSpace(agent.Model), "gpt-6-astra") {
-		return nil
-	}
-	tracker, _ := rt.Metadata.(astraAsyncRuntimeToolTracker)
-	return tracker
 }
 
 func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessage) (string, bool, error), rt *llmcontracts.RuntimeTools) func(context.Context, string, json.RawMessage) (string, bool, error) {
@@ -323,7 +303,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			ReasoningSummary: "auto",
 			WorkDir:          effectiveWorkDir,
 			Attachments:      oaAttachments,
-			ExtraTools:       runtimeOpenAIToolsWithAstraAsync(rt, astraAsyncRuntimeTracker(rt, agent)), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
+			ExtraTools:       runtimeOpenAITools(rt), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
 			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)),
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 			EnableAstraConfigurationUpdate: true,
@@ -383,7 +363,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAIToolsWithAstraAsync(rt, astraAsyncRuntimeTracker(rt, agent))...)
+	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
 
@@ -499,7 +479,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAIToolsWithAstraAsync(rt, astraAsyncRuntimeTracker(rt, agent))...)
+	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(isTaskFollowup, chatMode))
 

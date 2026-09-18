@@ -4519,6 +4519,76 @@ func TestProcessStreamingResponse_DoesNotReplaySteeringWhenReceiptPersistenceFai
 	require.Equal(t, repository.ProviderSteeringAcceptedAmbiguous, state)
 }
 
+func TestProcessStreamingResponse_FallsBackWhenSteeringClaimPersistenceFails(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "completed response"
+	mock.TextOnly = mock.Response
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Steering Claim Failure Project")
+	task := createTask(t, h, project.ID, "Steering Claim Failure Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	_, err := db.Exec(`
+		CREATE TRIGGER fail_provider_steering_claim
+		BEFORE INSERT ON thread_input_provider_steering
+		BEGIN
+			SELECT RAISE(FAIL, 'claim persistence failed');
+		END`)
+	require.NoError(t, err)
+
+	var steeringID string
+	var calls int
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		calls++
+		if calls != 1 {
+			return
+		}
+		steering := &models.ThreadInput{
+			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
+			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
+			Content: "retain this instruction when the delivery claim fails",
+		}
+		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+		steeringID = steering.ID
+		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
+		require.NotNil(t, callback)
+		require.NoError(t, callback(callCtx, func(context.Context, string) (llmcontracts.SteeringDeliveryState, error) {
+			t.Fatal("provider delivery must not run without a durable claim")
+			return llmcontracts.SteeringDeliveryState{}, nil
+		}))
+		restored, restoreErr := h.threadInputRepo.GetByID(ctx, steering.ID)
+		require.NoError(t, restoreErr)
+		require.Equal(t, exec.ID, restored.ExpectedTurnID)
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
+		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 2, mock.CallCount(), "restored steering should continue through the normal follow-up path")
+	require.NotEmpty(t, steeringID)
+	stored, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	var claims int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM thread_input_provider_steering WHERE thread_input_id = ?`, steeringID).Scan(&claims))
+	require.Zero(t, claims)
+}
+
 func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
