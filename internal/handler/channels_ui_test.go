@@ -1331,6 +1331,7 @@ func TestChannelsPagePasswordToggleButtonStaysFixedOnActive(t *testing.T) {
 		`onclick="togglePasswordVisibility('webhook_secret_display', this)"`,
 		`aria-label="Toggle secret visibility"`,
 		`aria-pressed="false"`,
+		`window.openVibelySecretInputVisibility`,
 		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
 		`function resetSecretInputVisibility(inputId)`,
 		`resetSecretInputVisibility('channel_telegram_token')`,
@@ -1339,11 +1340,23 @@ func TestChannelsPagePasswordToggleButtonStaysFixedOnActive(t *testing.T) {
 		`resetSecretInputVisibility('slack_client_secret')`,
 		`resetSecretInputVisibility('slack_app_token')`,
 		`resetSecretInputVisibility('slack_bot_token')`,
+		`resetSecretInputVisibility('discord_bot_token')`,
+		`resetSecretInputVisibility('email_password')`,
 		`resetSecretInputVisibility('webhook_secret_display')`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected webhook secret input pattern to contain %q", want)
 		}
+	}
+
+	if count := strings.Count(body, `function togglePasswordVisibility(inputId, button)`); count != 1 {
+		t.Fatalf("expected one shared password visibility toggle helper, got %d", count)
+	}
+	if count := strings.Count(body, `function resetSecretInputVisibility(inputId)`); count != 1 {
+		t.Fatalf("expected one shared secret input reset helper, got %d", count)
+	}
+	if count := strings.Count(body, `window.openVibelySecretInputVisibility = {`); count != 1 {
+		t.Fatalf("expected shared SecretInput helper script once, got %d", count)
 	}
 
 	if strings.Contains(body, `onclick="togglePasswordVisibility('webhook_secret_display', this)" tabindex="-1"`) {

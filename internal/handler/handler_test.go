@@ -2465,6 +2465,7 @@ func TestHandler_ListModels_LazyLoadsAPIKeyForEdit(t *testing.T) {
 		`type="password"`,
 		`id="model_api_key_submit" name="api_key" value=""`,
 		`onclick="togglePasswordVisibility('model_api_key', this)"`,
+		`window.openVibelySecretInputVisibility`,
 		`function editModelFromData(button)`,
 		`/edit-details`,
 		`generation !== window._modelEditRequestGeneration`,
@@ -2473,10 +2474,26 @@ func TestHandler_ListModels_LazyLoadsAPIKeyForEdit(t *testing.T) {
 		`function populateModelEditForm(button)`,
 		`setModelAPIKeyEditHelp(hasAPIKey);`,
 		`resetSecretInputVisibility('model_api_key')`,
+		`resetSecretInputVisibility('model_custom_oauth_client_secret')`,
+		`resetSecretInputVisibility('model_custom_signing_secret')`,
+		`resetSecretInputVisibility('model_compatible_extra_headers')`,
+		`resetSecretInputVisibility('model_custom_static_headers_json')`,
+		`resetSecretInputVisibility('model_custom_token_headers_json')`,
+		`resetSecretInputVisibility('model_custom_refresh_headers_json')`,
+		`resetSecretInputVisibility('model_custom_refresh_parameters_json')`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected lazy model edit markup/script to contain %q", want)
 		}
+	}
+	if count := strings.Count(body, `function togglePasswordVisibility(inputId, button)`); count != 1 {
+		t.Fatalf("expected one shared password visibility toggle helper, got %d", count)
+	}
+	if count := strings.Count(body, `function resetSecretInputVisibility(inputId)`); count != 1 {
+		t.Fatalf("expected one shared secret input reset helper, got %d", count)
+	}
+	if count := strings.Count(body, `window.openVibelySecretInputVisibility = {`); count != 1 {
+		t.Fatalf("expected shared SecretInput helper script once, got %d", count)
 	}
 	if strings.Contains(body, cfg.APIKey) || strings.Contains(body, `data-model-api-key=`) {
 		t.Fatal("initial Models response exposed the saved API key")
