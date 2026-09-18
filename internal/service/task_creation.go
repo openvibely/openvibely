@@ -459,11 +459,25 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 					if req.Chain.Enabled {
 						existing, _ := taskSvc.repo.FindBlockedChildByParent(ctx, task.ID)
 						if existing == nil {
-							blockedChild := llmworkflow.BuildBlockedChild(*task, req.Chain)
-							if childErr := taskSvc.Create(ctx, blockedChild); childErr != nil {
-								applog.Infof("[task-edit] error pre-creating blocked child for task %s: %v", req.ID, childErr)
+							chainChild, findChildErr := taskSvc.repo.FindChainChildByParent(ctx, task.ID)
+							if findChildErr != nil {
+								applog.Infof("[task-edit] error checking existing chain child for task %s: %v", req.ID, findChildErr)
+							} else if chainChild != nil {
+								applog.Infof("[task-edit] chain child already left blocked status id=%s status=%s for parent=%s", chainChild.ID, chainChild.Status, task.ID)
 							} else {
-								applog.Infof("[task-edit] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
+								blockedChild := llmworkflow.BuildBlockedChild(*task, req.Chain)
+								if childErr := taskSvc.Create(ctx, blockedChild); childErr != nil {
+									applog.Infof("[task-edit] error pre-creating blocked child for task %s: %v", req.ID, childErr)
+								} else {
+									applog.Infof("[task-edit] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
+								}
+							}
+						} else {
+							llmworkflow.ApplyBlockedChildMaterialization(*task, req.Chain, existing)
+							if childErr := taskSvc.Update(ctx, existing); childErr != nil {
+								applog.Infof("[task-edit] error refreshing blocked child for task %s child=%s: %v", req.ID, existing.ID, childErr)
+							} else {
+								applog.Infof("[task-edit] refreshed blocked child id=%s for parent=%s", existing.ID, task.ID)
 							}
 						}
 					} else {
