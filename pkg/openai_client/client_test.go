@@ -2306,6 +2306,49 @@ func TestOpenResponsesWebsocketStream_NonAstraSuppressesMidTurnSteeringCallback(
 	}
 }
 
+func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCallbackErrorFailsStream(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read initial request: %v", err)
+			return
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_callback_error"}}`)); err != nil {
+			t.Errorf("write created: %v", err)
+			return
+		}
+		_, _, _ = conn.Read(r.Context())
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	body, err := client.openResponsesWebsocketStream(context.Background(), map[string]any{
+		"type": "response.create", "model": "gpt-6-astra", "input": []any{},
+	}, false, responsesWebsocketStreamOptions{
+		Model: "gpt-6-astra",
+		OnMidTurnSteering: func(context.Context, AstraSteeringDeliverer) error {
+			return errors.New("store steering receipt")
+		},
+	})
+	if err != nil {
+		t.Fatalf("openResponsesWebsocketStream: %v", err)
+	}
+	defer body.Close()
+	_, err = io.ReadAll(body)
+	if err == nil || !strings.Contains(err.Error(), "persisting Astra steering delivery: store steering receipt") {
+		t.Fatalf("read error = %v, want callback persistence failure", err)
+	}
+}
+
 func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringAccepted(t *testing.T) {
 	steerSeen := make(chan map[string]any, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

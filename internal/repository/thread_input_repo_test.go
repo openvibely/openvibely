@@ -913,11 +913,50 @@ func TestThreadInputRepo_ProviderOwnedSteeringIsNotAutomaticallyRequeued(t *test
 	require.NoError(t, db.QueryRow(`SELECT delivery_state FROM thread_input_provider_steering WHERE thread_input_id = ?`, steering.ID).Scan(&state))
 	require.Equal(t, ProviderSteeringAcceptedAmbiguous, state)
 
+	pending, err := repo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, pending, "ambiguous steering must stay hidden while its execution is active")
+	require.NoError(t, execRepo.Complete(ctx, active.ID, models.ExecFailed, "", "connection lost", 0, 0))
+	pending, err = repo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, steering.ID, pending[0].ID)
+	require.Equal(t, ProviderSteeringAcceptedAmbiguous, pending[0].ProviderSteeringState)
+
 	require.NoError(t, repo.ClearProviderSteering(ctx, []string{"steer_ambiguous"}))
 	requeued, err = repo.RequeuePendingSteeringForExecution(ctx, active.ID)
 	require.NoError(t, err)
 	require.Len(t, requeued, 1)
 	require.Equal(t, steering.ID, requeued[0].ID)
+}
+
+func TestThreadInputRepo_ConfirmedProviderSteeringIsAppliedAtomically(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, execRepo.Create(ctx, active))
+	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "apply exactly once"}
+	require.NoError(t, repo.CreateSteeringForActiveExecution(ctx, steering, active.ID))
+	prepared, err := repo.PreparePendingTextSteering(ctx, active.ID, active.ID)
+	require.NoError(t, err)
+	require.Len(t, prepared, 1)
+
+	require.NoError(t, repo.RecordProviderSteering(ctx, []string{steering.ID}, "steer_confirmed", "resp_original", "resp_successor", ProviderSteeringAcceptedConfirmed))
+	stored, err := repo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	require.NotNil(t, stored.AppliedAt)
+
+	// The normal end-of-call commit remains safe after the confirmation transaction.
+	require.NoError(t, repo.MarkApplied(ctx, steering.ID, active.ID, active.ID))
+	requeued, err := repo.RequeuePendingSteeringForExecution(ctx, active.ID)
+	require.NoError(t, err)
+	require.Empty(t, requeued)
 }
 
 func TestThreadInputRepo_ConvertQueuedToSteeringFailsAfterTurnCompletes(t *testing.T) {

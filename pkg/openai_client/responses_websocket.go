@@ -553,6 +553,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 	}
 
 	reader, writer := io.Pipe()
+	callbackErrors := make(chan error, 1)
 	var steeringMu sync.Mutex
 	activeResponseID := ""
 	primaryResponseID := ""
@@ -682,6 +683,9 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 				case <-ticker.C:
 					if err := opts.OnMidTurnSteering(ctx, deliverSteering); err != nil {
 						state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringFailed, Error: err.Error()})
+						callbackErrors <- fmt.Errorf("persisting Astra steering delivery: %w", err)
+						_ = conn.CloseNow()
+						return
 					}
 				}
 			}
@@ -716,6 +720,13 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		for {
 			messageType, data, readErr := conn.Read(ctx)
 			if readErr != nil {
+				select {
+				case callbackErr := <-callbackErrors:
+					state.resetConnectionLocked()
+					writer.CloseWithError(callbackErr)
+					return
+				default:
+				}
 				if len(deferredPrimaryCompleted) > 0 {
 					if forwardEventData(deferredPrimaryCompleted) {
 						recordCompletedResponse(deferredPrimaryCompletedID)

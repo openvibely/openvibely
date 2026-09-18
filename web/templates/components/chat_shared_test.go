@@ -2082,6 +2082,23 @@ func TestPendingThreadInputRows_LeavesComposerOwnedInputsOutOfTranscript(t *test
 	}
 }
 
+func TestChatComposerQueuedInputRows_RendersAmbiguousSteeringRecovery(t *testing.T) {
+	inputs := []models.ThreadInput{{
+		ID: "steer-ambiguous", TaskID: "task-1", InputMode: models.ThreadInputModeSteering,
+		Content: "possibly delivered", ProviderSteeringState: "accepted_ambiguous",
+	}}
+	var buf bytes.Buffer
+	if err := ChatComposerQueuedInputRows(inputs, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ambiguous steering row: %v", err)
+	}
+	content := buf.String()
+	for _, want := range []string{"Steering delivery uncertain", "It was not replayed automatically", `/thread-inputs/steer-ambiguous/cancel`, "Discard"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("ambiguous steering row missing %q: %s", want, content)
+		}
+	}
+}
+
 func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	inputs := []models.ThreadInput{
 		{ID: "queued-1", TaskID: "task-1", InputMode: models.ThreadInputModeQueued, Content: "queue this", AttachmentSessionID: "pending-session-1"},
