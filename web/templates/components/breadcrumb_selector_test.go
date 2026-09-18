@@ -324,7 +324,7 @@ func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testin
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-breadcrumb-selector-running`, `loading loading-spinner loading-xs`, `text-primary`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
+	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-breadcrumb-selector-running`, `overflow-x-hidden`, `w-full max-w-full min-w-0`, `overflow-hidden rounded-btn`, `loading loading-spinner loading-xs`, `text-primary`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in results markup", want)
 		}
