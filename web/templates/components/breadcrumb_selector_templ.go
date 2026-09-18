@@ -464,7 +464,7 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 					return templ_7745c5c3_Err
 				}
 				if item.Status == models.StatusRunning {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"loading loading-spinner loading-xs ml-auto shrink-0 text-warning\" title=\"Running\" aria-label=\"Running\" data-breadcrumb-selector-running></span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"loading loading-spinner loading-xs ml-auto shrink-0 text-primary\" title=\"Running\" aria-label=\"Running\" data-breadcrumb-selector-running></span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
