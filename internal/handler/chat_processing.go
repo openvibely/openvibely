@@ -584,7 +584,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		instruction := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		delivery, deliveryErr := deliver(callbackCtx, instruction)
-		if deliveryErr != nil || (delivery.Status != llmcontracts.SteeringDeliveryAccepted && delivery.Status != llmcontracts.SteeringDeliveryPending) {
+		if deliveryErr != nil || (delivery.Status != llmcontracts.SteeringDeliveryAccepted && delivery.Status != llmcontracts.SteeringDeliveryPending && delivery.Status != llmcontracts.SteeringDeliveryAmbiguous) {
 			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), preparedSteeringInputIDs(batch), steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
 				return restoreErr
 			}
@@ -594,6 +594,22 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				applog.Infof("[handler] processStreamingResponse exec=%s Astra mid-turn steering not accepted status=%s error=%s", steeringCallbackParams.ExecID, delivery.Status, delivery.Error)
 			}
 			return nil
+		}
+		deliveryState := repository.ProviderSteeringAcceptedConfirmed
+		if delivery.Status == llmcontracts.SteeringDeliveryPending {
+			deliveryState = repository.ProviderSteeringAcceptedPending
+		} else if delivery.Status == llmcontracts.SteeringDeliveryAmbiguous || delivery.ResponseID == "" {
+			deliveryState = repository.ProviderSteeringAcceptedAmbiguous
+		}
+		steeringID := strings.TrimSpace(delivery.SteeringID)
+		if steeringID == "" {
+			steeringID = "unknown:" + batch.inputs[0].ID
+		}
+		if recordErr := h.threadInputRepo.RecordProviderSteering(
+			steeringCleanupContext(callbackCtx), preparedSteeringInputIDs(batch), steeringID,
+			delivery.PreviousResponseID, delivery.ResponseID, deliveryState,
+		); recordErr != nil {
+			return recordErr
 		}
 		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
@@ -667,6 +683,16 @@ modelLoop:
 		steeringCallbackParams = nil
 		attemptSteering = preparedSteeringBatch{}
 		if err != nil || ctx.Err() != nil {
+			if h.threadInputRepo != nil {
+				ambiguousIDs := ambiguousSteeringIDs(err)
+				if markErr := h.threadInputRepo.MarkProviderSteeringAmbiguous(steeringCleanupContext(ctx), ambiguousIDs); markErr != nil {
+					applog.Infof("[handler] processStreamingResponse exec=%s error preserving ambiguous Astra steering: %v", params.ExecID, markErr)
+				}
+				failedIDs := failedSteeringIDs(err)
+				if clearErr := h.threadInputRepo.ClearProviderSteering(steeringCleanupContext(ctx), failedIDs); clearErr != nil {
+					applog.Infof("[handler] processStreamingResponse exec=%s error clearing failed Astra steering: %v", params.ExecID, clearErr)
+				}
+			}
 			for _, steeringID := range committedSteeringIDs(err) {
 				batch := steeringBatchesByID[steeringID]
 				if batch.count() == 0 {
@@ -854,6 +880,14 @@ type committedSteeringError interface {
 	CommittedSteeringIDs() []string
 }
 
+type ambiguousSteeringError interface {
+	AmbiguousSteeringIDs() []string
+}
+
+type failedSteeringError interface {
+	FailedSteeringIDs() []string
+}
+
 func committedSteeringIDs(err error) []string {
 	if err == nil {
 		return nil
@@ -863,6 +897,28 @@ func committedSteeringIDs(err error) []string {
 		return nil
 	}
 	return committed.CommittedSteeringIDs()
+}
+
+func ambiguousSteeringIDs(err error) []string {
+	if err == nil {
+		return nil
+	}
+	var ambiguous ambiguousSteeringError
+	if !errors.As(err, &ambiguous) {
+		return nil
+	}
+	return ambiguous.AmbiguousSteeringIDs()
+}
+
+func failedSteeringIDs(err error) []string {
+	if err == nil {
+		return nil
+	}
+	var failed failedSteeringError
+	if !errors.As(err, &failed) {
+		return nil
+	}
+	return failed.FailedSteeringIDs()
 }
 
 func (b preparedSteeringBatch) count() int {

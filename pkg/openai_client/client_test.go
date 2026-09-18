@@ -1787,7 +1787,7 @@ func TestOpenResponsesWebsocketStream_AstraPendingSteeringCanFailBeforeSuccessor
 	}
 }
 
-func TestResponsesTransportState_ResetCommitsAndClearsServerOwnedAstraSteering(t *testing.T) {
+func TestResponsesTransportState_ResetPreservesPendingAstraSteeringAsAmbiguous(t *testing.T) {
 	state := NewResponsesTransportState()
 	state.pendingAstraSteering = map[string]ResponsesSteeringDelivery{
 		"steer_reset": {
@@ -1805,9 +1805,9 @@ func TestResponsesTransportState_ResetCommitsAndClearsServerOwnedAstraSteering(t
 	if err := state.takeAstraSteeringFailure(); err != nil {
 		t.Fatalf("reset treated server-owned steering as failed: %v", err)
 	}
-	commits := state.takeAstraSteeringCommits()
-	if len(commits) != 1 || commits[0].SteeringID != "steer_reset" || commits[0].Status != AstraSteeringAccepted {
-		t.Fatalf("reset steering commits = %#v", commits)
+	ambiguous := state.takeAstraSteeringAmbiguous()
+	if len(ambiguous) != 1 || ambiguous[0].SteeringID != "steer_reset" || ambiguous[0].Status != AstraSteeringAmbiguous {
+		t.Fatalf("reset ambiguous steering = %#v", ambiguous)
 	}
 	if err := state.takeUnresolvedAstraSteering(); err != nil {
 		t.Fatalf("reset left unresolved steering: %v", err)
@@ -2125,15 +2125,15 @@ func TestOpenResponsesWebsocketStream_AstraAcceptedSteeringDisconnectPreservesSe
 	}
 	select {
 	case delivery := <-deliveries:
-		if delivery.Status != AstraSteeringAccepted || delivery.SteeringID != "steer_disconnect_accepted" || delivery.PreviousResponseID != "resp_disconnect_accepted" || delivery.ResponseID != "" {
+		if delivery.Status != AstraSteeringAmbiguous || delivery.SteeringID != "steer_disconnect_accepted" || delivery.PreviousResponseID != "resp_disconnect_accepted" || delivery.ResponseID != "" {
 			t.Fatalf("delivery = %#v", delivery)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("steering callback did not preserve accepted ownership")
 	}
-	commits := client.responsesTransportState.takeAstraSteeringCommits()
-	if len(commits) != 1 || commits[0].SteeringID != "steer_disconnect_accepted" {
-		t.Fatalf("accepted disconnect commits = %#v", commits)
+	ambiguous := client.responsesTransportState.takeAstraSteeringAmbiguous()
+	if len(ambiguous) != 1 || ambiguous[0].SteeringID != "steer_disconnect_accepted" {
+		t.Fatalf("accepted disconnect ambiguous deliveries = %#v", ambiguous)
 	}
 }
 

@@ -883,6 +883,43 @@ func TestThreadInputRepo_RequeuePendingSteeringForExecutionRecoversUnpreparedRow
 	}
 }
 
+func TestThreadInputRepo_ProviderOwnedSteeringIsNotAutomaticallyRequeued(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, execRepo.Create(ctx, active))
+	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "apply exactly once"}
+	require.NoError(t, repo.CreateSteeringForActiveExecution(ctx, steering, active.ID))
+	prepared, err := repo.PreparePendingTextSteering(ctx, active.ID, active.ID)
+	require.NoError(t, err)
+	require.Len(t, prepared, 1)
+	require.NoError(t, repo.RecordProviderSteering(ctx, []string{steering.ID}, "steer_ambiguous", "resp_original", "", ProviderSteeringAcceptedPending))
+	require.NoError(t, repo.MarkProviderSteeringAmbiguous(ctx, []string{"steer_ambiguous"}))
+
+	requeued, err := repo.RequeuePendingSteeringForExecution(ctx, active.ID)
+	require.NoError(t, err)
+	require.Empty(t, requeued)
+	stored, err := repo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Equal(t, models.ThreadInputModeSteering, stored.InputMode)
+	require.Empty(t, stored.ExpectedTurnID)
+	var state string
+	require.NoError(t, db.QueryRow(`SELECT delivery_state FROM thread_input_provider_steering WHERE thread_input_id = ?`, steering.ID).Scan(&state))
+	require.Equal(t, ProviderSteeringAcceptedAmbiguous, state)
+
+	require.NoError(t, repo.ClearProviderSteering(ctx, []string{"steer_ambiguous"}))
+	requeued, err = repo.RequeuePendingSteeringForExecution(ctx, active.ID)
+	require.NoError(t, err)
+	require.Len(t, requeued, 1)
+	require.Equal(t, steering.ID, requeued[0].ID)
+}
+
 func TestThreadInputRepo_ConvertQueuedToSteeringFailsAfterTurnCompletes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

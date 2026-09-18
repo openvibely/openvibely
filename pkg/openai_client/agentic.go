@@ -145,6 +145,7 @@ const (
 	AstraSteeringUnavailable AstraSteeringDeliveryStatus = "unavailable"
 	AstraSteeringDelivered   AstraSteeringDeliveryStatus = "delivered"
 	AstraSteeringPending     AstraSteeringDeliveryStatus = "pending"
+	AstraSteeringAmbiguous   AstraSteeringDeliveryStatus = "ambiguous"
 	AstraSteeringAccepted    AstraSteeringDeliveryStatus = "accepted"
 	AstraSteeringFailed      AstraSteeringDeliveryStatus = "failed"
 )
@@ -163,9 +164,23 @@ type astraSteeringCommittedError struct {
 	ids []string
 }
 
+type astraSteeringAmbiguousError struct {
+	err error
+	ids []string
+}
+
+type astraSteeringFailedError struct {
+	err error
+	ids []string
+}
+
 func wrapAstraSteeringCommits(err error, state *ResponsesTransportState) error {
 	if err == nil || state == nil {
 		return err
+	}
+	ambiguous := steeringDeliveryIDs(state.takeAstraSteeringAmbiguous())
+	if len(ambiguous) > 0 {
+		err = &astraSteeringAmbiguousError{err: err, ids: ambiguous}
 	}
 	commits := state.takeAstraSteeringCommits()
 	if len(commits) == 0 {
@@ -189,9 +204,37 @@ func wrapAstraSteeringCommits(err error, state *ResponsesTransportState) error {
 	return &astraSteeringCommittedError{err: err, ids: ids}
 }
 
+func steeringDeliveryIDs(deliveries []ResponsesSteeringDelivery) []string {
+	seen := make(map[string]struct{}, len(deliveries))
+	ids := make([]string, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		if delivery.SteeringID == "" {
+			continue
+		}
+		if _, exists := seen[delivery.SteeringID]; exists {
+			continue
+		}
+		seen[delivery.SteeringID] = struct{}{}
+		ids = append(ids, delivery.SteeringID)
+	}
+	return ids
+}
+
 func (e *astraSteeringCommittedError) Error() string { return e.err.Error() }
 func (e *astraSteeringCommittedError) Unwrap() error { return e.err }
 func (e *astraSteeringCommittedError) CommittedSteeringIDs() []string {
+	return append([]string(nil), e.ids...)
+}
+
+func (e *astraSteeringAmbiguousError) Error() string { return e.err.Error() }
+func (e *astraSteeringAmbiguousError) Unwrap() error { return e.err }
+func (e *astraSteeringAmbiguousError) AmbiguousSteeringIDs() []string {
+	return append([]string(nil), e.ids...)
+}
+
+func (e *astraSteeringFailedError) Error() string { return e.err.Error() }
+func (e *astraSteeringFailedError) Unwrap() error { return e.err }
+func (e *astraSteeringFailedError) FailedSteeringIDs() []string {
 	return append([]string(nil), e.ids...)
 }
 
@@ -411,7 +454,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		var turnResult *agenticTurnResult
 		overflowRecovered := false
 		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
-			RetryableError:                       isRetryableResponsesTransportError,
+			RetryableError: func(err error) bool {
+				return !c.responsesTransportState.hasAstraSteeringAmbiguous() && isRetryableResponsesTransportError(err)
+			},
 			RetryConnectionFailuresWithoutBudget: true,
 			Recover: func(err error) (bool, error) {
 				if !opts.AutoCompaction || overflowRecovered || !isContextLengthExceededError(err) {

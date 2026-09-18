@@ -4329,6 +4329,15 @@ type committedSteeringTestError struct {
 func (e committedSteeringTestError) Error() string                  { return "stream failed after steering commit" }
 func (e committedSteeringTestError) CommittedSteeringIDs() []string { return e.ids }
 
+type ambiguousSteeringTestError struct {
+	ids []string
+}
+
+func (e ambiguousSteeringTestError) Error() string {
+	return "stream disconnected after steering acceptance"
+}
+func (e ambiguousSteeringTestError) AmbiguousSteeringIDs() []string { return e.ids }
+
 func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFailure(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -4381,6 +4390,64 @@ func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFail
 	require.NoError(t, err)
 	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
 	require.Equal(t, models.ThreadInputModeSteering, applied.InputMode)
+}
+
+func TestProcessStreamingResponse_PreservesAmbiguousSteeringWithoutApplyingOrRequeueing(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial output"
+	mock.TextOnly = mock.Response
+	mock.Err = ambiguousSteeringTestError{ids: []string{"steer_ambiguous"}}
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Ambiguous Midturn Steering Project")
+	task := createTask(t, h, project.ID, "Ambiguous Midturn Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	var steeringID string
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		steering := &models.ThreadInput{
+			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
+			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
+			Content: "do not replay an unknown provider outcome",
+		}
+		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+		steeringID = steering.ID
+		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
+		require.NotNil(t, callback)
+		require.NoError(t, callback(callCtx, func(_ context.Context, _ string) (llmcontracts.SteeringDeliveryState, error) {
+			return llmcontracts.SteeringDeliveryState{
+				Status: llmcontracts.SteeringDeliveryAmbiguous, SteeringID: "steer_ambiguous",
+				PreviousResponseID: "resp_original",
+			}, nil
+		}))
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
+		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
+	})
+
+	require.NotEmpty(t, steeringID)
+	stored, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Equal(t, models.ThreadInputModeSteering, stored.InputMode)
+	require.Empty(t, stored.ExpectedTurnID)
+	var state string
+	require.NoError(t, db.QueryRow(`SELECT delivery_state FROM thread_input_provider_steering WHERE thread_input_id = ?`, steeringID).Scan(&state))
+	require.Equal(t, repository.ProviderSteeringAcceptedAmbiguous, state)
 }
 
 func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {

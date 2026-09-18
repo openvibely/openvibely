@@ -24,6 +24,12 @@ var (
 	ErrInputNotPending   = errors.New("input is no longer pending")
 )
 
+const (
+	ProviderSteeringAcceptedPending   = "accepted_pending"
+	ProviderSteeringAcceptedAmbiguous = "accepted_ambiguous"
+	ProviderSteeringAcceptedConfirmed = "accepted_confirmed"
+)
+
 func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
 	return &ThreadInputRepo{
 		db:                     db,
@@ -642,18 +648,92 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 }
 
 func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, turnID string) error {
-	res, err := execBoundSQLite(ctx, r.db, `
-		UPDATE thread_inputs
-		SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
-		WHERE id = ? AND input_status = 'pending'`, runExecutionID, turnID, id)
-	if err != nil {
-		return fmt.Errorf("marking thread input applied: %w", err)
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE thread_inputs
+			SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
+			WHERE id = ? AND input_status = 'pending'`, runExecutionID, turnID, id)
+		if err != nil {
+			return fmt.Errorf("marking thread input applied: %w", err)
+		}
+		changed, _ := res.RowsAffected()
+		if changed == 0 {
+			return ErrInputNotPending
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE thread_input_provider_steering
+			SET delivery_state = ?, updated_at = datetime('now')
+			WHERE thread_input_id = ?`, ProviderSteeringAcceptedConfirmed, id); err != nil {
+			return fmt.Errorf("confirming provider steering delivery: %w", err)
+		}
+		return nil
+	})
+}
+
+func (r *ThreadInputRepo) RecordProviderSteering(ctx context.Context, inputIDs []string, steeringID, previousResponseID, responseID, deliveryState string) error {
+	if len(inputIDs) == 0 || steeringID == "" {
+		return nil
 	}
-	changed, _ := res.RowsAffected()
-	if changed == 0 {
-		return ErrInputNotPending
+	switch deliveryState {
+	case ProviderSteeringAcceptedPending, ProviderSteeringAcceptedAmbiguous, ProviderSteeringAcceptedConfirmed:
+	default:
+		return fmt.Errorf("invalid provider steering delivery state %q", deliveryState)
 	}
-	return nil
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		for _, inputID := range inputIDs {
+			res, err := tx.ExecContext(ctx, `
+				INSERT INTO thread_input_provider_steering
+					(thread_input_id, steering_id, previous_response_id, response_id, delivery_state)
+				SELECT id, ?, ?, ?, ?
+				FROM thread_inputs
+				WHERE id = ? AND input_mode = 'steering' AND input_status = 'pending'
+				ON CONFLICT(thread_input_id) DO UPDATE SET
+					steering_id = excluded.steering_id,
+					previous_response_id = excluded.previous_response_id,
+					response_id = excluded.response_id,
+					delivery_state = excluded.delivery_state,
+					updated_at = datetime('now')`, steeringID, previousResponseID, responseID, deliveryState, inputID)
+			if err != nil {
+				return fmt.Errorf("recording provider steering delivery for input %s: %w", inputID, err)
+			}
+			changed, _ := res.RowsAffected()
+			if changed == 0 {
+				return fmt.Errorf("recording provider steering delivery for input %s: %w", inputID, ErrInputNotPending)
+			}
+		}
+		return nil
+	})
+}
+
+func (r *ThreadInputRepo) MarkProviderSteeringAmbiguous(ctx context.Context, steeringIDs []string) error {
+	if len(steeringIDs) == 0 {
+		return nil
+	}
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		for _, steeringID := range steeringIDs {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE thread_input_provider_steering
+				SET delivery_state = ?, updated_at = datetime('now')
+				WHERE steering_id = ? AND delivery_state = ?`, ProviderSteeringAcceptedAmbiguous, steeringID, ProviderSteeringAcceptedPending); err != nil {
+				return fmt.Errorf("marking provider steering %s ambiguous: %w", steeringID, err)
+			}
+		}
+		return nil
+	})
+}
+
+func (r *ThreadInputRepo) ClearProviderSteering(ctx context.Context, steeringIDs []string) error {
+	if len(steeringIDs) == 0 {
+		return nil
+	}
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		for _, steeringID := range steeringIDs {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM thread_input_provider_steering WHERE steering_id = ?`, steeringID); err != nil {
+				return fmt.Errorf("clearing provider steering %s: %w", steeringID, err)
+			}
+		}
+		return nil
+	})
 }
 
 func (r *ThreadInputRepo) RestorePreparedSteering(ctx context.Context, ids []string, runExecutionID, expectedTurnID string) error {
@@ -681,9 +761,13 @@ func (r *ThreadInputRepo) RequeuePendingSteering(ctx context.Context, ids []stri
 	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `
-						UPDATE thread_inputs
-						SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
-						WHERE id = ? AND input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ?`, id, runExecutionID); err != nil {
+					UPDATE thread_inputs
+					SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
+					WHERE id = ? AND input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ?
+					  AND NOT EXISTS (
+						SELECT 1 FROM thread_input_provider_steering provider_steering
+						WHERE provider_steering.thread_input_id = thread_inputs.id
+					  )`, id, runExecutionID); err != nil {
 				return fmt.Errorf("requeueing steering input: %w", err)
 			}
 			input, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ? AND input_mode = 'queued' AND input_status = 'pending' AND run_execution_id = ?`, id, runExecutionID))
@@ -709,7 +793,12 @@ func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context
 	}
 	var requeued []models.ThreadInput
 	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
-		inputs, err := r.listWithExecutor(ctx, tx, `WHERE input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC`, runExecutionID)
+		inputs, err := r.listWithExecutor(ctx, tx, `WHERE input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ?
+			AND NOT EXISTS (
+				SELECT 1 FROM thread_input_provider_steering provider_steering
+				WHERE provider_steering.thread_input_id = thread_inputs.id
+			)
+			ORDER BY queue_position ASC, created_at ASC, rowid ASC`, runExecutionID)
 		if err != nil {
 			return err
 		}
