@@ -1450,25 +1450,27 @@ templ settingsContent(view ChannelsSettingsView) {
 	<!-- Webhook available agents data for JavaScript -->
 	<div id="webhook_agents_data" data-agents={ agentsJSON(view.AgentPickerOptions) } style="display:none"></div>
 
-		<style>
-			/* Keep password toggle button fixed inside input across press/focus states */
-			.password-toggle-btn:active,
-			.password-toggle-btn:focus,
-			.password-toggle-btn:focus-visible {
-				transform: translate(0, -50%) !important;
-			}
-			.password-toggle-btn.top-2:active,
-			.password-toggle-btn.top-2:focus,
-			.password-toggle-btn.top-2:focus-visible {
-				transform: translate(0, 0) !important;
-			}
-			.secret-textarea-masked {
-				-webkit-text-security: disc;
-			}
-		</style>
+	<style>
+		/* Keep password toggle button fixed inside input across press/focus states */
+		.password-toggle-btn:active,
+		.password-toggle-btn:focus,
+		.password-toggle-btn:focus-visible {
+			transform: translate(0, -50%) !important;
+		}
+		.password-toggle-btn.top-2:active,
+		.password-toggle-btn.top-2:focus,
+		.password-toggle-btn.top-2:focus-visible {
+			transform: translate(0, 0) !important;
+		}
+		.secret-textarea-masked {
+			-webkit-text-security: disc;
+		}
+	</style>
 
-			<script>
-				var pendingDeleteChannelURL = '';
+	@components.SecretInputVisibilityScript()
+
+	<script>
+		var pendingDeleteChannelURL = '';
 				var pendingDeleteChannelMethod = 'POST';
 
 				function openDeleteChannelConfirm(name, url, method) {
@@ -1624,32 +1626,6 @@ templ settingsContent(view ChannelsSettingsView) {
 				webhookAvailableAgents = [];
 			}
 		}
-			function togglePasswordVisibility(inputId, button) {
-				const input = document.getElementById(inputId);
-				if (!input || !button) return;
-				const eyeOpen = button.querySelector('.eye-open');
-				const eyeClosed = button.querySelector('.eye-closed');
-				const willReveal = input.type === 'password';
-				input.type = willReveal ? 'text' : 'password';
-				if (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);
-				if (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);
-				button.setAttribute('aria-pressed', willReveal ? 'true' : 'false');
-			}
-
-			function resetSecretInputVisibility(inputId) {
-				const input = document.getElementById(inputId);
-				if (!input) return;
-				input.type = 'password';
-				const button = document.querySelector("button[onclick=\"togglePasswordVisibility('" + inputId + "', this)\"]");
-				if (!button) return;
-				const eyeOpen = button.querySelector('.eye-open');
-				const eyeClosed = button.querySelector('.eye-closed');
-				if (eyeOpen) eyeOpen.classList.remove('hidden');
-				if (eyeClosed) eyeClosed.classList.add('hidden');
-				button.setAttribute('aria-pressed', 'false');
-			}
-
-
 			function toggleSecretTextareaVisibility(textareaId, button) {
 				const textarea = document.getElementById(textareaId);
 				if (!textarea) return;

@@ -917,8 +917,10 @@ for _, agent := range modelOptions {
 			}
 		</style>
 
-			<script>
-					function launchOAuthInSystemBrowser(path, anchor) {
+		@components.SecretInputVisibilityScript()
+
+		<script>
+			function launchOAuthInSystemBrowser(path, anchor) {
 						var href = path || '';
 						if (!href) return false;
 						href = modelMutationURL(href);
@@ -948,30 +950,6 @@ for _, agent := range modelOptions {
 						return false;
 					}
 
-					function togglePasswordVisibility(inputId, button) {
-						const input = document.getElementById(inputId);
-						if (!input || !button) return;
-						const eyeOpen = button.querySelector('.eye-open');
-						const eyeClosed = button.querySelector('.eye-closed');
-						const willReveal = input.type === 'password';
-						input.type = willReveal ? 'text' : 'password';
-						if (eyeOpen) eyeOpen.classList.toggle('hidden', willReveal);
-						if (eyeClosed) eyeClosed.classList.toggle('hidden', !willReveal);
-						button.setAttribute('aria-pressed', willReveal ? 'true' : 'false');
-					}
-
-						function resetSecretInputVisibility(inputId) {
-							const input = document.getElementById(inputId);
-							if (!input) return;
-							input.type = 'password';
-							const button = document.querySelector("button[onclick=\"togglePasswordVisibility('" + inputId + "', this)\"]");
-							if (!button) return;
-							const eyeOpen = button.querySelector('.eye-open');
-							const eyeClosed = button.querySelector('.eye-closed');
-							if (eyeOpen) eyeOpen.classList.remove('hidden');
-							if (eyeClosed) eyeClosed.classList.add('hidden');
-							button.setAttribute('aria-pressed', 'false');
-						}
 
 						function syncModelAPIKeySubmitValue() {
 							const form = document.getElementById('model_form');
