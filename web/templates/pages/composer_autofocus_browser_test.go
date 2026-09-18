@@ -190,6 +190,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
 		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
 		fmt.Sprintf("--remote-debugging-port=%d", debugPort),
 		"--user-data-dir="+filepath.Join(t.TempDir(), profileName+"-profile"), targetURL,
