@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
@@ -61,7 +62,6 @@ func modelCardListState(projectID string, filter repository.ModelCardListFilter)
 
 func (h *Handler) ListModels(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
-	htmxRequest := isHTMX(c)
 	ctx := c.Request().Context()
 	page := parseCardPageRequest(c)
 	filter := modelCardListFilter(c, page)
@@ -94,13 +94,16 @@ func (h *Handler) ListModels(c echo.Context) error {
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	listState := modelCardListState(currentProjectID, filter)
-	if htmxRequest || page.IsFragment {
-		setCardPageResponse(c, hasMore)
-		return render(c, http.StatusOK, pages.ModelsContentPageWithOAuthConnectionsAndState(agents, modelOptions, oauthConnections, modelWorkerStats, h.desktopMode, hasMore, listState))
-	}
-
-	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.ModelsPageWithOAuthConnectionsAndState(projects, currentProjectID, agents, modelOptions, oauthConnections, modelWorkerStats, h.desktopMode, hasMore, listState))
+	return h.renderCardBrowserPage(
+		c,
+		currentProjectID,
+		page,
+		hasMore,
+		pages.ModelsContentPageWithOAuthConnectionsAndState(agents, modelOptions, oauthConnections, modelWorkerStats, h.desktopMode, hasMore, listState),
+		func(projects []models.Project, projectID string) templ.Component {
+			return pages.ModelsPageWithOAuthConnectionsAndState(projects, projectID, agents, modelOptions, oauthConnections, modelWorkerStats, h.desktopMode, hasMore, listState)
+		},
+	)
 }
 
 type modelEditDetails struct {

@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
@@ -158,14 +159,16 @@ func (h *Handler) ListSkills(c echo.Context) error {
 			"source":     source,
 		},
 	}
-	if page.IsFragment {
-		setCardPageResponse(c, hasMore)
-	}
-	if isHTMX(c) || page.IsFragment {
-		return render(c, http.StatusOK, pages.SkillsContentForProjectPageWithState(pageItems, canManage, currentProjectID, hasMore, listState))
-	}
-	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.SkillsPageWithState(projects, currentProjectID, pageItems, canManage, hasMore, listState))
+	return h.renderCardBrowserPage(
+		c,
+		currentProjectID,
+		page,
+		hasMore,
+		pages.SkillsContentForProjectPageWithState(pageItems, canManage, currentProjectID, hasMore, listState),
+		func(projects []models.Project, projectID string) templ.Component {
+			return pages.SkillsPageWithState(projects, projectID, pageItems, canManage, hasMore, listState)
+		},
+	)
 }
 
 func skillCardMatchesSearch(skill pages.SkillCard, search string) bool {
