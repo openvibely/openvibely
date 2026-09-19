@@ -6447,7 +6447,9 @@ func TestRepublishOpenPullRequestAfterStartupSyncPreservesPendingUntilCompletion
 		},
 	})
 
-	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
+	publication, err := h.republishOpenPullRequestAfterStartupSync(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, &startupSyncPublication{prNumber: 1196, headSHA: publishedHead}, publication)
 	require.Equal(t, 1, publishCalls)
 	reloaded, err := prRepo.GetByTaskID(ctx, task.ID)
 	require.NoError(t, err)
@@ -6489,7 +6491,9 @@ func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *te
 	reservation, err := h.reserveStartupSyncPublication(ctx, task)
 	require.NoError(t, err)
 	require.False(t, reservation.active)
-	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
+	publication, err := h.republishOpenPullRequestAfterStartupSync(ctx, task.ID)
+	require.NoError(t, err)
+	require.Nil(t, publication)
 	require.Zero(t, publishCalls)
 	require.Zero(t, createCalls)
 	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
@@ -6499,7 +6503,7 @@ func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *te
 	require.False(t, recorded.NeedsRepublish)
 }
 
-func TestStartupSyncPublicationHonorsPRClosedDuringPublish(t *testing.T) {
+func TestStartupSyncPublicationDoesNotReadPRAfterSuccessfulPublish(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
 	prRepo := repository.NewTaskPullRequestRepo(db)
@@ -6533,14 +6537,16 @@ func TestStartupSyncPublicationHonorsPRClosedDuringPublish(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
-	require.GreaterOrEqual(t, getCalls, 4)
+	publication, err := h.republishOpenPullRequestAfterStartupSync(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, &startupSyncPublication{prNumber: 1196, headSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, publication)
+	require.Equal(t, 2, getCalls)
 	require.Zero(t, createCalls)
 	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1196, recorded.PRNumber)
-	require.Equal(t, "closed", recorded.PRState)
-	require.False(t, recorded.NeedsRepublish)
+	require.Equal(t, "open", recorded.PRState)
+	require.True(t, recorded.NeedsRepublish)
 }
 
 func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
@@ -6600,7 +6606,7 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 	})
 
 	require.Equal(t, 1, publishCalls)
-	require.Equal(t, 3, getCalls, "completion must not perform another eventually consistent PR head read")
+	require.Equal(t, 2, getCalls, "completion must not read PR state again after successful publication")
 	completed, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ExecCompleted, completed.Status)

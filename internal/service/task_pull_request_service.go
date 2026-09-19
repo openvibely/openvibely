@@ -354,17 +354,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if existingPR != nil && IsOpenPullRequestState(existingPR.PRState) {
 		livePR := validatedExistingPR
 		if livePR != nil {
-			// Recheck only the PR identity and open state after publication. The
-			// successful PublishBranch result is authoritative for the head SHA because
-			// an immediate PR read can briefly report the previous head after the branch
-			// ref update succeeds.
-			livePR, err = s.github.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
-			if err != nil {
-				return nil, fmt.Errorf("verifying existing pull request #%d after publication: %w", existingPR.PRNumber, err)
-			}
-			if err := ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err != nil {
-				return nil, fmt.Errorf("startup reconciliation pull request #%d is unavailable after publication: %w", opts.RequireExistingOpenPR, err)
-			}
+			// Startup reconciliation already verified the PR before publication.
+			// Trust the successful branch publication instead of immediately reading
+			// GitHub's eventually consistent pull-request representation again.
 			publishedPR := *livePR
 			publishedPR.HeadSHA = publishedHeadSHA
 			livePR = &publishedPR
