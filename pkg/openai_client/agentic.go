@@ -95,6 +95,14 @@ type AgenticOptions struct {
 	// ToolFilter can deny tool execution by name at runtime.
 	ToolFilter func(name string) bool
 
+	// EnableAsyncToolCalls persists and executes async-marked function tools before
+	// sending their results in a later Responses turn with the original call_id.
+	EnableAsyncToolCalls bool
+	OnAsyncToolCall      func(context.Context, AsyncToolCall) (AsyncToolCallRecord, error)
+	OnAsyncToolResult    func(context.Context, AsyncToolCallRecord, string, bool) error
+	OnAsyncToolDelivered func(context.Context, AsyncToolCallRecord) error
+	OnAsyncToolRejected  func(context.Context, AsyncToolCallRecord, error) error
+
 	// WebSearchEnabled adds the provider-native web search tool to the request
 	// when the model supports it. The search is executed server-side by OpenAI;
 	// no local tool execution is needed.
@@ -137,6 +145,24 @@ type AgenticResponse struct {
 	// AstraReasoningStateJSON is durable provider session state for preserving
 	// request-level effort and configuration-update history across cold starts.
 	AstraReasoningStateJSON string
+}
+
+// AsyncToolCall is the durable identity OpenVibely stores before executing an
+// async provider function tool.
+type AsyncToolCall struct {
+	ResponseID string
+	CallID     string
+	Name       string
+	Arguments  json.RawMessage
+}
+
+// AsyncToolCallRecord is an opaque persisted async-call handle returned by the
+// application layer and passed back for completion/delivery transitions.
+type AsyncToolCallRecord struct {
+	ID         string
+	ResponseID string
+	CallID     string
+	Name       string
 }
 
 // AstraSteeringDeliveryStatus describes provider-side mid-turn steering delivery state.
@@ -438,6 +464,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		return wrapAstraSteeringCommits(err, c.responsesTransportState)
 	}
 
+	pendingAsyncDeliveries := []AsyncToolCallRecord(nil)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
 			if turn == 0 || !opts.AutoCompaction {
@@ -483,11 +510,25 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
 		})
 		if err != nil {
+			providerErr := CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
+			for _, record := range pendingAsyncDeliveries {
+				if opts.OnAsyncToolRejected != nil {
+					_ = opts.OnAsyncToolRejected(ctx, record, providerErr)
+				}
+			}
 			if steeringFailure := c.responsesTransportState.takeAstraSteeringFailure(); steeringFailure != nil {
 				return nil, wrapSteeringCommits(steeringFailure)
 			}
-			return nil, wrapSteeringCommits(CategorizeProviderError(fmt.Errorf("turn %d: %w", turn+1, err)))
+			return nil, wrapSteeringCommits(providerErr)
 		}
+		for _, record := range pendingAsyncDeliveries {
+			if opts.OnAsyncToolDelivered != nil {
+				if err := opts.OnAsyncToolDelivered(ctx, record); err != nil {
+					return nil, wrapSteeringCommits(fmt.Errorf("turn %d mark async tool delivered: %w", turn+1, err))
+				}
+			}
+		}
+		pendingAsyncDeliveries = nil
 		if steeringFailure := c.responsesTransportState.takeAstraSteeringFailure(); steeringFailure != nil {
 			return nil, wrapSteeringCommits(steeringFailure)
 		}
@@ -523,8 +564,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			break
 		}
 
-		// Execute tools and add results.
-		tasks := make([]openAIToolExecutionTask, 0, len(turnResult.toolCalls))
+		// Execute tools and add results. Async-marked runtime tools are persisted
+		// before execution, then delivered in the next Responses turn with the
+		// original call_id. Non-async tools keep the existing synchronous path.
+		syncTasks := make([]openAIToolExecutionTask, 0, len(turnResult.toolCalls))
+		asyncTasks := make([]openAIToolExecutionTask, 0, len(turnResult.toolCalls))
 		for _, tc := range turnResult.toolCalls {
 			inputJSON := json.RawMessage(tc.Arguments)
 			if opts.OnToolUse != nil {
@@ -532,15 +576,31 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			var inputMap map[string]interface{}
 			_ = json.Unmarshal(inputJSON, &inputMap)
-			tasks = append(tasks, openAIToolExecutionTask{
-				call:     tc,
-				input:    inputJSON,
-				inputMap: inputMap,
-			})
+			task := openAIToolExecutionTask{call: tc, input: inputJSON, inputMap: inputMap}
+			if shouldRunOpenAIToolAsync(opts, tools, tc.Name) {
+				record, err := opts.OnAsyncToolCall(ctx, AsyncToolCall{ResponseID: turnResult.responseID, CallID: tc.CallID, Name: tc.Name, Arguments: inputJSON})
+				if err != nil {
+					return nil, wrapSteeringCommits(fmt.Errorf("turn %d persist async tool call: %w", turn+1, err))
+				}
+				task.record = record
+				asyncTasks = append(asyncTasks, task)
+				continue
+			}
+			syncTasks = append(syncTasks, task)
 		}
 
-		executed := executeOpenAIToolTasks(ctx, opts, tasks)
+		executed := executeOpenAIToolTasks(ctx, opts, syncTasks)
+		asyncExecuted := executeOpenAIToolTasks(ctx, opts, asyncTasks)
+		for _, exec := range asyncExecuted {
+			if opts.OnAsyncToolResult != nil {
+				if err := opts.OnAsyncToolResult(ctx, exec.record, exec.output, exec.isError); err != nil {
+					return nil, wrapSteeringCommits(fmt.Errorf("turn %d complete async tool call: %w", turn+1, err))
+				}
+			}
+		}
+		executed = append(executed, asyncExecuted...)
 		localItemsAfterResponse := make([]any, 0, len(executed))
+		deliveryRecords := make([]AsyncToolCallRecord, 0, len(asyncExecuted))
 		for _, exec := range executed {
 			if opts.OnToolResult != nil {
 				opts.OnToolResult(exec.call.Name, exec.output, exec.isError)
@@ -565,7 +625,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			inputItems = append(inputItems, toolResultItem)
 			localItemsAfterResponse = append(localItemsAfterResponse, toolResultItem)
+			if exec.record.ID != "" {
+				deliveryRecords = append(deliveryRecords, exec.record)
+			}
 		}
+		pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
 
 		if opts.OnToolBoundarySteering != nil {
 			steering, err := opts.OnToolBoundarySteering(ctx)
@@ -627,6 +691,7 @@ type openAIToolExecutionTask struct {
 	call     toolCallInfo
 	input    json.RawMessage
 	inputMap map[string]interface{}
+	record   AsyncToolCallRecord
 }
 
 type openAIToolExecutionResult struct {
@@ -634,6 +699,7 @@ type openAIToolExecutionResult struct {
 	inputMap map[string]interface{}
 	output   string
 	isError  bool
+	record   AsyncToolCallRecord
 }
 
 func normalizeOpenAIFunctionCallArguments(raw any) string {
@@ -642,6 +708,22 @@ func normalizeOpenAIFunctionCallArguments(raw any) string {
 		return "{}"
 	}
 	return args
+}
+
+func shouldRunOpenAIToolAsync(opts *AgenticOptions, tools []ToolDefinition, name string) bool {
+	if opts == nil || !opts.EnableAsyncToolCalls || opts.OnAsyncToolCall == nil || opts.OnAsyncToolResult == nil {
+		return false
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for _, tool := range tools {
+		if strings.EqualFold(strings.TrimSpace(tool.Name), name) && tool.Async && strings.EqualFold(strings.TrimSpace(tool.Type), "function") {
+			return true
+		}
+	}
+	return false
 }
 
 func completedOpenAIFunctionCallArguments(raw any, streamedArgs string) string {
@@ -666,6 +748,7 @@ func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []o
 			inputMap: task.inputMap,
 			output:   output,
 			isError:  isError,
+			record:   task.record,
 		}
 	}
 	if requestIndex := exclusiveRequestUserInputTask(tasks); requestIndex >= 0 {
@@ -1776,6 +1859,7 @@ type agenticTurnResult struct {
 	text              string
 	outputItems       []any
 	toolCalls         []toolCallInfo
+	responseID        string
 	stopReason        string
 	model             string
 	inputTokens       int
@@ -2318,6 +2402,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				sawThinking = true
 			}
 		}
+		result.responseID = stringFromAny(completed["id"])
 		result.model = stringFromAny(completed["model"])
 		result.inputTokens, result.outputTokens = extractUsage(completed)
 		result.cachedInputTokens = extractCachedInputTokens(completed)

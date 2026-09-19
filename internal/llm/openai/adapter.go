@@ -105,7 +105,7 @@ func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
 	})
 }
 
-func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefinition {
+func runtimeOpenAITools(rt *llmcontracts.RuntimeTools, enableAsync bool) []openaiclient.ToolDefinition {
 	if rt == nil || len(rt.Definitions) == 0 {
 		return nil
 	}
@@ -120,9 +120,87 @@ func runtimeOpenAITools(rt *llmcontracts.RuntimeTools) []openaiclient.ToolDefini
 			Name:        name,
 			Description: strings.TrimSpace(def.Description),
 			Parameters:  def.Parameters,
+			Async:       enableAsync && openAIRuntimeToolAsyncAllowed(def),
 		})
 	}
 	return out
+}
+
+func openAIRuntimeToolAsyncAllowed(def llmcontracts.RuntimeToolDefinition) bool {
+	if def.Access != llmcontracts.RuntimeToolAccessRead {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(def.Name)) {
+	case "memory_view", "skill_view", "list_tasks", "list_schedules", "view_pulse", "view_usage_analytics", "list_capabilities", "get_task_goal":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIAsyncRuntimeToolsEnabled(agent models.LLMConfig) bool {
+	return strings.EqualFold(strings.TrimSpace(agent.Model), "gpt-6-astra") && (agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth())
+}
+
+type openAIAsyncToolCallbacks struct {
+	enabled     bool
+	onCall      func(context.Context, openaiclient.AsyncToolCall) (openaiclient.AsyncToolCallRecord, error)
+	onResult    func(context.Context, openaiclient.AsyncToolCallRecord, string, bool) error
+	onDelivered func(context.Context, openaiclient.AsyncToolCallRecord) error
+	onRejected  func(context.Context, openaiclient.AsyncToolCallRecord, error) error
+}
+
+func (a *Adapter) asyncRuntimeToolCallbacks(ctx context.Context, projectID, execID string) openAIAsyncToolCallbacks {
+	if a == nil || a.execRepo == nil || strings.TrimSpace(execID) == "" {
+		return openAIAsyncToolCallbacks{}
+	}
+	repo := repository.NewOpenAIAsyncToolCallRepo(a.execRepo.DB())
+	execID = strings.TrimSpace(execID)
+	projectID = strings.TrimSpace(projectID)
+	return openAIAsyncToolCallbacks{
+		enabled: true,
+		onCall: func(callCtx context.Context, call openaiclient.AsyncToolCall) (openaiclient.AsyncToolCallRecord, error) {
+			execution, err := a.execRepo.GetByID(callCtx, execID)
+			if err != nil {
+				return openaiclient.AsyncToolCallRecord{}, err
+			}
+			if execution == nil {
+				return openaiclient.AsyncToolCallRecord{}, fmt.Errorf("execution %s not found for async tool call", execID)
+			}
+			deadline := time.Now().UTC().Add(30 * time.Minute)
+			persisted, err := repo.CreatePending(callCtx, &models.OpenAIAsyncToolCall{
+				ProjectID:     projectID,
+				TaskID:        strings.TrimSpace(execution.TaskID),
+				ExecutionID:   execID,
+				ResponseID:    strings.TrimSpace(call.ResponseID),
+				CallID:        strings.TrimSpace(call.CallID),
+				ToolName:      strings.TrimSpace(call.Name),
+				ArgumentsJSON: strings.TrimSpace(string(call.Arguments)),
+				DeadlineAt:    deadline,
+			})
+			if err != nil {
+				return openaiclient.AsyncToolCallRecord{}, err
+			}
+			claimed, err := repo.ClaimForRun(callCtx, persisted.ID, time.Now().UTC())
+			if err != nil {
+				return openaiclient.AsyncToolCallRecord{}, err
+			}
+			if !claimed && persisted.Status != models.OpenAIAsyncToolCallRunning {
+				return openaiclient.AsyncToolCallRecord{}, fmt.Errorf("async tool call %s is already %s", persisted.CallID, persisted.Status)
+			}
+			return openaiclient.AsyncToolCallRecord{ID: persisted.ID, ResponseID: persisted.ResponseID, CallID: persisted.CallID, Name: persisted.ToolName}, nil
+		},
+		onResult: func(resultCtx context.Context, record openaiclient.AsyncToolCallRecord, output string, isError bool) error {
+			return repo.MarkCompleted(resultCtx, record.ID, output, isError, time.Now().UTC())
+		},
+		onDelivered: func(deliverCtx context.Context, record openaiclient.AsyncToolCallRecord) error {
+			_, err := repo.MarkDelivered(deliverCtx, record.ID, time.Now().UTC())
+			return err
+		},
+		onRejected: func(rejectCtx context.Context, record openaiclient.AsyncToolCallRecord, providerErr error) error {
+			return repo.MarkProviderRejected(rejectCtx, record.ID, providerErr.Error(), time.Now().UTC())
+		},
+	}
 }
 
 func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessage) (string, bool, error), rt *llmcontracts.RuntimeTools) func(context.Context, string, json.RawMessage) (string, bool, error) {
@@ -303,7 +381,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			ReasoningSummary: "auto",
 			WorkDir:          effectiveWorkDir,
 			Attachments:      oaAttachments,
-			ExtraTools:       runtimeOpenAITools(rt), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
+			ExtraTools:       runtimeOpenAITools(rt, false), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
 			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)),
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 			EnableAstraConfigurationUpdate: true,
@@ -336,7 +414,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 }
 
 // CallStreaming makes a streaming OpenAI API call with tool use.
-func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
+func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, projectID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
 
 	client, releaseTransport, err := a.getClient(ctx, agent, a.taskTransportScope(ctx, execID))
@@ -363,7 +441,8 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	enableAsyncTools := openAIAsyncRuntimeToolsEnabled(agent) && strings.TrimSpace(execID) != "" && a.execRepo != nil
+	extraTools = append(extraTools, runtimeOpenAITools(rt, enableAsyncTools)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
 
@@ -372,6 +451,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	inThinking := false
 
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
+	asyncCallbacks := a.asyncRuntimeToolCallbacks(ctx, projectID, execID)
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
@@ -390,6 +470,11 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		ToolExecutor:                   toolExecutor,
 		ToolFilter:                     toolFilter,
 		SkipDefaultTools:               skipDefaultTools,
+		EnableAsyncToolCalls:           enableAsyncTools && asyncCallbacks.enabled,
+		OnAsyncToolCall:                asyncCallbacks.onCall,
+		OnAsyncToolResult:              asyncCallbacks.onResult,
+		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
+		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		EnableAstraMidTurnSteering:     true,
 		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
@@ -451,7 +536,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 }
 
 // CallChatStreaming makes a streaming OpenAI chat call with history.
-func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID, transportScope string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
+func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID, projectID, transportScope string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallChatStreaming model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v auth_method=%s workDir=%s",
 		agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, agent.AuthMethod, workDir)
 
@@ -480,7 +565,8 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	enableAsyncTools := openAIAsyncRuntimeToolsEnabled(agent) && strings.TrimSpace(execID) != "" && a.execRepo != nil
+	extraTools = append(extraTools, runtimeOpenAITools(rt, enableAsyncTools)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(isTaskFollowup, chatMode))
 
@@ -490,6 +576,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	skipDefaultTools := agentSkipDefaultTools(agentDef) || llmcontracts.RuntimeSkipDefaultTools(rt)
+	asyncCallbacks := a.asyncRuntimeToolCallbacks(ctx, projectID, execID)
 	restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		Model:                     agent.Model,
@@ -509,6 +596,11 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		ToolExecutor:                   toolExecutor,
 		ToolFilter:                     toolFilter,
 		SkipDefaultTools:               skipDefaultTools,
+		EnableAsyncToolCalls:           enableAsyncTools && asyncCallbacks.enabled,
+		OnAsyncToolCall:                asyncCallbacks.onCall,
+		OnAsyncToolResult:              asyncCallbacks.onResult,
+		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
+		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		EnableAstraMidTurnSteering:     true,
 		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
@@ -596,7 +688,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	extraTools = append(extraTools, runtimeOpenAITools(rt, false)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
 
@@ -675,7 +767,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
-	extraTools = append(extraTools, runtimeOpenAITools(rt)...)
+	extraTools = append(extraTools, runtimeOpenAITools(rt, false)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(isTaskFollowup, chatMode))
 
