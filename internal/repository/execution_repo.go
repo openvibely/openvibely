@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
@@ -582,6 +583,15 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 	if err != nil {
 		return fmt.Errorf("completing execution: %w", err)
 	}
+	if status == models.ExecCancelled {
+		message := strings.TrimSpace(errMsg)
+		if message == "" {
+			message = "execution cancelled"
+		}
+		if _, err := NewOpenAIAsyncToolCallRepo(r.db).CancelByExecution(ctx, id, message, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
 	if err := r.syncAutomationActivitiesForExecution(ctx, id, status, errMsg); err != nil {
 		applog.Infof("[execution-repo] automation activity projection deferred execution=%s: %v", id, err)
 		return nil
@@ -680,6 +690,11 @@ func (r *ExecutionRepo) CancelActiveByTaskThroughHistoryOrderReturningIDs(ctx co
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("scanning cancelled active execution ids: %w", err)
+		}
+		for _, id := range ids {
+			if err := cancelOpenAIAsyncToolCallsForExecution(ctx, conn, id, "cancelled"); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
