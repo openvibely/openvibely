@@ -52,7 +52,7 @@ templ BreadcrumbSelectorResults(kind string, currentID string, items []models.Br
 		} else {
 			<div role="listbox" aria-label={ kind + "s" } class={ templateui.SearchableSelectorMenuClass }>
 				for index, item := range items {
-					if breadcrumbSelectorShowSectionLabel(kind, currentID, items, index) {
+					if breadcrumbSelectorShowSectionLabel(kind, items, index) {
 						<div class="menu-title px-4 pb-1 pt-2" role="presentation" data-breadcrumb-selector-section>
 							<span>{ breadcrumbSelectorSectionLabel(item, searchActive) }</span>
 						</div>
@@ -67,12 +67,10 @@ templ BreadcrumbSelectorResults(kind string, currentID string, items []models.Br
 						data-searchable-selector-option
 					>
 						<span class="w-4 shrink-0" aria-hidden="true">{ breadcrumbSelectorCheck(item.ID == currentID) }</span>
-						<span class="min-w-0 flex-1 truncate">{ item.Name }</span>
-						if item.Status == models.StatusRunning {
-							<span class="ml-auto shrink-0" data-breadcrumb-selector-running>
-								@RunningSpinner("")
-							</span>
+						if kind == "Task" {
+							@TaskStateIcon(models.Task{Status: item.Status, Category: item.Category})
 						}
+						<span class="min-w-0 flex-1 truncate">{ item.Name }</span>
 					</a>
 				}
 			</div>
@@ -89,22 +87,14 @@ func breadcrumbSelectorCheck(current bool) string {
 	return ""
 }
 
-func breadcrumbSelectorShowSectionLabel(kind, currentID string, items []models.BreadcrumbSelectorItem, index int) bool {
+func breadcrumbSelectorShowSectionLabel(kind string, items []models.BreadcrumbSelectorItem, index int) bool {
 	if kind != "Task" || index < 0 || index >= len(items) {
 		return false
 	}
-	item := items[index]
-	if item.ID == currentID {
-		return false
+	if index == 0 {
+		return true
 	}
-	section := breadcrumbSelectorSectionKey(item)
-	for previous := index - 1; previous >= 0; previous-- {
-		if items[previous].ID == currentID {
-			continue
-		}
-		return breadcrumbSelectorSectionKey(items[previous]) != section
-	}
-	return true
+	return breadcrumbSelectorSectionKey(items[index-1]) != breadcrumbSelectorSectionKey(items[index])
 }
 
 func breadcrumbSelectorSectionKey(item models.BreadcrumbSelectorItem) string {

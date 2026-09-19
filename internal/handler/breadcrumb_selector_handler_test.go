@@ -41,10 +41,12 @@ func TestBreadcrumbSelectorTaskResultsAreProjectScopedAndPreserveAllowlistedTab(
 	require.NotContains(t, rec.Body.String(), secret.Title)
 }
 
-func TestBreadcrumbSelectorTaskResultsGroupRunningTasksBelowSelected(t *testing.T) {
+func TestBreadcrumbSelectorTaskResultsGroupCurrentTaskWithinStatusSection(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Task selector running project")
-	current := createTask(t, h, project.ID, "Selected task")
+	current := createTask(t, h, project.ID, "Selected task", func(task *models.Task) {
+		task.Status = models.StatusRunning
+	})
 	running := createTask(t, h, project.ID, "Running selector task", func(task *models.Task) {
 		task.Status = models.StatusRunning
 	})
@@ -61,9 +63,9 @@ func TestBreadcrumbSelectorTaskResultsGroupRunningTasksBelowSelected(t *testing.
 	require.Contains(t, body, `data-breadcrumb-selector-section`)
 	require.Contains(t, body, `<span>Running</span>`)
 	require.Contains(t, body, `<span>Recent</span>`)
-	require.Contains(t, body, `data-breadcrumb-selector-running`)
-	require.Less(t, strings.Index(body, current.Title), strings.Index(body, `<span>Running</span>`))
-	require.Less(t, strings.Index(body, `<span>Running</span>`), strings.Index(body, running.Title))
+	require.Contains(t, body, `data-task-state="running"`)
+	require.Less(t, strings.Index(body, `<span>Running</span>`), strings.Index(body, current.Title))
+	require.Less(t, strings.Index(body, current.Title), strings.Index(body, running.Title))
 	require.Less(t, strings.Index(body, running.Title), strings.Index(body, `<span>Recent</span>`))
 
 	req = httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+current.ID+"&search=running", nil)
