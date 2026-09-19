@@ -6499,7 +6499,7 @@ func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *te
 	require.False(t, recorded.NeedsRepublish)
 }
 
-func TestStartupSyncPublicationHonorsPRClosedDuringPublish(t *testing.T) {
+func TestStartupSyncPublicationDoesNotRecheckPRAfterSuccessfulPublish(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
 	prRepo := repository.NewTaskPullRequestRepo(db)
@@ -6534,13 +6534,13 @@ func TestStartupSyncPublicationHonorsPRClosedDuringPublish(t *testing.T) {
 	})
 
 	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
-	require.GreaterOrEqual(t, getCalls, 4)
+	require.Equal(t, 2, getCalls)
 	require.Zero(t, createCalls)
 	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1196, recorded.PRNumber)
-	require.Equal(t, "closed", recorded.PRState)
-	require.False(t, recorded.NeedsRepublish)
+	require.Equal(t, "open", recorded.PRState)
+	require.True(t, recorded.NeedsRepublish)
 }
 
 func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
