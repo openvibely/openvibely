@@ -1504,14 +1504,16 @@ func TestTasksMergeOptionLoaderSupportsKeyboardDeduplicationAndRetry(t *testing.
 		`const taskCardMergeOptionRequests = new Map()`,
 		`taskCardMergeOptionRequests.get(refreshURL)`,
 		`function loadTaskCardMergeOptions(dropdown, label)`,
+		`function setTaskCardMergeOptionsStatus(options, mode, dropdown, label)`,
 		`options.hasAttribute('data-task-card-merge-options-loading')`,
-		`fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true'}})`,
+		`'HX-Current-URL': window.location.href`,
 		`response.headers.get('HX-Redirect')`,
 		`window.location.assign(redirectURL)`,
 		`options.classList.add('htmx-request')`,
+		`setTaskCardMergeOptionsStatus(options, 'loading', dropdown, label)`,
 		`options.outerHTML = html`,
 		`event.target === trigger && trigger.matches('[data-task-card-menu-trigger]')`,
-		`Could not load Git actions. Retry`,
+		`setTaskCardMergeOptionsStatus(options, 'error', dropdown, label)`,
 		`loadTaskCardMergeOptions(openDropdown, openDropdown.querySelector('[data-kanban-menu-trigger]'))`,
 	} {
 		if !strings.Contains(body, required) {
@@ -1541,16 +1543,18 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 		function waitFor(fn,label){return new Promise(function(resolve,reject){var end=Date.now()+5000;(function poll(){if(fn())return resolve();if(Date.now()>end)return reject(new Error('timeout '+label));setTimeout(poll,20)})()})}
 		(async function(){
 			var card=document.getElementById('task-merge-loader-browser-task');var trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
-			await waitFor(function(){var options=card.querySelector('[data-task-card-merge-options]');return options&&options.classList.contains('htmx-request')},'keyboard loader start');
-			var options=card.querySelector('[data-task-card-merge-options]');var spinner=options.querySelector('.htmx-indicator');await waitFor(function(){return parseFloat(getComputedStyle(spinner).opacity)>=0.9},'visible loading spinner');
+			await waitFor(function(){var options=card.querySelector('[data-task-card-merge-options]');return options&&options.getAttribute('aria-busy')==='true'},'keyboard loader start');
+			var options=card.querySelector('[data-task-card-merge-options]');var loading=options.querySelector('[data-task-card-merge-options-loading-status]');await waitFor(function(){return !loading.classList.contains('hidden')},'visible loading spinner');
 			options.tabIndex=0;options.focus();await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
-			await waitFor(function(){var current=document.querySelector('[data-task-card-merge-options]');return current&&current.classList.contains('htmx-request')},'restored loader start');
+			card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');window.loadTaskCardMergeOptions(trigger.closest('[data-kanban-menu-key]'),trigger);
+			await waitFor(function(){var current=document.querySelector('[data-task-card-merge-options]');return current&&current.getAttribute('aria-busy')==='true'},'replacement loader start');
 			if((await fetch('/option-count').then(function(r){return r.text()})).trim()!=='1')fail('board refresh duplicated the in-flight Git request');
 			await fetch('/release-first',{method:'POST'});await waitFor(function(){return !!document.querySelector('[data-task-card-local-submenu]')},'shared request hydration');
 			var dropdown=document.querySelector('[data-kanban-menu-key="task-merge-loader-browser-task"]');if(window.closeKanbanMenu)window.closeKanbanMenu(dropdown,false);
 			await fetch('/set-mode?mode=fail',{method:'POST'});await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
-			await waitFor(function(){var retry=card.querySelector('[data-task-card-merge-options] button');return retry&&retry.textContent.indexOf('Retry')>=0},'visible retry');
-			await fetch('/set-mode?mode=auth',{method:'POST'});card.querySelector('[data-task-card-merge-options] button').click();
+			await waitFor(function(){var retry=card.querySelector('[data-task-card-merge-options-retry]');return retry&&!retry.classList.contains('hidden')},'visible retry');
+			await fetch('/set-mode?mode=auth',{method:'POST'});card.querySelector('[data-task-card-merge-options-retry]').click();
+			await waitFor(function(){var current=card.querySelector('[data-task-card-merge-options]');var retry=current.querySelector('[data-task-card-merge-options-retry]');var loading=current.querySelector('[data-task-card-merge-options-loading-status]');return current.getAttribute('aria-busy')==='true'&&retry.classList.contains('hidden')&&!loading.classList.contains('hidden')},'visible retry progress');
 		})().catch(function(error){fetch('/browser-result?status=fail&message='+encodeURIComponent(String(error&&error.stack||error)),{method:'POST'})})
 	});</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1585,6 +1589,10 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 				return
 			}
 			if requestMode == "auth" {
+				if !strings.HasSuffix(r.Header.Get("HX-Current-URL"), "/tasks?project_id="+project.ID) {
+					http.Error(w, "missing current page URL", http.StatusBadRequest)
+					return
+				}
 				w.Header().Set("HX-Redirect", "/login-marker")
 				w.WriteHeader(http.StatusUnauthorized)
 				return

@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -134,7 +135,7 @@ func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			nextURL := c.Request().URL.RequestURI()
+			nextURL := authNextURL(c.Request())
 			loginURL := auth.RedirectURL(nextURL)
 			if h.authMode == auth.AuthModeHostedSSO {
 				loginURL = auth.HostedSSOStartURL(nextURL)
@@ -146,6 +147,30 @@ func (h *Handler) AuthMiddleware() echo.MiddlewareFunc {
 			return c.Redirect(http.StatusFound, loginURL)
 		}
 	}
+}
+
+func authNextURL(request *http.Request) string {
+	fallback := request.URL.RequestURI()
+	if request.Header.Get("HX-Request") != "true" {
+		return fallback
+	}
+
+	rawCurrentURL := strings.TrimSpace(request.Header.Get("HX-Current-URL"))
+	if rawCurrentURL == "" || strings.HasPrefix(rawCurrentURL, "//") {
+		return fallback
+	}
+	currentURL, err := url.Parse(rawCurrentURL)
+	if err != nil {
+		return fallback
+	}
+	if currentURL.Host != "" && !strings.EqualFold(currentURL.Host, request.Host) {
+		return fallback
+	}
+	nextURL := currentURL.RequestURI()
+	if nextURL == "" || !strings.HasPrefix(nextURL, "/") || strings.HasPrefix(nextURL, "//") {
+		return fallback
+	}
+	return nextURL
 }
 
 func (h *Handler) AuthLoginPage(c echo.Context) error {
