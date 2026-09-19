@@ -536,6 +536,21 @@ func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T
 	if cancelIndex < 0 || closeIndex < 0 || cancelIndex > closeIndex {
 		t.Fatal("expected successful HTMX model save modal close to cancel stale OpenAI-compatible discovery before closing")
 	}
+	modelModalStart := strings.Index(out, `<dialog id="new_model_modal"`)
+	if modelModalStart < 0 {
+		t.Fatal("expected rendered content to include the model modal")
+	}
+	modelModalEnd := strings.Index(out[modelModalStart:], `</dialog>`)
+	if modelModalEnd < 0 {
+		t.Fatal("expected rendered content to include the model modal closing tag")
+	}
+	modelModal := out[modelModalStart : modelModalStart+modelModalEnd]
+	if strings.Contains(modelModal, `<form method="dialog" class="modal-backdrop"><button>close</button></form>`) {
+		t.Fatal("model modal backdrop still uses native dialog close without cancelling stale discovery")
+	}
+	if !strings.Contains(modelModal, `<form class="modal-backdrop"><button type="button" onclick="closeModelModal()">close</button></form>`) {
+		t.Fatal("expected model modal backdrop to close through the cancellation-aware helper")
+	}
 }
 
 func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
