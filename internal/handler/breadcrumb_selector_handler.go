@@ -52,7 +52,7 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 	}
 	items, hasMore := trimBreadcrumbSelectorItems(items, breadcrumbSelectorLimit, currentID, kind == "Task")
 	for i := range items {
-		items[i].URL = breadcrumbSelectorItemURL(c.Param("resource"), items[i].ID, projectID, c.QueryParam("tab"), c.QueryParam("view"), c.QueryParam("from"))
+		items[i].URL = breadcrumbSelectorItemURL(c.Param("resource"), items[i].ID, projectID, c.QueryParam("tab"), c.QueryParam("view"), c.QueryParam("from"), c.QueryParam("automation_id"), c.QueryParam("automation_name"))
 	}
 	return render(c, http.StatusOK, components.BreadcrumbSelectorResults(kind, currentID, items, hasMore, search != ""))
 }
@@ -86,7 +86,7 @@ func breadcrumbSelectorItemsContainID(items []models.BreadcrumbSelectorItem, id 
 	return false
 }
 
-func breadcrumbSelectorItemURL(resource, id, projectID, tab, view, from string) string {
+func breadcrumbSelectorItemURL(resource, id, projectID, tab, view, from, automationID, automationName string) string {
 	values := url.Values{"project_id": {projectID}}
 	path := "/automations/" + url.PathEscape(id)
 	if resource == "tasks" {
@@ -95,8 +95,17 @@ func breadcrumbSelectorItemURL(resource, id, projectID, tab, view, from string) 
 		case "details", "chat", "changes", "schedules", "chaining", "attachments", "lifecycle":
 			values.Set("tab", tab)
 		}
-		if from == "schedule" {
-			values.Set("from", "schedule")
+		switch from {
+		case "schedule", "chat", "alerts":
+			values.Set("from", from)
+		case "automation":
+			values.Set("from", "automation")
+			if automationID != "" {
+				values.Set("automation_id", automationID)
+			}
+			if automationName != "" {
+				values.Set("automation_name", automationName)
+			}
 		}
 	} else if view == "edit" {
 		path += "/builder"
