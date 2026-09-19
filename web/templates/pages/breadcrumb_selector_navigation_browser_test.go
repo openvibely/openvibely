@@ -148,6 +148,21 @@ window.addEventListener('DOMContentLoaded', function() {
     history.back();
     await waitFor(function(){ return route('task', 'task-two'); }, 'history back again');
 
+    await window.openVibelyNavigate('/tasks/task-one?project_id=project-browser&tab=details&from=chat');
+    await waitFor(function(){ return route('task', 'task-one'); }, 'Chat-origin Task detail');
+    await waitFor(function(){ var back=document.getElementById('task-back-btn'); return back && back.textContent==='Chat' && back.getAttribute('href')==='/chat?project_id=project-browser'; }, 'Chat back breadcrumb');
+    htmx.process(selector());
+    button().click();
+    await waitFor(function(){ return dialog().open && options().length>0; }, 'Chat-origin Task selector');
+    setSearch('two');
+    await waitFor(function(){ return options().some(function(option){return option.textContent.indexOf('Task Two')>=0;}); }, 'Chat-origin Task search');
+    options().filter(function(option){ return option.textContent.indexOf('Task Two')>=0; })[0].click();
+    await waitFor(function(){ return route('task', 'task-two'); }, 'Chat-origin Task switch');
+    var chatParams = new URLSearchParams(location.search);
+    if (location.pathname!='/tasks/task-two' || chatParams.get('project_id')!=='project-browser' || chatParams.get('tab')!=='details' || chatParams.get('from')!=='chat') fail('Task switch lost Chat context: '+location.href);
+    var chatBack=document.getElementById('task-back-btn');
+    if (!chatBack || chatBack.textContent!=='Chat' || chatBack.getAttribute('href')!=='/chat?project_id=project-browser') fail('Task switch did not preserve Chat back breadcrumb');
+
     await window.openVibelyNavigate('/automations/auto-one?project_id=project-browser');
     await waitFor(function(){ return route('automation-live', 'auto-one'); }, 'Automation Live');
     htmx.process(selector());
@@ -198,7 +213,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (document.title!=='Automation Two - OpenVibely') fail('Automation Edit switch did not update title');
 
     var finalCounts=await counts();
-	    if (finalCounts.taskSlow!==1 || finalCounts.taskTwo!==1 || finalCounts.taskScheduleOrigin<3) fail('unexpected Task search request counts or missing Schedule origin: '+JSON.stringify(finalCounts));    document.body.setAttribute('data-test-result', 'pass');
+	    if (finalCounts.taskSlow!==1 || finalCounts.taskTwo!==2 || finalCounts.taskScheduleOrigin<3 || finalCounts.taskChatOrigin<2) fail('unexpected Task search request counts or missing preserved origins: '+JSON.stringify(finalCounts));    document.body.setAttribute('data-test-result', 'pass');
     await report('pass', '');
   })().catch(async function(error) {
     var message=String(error && error.stack || error);
@@ -212,7 +227,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		.hidden{display:none!important} .flex{display:flex}.items-center{align-items:center}.gap-2{gap:.5rem}.px-1{padding-left:.25rem;padding-right:.25rem}.ml-1{margin-left:.25rem}.ml-2{margin-left:.5rem}.-ml-1{margin-left:-.25rem}.px-\[3px\]{padding-left:3px;padding-right:3px}.input-bordered{border:1px solid transparent}.relative{position:relative}.z-10{z-index:10}button{border:0} dialog{border:0;background:transparent}.modal-box{box-sizing:border-box}.modal-backdrop{position:fixed;inset:0}.modal-backdrop button{width:100%;height:100%}		.w-0{width:0}.w-7{width:1.75rem}.h-8{height:2rem}.max-w-full{max-width:100%}.overflow-visible{overflow:visible}
 		[data-breadcrumb-selector-dialog][open]{display:grid}.max-w-\[calc\(100vw-2rem\)\]{max-width:calc(100vw - 2rem)}</style>`
 
-	var taskSlow, taskTwo, taskBlank, taskScheduleOrigin atomic.Int32
+	var taskSlow, taskTwo, taskBlank, taskScheduleOrigin, taskChatOrigin atomic.Int32
 	browserResult := make(chan string, 8)
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -244,10 +259,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		case "/breadcrumb-selectors/tasks":
 			search := r.URL.Query().Get("search")
 			taskDestination := "/tasks/task-two?project_id=project-browser"
-			if r.URL.Query().Get("from") == "schedule" {
+			switch r.URL.Query().Get("from") {
+			case "schedule":
 				taskScheduleOrigin.Add(1)
 				taskDestination += "&from=schedule"
-			} else {
+			case "chat":
+				taskChatOrigin.Add(1)
+				taskDestination += "&from=chat"
+			default:
 				_, _ = w.Write([]byte(renderResults("Task", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: "ordinary", Name: "Ordinary Unscheduled Task", URL: "/tasks/ordinary?project_id=project-browser"}})))
 				return
 			}
@@ -276,7 +295,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(renderResults("Automation", r.URL.Query().Get("current_id"), []models.BreadcrumbSelectorItem{{ID: "auto-two", Name: "Automation Two", URL: destination}})))
 		case "/counts":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]int32{"taskSlow": taskSlow.Load(), "taskTwo": taskTwo.Load(), "taskBlank": taskBlank.Load(), "taskScheduleOrigin": taskScheduleOrigin.Load()})
+			_ = json.NewEncoder(w).Encode(map[string]int32{"taskSlow": taskSlow.Load(), "taskTwo": taskTwo.Load(), "taskBlank": taskBlank.Load(), "taskScheduleOrigin": taskScheduleOrigin.Load(), "taskChatOrigin": taskChatOrigin.Load()})
 		case "/browser-result":
 			select {
 			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):

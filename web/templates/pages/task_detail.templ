@@ -100,8 +100,22 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				(function() {
 					var params = new URLSearchParams(window.location.search);
 					var from = params.get('from');
-					var selectorOrigin = document.querySelector('[data-breadcrumb-selector-origin][name="from"]');
-					if (selectorOrigin && from === 'schedule') selectorOrigin.value = 'schedule';
+					var selectorRoot = document.querySelector('[data-breadcrumb-selector][data-searchable-selector-kind="Task"]');
+					var selectorOrigin = selectorRoot && selectorRoot.querySelector('[data-breadcrumb-selector-origin][name="from"]');
+					var safeOrigins = {schedule: true, chat: true, alerts: true, automation: true};
+					if (selectorOrigin) selectorOrigin.value = safeOrigins[from] ? from : '';
+					function setSelectorHidden(name, value) {
+						if (!selectorRoot || !value) return;
+						var input = selectorRoot.querySelector('input[type="hidden"][name="' + name + '"]');
+						if (!input) {
+							input = document.createElement('input');
+							input.type = 'hidden';
+							input.name = name;
+							input.setAttribute('data-breadcrumb-selector-automation-context', '');
+							selectorRoot.appendChild(input);
+						}
+						input.value = value;
+					}
 					var btn = document.getElementById('task-back-btn');
 					var automationsBtn = document.getElementById('task-automations-back-btn');
 					var automationsSeparator = document.getElementById('task-automations-separator');
@@ -121,6 +135,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							var automationID = params.get('automation_id');
 							var automationName = params.get('automation_name');
 							if (automationID) {
+								setSelectorHidden('automation_id', automationID);
+								setSelectorHidden('automation_name', automationName);
 								url = btn.dataset.automationUrlBase + encodeURIComponent(automationID) + '?project_id=' + encodeURIComponent(btn.dataset.projectId);
 								text = automationName || 'Automation';
 								if (automationsBtn && automationsSeparator) {
