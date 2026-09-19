@@ -98,12 +98,14 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	    input.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));
 	    if(!document.activeElement.matches('[data-breadcrumb-selector-option]')) throw new Error('ArrowDown did not focus an option');
 	    document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
-	    if(dialog.open || document.activeElement!==button || button.getAttribute('aria-expanded')!=='false') throw new Error('Escape did not close and restore focus');
-	    button.click(); await waitFor(function(){ return dialog.open; });
-		    var box=dialog.getBoundingClientRect(), triggerBox=button.getBoundingClientRect(), caretBox=button.querySelector('[data-breadcrumb-selector-caret]').getBoundingClientRect();
+		    if(dialog.open || document.activeElement!==button || button.getAttribute('aria-expanded')!=='false') throw new Error('Escape did not close and restore focus');
+		    var clickX=button.getBoundingClientRect().left+24;
+		    button.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,clientX:clickX,clientY:button.getBoundingClientRect().top+8}));
+		    await waitFor(function(){ return dialog.open; });
+		    var box=dialog.getBoundingClientRect(), triggerBox=button.getBoundingClientRect();
 		    if(box.left < 7 || box.right > innerWidth-7 || box.bottom > innerHeight-7) throw new Error('selector escaped viewport: '+JSON.stringify(box));
 		    if(Math.abs(box.top-triggerBox.bottom-4) > 2) throw new Error('selector is not anchored below trigger: '+JSON.stringify({box:box,trigger:triggerBox}));
-		    if(Math.abs(box.left-caretBox.left) > 2) throw new Error('selector left edge is not anchored below caret: '+JSON.stringify({box:box,caret:caretBox}));
+		    if(Math.abs(box.left-clickX) > 2) throw new Error('selector left edge is not anchored to pointer x: '+JSON.stringify({box:box,clickX:clickX}));
 		    document.documentElement.setAttribute('data-theme','light');
 		    var themeBox=dialog, lightStyle=getComputedStyle(themeBox);
 		    var light=[lightStyle.backgroundColor,lightStyle.borderColor,lightStyle.color].join('|');

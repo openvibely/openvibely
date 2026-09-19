@@ -76,7 +76,7 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 templ searchableSelectorScript() {
 	<script>
 		(function() {
-			var controllerVersion = 7;
+			var controllerVersion = 8;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -116,7 +116,8 @@ templ searchableSelectorScript() {
 				if (!dialog || !dialog.open || !button) return;
 				var margin = 8, gap = 4, trigger = button.getBoundingClientRect();
 				var caret = button.querySelector('[data-searchable-selector-caret]');
-				var anchorLeft = root.hasAttribute('data-searchable-selector-left-anchor') ? trigger.left : (caret ? caret.getBoundingClientRect().left : trigger.right);
+				var pointerAnchor = root && root.hasAttribute('data-searchable-selector-pointer-x-anchor') ? Number(root.__openVibelySearchableSelectorAnchorX) : NaN;
+				var anchorLeft = isFinite(pointerAnchor) ? pointerAnchor : (root.hasAttribute('data-searchable-selector-left-anchor') ? trigger.left : (caret ? caret.getBoundingClientRect().left : trigger.right));
 				dialog.style.maxHeight = '';
 				var width = dialog.offsetWidth, height = dialog.offsetHeight;
 				var left = Math.max(margin, Math.min(anchorLeft, window.innerWidth - width - margin));
@@ -162,11 +163,14 @@ templ searchableSelectorScript() {
 			}
 			function close(root, restore) {
 				var state = nodes(root); if (state.dialog && state.dialog.open) state.dialog.close();
+				if (root) delete root.__openVibelySearchableSelectorAnchorX;
 				if (state.button) state.button.setAttribute('aria-expanded', 'false');
 				if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
 			}
-			function open(root) {
+			function open(root, event) {
 				var state = nodes(root); if (!state.button || !state.dialog || !state.search || state.button.disabled || state.dialog.open) return;
+				if (root.hasAttribute('data-searchable-selector-pointer-x-anchor') && event && typeof event.clientX === 'number' && event.clientX > 0) root.__openVibelySearchableSelectorAnchorX = event.clientX;
+				else delete root.__openVibelySearchableSelectorAnchorX;
 				state.dialog.showModal(); state.button.setAttribute('aria-expanded', 'true');
 				if (root.hasAttribute('data-searchable-selector-local')) syncLocal(root, state.value && state.value.value);
 				position(root); state.search.focus(); state.search.select();
@@ -174,7 +178,7 @@ templ searchableSelectorScript() {
 			}
 			listen(document, 'click', function(event) {
 				var root = rootFor(event.target); if (!root) return;
-				var trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { open(root); return; }
+				var trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { open(root, event); return; }
 				var option = event.target.closest && event.target.closest('[data-searchable-selector-option]');
 				if (option) {
 					if (root.hasAttribute('data-searchable-selector-local')) {

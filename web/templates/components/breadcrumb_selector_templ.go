@@ -67,7 +67,7 @@ func BreadcrumbSelector(config models.BreadcrumbSelector) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" data-searchable-selector-pointer-x-anchor>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
