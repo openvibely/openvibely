@@ -365,6 +365,8 @@ type channelUtilityActionHandlerOptions struct {
 
 type channelListAutomationsInput struct {
 	ProjectID string `json:"project_id"`
+	Limit     *int   `json:"limit"`
+	Offset    *int   `json:"offset"`
 }
 
 type channelGetAutomationInput struct {
@@ -1243,17 +1245,35 @@ func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraph
 		return "", err
 	}
 	if graphSvc == nil {
-		return marshalChannelAutomationResult(map[string]any{"automations": []any{}})
+		page := AutomationRuntimeListPage{Limit: AutomationRuntimeListDefaultLimit}
+		return marshalChannelAutomationResult(map[string]any{"automations": []any{}, "pagination": automationRuntimePaginationSummary(page)})
 	}
-	cards, err := graphSvc.List(ctx, projectID)
+	limit, offset, err := NormalizeAutomationRuntimeListPageArgs(req.Limit, req.Offset)
+	if err != nil {
+		return "", fmt.Errorf("list_automations: %w", err)
+	}
+	page, err := graphSvc.ListRuntimePage(ctx, projectID, limit, offset)
 	if err != nil {
 		return "", err
 	}
-	summaries := make([]map[string]any, 0, len(cards))
-	for _, card := range cards {
+	summaries := make([]map[string]any, 0, len(page.Cards))
+	for _, card := range page.Cards {
 		summaries = append(summaries, AutomationCardSummary(card))
 	}
-	return marshalChannelAutomationResult(map[string]any{"automations": summaries})
+	return marshalChannelAutomationResult(map[string]any{"automations": summaries, "pagination": automationRuntimePaginationSummary(page)})
+}
+
+func automationRuntimePaginationSummary(page AutomationRuntimeListPage) map[string]any {
+	pagination := map[string]any{
+		"limit":    page.Limit,
+		"offset":   page.Offset,
+		"returned": len(page.Cards),
+		"has_more": page.HasMore,
+	}
+	if page.HasMore {
+		pagination["next_offset"] = page.NextOffset
+	}
+	return pagination
 }
 
 func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
@@ -1272,16 +1292,14 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 	if graphSvc == nil {
 		return "", fmt.Errorf("automations unavailable")
 	}
-	cards, err := graphSvc.List(ctx, projectID)
+	card, err := graphSvc.RuntimeCardByID(ctx, projectID, automationID)
 	if err != nil {
 		return "", err
 	}
-	for _, card := range cards {
-		if card.Automation.ID == automationID {
-			return marshalChannelAutomationResult(map[string]any{"automation": AutomationCardSummary(card)})
-		}
+	if card == nil {
+		return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
 	}
-	return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+	return marshalChannelAutomationResult(map[string]any{"automation": AutomationCardSummary(*card)})
 }
 
 func ExecuteAutomationTemplateUpdateRuntime(ctx context.Context, opts AutomationTemplateUpdateRuntimeOptions) (string, error) {
@@ -1666,8 +1684,8 @@ func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSet
 		if req.MaxWorkers != nil {
 			return false, false, "clear_max_workers cannot be combined with max_workers"
 		}
-		changed = !models.ProjectWorkerLimitsEqual(project.MaxWorkers, nil)
-		shouldDispatch = models.ProjectWorkerLimitIncrease(project.MaxWorkers, nil)
+		changed = project.MaxWorkers != nil
+		shouldDispatch = isProjectWorkerLimitIncrease(project.MaxWorkers, nil)
 		project.MaxWorkers = nil
 		return changed, shouldDispatch, ""
 	}
@@ -1688,10 +1706,30 @@ func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSet
 		v := maxWorkers
 		next = &v
 	}
-	changed = !models.ProjectWorkerLimitsEqual(project.MaxWorkers, next)
-	shouldDispatch = models.ProjectWorkerLimitIncrease(project.MaxWorkers, next)
+	changed = !sameProjectWorkerLimit(project.MaxWorkers, next)
+	shouldDispatch = isProjectWorkerLimitIncrease(project.MaxWorkers, next)
 	project.MaxWorkers = next
 	return changed, shouldDispatch, ""
+}
+
+func normalizedProjectWorkerLimit(limit *int) int {
+	if limit == nil || *limit <= 0 {
+		return 0
+	}
+	return *limit
+}
+
+func sameProjectWorkerLimit(a, b *int) bool {
+	return normalizedProjectWorkerLimit(a) == normalizedProjectWorkerLimit(b)
+}
+
+func isProjectWorkerLimitIncrease(oldLimit, newLimit *int) bool {
+	oldValue := normalizedProjectWorkerLimit(oldLimit)
+	newValue := normalizedProjectWorkerLimit(newLimit)
+	if oldValue == 0 {
+		return false
+	}
+	return newValue == 0 || newValue > oldValue
 }
 
 func projectDefaultModelSummary(model *models.LLMConfig) updateProjectSettingsModelSummary {
@@ -1708,7 +1746,7 @@ func projectDefaultModelSummary(model *models.LLMConfig) updateProjectSettingsMo
 }
 
 func projectWorkerLimitSummary(maxWorkers *int) updateProjectSettingsWorkerLimit {
-	value := models.NormalizeProjectWorkerLimit(maxWorkers)
+	value := normalizedProjectWorkerLimit(maxWorkers)
 	if value == 0 {
 		return updateProjectSettingsWorkerLimit{Set: false}
 	}

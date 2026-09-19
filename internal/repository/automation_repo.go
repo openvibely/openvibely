@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
@@ -116,17 +117,131 @@ func (r *AutomationRepo) ListPortfolioCards(ctx context.Context, projectID strin
 	defer rows.Close()
 	var out []models.AutomationCard
 	for rows.Next() {
-		var card models.AutomationCard
-		if err := rows.Scan(&card.Automation.ID, &card.Automation.ProjectID, &card.Automation.StableKey, &card.Automation.Name, &card.Automation.Description, &card.Automation.AutomationType,
-			&card.Automation.LifecycleState, &card.Automation.HealthState, &card.Automation.HealthReason, &card.Automation.HealthEvaluatedAt, &card.Automation.PublishedVersionID, &card.Automation.TemplateRevision,
-			&card.Automation.CreatedVia, &card.Automation.CreatedAt, &card.Automation.UpdatedAt, &card.Automation.ArchivedAt,
-			&card.Version.ID, &card.Version.ProjectID, &card.Version.AutomationID, &card.Version.Version, &card.Version.State, &card.Version.Source,
-			&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt, &card.GraphNodeCount); err != nil {
+		card, err := scanAutomationPortfolioCard(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, card)
 	}
 	return out, rows.Err()
+}
+
+const runtimeAutomationCardColumns = `a.id, a.project_id, a.name, a.lifecycle_state, a.template_revision,
+	v.id, v.adapter_key,
+	(SELECT COUNT(*) FROM automation_nodes n
+		WHERE n.project_id = a.project_id AND n.automation_id = a.id AND n.version_id = v.id),
+	(SELECT MIN(s.next_run) FROM automation_trigger_owners owner
+		JOIN schedules s ON s.id = owner.schedule_id
+		WHERE owner.project_id = a.project_id AND owner.automation_id = a.id AND owner.version_id = v.id
+			AND s.enabled = 1 AND s.next_run IS NOT NULL),
+	(SELECT MAX(s.last_run) FROM automation_trigger_owners owner
+		JOIN schedules s ON s.id = owner.schedule_id
+		WHERE owner.project_id = a.project_id AND owner.automation_id = a.id AND owner.version_id = v.id
+			AND s.last_run IS NOT NULL)`
+
+func scanAutomationPortfolioCard(scanner interface{ Scan(dest ...any) error }) (models.AutomationCard, error) {
+	var card models.AutomationCard
+	if err := scanner.Scan(&card.Automation.ID, &card.Automation.ProjectID, &card.Automation.StableKey, &card.Automation.Name, &card.Automation.Description, &card.Automation.AutomationType,
+		&card.Automation.LifecycleState, &card.Automation.HealthState, &card.Automation.HealthReason, &card.Automation.HealthEvaluatedAt, &card.Automation.PublishedVersionID, &card.Automation.TemplateRevision,
+		&card.Automation.CreatedVia, &card.Automation.CreatedAt, &card.Automation.UpdatedAt, &card.Automation.ArchivedAt,
+		&card.Version.ID, &card.Version.ProjectID, &card.Version.AutomationID, &card.Version.Version, &card.Version.State, &card.Version.Source,
+		&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt, &card.GraphNodeCount); err != nil {
+		return models.AutomationCard{}, err
+	}
+	return card, nil
+}
+
+func scanAutomationRuntimeCard(scanner interface{ Scan(dest ...any) error }) (models.AutomationCard, error) {
+	var card models.AutomationCard
+	var nextRun, lastRun sql.NullString
+	if err := scanner.Scan(&card.Automation.ID, &card.Automation.ProjectID, &card.Automation.Name, &card.Automation.LifecycleState, &card.Automation.TemplateRevision,
+		&card.Version.ID, &card.Version.AdapterKey, &card.GraphNodeCount, &nextRun, &lastRun); err != nil {
+		return models.AutomationCard{}, err
+	}
+	card.Version.ProjectID = card.Automation.ProjectID
+	card.Version.AutomationID = card.Automation.ID
+	if nextRun.Valid {
+		parsed, err := parseRuntimeCardTime(nextRun.String)
+		if err != nil {
+			return models.AutomationCard{}, fmt.Errorf("parsing runtime automation next_run: %w", err)
+		}
+		card.NextRun = &parsed
+	}
+	if lastRun.Valid {
+		parsed, err := parseRuntimeCardTime(lastRun.String)
+		if err != nil {
+			return models.AutomationCard{}, fmt.Errorf("parsing runtime automation last_run: %w", err)
+		}
+		card.LastRun = &parsed
+	}
+	return card, nil
+}
+
+func parseRuntimeCardTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+	} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unsupported timestamp %q", value)
+}
+
+func (r *AutomationRepo) ListRuntimeAutomationCards(ctx context.Context, projectID string, limit, offset int) ([]models.AutomationCard, bool, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+runtimeAutomationCardColumns+`
+		FROM automations a
+		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
+		WHERE a.project_id = ? AND v.state = 'published'
+		ORDER BY a.updated_at DESC, a.id ASC
+		LIMIT ? OFFSET ?`, projectID, limit, offset)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing runtime automation cards: %w", err)
+	}
+	defer rows.Close()
+	out := make([]models.AutomationCard, 0, limit)
+	for rows.Next() {
+		card, err := scanAutomationRuntimeCard(rows)
+		if err != nil {
+			return nil, false, fmt.Errorf("scanning runtime automation card: %w", err)
+		}
+		out = append(out, card)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	var hasMore bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM automations a
+		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
+		WHERE a.project_id = ? AND v.state = 'published'
+		ORDER BY a.updated_at DESC, a.id ASC
+		LIMIT 1 OFFSET ?)`, projectID, offset+limit).Scan(&hasMore); err != nil {
+		return nil, false, fmt.Errorf("checking runtime automation card next page: %w", err)
+	}
+	return out, hasMore, nil
+}
+
+func (r *AutomationRepo) GetRuntimeAutomationCard(ctx context.Context, projectID, automationID string) (*models.AutomationCard, error) {
+	card, err := scanAutomationRuntimeCard(r.db.QueryRowContext(ctx, `SELECT `+runtimeAutomationCardColumns+`
+		FROM automations a
+		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
+		WHERE a.project_id = ? AND a.id = ? AND v.state = 'published'`, projectID, automationID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting runtime automation card: %w", err)
+	}
+	return &card, nil
 }
 
 type AutomationCardListFilter struct {
