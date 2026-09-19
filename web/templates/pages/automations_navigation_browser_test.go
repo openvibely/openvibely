@@ -863,6 +863,11 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 		`data-automation-yaml-highlight`,
 		`data-automation-yaml-editor`,
 		`data-automation-yaml-readonly`,
+		`data-automation-copy-yaml`,
+		`data-automation-copy-yaml-label`,
+		`data-automation-copy-yaml-status`,
+		`Copy YAML`,
+		`aria-label="Copy saved Automation YAML"`,
 		`readonly`,
 		`tabindex="-1"`,
 		`cursor-default`,
@@ -875,6 +880,22 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 			t.Errorf("Preview YAML panel must reuse the editable editor's structure and contain %q", want)
 		}
 	}
+
+	copyButtonMarkup := regexp.MustCompile(`<button[^>]*data-automation-copy-yaml[^>]*>`).FindString(body)
+	if copyButtonMarkup == "" {
+		t.Fatal("Live YAML panel must render a Copy YAML button")
+	}
+	for _, want := range []string{`type="button"`, `aria-label="Copy saved Automation YAML"`} {
+		if !strings.Contains(copyButtonMarkup, want) {
+			t.Errorf("Copy YAML control must contain %q, got %s", want, copyButtonMarkup)
+		}
+	}
+	for _, forbidden := range []string{`hx-`, `form=`, `href=`, `type="submit"`} {
+		if strings.Contains(copyButtonMarkup, forbidden) {
+			t.Errorf("Copy YAML control must be non-mutating, but button markup contains %q: %s", forbidden, copyButtonMarkup)
+		}
+	}
+
 	// Strip <script> contents before checking for forbidden markup: the page
 	// includes a shared YAML rendering script (used by both the editable
 	// builder and this read-only panel) whose JS source text legitimately
@@ -935,6 +956,14 @@ window.addEventListener('DOMContentLoaded', function() {
     return !element.hidden && window.getComputedStyle(element).display !== 'none' && element.getClientRects().length > 0;
   }
   (async function() {
+    var copiedTexts = [];
+    var toastEvents = [];
+    var htmxCalls = 0;
+    if (window.htmx) {
+      window.htmx.ajax = function() { htmxCalls++; return Promise.resolve(); };
+    }
+    window.showToast = function(message, status) { toastEvents.push({message: message, status: status}); };
+    Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText: function(text) { copiedTexts.push(text); return Promise.resolve(); }}});
     await new Promise(function(resolve) { window.setTimeout(resolve, 200); });
     var graphPanel = document.querySelector('[data-automation-graph-panel]');
     var detailsPanel = document.querySelector('[data-automation-live-details-panel]');
@@ -958,6 +987,29 @@ window.addEventListener('DOMContentLoaded', function() {
     var yamlTextarea = yamlPanel.querySelector('[data-automation-yaml-editor]');
     if (!yamlTextarea || !yamlTextarea.value.includes('schema_version: 1')) fail('YAML panel did not render the saved automation YAML when selected');
     if (!yamlTextarea.hasAttribute('readonly')) fail('Live/Preview YAML panel textarea must be read-only');
+    var copyButton = yamlPanel.querySelector('[data-automation-copy-yaml]');
+    if (!copyButton) fail('Live YAML panel must expose a Copy YAML control');
+    if (copyButton.type !== 'button') fail('Copy YAML control must be a non-submit button');
+    if (copyButton.hasAttribute('hx-post') || copyButton.hasAttribute('hx-get') || copyButton.hasAttribute('form')) fail('Copy YAML control must not submit, navigate, or invoke HTMX');
+    copyButton.focus();
+    if (document.activeElement !== copyButton) fail('Copy YAML control must be keyboard reachable');
+    copyButton.click();
+    await new Promise(function(resolve) { window.setTimeout(resolve, 0); });
+    if (copiedTexts.length !== 1 || copiedTexts[0] !== yamlTextarea.value) fail('Copy YAML must copy the exact read-only textarea value');
+    if (!copyButton.textContent.includes('Copied')) fail('Copy YAML success feedback was not rendered');
+    if (!toastEvents.some(function(event) { return event.message === 'YAML copied to clipboard' && event.status === 'completed'; })) fail('Copy YAML success toast was not shown');
+    if (htmxCalls !== 0) fail('Copy YAML must not trigger HTMX requests');
+    navigator.clipboard.writeText = function() { return Promise.reject(new Error('denied')); };
+    var originalExecCommand = document.execCommand;
+    var fallbackAttempts = 0;
+    document.execCommand = function(command) { if (command === 'copy') fallbackAttempts++; return false; };
+    copyButton.click();
+    await new Promise(function(resolve) { window.setTimeout(resolve, 0); });
+    document.execCommand = originalExecCommand;
+    if (!fallbackAttempts) fail('Copy YAML failure path must attempt the clipboard fallback');
+    if (!copyButton.textContent.includes('Copy failed')) fail('Copy YAML failure feedback was not rendered');
+    if (!toastEvents.some(function(event) { return event.message === 'Failed to copy YAML' && event.status === 'failed'; })) fail('Copy YAML failure toast was not shown');
+    if (htmxCalls !== 0) fail('Copy YAML failure must not trigger HTMX requests');
     var lineNumberEls = yamlPanel.querySelectorAll('[data-automation-yaml-line-number]');
     var expectedLineCount = yamlTextarea.value.split('\n').length;
     if (lineNumberEls.length !== expectedLineCount) fail('Live/Preview YAML panel must render one line-number element per source line, got ' + lineNumberEls.length + ' expected ' + expectedLineCount);
@@ -995,6 +1047,7 @@ window.addEventListener('DOMContentLoaded', function() {
     detailsPanel = document.querySelector('[data-automation-live-details-panel]');
     yamlPanel = document.querySelector('[data-automation-yaml-panel]');
     if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('a background htmx refresh swap must not reset the selected YAML view back to Graph');
+    if (!yamlPanel.querySelector('[data-automation-copy-yaml]')) fail('a background refresh must preserve the scoped Copy YAML control in the selected YAML view');
     report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
