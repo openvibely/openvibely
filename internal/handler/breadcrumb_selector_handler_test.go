@@ -115,6 +115,49 @@ func TestBreadcrumbSelectorTaskResultsExposeTwentyRowBoundaryAndHasMore(t *testi
 	require.NotContains(t, body, "More matches are available")
 }
 
+func TestBreadcrumbSelectorTaskResultsKeepCurrentWhenHasMoreProbeAddsExtraRow(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	for _, test := range []struct {
+		name  string
+		query string
+	}{
+		{name: "empty", query: ""},
+		{name: "search", query: "&search=selector+edge"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			project := createProject(t, h, "Task selector current trim "+test.name)
+			for i := 0; i < breadcrumbSelectorLimit; i++ {
+				createTask(t, h, project.ID, fmt.Sprintf("Selector edge running %02d", i), func(task *models.Task) {
+					task.Status = models.StatusRunning
+				})
+			}
+			current := createTask(t, h, project.ID, "Selector edge current task")
+
+			req := httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+current.ID+test.query, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			body := rec.Body.String()
+			require.Equal(t, breadcrumbSelectorLimit, strings.Count(body, `data-breadcrumb-selector-option`))
+			require.Contains(t, body, current.Title)
+			require.Contains(t, body, `aria-selected="true"`)
+			require.Contains(t, body, "More matches are available")
+			require.Equal(t, breadcrumbSelectorLimit-1, strings.Count(body, "Selector edge running"))
+			require.Less(t, strings.Index(body, `<span>Running</span>`), strings.Index(body, "Selector edge running"))
+			require.Less(t, strings.Index(body, "Selector edge running"), strings.Index(body, `<span>`+breadcrumbSelectorTrailingSectionLabel(test.query)+`</span>`))
+			require.Less(t, strings.Index(body, `<span>`+breadcrumbSelectorTrailingSectionLabel(test.query)+`</span>`), strings.Index(body, current.Title))
+		})
+	}
+}
+
+func breadcrumbSelectorTrailingSectionLabel(query string) string {
+	if query != "" {
+		return "Matches"
+	}
+	return "Recent"
+}
+
 func TestBreadcrumbSelectorScheduleOriginShowsOnlyTasksWithScheduleRows(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Schedule selector project")

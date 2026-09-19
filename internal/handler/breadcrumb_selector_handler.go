@@ -50,14 +50,40 @@ func (h *Handler) GetBreadcrumbSelectorResults(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	hasMore := len(items) > breadcrumbSelectorLimit
-	if hasMore {
-		items = items[:breadcrumbSelectorLimit]
-	}
+	items, hasMore := trimBreadcrumbSelectorItems(items, breadcrumbSelectorLimit, currentID, kind == "Task")
 	for i := range items {
 		items[i].URL = breadcrumbSelectorItemURL(c.Param("resource"), items[i].ID, projectID, c.QueryParam("tab"), c.QueryParam("view"), c.QueryParam("from"))
 	}
 	return render(c, http.StatusOK, components.BreadcrumbSelectorResults(kind, currentID, items, hasMore, search != ""))
+}
+
+func trimBreadcrumbSelectorItems(items []models.BreadcrumbSelectorItem, limit int, currentID string, preserveCurrent bool) ([]models.BreadcrumbSelectorItem, bool) {
+	if limit <= 0 || len(items) <= limit {
+		return items, false
+	}
+	hasMore := true
+	visible := items[:limit]
+	if !preserveCurrent || currentID == "" || breadcrumbSelectorItemsContainID(visible, currentID) {
+		return visible, hasMore
+	}
+	for _, item := range items[limit:] {
+		if item.ID != currentID {
+			continue
+		}
+		visible = append([]models.BreadcrumbSelectorItem(nil), visible...)
+		visible[len(visible)-1] = item
+		return visible, hasMore
+	}
+	return visible, hasMore
+}
+
+func breadcrumbSelectorItemsContainID(items []models.BreadcrumbSelectorItem, id string) bool {
+	for _, item := range items {
+		if item.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func breadcrumbSelectorItemURL(resource, id, projectID, tab, view, from string) string {
