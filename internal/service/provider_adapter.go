@@ -1810,6 +1810,7 @@ func (a *mixtureProviderAdapter) callMixtureReference(req llmcontracts.AgentRequ
 }
 
 func (a *mixtureProviderAdapter) callAggregator(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	req.Ctx = llmcontracts.WithProviderAsyncToolsDisabled(req.Ctx)
 	adapter, ok := a.svc.adapterFor(req.Agent.Provider)
 	if !ok {
 		return llmcontracts.AgentResult{}, fmt.Errorf("no adapter for mixture aggregator provider %s", req.Agent.Provider)

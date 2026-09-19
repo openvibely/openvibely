@@ -28,6 +28,48 @@ func createAsyncToolCallFixture(t *testing.T, repo *OpenAIAsyncToolCallRepo, pro
 	return call
 }
 
+func TestExecutionCancellationCancelsOpenAIAsyncToolCalls(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectID := "async-cancel-project"
+	taskID := "async-cancel-task"
+	execCompleteID := "async-cancel-complete-exec"
+	execSweepID := "async-cancel-sweep-exec"
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects(id, name, repo_path) VALUES (?, 'Async Cancel Project', '')`, projectID); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO tasks(id, project_id, title, status, category, prompt) VALUES (?, ?, 'Async Cancel Task', 'running', 'active', 'prompt')`, taskID, projectID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO executions(id, task_id, status, prompt_sent) VALUES (?, ?, 'running', 'prompt'), (?, ?, 'running', 'prompt')`, execCompleteID, taskID, execSweepID, taskID); err != nil {
+		t.Fatalf("insert executions: %v", err)
+	}
+	repo := NewOpenAIAsyncToolCallRepo(db)
+	now := time.Now().UTC()
+	completeCall := createAsyncToolCallFixture(t, repo, projectID, taskID, execCompleteID, "call_cancel_complete", now.Add(time.Hour))
+	sweepCall := createAsyncToolCallFixture(t, repo, projectID, taskID, execSweepID, "call_cancel_sweep", now.Add(time.Hour))
+	execRepo := NewExecutionRepo(db)
+	if err := execRepo.Complete(ctx, execCompleteID, models.ExecCancelled, "", "cancelled by test", 0, 0); err != nil {
+		t.Fatalf("Complete cancelled: %v", err)
+	}
+	cancelledIDs, err := execRepo.CancelActiveByTaskReturningIDs(ctx, taskID)
+	if err != nil {
+		t.Fatalf("CancelActiveByTaskReturningIDs: %v", err)
+	}
+	if len(cancelledIDs) != 1 || cancelledIDs[0] != execSweepID {
+		t.Fatalf("cancelledIDs = %#v", cancelledIDs)
+	}
+	for _, id := range []string{completeCall.ID, sweepCall.ID} {
+		var status string
+		if err := db.QueryRowContext(ctx, `SELECT status FROM openai_async_tool_calls WHERE id = ?`, id).Scan(&status); err != nil {
+			t.Fatalf("load async status: %v", err)
+		}
+		if status != models.OpenAIAsyncToolCallCancelled {
+			t.Fatalf("async status for %s = %s, want cancelled", id, status)
+		}
+	}
+}
+
 func TestOpenAIAsyncToolCallRepoLifecycleTransitions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
