@@ -47,7 +47,7 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	}
 }
 
-func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -134,7 +134,7 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_KPIsFunnelsAndChartsAreDisplayOnlyInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_KPIsFunnelsAndChartsAreDisplayOnlyInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -173,7 +173,7 @@ func TestAnalyticsContent_KPIsFunnelsAndChartsAreDisplayOnlyInChrome(t *testing.
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -210,7 +210,7 @@ func TestAnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_RejectsStaleDashboardAndEvidenceResponsesInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_RejectsStaleDashboardAndEvidenceResponsesInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -266,7 +266,7 @@ func TestAnalyticsContent_RejectsStaleDashboardAndEvidenceResponsesInChrome(t *t
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_ClearsChartsOnDimensionFilterChangeInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_ClearsChartsOnDimensionFilterChangeInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -292,7 +292,7 @@ func TestAnalyticsContent_ClearsChartsOnDimensionFilterChangeInChrome(t *testing
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_ExplicitSupportingLinksPreserveExactSubsetInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_ExplicitSupportingLinksPreserveExactSubsetInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -335,7 +335,7 @@ func TestAnalyticsContent_ExplicitSupportingLinksPreserveExactSubsetInChrome(t *
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -379,7 +379,7 @@ func TestAnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *testing.T) {
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_WorkflowPerformanceRendersInvocationStatusCountsInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_WorkflowPerformanceRendersInvocationStatusCountsInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -417,7 +417,7 @@ func TestAnalyticsContent_WorkflowPerformanceRendersInvocationStatusCountsInChro
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_ImmediateNavigationAwayAbortsWorkInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_ImmediateNavigationAwayAbortsWorkInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -455,7 +455,7 @@ func TestAnalyticsContent_ImmediateNavigationAwayAbortsWorkInChrome(t *testing.T
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_DirectFilteredURLAppliesFirstRequestsInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_DirectFilteredURLAppliesFirstRequestsInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
@@ -474,7 +474,7 @@ func TestAnalyticsContent_DirectFilteredURLAppliesFirstRequestsInChrome(t *testi
 	runReconnectChromeFixture(t, fixture)
 }
 
-func TestAnalyticsContent_DelayedChartLoaderInitializesNewestGenerationOnceInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_DelayedChartLoaderInitializesNewestGenerationOnceInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {

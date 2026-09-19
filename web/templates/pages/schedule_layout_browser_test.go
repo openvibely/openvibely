@@ -16,7 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestScheduleContentTimelineFillsAvailableHeightInChrome(t *testing.T) {
+func TestBrowserFunctional_ScheduleContentTimelineFillsAvailableHeightInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 
 	var content bytes.Buffer

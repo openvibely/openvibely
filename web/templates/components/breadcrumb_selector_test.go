@@ -77,7 +77,7 @@ func TestBreadcrumbSelectorRendersAccessibleBoundedDialog(t *testing.T) {
 	}
 }
 
-func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
+func TestBrowserFunctional_BreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var selector bytes.Buffer
 	if err := BreadcrumbSelector(models.BreadcrumbSelector{ID: "browser-selector", Kind: "Task", CurrentID: "one", CurrentName: "Current", SearchURL: "/results"}).Render(context.Background(), &selector); err != nil {
@@ -138,7 +138,7 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector keyboard", 900, 20*time.Second)
 }
 
-func TestBreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChrome(t *testing.T) {
+func TestBrowserFunctional_BreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var selector bytes.Buffer
 	if err := BreadcrumbSelector(models.BreadcrumbSelector{ID: "live-selector", Kind: "Task", CurrentID: "one", CurrentName: "Current", SearchURL: "/results"}).Render(context.Background(), &selector); err != nil {
@@ -191,7 +191,7 @@ func TestBreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChrome(t *testing.T) {
 	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector SSE refresh", 900, 20*time.Second)
 }
 
-func TestBreadcrumbSelectorLongTitleClampsInsideNarrowViewportInChrome(t *testing.T) {
+func TestBrowserFunctional_BreadcrumbSelectorLongTitleClampsInsideNarrowViewportInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var selector bytes.Buffer
 	if err := BreadcrumbSelector(models.BreadcrumbSelector{

@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func TestChatComposerShortcutsInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerShortcutsInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	type requestRecord struct {
@@ -209,7 +209,7 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 	}
 }
 
-func TestChatComposerAutoFocusLifecycleInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	renderForm := func(config ChatInputFormConfig) string {
@@ -329,7 +329,7 @@ func TestChatComposerAutoFocusLifecycleInChrome(t *testing.T) {
 	runHeadlessChromeFixture(t, chrome, server.URL+"/direct-thread", "direct task Thread autofocus", 5000, 20*time.Second)
 }
 
-func TestChatComposerIOSShortcutHintAndModifierInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerIOSShortcutHintAndModifierInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	var form bytes.Buffer
@@ -401,7 +401,7 @@ window.htmx = {
 	runHeadlessChromeFixture(t, chrome, server.URL+"/", "iOS composer shortcuts", 5000, 20*time.Second)
 }
 
-func TestChatComposerPreservesSteerInfoDuringSteerAndQueueInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerPreservesSteerInfoDuringSteerAndQueueInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	type requestRecord struct {
@@ -537,7 +537,7 @@ func TestChatComposerPreservesSteerInfoDuringSteerAndQueueInChrome(t *testing.T)
 	})
 }
 
-func TestChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	type requestRecord struct {
@@ -644,7 +644,7 @@ func TestChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.
 	}
 }
 
-func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	type requestRecord struct {
@@ -743,7 +743,7 @@ func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 	}
 }
 
-func TestChatComposerRunningActionModifierSteersInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerRunningActionModifierSteersInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	type requestRecord struct {
@@ -834,7 +834,7 @@ func TestChatComposerRunningActionModifierSteersInChrome(t *testing.T) {
 	}
 }
 
-func TestChatComposerRunningPrimaryActionSwapsWithInputContentInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatComposerRunningPrimaryActionSwapsWithInputContentInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	renderForm := func(config ChatInputFormConfig) string {

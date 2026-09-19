@@ -18,7 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 
 	task := &models.Task{
@@ -369,7 +369,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecyclePendingRefreshFailureInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecyclePendingRefreshFailureInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-refresh-failure-browser",
@@ -546,7 +546,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecyclePendingFullRefreshFailureInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecyclePendingFullRefreshFailureInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-full-refresh-failure-browser",
@@ -733,7 +733,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleRefreshPreservesAnchorBeyondLatestWindowInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleRefreshPreservesAnchorBeyondLatestWindowInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-anchor-browser",
@@ -937,7 +937,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleMixedLiveRefreshInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleMixedLiveRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-mixed-browser",
@@ -1112,7 +1112,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleFullInvalidationDuringNewerFailureInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleFullInvalidationDuringNewerFailureInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-mixed-failure-browser",
@@ -1311,7 +1311,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-reconnect-browser",
@@ -1551,7 +1551,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleFullInvalidationDuringOlderFailureInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleFullInvalidationDuringOlderFailureInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-older-failure-browser",
@@ -1745,7 +1745,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleHTMXSwapDuringRequestReconcilesOnReconnectInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleHTMXSwapDuringRequestReconcilesOnReconnectInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-htmx-swap-browser",
@@ -1950,7 +1950,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleHTMXSwapPreservesAnchorInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleHTMXSwapPreservesAnchorInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-htmx-anchor-browser",
@@ -2154,7 +2154,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleRetainedRowFinalizationRehydratesInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleRetainedRowFinalizationRehydratesInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-retained-finalization-browser",
@@ -2380,7 +2380,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskDetailLifecycleFillsRemainingHeightInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskDetailLifecycleFillsRemainingHeightInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{
 		ID:        "task-lifecycle-fill-browser",

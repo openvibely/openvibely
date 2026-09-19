@@ -294,7 +294,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	run(browser)
 }
 
-func TestComposerAutoFocusProductionNavigationInChrome(t *testing.T) {
+func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {

@@ -135,7 +135,7 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 	}
 }
 
-func TestCatalogCardsSuppressPointerFocusFlashButKeepKeyboardFocusVisible(t *testing.T) {
+func TestBrowserFunctional_CatalogCardsSuppressPointerFocusFlashButKeepKeyboardFocusVisible(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projectID := "project-catalog-focus"
 	automations := []models.AutomationCard{{
@@ -287,7 +287,7 @@ func TestCatalogCardsSuppressPointerFocusFlashButKeepKeyboardFocusVisible(t *tes
 	})
 }
 
-func TestAutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPagination(t *testing.T) {
+func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcrossSearchAndPagination(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projectID := "project-automation-browser"
 	cards := []models.AutomationCard{
@@ -908,7 +908,7 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 // regression where the YAML panel's `flex` utility class visually wins the CSS cascade
 // over the `hidden` attribute, leaving the YAML panel always visible (shrinking the graph
 // and details panels) regardless of which switcher button is selected.
-func TestAutomationLiveYAMLViewSwitcherActuallyTogglesVisibility(t *testing.T) {
+func TestBrowserFunctional_AutomationLiveYAMLViewSwitcherActuallyTogglesVisibility(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-switch", Name: "Live Switch", LifecycleState: models.AutomationActive},
@@ -1545,7 +1545,7 @@ func TestAutomationBuilderRendersDeleteControls(t *testing.T) {
 	}
 }
 
-func TestAutomationBuilderDetailsHeaderSaveSubmitsBreadcrumbNameInChrome(t *testing.T) {
+func TestBrowserFunctional_AutomationBuilderDetailsHeaderSaveSubmitsBreadcrumbNameInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	candidate := models.AutomationDraftCandidate{
 		SchemaVersion:  1,
@@ -1684,7 +1684,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
+func TestBrowserFunctional_AutomationGraphAndNavigationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	candidate := models.AutomationDraftCandidate{
 		SchemaVersion:  1,
