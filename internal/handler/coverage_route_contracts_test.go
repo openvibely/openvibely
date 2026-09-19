@@ -490,27 +490,54 @@ func TestTaskGoalRoutesReturnJSONLifecycle(t *testing.T) {
 	project := tc.CreateProject().WithName("Goal Route Contracts").Build()
 	task := tc.CreateTask(project.ID).WithTitle("Goal-backed task").WithCategory(models.CategoryBacklog).Build()
 
+	decodeGoalResponse := func(t *testing.T, rec *httptest.ResponseRecorder) taskGoalResponse {
+		t.Helper()
+		var response taskGoalResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response), rec.Body.String())
+		require.True(t, response.OK, rec.Body.String())
+		return response
+	}
+
 	projectQuery := "?project_id=" + project.ID
 	getEmpty := requestWithAccept(tc, http.MethodGet, "/tasks/"+task.ID+"/goal"+projectQuery, "application/json", "")
 	require.Equal(t, http.StatusOK, getEmpty.Code)
-	require.Contains(t, getEmpty.Body.String(), `"ok":true`)
+	getEmptyResponse := decodeGoalResponse(t, getEmpty)
+	require.Nil(t, getEmptyResponse.Goal)
+
+	missingPause := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/pause"+projectQuery, "application/json", "")
+	require.Equal(t, http.StatusNotFound, missingPause.Code)
+	missingResume := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/resume"+projectQuery, "application/json", "")
+	require.Equal(t, http.StatusNotFound, missingResume.Code)
 
 	setEmpty := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal"+projectQuery, "application/json", url.Values{"goal": {""}}.Encode())
 	require.Equal(t, http.StatusBadRequest, setEmpty.Code)
+	setTooLong := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal"+projectQuery, "application/json", url.Values{"goal": {strings.Repeat("x", service.MaxTaskGoalLength+1)}}.Encode())
+	require.Equal(t, http.StatusBadRequest, setTooLong.Code)
 
 	setGoal := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal"+projectQuery, "application/json", url.Values{"goal": {"Ship reliable coverage"}}.Encode())
 	require.Equal(t, http.StatusOK, setGoal.Code)
-	require.Contains(t, setGoal.Body.String(), "Ship reliable coverage")
+	setResponse := decodeGoalResponse(t, setGoal)
+	require.NotNil(t, setResponse.Goal)
+	require.Equal(t, "Ship reliable coverage", setResponse.Goal.Objective)
+	require.Equal(t, models.TaskGoalStatusActive, setResponse.Goal.Status)
 
-	pause := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/pause"+projectQuery, "application/json", "")
+	pause := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/pause"+projectQuery, "application/json", url.Values{"goal": {""}}.Encode())
 	require.Equal(t, http.StatusOK, pause.Code)
-	resume := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/resume"+projectQuery, "application/json", "")
-	require.Equal(t, http.StatusOK, resume.Code)
-	clear := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/clear"+projectQuery, "application/json", "")
-	require.Equal(t, http.StatusOK, clear.Code)
+	pauseResponse := decodeGoalResponse(t, pause)
+	require.NotNil(t, pauseResponse.Goal)
+	require.Equal(t, models.TaskGoalStatusPaused, pauseResponse.Goal.Status)
 
-	missingPause := requestWithAccept(tc, http.MethodPost, "/tasks/missing/goal/pause"+projectQuery, "application/json", "")
-	require.Equal(t, http.StatusNotFound, missingPause.Code)
+	resume := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/resume"+projectQuery, "application/json", url.Values{"goal": {strings.Repeat("x", service.MaxTaskGoalLength+1)}}.Encode())
+	require.Equal(t, http.StatusOK, resume.Code)
+	resumeResponse := decodeGoalResponse(t, resume)
+	require.NotNil(t, resumeResponse.Goal)
+	require.Equal(t, models.TaskGoalStatusActive, resumeResponse.Goal.Status)
+
+	clear := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/clear"+projectQuery, "application/json", url.Values{"goal": {""}}.Encode())
+	require.Equal(t, http.StatusOK, clear.Code)
+	clearResponse := decodeGoalResponse(t, clear)
+	require.NotNil(t, clearResponse.Goal)
+	require.Equal(t, models.TaskGoalStatusCleared, clearResponse.Goal.Status)
 }
 
 func TestQueuedInputRoutesValidateStaleAndMissingInputs(t *testing.T) {
