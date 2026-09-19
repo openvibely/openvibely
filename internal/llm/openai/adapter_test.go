@@ -63,11 +63,11 @@ func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 		{Name: "read_task", Description: "read", Access: llmcontracts.RuntimeToolAccessRead},
 		{Name: "   ", Description: "ignored"},
 	}}
-	openAITools := runtimeOpenAITools(rt)
+	openAITools := runtimeOpenAITools(rt, false)
 	if len(openAITools) != 2 || openAITools[0].Name != "write_task" || openAITools[0].Description != "write" {
 		t.Fatalf("unexpected OpenAI tools: %#v", openAITools)
 	}
-	if runtimeOpenAITools(nil) != nil {
+	if runtimeOpenAITools(nil, false) != nil {
 		t.Fatal("nil runtime tools should produce no OpenAI tools")
 	}
 
@@ -617,7 +617,7 @@ func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *te
 		},
 	}
 
-	extraTools := runtimeOpenAITools(rt)
+	extraTools := runtimeOpenAITools(rt, false)
 	if len(extraTools) != 1 || extraTools[0].Name != "list_files" {
 		t.Fatalf("expected runtime tool definition to be exposed, got %#v", extraTools)
 	}
@@ -795,7 +795,7 @@ func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
 	adapter := New(nil, nil, nil)
 	out, textOnly, usage, err := adapter.CallStreaming(context.Background(), "Finish this", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "medium",
-	}, "exec-agentic-stream", "", "project instructions", nil)
+	}, "exec-agentic-stream", "project-1", "", "project instructions", nil)
 	if err != nil {
 		t.Fatalf("CallStreaming: %v", err)
 	}
@@ -842,7 +842,7 @@ func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) 
 	adapter := New(nil, nil, nil)
 	out, usage, err := adapter.CallChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
-	}, "exec-chat-stream", "transport-scope", []models.Execution{{PromptSent: "previous prompt", Output: "previous output", Status: models.ExecCompleted}}, "project chat context", false, models.ChatModePlan, "", nil)
+	}, "exec-chat-stream", "project-1", "transport-scope", []models.Execution{{PromptSent: "previous prompt", Output: "previous output", Status: models.ExecCompleted}}, "project chat context", false, models.ChatModePlan, "", nil)
 	if err != nil {
 		t.Fatalf("CallChatStreaming: %v", err)
 	}

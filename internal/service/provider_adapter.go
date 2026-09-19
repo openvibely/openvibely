@@ -1593,17 +1593,17 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		case llmcontracts.OperationStreaming:
 			if openAIDirectClientEnabled(req.Agent) {
 				if requestUsesChatStreaming(req) {
-					output, usage, err := a.adapter.CallChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.TransportScope, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
+					output, usage, err := a.adapter.CallChatStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ProjectID, req.TransportScope, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, req.WorkDir, req.AgentDefinition)
 					return canonicalResult(output, output, usage, err)
 				}
-				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
+				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ProjectID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 				return canonicalResult(output, textOnly, usage, err)
 			}
 			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
 
 		case llmcontracts.OperationTask:
 			if openAIDirectClientEnabled(req.Agent) {
-				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
+				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ProjectID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 				return canonicalResult(output, textOnly, usage, err)
 			}
 			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
