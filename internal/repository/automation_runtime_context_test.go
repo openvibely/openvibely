@@ -932,6 +932,8 @@ func TestAutomationRepoCancelsQueuedDispatchAndPreparedExecution(t *testing.T) {
 		if err != nil {
 			t.Fatalf("claim prepared execution: %v", err)
 		}
+		asyncRepo := NewOpenAIAsyncToolCallRepo(db)
+		asyncCall := createAsyncToolCallFixture(t, asyncRepo, fixture.ProjectID, task.ID, execution.ID, "call_cancel_dispatch", time.Now().UTC().Add(time.Hour))
 		if err := repo.MarkDispatchSubmitted(ctx, dispatch.ID, "prepared-cancellation-owner", execution.ID); err != nil {
 			t.Fatalf("mark prepared dispatch submitted: %v", err)
 		}
@@ -959,9 +961,15 @@ func TestAutomationRepoCancelsQueuedDispatchAndPreparedExecution(t *testing.T) {
 		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations); err != nil {
 			t.Fatalf("load prepared reservation count: %v", err)
 		}
+		asyncState, err := asyncRepo.GetByExecutionCallID(ctx, execution.ID, asyncCall.CallID)
+		if err != nil {
+			t.Fatalf("load async cancellation state: %v", err)
+		}
+		if asyncState == nil || asyncState.Status != models.OpenAIAsyncToolCallCancelled {
+			t.Fatalf("async state after CancelDispatchesForTask = %#v, want cancelled", asyncState)
+		}
 		if taskStatus != string(models.StatusCancelled) || taskCategory != string(models.CategoryBacklog) || executionStatus != string(models.ExecCancelled) ||
-			dispatchStatus != "failed" || invocationStatus != string(models.AutomationInvocationCancelled) ||
-			activityStatus != string(models.AutomationActivityCancelled) || reservations != 0 {
+			dispatchStatus != "failed" || invocationStatus != string(models.AutomationInvocationCancelled) || activityStatus != string(models.AutomationActivityCancelled) || reservations != 0 {
 			t.Fatalf("prepared cancellation state task=%q/%q execution=%q dispatch=%q invocation=%q activity=%q reservations=%d",
 				taskStatus, taskCategory, executionStatus, dispatchStatus, invocationStatus, activityStatus, reservations)
 		}
@@ -989,6 +997,11 @@ func TestAutomationRepoTerminalDispatchFailurePreservesCancelledTask(t *testing.
 	if err != nil {
 		t.Fatalf("claim execution before cancellation: %v", err)
 	}
+	asyncRepo := NewOpenAIAsyncToolCallRepo(db)
+	asyncCall := createAsyncToolCallFixture(t, asyncRepo, fixture.ProjectID, task.ID, execution.ID, "call_fail_dispatch", now.Add(time.Hour))
+	if claimed, err := asyncRepo.ClaimForRun(ctx, asyncCall.ID, now); err != nil || !claimed {
+		t.Fatalf("claim async row before terminal FailDispatch claimed=%v err=%v", claimed, err)
+	}
 	if _, err := db.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled', category = 'backlog', updated_at = CURRENT_TIMESTAMP WHERE id = ?`, task.ID); err != nil {
 		t.Fatalf("cancel task: %v", err)
 	}
@@ -1010,11 +1023,77 @@ func TestAutomationRepoTerminalDispatchFailurePreservesCancelledTask(t *testing.
 		dispatch.InvocationID, "dispatch:"+dispatch.ID+":execute").Scan(&activityStatus); err != nil {
 		t.Fatalf("load cancelled activity: %v", err)
 	}
+	asyncState, err := asyncRepo.GetByExecutionCallID(ctx, execution.ID, asyncCall.CallID)
+	if err != nil {
+		t.Fatalf("load async state after FailDispatch cancellation: %v", err)
+	}
+	if asyncState == nil || asyncState.Status != models.OpenAIAsyncToolCallCancelled {
+		t.Fatalf("async state after FailDispatch cancellation = %#v, want cancelled", asyncState)
+	}
 	if taskStatus != string(models.StatusCancelled) || taskCategory != string(models.CategoryBacklog) ||
 		executionStatus != string(models.ExecCancelled) || invocationStatus != string(models.AutomationInvocationCancelled) ||
 		activityStatus != string(models.AutomationActivityCancelled) {
 		t.Fatalf("cancel race state task=%q/%q execution=%q invocation=%q activity=%q",
 			taskStatus, taskCategory, executionStatus, invocationStatus, activityStatus)
+	}
+}
+
+func TestAutomationRepoCompleteDispatchCancelledCancelsCompletedAsyncToolCalls(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Cancelled complete dispatch")
+	now := time.Now().UTC()
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], now.Add(-time.Minute))
+	_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, now, schedule.ComputeNextRun(now))
+	if err != nil {
+		t.Fatalf("claim cancelled occurrence: %v", err)
+	}
+	leased, err := repo.LeaseNextDispatch(ctx, "complete-cancel-owner", now, time.Minute)
+	if err != nil || leased == nil || leased.ID != dispatch.ID {
+		t.Fatalf("lease cancelled dispatch = %#v, %v", leased, err)
+	}
+	execution, err := taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "complete-cancel-owner")
+	if err != nil {
+		t.Fatalf("claim cancelled execution: %v", err)
+	}
+	if err := repo.MarkDispatchSubmitted(ctx, dispatch.ID, "complete-cancel-owner", execution.ID); err != nil {
+		t.Fatalf("mark cancelled dispatch submitted: %v", err)
+	}
+	asyncRepo := NewOpenAIAsyncToolCallRepo(db)
+	asyncCall := createAsyncToolCallFixture(t, asyncRepo, fixture.ProjectID, task.ID, execution.ID, "call_complete_dispatch", now.Add(time.Hour))
+	if claimed, err := asyncRepo.ClaimForRun(ctx, asyncCall.ID, now); err != nil || !claimed {
+		t.Fatalf("claim async row before CompleteDispatch claimed=%v err=%v", claimed, err)
+	}
+	if err := asyncRepo.MarkCompleted(ctx, asyncCall.ID, "durable result", false, now); err != nil {
+		t.Fatalf("complete async row before CompleteDispatch: %v", err)
+	}
+
+	if err := repo.CompleteDispatch(ctx, dispatch.ID, execution.ID, models.ExecCancelled, "provider cancelled"); err != nil {
+		t.Fatalf("complete cancelled dispatch: %v", err)
+	}
+
+	asyncState, err := asyncRepo.GetByExecutionCallID(ctx, execution.ID, asyncCall.CallID)
+	if err != nil {
+		t.Fatalf("load async state after CompleteDispatch cancellation: %v", err)
+	}
+	if asyncState == nil || asyncState.Status != models.OpenAIAsyncToolCallCancelled {
+		t.Fatalf("async state after CompleteDispatch cancellation = %#v, want cancelled", asyncState)
+	}
+	var executionStatus, taskStatus, invocationStatus string
+	if err := db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, execution.ID).Scan(&executionStatus); err != nil {
+		t.Fatalf("load cancelled execution: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM tasks WHERE id = ?`, task.ID).Scan(&taskStatus); err != nil {
+		t.Fatalf("load cancelled task: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus); err != nil {
+		t.Fatalf("load cancelled invocation: %v", err)
+	}
+	if executionStatus != string(models.ExecCancelled) || taskStatus != string(models.StatusCancelled) || invocationStatus != string(models.AutomationInvocationCancelled) {
+		t.Fatalf("cancelled dispatch state execution=%q task=%q invocation=%q", executionStatus, taskStatus, invocationStatus)
 	}
 }
 
