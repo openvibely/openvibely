@@ -839,6 +839,16 @@ func TestGetPullRequestReturnsHeadRefAndMergedStateFromResolvedRepository(t *tes
 	}
 }
 
+func TestGitHubPullRequestJSONOmitsBody(t *testing.T) {
+	payload, err := json.Marshal(GitHubPullRequest{Number: 4, Body: "untrusted pull request text"})
+	if err != nil {
+		t.Fatalf("marshal pull request: %v", err)
+	}
+	if strings.Contains(string(payload), "untrusted pull request text") || strings.Contains(string(payload), `"Body"`) {
+		t.Fatalf("pull request body leaked into JSON: %s", payload)
+	}
+}
+
 func TestGetPullRequestRetriesTransientGitHubFailures(t *testing.T) {
 	svc := newPATGitHubService(t, "https://api.github.test")
 	svc.retryPolicy.After = func(time.Duration) <-chan time.Time {
