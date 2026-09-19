@@ -735,13 +735,16 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								});
 							}
 							if (isThread) {
-								if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+								if (window.syncTaskThreadTranscriptRevision) return window.syncTaskThreadTranscriptRevision(execId);
 							} else if (window.syncChatTranscriptRevision) {
-								window.syncChatTranscriptRevision(execId);
+								return window.syncChatTranscriptRevision(execId);
 							}
 						}
-						if (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);
-						else revealTerminalError();
+						if (failedRender && typeof failedRender.then === 'function') {
+							container._chatTerminalTransitionPromise = failedRender.then(revealTerminalError, revealTerminalError);
+						} else {
+							container._chatTerminalTransitionPromise = Promise.resolve(revealTerminalError());
+						}
 							window._taskThreadStreamingActive = false;
 							var failedPair = container.closest('[data-execution-pair="true"]');
 							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
@@ -1232,13 +1235,16 @@ templ ChatStreamingResumeInitScript() {
 						});
 					}
 					if (pauseTarget) {
-						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+						if (window.syncTaskThreadTranscriptRevision) return window.syncTaskThreadTranscriptRevision(execId);
 					} else if (window.syncChatTranscriptRevision) {
-						window.syncChatTranscriptRevision(execId);
+						return window.syncChatTranscriptRevision(execId);
 					}
 				}
-				if (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);
-				else revealTerminalError();
+				if (failedRender && typeof failedRender.then === 'function') {
+					container._chatTerminalTransitionPromise = failedRender.then(revealTerminalError, revealTerminalError);
+				} else {
+					container._chatTerminalTransitionPromise = Promise.resolve(revealTerminalError());
+				}
 				window._taskThreadStreamingActive = false;
 					var failedPair = container.closest('[data-execution-pair="true"]');
 					if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');

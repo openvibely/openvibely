@@ -27,6 +27,39 @@ type composerFocusCDP struct {
 	ctx    context.Context
 	conn   *websocket.Conn
 	nextID int
+	events []string
+}
+
+func (c *composerFocusCDP) captureEvent(message []byte) {
+	var event struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(message, &event) != nil || event.Method == "" {
+		return
+	}
+	switch event.Method {
+	case "Runtime.exceptionThrown", "Runtime.consoleAPICalled", "Log.entryAdded":
+		entry := event.Method + ": " + string(event.Params)
+		if len(entry) > 1500 {
+			entry = entry[:1500] + "..."
+		}
+		c.events = append(c.events, entry)
+		if len(c.events) > 20 {
+			c.events = c.events[len(c.events)-20:]
+		}
+	}
+}
+
+func (c *composerFocusCDP) eventDiagnostic() string {
+	if len(c.events) == 0 {
+		return "[]"
+	}
+	encoded, err := json.Marshal(c.events)
+	if err != nil {
+		return "[unavailable]"
+	}
+	return string(encoded)
 }
 
 func (c *composerFocusCDP) call(method string, params any, result any) {
@@ -44,6 +77,7 @@ func (c *composerFocusCDP) call(method string, params any, result any) {
 		if err != nil {
 			c.t.Fatalf("read CDP %s response: %v", method, err)
 		}
+		c.captureEvent(message)
 		var response struct {
 			ID     int             `json:"id"`
 			Result json.RawMessage `json:"result"`
@@ -66,6 +100,16 @@ func (c *composerFocusCDP) call(method string, params any, result any) {
 
 func (c *composerFocusCDP) evaluate(expression string) string {
 	c.t.Helper()
+	return c.evaluateExpression(expression, false)
+}
+
+func (c *composerFocusCDP) evaluateAwait(expression string) string {
+	c.t.Helper()
+	return c.evaluateExpression(expression, true)
+}
+
+func (c *composerFocusCDP) evaluateExpression(expression string, awaitPromise bool) string {
+	c.t.Helper()
 	var response struct {
 		Result struct {
 			Type        string          `json:"type"`
@@ -74,9 +118,9 @@ func (c *composerFocusCDP) evaluate(expression string) string {
 		} `json:"result"`
 		ExceptionDetails json.RawMessage `json:"exceptionDetails"`
 	}
-	c.call("Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true}, &response)
+	c.call("Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true, "awaitPromise": awaitPromise}, &response)
 	if len(response.ExceptionDetails) > 0 {
-		c.t.Fatalf("evaluate JavaScript %q: %s", expression, response.ExceptionDetails)
+		c.t.Fatalf("evaluate JavaScript %q: %s; browserEvents=%s", expression, response.ExceptionDetails, c.eventDiagnostic())
 	}
 	if response.Result.Type != "string" || len(response.Result.Value) == 0 {
 		c.t.Fatalf("evaluate JavaScript %q returned %q: %s", expression, response.Result.Type, response.Result.Description)
@@ -104,8 +148,8 @@ func (c *composerFocusCDP) waitForTimeout(label, expression, want string, timeou
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	diagnostic := c.evaluate(`JSON.stringify({ready:document.readyState,active:document.activeElement&&{name:document.activeElement.id||document.activeElement.tagName,html:document.activeElement.outerHTML.slice(0,180),dialog:document.activeElement.closest('dialog')&&document.activeElement.closest('dialog').id},input:!!document.getElementById('message-input'),taskInput:!!document.getElementById('task-message-input'),thread:document.getElementById('thread-content')&&{loaded:document.getElementById('thread-content').dataset.loaded,loading:document.getElementById('thread-content').dataset.loading,text:document.getElementById('thread-content').textContent.slice(0,100)},manager:typeof window.openVibelyRequestComposerFocus,state:window._openVibelyComposerFocusState,historyRequests:window._historyRestoreFocusRequests,overlays:Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"], [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"]')).map(function(el){return el.id||el.outerHTML.slice(0,120)})})`)
-	c.t.Fatalf("timed out waiting for %s: got %q, want %q; state=%s", label, got, want, diagnostic)
+	diagnostic := c.evaluate(`JSON.stringify({ready:document.readyState,active:document.activeElement&&{name:document.activeElement.id||document.activeElement.tagName,html:document.activeElement.outerHTML.slice(0,180),dialog:document.activeElement.closest('dialog')&&document.activeElement.closest('dialog').id},input:!!document.getElementById('message-input'),taskInput:!!document.getElementById('task-message-input'),thread:document.getElementById('thread-content')&&{loaded:document.getElementById('thread-content').dataset.loaded,loading:document.getElementById('thread-content').dataset.loading,text:document.getElementById('thread-content').textContent.slice(0,100)},manager:typeof window.openVibelyRequestComposerFocus,state:window._openVibelyComposerFocusState,historyRequests:window._historyRestoreFocusRequests,terminal:{started:window.__terminalRenderStarted,settled:window.__terminalRenderSettled,queued:window.__terminalRenderQueue&&window.__terminalRenderQueue.length,syncCalls:window.__terminalSyncCalls},overlays:Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]:not(dialog), [data-chat-actions-open="true"], [aria-haspopup][aria-expanded="true"]')).filter(function(el){var style=getComputedStyle(el);return style.display!=='none'&&style.visibility!=='hidden'}).map(function(el){return el.id||el.outerHTML.slice(0,120)})})`)
+	c.t.Fatalf("timed out waiting for %s: got %q, want %q; state=%s; browserEvents=%s", label, got, want, diagnostic, c.eventDiagnostic())
 }
 
 func (c *composerFocusCDP) click(selector string) {
@@ -244,7 +288,10 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 		t.Fatalf("connect to Chrome debugging target: %v", err)
 	}
 	defer conn.CloseNow()
-	run(&composerFocusCDP{t: t, ctx: ctx, conn: conn})
+	browser := &composerFocusCDP{t: t, ctx: ctx, conn: conn}
+	browser.call("Runtime.enable", map[string]any{}, nil)
+	browser.call("Log.enable", map[string]any{}, nil)
+	run(browser)
 }
 
 func TestComposerAutoFocusProductionNavigationInChrome(t *testing.T) {

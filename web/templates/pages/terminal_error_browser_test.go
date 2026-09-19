@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,7 +11,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
@@ -70,31 +68,6 @@ return 'ready';
 	}
 }
 
-func installDelayedTerminalBrowserRenderer(browser *composerFocusCDP, delayMilliseconds int) {
-	browser.t.Helper()
-	got := browser.evaluate(`(function(){
-var productionRenderer=window.renderLiveChatContent||window.renderStreamingContent;
-if(typeof productionRenderer!=='function')return 'missing';
-window.__terminalRenderStarted=0;
-window.__terminalRenderSettled=0;
-window.__terminalSyncCalls=0;
-var productionSync=window.syncChatTranscriptRevision;
-window.syncChatTranscriptRevision=function(execID){window.__terminalSyncCalls++;return productionSync(execID);};
-window.renderLiveChatContent=function(el,text,yieldLarge){
-  window.__terminalRenderStarted++;
-  return new Promise(function(resolve,reject){
-    setTimeout(function(){
-      Promise.resolve(productionRenderer(el,text,yieldLarge)).then(function(value){window.__terminalRenderSettled++;resolve(value);},reject);
-    },` + fmt.Sprintf("%d", delayMilliseconds) + `);
-  });
-};
-return 'ready';
-})()`)
-	if got != "ready" {
-		browser.t.Fatalf("install delayed production terminal browser renderer: %s", got)
-	}
-}
-
 func installGatedTerminalBrowserRenderer(browser *composerFocusCDP) {
 	browser.t.Helper()
 	got := browser.evaluate(`(function(){
@@ -127,6 +100,13 @@ func releaseTerminalBrowserRender(browser *composerFocusCDP, label string) {
 	browser.waitFor(label+" queued", `String(!!(window.__terminalRenderQueue&&window.__terminalRenderQueue.length))`, "true")
 	if got := browser.evaluate(`(function(){var released=0;while(window.__releaseTerminalRender()){released++;}return String(released);})()`); got == "0" {
 		browser.t.Fatalf("release %s: %s", label, got)
+	}
+}
+
+func awaitTerminalBrowserTransition(browser *composerFocusCDP, execID, label string) {
+	browser.t.Helper()
+	if got := browser.evaluateAwait(`(async function(){var content=document.getElementById('streaming-message-` + execID + `');if(!content||!content._chatTerminalTransitionPromise)return 'missing';await content._chatTerminalTransitionPromise;return 'settled';})()`); got != "settled" {
+		browser.t.Fatalf("await %s: %s", label, got)
 	}
 }
 
@@ -223,7 +203,7 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/"+task.ID+"?tab=chat", "task-thread-terminal-wiring", func(browser *composerFocusCDP) {
 		browser.waitFor("real lazy Thread load", `Boolean(document.getElementById('task-thread-messages'))+':'+Boolean(document.getElementById('task-thread-view'))`, "true:true")
 		browser.waitFor("lazy Thread HTMX settle", `(function(){var el=document.getElementById('thread-content');return el.dataset.loaded+':'+el.dataset.loading})()`, "true:false")
-		installDelayedTerminalBrowserRenderer(browser, 2500)
+		installGatedTerminalBrowserRenderer(browser)
 
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_thread_execution_started',task_id:'` + task.ID + `',exec_id:'` + runningOne.ID + `'}}));return 'sent';})()`); got != "sent" {
 			t.Fatalf("dispatch first task-thread live event: %s", got)
@@ -240,6 +220,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){window.__terminalStreamFor('` + runningOne.ID + `').emit('error','first terminal failure <unsafe>');return 'failed';})()`); got != "failed" {
 			t.Fatalf("fail first task-thread stream: %s", got)
 		}
+		releaseTerminalBrowserRender(browser, "first task-thread failed render")
+		awaitTerminalBrowserTransition(browser, runningOne.ID, "first task-thread terminal transition")
 		browser.waitFor("first task-thread terminal alert ordering and visibility", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-`+runningOne.ID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: first terminal failure <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_thread_execution_started',task_id:'` + task.ID + `',exec_id:'` + runningTwo.ID + `'}}));return 'sent';})()`); got != "sent" {
@@ -260,6 +242,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 			t.Fatalf("save resumed older-reader position: %s", got)
 		}
 		phase.Store(2)
+		releaseTerminalBrowserRender(browser, "second task-thread failed render")
+		awaitTerminalBrowserTransition(browser, runningTwo.ID, "resumed task-thread terminal transition")
 		browser.waitFor("older task-thread reader preserved after resumed terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-`+runningTwo.ID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__threadSettledBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&Math.abs(messages.scrollTop-window.__taskThreadReaderTop)<=2));})()`, "true")
 
 		if got := browser.evaluate(`(function(){window.dispatchEvent(new CustomEvent('sse-task-event',{detail:{type:'task_thread_execution_started',task_id:'` + task.ID + `',exec_id:'` + runningThree.ID + `'}}));return 'sent';})()`); got != "sent" {
@@ -269,6 +253,7 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){window.__thirdInitialSettled=window.__terminalRenderSettled;window.__terminalStreamFor('` + runningThree.ID + `').emit('message',` + longOutputJS + `);return 'streamed';})()`); got != "streamed" {
 			t.Fatalf("stream third task-thread partial output: %s", got)
 		}
+		releaseTerminalBrowserRender(browser, "third task-thread initial render")
 		browser.waitFor("third task-thread initial render settled", `window.__terminalRenderSettled>window.__thirdInitialSettled?'ready':'waiting'`, "ready")
 		phase.Store(3)
 		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages');messages.style.overflowAnchor='none';if(messages._chatTranscriptMutationObserver)messages._chatTranscriptMutationObserver.disconnect();if(messages._chatTranscriptResizeObserver)messages._chatTranscriptResizeObserver.disconnect();messages.scrollTop=messages.scrollHeight;window.__thirdSettledBeforeFailure=window.__terminalRenderSettled;var stream=window.__terminalStreamFor('` + runningThree.ID + `');stream.emit('message',` + returnTailJS + `);stream.emit('error','third terminal failure');return String(!document.getElementById('chat-execution-` + runningThree.ID + `').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
@@ -278,6 +263,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		browser.waitFor("resumed task-thread reader scrolls up during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
 		browser.wheel("#task-thread-messages", 12000)
 		browser.waitFor("resumed task-thread reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker,pair=document.getElementById('chat-execution-`+runningThree.ID+`');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
+		releaseTerminalBrowserRender(browser, "third task-thread failed render")
+		awaitTerminalBrowserTransition(browser, runningThree.ID, "returning resumed task-thread terminal transition")
 		browser.waitFor("returning resumed task-thread reader pinned after terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-`+runningThree.ID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__thirdSettledBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 
 		if got := browser.evaluate(`(function(){htmx.ajax('POST','/tasks/` + task.ID + `/thread',{target:'#task-thread-messages',swap:'beforeend',values:{message:'fresh live turn'}});return 'sent';})()`); got != "sent" {
@@ -293,6 +280,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){window.__freshTaskThreadReaderTop=document.getElementById('task-thread-messages').scrollTop;return 'saved';})()`); got != "saved" {
 			t.Fatalf("save fresh older-reader position: %s", got)
 		}
+		releaseTerminalBrowserRender(browser, "fresh task-thread failed render")
+		awaitTerminalBrowserTransition(browser, "thread-live-fresh", "fresh task-thread terminal transition")
 		browser.waitFor("fresh task-thread terminal render settles", `(function(){var pair=document.getElementById('chat-execution-thread-live-fresh');return String(!!(window.__terminalRenderSettled>window.__freshSettledBeforeFailure&&pair&&pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
 		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-thread-live-fresh'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&Math.abs(messages.scrollTop-window.__freshTaskThreadReaderTop)<=2));})()`); got != "true" {
 			t.Fatalf("older task-thread reader was not preserved after fresh terminal render: %s", got)
@@ -305,6 +294,7 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		if got := browser.evaluate(`(function(){window.__freshReturnInitialSettled=window.__terminalRenderSettled;window.__terminalStreamFor('thread-live-fresh-return').emit('message',` + longOutputJS + `);return 'streamed';})()`); got != "streamed" {
 			t.Fatalf("stream returning fresh task-thread partial output: %s", got)
 		}
+		releaseTerminalBrowserRender(browser, "returning fresh task-thread initial render")
 		browser.waitFor("returning fresh task-thread initial render settled", `window.__terminalRenderSettled>window.__freshReturnInitialSettled?'ready':'waiting'`, "ready")
 		if got := browser.evaluate(`(function(){var messages=document.getElementById('task-thread-messages');messages.style.overflowAnchor='none';if(messages._chatTranscriptMutationObserver)messages._chatTranscriptMutationObserver.disconnect();if(messages._chatTranscriptResizeObserver)messages._chatTranscriptResizeObserver.disconnect();messages.scrollTop=messages.scrollHeight;window.__freshReturnSettledBeforeFailure=window.__terminalRenderSettled;var stream=window.__terminalStreamFor('thread-live-fresh-return');stream.emit('message',` + returnTailJS + `);stream.emit('error','fresh return terminal failure');return String(!document.getElementById('chat-execution-thread-live-fresh-return').querySelector('[data-terminal-error="true"]'));})()`); got != "true" {
 			t.Fatalf("returning fresh task-thread terminal alert must wait for pending render: %s", got)
@@ -313,6 +303,8 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 		browser.waitFor("fresh task-thread reader scrolls up during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
 		browser.wheel("#task-thread-messages", 12000)
 		browser.waitFor("fresh task-thread reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),tracker=window._taskThreadPageTracker,pair=document.getElementById('chat-execution-thread-live-fresh-return');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
+		releaseTerminalBrowserRender(browser, "returning fresh task-thread failed render")
+		awaitTerminalBrowserTransition(browser, "thread-live-fresh-return", "returning fresh task-thread terminal transition")
 		browser.waitFor("returning fresh task-thread reader pinned after terminal render", `(function(){var messages=document.getElementById('task-thread-messages'),pair=document.getElementById('chat-execution-thread-live-fresh-return'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__freshReturnSettledBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 	})
 
@@ -406,10 +398,10 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		browser.waitFor("native upward Chat reading intent during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
 		browser.waitFor("stable native Chat scroll position during terminal render", `(function(){var top=document.getElementById('chat-messages').scrollTop;if(window.__terminalChatLastTop===top)window.__terminalChatStable=(window.__terminalChatStable||0)+1;else{window.__terminalChatLastTop=top;window.__terminalChatStable=0;}return String(window.__terminalChatStable>=3);})()`, "true")
 		releaseTerminalBrowserRender(browser, "failed page-level Chat render")
-		// Production live rendering has its own 30-second cancellation fallback.
-		// Keep this integration assertion beyond that contract so a contended CI
-		// runner cannot fail while the renderer is still allowed to be pending.
-		browser.waitForTimeout("page-level Chat terminal render and sync", `String(window.__terminalRenderSettled>=window.__terminalSettledBeforeFailure+1&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure)`, "true", 35*time.Second)
+		awaitTerminalBrowserTransition(browser, execID, "page-level Chat terminal render and sync")
+		if got := browser.evaluate(`String(window.__terminalRenderSettled>=window.__terminalSettledBeforeFailure+1&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure)`); got != "true" {
+			t.Fatalf("page-level Chat terminal render and sync state after transition: %s", got)
+		}
 		browser.waitFor("page-level Chat terminal alert", `(function(){var pair=document.getElementById('chat-execution-`+execID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: live Chat terminal <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1));})()`, "true")
 		browser.waitFor("page-level Chat reader remains above bottom", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker,bottomGap=messages.scrollHeight-messages.scrollTop-messages.clientHeight;return String(!!(tracker&&tracker.userScrolledUp&&bottomGap>2));})()`, "true")
 
@@ -431,7 +423,8 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		browser.wheel("#chat-messages", 12000)
 		browser.waitFor("page-level Chat reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker,pair=document.getElementById('chat-execution-`+returnExecID+`');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
 		releaseTerminalBrowserRender(browser, "failed returning page-level Chat render")
-		browser.waitForTimeout("returning page-level Chat reader pinned after terminal render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+returnExecID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__returnSettledBeforeFailure&&window.__terminalSyncCalls>window.__returnSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true", 35*time.Second)
+		awaitTerminalBrowserTransition(browser, returnExecID, "returning page-level Chat terminal render and sync")
+		browser.waitFor("returning page-level Chat reader pinned after terminal render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+returnExecID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__returnSettledBeforeFailure&&window.__terminalSyncCalls>window.__returnSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
 	})
 	if chatRequests.Load() < 3 {
 		t.Fatalf("production Chat requests = %d, want initial page plus two authoritative terminal syncs", chatRequests.Load())
