@@ -306,6 +306,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if err := ConfigureGitHubRepoEndpoint(repoRef, s.github.GlobalAPIEndpoint(ctx)); err != nil {
 		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
 	}
+	var validatedExistingPR *GitHubPullRequest
 	if opts.RequireExistingOpenPR > 0 {
 		if existingPR == nil || existingPR.PRNumber != opts.RequireExistingOpenPR || !IsOpenPullRequestState(existingPR.PRState) {
 			return nil, fmt.Errorf("startup reconciliation pull request #%d is no longer the recorded open pull request", opts.RequireExistingOpenPR)
@@ -317,6 +318,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		if err := ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err != nil {
 			return nil, fmt.Errorf("startup reconciliation pull request #%d is unavailable: %w", opts.RequireExistingOpenPR, err)
 		}
+		validatedExistingPR = livePR
 	}
 
 	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)
@@ -350,9 +352,19 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		s.recordPublishedCommitStat(ctx, task, publishResult, createReq.Base, commitMessage)
 	}
 	if existingPR != nil && IsOpenPullRequestState(existingPR.PRState) {
-		livePR, err := s.github.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
-		if err != nil {
-			return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
+		livePR := validatedExistingPR
+		if livePR != nil {
+			// Startup reconciliation already verified the PR before publication.
+			// Trust the successful branch publication instead of immediately reading
+			// GitHub's eventually consistent pull-request representation again.
+			publishedPR := *livePR
+			publishedPR.HeadSHA = publishedHeadSHA
+			livePR = &publishedPR
+		} else {
+			livePR, err = s.github.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
+			if err != nil {
+				return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
+			}
 		}
 		if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, publishedHeadSHA); err == nil {
 			if body, update := reusedPullRequestBody(livePR.Body, createReq.Body, existingPR.IssueNumber, opts); update {
