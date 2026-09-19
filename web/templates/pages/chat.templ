@@ -1103,11 +1103,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										}
 									});
 								}
-								window.syncChatTranscriptRevision(execId);
+								var terminalSync = window.syncChatTranscriptRevision(execId);
 								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+								return terminalSync;
 							}
-								if (failedRender && typeof failedRender.then === 'function') failedRender.then(revealTerminalError, revealTerminalError);
-								else revealTerminalError();
+								// Keep the exact terminal transition awaitable. Browser integration
+								// tests and reconnect code can observe this owned work instead of
+								// inferring completion from timers or global counters.
+								contentDiv._chatTerminalTransitionPromise = Promise.resolve(failedRender).then(revealTerminalError, revealTerminalError);
 								// Clear streaming state and refresh the composer immediately; the
 								// terminal alert and authoritative transcript sync wait for the
 								// final Markdown render to settle.
