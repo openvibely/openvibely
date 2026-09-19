@@ -1546,10 +1546,12 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 			var card=document.getElementById('task-merge-loader-browser-task');var trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
 			await waitFor(function(){var options=card.querySelector('[data-task-card-merge-options]');return options&&options.getAttribute('aria-busy')==='true'},'keyboard loader start');
 			var options=card.querySelector('[data-task-card-merge-options]');var loading=options.querySelector('[data-task-card-merge-options-loading-status]');await waitFor(function(){return !loading.classList.contains('hidden')},'visible loading spinner');
-			options.tabIndex=0;options.focus();await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
+			if(document.activeElement!==trigger)fail('merge option loading moved focus from the menu trigger');await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
 			await waitFor(function(){var current=document.querySelector('[data-task-card-merge-options]');return current&&current.getAttribute('aria-busy')==='true'},'automatic replacement loader start');
 			if((await fetch('/option-count').then(function(r){return r.text()})).trim()!=='1')fail('board refresh duplicated the in-flight Git request');
 			await fetch('/release-first',{method:'POST'});await waitFor(function(){return !!document.querySelector('[data-task-card-local-submenu]')},'shared request hydration');
+			card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');if(document.activeElement!==trigger)fail('shared request hydration lost trigger focus');await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
+			await waitFor(function(){return !!document.querySelector('[data-task-card-local-submenu]')},'settled request replacement hydration');if((await fetch('/option-count').then(function(r){return r.text()})).trim()!=='2')fail('settled request replacement did not start a fresh Git request');
 			var dropdown=document.querySelector('[data-kanban-menu-key="task-merge-loader-browser-task"]');if(window.closeKanbanMenu)window.closeKanbanMenu(dropdown,false);
 			await fetch('/set-mode?mode=fail',{method:'POST'});await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
 			await waitFor(function(){var retry=card.querySelector('[data-task-card-merge-options-retry]');return retry&&!retry.classList.contains('hidden')},'visible retry');

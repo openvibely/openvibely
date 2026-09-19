@@ -3084,8 +3084,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					const refreshURL = options.getAttribute('data-task-card-merge-options-url');
 					const dropdown = options.closest('[data-kanban-menu-key]');
 					if (!refreshURL || !dropdown) return;
-					const restoresFocusedOptions = !!(savedKanbanInteraction && savedKanbanInteraction.refreshTaskOptions && savedKanbanInteraction.menuKey === dropdown.getAttribute('data-kanban-menu-key'));
-					if (!taskCardMergeOptionRequests.has(refreshURL) && !restoresFocusedOptions) return;
+					const restoresOpenOptions = dropdown.getAttribute('data-kanban-menu-open') === 'true';
+					if (!taskCardMergeOptionRequests.has(refreshURL) && !restoresOpenOptions) return;
 					loadTaskCardMergeOptions(dropdown, dropdown.querySelector('[data-kanban-menu-trigger]'));
 				});
 			}
