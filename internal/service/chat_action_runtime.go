@@ -1666,8 +1666,8 @@ func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSet
 		if req.MaxWorkers != nil {
 			return false, false, "clear_max_workers cannot be combined with max_workers"
 		}
-		changed = project.MaxWorkers != nil
-		shouldDispatch = isProjectWorkerLimitIncrease(project.MaxWorkers, nil)
+		changed = !models.ProjectWorkerLimitsEqual(project.MaxWorkers, nil)
+		shouldDispatch = models.ProjectWorkerLimitIncrease(project.MaxWorkers, nil)
 		project.MaxWorkers = nil
 		return changed, shouldDispatch, ""
 	}
@@ -1688,30 +1688,10 @@ func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSet
 		v := maxWorkers
 		next = &v
 	}
-	changed = !sameProjectWorkerLimit(project.MaxWorkers, next)
-	shouldDispatch = isProjectWorkerLimitIncrease(project.MaxWorkers, next)
+	changed = !models.ProjectWorkerLimitsEqual(project.MaxWorkers, next)
+	shouldDispatch = models.ProjectWorkerLimitIncrease(project.MaxWorkers, next)
 	project.MaxWorkers = next
 	return changed, shouldDispatch, ""
-}
-
-func normalizedProjectWorkerLimit(limit *int) int {
-	if limit == nil || *limit <= 0 {
-		return 0
-	}
-	return *limit
-}
-
-func sameProjectWorkerLimit(a, b *int) bool {
-	return normalizedProjectWorkerLimit(a) == normalizedProjectWorkerLimit(b)
-}
-
-func isProjectWorkerLimitIncrease(oldLimit, newLimit *int) bool {
-	oldValue := normalizedProjectWorkerLimit(oldLimit)
-	newValue := normalizedProjectWorkerLimit(newLimit)
-	if oldValue == 0 {
-		return false
-	}
-	return newValue == 0 || newValue > oldValue
 }
 
 func projectDefaultModelSummary(model *models.LLMConfig) updateProjectSettingsModelSummary {
@@ -1728,7 +1708,7 @@ func projectDefaultModelSummary(model *models.LLMConfig) updateProjectSettingsMo
 }
 
 func projectWorkerLimitSummary(maxWorkers *int) updateProjectSettingsWorkerLimit {
-	value := normalizedProjectWorkerLimit(maxWorkers)
+	value := models.NormalizeProjectWorkerLimit(maxWorkers)
 	if value == 0 {
 		return updateProjectSettingsWorkerLimit{Set: false}
 	}

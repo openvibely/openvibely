@@ -616,6 +616,21 @@ func TestProjectService_ValidatesProjectWorkerLimitAgainstGlobal(t *testing.T) {
 	if storedZero.MaxWorkers != nil {
 		t.Fatalf("zero project limit persisted as %v, want nil", storedZero.MaxWorkers)
 	}
+	requestedZero := *storedZero
+	requestedZero.MaxWorkers = &zero
+	if err := svc.Update(ctx, &requestedZero); err != nil {
+		t.Fatalf("Update with requested zero against inherited project cap: %v", err)
+	}
+	updatedZero, err := projectRepo.GetByID(ctx, zeroProject.ID)
+	if err != nil {
+		t.Fatalf("GetByID after requested zero update: %v", err)
+	}
+	if updatedZero.MaxWorkers != nil {
+		t.Fatalf("requested zero project limit persisted as %v, want nil", updatedZero.MaxWorkers)
+	}
+	if requestedZero.MaxWorkers != nil {
+		t.Fatalf("requested zero project limit normalized to %v, want nil", requestedZero.MaxWorkers)
+	}
 
 	if err := workerRepo.SetMaxWorkers(ctx, 10); err != nil {
 		t.Fatalf("SetMaxWorkers(10): %v", err)
