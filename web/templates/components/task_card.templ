@@ -286,7 +286,7 @@ func taskCardDisplayState(task models.Task) taskCardState {
 	}
 }
 
-templ taskCardStateIcon(task models.Task) {
+templ TaskStateIcon(task models.Task) {
 	{{ state := taskCardDisplayState(task) }}
 	<span
 		data-task-state-icon
@@ -531,7 +531,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						class="font-medium hover:underline cursor-pointer flex items-start gap-2 min-w-0 max-w-full leading-snug"
 						title={ task.Title }
 					>
-						@taskCardStateIcon(task)
+						@TaskStateIcon(task)
 						<span data-task-title class="min-w-0 flex-1 break-words sm:truncate">{ task.Title }</span>
 					</a>
 					if task.Prompt != "" {

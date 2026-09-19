@@ -266,7 +266,7 @@ func TestTaskRepo_BreadcrumbSelectorPrioritizesRunningTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListBreadcrumbSelector empty: %v", err)
 	}
-	wantEmpty := []string{current.ID, runningNew.ID, runningOld.ID, recentPending.ID, exactPending.ID}
+	wantEmpty := []string{runningNew.ID, runningOld.ID, current.ID, recentPending.ID, exactPending.ID}
 	gotEmpty := make([]string, len(items))
 	for i, item := range items {
 		gotEmpty[i] = item.ID

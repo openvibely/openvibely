@@ -353,7 +353,7 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 				return templ_7745c5c3_Err
 			}
 			for index, item := range items {
-				if breadcrumbSelectorShowSectionLabel(kind, currentID, items, index) {
+				if breadcrumbSelectorShowSectionLabel(kind, items, index) {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<div class=\"menu-title px-4 pb-1 pt-2\" role=\"presentation\" data-breadcrumb-selector-section><span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
@@ -446,48 +446,40 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</span> <span class=\"min-w-0 flex-1 truncate\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</span> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if kind == "Task" {
+					templ_7745c5c3_Err = TaskStateIcon(models.Task{Status: item.Status, Category: item.Category}).Render(ctx, templ_7745c5c3_Buffer)
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<span class=\"min-w-0 flex-1 truncate\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 70, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 73, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</span> ")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if item.Status == models.StatusRunning {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"ml-auto shrink-0\" data-breadcrumb-selector-running>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = RunningSpinner("").Render(ctx, templ_7745c5c3_Buffer)
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</span>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</span></a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if hasMore {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<p class=\"px-3 py-2 text-center text-xs text-base-content/60\">More matches are available. Refine your search.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<p class=\"px-3 py-2 text-center text-xs text-base-content/60\">More matches are available. Refine your search.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -504,22 +496,14 @@ func breadcrumbSelectorCheck(current bool) string {
 	return ""
 }
 
-func breadcrumbSelectorShowSectionLabel(kind, currentID string, items []models.BreadcrumbSelectorItem, index int) bool {
+func breadcrumbSelectorShowSectionLabel(kind string, items []models.BreadcrumbSelectorItem, index int) bool {
 	if kind != "Task" || index < 0 || index >= len(items) {
 		return false
 	}
-	item := items[index]
-	if item.ID == currentID {
-		return false
+	if index == 0 {
+		return true
 	}
-	section := breadcrumbSelectorSectionKey(item)
-	for previous := index - 1; previous >= 0; previous-- {
-		if items[previous].ID == currentID {
-			continue
-		}
-		return breadcrumbSelectorSectionKey(items[previous]) != section
-	}
-	return true
+	return breadcrumbSelectorSectionKey(items[index-1]) != breadcrumbSelectorSectionKey(items[index])
 }
 
 func breadcrumbSelectorSectionKey(item models.BreadcrumbSelectorItem) string {
