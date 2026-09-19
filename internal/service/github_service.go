@@ -76,7 +76,7 @@ type GitHubRepoRef struct {
 type GitHubPullRequest struct {
 	Number           int
 	URL              string
-	Body             string
+	Body             string `json:"-"`
 	State            string
 	Merged           bool
 	HeadRef          string

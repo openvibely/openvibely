@@ -355,11 +355,12 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
 		}
 		if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, publishedHeadSHA); err == nil {
-			if body, update := reusedPullRequestBody(livePR.Body, createReq.Body, opts); update {
+			if body, update := reusedPullRequestBody(livePR.Body, createReq.Body, existingPR.IssueNumber, opts); update {
 				if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
 					if err := updater.UpdatePullRequestBody(ctx, repoRef, existingPR.PRNumber, body); err != nil {
 						return nil, fmt.Errorf("updating existing pull request #%d body: %w", existingPR.PRNumber, err)
 					}
+					livePR.Body = body
 				}
 			}
 			liveURL := strings.TrimSpace(livePR.URL)
@@ -433,11 +434,12 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		return nil, fmt.Errorf("pull request #%d is not current: %w", prNumber, err)
 	}
 	if !created {
-		if body, update := reusedPullRequestBody(pr.Body, createReq.Body, opts); update {
+		if body, update := reusedPullRequestBody(pr.Body, createReq.Body, nil, opts); update {
 			if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
 				if err := updater.UpdatePullRequestBody(ctx, repoRef, prNumber, body); err != nil {
 					return nil, fmt.Errorf("updating existing pull request #%d body: %w", prNumber, err)
 				}
+				pr.Body = body
 			}
 		}
 	}
@@ -469,7 +471,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}, nil
 }
 
-func reusedPullRequestBody(existingBody, defaultBody string, opts OpenTaskPullRequestOptions) (string, bool) {
+func reusedPullRequestBody(existingBody, defaultBody string, previousIssueNumber *int, opts OpenTaskPullRequestOptions) (string, bool) {
 	if body := strings.TrimSpace(opts.Body); body != "" {
 		return body, true
 	}
@@ -478,14 +480,55 @@ func reusedPullRequestBody(existingBody, defaultBody string, opts OpenTaskPullRe
 	}
 
 	closingLine := fmt.Sprintf("Closes #%d", *opts.IssueNumber)
-	body := strings.TrimSpace(existingBody)
+	originalBody := strings.TrimSpace(existingBody)
+	body := originalBody
+	if previousIssueNumber != nil && *previousIssueNumber != *opts.IssueNumber {
+		body = removePullRequestIssueClosingLine(body, *previousIssueNumber)
+	}
 	if pullRequestBodyClosesIssue(body, *opts.IssueNumber) {
+		if body != originalBody {
+			return body, true
+		}
 		return "", false
 	}
 	if body == "" {
 		return strings.TrimSpace(defaultBody), true
 	}
 	return body + "\n\n" + closingLine, true
+}
+
+func removePullRequestIssueClosingLine(body string, issueNumber int) string {
+	lines := strings.Split(body, "\n")
+	kept := lines[:0]
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		if pullRequestClosingLineMatchesIssue(line, issueNumber) {
+			if i+1 < len(lines) && len(kept) > 0 && strings.TrimSpace(lines[i+1]) == "" && strings.TrimSpace(kept[len(kept)-1]) == "" {
+				i++
+			}
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+func pullRequestClosingLineMatchesIssue(line string, issueNumber int) bool {
+	fields := strings.Fields(strings.TrimSpace(line))
+	if len(fields) == 3 && (fields[0] == "-" || fields[0] == "*" || fields[0] == "+") {
+		fields = fields[1:]
+	}
+	if len(fields) != 2 {
+		return false
+	}
+	keyword := strings.ToLower(strings.Trim(fields[0], "*_`:-[]()"))
+	switch keyword {
+	case "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved":
+		ref := strings.Trim(fields[1], "*_`.,;:[]()")
+		return strings.EqualFold(ref, fmt.Sprintf("#%d", issueNumber))
+	default:
+		return false
+	}
 }
 
 func pullRequestBodyClosesIssue(body string, issueNumber int) bool {

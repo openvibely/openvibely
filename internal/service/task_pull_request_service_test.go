@@ -1086,7 +1086,13 @@ func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueURLWhenIssueNumberChan
 	}
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
 		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: 24, URL: "https://github.com/openvibely/openvibely/pull/24", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+			return &GitHubPullRequest{Number: 24, URL: "https://github.com/openvibely/openvibely/pull/24", Body: "Existing notes\n\nCloses #123", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error {
+			if body != "Existing notes\n\nCloses #456" {
+				t.Fatalf("updated body = %q, want old closing line replaced", body)
+			}
+			return nil
 		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			return nil, fmt.Errorf("should not create")
@@ -1100,6 +1106,9 @@ func TestTaskPullRequestServiceOpenForTaskClearsStaleIssueURLWhenIssueNumberChan
 	}
 	if !result.ReusedExistingRecord || result.PullRequest.Number != 24 {
 		t.Fatalf("expected existing PR reuse, got %#v", result)
+	}
+	if result.PullRequest.Body != "Existing notes\n\nCloses #456" {
+		t.Fatalf("result body = %q, want updated body", result.PullRequest.Body)
 	}
 	if result.Record.IssueNumber == nil || *result.Record.IssueNumber != 456 || result.Record.IssueURL != "" {
 		t.Fatalf("expected result record with new issue number and cleared URL, got %#v", result.Record)
@@ -1360,11 +1369,15 @@ func TestTaskPullRequestServiceOpenForTaskReusedRecordAppliesDefaultIssueBody(t 
 		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error { updatedBody = body; return nil },
 	}, prRepo)
 	issueNumber := 123
-	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}); err != nil {
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber})
+	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
 	if updatedBody != "Existing review notes\n\nCloses #123" {
 		t.Fatalf("updated body = %q, want existing body with closing line", updatedBody)
+	}
+	if result.PullRequest.Body != updatedBody {
+		t.Fatalf("result body = %q, want updated body %q", result.PullRequest.Body, updatedBody)
 	}
 }
 
@@ -1390,34 +1403,42 @@ func TestTaskPullRequestServiceOpenForTaskReusedRemoteAppliesDefaultIssueBody(t 
 		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error { updatedBody = body; return nil },
 	}, prRepo)
 	issueNumber := 456
-	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}); err != nil {
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber})
+	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
 	if updatedBody != "Remote review notes\n\nCloses #456" {
 		t.Fatalf("updated body = %q, want existing body with closing line", updatedBody)
 	}
+	if result.PullRequest.Body != updatedBody {
+		t.Fatalf("result body = %q, want updated body %q", result.PullRequest.Body, updatedBody)
+	}
 }
 
 func TestReusedPullRequestBody(t *testing.T) {
 	issueNumber := 123
+	previousIssueNumber := 122
 	tests := []struct {
-		name         string
-		existingBody string
-		defaultBody  string
-		opts         OpenTaskPullRequestOptions
-		wantBody     string
-		wantUpdate   bool
+		name                string
+		existingBody        string
+		defaultBody         string
+		previousIssueNumber *int
+		opts                OpenTaskPullRequestOptions
+		wantBody            string
+		wantUpdate          bool
 	}{
 		{name: "no issue leaves body unchanged", existingBody: "Human-written notes", defaultBody: "Generated summary", opts: OpenTaskPullRequestOptions{}},
 		{name: "issue appends closing line", existingBody: "Human-written notes", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, wantBody: "Human-written notes\n\nCloses #123", wantUpdate: true},
 		{name: "existing closing line is unchanged", existingBody: "Human-written notes\n\ncloses #123", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}},
 		{name: "equivalent closing keyword is unchanged", existingBody: "Human-written notes\n\n- Fixes #123.", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}},
+		{name: "relink replaces generated closing line", existingBody: "Human-written notes\n\nCloses #122", defaultBody: "Generated summary\n\nCloses #123", previousIssueNumber: &previousIssueNumber, opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, wantBody: "Human-written notes\n\nCloses #123", wantUpdate: true},
+		{name: "relink removes old line when new line exists", existingBody: "Human-written notes\n\nCloses #122\n\nCloses #123", defaultBody: "Generated summary\n\nCloses #123", previousIssueNumber: &previousIssueNumber, opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, wantBody: "Human-written notes\n\nCloses #123", wantUpdate: true},
 		{name: "empty body uses default", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, wantBody: "Generated summary\n\nCloses #123", wantUpdate: true},
 		{name: "explicit body replaces existing", existingBody: "Human-written notes", opts: OpenTaskPullRequestOptions{Body: "Replacement"}, wantBody: "Replacement", wantUpdate: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotBody, gotUpdate := reusedPullRequestBody(tt.existingBody, tt.defaultBody, tt.opts)
+			gotBody, gotUpdate := reusedPullRequestBody(tt.existingBody, tt.defaultBody, tt.previousIssueNumber, tt.opts)
 			if gotBody != tt.wantBody || gotUpdate != tt.wantUpdate {
 				t.Fatalf("reusedPullRequestBody() = (%q, %t), want (%q, %t)", gotBody, gotUpdate, tt.wantBody, tt.wantUpdate)
 			}
