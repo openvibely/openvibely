@@ -343,11 +343,10 @@ templ analyticsContent(currentProject *models.Project) {
 									if (previous && card.kind === 'ratio' && previous[card.key] && current[card.key]) { const change = Number(current[card.key].percent || 0) - Number(previous[card.key].percent || 0); delta = (change >= 0 ? '+' : '') + change.toFixed(1) + ' percentage points; previous ' + Number(previous[card.key].percent || 0).toFixed(1) + '%; n=' + previous[card.key].denominator; }
 									if (previous && (card.kind === 'duration' || card.kind === 'p90')) { const field=card.kind==='p90'?'p90_cycle_time_ms':'median_cycle_time_ms'; const change = Number(current[field] || 0) - Number(previous[field] || 0); delta = (change >= 0 ? '+' : '-') + formatDuration(Math.abs(change)) + '; previous ' + formatDuration(previous[field] || 0) + '; n=' + (previous.cycle_sample_size || 0); }
 									if (previous && card.kind === 'cost') { delta = previous.known_cost_per_achieved_goal ? 'previous ' + costCoverageText(previous.known_cost_per_achieved_goal) : 'previous unavailable'; }
-									const params = clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view', 'outcomes'); params.set('evidence', card.key);
-									return '\x3ca class="card bg-base-100 border border-base-300 hover:border-primary" data-analytics-evidence-link href="/analytics?' + escapeHTML(params.toString()) + '">\x3cdiv class="card-body p-4">\x3cdiv class="text-sm font-semibold">' + escapeHTML(card.label) + '\x3c/div>\x3cdiv class="text-xl font-bold">' + escapeHTML(card.value) + '\x3c/div>\x3cdiv class="text-xs opacity-60">sample n=' + card.sample + (delta ? ' · ' + escapeHTML(delta) : '') + '\x3c/div>\x3cdiv class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator\x3c/div>\x3c/div>\x3c/a>';
+									return '\x3cdiv class="card bg-base-100 border border-base-300">\x3cdiv class="card-body p-4">\x3cdiv class="text-sm font-semibold">' + escapeHTML(card.label) + '\x3c/div>\x3cdiv class="text-xl font-bold">' + escapeHTML(card.value) + '\x3c/div>\x3cdiv class="text-xs opacity-60">sample n=' + card.sample + (delta ? ' · ' + escapeHTML(delta) : '') + '\x3c/div>\x3cdiv class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator\x3c/div>\x3c/div>\x3c/div>';
 								}).join('');
-								const kpis = document.getElementById('analyticsKpis'); if (kpis) { kpis.innerHTML = cardHTML; bindEvidenceLinks(kpis); }
-								const outcomeSummary = document.getElementById('outcomeSummaryCards'); if (outcomeSummary) { outcomeSummary.innerHTML = cardHTML; bindEvidenceLinks(outcomeSummary); }
+								const kpis = document.getElementById('analyticsKpis'); if (kpis) kpis.innerHTML = cardHTML;
+								const outcomeSummary = document.getElementById('outcomeSummaryCards'); if (outcomeSummary) outcomeSummary.innerHTML = cardHTML;
 								const recent = data.recent_outcomes || [];
 								renderProjectOutcomeTrend(data.outcome_trend || []);
 								renderOutcomeFunnel('overviewOutcomeFunnel', data.funnel || []);
@@ -439,8 +438,7 @@ templ analyticsContent(currentProject *models.Project) {
 							function renderOutcomeFunnel(targetID, stages) {
 								const target = document.getElementById(targetID); if (!target) return;
 								const max = Math.max(1, ...stages.map(function(stage){ return Number(stage.denominator || stage.count || 0); }));
-								target.innerHTML = stages.length ? stages.map(function(stage) { const params=clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view','outcomes'); params.set('evidence',stage.key); const width=Math.max(18,Number(stage.count||0)*100/max); return '\x3ca class="flex-1 card bg-base-200 hover:border-primary border border-transparent" data-analytics-evidence-link href="/analytics?'+escapeHTML(params.toString())+'">\x3cdiv class="card-body p-3">\x3cspan class="text-sm">'+escapeHTML(stage.label)+'\x3c/span>\x3cdiv class="h-3 bg-base-300 rounded">\x3cdiv class="h-3 bg-primary rounded" style="width:'+width.toFixed(1)+'%">\x3c/div>\x3c/div>\x3cstrong>'+stage.count+'\x3c/strong>\x3cspan class="text-xs opacity-60">eligible n='+stage.denominator+'\x3c/span>\x3c/div>\x3c/a>'; }).join('') : '\x3cp class="opacity-50">No funnel evidence in this period.\x3c/p>';
-								bindEvidenceLinks(target);
+								target.innerHTML = stages.length ? stages.map(function(stage) { const width=Math.max(18,Number(stage.count||0)*100/max); return '\x3cdiv class="flex-1 card bg-base-200 border border-transparent">\x3cdiv class="card-body p-3">\x3cspan class="text-sm">'+escapeHTML(stage.label)+'\x3c/span>\x3cdiv class="h-3 bg-base-300 rounded">\x3cdiv class="h-3 bg-primary rounded" style="width:'+width.toFixed(1)+'%">\x3c/div>\x3c/div>\x3cstrong>'+stage.count+'\x3c/strong>\x3cspan class="text-xs opacity-60">eligible n='+stage.denominator+'\x3c/span>\x3c/div>\x3c/div>'; }).join('') : '\x3cp class="opacity-50">No funnel evidence in this period.\x3c/p>';
 							}
 							function renderProjectOutcomeTrend(rows) {
 								const canvas=renderChartState('projectOutcomeTrend','projectOutcomeTrendChart',rows,'No grouped outcome evidence in this period'); if(!canvas)return;
@@ -449,7 +447,7 @@ templ analyticsContent(currentProject *models.Project) {
 								charts.projectOutcomeTrend=new Chart(canvas.getContext('2d'),{
 									type:'line',
 									data:{labels:rows.map(r=>r.period),datasets:[{label:'Technical completion',data:series('technical_completion'),borderColor:'#22c55e'},{label:'Goal achievement',data:series('goal_achievement'),borderColor:'#3b82f6'},{label:'First pass',data:series('first_pass'),borderColor:'#8b5cf6'},{label:'Follow-up',data:series('follow_up'),borderColor:'#f59e0b'}]},
-									options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','period',rows[items[0].index].period);},scales:{y:{beginAtZero:true,max:100,title:{display:true,text:'Percent'}}},plugins:{tooltip:{callbacks:{footer:tooltipFooter}}}}
+									options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,title:{display:true,text:'Percent'}}},plugins:{tooltip:{callbacks:{footer:tooltipFooter}}}}
 								});
 							}
 							function renderActionableExceptions(rows) {
@@ -459,17 +457,17 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function renderAgentComparison(rows) {
 								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=3); let canvas=renderChartState('agentComparison','agentComparisonChart',supported,'At least three task samples per Agent are required');
-								if(canvas)charts.agentComparison=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:supported.map(r=>r.agent_name),datasets:[{label:'Goal achievement',data:supported.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'First pass',data:supported.map(r=>Number((r.first_pass||{}).percent||0)),backgroundColor:'#8b5cf6'},{label:'Follow-up',data:supported.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){selectedAgent=supported[items[0].index].agent_id||'__unassigned__';history.pushState({},'',analyticsURL('agents'));loadAllData(false);}},scales:{x:{beginAtZero:true,max:100}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+supported[items[0].dataIndex].tasks_evaluated:'';}}}}}});
+								if(canvas)charts.agentComparison=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:supported.map(r=>r.agent_name),datasets:[{label:'Goal achievement',data:supported.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'First pass',data:supported.map(r=>Number((r.first_pass||{}).percent||0)),backgroundColor:'#8b5cf6'},{label:'Follow-up',data:supported.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+supported[items[0].dataIndex].tasks_evaluated:'';}}}}}});
 								const efficiency=supported.filter(r=>Number(r.duration_sample_size||0)>=3); canvas=renderChartState('agentEfficiency','agentEfficiencyChart',efficiency,'At least three duration samples per Agent are required');
-								if(canvas)charts.agentEfficiency=new Chart(canvas.getContext('2d'),{type:'bubble',data:{datasets:efficiency.map(function(r,i){return {label:r.agent_name,data:[{x:Number(r.median_duration_ms||0)/60000,y:Number((r.goal_achievement||{}).percent||0),r:Math.min(20,5+Math.sqrt(r.tasks_evaluated||0)*2)}],backgroundColor:'hsla('+(i*67%360)+',70%,55%,.65)'};})},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){selectedAgent=efficiency[items[0].datasetIndex].agent_id||'__unassigned__';history.pushState({},'',analyticsURL('agents'));loadAllData(false);}},scales:{x:{title:{display:true,text:'Median duration (minutes)'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Goal achievement (%)'}}}}});
+								if(canvas)charts.agentEfficiency=new Chart(canvas.getContext('2d'),{type:'bubble',data:{datasets:efficiency.map(function(r,i){return {label:r.agent_name,data:[{x:Number(r.median_duration_ms||0)/60000,y:Number((r.goal_achievement||{}).percent||0),r:Math.min(20,5+Math.sqrt(r.tasks_evaluated||0)*2)}],backgroundColor:'hsla('+(i*67%360)+',70%,55%,.65)'};})},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'Median duration (minutes)'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Goal achievement (%)'}}}}});
 								const findings=document.getElementById('agentFindings');if(findings)findings.innerHTML=supported.length?supported.slice().sort((a,b)=>Number((b.first_pass||{}).percent||0)-Number((a.first_pass||{}).percent||0)).slice(0,3).map(r=>'\x3cp>\x3cstrong>'+escapeHTML(r.agent_name)+'\x3c/strong> · first pass '+Number((r.first_pass||{}).percent||0).toFixed(1)+'% · follow-up '+Number((r.follow_up||{}).percent||0).toFixed(1)+'% · n='+r.tasks_evaluated+'\x3c/p>').join(''):'\x3cp class="opacity-50">No supported Agent findings in this period.\x3c/p>';
 							}
 							function renderSkillOutcomeCharts(rows) {
-								let canvas=renderChartState('skillOutcome','skillOutcomeChart',rows,'No skill outcome samples in this period');if(canvas)charts.skillOutcome=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.skill_handle),datasets:[{label:'Goal achievement',data:rows.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'Technical completion',data:rows.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#22c55e'},{label:'Follow-up',data:rows.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const r=rows[items[0].index];history.pushState({},'',skillOutcomeEvidenceURL(r,''));restoreURLState();loadAllData(false);}},scales:{x:{beginAtZero:true,max:100}}}});
-								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=2);canvas=renderChartState('skillEffectiveness','skillEffectivenessChart',supported,'At least two task samples per skill are required');if(canvas)charts.skillEffectiveness=new Chart(canvas.getContext('2d'),{type:'bubble',data:{datasets:supported.map((r,i)=>({label:r.skill_handle,data:[{x:r.tasks_evaluated,y:Number((r.goal_achievement||{}).percent||0),r:Math.min(18,5+Math.sqrt(r.tasks_evaluated)*2)}],backgroundColor:'hsla('+(i*61%360)+',70%,55%,.65)'}))},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const r=supported[items[0].datasetIndex];history.pushState({},'',skillOutcomeEvidenceURL(r,''));restoreURLState();loadAllData(false);}},scales:{x:{title:{display:true,text:'Tasks using skill'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Observed goal achievement (%)'}}}}});
+								let canvas=renderChartState('skillOutcome','skillOutcomeChart',rows,'No skill outcome samples in this period');if(canvas)charts.skillOutcome=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.skill_handle),datasets:[{label:'Goal achievement',data:rows.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'Technical completion',data:rows.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#22c55e'},{label:'Follow-up',data:rows.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100}}}});
+								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=2);canvas=renderChartState('skillEffectiveness','skillEffectivenessChart',supported,'At least two task samples per skill are required');if(canvas)charts.skillEffectiveness=new Chart(canvas.getContext('2d'),{type:'bubble',data:{datasets:supported.map((r,i)=>({label:r.skill_handle,data:[{x:r.tasks_evaluated,y:Number((r.goal_achievement||{}).percent||0),r:Math.min(18,5+Math.sqrt(r.tasks_evaluated)*2)}],backgroundColor:'hsla('+(i*61%360)+',70%,55%,.65)'}))},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'Tasks using skill'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Observed goal achievement (%)'}}}}});
 								const rec=document.getElementById('skillRecommendations');if(rec)rec.innerHTML=supported.length?supported.slice().sort((a,b)=>Number((b.goal_achievement||{}).percent||0)-Number((a.goal_achievement||{}).percent||0)).slice(0,3).map(r=>'\x3cp>\x3cstrong>'+escapeHTML(r.skill_handle)+'\x3c/strong> · observed goal achievement '+Number((r.goal_achievement||{}).percent||0).toFixed(1)+'% · n='+r.tasks_evaluated+'\x3c/p>').join(''):'\x3cp class="opacity-50">Not enough task evidence for a supported recommendation.\x3c/p>';
 							}
-							function renderModelEfficiency(rows){const canvas=renderChartState('modelEfficiency','modelEfficiencyChart',rows,'No model/category outcome samples in this period');if(canvas)charts.modelEfficiency=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.model+' · '+r.category),datasets:[{label:'Technical completion',data:rows.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#14b8a6'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const r=rows[items[0].index];navigateEvidence('outcomes','model_id',r.model_config_id,{category:r.category});}},scales:{x:{beginAtZero:true,max:100}}}});}
+							function renderModelEfficiency(rows){const canvas=renderChartState('modelEfficiency','modelEfficiencyChart',rows,'No model/category outcome samples in this period');if(canvas)charts.modelEfficiency=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.model+' · '+r.category),datasets:[{label:'Technical completion',data:rows.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#14b8a6'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100}}}});}
 							function renderCostOutcomeTrend(outcomes, usageRows){const costs={};(usageRows||[]).forEach(function(row){costs[row.period]=(costs[row.period]||0)+Number(row.cost_usd||0);});const rows=(outcomes||[]);const canvas=renderChartState('costOutcomeTrend','costOutcomeTrendChart',rows,'No cost and outcome trend in this period');if(canvas)charts.costOutcomeTrend=new Chart(canvas.getContext('2d'),{data:{labels:rows.map(r=>r.period),datasets:[{type:'line',label:'Known cost',data:rows.map(r=>costs[r.period]||0),yAxisID:'cost',borderColor:'#f59e0b'},{type:'bar',label:'Technical completions',data:rows.map(r=>Number((r.technical_completion||{}).numerator||0)),yAxisID:'count',backgroundColor:'#22c55e'},{type:'bar',label:'Achieved goals',data:rows.map(r=>Number((r.goal_achievement||{}).numerator||0)),yAxisID:'count',backgroundColor:'#3b82f6'}]},options:{responsive:true,maintainAspectRatio:false,scales:{cost:{position:'right',beginAtZero:true,title:{display:true,text:'Known USD'}},count:{beginAtZero:true,title:{display:true,text:'Outcomes'}}}}});}
 
 							function renderUsageOutcomeContext(current, totals) {
@@ -482,7 +480,7 @@ templ analyticsContent(currentProject *models.Project) {
 						function renderDistributionChart(key, canvasID, rows) {
 							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');
 							if (!canvas) return;
-							charts[key] = new Chart(canvas.getContext('2d'), { type: 'bar', data: { labels: rows.map(function(row) { return row.label; }), datasets: [{ label: 'Tasks (sample n=' + rows.reduce(function(sum, row) { return sum + row.count; }, 0) + ')', data: rows.map(function(row) { return row.count; }), backgroundColor: 'rgba(59, 130, 246, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, onClick: function(_, items) { if (items.length) navigateEvidence('outcomes', key, rows[items[0].index].label); }, scales: { y: { beginAtZero: true } } } });
+							charts[key] = new Chart(canvas.getContext('2d'), { type: 'bar', data: { labels: rows.map(function(row) { return row.label; }), datasets: [{ label: 'Tasks (sample n=' + rows.reduce(function(sum, row) { return sum + row.count; }, 0) + ')', data: rows.map(function(row) { return row.count; }), backgroundColor: 'rgba(59, 130, 246, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } } });
 						}
 								function renderDashboardFilterOptions(agents, workflows) {
 									function updateOptions(select, rows, valueKey, labelKey, allLabel, selected, replaceWhenEmpty) {
@@ -524,16 +522,6 @@ templ analyticsContent(currentProject *models.Project) {
 									preserveActiveCharts = true;
 									try { renderDashboard(latestDashboard || {}); } finally { preserveActiveCharts = false; }
 								}
-								function bindEvidenceLinks(root) {
-									if (!root) return;
-									root.querySelectorAll('[data-analytics-evidence-link]').forEach(function(link) {
-										link.addEventListener('click', function(event) {
-											event.preventDefault();
-											event.stopPropagation();
-											openEvidenceURL(link.getAttribute('href'));
-										}, { signal: eventSignal });
-									});
-								}
 								function navigateEvidence(view, key, value, extra) {
 									const params = clearEvidenceParams(new URLSearchParams(window.location.search));
 									params.set('view', view);
@@ -545,13 +533,13 @@ templ analyticsContent(currentProject *models.Project) {
 							function renderAgentDetail(detail) {
 								const trend = detail ? (detail.outcome_trend || []) : [];
 								let canvas = renderChartState('agentOutcomeTrend', 'agentOutcomeTrendChart', trend, 'Select an Agent to see its outcome trend');
-								if (canvas) charts.agentOutcomeTrend = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:trend.map(r=>r.period),datasets:[{label:'Completed',data:trend.map(r=>r.completed),backgroundColor:'rgba(34,197,94,.65)'},{label:'Failed',data:trend.map(r=>r.failed),backgroundColor:'rgba(239,68,68,.65)'},{label:'Cancelled',data:trend.map(r=>r.cancelled),backgroundColor:'rgba(245,158,11,.65)'}]},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const item=items[0];const status=['completed','failed','cancelled'][item.datasetIndex];navigateEvidence('outcomes','technical_status',status,{period:trend[item.index].period});}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+trend[items[0].dataIndex].sample_size:'';}}}},scales:{y:{beginAtZero:true}}}});
+								if (canvas) charts.agentOutcomeTrend = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:trend.map(r=>r.period),datasets:[{label:'Completed',data:trend.map(r=>r.completed),backgroundColor:'rgba(34,197,94,.65)'},{label:'Failed',data:trend.map(r=>r.failed),backgroundColor:'rgba(239,68,68,.65)'},{label:'Cancelled',data:trend.map(r=>r.cancelled),backgroundColor:'rgba(245,158,11,.65)'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+trend[items[0].dataIndex].sample_size:'';}}}},scales:{y:{beginAtZero:true}}}});
 								const mix = detail ? (detail.model_mix || []) : [];
 								canvas = renderChartState('agentModelMix', 'agentModelMixChart', mix, 'Select an Agent to see its model mix');
-								if (canvas) charts.agentModelMix = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:mix.map(r=>r.model),datasets:[{label:'Executions',data:mix.map(r=>r.execution_count),backgroundColor:'rgba(59,130,246,.65)'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model_id',mix[items[0].index].model_config_id);},scales:{x:{beginAtZero:true}}}});
+								if (canvas) charts.agentModelMix = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:mix.map(r=>r.model),datasets:[{label:'Executions',data:mix.map(r=>r.execution_count),backgroundColor:'rgba(59,130,246,.65)'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}}}});
 								const categories = detail ? (detail.categories || []) : [];
 									canvas = renderChartState('agentCategory', 'agentCategoryChart', categories, 'Select an Agent to compare task categories');
-									if (canvas) charts.agentCategory = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:categories.map(r=>r.category),datasets:[{label:'Technical completion',data:categories.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#22c55e'},{label:'Goal achievement',data:categories.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'Follow-up',data:categories.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length)navigateEvidence('outcomes','category',categories[items[0].index].category);},scales:{x:{beginAtZero:true,max:100}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+categories[items[0].dataIndex].tasks_evaluated:'';}}}}}});
+									if (canvas) charts.agentCategory = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:categories.map(r=>r.category),datasets:[{label:'Technical completion',data:categories.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#22c55e'},{label:'Goal achievement',data:categories.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'Follow-up',data:categories.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+categories[items[0].dataIndex].tasks_evaluated:'';}}}}}});
 									function rowsOrEmpty(id, rows, columns, render) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(render).join(''):'\x3ctr>\x3ctd colspan="'+columns+'" class="text-center opacity-50">'+(detail?'No evidence in this period':'Select an Agent to inspect evidence')+'\x3c/td>\x3c/tr>'; }
 								rowsOrEmpty('agentCategoryTable',detail?(detail.categories||[]):[],5,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.category)+'\x3c/td>\x3ctd>'+row.tasks_evaluated+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.technical_completion))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.goal_achievement))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.follow_up))+'\x3c/td>\x3c/tr>';});
 								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+row.failure_count+'\x3c/td>\x3ctd>'+escapeHTML(row.last_error||'Unavailable')+'\x3c/td>\x3c/tr>';});
@@ -579,7 +567,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
 									const table=document.getElementById('workflowPerformanceTable');if(table)table.innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'\x3c/a>\x3c/td>\x3ctd>'+row.invocation_count+'\x3c/td>\x3ctd>'+row.completed_count+' / '+row.invocation_count+' ('+Number(row.completion_rate||0).toFixed(1)+'%)\x3c/td>\x3ctd>'+row.failed_count+'\x3c/td>\x3ctd>'+row.cancelled_count+'\x3c/td>\x3ctd>'+row.skipped_count+'\x3c/td>\x3ctd>'+row.open_count+'\x3c/td>\x3ctd>'+escapeHTML(row.duration_sample_size ? formatDuration(row.average_duration_ms||0)+' · n='+row.duration_sample_size : 'Unavailable · n=0')+'\x3c/td>\x3ctd>'+row.waiting_count+' / '+row.blocked_count+'\x3c/td>\x3ctd>'+escapeHTML(row.health)+'\x3c/td>\x3c/tr>'; }).join('') : '\x3ctr>\x3ctd colspan="10" class="text-center">No automation activity in this period. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Open Automations\x3c/a>\x3c/td>\x3c/tr>';
 									const empty=document.getElementById('automationEmptyState');if(empty){empty.classList.toggle('hidden',rows.length>0);empty.innerHTML=rows.length?'':'No automation activity in this period. Automation analytics appear after this project runs an automation graph. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Open Automations\x3c/a>';}
-									const canvas=renderChartState('automationComparison','automationComparisonChart',rows,'No automation activity in this period');if(canvas)charts.automationComparison=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.workflow_name),datasets:[{label:'Completed',data:rows.map(r=>r.completed_count),backgroundColor:'#22c55e'},{label:'Failed',data:rows.map(r=>r.failed_count),backgroundColor:'#ef4444'},{label:'Open',data:rows.map(r=>r.open_count),backgroundColor:'#3b82f6'},{label:'Waiting / blocked',data:rows.map(r=>Number(r.waiting_count||0)+Number(r.blocked_count||0)),backgroundColor:'#f59e0b'}]},options:{responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){selectedWorkflow=rows[items[0].index].workflow_id;history.pushState({},'',analyticsURL('automations'));loadAllData(false);}},scales:{y:{beginAtZero:true}},plugins:{tooltip:{callbacks:{footer:function(items){if(!items.length)return '';const r=rows[items[0].dataIndex];return 'completion '+Number(r.completion_rate||0).toFixed(1)+'% · duration '+formatDuration(r.average_duration_ms||0)+' · n='+r.invocation_count;}}}}}});
+									const canvas=renderChartState('automationComparison','automationComparisonChart',rows,'No automation activity in this period');if(canvas)charts.automationComparison=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.workflow_name),datasets:[{label:'Completed',data:rows.map(r=>r.completed_count),backgroundColor:'#22c55e'},{label:'Failed',data:rows.map(r=>r.failed_count),backgroundColor:'#ef4444'},{label:'Open',data:rows.map(r=>r.open_count),backgroundColor:'#3b82f6'},{label:'Waiting / blocked',data:rows.map(r=>Number(r.waiting_count||0)+Number(r.blocked_count||0)),backgroundColor:'#f59e0b'}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true}},plugins:{tooltip:{callbacks:{footer:function(items){if(!items.length)return '';const r=rows[items[0].dataIndex];return 'completion '+Number(r.completion_rate||0).toFixed(1)+'% · duration '+formatDuration(r.average_duration_ms||0)+' · n='+r.invocation_count;}}}}}});
 								}
 								function renderWorkflowDetail(detail) {
 									function render(id, rows, columns, formatter, empty) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(formatter).join(''):'\x3ctr>\x3ctd colspan="'+columns+'" class="text-center opacity-50">'+(detail?empty:'Select an automation to inspect node metrics')+'\x3c/td>\x3c/tr>'; }
@@ -588,7 +576,7 @@ templ analyticsContent(currentProject *models.Project) {
 									render('workflowDurationTable',durations,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.sample_count+'\x3c/td>\x3ctd>'+escapeHTML(formatDuration(Number(row.average_seconds||0)*1000))+'\x3c/td>\x3c/tr>';},'No completed node durations in this period');
 									render('workflowFailureTable',failures,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.count+'\x3c/td>\x3ctd>'+escapeHTML(row.last_failure?new Date(row.last_failure).toLocaleString():'Unavailable')+'\x3c/td>\x3c/tr>';},'No node failures in this period');
 									render('workflowBottleneckTable',bottlenecks,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.waiting+'\x3c/td>\x3ctd>'+row.blocked+'\x3c/td>\x3c/tr>';},'No current bottlenecks');
-									function bar(key,id,rows,label,value,color,empty){const canvas=renderChartState(key,id,rows,empty);if(canvas)charts[key]=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.node_name),datasets:[{label:label,data:rows.map(value),backgroundColor:color}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const details=document.getElementById('automationExactValues');if(details){details.open=true;}}},scales:{x:{beginAtZero:true}}}});}
+									function bar(key,id,rows,label,value,color,empty){const canvas=renderChartState(key,id,rows,empty);if(canvas)charts[key]=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.node_name),datasets:[{label:label,data:rows.map(value),backgroundColor:color}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}}}});}
 									bar('automationFunnel','automationFunnelChart',funnel,'Entered',r=>r.entered_count,'#3b82f6','Select an automation to inspect its node funnel');
 									bar('automationDuration','automationDurationChart',durations,'Average seconds',r=>Number(r.average_seconds||0),'#8b5cf6','No completed node durations');
 									bar('automationFailure','automationFailureChart',failures,'Failures',r=>r.count,'#ef4444','No node failures');
@@ -869,7 +857,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(_,items){if(!items.length)return;const item=items[0];const eventType=['used','created','edited'][item.datasetIndex]||'used';const period=labels[item.index]||'';showAggregateSelection('learning',{skill_period:period,skill_event:eventType},'skillEvidenceSelection',(datasets[item.datasetIndex]?.label||'Skill activity')+' · '+period+' · events '+Number(datasets[item.datasetIndex]?.data[item.index]||0));loadSkillEvidence();}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -890,7 +878,7 @@ templ analyticsContent(currentProject *models.Project) {
 												{ label: 'Created', data: chartRows.map(r => r.created_count || 0), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 },
 											{ label: 'Edited', data: chartRows.map(r => r.edited_count || 0), backgroundColor: 'rgba(147, 51, 234, 0.5)', borderColor: 'rgb(147, 51, 234)', borderWidth: 1 }
 										] },
-										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const item=items[0];const row=chartRows[item.index];const eventType=['selected','loaded','viewed','created','edited'][item.datasetIndex]||'';showAggregateSelection('learning',{skill_handle:row.skill_handle,skill_evidence_scope:row.skill_scope,skill_event:eventType},'skillEvidenceSelection',row.skill_handle+' ['+(row.skill_scope||'unknown')+'] · '+eventType+' · events '+Number([row.selected_count,row.loaded_count,row.viewed_count,row.created_count,row.edited_count][item.datasetIndex]||0));loadSkillEvidence();}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
+										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
 									}
 								}
 
@@ -904,7 +892,7 @@ templ analyticsContent(currentProject *models.Project) {
 												{ label: 'Used', data: chartRows.map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 											{ label: 'Ignored', data: chartRows.map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
 										] },
-										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const item=items[0];const row=chartRows[item.index];const eventType=item.datasetIndex===0?'followed':'ignored';const count=item.datasetIndex===0?row.loaded_or_viewed_count:row.ignored_count;showAggregateSelection('learning',{skill_handle:row.skill_handle,skill_evidence_scope:row.skill_scope,skill_event:eventType},'skillEvidenceSelection',row.skill_handle+' ['+(row.skill_scope||'unknown')+'] · '+eventType+' selections '+Number(count||0));loadSkillEvidence();}, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
+										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
 									}
 								}
 
@@ -924,7 +912,7 @@ templ analyticsContent(currentProject *models.Project) {
 											data: {
 													labels: rows.map(row => scopedSkillLabel(row.agent_name + ' · ' + row.skill_handle, row.skill_scope)),												datasets: [{ label: 'Activity', data: rows.map(row => row.activity), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 }]
 											},
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, onClick:function(_,items){if(!items.length)return;const row=rows[items[0].index];showAggregateSelection('learning',{skill_agent:row.agent_id||'__unassigned__',skill_handle:row.skill_handle,skill_evidence_scope:row.skill_scope,skill_event:'used'},'skillEvidenceSelection',row.agent_name+' · '+row.skill_handle+' ['+(row.skill_scope||'unknown')+'] · activity '+row.activity);loadSkillEvidence();}, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 								}
@@ -1095,7 +1083,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, onClick:function(_,items){if(!items.length)return;const item=items[0];const period=labels[item.index]||'';let modelKey='combined';let row=null;if(choice!=='combined'&&rateByModel.length){const visibleKeys=choice==='all'?rateKeys:[choice];modelKey=visibleKeys[item.datasetIndex]||choice;row=rateByModel.find(function(candidate){return candidate.period===period&&usageModelKey(candidate)===modelKey;})||null;}showUsageSelection(period,modelKey,Number(datasets[item.datasetIndex]?.data[item.index]||0),row);}, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -1139,8 +1127,7 @@ templ analyticsContent(currentProject *models.Project) {
 												options: {
 													responsive: true,
 													maintainAspectRatio: false,
-													onClick:function(_,items){if(items.length)showUsageModelEvidence(breakdown[items[0].index]);},
-													plugins: { legend: { position: 'bottom' } }
+														plugins: { legend: { position: 'bottom' } }
 												}
 											});
 											}
@@ -1254,13 +1241,6 @@ templ analyticsContent(currentProject *models.Project) {
 								responsive: true,
 								maintainAspectRatio: false,
 									interaction: { mode: 'index', intersect: false },
-									onClick: function(_, items) {
-										if (!items.length) return;
-										const item = items[0];
-										const period = data[item.index].Period || '';
-										const status = ({0:'completed',2:'completed',3:'failed',4:'cancelled'})[item.datasetIndex];
-										if (status) navigateEvidence('outcomes', 'technical_status', status, {period:period}); else navigateEvidence('outcomes', 'period', period);
-									},
 									plugins: { tooltip: analyticsLineTooltipOptions() },								scales: {
 									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Technical completion rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }
@@ -1300,7 +1280,6 @@ templ analyticsContent(currentProject *models.Project) {
 							options: {
 								responsive: true,
 									maintainAspectRatio: false,
-									onClick:function(_,items){if(items.length)navigateEvidence('outcomes','execution_hour',items[0].index);},
 									scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' } } }							}
 						});
 						} catch (e) { console.error('loadHourlyTrends:', e); showAnalyticsError(e); }
@@ -1332,7 +1311,6 @@ templ analyticsContent(currentProject *models.Project) {
 								responsive: true,
 								maintainAspectRatio: false,
 								indexAxis: 'y',
-								onClick:function(_,items){if(items.length)window.location.href='/tasks/'+encodeURIComponent(data[items[0].index].ID)+'?project_id='+encodeURIComponent(projectID);},
 								scales: { x: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },
 								plugins: {
 									tooltip: {
@@ -1373,7 +1351,6 @@ templ analyticsContent(currentProject *models.Project) {
 							options: {
 								responsive: true,
 									maintainAspectRatio: false,
-									onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model_id',data[items[0].index].ID);},
 									scales: { y: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },								plugins: {
 									tooltip: {
 										callbacks: {
@@ -1417,7 +1394,6 @@ templ analyticsContent(currentProject *models.Project) {
 							options: {
 									responsive: true,
 									maintainAspectRatio: false,
-									onClick:function(_,items){if(items.length)navigateEvidence('outcomes','model_id',data[items[0].index].AgentID);},
 									plugins: { legend: { position: 'bottom' } }							}
 						});
 						} catch (e) { console.error('loadAgentUsage:', e); showAnalyticsError(e); }
@@ -1460,7 +1436,7 @@ templ analyticsContent(currentProject *models.Project) {
 							const data = await fetchJSON('/api/analytics/failed-task-patterns?' + params.toString());
 
 							const canvas = renderChartState('failedPatterns', 'failedPatternsChart', data, 'No failed task patterns in this period');
-							if (canvas) charts.failedPatterns = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:data.map(pattern=>pattern.TaskTitle||'Unknown'),datasets:[{label:'Failed executions',data:data.map(pattern=>Number(pattern.FailureCount||0)),backgroundColor:'#ef4444'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const task=data[items[0].index];window.location.href='/tasks/'+encodeURIComponent(task.TaskID)+'?project_id='+encodeURIComponent(projectID);}},scales:{x:{beginAtZero:true}}}});
+							if (canvas) charts.failedPatterns = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:data.map(pattern=>pattern.TaskTitle||'Unknown'),datasets:[{label:'Failed executions',data:data.map(pattern=>Number(pattern.FailureCount||0)),backgroundColor:'#ef4444'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}}}});
 
 							const tbody = document.querySelector('#failedPatternsTable tbody');
 						if (!tbody) return;
