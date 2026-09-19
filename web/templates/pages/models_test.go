@@ -505,7 +505,17 @@ func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T
 	if strings.Contains(out, "fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})") {
 		t.Fatal("discovery fetch still omits AbortController signal")
 	}
-	if !strings.Contains(out, "function scheduleAutoDiscoverOpenAICompatibleModels() {\n\t\t\t\t\t\t\t\t\tcancelOpenAICompatibleDiscovery();") {
+	cancelBody := renderedFunctionBody(t, out, "function cancelOpenAICompatibleDiscovery()")
+	for _, want := range []string{
+		"clearTimeout(openAICompatibleDiscoveryTimer);",
+		"openAICompatibleDiscoveryTimer = null;",
+	} {
+		if !strings.Contains(cancelBody, want) {
+			t.Fatalf("expected cancellation to clear pending OpenAI-compatible discovery debounce timer with %q", want)
+		}
+	}
+	scheduleBody := renderedFunctionBody(t, out, "function scheduleAutoDiscoverOpenAICompatibleModels()")
+	if !strings.Contains(scheduleBody, "cancelOpenAICompatibleDiscovery();") {
 		t.Fatal("scheduled discovery should cancel the prior stale request before starting a debounce")
 	}
 	for _, lifecycle := range []struct {
@@ -521,6 +531,35 @@ func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T
 		if !strings.Contains(body, "cancelOpenAICompatibleDiscovery();") {
 			t.Fatalf("expected %s lifecycle to cancel stale OpenAI-compatible discovery", lifecycle.name)
 		}
+	}
+	successCloseStart := strings.Index(out, "document.body.addEventListener('htmx:afterSwap'")
+	if successCloseStart < 0 {
+		t.Fatal("expected rendered script to include the HTMX success modal close handler")
+	}
+	successCloseEnd := strings.Index(out[successCloseStart:], "document.body.addEventListener('htmx:responseError'")
+	if successCloseEnd < 0 {
+		t.Fatal("expected rendered script to include the HTMX response error handler after success close handler")
+	}
+	successCloseHandler := out[successCloseStart : successCloseStart+successCloseEnd]
+	cancelIndex := strings.Index(successCloseHandler, "cancelOpenAICompatibleDiscovery();")
+	closeIndex := strings.Index(successCloseHandler, "modal.close();")
+	if cancelIndex < 0 || closeIndex < 0 || cancelIndex > closeIndex {
+		t.Fatal("expected successful HTMX model save modal close to cancel stale OpenAI-compatible discovery before closing")
+	}
+	modelModalStart := strings.Index(out, `<dialog id="new_model_modal"`)
+	if modelModalStart < 0 {
+		t.Fatal("expected rendered content to include the model modal")
+	}
+	modelModalEnd := strings.Index(out[modelModalStart:], `</dialog>`)
+	if modelModalEnd < 0 {
+		t.Fatal("expected rendered content to include the model modal closing tag")
+	}
+	modelModal := out[modelModalStart : modelModalStart+modelModalEnd]
+	if strings.Contains(modelModal, `<form method="dialog" class="modal-backdrop"><button>close</button></form>`) {
+		t.Fatal("model modal backdrop still uses native dialog close without cancelling stale discovery")
+	}
+	if !strings.Contains(modelModal, `<form class="modal-backdrop"><button type="button" onclick="closeModelModal()">close</button></form>`) {
+		t.Fatal("expected model modal backdrop to close through the cancellation-aware helper")
 	}
 }
 

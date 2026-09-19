@@ -1296,7 +1296,7 @@ func taskDiscoveryWritePaths() []taskDiscoveryWritePath {
 			return err
 		}),
 		taskDiscoveryBulkWritePath("MoveCompletedActiveToCompleted", taskDiscoveryWritePoolPrefix+"move-completed-", models.CategoryActive, models.StatusCompleted, func(ctx context.Context, taskRepo *repository.TaskRepo) error {
-			_, err := taskRepo.MoveCompletedActiveToCompleted(ctx)
+			_, err := taskRepo.MoveCompletedActiveToCompleted(ctx, "default")
 			return err
 		}),
 		taskDiscoveryBulkWritePath("ActivateAllBacklog", taskDiscoveryWritePoolPrefix+"activate-backlog-", models.CategoryBacklog, models.StatusPending, func(ctx context.Context, taskRepo *repository.TaskRepo) error {

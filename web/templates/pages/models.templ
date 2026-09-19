@@ -904,8 +904,8 @@ for _, agent := range modelOptions {
 					</div>
 				</form>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button>close</button>
+			<form class="modal-backdrop">
+				<button type="button" onclick="closeModelModal()">close</button>
 			</form>
 		</dialog>
 
@@ -1382,29 +1382,36 @@ for _, agent := range modelOptions {
 
 							function cancelOpenAICompatibleDiscovery() {
 								openAICompatibleDiscoveryGeneration++;
+								if (openAICompatibleDiscoveryTimer) {
+									clearTimeout(openAICompatibleDiscoveryTimer);
+									openAICompatibleDiscoveryTimer = null;
+								}
 								if (openAICompatibleDiscoveryAbortController) {
 									openAICompatibleDiscoveryAbortController.abort();
 									openAICompatibleDiscoveryAbortController = null;
 								}
 							}
 
-								function maybeAutoDiscoverOpenAICompatibleModels() {
+							function maybeAutoDiscoverOpenAICompatibleModels() {
 								var provider = document.getElementById('model_provider').value;
 								if (isOpenAICompatibleProvider(provider) && isDiscoverableOpenAICompatiblePreset()) {
 									discoverOpenAICompatibleModels();
 								}
 							}
 
-								function scheduleAutoDiscoverOpenAICompatibleModels() {
-									cancelOpenAICompatibleDiscovery();
-									if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
-									openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
-								}
+							function scheduleAutoDiscoverOpenAICompatibleModels() {
+								cancelOpenAICompatibleDiscovery();
+								if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
+								openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
+							}
 
-								function runAutoDiscoverOpenAICompatibleModels() {
-									if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
-									maybeAutoDiscoverOpenAICompatibleModels();
+							function runAutoDiscoverOpenAICompatibleModels() {
+								if (openAICompatibleDiscoveryTimer) {
+									clearTimeout(openAICompatibleDiscoveryTimer);
+									openAICompatibleDiscoveryTimer = null;
 								}
+								maybeAutoDiscoverOpenAICompatibleModels();
+							}
 						function applyOpenAICompatiblePreset(force) {
 							var provider = document.getElementById('model_provider').value;
 							var presetInput = document.getElementById('model_openai_compatible_preset');
@@ -2401,6 +2408,7 @@ for _, agent := range modelOptions {
 					if (event.detail.target && event.detail.target.id === 'models-container') {
 						var modal = document.getElementById('new_model_modal');
 						if (modal && modal.open) {
+							cancelOpenAICompatibleDiscovery();
 							modal.close();
 						}
 					}

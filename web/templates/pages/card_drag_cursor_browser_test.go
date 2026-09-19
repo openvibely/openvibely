@@ -425,7 +425,7 @@ window.addEventListener('DOMContentLoaded', function() {
       taskMenuTrigger.focus();
       taskMenuTrigger.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, detail:1}));
 	      if (taskMenuTrigger.getAttribute('aria-expanded') !== 'true') fail('task menu must expose its open state');
-	      if (selectedActiveTask.querySelector('[data-task-card-merge-options]')) fail('task menu must not hydrate merge options after opening');
+	      await waitFor(function() { return !selectedActiveTask.querySelector('[data-task-card-merge-options]') && selectedActiveTask.querySelector('[data-task-card-local-submenu]'); }, 'task menu lazy merge option hydration');
 	      if (document.querySelector('#kanban-board').getAttribute('data-open-kanban-menu-key') !== 'task-task-active-status-drag') fail('task menu open key was not recorded before refresh');
 	      await waitFor(function() { return taskMenuTrigger.closest('[data-kanban-menu-key]').getAttribute('data-kanban-menu-positioning') !== 'true'; }, 'task menu stable reveal before option focus');
 	      var focusedTaskOption = Array.from(selectedActiveTask.querySelectorAll('[data-kanban-menu-content] a, [data-kanban-menu-content] button')).find(function(option) { return option.textContent.trim() === 'Edit'; });
@@ -589,6 +589,8 @@ window.addEventListener('DOMContentLoaded', function() {
 				t.Fatalf("render refreshed kanban: %v", err)
 			}
 			_, _ = w.Write(out.Bytes())
+		case "/tasks/task-active-status-drag/card/merge-options":
+			_ = components.TaskCardMergeOptions(&tasks[1], project.ID, false, false, nil, true).Render(r.Context(), w)
 		case "/tasks/task-drag-cursor":
 			if r.Header.Get("HX-Request") != "true" {
 				t.Fatalf("expected task menu navigation to use HTMX")

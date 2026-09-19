@@ -3273,7 +3273,7 @@ func alertTerminalRuntimeHandler(opts AlertRuntimeOptions, state models.AlertPro
 		if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 			return "", err
 		}
-		if len(req.Message) > 2000 {
+		if utf8.RuneCountInString(req.Message) > 2000 {
 			return "", fmt.Errorf("message must be at most 2000 characters")
 		}
 		return ownedNotificationMutationRuntimeHandler(ctx, ownedNotificationRuntimeInput{ProjectID: req.ProjectID, AlertID: req.AlertID}, preflight, func(alertID string) (string, error) {
