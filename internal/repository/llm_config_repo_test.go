@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -2000,9 +1999,6 @@ func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionStaysBoundedOnLar
 	if testing.Short() {
 		t.Skip("skipping browser Chat context model-loading performance guard in short mode")
 	}
-	if os.Getenv("OPENVIBELY_SKIP_BROWSER_PERF") == "1" {
-		t.Skip("browser Chat context model-loading performance guard runs outside the main CI coverage job")
-	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
@@ -2038,7 +2034,10 @@ func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionStaysBoundedOnLar
 	compactDuration, compactBytes := measure("browser Chat context selection", sampleOps, func() ([]models.LLMConfig, error) { return repo.ListChatSelectionOptions(ctx) })
 
 	t.Logf("browser Chat context selection: %s/op, %d B/op", compactDuration, compactBytes)
-	if compactDuration > maxCompactDuration {
+	// Coverage instrumentation makes absolute wall-clock microbenchmarks
+	// machine-dependent. Keep enforcing the deterministic allocation guard in
+	// coverage runs and enforce latency in uninstrumented runs.
+	if testing.CoverMode() == "" && compactDuration > maxCompactDuration {
 		t.Fatalf("browser Chat context selection took %s/op, want <= %s/op", compactDuration, maxCompactDuration)
 	}
 	if compactBytes > maxCompactBytesPerOp {
