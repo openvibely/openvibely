@@ -882,6 +882,176 @@ func TestAlertRepoListFilteredSummariesOmitFullDetailColumnsAndGetHydrates(t *te
 	}
 }
 
+func insertAlertListOwnerAutomation(t *testing.T, db *sql.DB, projectID, automationID string) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state) VALUES (?, ?, ?, ?, 'active')`, automationID, projectID, automationID, automationID); err != nil {
+		t.Fatalf("creating automation %s: %v", automationID, err)
+	}
+}
+
+func insertAlertListOwnerAlert(t *testing.T, db *sql.DB, projectID, id, title, automationID string, createdAt string, decision models.AlertDecisionState, processing models.AlertProcessingState, source string, read bool, linked bool) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO alerts
+		(id, project_id, scope, type, severity, title, message, body, source, metadata_json, decision_state, processing_state, is_read, implementation_task_was_linked, created_at, updated_at)
+		VALUES (?, ?, 'project', 'suggestion', 'info', ?, 'summary', 'body', ?, '{}', ?, ?, ?, ?, ?, ?)`,
+		id, projectID, title, source, decision, processing, read, linked, createdAt, createdAt); err != nil {
+		t.Fatalf("creating alert %s: %v", id, err)
+	}
+	if automationID == "" {
+		return
+	}
+	if _, err := db.Exec(`INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+		VALUES (?, ?, 'alert', ?, 'producer', 'notify', 'approve', 'inbox')`, projectID, automationID, id); err != nil {
+		t.Fatalf("creating owner for %s: %v", id, err)
+	}
+}
+
+func TestAlertRepo_ListFilteredSummariesAutomationOwnedPathPreservesFiltersAndPagination(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := createTestProject(t, NewProjectRepo(db))
+	const targetAutomation = "alert-list-target-automation"
+	const otherAutomation = "alert-list-other-automation"
+	insertAlertListOwnerAutomation(t, db, project.ID, targetAutomation)
+	insertAlertListOwnerAutomation(t, db, project.ID, otherAutomation)
+
+	insertAlertListOwnerAlert(t, db, project.ID, "target-old", "target old", targetAutomation, "2026-01-01 00:00:01", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "target-mid", "target mid", targetAutomation, "2026-01-01 00:00:02", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "target-new", "target new", targetAutomation, "2026-01-01 00:00:03", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "other-newer", "other hidden", otherAutomation, "2026-01-01 00:10:00", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "target-claimed", "claimed hidden", targetAutomation, "2026-01-01 00:09:00", models.AlertDecisionApproved, models.AlertProcessingClaimed, "finder", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "target-rejected", "rejected hidden", targetAutomation, "2026-01-01 00:08:00", models.AlertDecisionRejected, models.AlertProcessingUnclaimed, "finder", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "target-source", "source hidden", targetAutomation, "2026-01-01 00:07:00", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "other-source", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "target-read", "read hidden", targetAutomation, "2026-01-01 00:06:00", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", true, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "target-linked", "linked hidden", targetAutomation, "2026-01-01 00:05:00", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, true)
+	insertAlertListOwnerAlert(t, db, project.ID, "unowned-newest", "unowned hidden", "", "2026-01-01 00:11:00", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+
+	unlinked := false
+	unread := false
+	filter := models.AlertListFilter{
+		DecisionState:            models.AlertDecisionApproved,
+		ProcessingState:          models.AlertProcessingUnclaimed,
+		Source:                   "finder",
+		Read:                     &unread,
+		ImplementationTaskLinked: &unlinked,
+		AutomationInboxBindings:  []models.AutomationBinding{{AutomationID: targetAutomation}},
+		Limit:                    2,
+	}
+	repo := NewAlertRepo(db)
+	firstPage, err := repo.ListFilteredSummaries(context.Background(), project.ID, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := alertSummaryIDs(firstPage); strings.Join(got, ",") != "target-new,target-mid" {
+		t.Fatalf("first page IDs = %v, want target-new,target-mid", got)
+	}
+	filter.Offset = 2
+	secondPage, err := repo.ListFilteredSummaries(context.Background(), project.ID, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := alertSummaryIDs(secondPage); strings.Join(got, ",") != "target-old" {
+		t.Fatalf("second page IDs = %v, want target-old", got)
+	}
+}
+
+func TestAlertRepo_ListFilteredSummariesAutomationOwnedPathDeduplicatesBindingsAndOwners(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := createTestProject(t, NewProjectRepo(db))
+	const automationID = "alert-list-duplicate-automation"
+	const secondAutomationID = "alert-list-second-automation"
+	insertAlertListOwnerAutomation(t, db, project.ID, automationID)
+	insertAlertListOwnerAutomation(t, db, project.ID, secondAutomationID)
+	insertAlertListOwnerAlert(t, db, project.ID, "dedup-alert", "dedupe", automationID, "2026-01-01 00:00:01", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+	insertAlertListOwnerAlert(t, db, project.ID, "second-alert", "second automation", secondAutomationID, "2026-01-01 00:00:02", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+	if _, err := db.Exec(`INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+		VALUES (?, ?, 'alert', 'dedup-alert', 'producer-2', 'notify', 'approve', 'inbox')`, project.ID, automationID); err != nil {
+		t.Fatalf("creating duplicate owner path: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+		VALUES (?, ?, 'alert', 'dedup-alert', 'producer', 'notify', 'approve', 'inbox')`, project.ID, secondAutomationID); err != nil {
+		t.Fatalf("creating second Automation owner path: %v", err)
+	}
+
+	repo := NewAlertRepo(db)
+	results, err := repo.ListFilteredSummaries(context.Background(), project.ID, models.AlertListFilter{
+		DecisionState:           models.AlertDecisionApproved,
+		ProcessingState:         models.AlertProcessingUnclaimed,
+		AutomationInboxBindings: []models.AutomationBinding{{AutomationID: automationID}, {AutomationID: automationID}, {AutomationID: secondAutomationID}},
+		Limit:                   10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := alertSummaryIDs(results); strings.Join(got, ",") != "second-alert,dedup-alert" {
+		t.Fatalf("IDs = %v, want second-alert,dedup-alert without duplicates", got)
+	}
+}
+
+func TestAlertRepo_ListFilteredSummariesAutomationOwnedPathEmptyOwnershipDoesNotFallback(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := createTestProject(t, NewProjectRepo(db))
+	const targetAutomation = "alert-list-empty-automation"
+	insertAlertListOwnerAutomation(t, db, project.ID, targetAutomation)
+	insertAlertListOwnerAlert(t, db, project.ID, "unowned-match", "unowned matching alert", "", "2026-01-01 00:00:01", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+
+	repo := NewAlertRepo(db)
+	results, err := repo.ListFilteredSummaries(context.Background(), project.ID, models.AlertListFilter{
+		DecisionState:           models.AlertDecisionApproved,
+		ProcessingState:         models.AlertProcessingUnclaimed,
+		AutomationInboxBindings: []models.AutomationBinding{{AutomationID: targetAutomation}},
+		Limit:                   10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("empty ownership returned %v, want no fallback results", alertSummaryIDs(results))
+	}
+}
+
+func TestAlertRepo_AutomationOwnedSummaryQueryStartsFromMailboxOwners(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := createTestProject(t, NewProjectRepo(db))
+	const targetAutomation = "alert-list-plan-automation"
+	insertAlertListOwnerAutomation(t, db, project.ID, targetAutomation)
+	insertAlertListOwnerAlert(t, db, project.ID, "owned-plan-alert", "owned", targetAutomation, "2026-01-01 00:00:01", models.AlertDecisionApproved, models.AlertProcessingUnclaimed, "finder", false, false)
+
+	query, args := buildAlertSummaryListQuery(project.ID, normalizeAlertListFilter(models.AlertListFilter{
+		DecisionState:           models.AlertDecisionApproved,
+		ProcessingState:         models.AlertProcessingUnclaimed,
+		AutomationInboxBindings: []models.AutomationBinding{{AutomationID: targetAutomation}},
+		Limit:                   10,
+	}))
+	plan := alertBenchExplain(t, db, query, args...)
+	ownerPos := strings.Index(plan, "automation_artifact_mailbox_owners")
+	if ownerPos < 0 {
+		ownerPos = strings.Index(plan, "sqlite_autoindex_automation_artifact_mailbox_owners")
+	}
+	alertPos := strings.Index(plan, "SEARCH alerts")
+	if ownerPos < 0 || alertPos < 0 || ownerPos > alertPos {
+		t.Fatalf("plan = %s, want owner lookup before alert join", plan)
+	}
+	if strings.Contains(plan, "CORRELATED") {
+		t.Fatalf("plan = %s, want no correlated ownership subquery", plan)
+	}
+
+	unscopedQuery, _ := buildAlertSummaryListQuery(project.ID, normalizeAlertListFilter(models.AlertListFilter{Limit: 10}))
+	if strings.Contains(unscopedQuery, "automation_artifact_mailbox_owners") {
+		t.Fatalf("unscoped summary query unexpectedly uses mailbox owners: %s", unscopedQuery)
+	}
+}
+
+func alertSummaryIDs(alerts []models.AlertSummary) []string {
+	ids := make([]string, 0, len(alerts))
+	for _, alert := range alerts {
+		ids = append(ids, alert.ID)
+	}
+	return ids
+}
+
 func TestAlertRepo_GetByIdempotencyKeyScopesToProject(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
