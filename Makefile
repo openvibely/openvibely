@@ -80,7 +80,7 @@ test-short:
 # statements at low coverage — including them would misrepresent real coverage.
 test-cover:
 	go test ./... -count=1 -timeout 120s -coverpkg=./... -coverprofile=coverage.out
-	@grep -Ev '(_templ\.go:|^github.com/openvibely/openvibely/cmd/|^github.com/openvibely/openvibely/docs/|^github.com/openvibely/openvibely/internal/database/migrations/|^github.com/openvibely/openvibely/internal/update/testfixture/|^github.com/openvibely/openvibely/internal/service/workflow_service\.go:)' coverage.out > coverage.filtered.out
+	@./scripts/filter-coverage.sh coverage.out coverage.filtered.out
 	@go tool cover -func=coverage.filtered.out | tail -1
 	@echo "Full HTML report: go tool cover -html=coverage.filtered.out"
 
