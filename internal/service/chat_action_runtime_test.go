@@ -418,6 +418,121 @@ func TestAlertRuntimeCreateNotificationUsesUnicodeCharacterLimits(t *testing.T) 
 	}
 }
 
+func TestAlertRuntimeTerminalProcessingMessagesUseUnicodeCharacterLimits(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Unicode terminal notification limits"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	createClaimed := func(t *testing.T, title string) models.Alert {
+		t.Helper()
+		input, err := json.Marshal(map[string]any{"type": "bug_suggestion", "title": title})
+		require.NoError(t, err)
+		out, err := handlers["create_notification"](ctx, input)
+		require.NoError(t, err)
+		var payload struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &payload))
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, payload.Notification.ID, models.AlertDecisionApproved))
+		_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+payload.Notification.ID+`"}`))
+		require.NoError(t, err)
+		stored, err := alertSvc.GetByID(ctx, project.ID, payload.Notification.ID)
+		require.NoError(t, err)
+		return *stored
+	}
+	linkImplementation := func(t *testing.T, alertID string) string {
+		t.Helper()
+		input, err := json.Marshal(map[string]any{"alert_id": alertID, "title": "Implement " + alertID, "prompt": "Do the approved work."})
+		require.NoError(t, err)
+		out, err := handlers["create_alert_implementation_task"](ctx, input)
+		require.NoError(t, err)
+		var payload struct {
+			ImplementationTaskID string `json:"implementation_task_id"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &payload))
+		require.NotEmpty(t, payload.ImplementationTaskID)
+		return payload.ImplementationTaskID
+	}
+	callTerminal := func(t *testing.T, handlerName, alertID, message string) (string, error) {
+		t.Helper()
+		input, err := json.Marshal(map[string]any{"alert_id": alertID, "message": message})
+		require.NoError(t, err)
+		return handlers[handlerName](ctx, input)
+	}
+	assertProcessingUnchanged := func(t *testing.T, before models.Alert) {
+		t.Helper()
+		after, err := alertSvc.GetByID(ctx, project.ID, before.ID)
+		require.NoError(t, err)
+		require.Equal(t, before.ProcessingState, after.ProcessingState)
+		require.Equal(t, before.ProcessingError, after.ProcessingError)
+		require.Equal(t, before.Claimant, after.Claimant)
+		require.Equal(t, before.ImplementationTaskID, after.ImplementationTaskID)
+	}
+
+	emojiMessage := strings.Repeat("🚀", 600)
+	failedAlert := createClaimed(t, "Emoji failure note")
+	_, err := callTerminal(t, "fail_alert_processing", failedAlert.ID, emojiMessage)
+	require.NoError(t, err)
+	storedFailed, err := alertSvc.GetByID(ctx, project.ID, failedAlert.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertProcessingFailed, storedFailed.ProcessingState)
+	require.Equal(t, emojiMessage, storedFailed.ProcessingError)
+
+	completedAlert := createClaimed(t, "Emoji completion note")
+	implementationTaskID := linkImplementation(t, completedAlert.ID)
+	_, err = callTerminal(t, "complete_alert_processing", completedAlert.ID, emojiMessage)
+	require.NoError(t, err)
+	storedCompleted, err := alertSvc.GetByID(ctx, project.ID, completedAlert.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertProcessingCompleted, storedCompleted.ProcessingState)
+	require.Equal(t, emojiMessage, storedCompleted.ProcessingError)
+	require.Equal(t, implementationTaskID, *storedCompleted.ImplementationTaskID)
+
+	for _, tt := range []struct {
+		name       string
+		handler    string
+		message    string
+		linkBefore bool
+		wantState  models.AlertProcessingState
+		wantErr    bool
+	}{
+		{name: "fail accepts 2000 ASCII characters", handler: "fail_alert_processing", message: strings.Repeat("a", 2000), wantState: models.AlertProcessingFailed},
+		{name: "complete accepts 2000 ASCII characters", handler: "complete_alert_processing", message: strings.Repeat("a", 2000), linkBefore: true, wantState: models.AlertProcessingCompleted},
+		{name: "fail rejects 2001 Unicode characters", handler: "fail_alert_processing", message: strings.Repeat("界", 2001), wantErr: true},
+		{name: "complete rejects 2001 Unicode characters", handler: "complete_alert_processing", message: strings.Repeat("界", 2001), linkBefore: true, wantErr: true},
+		{name: "fail rejects 2001 ASCII characters", handler: "fail_alert_processing", message: strings.Repeat("a", 2001), wantErr: true},
+		{name: "complete rejects 2001 ASCII characters", handler: "complete_alert_processing", message: strings.Repeat("a", 2001), linkBefore: true, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			alert := createClaimed(t, tt.name)
+			if tt.linkBefore {
+				linkImplementation(t, alert.ID)
+				stored, err := alertSvc.GetByID(ctx, project.ID, alert.ID)
+				require.NoError(t, err)
+				alert = *stored
+			}
+			_, err := callTerminal(t, tt.handler, alert.ID, tt.message)
+			if tt.wantErr {
+				require.ErrorContains(t, err, "message must be at most 2000 characters")
+				assertProcessingUnchanged(t, alert)
+				return
+			}
+			require.NoError(t, err)
+			stored, err := alertSvc.GetByID(ctx, project.ID, alert.ID)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantState, stored.ProcessingState)
+			require.Equal(t, tt.message, stored.ProcessingError)
+		})
+	}
+}
+
 func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

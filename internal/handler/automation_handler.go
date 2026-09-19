@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -118,12 +120,16 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 		return err
 	}
 	cards, hasMore := cardPageItems(cards, page.PageSize)
-	if page.IsFragment || isHTMX(c) {
-		setCardPageResponse(c, hasMore)
-		return render(c, http.StatusOK, pages.AutomationsContentPageWithState(cards, projectID, hasMore, listState))
-	}
-	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.AutomationsPageWithState(projects, projectID, cards, hasMore, listState))
+	return h.renderCardBrowserPage(
+		c,
+		projectID,
+		page,
+		hasMore,
+		pages.AutomationsContentPageWithState(cards, projectID, hasMore, listState),
+		func(projects []models.Project, projectID string) templ.Component {
+			return pages.AutomationsPageWithState(projects, projectID, cards, hasMore, listState)
+		},
+	)
 }
 
 func (h *Handler) GetAutomationLive(c echo.Context) error {

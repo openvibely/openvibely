@@ -504,7 +504,17 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						</a>
 					</li>
 				}
-				@TaskCardMergeSubmenus(&task, projectID, taskCardMergeMenuState(task.ID, menuStates))
+				if len(menuStates) > 0 && menuStates[0] != nil {
+					@TaskCardMergeSubmenus(&task, projectID, taskCardMergeMenuState(task.ID, menuStates))
+				} else {
+					<li
+						data-task-card-merge-options
+						hx-get={ fmt.Sprintf("/tasks/%s/card/merge-options?project_id=%s", task.ID, projectID) }
+						hx-swap="outerHTML"
+					>
+						<span class="opacity-60"><span class="loading loading-spinner loading-xs htmx-indicator"></span> Merge options</span>
+					</li>
+				}
 
 			}
 		<!-- X button in top right corner -->

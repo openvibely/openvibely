@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
@@ -1544,8 +1545,7 @@ func (h *Handler) materializeDBAgentsInPages(c echo.Context) error {
 }
 
 func (h *Handler) ListAgents(c echo.Context) error {
-	isHtmx := isHTMX(c)
-	// applog.Debugf("[handler] ListAgents requested htmx=%v", isHtmx)
+	// applog.Debugf("[handler] ListAgents requested htmx=%v", isHTMX(c))
 
 	if h.agentLibraryMaintenanceSvc != nil {
 		projectID := ""
@@ -1602,15 +1602,16 @@ func (h *Handler) ListAgents(c echo.Context) error {
 			"origin":  agentFilter.Origin,
 		},
 	}
-	if isHtmx || page.IsFragment {
-		if page.IsFragment {
-			setCardPageResponse(c, hasMore)
-		}
-		return render(c, http.StatusOK, pages.AgentsContentPageWithState(agents, modelOptions, hasMore, listState))
-	}
-
-	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.AgentsPageWithState(projects, currentProjectID, agents, modelOptions, hasMore, listState))
+	return h.renderCardBrowserPage(
+		c,
+		currentProjectID,
+		page,
+		hasMore,
+		pages.AgentsContentPageWithState(agents, modelOptions, hasMore, listState),
+		func(projects []models.Project, projectID string) templ.Component {
+			return pages.AgentsPageWithState(projects, projectID, agents, modelOptions, hasMore, listState)
+		},
+	)
 }
 
 func agentNameValidationHTTPError(err error) error {
