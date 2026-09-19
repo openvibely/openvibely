@@ -1501,9 +1501,14 @@ func TestTasksMergeOptionLoaderSupportsKeyboardDeduplicationAndRetry(t *testing.
 	}
 	body := out.String()
 	for _, required := range []string{
+		`const taskCardMergeOptionRequests = new Map()`,
+		`taskCardMergeOptionRequests.get(refreshURL)`,
 		`function loadTaskCardMergeOptions(dropdown, label)`,
 		`options.hasAttribute('data-task-card-merge-options-loading')`,
-		`fetch(refreshURL, {headers: {'HX-Request': 'true'}})`,
+		`fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true'}})`,
+		`response.headers.get('HX-Redirect')`,
+		`window.location.assign(redirectURL)`,
+		`options.classList.add('htmx-request')`,
 		`options.outerHTML = html`,
 		`event.target === trigger && trigger.matches('[data-task-card-menu-trigger]')`,
 		`Could not load Git actions. Retry`,
@@ -1515,6 +1520,124 @@ func TestTasksMergeOptionLoaderSupportsKeyboardDeduplicationAndRetry(t *testing.
 	}
 	if strings.Contains(body, `const refreshURL = options && options.getAttribute('hx-get')`) {
 		t.Fatal("task-card merge loader retained the duplicate declarative request path")
+	}
+}
+
+func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedirects(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := models.Project{ID: "project-merge-loader-browser", Name: "Merge Loader Browser"}
+	task := models.Task{ID: "merge-loader-browser-task", ProjectID: project.ID, Title: "Merge Loader", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/merge-loader", MergeTargetBranch: "main"}
+	var mu sync.Mutex
+	mode := "hold"
+	optionGets := 0
+	releaseFirst := make(chan struct{}, 1)
+	result := make(chan string, 1)
+	runner := `<script>window.addEventListener('DOMContentLoaded',function(){
+		function fail(message){throw new Error(message)}
+		function waitFor(fn,label){return new Promise(function(resolve,reject){var end=Date.now()+5000;(function poll(){if(fn())return resolve();if(Date.now()>end)return reject(new Error('timeout '+label));setTimeout(poll,20)})()})}
+		(async function(){
+			var card=document.getElementById('task-merge-loader-browser-task');var trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
+			await waitFor(function(){var options=card.querySelector('[data-task-card-merge-options]');return options&&options.classList.contains('htmx-request')},'keyboard loader start');
+			var options=card.querySelector('[data-task-card-merge-options]');var spinner=options.querySelector('.htmx-indicator');await waitFor(function(){return parseFloat(getComputedStyle(spinner).opacity)>=0.9},'visible loading spinner');
+			options.tabIndex=0;options.focus();await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
+			await waitFor(function(){var current=document.querySelector('[data-task-card-merge-options]');return current&&current.classList.contains('htmx-request')},'restored loader start');
+			if((await fetch('/option-count').then(function(r){return r.text()})).trim()!=='1')fail('board refresh duplicated the in-flight Git request');
+			await fetch('/release-first',{method:'POST'});await waitFor(function(){return !!document.querySelector('[data-task-card-local-submenu]')},'shared request hydration');
+			var dropdown=document.querySelector('[data-kanban-menu-key="task-merge-loader-browser-task"]');if(window.closeKanbanMenu)window.closeKanbanMenu(dropdown,false);
+			await fetch('/set-mode?mode=fail',{method:'POST'});await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');trigger.focus();
+			await waitFor(function(){var retry=card.querySelector('[data-task-card-merge-options] button');return retry&&retry.textContent.indexOf('Retry')>=0},'visible retry');
+			await fetch('/set-mode?mode=auth',{method:'POST'});card.querySelector('[data-task-card-merge-options] button').click();
+		})().catch(function(error){fetch('/browser-result?status=fail&message='+encodeURIComponent(String(error&&error.stack||error)),{method:'POST'})})
+	});</script>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmxJS)
+		case "/tasks":
+			var out bytes.Buffer
+			if err := Tasks([]models.Project{project}, &project, []models.Task{task}, nil, nil, "", "").Render(r.Context(), &out); err != nil {
+				t.Fatal(err)
+			}
+			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
+		case "/board-refresh":
+			_ = components.KanbanBoard([]models.Task{task}, project.ID, "", "", nil, nil).Render(r.Context(), w)
+		case "/tasks/merge-loader-browser-task/card/merge-options":
+			mu.Lock()
+			optionGets++
+			requestMode := mode
+			mu.Unlock()
+			if requestMode == "hold" {
+				select {
+				case <-releaseFirst:
+				case <-r.Context().Done():
+					return
+				}
+			}
+			if requestMode == "fail" {
+				http.Error(w, "merge options unavailable", http.StatusInternalServerError)
+				return
+			}
+			if requestMode == "auth" {
+				w.Header().Set("HX-Redirect", "/login-marker")
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			_ = components.TaskCardMergeOptions(&task, project.ID, true, true, nil, true).Render(r.Context(), w)
+		case "/release-first":
+			mu.Lock()
+			mode = "success"
+			mu.Unlock()
+			select {
+			case releaseFirst <- struct{}{}:
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/set-mode":
+			mu.Lock()
+			mode = r.URL.Query().Get("mode")
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		case "/option-count":
+			mu.Lock()
+			count := optionGets
+			mu.Unlock()
+			_, _ = fmt.Fprintf(w, "%d", count)
+		case "/login-marker":
+			result <- "pass:redirect"
+			_, _ = w.Write([]byte("login"))
+		case "/browser-result":
+			result <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--user-data-dir="+filepath.Join(t.TempDir(), "profile"), server.URL+"/tasks?project_id="+project.ID)
+	stderrPath := filepath.Join(t.TempDir(), "merge-loader-browser.stderr")
+	stderr, _ := os.Create(stderrPath)
+	defer stderr.Close()
+	cmd.Stderr = stderr
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatal(err)
+	}
+	defer stopBrowserProcess(cmd)
+	select {
+	case outcome := <-result:
+		if outcome != "pass:redirect" {
+			logData, _ := os.ReadFile(stderrPath)
+			t.Fatalf("task-card merge loader browser regression: %s\n%s", outcome, logData)
+		}
+	case <-time.After(20 * time.Second):
+		logData, _ := os.ReadFile(stderrPath)
+		t.Fatalf("task-card merge loader browser regression timed out\n%s", logData)
 	}
 }
 

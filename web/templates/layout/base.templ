@@ -3006,6 +3006,30 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				requestAnimationFrame(settlePosition);
 			}
 
+			const taskCardMergeOptionRequests = new Map();
+
+			function taskCardMergeOptionsRequest(refreshURL) {
+				let request = taskCardMergeOptionRequests.get(refreshURL);
+				if (request) return request;
+				request = fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true'}}).then(function(response) {
+					const redirectURL = response.headers.get('HX-Redirect');
+					if (redirectURL) {
+						const redirectError = new Error('Authentication redirect');
+						redirectError.taskCardMergeOptionsRedirect = true;
+						window.location.assign(redirectURL);
+						throw redirectError;
+					}
+					if (!response.ok) throw new Error('HTTP ' + response.status);
+					return response.text();
+				});
+				taskCardMergeOptionRequests.set(refreshURL, request);
+				const clearRequest = function() {
+					if (taskCardMergeOptionRequests.get(refreshURL) === request) taskCardMergeOptionRequests.delete(refreshURL);
+				};
+				request.then(clearRequest, clearRequest);
+				return request;
+			}
+
 			function loadTaskCardMergeOptions(dropdown, label) {
 				if (!dropdown || !window.htmx) return;
 				const options = dropdown.querySelector('[data-task-card-merge-options]');
@@ -3013,18 +3037,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				if (!options || !refreshURL || options.hasAttribute('data-task-card-merge-options-loading')) return;
 				options.setAttribute('data-task-card-merge-options-loading', 'true');
 				options.setAttribute('aria-busy', 'true');
-				fetch(refreshURL, {headers: {'HX-Request': 'true'}}).then(function(response) {
-					if (!response.ok) throw new Error('HTTP ' + response.status);
-					return response.text();
-				}).then(function(html) {
+				options.classList.add('htmx-request');
+				taskCardMergeOptionsRequest(refreshURL).then(function(html) {
 					if (!options.isConnected) return;
 					options.outerHTML = html;
 					htmx.process(dropdown);
 					if (dropdown.getAttribute('data-kanban-menu-open') === 'true') positionDropdownForViewport(label);
-				}).catch(function() {
+				}).catch(function(error) {
+					if (error && error.taskCardMergeOptionsRedirect) return;
 					if (!options.isConnected) return;
 					options.removeAttribute('data-task-card-merge-options-loading');
 					options.removeAttribute('aria-busy');
+					options.classList.remove('htmx-request');
 					options.replaceChildren();
 					const retry = document.createElement('button');
 					retry.type = 'button';
