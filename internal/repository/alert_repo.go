@@ -291,7 +291,7 @@ func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter m
 
 func (r *AlertRepo) ListFilteredSummaries(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
 	filter = normalizeAlertListFilter(filter)
-	query, args := buildAlertListQuery(alertSummarySelectColumns, projectID, filter)
+	query, args := buildAlertSummaryListQuery(projectID, filter)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing alert summaries: %w", err)
@@ -324,56 +324,7 @@ func normalizeAlertListFilter(filter models.AlertListFilter) models.AlertListFil
 func buildAlertListQuery(columns, projectID string, filter models.AlertListFilter) (string, []any) {
 	query := `SELECT ` + columns + ` FROM alerts WHERE project_id = ?`
 	args := []any{projectID}
-	if filter.DecisionState != "" {
-		query += ` AND decision_state = ?`
-		args = append(args, filter.DecisionState)
-	}
-	if filter.ProcessingState != "" {
-		query += ` AND processing_state = ?`
-		args = append(args, filter.ProcessingState)
-	}
-	if filter.Type != "" {
-		query += ` AND type = ?`
-		args = append(args, filter.Type)
-	}
-	if filter.Severity != "" {
-		query += ` AND severity = ?`
-		args = append(args, filter.Severity)
-	}
-	if strings.TrimSpace(filter.Source) != "" {
-		query += ` AND source = ?`
-		args = append(args, strings.TrimSpace(filter.Source))
-	}
-	if filter.Read != nil {
-		query += ` AND is_read = ?`
-		args = append(args, *filter.Read)
-	}
-	if filter.ImplementationTaskLinked != nil {
-		query += ` AND implementation_task_was_linked = ?`
-		args = append(args, *filter.ImplementationTaskLinked)
-	}
-	if strings.TrimSpace(filter.Search) != "" {
-		query += ` AND INSTR(LOWER(
-				COALESCE(title, '') || ' ' || COALESCE(message, '') || ' ' ||
-				COALESCE(severity, '') || ' ' || COALESCE(decision_state, '') || ' ' ||
-				COALESCE(processing_state, '') || ' ' || COALESCE(source, '') || ' ' ||
-				COALESCE(
-				CASE strftime('%m', created_at, 'localtime')
-					WHEN '01' THEN 'Jan' WHEN '02' THEN 'Feb' WHEN '03' THEN 'Mar'
-					WHEN '04' THEN 'Apr' WHEN '05' THEN 'May' WHEN '06' THEN 'Jun'
-					WHEN '07' THEN 'Jul' WHEN '08' THEN 'Aug' WHEN '09' THEN 'Sep'
-					WHEN '10' THEN 'Oct' WHEN '11' THEN 'Nov' WHEN '12' THEN 'Dec'
-				END || ' ' ||
-				CAST(CAST(strftime('%d', created_at, 'localtime') AS INTEGER) AS TEXT) || ', ' ||
-				strftime('%Y', created_at, 'localtime') || ' ' ||
-				CAST(((CAST(strftime('%H', created_at, 'localtime') AS INTEGER) + 11) % 12) + 1 AS TEXT) || ':' ||
-				strftime('%M', created_at, 'localtime') || ' ' ||
-				CASE WHEN CAST(strftime('%H', created_at, 'localtime') AS INTEGER) < 12 THEN 'AM' ELSE 'PM' END,
-				''
-			)
-		), ?) > 0`
-		args = append(args, strings.ToLower(strings.TrimSpace(filter.Search)))
-	}
+	query, args = appendAlertListPredicates(query, args, filter, "alerts")
 	if len(filter.AutomationInboxBindings) > 0 {
 		query += ` AND (`
 		for i, binding := range filter.AutomationInboxBindings {
@@ -381,27 +332,179 @@ func buildAlertListQuery(columns, projectID string, filter models.AlertListFilte
 				query += ` OR `
 			}
 			query += `EXISTS (
-							SELECT 1
-							FROM automation_artifact_mailbox_owners owner
-							WHERE owner.project_id = alerts.project_id AND owner.automation_id = ?
-								AND owner.artifact_type = 'alert' AND owner.artifact_id = alerts.id)`
+								SELECT 1
+								FROM automation_artifact_mailbox_owners owner
+								WHERE owner.project_id = alerts.project_id AND owner.automation_id = ?
+									AND owner.artifact_type = 'alert' AND owner.artifact_id = alerts.id)`
 			args = append(args, binding.AutomationID)
 		}
 		query += `)`
 	}
-	switch filter.Sort {
-	case "oldest":
-		query += ` ORDER BY created_at ASC, id ASC`
-	case "severity":
-		query += ` ORDER BY CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END ASC, created_at DESC, id DESC`
-	case "unread_first":
-		query += ` ORDER BY is_read ASC, created_at DESC, id DESC`
-	default:
-		query += ` ORDER BY created_at DESC, id DESC`
-	}
+	query += alertListOrderBy(filter, "alerts")
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, filter.Limit, filter.Offset)
 	return query, args
+}
+
+func buildAlertSummaryListQuery(projectID string, filter models.AlertListFilter) (string, []any) {
+	if len(filter.AutomationInboxBindings) == 0 {
+		return buildAlertListQuery(alertSummarySelectColumns, projectID, filter)
+	}
+	return buildAutomationOwnedAlertSummaryListQuery(projectID, filter)
+}
+
+func buildAutomationOwnedAlertSummaryListQuery(projectID string, filter models.AlertListFilter) (string, []any) {
+	automationIDs := make([]string, 0, len(filter.AutomationInboxBindings))
+	seen := make(map[string]bool, len(filter.AutomationInboxBindings))
+	for _, binding := range filter.AutomationInboxBindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" || seen[automationID] {
+			continue
+		}
+		seen[automationID] = true
+		automationIDs = append(automationIDs, automationID)
+	}
+	if len(automationIDs) == 0 {
+		return `SELECT ` + alertSummarySelectColumns + ` FROM alerts WHERE 0 LIMIT ? OFFSET ?`, []any{filter.Limit, filter.Offset}
+	}
+
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(automationIDs)), ",")
+	query := `WITH owned_alerts AS MATERIALIZED (
+		SELECT DISTINCT owner.artifact_id AS alert_id
+		FROM automation_artifact_mailbox_owners owner
+		WHERE owner.project_id = ? AND owner.artifact_type = 'alert' AND owner.automation_id IN (` + placeholders + `)
+	)
+	SELECT ` + qualifyAlertSelectColumns(alertSummarySelectColumns, "alerts") + `
+	FROM owned_alerts
+	CROSS JOIN alerts ON alerts.project_id = ? AND alerts.id = owned_alerts.alert_id
+	WHERE 1 = 1`
+	args := make([]any, 0, len(automationIDs)+4)
+	args = append(args, projectID)
+	for _, automationID := range automationIDs {
+		args = append(args, automationID)
+	}
+	args = append(args, projectID)
+	query, args = appendAlertListPredicates(query, args, filter, "alerts")
+	query += alertListOrderBy(filter, "alerts")
+	query += ` LIMIT ? OFFSET ?`
+	args = append(args, filter.Limit, filter.Offset)
+	return query, args
+}
+
+func qualifyAlertSelectColumns(columns, alias string) string {
+	parts := splitSQLSelectColumns(columns)
+	for i, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if strings.HasPrefix(strings.ToUpper(trimmed), "COALESCE(") {
+			parts[i] = strings.Replace(trimmed, "COALESCE(", "COALESCE("+alias+".", 1)
+			continue
+		}
+		parts[i] = alias + "." + trimmed
+	}
+	return strings.Join(parts, ", ")
+}
+
+func splitSQLSelectColumns(columns string) []string {
+	parts := []string{}
+	start := 0
+	depth := 0
+	for i, r := range columns {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, columns[start:i])
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, columns[start:])
+	return parts
+}
+
+func appendAlertListPredicates(query string, args []any, filter models.AlertListFilter, alias string) (string, []any) {
+	column := func(name string) string {
+		if alias == "" {
+			return name
+		}
+		return alias + "." + name
+	}
+	if filter.DecisionState != "" {
+		query += ` AND ` + column("decision_state") + ` = ?`
+		args = append(args, filter.DecisionState)
+	}
+	if filter.ProcessingState != "" {
+		query += ` AND ` + column("processing_state") + ` = ?`
+		args = append(args, filter.ProcessingState)
+	}
+	if filter.Type != "" {
+		query += ` AND ` + column("type") + ` = ?`
+		args = append(args, filter.Type)
+	}
+	if filter.Severity != "" {
+		query += ` AND ` + column("severity") + ` = ?`
+		args = append(args, filter.Severity)
+	}
+	if strings.TrimSpace(filter.Source) != "" {
+		query += ` AND ` + column("source") + ` = ?`
+		args = append(args, strings.TrimSpace(filter.Source))
+	}
+	if filter.Read != nil {
+		query += ` AND ` + column("is_read") + ` = ?`
+		args = append(args, *filter.Read)
+	}
+	if filter.ImplementationTaskLinked != nil {
+		query += ` AND ` + column("implementation_task_was_linked") + ` = ?`
+		args = append(args, *filter.ImplementationTaskLinked)
+	}
+	if strings.TrimSpace(filter.Search) != "" {
+		createdAt := column("created_at")
+		query += ` AND INSTR(LOWER(
+					COALESCE(` + column("title") + `, '') || ' ' || COALESCE(` + column("message") + `, '') || ' ' ||
+					COALESCE(` + column("severity") + `, '') || ' ' || COALESCE(` + column("decision_state") + `, '') || ' ' ||
+					COALESCE(` + column("processing_state") + `, '') || ' ' || COALESCE(` + column("source") + `, '') || ' ' ||
+					COALESCE(
+					CASE strftime('%m', ` + createdAt + `, 'localtime')
+						WHEN '01' THEN 'Jan' WHEN '02' THEN 'Feb' WHEN '03' THEN 'Mar'
+						WHEN '04' THEN 'Apr' WHEN '05' THEN 'May' WHEN '06' THEN 'Jun'
+						WHEN '07' THEN 'Jul' WHEN '08' THEN 'Aug' WHEN '09' THEN 'Sep'
+						WHEN '10' THEN 'Oct' WHEN '11' THEN 'Nov' WHEN '12' THEN 'Dec'
+					END || ' ' ||
+					CAST(CAST(strftime('%d', ` + createdAt + `, 'localtime') AS INTEGER) AS TEXT) || ', ' ||
+					strftime('%Y', ` + createdAt + `, 'localtime') || ' ' ||
+					CAST(((CAST(strftime('%H', ` + createdAt + `, 'localtime') AS INTEGER) + 11) % 12) + 1 AS TEXT) || ':' ||
+					strftime('%M', ` + createdAt + `, 'localtime') || ' ' ||
+					CASE WHEN CAST(strftime('%H', ` + createdAt + `, 'localtime') AS INTEGER) < 12 THEN 'AM' ELSE 'PM' END,
+					''
+				)
+			), ?) > 0`
+		args = append(args, strings.ToLower(strings.TrimSpace(filter.Search)))
+	}
+	return query, args
+}
+
+func alertListOrderBy(filter models.AlertListFilter, alias string) string {
+	column := func(name string) string {
+		if alias == "" {
+			return name
+		}
+		return alias + "." + name
+	}
+	switch filter.Sort {
+	case "oldest":
+		return ` ORDER BY ` + column("created_at") + ` ASC, ` + column("id") + ` ASC`
+	case "severity":
+		return ` ORDER BY CASE ` + column("severity") + ` WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END ASC, ` + column("created_at") + ` DESC, ` + column("id") + ` DESC`
+	case "unread_first":
+		return ` ORDER BY ` + column("is_read") + ` ASC, ` + column("created_at") + ` DESC, ` + column("id") + ` DESC`
+	default:
+		return ` ORDER BY ` + column("created_at") + ` DESC, ` + column("id") + ` DESC`
+	}
 }
 
 func (r *AlertRepo) CountPending(ctx context.Context, projectID string) (int, error) {
