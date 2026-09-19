@@ -478,6 +478,91 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	}
 }
 
+func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"var openAICompatibleDiscoveryAbortController = null;",
+		"var openAICompatibleDiscoveryGeneration = 0;",
+		"function cancelOpenAICompatibleDiscovery()",
+		"openAICompatibleDiscoveryAbortController.abort();",
+		"cancelOpenAICompatibleDiscovery();",
+		"var discoveryAbortController = typeof AbortController === 'function' ? new AbortController() : null;",
+		"if (discoveryAbortController) fetchOptions.signal = discoveryAbortController.signal;",
+		"fetch('/models/openai-compatible/available?' + params.toString(), fetchOptions)",
+		"if (err && err.name === 'AbortError') return;",
+		"openAICompatibleDiscoveryGeneration !== discoveryGeneration",
+		"openAICompatibleDiscoveryAbortController === discoveryAbortController",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected OpenAI-compatible discovery cancellation script to contain %q", want)
+		}
+	}
+	if strings.Contains(out, "fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})") {
+		t.Fatal("discovery fetch still omits AbortController signal")
+	}
+	cancelBody := renderedFunctionBody(t, out, "function cancelOpenAICompatibleDiscovery()")
+	for _, want := range []string{
+		"clearTimeout(openAICompatibleDiscoveryTimer);",
+		"openAICompatibleDiscoveryTimer = null;",
+	} {
+		if !strings.Contains(cancelBody, want) {
+			t.Fatalf("expected cancellation to clear pending OpenAI-compatible discovery debounce timer with %q", want)
+		}
+	}
+	scheduleBody := renderedFunctionBody(t, out, "function scheduleAutoDiscoverOpenAICompatibleModels()")
+	if !strings.Contains(scheduleBody, "cancelOpenAICompatibleDiscovery();") {
+		t.Fatal("scheduled discovery should cancel the prior stale request before starting a debounce")
+	}
+	for _, lifecycle := range []struct {
+		name string
+		sig  string
+	}{
+		{name: "provider changes", sig: "function toggleProviderFields(selectedModel, selectedReasoningEffort)"},
+		{name: "edit population", sig: "function populateModelEditForm(button)"},
+		{name: "modal close", sig: "function closeModelModal()"},
+		{name: "new modal reset", sig: "function openNewModelModal()"},
+	} {
+		body := renderedFunctionBody(t, out, lifecycle.sig)
+		if !strings.Contains(body, "cancelOpenAICompatibleDiscovery();") {
+			t.Fatalf("expected %s lifecycle to cancel stale OpenAI-compatible discovery", lifecycle.name)
+		}
+	}
+	successCloseStart := strings.Index(out, "document.body.addEventListener('htmx:afterSwap'")
+	if successCloseStart < 0 {
+		t.Fatal("expected rendered script to include the HTMX success modal close handler")
+	}
+	successCloseEnd := strings.Index(out[successCloseStart:], "document.body.addEventListener('htmx:responseError'")
+	if successCloseEnd < 0 {
+		t.Fatal("expected rendered script to include the HTMX response error handler after success close handler")
+	}
+	successCloseHandler := out[successCloseStart : successCloseStart+successCloseEnd]
+	cancelIndex := strings.Index(successCloseHandler, "cancelOpenAICompatibleDiscovery();")
+	closeIndex := strings.Index(successCloseHandler, "modal.close();")
+	if cancelIndex < 0 || closeIndex < 0 || cancelIndex > closeIndex {
+		t.Fatal("expected successful HTMX model save modal close to cancel stale OpenAI-compatible discovery before closing")
+	}
+	modelModalStart := strings.Index(out, `<dialog id="new_model_modal"`)
+	if modelModalStart < 0 {
+		t.Fatal("expected rendered content to include the model modal")
+	}
+	modelModalEnd := strings.Index(out[modelModalStart:], `</dialog>`)
+	if modelModalEnd < 0 {
+		t.Fatal("expected rendered content to include the model modal closing tag")
+	}
+	modelModal := out[modelModalStart : modelModalStart+modelModalEnd]
+	if strings.Contains(modelModal, `<form method="dialog" class="modal-backdrop"><button>close</button></form>`) {
+		t.Fatal("model modal backdrop still uses native dialog close without cancelling stale discovery")
+	}
+	if !strings.Contains(modelModal, `<form class="modal-backdrop"><button type="button" onclick="closeModelModal()">close</button></form>`) {
+		t.Fatal("expected model modal backdrop to close through the cancellation-aware helper")
+	}
+}
+
 func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
 	agents := []models.LLMConfig{
 		{
@@ -817,6 +902,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	for _, want := range []string{
 		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
 		`<select id="model_provider"`,
+		`id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`onsubmit="clearModelFormError(); return normalizeModelFormBeforeSubmit()"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
@@ -849,6 +935,18 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"X-OpenAI-Compatible-Extra-Headers",
 		"X-OpenAI-Compatible-Models-Array-Path",
 		"X-OpenAI-Compatible-Model-ID-Field",
+		"function currentOpenAICompatibleDiscoveryIdentity()",
+		"var discoveryIdentity = currentOpenAICompatibleDiscoveryIdentity();",
+		"currentOpenAICompatibleDiscoveryIdentity() !== discoveryIdentity",
+		"api_key: document.getElementById('model_api_key').value.trim()",
+		"custom_auth_method: document.getElementById('model_custom_auth_method').value",
+		"auth_header_name: document.getElementById('model_compatible_auth_header_name').value.trim()",
+		"auth_header_prefix: document.getElementById('model_compatible_auth_header_prefix').value",
+		"extra_headers: document.getElementById('model_compatible_extra_headers').value.trim()",
+		"clear_extra_headers: !!(clearExtraHeaders && clearExtraHeaders.checked)",
+		"models_array_path: document.getElementById('model_custom_models_array_path').value.trim()",
+		"model_id_field: document.getElementById('model_custom_model_id_field').value.trim()",
+		"allow_private: document.getElementById('model_custom_allow_private_endpoints').checked",
 		"(!configID || customAuthMethod === 'api_key')",
 		"clearExtraHeaders.checked",
 		"cfg.model_id_field || 'id'",
@@ -856,7 +954,6 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"setOpenAICompatibleModelValue(models[i].id, models[i].id, false)",
 		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true)",
 		"if (!isDiscoverableOpenAICompatiblePreset())",
-		"document.getElementById('model_provider').value !== provider",
 		"Discover Models",
 		`onclick="discoverOpenAICompatibleModels()"`,
 		`name="custom_static_headers_json"`,
@@ -878,14 +975,24 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	if modelsPathIndex < 0 || oauthFieldsIndex < 0 || modelsPathIndex > oauthFieldsIndex {
 		t.Fatal("expected model discovery schema controls to be available outside the OAuth-only fields")
 	}
-	modelIDFieldIndex := strings.Index(out, `id="model_custom_model_id_field"`)
-	if modelIDFieldIndex < 0 {
-		t.Fatal("expected custom model ID field")
+	for _, control := range []struct {
+		id    string
+		event string
+	}{
+		{id: "model_custom_auth_method", event: `onchange="toggleCustomProviderAuthFields(); scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_custom_models_array_path", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_custom_model_id_field", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_compatible_auth_header_name", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_compatible_auth_header_prefix", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_compatible_extra_headers", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_custom_allow_private_endpoints", event: `onchange="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+	} {
+		markup := renderedTagWithID(t, out, control.id)
+		if !strings.Contains(markup, control.event) {
+			t.Fatalf("expected %s to schedule OpenAI-compatible discovery cancellation, got %s", control.id, markup)
+		}
 	}
-	modelIDFieldMarkup := out[modelIDFieldIndex:]
-	if end := strings.Index(modelIDFieldMarkup, `>`); end >= 0 {
-		modelIDFieldMarkup = modelIDFieldMarkup[:end]
-	}
+	modelIDFieldMarkup := renderedTagWithID(t, out, "model_custom_model_id_field")
 	if !strings.Contains(modelIDFieldMarkup, `value="id"`) {
 		t.Fatalf("expected custom model ID field to default to id: %s", modelIDFieldMarkup)
 	}
@@ -907,6 +1014,80 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 			t.Fatalf("expected discovery UI not to contain %q", forbidden)
 		}
 	}
+}
+
+func renderedFunctionBody(t *testing.T, out, signature string) string {
+	t.Helper()
+	idx := strings.Index(out, signature)
+	if idx < 0 {
+		t.Fatalf("expected rendered script to contain %s", signature)
+	}
+	open := strings.Index(out[idx:], "{")
+	if open < 0 {
+		t.Fatalf("expected rendered function %s to have an opening brace", signature)
+	}
+	bodyStart := idx + open + 1
+	depth := 1
+	inSingle := false
+	inDouble := false
+	inTemplate := false
+	escaped := false
+	for pos := bodyStart; pos < len(out); pos++ {
+		ch := out[pos]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inSingle || inDouble || inTemplate {
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if inSingle && ch == '\'' {
+				inSingle = false
+			} else if inDouble && ch == '"' {
+				inDouble = false
+			} else if inTemplate && ch == '`' {
+				inTemplate = false
+			}
+			continue
+		}
+		switch ch {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '`':
+			inTemplate = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return out[bodyStart:pos]
+			}
+		}
+	}
+	t.Fatalf("expected rendered function %s to have a closing brace", signature)
+	return ""
+}
+
+func renderedTagWithID(t *testing.T, out, id string) string {
+	t.Helper()
+	marker := `id="` + id + `"`
+	idx := strings.Index(out, marker)
+	if idx < 0 {
+		t.Fatalf("expected rendered element with id %s", id)
+	}
+	start := strings.LastIndex(out[:idx], "<")
+	if start < 0 {
+		t.Fatalf("expected rendered element %s to have a start tag", id)
+	}
+	end := strings.Index(out[idx:], ">")
+	if end < 0 {
+		t.Fatalf("expected rendered element %s to have an end of start tag", id)
+	}
+	return out[start : idx+end+1]
 }
 
 func renderedModelCard(t *testing.T, out, id string) string {

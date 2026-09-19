@@ -613,7 +613,7 @@ for _, agent := range modelOptions {
 								<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"/>
 								<input type="hidden" id="model_openai_compatible_transport" name="transport" value="chat_completions"/>							<div class="form-control mb-3">
 								<label class="label"><span class="label-text">Base URL</span></label>
-								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/"/>
+								<input type="text" id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/>
 								<label class="label"><span class="label-text-alt opacity-70">API root; requests go to base URL + /chat/completions.</span></label>
 							</div>
 								<div class="form-control mb-3">
@@ -628,17 +628,17 @@ for _, agent := range modelOptions {
 								<div id="custom_provider_auth_fields">
 									<div class="form-control mb-3">
 										<label class="label"><span class="label-text">Authentication</span></label>
-										<select id="model_custom_auth_method" name="custom_auth_method" class="select select-bordered" onchange="toggleCustomProviderAuthFields()">
+										<select id="model_custom_auth_method" name="custom_auth_method" class="select select-bordered" onchange="toggleCustomProviderAuthFields(); scheduleAutoDiscoverOpenAICompatibleModels()">
 											<option value="api_key">API Key / None</option>
 											<option value="oauth">OAuth + signed requests</option>
 										</select>
 									</div>
 									<div id="custom_provider_request_fields" class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
 										<div class="form-control md:col-span-2"><label class="label"><span class="label-text">Models URL</span></label><input id="model_custom_models_url" name="models_url" class="input input-bordered" placeholder="https://…/models" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/><label class="label"><span class="label-text-alt opacity-70">Optional dedicated endpoint used by Discover Models.</span></label></div>
-										<div class="form-control"><label class="label"><span class="label-text">Models array path</span></label><input id="model_custom_models_array_path" name="custom_models_array_path" class="input input-bordered" value="data"/></div>
-										<div class="form-control"><label class="label"><span class="label-text">Model ID field</span></label><input id="model_custom_model_id_field" name="custom_model_id_field" class="input input-bordered" value="id"/></div>
-										<div class="form-control"><label class="label"><span class="label-text">API key header</span></label><input id="model_compatible_auth_header_name" name="auth_header_name" class="input input-bordered" value="Authorization" placeholder="Authorization"/></div>
-										<div class="form-control"><label class="label"><span class="label-text">API key value prefix</span></label><input id="model_compatible_auth_header_prefix" name="auth_header_value_prefix" class="input input-bordered" value="Bearer " placeholder="Leave empty for a raw API key"/><label class="label"><span class="label-text-alt opacity-70">Use an empty value for headers such as X-API-Key.</span></label></div>
+										<div class="form-control"><label class="label"><span class="label-text">Models array path</span></label><input id="model_custom_models_array_path" name="custom_models_array_path" class="input input-bordered" value="data" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/></div>
+										<div class="form-control"><label class="label"><span class="label-text">Model ID field</span></label><input id="model_custom_model_id_field" name="custom_model_id_field" class="input input-bordered" value="id" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/></div>
+										<div class="form-control"><label class="label"><span class="label-text">API key header</span></label><input id="model_compatible_auth_header_name" name="auth_header_name" class="input input-bordered" value="Authorization" placeholder="Authorization" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/></div>
+										<div class="form-control"><label class="label"><span class="label-text">API key value prefix</span></label><input id="model_compatible_auth_header_prefix" name="auth_header_value_prefix" class="input input-bordered" value="Bearer " placeholder="Leave empty for a raw API key" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/><label class="label"><span class="label-text-alt opacity-70">Use an empty value for headers such as X-API-Key.</span></label></div>
 										<div class="form-control">
 											<label class="label"><span class="label-text">Additional inference headers (JSON)</span></label>
 											@components.SecretInput(components.SecretInputConfig{
@@ -647,6 +647,7 @@ for _, agent := range modelOptions {
 												Class:        "input input-bordered w-full pr-10 font-mono text-xs",
 												Placeholder:  `{"X-Required-Header":"value"}`,
 												AutoComplete: "off",
+												OnInput:      "scheduleAutoDiscoverOpenAICompatibleModels()",
 												AriaLabel:    "Toggle additional inference headers visibility",
 											})
 											<label class="label"><span class="label-text-alt opacity-70">Saved headers are hidden by default. Click the eye to reveal or edit them; remove the JSON to clear them.</span></label>
@@ -762,7 +763,7 @@ for _, agent := range modelOptions {
 											</div>
 											<p class="text-xs opacity-70 mt-3">HMAC-SHA256 signs METHOD, request path, ISO timestamp, and the SHA-256 hash of the exact request body.</p>
 									</div>
-									<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_allow_private_endpoints" name="custom_allow_private_endpoints" type="checkbox" class="checkbox checkbox-sm"/><span class="label-text">Allow private/local endpoint access for this model (requires server policy)</span></label>
+									<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_allow_private_endpoints" name="custom_allow_private_endpoints" type="checkbox" class="checkbox checkbox-sm" onchange="scheduleAutoDiscoverOpenAICompatibleModels()"/><span class="label-text">Allow private/local endpoint access for this model (requires server policy)</span></label>
 								</div>
 							</div>
 						<div id="ollama_fields" class="hidden">
@@ -903,8 +904,8 @@ for _, agent := range modelOptions {
 					</div>
 				</form>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button>close</button>
+			<form class="modal-backdrop">
+				<button type="button" onclick="closeModelModal()">close</button>
 			</form>
 		</dialog>
 
@@ -1375,7 +1376,21 @@ for _, agent := range modelOptions {
 									(preset === 'custom' && !!document.getElementById('model_custom_models_url').value.trim());
 							}
 
-						var openAICompatibleDiscoveryTimer = null;
+							var openAICompatibleDiscoveryTimer = null;
+							var openAICompatibleDiscoveryAbortController = null;
+							var openAICompatibleDiscoveryGeneration = 0;
+
+							function cancelOpenAICompatibleDiscovery() {
+								openAICompatibleDiscoveryGeneration++;
+								if (openAICompatibleDiscoveryTimer) {
+									clearTimeout(openAICompatibleDiscoveryTimer);
+									openAICompatibleDiscoveryTimer = null;
+								}
+								if (openAICompatibleDiscoveryAbortController) {
+									openAICompatibleDiscoveryAbortController.abort();
+									openAICompatibleDiscoveryAbortController = null;
+								}
+							}
 
 							function maybeAutoDiscoverOpenAICompatibleModels() {
 								var provider = document.getElementById('model_provider').value;
@@ -1385,12 +1400,16 @@ for _, agent := range modelOptions {
 							}
 
 							function scheduleAutoDiscoverOpenAICompatibleModels() {
+								cancelOpenAICompatibleDiscovery();
 								if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
 								openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
 							}
 
 							function runAutoDiscoverOpenAICompatibleModels() {
-								if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
+								if (openAICompatibleDiscoveryTimer) {
+									clearTimeout(openAICompatibleDiscoveryTimer);
+									openAICompatibleDiscoveryTimer = null;
+								}
 								maybeAutoDiscoverOpenAICompatibleModels();
 							}
 						function applyOpenAICompatiblePreset(force) {
@@ -1635,29 +1654,58 @@ for _, agent := range modelOptions {
 						setOpenAICompatibleModelValue(custom, custom ? custom + ' (custom)' : '', true);
 					}
 
+						function currentOpenAICompatibleDiscoveryIdentity() {
+							var form = document.getElementById('model_form');
+							var clearExtraHeaders = form && form.querySelector('[name="clear_extra_headers"]');
+							return JSON.stringify({
+								provider: document.getElementById('model_provider').value,
+								base_url: document.getElementById('model_base_url').value.trim(),
+								models_url: document.getElementById('model_custom_models_url').value.trim(),
+								preset: document.getElementById('model_openai_compatible_preset').value || 'custom',
+								allow_private: document.getElementById('model_custom_allow_private_endpoints').checked,
+								api_key: document.getElementById('model_api_key').value.trim(),
+								custom_auth_method: document.getElementById('model_custom_auth_method').value,
+								auth_header_name: document.getElementById('model_compatible_auth_header_name').value.trim(),
+								auth_header_prefix: document.getElementById('model_compatible_auth_header_prefix').value,
+								extra_headers: document.getElementById('model_compatible_extra_headers').value.trim(),
+								clear_extra_headers: !!(clearExtraHeaders && clearExtraHeaders.checked),
+								models_array_path: document.getElementById('model_custom_models_array_path').value.trim(),
+								model_id_field: document.getElementById('model_custom_model_id_field').value.trim(),
+								discoverable: isDiscoverableOpenAICompatiblePreset(),
+							});
+						}
+
 						function discoverOpenAICompatibleModels() {
 							var provider = document.getElementById('model_provider').value;
 							var baseURL = document.getElementById('model_base_url').value.trim();
 							var status = document.getElementById('openai_compatible_discovery_status');
-							if (!isDiscoverableOpenAICompatiblePreset()) {
-								if (status) status.textContent = 'Enter the model ID manually for local or custom endpoints.';
-								return;
-							}
-							if (!baseURL) {
-								status.textContent = 'Enter a base URL before discovering models.';
-								return;
-							}
-							status.textContent = 'Discovering models...';
-							var params = new URLSearchParams({base_url: baseURL});
+								if (!isDiscoverableOpenAICompatiblePreset()) {
+									cancelOpenAICompatibleDiscovery();
+									if (status) status.textContent = 'Enter the model ID manually for local or custom endpoints.';
+									return;
+								}
+								if (!baseURL) {
+									cancelOpenAICompatibleDiscovery();
+									status.textContent = 'Enter a base URL before discovering models.';
+									return;
+								}
+								cancelOpenAICompatibleDiscovery();
+								var discoveryGeneration = openAICompatibleDiscoveryGeneration;
+								var discoveryIdentity = currentOpenAICompatibleDiscoveryIdentity();
+								var discoveryAbortController = typeof AbortController === 'function' ? new AbortController() : null;
+								openAICompatibleDiscoveryAbortController = discoveryAbortController;
+								status.textContent = 'Discovering models...';
+						var params = new URLSearchParams({base_url: baseURL});
 							var configID = document.getElementById('model_config_id').value.trim();
 							var modelsURL = document.getElementById('model_custom_models_url').value.trim();
 							var form = document.getElementById('model_form');
-							if (configID && form &&
-								(baseURL !== (form.dataset.originalBaseUrl || '') ||
-								 modelsURL !== (form.dataset.originalModelsUrl || ''))) {
-								status.textContent = 'Save endpoint changes and reconnect before discovering models.';
-								return;
-							}
+								if (configID && form &&
+									(baseURL !== (form.dataset.originalBaseUrl || '') ||
+									 modelsURL !== (form.dataset.originalModelsUrl || ''))) {
+									cancelOpenAICompatibleDiscovery();
+									status.textContent = 'Save endpoint changes and reconnect before discovering models.';
+									return;
+								}
 							if (configID) params.set('config_id', configID);
 							if (modelsURL || configID) params.set('models_url', modelsURL);
 							var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
@@ -1678,30 +1726,34 @@ for _, agent := range modelOptions {
 								headers['X-OpenAI-Compatible-Models-Array-Path'] = document.getElementById('model_custom_models_array_path').value.trim();
 								headers['X-OpenAI-Compatible-Model-ID-Field'] = document.getElementById('model_custom_model_id_field').value.trim();
 							}
-							fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})
-								.then(function(resp) {								return resp.json().then(function(data) {
-									if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
-									return data;
-								});
-							})
-								.then(function(data) {
-									if (document.getElementById('model_provider').value !== provider ||
-										document.getElementById('model_base_url').value.trim() !== baseURL ||
-										document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
-										!isDiscoverableOpenAICompatiblePreset()) return;
-									var models = data.models || [];								for (var i = 0; i < models.length; i++) {
-									if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id, false);
-								}
-								if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true);
-								status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
-							})
-								.catch(function(err) {
-									if (document.getElementById('model_provider').value !== provider ||
-										document.getElementById('model_base_url').value.trim() !== baseURL ||
-										document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
-										!isDiscoverableOpenAICompatiblePreset()) return;
-									status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
-								});					}
+								var fetchOptions = {headers: headers};
+								if (discoveryAbortController) fetchOptions.signal = discoveryAbortController.signal;
+								fetch('/models/openai-compatible/available?' + params.toString(), fetchOptions)
+									.then(function(resp) {								return resp.json().then(function(data) {
+										if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
+										return data;
+									});
+								})
+									.then(function(data) {
+										if (openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
+											currentOpenAICompatibleDiscoveryIdentity() !== discoveryIdentity) return;
+										var models = data.models || [];								for (var i = 0; i < models.length; i++) {
+										if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id, false);
+									}
+									if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true);
+									status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
+								})
+									.catch(function(err) {
+										if (err && err.name === 'AbortError') return;
+										if (openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
+											currentOpenAICompatibleDiscoveryIdentity() !== discoveryIdentity) return;
+										status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
+									})
+									.finally(function() {
+										if (openAICompatibleDiscoveryGeneration === discoveryGeneration && openAICompatibleDiscoveryAbortController === discoveryAbortController) {
+											openAICompatibleDiscoveryAbortController = null;
+										}
+									});					}
 
 					function hideAllInfoBoxes() {
 						document.getElementById('subscription_info_oauth').classList.add('hidden');
@@ -1850,6 +1902,7 @@ for _, agent := range modelOptions {
 			}
 
 			function populateModelEditForm(button) {
+				cancelOpenAICompatibleDiscovery();
 				var id = button.dataset.modelId;
 				var name = button.dataset.modelName;
 					var dbProvider = button.dataset.modelProvider;
@@ -1973,6 +2026,7 @@ for _, agent := range modelOptions {
 			}
 
 			function toggleProviderFields(selectedModel, selectedReasoningEffort) {
+				cancelOpenAICompatibleDiscovery();
 				var provider = document.getElementById('model_provider').value;
 				var effectiveProvider = canonicalProvider(provider);
 				var modelField = document.getElementById('model_field');
@@ -2247,6 +2301,7 @@ for _, agent := range modelOptions {
 					}
 
 				function closeModelModal() {
+					cancelOpenAICompatibleDiscovery();
 					window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;
 					window._modelEditRequestedID = '';
 					new_model_modal.close();
@@ -2281,6 +2336,7 @@ for _, agent := range modelOptions {
 				}
 
 				function openNewModelModal() {
+					cancelOpenAICompatibleDiscovery();
 					window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;
 					window._modelEditRequestedID = '';
 					var form = document.getElementById('model_form');
@@ -2352,6 +2408,7 @@ for _, agent := range modelOptions {
 					if (event.detail.target && event.detail.target.id === 'models-container') {
 						var modal = document.getElementById('new_model_modal');
 						if (modal && modal.open) {
+							cancelOpenAICompatibleDiscovery();
 							modal.close();
 						}
 					}
