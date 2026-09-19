@@ -849,6 +849,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	for _, want := range []string{
 		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
 		`<select id="model_provider"`,
+		`id="model_base_url" name="base_url" class="input input-bordered" placeholder="https://openrouter.ai/api/v1/" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
 		`onsubmit="clearModelFormError(); return normalizeModelFormBeforeSubmit()"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
