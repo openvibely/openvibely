@@ -508,6 +508,20 @@ func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T
 	if !strings.Contains(out, "function scheduleAutoDiscoverOpenAICompatibleModels() {\n\t\t\t\t\t\t\t\t\tcancelOpenAICompatibleDiscovery();") {
 		t.Fatal("scheduled discovery should cancel the prior stale request before starting a debounce")
 	}
+	for _, lifecycle := range []struct {
+		name string
+		sig  string
+	}{
+		{name: "provider changes", sig: "function toggleProviderFields(selectedModel, selectedReasoningEffort)"},
+		{name: "edit population", sig: "function populateModelEditForm(button)"},
+		{name: "modal close", sig: "function closeModelModal()"},
+		{name: "new modal reset", sig: "function openNewModelModal()"},
+	} {
+		body := renderedFunctionBody(t, out, lifecycle.sig)
+		if !strings.Contains(body, "cancelOpenAICompatibleDiscovery();") {
+			t.Fatalf("expected %s lifecycle to cancel stale OpenAI-compatible discovery", lifecycle.name)
+		}
+	}
 }
 
 func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
@@ -961,6 +975,62 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 			t.Fatalf("expected discovery UI not to contain %q", forbidden)
 		}
 	}
+}
+
+func renderedFunctionBody(t *testing.T, out, signature string) string {
+	t.Helper()
+	idx := strings.Index(out, signature)
+	if idx < 0 {
+		t.Fatalf("expected rendered script to contain %s", signature)
+	}
+	open := strings.Index(out[idx:], "{")
+	if open < 0 {
+		t.Fatalf("expected rendered function %s to have an opening brace", signature)
+	}
+	bodyStart := idx + open + 1
+	depth := 1
+	inSingle := false
+	inDouble := false
+	inTemplate := false
+	escaped := false
+	for pos := bodyStart; pos < len(out); pos++ {
+		ch := out[pos]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inSingle || inDouble || inTemplate {
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if inSingle && ch == '\'' {
+				inSingle = false
+			} else if inDouble && ch == '"' {
+				inDouble = false
+			} else if inTemplate && ch == '`' {
+				inTemplate = false
+			}
+			continue
+		}
+		switch ch {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '`':
+			inTemplate = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return out[bodyStart:pos]
+			}
+		}
+	}
+	t.Fatalf("expected rendered function %s to have a closing brace", signature)
+	return ""
 }
 
 func renderedTagWithID(t *testing.T, out, id string) string {
