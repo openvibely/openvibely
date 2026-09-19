@@ -927,13 +927,13 @@ var registry = []ActionDef{
 	// --- Automations domain (project-scoped definition control) ---
 	{
 		Name:         "list_automations",
-		Description:  "List compact summaries of all project Automations (ID, name, status, paused, adapter key, saved graph node count, operational state counts, next run, last run). Does not expose YAML graph definitions.",
+		Description:  "List one bounded page of compact project Automation summaries (ID, name, status, paused, adapter key, saved graph node count, operational state counts, next run, last run) plus pagination metadata. Defaults to 20 items and caps large limits. Does not expose YAML graph definitions.",
 		Domain:       DomainAutomations,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional project ID equality assertion."}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional project ID equality assertion."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum summaries to return. Defaults to 20 and caps at 50."},"offset":{"type":"integer","minimum":0,"description":"Number of summaries to skip before returning the page."}},"additionalProperties":false}`),
 	},
 	{
 		Name:         "get_automation",

@@ -249,8 +249,42 @@ const automationExternalRefreshCache = time.Minute
 
 type AutomationGraphService struct{ repo *repository.AutomationRepo }
 
+type AutomationRuntimeListPage struct {
+	Cards      []models.AutomationCard
+	Limit      int
+	Offset     int
+	HasMore    bool
+	NextOffset int
+}
+
+const (
+	AutomationRuntimeListDefaultLimit = 20
+	AutomationRuntimeListMaxLimit     = 50
+)
+
 func NewAutomationGraphService(repo *repository.AutomationRepo) *AutomationGraphService {
 	return &AutomationGraphService{repo: repo}
+}
+
+func NormalizeAutomationRuntimeListPageArgs(limit, offset *int) (int, int, error) {
+	normalizedLimit := AutomationRuntimeListDefaultLimit
+	if limit != nil {
+		if *limit <= 0 {
+			return 0, 0, fmt.Errorf("limit must be greater than 0")
+		}
+		normalizedLimit = *limit
+		if normalizedLimit > AutomationRuntimeListMaxLimit {
+			normalizedLimit = AutomationRuntimeListMaxLimit
+		}
+	}
+	normalizedOffset := 0
+	if offset != nil {
+		if *offset < 0 {
+			return 0, 0, fmt.Errorf("offset must be greater than or equal to 0")
+		}
+		normalizedOffset = *offset
+	}
+	return normalizedLimit, normalizedOffset, nil
 }
 
 func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]models.AutomationCard, error) {
@@ -262,13 +296,57 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 	if err != nil {
 		return nil, err
 	}
+	enrichAutomationCards(cards, portfolioCounts)
+	return cards, nil
+}
+
+func (s *AutomationGraphService) ListRuntimePage(ctx context.Context, projectID string, limit, offset int) (AutomationRuntimeListPage, error) {
+	cards, hasMore, err := s.repo.ListRuntimeAutomationCards(ctx, projectID, limit, offset)
+	if err != nil {
+		return AutomationRuntimeListPage{}, err
+	}
+	if err := s.enrichRuntimeCards(ctx, projectID, cards); err != nil {
+		return AutomationRuntimeListPage{}, err
+	}
+	page := AutomationRuntimeListPage{Cards: cards, Limit: limit, Offset: offset, HasMore: hasMore}
+	if hasMore {
+		page.NextOffset = offset + len(cards)
+	}
+	return page, nil
+}
+
+func (s *AutomationGraphService) RuntimeCardByID(ctx context.Context, projectID, automationID string) (*models.AutomationCard, error) {
+	card, err := s.repo.GetRuntimeAutomationCard(ctx, projectID, automationID)
+	if err != nil || card == nil {
+		return card, err
+	}
+	cards := []models.AutomationCard{*card}
+	if err := s.enrichRuntimeCards(ctx, projectID, cards); err != nil {
+		return nil, err
+	}
+	return &cards[0], nil
+}
+
+func (s *AutomationGraphService) enrichRuntimeCards(ctx context.Context, projectID string, cards []models.AutomationCard) error {
+	automationIDs := make([]string, 0, len(cards))
+	for _, card := range cards {
+		automationIDs = append(automationIDs, card.Automation.ID)
+	}
+	portfolioCounts, err := s.repo.PortfolioOperationalCountsForAutomations(ctx, projectID, automationIDs, time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		return err
+	}
+	enrichAutomationCards(cards, portfolioCounts)
+	return nil
+}
+
+func enrichAutomationCards(cards []models.AutomationCard, portfolioCounts map[string]models.AutomationNodeCounts) {
 	for i := range cards {
 		cards[i].Counts = portfolioCounts[cards[i].Automation.ID]
 		currentTemplateRevision := CurrentAutomationTemplateRevision(cards[i].Version.AdapterKey)
 		cards[i].TemplateUpdateAvailable = currentTemplateRevision > 0 &&
 			(cards[i].Automation.TemplateRevision == nil || *cards[i].Automation.TemplateRevision < currentTemplateRevision)
 	}
-	return cards, nil
 }
 
 type automationCardNotFoundError string
@@ -324,15 +402,7 @@ func (s *AutomationGraphService) ResolveAutomationCard(ctx context.Context, proj
 
 // AutomationCardByID returns the current card for an exact Automation ID.
 func (s *AutomationGraphService) AutomationCardByID(ctx context.Context, projectID, automationID string) (*models.AutomationCard, error) {
-	card, err := s.ResolveAutomationCard(ctx, projectID, automationID, "")
-	if err != nil {
-		var notFound automationCardNotFoundError
-		if errors.As(err, &notFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &card, nil
+	return s.RuntimeCardByID(ctx, projectID, strings.TrimSpace(automationID))
 }
 
 // AutomationCardSummary converts an AutomationCard to the compact prompt-safe
