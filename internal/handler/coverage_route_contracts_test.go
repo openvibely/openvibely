@@ -156,6 +156,38 @@ func TestTaskBoardMutationRoutesValidateAndPersistExpectedState(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, invalidReorder.Code)
 }
 
+func TestMoveCompletedActiveToCompletedRequiresAndScopesProject(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	projectA := tc.CreateProject().WithName("Move completed project A").Build()
+	projectB := tc.CreateProject().WithName("Move completed project B").Build()
+	projectATask := tc.CreateTask(projectA.ID).WithTitle("Project A finished active").WithCategory(models.CategoryActive).Build()
+	projectBTask := tc.CreateTask(projectB.ID).WithTitle("Project B finished active").WithCategory(models.CategoryActive).Build()
+	rejectedTask := tc.CreateTask(projectA.ID).WithTitle("Missing scope finished active").WithCategory(models.CategoryActive).Build()
+	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, projectATask.ID, models.StatusCompleted))
+	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, projectBTask.ID, models.StatusCompleted))
+	require.NoError(t, tc.taskRepo.UpdateStatus(ctx, rejectedTask.ID, models.StatusCompleted))
+
+	missing := tc.HTTP().Post("/tasks/move-completed").Execute()
+	require.Equal(t, http.StatusBadRequest, missing.Code, missing.Body.String())
+	unchangedAfterReject, err := tc.taskRepo.GetByID(ctx, rejectedTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, unchangedAfterReject.Category)
+
+	move := tc.HTMX().Post("/tasks/move-completed?project_id=" + projectA.ID).Execute()
+	require.Equal(t, http.StatusOK, move.Code, move.Body.String())
+	require.Contains(t, move.Body.String(), `id="kanban-board"`)
+	movedA, err := tc.taskRepo.GetByID(ctx, projectATask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryCompleted, movedA.Category)
+	unchangedB, err := tc.taskRepo.GetByID(ctx, projectBTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, unchangedB.Category)
+	remainingA, err := tc.taskRepo.GetByID(ctx, rejectedTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryCompleted, remainingA.Category)
+}
+
 func TestBatchUpdateTaskCategoryRejectsForeignMixedAndMissingIDsBeforeMutation(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

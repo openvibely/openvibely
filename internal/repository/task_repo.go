@@ -2750,12 +2750,16 @@ func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 	return int(rows), nil
 }
 
-// MoveCompletedActiveToCompleted moves all tasks with category='active' and status='completed'
+// MoveCompletedActiveToCompleted moves tasks in one project with category='active' and status='completed'
 // to category='completed'. Returns the number of tasks moved.
-func (r *TaskRepo) MoveCompletedActiveToCompleted(ctx context.Context) (int, error) {
+func (r *TaskRepo) MoveCompletedActiveToCompleted(ctx context.Context, projectID string) (int, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return 0, fmt.Errorf("moving completed active tasks to completed: project id is required")
+	}
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = 'completed', updated_at = datetime('now'), completed_at = datetime('now')
-		 WHERE category = 'active' AND status = 'completed'`)
+		 WHERE project_id = ? AND category = 'active' AND status = 'completed'`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("moving completed active tasks to completed: %w", err)
 	}

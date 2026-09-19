@@ -21,6 +21,7 @@ var ErrTaskTitleRequired = errors.New("task title is required")
 var ErrTaskPromptRequired = errors.New("task prompt is required")
 var ErrInvalidTaskPriority = errors.New("task priority must be between 1 and 4")
 var ErrTaskNotFoundInProject = errors.New("task not found in project")
+var ErrTaskProjectScopeRequired = errors.New("project_id is required")
 var ErrActiveLaneLifecycleRouted = errors.New("task activation was routed to its lifecycle owner")
 var ErrTaskCancellationSuperseded = errors.New("task cancellation was superseded by a newer run")
 
@@ -1051,9 +1052,13 @@ func (s *TaskService) CountByProjectAndCategory(ctx context.Context, projectID s
 	return s.repo.CountByProjectAndCategory(ctx, projectID)
 }
 
-func (s *TaskService) MoveCompletedActiveToCompleted(ctx context.Context) (int, error) {
-	applog.Infof("[task-svc] MoveCompletedActiveToCompleted called")
-	count, err := s.repo.MoveCompletedActiveToCompleted(ctx)
+func (s *TaskService) MoveCompletedActiveToCompleted(ctx context.Context, projectID string) (int, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return 0, ErrTaskProjectScopeRequired
+	}
+	applog.Infof("[task-svc] MoveCompletedActiveToCompleted project=%s", projectID)
+	count, err := s.repo.MoveCompletedActiveToCompleted(ctx, projectID)
 	if err != nil {
 		applog.Infof("[task-svc] MoveCompletedActiveToCompleted error: %v", err)
 		return 0, err
