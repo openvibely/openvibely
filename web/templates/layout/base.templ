@@ -3027,8 +3027,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return;
 					}
 
-					// Otherwise, keep the Kanban dropdown hidden while its pre-rendered,
-					// measurable content settles into fixed viewport coordinates, then reveal it.
+					// Otherwise, keep the Kanban dropdown hidden while its current measurable
+					// content settles into fixed viewport coordinates, then reveal it.
 					if (kanbanDropdown) {
 						document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
 							if (candidate !== kanbanDropdown) setKanbanMenuExpanded(candidate, false);
@@ -3039,6 +3039,21 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
 						setKanbanMenuExpanded(kanbanDropdown, true);
 						window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
+						if (label.matches('[data-task-card-menu-trigger]') && window.htmx) {
+							const options = kanbanDropdown.querySelector('[data-task-card-merge-options]');
+							const refreshURL = options && options.getAttribute('hx-get');
+							if (options && refreshURL && !options.hasAttribute('data-task-card-merge-options-loading')) {
+								options.setAttribute('data-task-card-merge-options-loading', 'true');
+								const request = htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
+								if (request && typeof request.then === 'function') {
+									const finishMergeOptionsRequest = function() {
+										if (options.isConnected) options.removeAttribute('data-task-card-merge-options-loading');
+										if (kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true') positionDropdownForViewport(label);
+									};
+									request.then(finishMergeOptionsRequest, finishMergeOptionsRequest);
+								}
+							}
+						}
 					} else {
 						requestAnimationFrame(function() { positionDropdownForViewport(label); });
 					}
