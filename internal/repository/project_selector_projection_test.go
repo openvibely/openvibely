@@ -180,10 +180,7 @@ func TestProjectRepo_ListSelectorOptions_QueryPlan(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 
-	rows, err := db.QueryContext(ctx,
-		`EXPLAIN QUERY PLAN
-		 SELECT id, name, is_default
-		 FROM projects ORDER BY is_default DESC, name ASC, id ASC`)
+	rows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+projectSelectorOptionsQuery)
 	if err != nil {
 		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
 	}

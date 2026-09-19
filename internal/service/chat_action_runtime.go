@@ -1445,11 +1445,25 @@ type channelProjectSelection struct {
 }
 
 func selectChannelProject(ctx context.Context, projectRepo *repository.ProjectRepo, currentProjectID, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
-	var selection channelProjectSelection
 	if projectRepo == nil {
+		return channelProjectSelection{}, fmt.Errorf("project repository not configured")
+	}
+	return selectChannelProjectWithList(ctx, projectRepo.List, currentProjectID, targetProject, switchProject)
+}
+
+func selectChannelProjectForSwitch(ctx context.Context, projectRepo *repository.ProjectRepo, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
+	if projectRepo == nil {
+		return channelProjectSelection{}, fmt.Errorf("project repository not configured")
+	}
+	return selectChannelProjectWithList(ctx, projectRepo.ListSelectorOptions, "", targetProject, switchProject)
+}
+
+func selectChannelProjectWithList(ctx context.Context, listProjects func(context.Context) ([]models.Project, error), currentProjectID, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
+	var selection channelProjectSelection
+	if listProjects == nil {
 		return selection, fmt.Errorf("project repository not configured")
 	}
-	projects, err := projectRepo.List(ctx)
+	projects, err := listProjects(ctx)
 	if err != nil {
 		return selection, err
 	}
@@ -2501,7 +2515,7 @@ func switchChannelProjectResult(ctx context.Context, projectRepo *repository.Pro
 	if targetProject == "" {
 		return "Project switch requires a project name or ID.", nil
 	}
-	selection, err := selectChannelProject(ctx, projectRepo, "", targetProject, switchProject)
+	selection, err := selectChannelProjectForSwitch(ctx, projectRepo, targetProject, switchProject)
 	if err != nil {
 		if selection.Target != nil {
 			return "", fmt.Errorf("failed to switch project: %w", err)

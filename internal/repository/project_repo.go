@@ -162,10 +162,11 @@ func (r *ProjectRepo) ListRepoRoots(ctx context.Context) ([]ProjectRepoRoot, err
 // explicit id tie-breaker so equal project names are deterministic. The
 // idx_projects_selector_order covering index lets SQLite satisfy this order
 // without a temp B-tree sort or table lookup.
+const projectSelectorOptionsQuery = `SELECT id, name, is_default
+			 FROM projects ORDER BY is_default DESC, name ASC, id ASC`
+
 func (r *ProjectRepo) ListSelectorOptions(ctx context.Context) ([]models.Project, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, is_default
-		 FROM projects ORDER BY is_default DESC, name ASC, id ASC`)
+	rows, err := r.db.QueryContext(ctx, projectSelectorOptionsQuery)
 	if err != nil {
 		return nil, fmt.Errorf("listing project selector options: %w", err)
 	}
