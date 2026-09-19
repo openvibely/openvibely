@@ -2547,21 +2547,28 @@ func TestTaskRepo_MoveCompletedActiveToCompleted(t *testing.T) {
 	repo := NewTaskRepo(db, nil)
 	ctx := context.Background()
 
+	projectB := &models.Project{Name: "Move completed repo project B"}
+	if err := NewProjectRepo(db).Create(ctx, projectB); err != nil {
+		t.Fatalf("Create project B: %v", err)
+	}
+
 	// Create various tasks
 	completedActive1 := &models.Task{ProjectID: "default", Title: "Completed Active 1", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
 	completedActive2 := &models.Task{ProjectID: "default", Title: "Completed Active 2", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
 	pendingActive := &models.Task{ProjectID: "default", Title: "Pending Active", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
 	completedBacklog := &models.Task{ProjectID: "default", Title: "Completed Backlog", Category: models.CategoryBacklog, Status: models.StatusCompleted, Prompt: "p"}
 	alreadyCompleted := &models.Task{ProjectID: "default", Title: "Already Completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+	foreignCompletedActive := &models.Task{ProjectID: projectB.ID, Title: "Foreign Completed Active", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
 
 	repo.Create(ctx, completedActive1)
 	repo.Create(ctx, completedActive2)
 	repo.Create(ctx, pendingActive)
 	repo.Create(ctx, completedBacklog)
 	repo.Create(ctx, alreadyCompleted)
+	repo.Create(ctx, foreignCompletedActive)
 
 	// Move completed active tasks to completed category
-	count, err := repo.MoveCompletedActiveToCompleted(ctx)
+	count, err := repo.MoveCompletedActiveToCompleted(ctx, "default")
 	if err != nil {
 		t.Fatalf("MoveCompletedActiveToCompleted: %v", err)
 	}
@@ -2595,6 +2602,11 @@ func TestTaskRepo_MoveCompletedActiveToCompleted(t *testing.T) {
 	if completedTask.Category != models.CategoryCompleted {
 		t.Errorf("expected completed task still in completed, got %q", completedTask.Category)
 	}
+
+	foreignTask, _ := repo.GetByID(ctx, foreignCompletedActive.ID)
+	if foreignTask.Category != models.CategoryActive {
+		t.Errorf("expected foreign task still in active, got %q", foreignTask.Category)
+	}
 }
 
 func TestTaskRepo_MoveCompletedActiveToCompleted_NoCompletedTasks(t *testing.T) {
@@ -2607,7 +2619,7 @@ func TestTaskRepo_MoveCompletedActiveToCompleted_NoCompletedTasks(t *testing.T) 
 	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Running Active", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"})
 
 	// Should move 0 tasks
-	count, err := repo.MoveCompletedActiveToCompleted(ctx)
+	count, err := repo.MoveCompletedActiveToCompleted(ctx, "default")
 	if err != nil {
 		t.Fatalf("MoveCompletedActiveToCompleted: %v", err)
 	}

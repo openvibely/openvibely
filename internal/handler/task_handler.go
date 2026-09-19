@@ -2354,12 +2354,18 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 }
 
 func (h *Handler) MoveCompletedActiveToCompleted(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
 	applog.Infof("[handler] MoveCompletedActiveToCompleted project=%s", projectID)
 
-	count, err := h.taskSvc.MoveCompletedActiveToCompleted(c.Request().Context())
+	count, err := h.taskSvc.MoveCompletedActiveToCompleted(c.Request().Context(), projectID)
 	if err != nil {
 		applog.Infof("[handler] MoveCompletedActiveToCompleted error: %v", err)
+		if errors.Is(err, service.ErrTaskProjectScopeRequired) {
+			return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+		}
 		return err
 	}
 	applog.Infof("[handler] MoveCompletedActiveToCompleted moved %d tasks", count)

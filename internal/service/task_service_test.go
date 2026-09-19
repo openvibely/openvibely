@@ -1397,6 +1397,9 @@ func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 
+	projectB := &models.Project{Name: "Move completed service project B"}
+	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, projectB))
+
 	// Create tasks in various states
 	completedActive := &models.Task{
 		ProjectID: "default",
@@ -1412,9 +1415,17 @@ func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
 		Status:    models.StatusPending,
 		Prompt:    "p",
 	}
+	foreignCompletedActive := &models.Task{
+		ProjectID: projectB.ID,
+		Title:     "Foreign Completed Active",
+		Category:  models.CategoryActive,
+		Status:    models.StatusCompleted,
+		Prompt:    "p",
+	}
 
 	taskRepo.Create(ctx, completedActive)
 	taskRepo.Create(ctx, pendingActive)
+	taskRepo.Create(ctx, foreignCompletedActive)
 
 	// Drain any auto-submissions from active category
 	for i := 0; i < 2; i++ {
@@ -1424,8 +1435,11 @@ func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
 		}
 	}
 
+	_, err := svc.MoveCompletedActiveToCompleted(ctx, " ")
+	require.ErrorIs(t, err, ErrTaskProjectScopeRequired)
+
 	// Move completed active tasks
-	count, err := svc.MoveCompletedActiveToCompleted(ctx)
+	count, err := svc.MoveCompletedActiveToCompleted(ctx, "default")
 	if err != nil {
 		t.Fatalf("MoveCompletedActiveToCompleted: %v", err)
 	}
@@ -1443,6 +1457,11 @@ func TestTaskService_MoveCompletedActiveToCompleted(t *testing.T) {
 	unchangedTask, _ := taskRepo.GetByID(ctx, pendingActive.ID)
 	if unchangedTask.Category != models.CategoryActive {
 		t.Errorf("expected pending task to remain active, got %q", unchangedTask.Category)
+	}
+
+	foreignTask, _ := taskRepo.GetByID(ctx, foreignCompletedActive.ID)
+	if foreignTask.Category != models.CategoryActive {
+		t.Errorf("expected foreign task to remain active, got %q", foreignTask.Category)
 	}
 }
 
