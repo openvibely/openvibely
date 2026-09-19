@@ -882,6 +882,18 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"X-OpenAI-Compatible-Extra-Headers",
 		"X-OpenAI-Compatible-Models-Array-Path",
 		"X-OpenAI-Compatible-Model-ID-Field",
+		"function currentOpenAICompatibleDiscoveryIdentity()",
+		"var discoveryIdentity = currentOpenAICompatibleDiscoveryIdentity();",
+		"currentOpenAICompatibleDiscoveryIdentity() !== discoveryIdentity",
+		"api_key: document.getElementById('model_api_key').value.trim()",
+		"custom_auth_method: document.getElementById('model_custom_auth_method').value",
+		"auth_header_name: document.getElementById('model_compatible_auth_header_name').value.trim()",
+		"auth_header_prefix: document.getElementById('model_compatible_auth_header_prefix').value",
+		"extra_headers: document.getElementById('model_compatible_extra_headers').value.trim()",
+		"clear_extra_headers: !!(clearExtraHeaders && clearExtraHeaders.checked)",
+		"models_array_path: document.getElementById('model_custom_models_array_path').value.trim()",
+		"model_id_field: document.getElementById('model_custom_model_id_field').value.trim()",
+		"allow_private: document.getElementById('model_custom_allow_private_endpoints').checked",
 		"(!configID || customAuthMethod === 'api_key')",
 		"clearExtraHeaders.checked",
 		"cfg.model_id_field || 'id'",
@@ -889,7 +901,6 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"setOpenAICompatibleModelValue(models[i].id, models[i].id, false)",
 		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true)",
 		"if (!isDiscoverableOpenAICompatiblePreset())",
-		"document.getElementById('model_provider').value !== provider",
 		"Discover Models",
 		`onclick="discoverOpenAICompatibleModels()"`,
 		`name="custom_static_headers_json"`,
@@ -911,14 +922,24 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	if modelsPathIndex < 0 || oauthFieldsIndex < 0 || modelsPathIndex > oauthFieldsIndex {
 		t.Fatal("expected model discovery schema controls to be available outside the OAuth-only fields")
 	}
-	modelIDFieldIndex := strings.Index(out, `id="model_custom_model_id_field"`)
-	if modelIDFieldIndex < 0 {
-		t.Fatal("expected custom model ID field")
+	for _, control := range []struct {
+		id    string
+		event string
+	}{
+		{id: "model_custom_auth_method", event: `onchange="toggleCustomProviderAuthFields(); scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_custom_models_array_path", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_custom_model_id_field", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_compatible_auth_header_name", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_compatible_auth_header_prefix", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_compatible_extra_headers", event: `oninput="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+		{id: "model_custom_allow_private_endpoints", event: `onchange="scheduleAutoDiscoverOpenAICompatibleModels()"`},
+	} {
+		markup := renderedTagWithID(t, out, control.id)
+		if !strings.Contains(markup, control.event) {
+			t.Fatalf("expected %s to schedule OpenAI-compatible discovery cancellation, got %s", control.id, markup)
+		}
 	}
-	modelIDFieldMarkup := out[modelIDFieldIndex:]
-	if end := strings.Index(modelIDFieldMarkup, `>`); end >= 0 {
-		modelIDFieldMarkup = modelIDFieldMarkup[:end]
-	}
+	modelIDFieldMarkup := renderedTagWithID(t, out, "model_custom_model_id_field")
 	if !strings.Contains(modelIDFieldMarkup, `value="id"`) {
 		t.Fatalf("expected custom model ID field to default to id: %s", modelIDFieldMarkup)
 	}
@@ -940,6 +961,24 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 			t.Fatalf("expected discovery UI not to contain %q", forbidden)
 		}
 	}
+}
+
+func renderedTagWithID(t *testing.T, out, id string) string {
+	t.Helper()
+	marker := `id="` + id + `"`
+	idx := strings.Index(out, marker)
+	if idx < 0 {
+		t.Fatalf("expected rendered element with id %s", id)
+	}
+	start := strings.LastIndex(out[:idx], "<")
+	if start < 0 {
+		t.Fatalf("expected rendered element %s to have a start tag", id)
+	}
+	end := strings.Index(out[idx:], ">")
+	if end < 0 {
+		t.Fatalf("expected rendered element %s to have an end of start tag", id)
+	}
+	return out[start : idx+end+1]
 }
 
 func renderedModelCard(t *testing.T, out, id string) string {
