@@ -793,11 +793,25 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	  function nextPaint() {
 	    return new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
 	  }
-	  async function waitForAlertsSettled(label) {
+	  async function waitForAlertsSettled(label, searchTerm) {
 	    await waitFor(function() {
 	      var state = window.openVibelyAlertsViewport || {};
-	      return !state.swap && !state.settlingSwap;
+	      var root = document.getElementById('alerts-container');
+	      if (state.swap || state.settlingSwap || (root && root.getAttribute('aria-busy') === 'true')) return false;
+	      if (searchTerm === undefined) return true;
+	      var pagination = root && root._openVibelyCardPaginationState;
+	      var current = new URL(window.location.href).searchParams.get('search') || '';
+	      return current === searchTerm && pagination && !pagination.loading && !pagination.resetPending && pagination.search === searchTerm;
 	    }, label + ' settle');
+	    await nextPaint();
+	  }
+	  async function waitForCardSearchSettled(term, label) {
+	    await waitFor(function() {
+	      var root = document.getElementById('alerts-container');
+	      var state = root && root._openVibelyCardPaginationState;
+	      var current = new URL(window.location.href).searchParams.get('search') || '';
+	      return current === term && root && root.getAttribute('aria-busy') !== 'true' && (!state || (!state.loading && !state.resetPending && state.search === term));
+	    }, label + ' search settle');
 	    await nextPaint();
 	  }
 	  function row(id) { return document.querySelector('[data-alert-scroll-anchor="' + id + '"]'); }
@@ -871,10 +885,13 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    if (root.scrollTop < 100) fail('live operational alert reset the Alerts scrollport');
 			    if (row('live-operational').contains(document.activeElement)) fail('live operational alert received focus');
 
-			    var liveSearch = document.querySelector('input[data-card-search="alerts"]');
+		    var liveSearch = document.querySelector('input[data-card-search="alerts"]');
 		    liveSearch.value = 'notification';
 		    liveSearch.dispatchEvent(new Event('input', {bubbles:true}));
-		    await wait(50);
+		    await waitFor(function() {
+		      var pagination = document.getElementById('alerts-container')._openVibelyCardPaginationState;
+		      return getComputedStyle(row('live-operational')).display === 'none' && !new URL(window.location.href).searchParams.has('search') && pagination && pagination.search !== 'notification';
+		    }, 'pending notification search debounce');
 
 		    liveAnchorTop = row('item-14').getBoundingClientRect().top;
 		    transientTopJump = false;
@@ -882,7 +899,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    await fetch('/browser-add?kind=notification', {method:'POST'});
 		    htmx.trigger(document.body, 'alertUpdate');
 		    await waitFor(function() { return !!row('live-notification'); }, 'live actionable notification refresh');
-		    await waitForAlertsSettled('live actionable notification refresh');
+		    await waitForAlertsSettled('live actionable notification refresh', 'notification');
 		    detectTransientTopJump = false;
 		    root = document.getElementById('alerts-container');
 		    if (document.getElementById('system-update-card') !== originalUpdateCard) fail('live actionable notification replaced the active system update card');
@@ -897,8 +914,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    if (getComputedStyle(row('live-operational')).display !== 'none') fail('card search was not reapplied before live refresh settled');
 		    liveSearch.value = '';
 		    liveSearch.dispatchEvent(new Event('input', {bubbles:true}));
-		    await waitFor(function() { return !new URL(window.location.href).searchParams.has('search'); }, 'search URL clear');
-		    await wait(50);
+		    await waitForCardSearchSettled('', 'search clear');
 
 	    var stableTop = row('item-14').getBoundingClientRect().top;
 	    detectTransientTopJump = true;
@@ -942,7 +958,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    var search = document.querySelector('input[data-card-search="alerts"]');
 	    search.value = 'filtered-focus';
 	    search.dispatchEvent(new Event('input', {bubbles:true}));
-	    await wait(50);
+	    await waitForCardSearchSettled('filtered-focus', 'filtered focus');
 	    root = document.getElementById('alerts-container');
 	    root.scrollTop = row('item-11').offsetTop - root.offsetTop - 70;
 	    await wait(50);
@@ -957,8 +973,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    search = document.querySelector('input[data-card-search="alerts"]');
 	    search.value = '';
 	    search.dispatchEvent(new Event('input', {bubbles:true}));
-	    await waitFor(function() { return !new URL(window.location.href).searchParams.has('search'); }, 'selection search URL clear');
-	    await wait(50);
+	    await waitForCardSearchSettled('', 'selection search clear');
 
 	    var staleSelection = row('item-09').querySelector('[data-card-selection-gutter] input');
 	    var survivingSelection = row('item-14').querySelector('[data-card-selection-gutter] input');
