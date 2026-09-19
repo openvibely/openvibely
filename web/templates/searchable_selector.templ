@@ -76,7 +76,7 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 templ searchableSelectorScript() {
 	<script>
 		(function() {
-			var controllerVersion = 8;
+			var controllerVersion = 9;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -161,9 +161,26 @@ templ searchableSelectorScript() {
 				var label = root.querySelector('[data-searchable-selector-current-label]'); if (label && name) label.textContent = name;
 				applyLocalFilter(root);
 			}
+			function refreshOpenRemoteTaskSelectors() {
+				if (!window.htmx) return;
+				document.querySelectorAll('[data-breadcrumb-selector][data-searchable-selector-kind="Task"]').forEach(function(root) {
+					var state = nodes(root);
+					if (!state.dialog || !state.dialog.open || !state.search || root.hasAttribute('data-searchable-selector-local')) return;
+					if (root.__openVibelySearchableSelectorRefreshTimer) clearTimeout(root.__openVibelySearchableSelectorRefreshTimer);
+					root.__openVibelySearchableSelectorRefreshTimer = setTimeout(function() {
+						var latest = nodes(root);
+						if (!latest.dialog || !latest.dialog.open || !latest.search || !window.htmx) return;
+						htmx.trigger(latest.search, 'search');
+					}, 150);
+				});
+			}
 			function close(root, restore) {
 				var state = nodes(root); if (state.dialog && state.dialog.open) state.dialog.close();
-				if (root) delete root.__openVibelySearchableSelectorAnchorX;
+				if (root) {
+					delete root.__openVibelySearchableSelectorAnchorX;
+					if (root.__openVibelySearchableSelectorRefreshTimer) clearTimeout(root.__openVibelySearchableSelectorRefreshTimer);
+					delete root.__openVibelySearchableSelectorRefreshTimer;
+				}
 				if (state.button) state.button.setAttribute('aria-expanded', 'false');
 				if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
 			}
@@ -216,6 +233,7 @@ templ searchableSelectorScript() {
 				if (status && !root.hasAttribute('data-searchable-selector-local')) status.textContent = root.querySelector('[data-searchable-selector-empty]') ? 'No results.' : 'Search results updated.';
 				position(root);
 			});
+			listen(window, 'sse-task-event', refreshOpenRemoteTaskSelectors);
 			listen(document, 'htmx:beforeSwap', function(event) {
 				var target = event.detail && event.detail.target; if (!target || rootFor(target) || target.id !== 'main-content') return;
 				document.querySelectorAll('[data-searchable-selector-dialog][open]').forEach(function(dialog) { close(rootFor(dialog), false); });

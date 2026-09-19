@@ -134,6 +134,8 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`option.hidden = hidden;`,
 		`option.classList.toggle('hidden', hidden);`,
 		`state.search.focus(); state.search.select();`,
+		`listen(window, 'sse-task-event', refreshOpenRemoteTaskSelectors)`,
+		`htmx.trigger(latest.search, 'search')`,
 		`event.key === 'ArrowDown'`,
 		`event.key === 'ArrowUp'`,
 		`event.key === 'Escape'`,
@@ -406,6 +408,11 @@ func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
 	}
 	if !strings.Contains(html, "window._tabVisibility.dispatchSSEEvent('sse-task-event', data)") || !strings.Contains(html, "if (eventType === 'mixture_progress')") {
 		t.Fatal("shared live SSE dispatch must also route mixture_progress to task listeners")
+	}
+	for _, required := range []string{`'task_goal_updated': handleLiveEvent`, `eventType === 'task_goal_evaluated'`} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("shared live SSE dispatch must route task-goal invalidations to task listeners, missing %q", required)
+		}
 	}
 }
 
