@@ -478,6 +478,38 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	}
 }
 
+func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"var openAICompatibleDiscoveryAbortController = null;",
+		"var openAICompatibleDiscoveryGeneration = 0;",
+		"function cancelOpenAICompatibleDiscovery()",
+		"openAICompatibleDiscoveryAbortController.abort();",
+		"cancelOpenAICompatibleDiscovery();",
+		"var discoveryAbortController = typeof AbortController === 'function' ? new AbortController() : null;",
+		"if (discoveryAbortController) fetchOptions.signal = discoveryAbortController.signal;",
+		"fetch('/models/openai-compatible/available?' + params.toString(), fetchOptions)",
+		"if (err && err.name === 'AbortError') return;",
+		"openAICompatibleDiscoveryGeneration !== discoveryGeneration",
+		"openAICompatibleDiscoveryAbortController === discoveryAbortController",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected OpenAI-compatible discovery cancellation script to contain %q", want)
+		}
+	}
+	if strings.Contains(out, "fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})") {
+		t.Fatal("discovery fetch still omits AbortController signal")
+	}
+	if !strings.Contains(out, "function scheduleAutoDiscoverOpenAICompatibleModels() {\n\t\t\t\t\t\t\t\t\tcancelOpenAICompatibleDiscovery();") {
+		t.Fatal("scheduled discovery should cancel the prior stale request before starting a debounce")
+	}
+}
+
 func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
 	agents := []models.LLMConfig{
 		{

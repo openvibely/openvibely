@@ -1375,24 +1375,35 @@ for _, agent := range modelOptions {
 									(preset === 'custom' && !!document.getElementById('model_custom_models_url').value.trim());
 							}
 
-						var openAICompatibleDiscoveryTimer = null;
+							var openAICompatibleDiscoveryTimer = null;
+							var openAICompatibleDiscoveryAbortController = null;
+							var openAICompatibleDiscoveryGeneration = 0;
 
-							function maybeAutoDiscoverOpenAICompatibleModels() {
+							function cancelOpenAICompatibleDiscovery() {
+								openAICompatibleDiscoveryGeneration++;
+								if (openAICompatibleDiscoveryAbortController) {
+									openAICompatibleDiscoveryAbortController.abort();
+									openAICompatibleDiscoveryAbortController = null;
+								}
+							}
+
+								function maybeAutoDiscoverOpenAICompatibleModels() {
 								var provider = document.getElementById('model_provider').value;
 								if (isOpenAICompatibleProvider(provider) && isDiscoverableOpenAICompatiblePreset()) {
 									discoverOpenAICompatibleModels();
 								}
 							}
 
-							function scheduleAutoDiscoverOpenAICompatibleModels() {
-								if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
-								openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
-							}
+								function scheduleAutoDiscoverOpenAICompatibleModels() {
+									cancelOpenAICompatibleDiscovery();
+									if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
+									openAICompatibleDiscoveryTimer = setTimeout(maybeAutoDiscoverOpenAICompatibleModels, 400);
+								}
 
-							function runAutoDiscoverOpenAICompatibleModels() {
-								if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
-								maybeAutoDiscoverOpenAICompatibleModels();
-							}
+								function runAutoDiscoverOpenAICompatibleModels() {
+									if (openAICompatibleDiscoveryTimer) clearTimeout(openAICompatibleDiscoveryTimer);
+									maybeAutoDiscoverOpenAICompatibleModels();
+								}
 						function applyOpenAICompatiblePreset(force) {
 							var provider = document.getElementById('model_provider').value;
 							var presetInput = document.getElementById('model_openai_compatible_preset');
@@ -1639,25 +1650,32 @@ for _, agent := range modelOptions {
 							var provider = document.getElementById('model_provider').value;
 							var baseURL = document.getElementById('model_base_url').value.trim();
 							var status = document.getElementById('openai_compatible_discovery_status');
-							if (!isDiscoverableOpenAICompatiblePreset()) {
-								if (status) status.textContent = 'Enter the model ID manually for local or custom endpoints.';
-								return;
-							}
-							if (!baseURL) {
-								status.textContent = 'Enter a base URL before discovering models.';
-								return;
-							}
-							status.textContent = 'Discovering models...';
+								if (!isDiscoverableOpenAICompatiblePreset()) {
+									cancelOpenAICompatibleDiscovery();
+									if (status) status.textContent = 'Enter the model ID manually for local or custom endpoints.';
+									return;
+								}
+								if (!baseURL) {
+									cancelOpenAICompatibleDiscovery();
+									status.textContent = 'Enter a base URL before discovering models.';
+									return;
+								}
+								cancelOpenAICompatibleDiscovery();
+								var discoveryGeneration = openAICompatibleDiscoveryGeneration;
+								var discoveryAbortController = typeof AbortController === 'function' ? new AbortController() : null;
+								openAICompatibleDiscoveryAbortController = discoveryAbortController;
+								status.textContent = 'Discovering models...';
 							var params = new URLSearchParams({base_url: baseURL});
 							var configID = document.getElementById('model_config_id').value.trim();
 							var modelsURL = document.getElementById('model_custom_models_url').value.trim();
 							var form = document.getElementById('model_form');
-							if (configID && form &&
-								(baseURL !== (form.dataset.originalBaseUrl || '') ||
-								 modelsURL !== (form.dataset.originalModelsUrl || ''))) {
-								status.textContent = 'Save endpoint changes and reconnect before discovering models.';
-								return;
-							}
+								if (configID && form &&
+									(baseURL !== (form.dataset.originalBaseUrl || '') ||
+									 modelsURL !== (form.dataset.originalModelsUrl || ''))) {
+									cancelOpenAICompatibleDiscovery();
+									status.textContent = 'Save endpoint changes and reconnect before discovering models.';
+									return;
+								}
 							if (configID) params.set('config_id', configID);
 							if (modelsURL || configID) params.set('models_url', modelsURL);
 							var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
@@ -1678,30 +1696,40 @@ for _, agent := range modelOptions {
 								headers['X-OpenAI-Compatible-Models-Array-Path'] = document.getElementById('model_custom_models_array_path').value.trim();
 								headers['X-OpenAI-Compatible-Model-ID-Field'] = document.getElementById('model_custom_model_id_field').value.trim();
 							}
-							fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})
-								.then(function(resp) {								return resp.json().then(function(data) {
-									if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
-									return data;
-								});
-							})
-								.then(function(data) {
-									if (document.getElementById('model_provider').value !== provider ||
-										document.getElementById('model_base_url').value.trim() !== baseURL ||
-										document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
-										!isDiscoverableOpenAICompatiblePreset()) return;
-									var models = data.models || [];								for (var i = 0; i < models.length; i++) {
-									if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id, false);
-								}
-								if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true);
-								status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
-							})
-								.catch(function(err) {
-									if (document.getElementById('model_provider').value !== provider ||
-										document.getElementById('model_base_url').value.trim() !== baseURL ||
-										document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
-										!isDiscoverableOpenAICompatiblePreset()) return;
-									status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
-								});					}
+								var fetchOptions = {headers: headers};
+								if (discoveryAbortController) fetchOptions.signal = discoveryAbortController.signal;
+								fetch('/models/openai-compatible/available?' + params.toString(), fetchOptions)
+									.then(function(resp) {								return resp.json().then(function(data) {
+										if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
+										return data;
+									});
+								})
+									.then(function(data) {
+										if (openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
+											document.getElementById('model_provider').value !== provider ||
+											document.getElementById('model_base_url').value.trim() !== baseURL ||
+											document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
+											!isDiscoverableOpenAICompatiblePreset()) return;
+										var models = data.models || [];								for (var i = 0; i < models.length; i++) {
+										if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id, false);
+									}
+									if (data.resolved_id) setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true);
+									status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
+								})
+									.catch(function(err) {
+										if (err && err.name === 'AbortError') return;
+										if (openAICompatibleDiscoveryGeneration !== discoveryGeneration ||
+											document.getElementById('model_provider').value !== provider ||
+											document.getElementById('model_base_url').value.trim() !== baseURL ||
+											document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
+											!isDiscoverableOpenAICompatiblePreset()) return;
+										status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
+									})
+									.finally(function() {
+										if (openAICompatibleDiscoveryGeneration === discoveryGeneration && openAICompatibleDiscoveryAbortController === discoveryAbortController) {
+											openAICompatibleDiscoveryAbortController = null;
+										}
+									});					}
 
 					function hideAllInfoBoxes() {
 						document.getElementById('subscription_info_oauth').classList.add('hidden');
