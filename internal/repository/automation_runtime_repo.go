@@ -2204,62 +2204,97 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 }
 
 func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, projectID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, error) {
-	rows, err := r.db.QueryContext(ctx, `WITH ranked_activities AS (
-			SELECT a.automation_id, a.work_item_id, a.id, a.status, a.completed_at, task_resource.resource_id AS task_id,
-				ROW_NUMBER() OVER (PARTITION BY a.automation_id, CASE
-					WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
-					WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
-					ELSE 'activity:' || a.id END
-					ORDER BY a.rowid DESC) AS activity_rank
-			FROM automation_activities a
-			LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
-				AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
-			WHERE a.project_id = ?
-		), operational_state AS (
-			SELECT ranked.automation_id, CASE ranked.status
-				WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
-				WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
-				CASE WHEN ranked.work_item_id IS NOT NULL THEN 'work:' || ranked.work_item_id
-					WHEN ranked.task_id IS NOT NULL THEN 'task:' || ranked.task_id ELSE 'activity:' || ranked.id END AS state_key
-			FROM ranked_activities ranked
-			LEFT JOIN automation_work_items work_item ON work_item.id = ranked.work_item_id
-				AND work_item.project_id = ? AND work_item.automation_id = ranked.automation_id
-			WHERE activity_rank = 1
-				AND (ranked.status IN ('pending','running','waiting','failed') OR (ranked.status = 'completed' AND ranked.completed_at >= ?))
-				AND NOT (ranked.work_item_id IS NOT NULL AND work_item.status = 'completed' AND ranked.status IN ('pending','running','waiting','failed'))
-		UNION
-		SELECT binding.automation_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
-			THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
-		FROM automation_thread_input_bindings binding
-		JOIN thread_inputs input ON input.id = binding.thread_input_id
-		WHERE binding.project_id = ? AND input.input_status = 'pending'
-		UNION
-		SELECT position.automation_id,
-			CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
-				WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
-			'work:' || position.work_item_id
-		FROM automation_work_item_positions position
-		JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
-			AND node.automation_id = position.automation_id AND node.project_id = position.project_id
-		WHERE position.project_id = ? AND position.state IN ('active','waiting','blocked','failed')
-			AND NOT (position.state = 'active' AND node.role IN ('github_inbox','native_inbox'))
-		UNION
-		SELECT automation_id, 'recent', 'work:' || work_item_id
-		FROM automation_transitions
-		WHERE project_id = ? AND state = 'completed' AND occurred_at >= ?
-		), identity_state AS (
-			SELECT automation_id, state_key, MAX(CASE state
-				WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
-				WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
-			FROM operational_state GROUP BY automation_id, state_key
-		)
-		SELECT automation_id,
-			SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
-			FROM identity_state GROUP BY automation_id`, projectID, projectID, recentCutoff.UTC(), projectID, projectID, projectID, recentCutoff.UTC())
+	return r.portfolioOperationalCounts(ctx, projectID, nil, recentCutoff)
+}
+
+func (r *AutomationRepo) PortfolioOperationalCountsForAutomations(ctx context.Context, projectID string, automationIDs []string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, error) {
+	if len(automationIDs) == 0 {
+		return map[string]models.AutomationNodeCounts{}, nil
+	}
+	return r.portfolioOperationalCounts(ctx, projectID, automationIDs, recentCutoff)
+}
+
+func (r *AutomationRepo) portfolioOperationalCounts(ctx context.Context, projectID string, automationIDs []string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, error) {
+	selectedCTE := ""
+	selectedActivityJoin := ""
+	selectedBindingJoin := ""
+	selectedPositionJoin := ""
+	selectedTransitionJoin := ""
+	args := make([]any, 0, len(automationIDs)+7)
+	if len(automationIDs) > 0 {
+		placeholders := make([]string, 0, len(automationIDs))
+		for _, automationID := range automationIDs {
+			placeholders = append(placeholders, "(?)")
+			args = append(args, automationID)
+		}
+		selectedCTE = "selected_automations(automation_id) AS (VALUES " + strings.Join(placeholders, ",") + "), "
+		selectedActivityJoin = "JOIN selected_automations selected_activity ON selected_activity.automation_id = a.automation_id"
+		selectedBindingJoin = "JOIN selected_automations selected_binding ON selected_binding.automation_id = binding.automation_id"
+		selectedPositionJoin = "JOIN selected_automations selected_position ON selected_position.automation_id = position.automation_id"
+		selectedTransitionJoin = "JOIN selected_automations selected_transition ON selected_transition.automation_id = automation_transitions.automation_id"
+	}
+	query := `WITH ` + selectedCTE + `ranked_activities AS (
+				SELECT a.automation_id, a.work_item_id, a.id, a.status, a.completed_at, task_resource.resource_id AS task_id,
+					ROW_NUMBER() OVER (PARTITION BY a.automation_id, CASE
+						WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
+						WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
+						ELSE 'activity:' || a.id END
+						ORDER BY a.rowid DESC) AS activity_rank
+				FROM automation_activities a
+				` + selectedActivityJoin + `
+				LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+					AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
+				WHERE a.project_id = ?
+			), operational_state AS (
+				SELECT ranked.automation_id, CASE ranked.status
+					WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
+					WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
+					CASE WHEN ranked.work_item_id IS NOT NULL THEN 'work:' || ranked.work_item_id
+						WHEN ranked.task_id IS NOT NULL THEN 'task:' || ranked.task_id ELSE 'activity:' || ranked.id END AS state_key
+				FROM ranked_activities ranked
+				LEFT JOIN automation_work_items work_item ON work_item.id = ranked.work_item_id
+					AND work_item.project_id = ? AND work_item.automation_id = ranked.automation_id
+				WHERE activity_rank = 1
+					AND (ranked.status IN ('pending','running','waiting','failed') OR (ranked.status = 'completed' AND ranked.completed_at >= ?))
+					AND NOT (ranked.work_item_id IS NOT NULL AND work_item.status = 'completed' AND ranked.status IN ('pending','running','waiting','failed'))
+			UNION
+			SELECT binding.automation_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
+				THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
+			FROM automation_thread_input_bindings binding
+			` + selectedBindingJoin + `
+			JOIN thread_inputs input ON input.id = binding.thread_input_id
+			WHERE binding.project_id = ? AND input.input_status = 'pending'
+			UNION
+			SELECT position.automation_id,
+				CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
+					WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
+				'work:' || position.work_item_id
+			FROM automation_work_item_positions position
+			` + selectedPositionJoin + `
+			JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
+				AND node.automation_id = position.automation_id AND node.project_id = position.project_id
+			WHERE position.project_id = ? AND position.state IN ('active','waiting','blocked','failed')
+				AND NOT (position.state = 'active' AND node.role IN ('github_inbox','native_inbox'))
+			UNION
+			SELECT automation_transitions.automation_id, 'recent', 'work:' || automation_transitions.work_item_id
+			FROM automation_transitions
+			` + selectedTransitionJoin + `
+			WHERE automation_transitions.project_id = ? AND automation_transitions.state = 'completed' AND automation_transitions.occurred_at >= ?
+			), identity_state AS (
+				SELECT automation_id, state_key, MAX(CASE state
+					WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
+					WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
+				FROM operational_state GROUP BY automation_id, state_key
+			)
+			SELECT automation_id,
+				SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
+				FROM identity_state GROUP BY automation_id`
+	args = append(args, projectID, projectID, recentCutoff.UTC(), projectID, projectID, projectID, recentCutoff.UTC())
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

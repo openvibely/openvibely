@@ -365,6 +365,8 @@ type channelUtilityActionHandlerOptions struct {
 
 type channelListAutomationsInput struct {
 	ProjectID string `json:"project_id"`
+	Limit     *int   `json:"limit"`
+	Offset    *int   `json:"offset"`
 }
 
 type channelGetAutomationInput struct {
@@ -1243,17 +1245,35 @@ func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraph
 		return "", err
 	}
 	if graphSvc == nil {
-		return marshalChannelAutomationResult(map[string]any{"automations": []any{}})
+		page := AutomationRuntimeListPage{Limit: AutomationRuntimeListDefaultLimit}
+		return marshalChannelAutomationResult(map[string]any{"automations": []any{}, "pagination": automationRuntimePaginationSummary(page)})
 	}
-	cards, err := graphSvc.List(ctx, projectID)
+	limit, offset, err := NormalizeAutomationRuntimeListPageArgs(req.Limit, req.Offset)
+	if err != nil {
+		return "", fmt.Errorf("list_automations: %w", err)
+	}
+	page, err := graphSvc.ListRuntimePage(ctx, projectID, limit, offset)
 	if err != nil {
 		return "", err
 	}
-	summaries := make([]map[string]any, 0, len(cards))
-	for _, card := range cards {
+	summaries := make([]map[string]any, 0, len(page.Cards))
+	for _, card := range page.Cards {
 		summaries = append(summaries, AutomationCardSummary(card))
 	}
-	return marshalChannelAutomationResult(map[string]any{"automations": summaries})
+	return marshalChannelAutomationResult(map[string]any{"automations": summaries, "pagination": automationRuntimePaginationSummary(page)})
+}
+
+func automationRuntimePaginationSummary(page AutomationRuntimeListPage) map[string]any {
+	pagination := map[string]any{
+		"limit":    page.Limit,
+		"offset":   page.Offset,
+		"returned": len(page.Cards),
+		"has_more": page.HasMore,
+	}
+	if page.HasMore {
+		pagination["next_offset"] = page.NextOffset
+	}
+	return pagination
 }
 
 func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
@@ -1272,16 +1292,14 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 	if graphSvc == nil {
 		return "", fmt.Errorf("automations unavailable")
 	}
-	cards, err := graphSvc.List(ctx, projectID)
+	card, err := graphSvc.RuntimeCardByID(ctx, projectID, automationID)
 	if err != nil {
 		return "", err
 	}
-	for _, card := range cards {
-		if card.Automation.ID == automationID {
-			return marshalChannelAutomationResult(map[string]any{"automation": AutomationCardSummary(card)})
-		}
+	if card == nil {
+		return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
 	}
-	return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+	return marshalChannelAutomationResult(map[string]any{"automation": AutomationCardSummary(*card)})
 }
 
 func ExecuteAutomationTemplateUpdateRuntime(ctx context.Context, opts AutomationTemplateUpdateRuntimeOptions) (string, error) {

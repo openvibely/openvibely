@@ -2302,3 +2302,126 @@ func selectableAgentValidationStatements(statements []string) []string {
 	}
 	return filtered
 }
+
+func BenchmarkAutomationRuntimeReadProjection(b *testing.B) {
+	benchProject := func(b *testing.B, total int) (*AutomationGraphService, string) {
+		b.Helper()
+		db := testutil.NewTestDB(b)
+		ctx := context.Background()
+		project := models.Project{Name: fmt.Sprintf("Automation runtime bench %d", total)}
+		require.NoError(b, repository.NewProjectRepo(db).Create(ctx, &project))
+		seedAutomationRuntimeCards(b, db, project.ID, total)
+		return NewAutomationGraphService(repository.NewAutomationRepo(db)), project.ID
+	}
+
+	b.Run("list_full_300", func(b *testing.B) {
+		graphSvc, projectID := benchProject(b, 300)
+		ctx := context.Background()
+		responseBytes := 0
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			cards, err := graphSvc.List(ctx, projectID)
+			require.NoError(b, err)
+			payload := automationRuntimeBenchListPayload(cards, false, 0, 0)
+			responseBytes = len(payload)
+		}
+		b.ReportMetric(float64(responseBytes), "response_bytes/op")
+	})
+
+	b.Run("list_runtime_page_300_default_20", func(b *testing.B) {
+		graphSvc, projectID := benchProject(b, 300)
+		ctx := context.Background()
+		responseBytes := 0
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			page, err := graphSvc.ListRuntimePage(ctx, projectID, AutomationRuntimeListDefaultLimit, 0)
+			require.NoError(b, err)
+			payload := automationRuntimeBenchListPayload(page.Cards, true, page.Limit, page.Offset)
+			responseBytes = len(payload)
+		}
+		b.ReportMetric(float64(responseBytes), "response_bytes/op")
+	})
+
+	b.Run("get_full_scan_3000_last", func(b *testing.B) {
+		graphSvc, projectID := benchProject(b, 3000)
+		ctx := context.Background()
+		targetID := "bench-auto-0001"
+		responseBytes := 0
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			cards, err := graphSvc.List(ctx, projectID)
+			require.NoError(b, err)
+			var found *models.AutomationCard
+			for i := range cards {
+				if cards[i].Automation.ID == targetID {
+					found = &cards[i]
+					break
+				}
+			}
+			require.NotNil(b, found)
+			payload, err := json.Marshal(map[string]any{"automation": AutomationCardSummary(*found)})
+			require.NoError(b, err)
+			responseBytes = len(payload)
+		}
+		b.ReportMetric(float64(responseBytes), "response_bytes/op")
+	})
+
+	b.Run("get_runtime_lookup_3000_last", func(b *testing.B) {
+		graphSvc, projectID := benchProject(b, 3000)
+		ctx := context.Background()
+		targetID := "bench-auto-0001"
+		responseBytes := 0
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			card, err := graphSvc.RuntimeCardByID(ctx, projectID, targetID)
+			require.NoError(b, err)
+			require.NotNil(b, card)
+			payload, err := json.Marshal(map[string]any{"automation": AutomationCardSummary(*card)})
+			require.NoError(b, err)
+			responseBytes = len(payload)
+		}
+		b.ReportMetric(float64(responseBytes), "response_bytes/op")
+	})
+}
+
+func automationRuntimeBenchListPayload(cards []models.AutomationCard, paginated bool, limit, offset int) []byte {
+	summaries := make([]map[string]any, 0, len(cards))
+	for _, card := range cards {
+		summaries = append(summaries, AutomationCardSummary(card))
+	}
+	payload := map[string]any{"automations": summaries}
+	if paginated {
+		payload["pagination"] = map[string]any{"limit": limit, "offset": offset, "returned": len(cards), "has_more": true, "next_offset": offset + len(cards)}
+	}
+	encoded, _ := json.Marshal(payload)
+	return encoded
+}
+
+func seedAutomationRuntimeCards(tb testing.TB, db *sql.DB, projectID string, total int) {
+	tb.Helper()
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	for i := 1; i <= total; i++ {
+		automationID := fmt.Sprintf("bench-auto-%04d", i)
+		versionID := automationID + "-version"
+		updatedAt := base.Add(time.Duration(i) * time.Minute)
+		_, err := db.ExecContext(ctx, `INSERT INTO automations
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, template_revision, updated_at)
+			VALUES (?, ?, ?, ?, ?, 'custom', 'active', 0, ?)`, automationID, projectID, "bench/"+automationID, fmt.Sprintf("Bench Automation %04d", i), strings.Repeat("large hidden description ", 1024), updatedAt)
+		require.NoError(tb, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
+			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, ?)`, versionID, projectID, automationID, updatedAt)
+		require.NoError(tb, err)
+		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, projectID)
+		require.NoError(tb, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_nodes
+			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
+			VALUES (?, ?, ?, ?, 'node', 'Node', 'agent_task', 'task', '{}', 0, 0)`, automationID+"-node", projectID, automationID, versionID)
+		require.NoError(tb, err)
+	}
+}

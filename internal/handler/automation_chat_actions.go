@@ -182,6 +182,8 @@ func marshalAutomationActionResult(value any) (string, error) {
 
 type listAutomationsToolInput struct {
 	ProjectID string `json:"project_id"`
+	Limit     *int   `json:"limit"`
+	Offset    *int   `json:"offset"`
 }
 
 type getAutomationToolInput struct {
@@ -196,7 +198,8 @@ type automationLifecycleActionInput struct {
 
 func (h *Handler) executeListAutomationsTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
 	if h.automationGraphSvc == nil {
-		return marshalAutomationActionResult(map[string]any{"automations": []any{}})
+		page := service.AutomationRuntimeListPage{Limit: service.AutomationRuntimeListDefaultLimit}
+		return marshalAutomationActionResult(map[string]any{"automations": []any{}, "pagination": automationRuntimePaginationSummary(page)})
 	}
 	var req listAutomationsToolInput
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
@@ -209,15 +212,33 @@ func (h *Handler) executeListAutomationsTool(ctx context.Context, params streami
 	if requestedProjectID := strings.TrimSpace(req.ProjectID); requestedProjectID != "" && requestedProjectID != projectID {
 		return "", fmt.Errorf("project_id %q is outside the caller's authorized project context", requestedProjectID)
 	}
-	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	limit, offset, err := service.NormalizeAutomationRuntimeListPageArgs(req.Limit, req.Offset)
+	if err != nil {
+		return "", fmt.Errorf("list_automations: %w", err)
+	}
+	page, err := h.automationGraphSvc.ListRuntimePage(ctx, projectID, limit, offset)
 	if err != nil {
 		return "", err
 	}
-	summaries := make([]map[string]any, 0, len(cards))
-	for _, card := range cards {
+	summaries := make([]map[string]any, 0, len(page.Cards))
+	for _, card := range page.Cards {
 		summaries = append(summaries, service.AutomationCardSummary(card))
 	}
-	return marshalAutomationActionResult(map[string]any{"automations": summaries})
+	result := map[string]any{"automations": summaries, "pagination": automationRuntimePaginationSummary(page)}
+	return marshalAutomationActionResult(result)
+}
+
+func automationRuntimePaginationSummary(page service.AutomationRuntimeListPage) map[string]any {
+	pagination := map[string]any{
+		"limit":    page.Limit,
+		"offset":   page.Offset,
+		"returned": len(page.Cards),
+		"has_more": page.HasMore,
+	}
+	if page.HasMore {
+		pagination["next_offset"] = page.NextOffset
+	}
+	return pagination
 }
 
 func (h *Handler) executeGetAutomationTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
@@ -239,16 +260,14 @@ func (h *Handler) executeGetAutomationTool(ctx context.Context, params streaming
 	if requestedProjectID := strings.TrimSpace(req.ProjectID); requestedProjectID != "" && requestedProjectID != projectID {
 		return "", fmt.Errorf("project_id %q is outside the caller's authorized project context", requestedProjectID)
 	}
-	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	card, err := h.automationGraphSvc.RuntimeCardByID(ctx, projectID, automationID)
 	if err != nil {
 		return "", err
 	}
-	for _, card := range cards {
-		if card.Automation.ID == automationID {
-			return marshalAutomationActionResult(map[string]any{"automation": service.AutomationCardSummary(card)})
-		}
+	if card == nil {
+		return marshalAutomationActionResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
 	}
-	return marshalAutomationActionResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+	return marshalAutomationActionResult(map[string]any{"automation": service.AutomationCardSummary(*card)})
 }
 
 func (h *Handler) executeUpdateAutomationTemplateTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {

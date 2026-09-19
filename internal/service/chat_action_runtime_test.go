@@ -1371,35 +1371,41 @@ func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T)
 	})
 	assertAutomationSummary := func(output, field string) {
 		t.Helper()
-		cards, err := graphSvc.List(ctx, project.ID)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &response))
+		var actual map[string]any
+		if field == "automations" {
+			automations, _ := response[field].([]any)
+			require.Len(t, automations, 1)
+			actual, _ = automations[0].(map[string]any)
+		} else {
+			actual, _ = response[field].(map[string]any)
+		}
+		automationID, _ := actual["id"].(string)
+		card, err := graphSvc.RuntimeCardByID(ctx, project.ID, automationID)
 		require.NoError(t, err)
-		require.Len(t, cards, 1)
-		expectedJSON, err := json.Marshal(AutomationCardSummary(cards[0]))
+		require.NotNil(t, card)
+		expectedJSON, err := json.Marshal(AutomationCardSummary(*card))
 		require.NoError(t, err)
 		var expected map[string]any
 		require.NoError(t, json.Unmarshal(expectedJSON, &expected))
 
 		var graphNodeCount int
-		require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ?`, project.ID, cards[0].Automation.ID, cards[0].Version.ID).Scan(&graphNodeCount))
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ?`, project.ID, card.Automation.ID, card.Version.ID).Scan(&graphNodeCount))
 		require.Equal(t, float64(graphNodeCount), expected["graph_node_count"])
 		require.NotContains(t, expected, "node_count")
-
-		var response map[string]any
-		require.NoError(t, json.Unmarshal([]byte(output), &response))
-		if field == "automations" {
-			automations, _ := response[field].([]any)
-			require.Len(t, automations, 1)
-			actual, _ := automations[0].(map[string]any)
-			require.Equal(t, expected, actual)
-			return
+		for _, optionalTiming := range []string{"next_run", "last_run"} {
+			if _, emitted := actual[optionalTiming]; !emitted {
+				delete(expected, optionalTiming)
+			}
 		}
-		actual, _ := response[field].(map[string]any)
+
 		require.Equal(t, expected, actual)
 	}
 
 	emptyOut, err := channelListAutomationsResult(ctx, graphSvc, foreign.ID, nil)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"automations":[]}`, emptyOut)
+	require.JSONEq(t, `{"automations":[],"pagination":{"limit":20,"offset":0,"returned":0,"has_more":false}}`, emptyOut)
 	unknownOut, err := handlers["get_automation"](ctx, json.RawMessage(`{"automation_id":"unknown"}`))
 	require.NoError(t, err)
 	var unknown map[string]any
@@ -3623,7 +3629,7 @@ func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
 
 	listResult, err := channelListAutomationsResult(context.Background(), nil, "project-1", json.RawMessage(`{}`))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"automations":[]}`, listResult)
+	require.JSONEq(t, `{"automations":[],"pagination":{"limit":20,"offset":0,"returned":0,"has_more":false}}`, listResult)
 	_, err = channelListAutomationsResult(context.Background(), nil, "project-1", json.RawMessage(`{"project_id":"other"}`))
 	require.ErrorContains(t, err, "outside the caller's authorized project context")
 	_, err = channelGetAutomationResult(context.Background(), nil, "project-1", json.RawMessage(`{"automation_id":"auto-1"}`))

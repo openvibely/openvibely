@@ -2645,10 +2645,10 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 		ActivityStatus: models.AutomationActivityRunning,
 	})
 	require.NoError(t, err)
-	cards, err = tc.handler.automationGraphSvc.List(ctx, project.ID)
+	runtimeCard, err := tc.handler.automationGraphSvc.RuntimeCardByID(ctx, project.ID, automationID)
 	require.NoError(t, err)
-	require.Len(t, cards, 1)
-	expectedJSON, err := json.Marshal(service.AutomationCardSummary(cards[0]))
+	require.NotNil(t, runtimeCard)
+	expectedJSON, err := json.Marshal(service.AutomationCardSummary(*runtimeCard))
 	require.NoError(t, err)
 	var expected map[string]any
 	require.NoError(t, json.Unmarshal(expectedJSON, &expected))
@@ -2699,6 +2699,109 @@ func TestAutomationChatReadToolsPreserveSharedSummaryEnvelope(t *testing.T) {
 		require.Empty(t, output)
 		require.ErrorContains(t, err, fmt.Sprintf("project_id %q is outside the caller's authorized project context", foreign.ID))
 	}
+}
+
+func TestAutomationChatReadToolsUseBoundedRuntimePageAndDirectLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, _ := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Bounded Automation runtime reads"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	foreign := &models.Project{Name: "Foreign bounded Automation runtime reads"}
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	automationRepo := repository.NewAutomationRepo(db)
+	h.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+
+	insertAutomation := func(projectID string, ordinal int) string {
+		t.Helper()
+		automationID := fmt.Sprintf("auto-%03d", ordinal)
+		if projectID == foreign.ID {
+			automationID = "foreign-" + automationID
+		}
+		versionID := automationID + "-version"
+		updatedAt := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC).Add(time.Duration(ordinal) * time.Minute)
+		_, err := db.ExecContext(ctx, `INSERT INTO automations
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, template_revision, updated_at)
+			VALUES (?, ?, ?, ?, ?, 'custom', 'active', 0, ?)`, automationID, projectID, "runtime/"+automationID, fmt.Sprintf("Runtime %03d", ordinal), strings.Repeat("hidden-description ", 32), updatedAt)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
+			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, ?)`, versionID, projectID, automationID, updatedAt)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, projectID)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_nodes
+			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
+			VALUES (?, ?, ?, ?, 'node', 'Node', 'agent_task', 'task', '{}', 0, 0)`, automationID+"-node", projectID, automationID, versionID)
+		require.NoError(t, err)
+		return automationID
+	}
+
+	var lastID string
+	for i := 1; i <= 25; i++ {
+		lastID = insertAutomation(project.ID, i)
+	}
+	foreignID := insertAutomation(foreign.ID, 1)
+
+	runtime := h.buildChatActionToolRuntimeFromDefs(streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true), models.ChatModePlan, chatcontrol.SurfaceWeb)
+	executeOK := func(name string, input json.RawMessage) map[string]any {
+		t.Helper()
+		output, handled, isError, err := runtime.Executor(ctx, name, input)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		return result
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	listed := executeOK("list_automations", nil)
+	counter.SetEnabled(false)
+	automations, _ := listed["automations"].([]any)
+	require.Len(t, automations, service.AutomationRuntimeListDefaultLimit)
+	firstSummary, _ := automations[0].(map[string]any)
+	require.Equal(t, "auto-025", firstSummary["id"])
+	require.NotContains(t, firstSummary, "description")
+	pagination, _ := listed["pagination"].(map[string]any)
+	require.Equal(t, float64(service.AutomationRuntimeListDefaultLimit), pagination["limit"])
+	require.Equal(t, float64(0), pagination["offset"])
+	require.Equal(t, float64(service.AutomationRuntimeListDefaultLimit), pagination["returned"])
+	require.Equal(t, true, pagination["has_more"])
+	require.Equal(t, float64(service.AutomationRuntimeListDefaultLimit), pagination["next_offset"])
+	statements := strings.ToLower(strings.Join(counter.Statements(), "\n"))
+	require.Contains(t, statements, "limit ? offset ?")
+	require.Contains(t, statements, "selected_automations(automation_id) as (values")
+	require.NotContains(t, statements, "listing automation portfolio cards")
+
+	capped := executeOK("list_automations", json.RawMessage(`{"limit":500,"offset":0}`))
+	cappedPagination, _ := capped["pagination"].(map[string]any)
+	require.Equal(t, float64(service.AutomationRuntimeListMaxLimit), cappedPagination["limit"])
+	require.Equal(t, false, cappedPagination["has_more"])
+	_, handled, isError, err := runtime.Executor(ctx, "list_automations", json.RawMessage(`{"limit":0}`))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "limit must be greater than 0")
+	_, handled, isError, err = runtime.Executor(ctx, "list_automations", json.RawMessage(`{"offset":-1}`))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "offset must be greater than or equal to 0")
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	got := executeOK("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, lastID)))
+	counter.SetEnabled(false)
+	gotAutomation, _ := got["automation"].(map[string]any)
+	require.Equal(t, lastID, gotAutomation["id"])
+	getStatements := strings.ToLower(strings.Join(counter.Statements(), "\n"))
+	require.Contains(t, getStatements, "where a.project_id = ? and a.id = ?")
+	require.Contains(t, getStatements, "selected_automations(automation_id) as (values (?))")
+	require.NotContains(t, getStatements, "order by a.updated_at desc, a.id limit ?")
+
+	unknown := executeOK("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignID)))
+	require.False(t, unknown["found"].(bool))
 }
 
 func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testing.T) {
