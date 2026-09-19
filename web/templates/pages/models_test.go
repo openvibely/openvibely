@@ -505,7 +505,17 @@ func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T
 	if strings.Contains(out, "fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})") {
 		t.Fatal("discovery fetch still omits AbortController signal")
 	}
-	if !strings.Contains(out, "function scheduleAutoDiscoverOpenAICompatibleModels() {\n\t\t\t\t\t\t\t\t\tcancelOpenAICompatibleDiscovery();") {
+	cancelBody := renderedFunctionBody(t, out, "function cancelOpenAICompatibleDiscovery()")
+	for _, want := range []string{
+		"clearTimeout(openAICompatibleDiscoveryTimer);",
+		"openAICompatibleDiscoveryTimer = null;",
+	} {
+		if !strings.Contains(cancelBody, want) {
+			t.Fatalf("expected cancellation to clear pending OpenAI-compatible discovery debounce timer with %q", want)
+		}
+	}
+	scheduleBody := renderedFunctionBody(t, out, "function scheduleAutoDiscoverOpenAICompatibleModels()")
+	if !strings.Contains(scheduleBody, "cancelOpenAICompatibleDiscovery();") {
 		t.Fatal("scheduled discovery should cancel the prior stale request before starting a debounce")
 	}
 	for _, lifecycle := range []struct {
