@@ -26,7 +26,7 @@ var htmx204 []byte
 
 const htmx204SHA256 = "e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447"
 
-func TestHTMXHistoryNavigationAndTitlesInChrome(t *testing.T) {
+func TestBrowserFunctional_HTMXHistoryNavigationAndTitlesInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	actualHash := fmt.Sprintf("%x", sha256.Sum256(htmx204))
@@ -97,7 +97,7 @@ func TestHTMXHistoryNavigationAndTitlesInChrome(t *testing.T) {
 	}
 }
 
-func TestHTMXHistoryOptOutPreventsSecretSnapshotInChrome(t *testing.T) {
+func TestBrowserFunctional_HTMXHistoryOptOutPreventsSecretSnapshotInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	var renderedBase bytes.Buffer
@@ -173,7 +173,7 @@ localStorage.setItem('htmx-history-cache', JSON.stringify([
 	runHeadlessChromeFixture(t, chrome, fixtureServer.URL+"/models", "Models HTMX history opt-out", 5000, 20*time.Second)
 }
 
-func TestSidebarHostedIdentityPayloadIsInertInChrome(t *testing.T) {
+func TestBrowserFunctional_SidebarHostedIdentityPayloadIsInertInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
 	var renderedSidebar bytes.Buffer

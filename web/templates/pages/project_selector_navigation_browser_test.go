@@ -19,7 +19,7 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-func TestSidebarProjectSelectorSearchAndSwitchInChrome(t *testing.T) {
+func TestBrowserFunctional_SidebarProjectSelectorSearchAndSwitchInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projects := []models.Project{
 		{ID: "default", Name: "Default", IsDefault: true},

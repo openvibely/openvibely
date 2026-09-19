@@ -158,7 +158,7 @@ func driveNativeGroupedTaskDrags(debugPort int, serverURL string, ready <-chan n
 	return result
 }
 
-func TestTaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
+func TestBrowserFunctional_TaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -787,7 +787,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestScheduleCardsSupportModifierMultiSelectGroupedPointerDragAndRollback(t *testing.T) {
+func TestBrowserFunctional_ScheduleCardsSupportModifierMultiSelectGroupedPointerDragAndRollback(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {

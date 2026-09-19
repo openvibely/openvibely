@@ -257,7 +257,7 @@ func runReconnectChromeFixture(t *testing.T, body string) string {
 	return result
 }
 
-func TestChatReconnectTransitionsPreserveCurrentDOMState(t *testing.T) {
+func TestBrowserFunctional_ChatReconnectTransitionsPreserveCurrentDOMState(t *testing.T) {
 	completed := models.Execution{ID: "chat-done", Status: models.ExecCompleted, PromptSent: "old", Output: "stable"}
 	running := models.Execution{ID: "chat-live", Status: models.ExecRunning, PromptSent: "new", Output: "partial"}
 	terminal := running
@@ -361,7 +361,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
 }
 
-func TestChatReconnectDiscoversMissedActiveExecutionAndAttachesStream(t *testing.T) {
+func TestBrowserFunctional_ChatReconnectDiscoversMissedActiveExecutionAndAttachesStream(t *testing.T) {
 	running := models.Execution{ID: "chat-missed-active", Status: models.ExecRunning, PromptSent: "missed start", Output: "partial"}
 	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-missed-active", nil, nil, false, false, 30))
 	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-missed-active", nil, nil, false, false, 30))
@@ -506,7 +506,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
 }
 
-func TestChatExecutionStreamOnlyTerminalRefreshesComposerAction(t *testing.T) {
+func TestBrowserFunctional_ChatExecutionStreamOnlyTerminalRefreshesComposerAction(t *testing.T) {
 	for _, status := range []models.ExecutionStatus{models.ExecCompleted, models.ExecFailed, models.ExecCancelled} {
 		t.Run(string(status), func(t *testing.T) {
 			runChatExecutionStreamOnlyTerminalComposerCase(t, status)
@@ -514,7 +514,7 @@ func TestChatExecutionStreamOnlyTerminalRefreshesComposerAction(t *testing.T) {
 	}
 }
 
-func TestTaskThreadQueuedPromotionRefreshesComposerActionToStop(t *testing.T) {
+func TestBrowserFunctional_TaskThreadQueuedPromotionRefreshesComposerActionToStop(t *testing.T) {
 	task := &models.Task{ID: "thread-promotion", ProjectID: "project-promotion", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 	completed := models.Execution{ID: "thread-before-promotion", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "old", Output: "done"}
 	promoted := models.Execution{ID: "thread-promoted", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "queued next", IsFollowup: true}
@@ -592,7 +592,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
 }
 
-func TestTaskThreadReconnectTransitionsPreserveCurrentDOMAndPendingAttachment(t *testing.T) {
+func TestBrowserFunctional_TaskThreadReconnectTransitionsPreserveCurrentDOMAndPendingAttachment(t *testing.T) {
 	task := &models.Task{ID: "thread-focus", ProjectID: "project-focus", Status: models.StatusRunning, Category: models.CategoryActive}
 	completed := models.Execution{ID: "thread-done", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "old", Output: "stable"}
 	running := models.Execution{ID: "thread-live", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "new", Output: "partial", IsFollowup: true}
@@ -808,7 +808,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
 }
 
-func TestChatFailedAndCancelledTerminalOrderingKeepsNoOpRefocusStable(t *testing.T) {
+func TestBrowserFunctional_ChatFailedAndCancelledTerminalOrderingKeepsNoOpRefocusStable(t *testing.T) {
 	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
 		for _, sharedEventFirst := range []bool{false, true} {
 			order := "stream terminal before shared terminal"
@@ -915,7 +915,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
 }
 
-func TestTaskThreadFailedAndCancelledTerminalOrderingKeepsNoOpRefocusStable(t *testing.T) {
+func TestBrowserFunctional_TaskThreadFailedAndCancelledTerminalOrderingKeepsNoOpRefocusStable(t *testing.T) {
 	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
 		for _, sharedEventFirst := range []bool{false, true} {
 			order := "stream terminal before shared terminal"

@@ -14,7 +14,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestUpcomingStopControlUsesConfirmationRefreshAndPreservesCardNavigationInChrome(t *testing.T) {
+func TestBrowserFunctional_UpcomingStopControlUsesConfirmationRefreshAndPreservesCardNavigationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
