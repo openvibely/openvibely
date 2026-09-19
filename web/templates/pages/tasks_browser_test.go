@@ -1505,6 +1505,7 @@ func TestTasksMergeOptionLoaderSupportsKeyboardDeduplicationAndRetry(t *testing.
 		`taskCardMergeOptionRequests.get(refreshURL)`,
 		`function loadTaskCardMergeOptions(dropdown, label)`,
 		`function setTaskCardMergeOptionsStatus(options, mode, dropdown, label)`,
+		`function reconnectTaskCardMergeOptions(root)`,
 		`options.hasAttribute('data-task-card-merge-options-loading')`,
 		`'HX-Current-URL': window.location.href`,
 		`response.headers.get('HX-Redirect')`,
@@ -1546,8 +1547,7 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 			await waitFor(function(){var options=card.querySelector('[data-task-card-merge-options]');return options&&options.getAttribute('aria-busy')==='true'},'keyboard loader start');
 			var options=card.querySelector('[data-task-card-merge-options]');var loading=options.querySelector('[data-task-card-merge-options-loading-status]');await waitFor(function(){return !loading.classList.contains('hidden')},'visible loading spinner');
 			options.tabIndex=0;options.focus();await htmx.ajax('GET','/board-refresh',{target:'#kanban-board',swap:'outerHTML'});
-			card=document.getElementById('task-merge-loader-browser-task');trigger=card.querySelector('[data-task-card-menu-trigger]');window.loadTaskCardMergeOptions(trigger.closest('[data-kanban-menu-key]'),trigger);
-			await waitFor(function(){var current=document.querySelector('[data-task-card-merge-options]');return current&&current.getAttribute('aria-busy')==='true'},'replacement loader start');
+			await waitFor(function(){var current=document.querySelector('[data-task-card-merge-options]');return current&&current.getAttribute('aria-busy')==='true'},'automatic replacement loader start');
 			if((await fetch('/option-count').then(function(r){return r.text()})).trim()!=='1')fail('board refresh duplicated the in-flight Git request');
 			await fetch('/release-first',{method:'POST'});await waitFor(function(){return !!document.querySelector('[data-task-card-local-submenu]')},'shared request hydration');
 			var dropdown=document.querySelector('[data-kanban-menu-key="task-merge-loader-browser-task"]');if(window.closeKanbanMenu)window.closeKanbanMenu(dropdown,false);

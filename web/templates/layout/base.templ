@@ -3078,6 +3078,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			}
 			window.loadTaskCardMergeOptions = loadTaskCardMergeOptions;
 
+			function reconnectTaskCardMergeOptions(root) {
+				if (!root) return;
+				root.querySelectorAll('[data-task-card-merge-options]').forEach(function(options) {
+					const refreshURL = options.getAttribute('data-task-card-merge-options-url');
+					const dropdown = options.closest('[data-kanban-menu-key]');
+					if (!refreshURL || !dropdown) return;
+					const restoresFocusedOptions = !!(savedKanbanInteraction && savedKanbanInteraction.refreshTaskOptions && savedKanbanInteraction.menuKey === dropdown.getAttribute('data-kanban-menu-key'));
+					if (!taskCardMergeOptionRequests.has(refreshURL) && !restoresFocusedOptions) return;
+					loadTaskCardMergeOptions(dropdown, dropdown.querySelector('[data-kanban-menu-trigger]'));
+				});
+			}
+
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
@@ -4078,7 +4090,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								reconciliationGenerations.forEach(finishKanbanReconciliation);
 							}
 							const liveBoard = document.getElementById('kanban-board');
-						if (liveBoard) restoreKanbanInteraction(liveBoard);
+						if (liveBoard) {
+							restoreKanbanInteraction(liveBoard);
+							reconnectTaskCardMergeOptions(liveBoard);
+						}
 
 
 						// Restore scroll positions after board is re-rendered
