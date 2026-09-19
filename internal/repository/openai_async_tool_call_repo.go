@@ -85,13 +85,29 @@ func (r *OpenAIAsyncToolCallRepo) GetByExecutionCallID(ctx context.Context, exec
 }
 
 func (r *OpenAIAsyncToolCallRepo) ListRecoverable(ctx context.Context, now time.Time, limit int) ([]models.OpenAIAsyncToolCall, error) {
+	return r.listRecoverable(ctx, "", now, limit)
+}
+
+func (r *OpenAIAsyncToolCallRepo) ListRecoverableByExecution(ctx context.Context, executionID string, now time.Time, limit int) ([]models.OpenAIAsyncToolCall, error) {
+	return r.listRecoverable(ctx, executionID, now, limit)
+}
+
+func (r *OpenAIAsyncToolCallRepo) listRecoverable(ctx context.Context, executionID string, now time.Time, limit int) ([]models.OpenAIAsyncToolCall, error) {
 	if r == nil || r.db == nil {
 		return nil, nil
 	}
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT `+openAIAsyncToolCallColumns+` FROM openai_async_tool_calls WHERE status IN ('pending', 'running', 'completed') AND deadline_at > ? ORDER BY created_at ASC, id ASC LIMIT ?`, now, limit)
+	query := `SELECT ` + openAIAsyncToolCallColumns + ` FROM openai_async_tool_calls WHERE status IN ('pending', 'running', 'completed') AND deadline_at > ?`
+	args := []any{now}
+	if executionID != "" {
+		query += ` AND execution_id = ?`
+		args = append(args, executionID)
+	}
+	query += ` ORDER BY created_at ASC, id ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing recoverable OpenAI async tool calls: %w", err)
 	}
@@ -111,6 +127,15 @@ func (r *OpenAIAsyncToolCallRepo) ClaimForRun(ctx context.Context, id string, no
 	res, err := execBoundSQLite(ctx, r.db, `UPDATE openai_async_tool_calls SET status = 'running', updated_at = ? WHERE id = ? AND status = 'pending' AND deadline_at > ?`, now, id, now)
 	if err != nil {
 		return false, fmt.Errorf("claiming OpenAI async tool call: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+func (r *OpenAIAsyncToolCallRepo) ClaimRecoverableForRun(ctx context.Context, id string, now time.Time) (bool, error) {
+	res, err := execBoundSQLite(ctx, r.db, `UPDATE openai_async_tool_calls SET status = 'running', updated_at = ? WHERE id = ? AND status IN ('pending', 'running') AND deadline_at > ?`, now, id, now)
+	if err != nil {
+		return false, fmt.Errorf("claiming recoverable OpenAI async tool call: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return n == 1, nil
@@ -168,6 +193,17 @@ func (r *OpenAIAsyncToolCallRepo) CancelByExecution(ctx context.Context, executi
 	}
 	n, _ := res.RowsAffected()
 	return n, nil
+}
+
+func cancelOpenAIAsyncToolCallsForExecution(ctx context.Context, exec SQLExecutor, executionID, message string) error {
+	if exec == nil || executionID == "" {
+		return nil
+	}
+	_, err := exec.ExecContext(ctx, `UPDATE openai_async_tool_calls SET status = 'cancelled', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE execution_id = ? AND status IN ('pending', 'running', 'completed')`, message, executionID)
+	if err != nil {
+		return fmt.Errorf("cancelling OpenAI async tool calls: %w", err)
+	}
+	return nil
 }
 
 func (r *OpenAIAsyncToolCallRepo) ExpireDue(ctx context.Context, now time.Time) (int64, error) {

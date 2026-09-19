@@ -98,10 +98,15 @@ type AgenticOptions struct {
 	// EnableAsyncToolCalls persists and executes async-marked function tools before
 	// sending their results in a later Responses turn with the original call_id.
 	EnableAsyncToolCalls bool
-	OnAsyncToolCall      func(context.Context, AsyncToolCall) (AsyncToolCallRecord, error)
-	OnAsyncToolResult    func(context.Context, AsyncToolCallRecord, string, bool) error
-	OnAsyncToolDelivered func(context.Context, AsyncToolCallRecord) error
-	OnAsyncToolRejected  func(context.Context, AsyncToolCallRecord, error) error
+	// InitialAsyncToolResults are completed durable async tool calls recovered from
+	// a prior interrupted process. They are replayed before the current user turn
+	// as a reconstructed function_call/function_call_output pair, then marked
+	// delivered only after the provider accepts the next Responses request.
+	InitialAsyncToolResults []AsyncToolResult
+	OnAsyncToolCall         func(context.Context, AsyncToolCall) (AsyncToolCallRecord, error)
+	OnAsyncToolResult       func(context.Context, AsyncToolCallRecord, string, bool) error
+	OnAsyncToolDelivered    func(context.Context, AsyncToolCallRecord) error
+	OnAsyncToolRejected     func(context.Context, AsyncToolCallRecord, error) error
 
 	// WebSearchEnabled adds the provider-native web search tool to the request
 	// when the model supports it. The search is executed server-side by OpenAI;
@@ -163,6 +168,16 @@ type AsyncToolCallRecord struct {
 	ResponseID string
 	CallID     string
 	Name       string
+}
+
+// AsyncToolResult is a completed durable async call recovered after process
+// interruption. The client reconstructs the original function_call item from
+// the stored identity/arguments and submits Output using the same call_id.
+type AsyncToolResult struct {
+	Record    AsyncToolCallRecord
+	Arguments json.RawMessage
+	Output    string
+	IsError   bool
 }
 
 // AstraSteeringDeliveryStatus describes provider-side mid-turn steering delivery state.
@@ -429,6 +444,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// without re-establishing it afterward.
 		inputItems = upsertTrailingConfigurationUpdate(inputItems, astraConfigurationUpdateEffort)
 	}
+	recoveredAsyncDeliveries := appendRecoveredAsyncToolResults(&inputItems, opts.InitialAsyncToolResults, toolOutputTokenLimit)
 
 	// Add current prompt with optional attachments
 	if len(opts.Attachments) > 0 {
@@ -464,7 +480,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		return wrapAstraSteeringCommits(err, c.responsesTransportState)
 	}
 
-	pendingAsyncDeliveries := []AsyncToolCallRecord(nil)
+	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
 			if turn == 0 || !opts.AutoCompaction {
@@ -724,6 +740,38 @@ func shouldRunOpenAIToolAsync(opts *AgenticOptions, tools []ToolDefinition, name
 		}
 	}
 	return false
+}
+
+func appendRecoveredAsyncToolResults(inputItems *[]any, results []AsyncToolResult, toolOutputTokenLimit int) []AsyncToolCallRecord {
+	if len(results) == 0 || inputItems == nil {
+		return nil
+	}
+	deliveries := make([]AsyncToolCallRecord, 0, len(results))
+	for _, result := range results {
+		record := result.Record
+		callID := strings.TrimSpace(record.CallID)
+		name := strings.TrimSpace(record.Name)
+		if record.ID == "" || callID == "" || name == "" {
+			continue
+		}
+		arguments := strings.TrimSpace(string(result.Arguments))
+		if arguments == "" {
+			arguments = "{}"
+		}
+		*inputItems = append(*inputItems, agenticInputItem{
+			"type":      "function_call",
+			"call_id":   callID,
+			"name":      name,
+			"arguments": arguments,
+		})
+		*inputItems = append(*inputItems, agenticInputItem{
+			"type":    "function_call_output",
+			"call_id": callID,
+			"output":  truncateToolOutputForModelInput(result.Output, toolOutputTokenLimit),
+		})
+		deliveries = append(deliveries, record)
+	}
+	return deliveries
 }
 
 func completedOpenAIFunctionCallArguments(raw any, streamedArgs string) string {

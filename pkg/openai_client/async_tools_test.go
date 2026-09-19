@@ -126,6 +126,63 @@ func TestSendAgentic_AsyncToolPersistsExecutesAndDeliversWithOriginalCallID(t *t
 	}
 }
 
+func TestSendAgentic_RecoveredAsyncToolResultIsDeliveredWithOriginalCallID(t *testing.T) {
+	var request map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			`data: {"type":"response.output_text.delta","delta":"recovered"}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_recovered","status":"completed","model":"gpt-test"}}` + "\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	var delivered []AsyncToolCallRecord
+	client := NewWithAPIKey("sk-test")
+	_, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
+		Model:            "gpt-test",
+		SkipDefaultTools: true,
+		InitialAsyncToolResults: []AsyncToolResult{{
+			Record:    AsyncToolCallRecord{ID: "async-recovered", ResponseID: "resp_old", CallID: "call_recovered", Name: "memory_view"},
+			Arguments: json.RawMessage(`{"handle":"provider_architecture.md"}`),
+			Output:    "recovered output",
+		}},
+		OnAsyncToolDelivered: func(_ context.Context, record AsyncToolCallRecord) error {
+			delivered = append(delivered, record)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if len(delivered) != 1 || delivered[0].CallID != "call_recovered" {
+		t.Fatalf("delivered = %#v", delivered)
+	}
+	input, _ := request["input"].([]any)
+	foundCall := false
+	foundOutput := false
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "function_call" && item["call_id"] == "call_recovered" && item["name"] == "memory_view" && item["arguments"] == `{"handle":"provider_architecture.md"}` {
+			foundCall = true
+		}
+		if item["type"] == "function_call_output" && item["call_id"] == "call_recovered" && item["output"] == "recovered output" {
+			foundOutput = true
+		}
+	}
+	if !foundCall || !foundOutput {
+		t.Fatalf("request missing recovered call/output: %#v", request["input"])
+	}
+}
+
 func TestSendAgentic_AsyncDeliveryProviderRejectionIsReported(t *testing.T) {
 	requestCount := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -144,6 +144,7 @@ type nativeCompactionStateContextKey struct{}
 type providerSessionStateContextKey struct{}
 type retrySourceExecutionIDContextKey struct{}
 type artifactExecutionIDContextKey struct{}
+type providerAsyncToolsDisabledContextKey struct{}
 
 func WithNativeCompactionStateJSON(ctx context.Context, state string) context.Context {
 	if ctx == nil {
@@ -173,6 +174,21 @@ func ProviderSessionStateJSONFromContext(ctx context.Context) string {
 	}
 	state, _ := ctx.Value(providerSessionStateContextKey{}).(string)
 	return state
+}
+
+func WithProviderAsyncToolsDisabled(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, providerAsyncToolsDisabledContextKey{}, true)
+}
+
+func ProviderAsyncToolsDisabled(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	disabled, _ := ctx.Value(providerAsyncToolsDisabledContextKey{}).(bool)
+	return disabled
 }
 
 func WithTransportScope(ctx context.Context, scope string) context.Context {
