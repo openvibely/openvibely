@@ -1015,6 +1015,63 @@ func TestTaskPullRequestServiceStartupReconciliationNeverReplacesClosedPR(t *tes
 	}
 }
 
+func TestTaskPullRequestServiceStartupReconciliationTrustsSuccessfulPublication(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Startup PR publication", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Startup PR publication", Prompt: "Continue work", Category: models.CategoryActive, Status: models.StatusRunning, WorktreeBranch: "task/startup-publication"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	previousHead := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	publishedHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 1196, PRState: "open", PublishedHeadSHA: previousHead, NeedsRepublish: true}); err != nil {
+		t.Fatal(err)
+	}
+	getCalls := 0
+	createCalls := 0
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+			getCalls++
+			return &GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: previousHead}, nil
+		},
+		publishBranchFn: func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			return &GitHubPublishBranchResult{HeadSHA: publishedHead}, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			createCalls++
+			return nil, errors.New("must reuse the verified PR")
+		},
+	}, prRepo)
+
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{RequireExistingOpenPR: 1196, PreserveNeedsRepublish: true})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if getCalls != 1 {
+		t.Fatalf("GetPullRequest calls = %d, want one pre-publication verification", getCalls)
+	}
+	if createCalls != 0 {
+		t.Fatalf("CreatePullRequest calls = %d, want zero", createCalls)
+	}
+	if result == nil || result.PullRequest == nil || result.PullRequest.HeadSHA != publishedHead {
+		t.Fatalf("result = %#v, want published head %s", result, publishedHead)
+	}
+	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorded == nil || recorded.PublishedHeadSHA != publishedHead || !recorded.NeedsRepublish {
+		t.Fatalf("recorded PR = %#v, want published head with durable marker preserved", recorded)
+	}
+}
+
 func TestTaskPullRequestServiceOpenForTaskReusesExistingRecordAndPersistsIssueMetadata(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
