@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,6 +136,59 @@ func TestBreadcrumbSelectorKeyboardFocusAndContainmentInChrome(t *testing.T) {
 	}))
 	defer server.Close()
 	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector keyboard", 900, 20*time.Second)
+}
+
+func TestBreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	var selector bytes.Buffer
+	if err := BreadcrumbSelector(models.BreadcrumbSelector{ID: "live-selector", Kind: "Task", CurrentID: "one", CurrentName: "Current", SearchURL: "/results"}).Render(context.Background(), &selector); err != nil {
+		t.Fatal(err)
+	}
+	renderResults := func(name string) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := BreadcrumbSelectorResults("Task", "one", []models.BreadcrumbSelectorItem{{ID: "one", Name: name, URL: "/tasks/one", Status: models.StatusPending, Category: models.CategoryActive}}, false, false).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render selector results: %v", err)
+		}
+		return out.String()
+	}
+	beforeResults := renderResults("Before SSE")
+	afterResults := renderResults("After SSE")
+	runner := `<script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  (async function() {
+	    function waitFor(check) { return new Promise(function(resolve, reject) { var started=Date.now(); (function poll(){ if(check()) return resolve(); if(Date.now()-started>5000) return reject(new Error('timeout')); setTimeout(poll,20); })(); }); }
+	    var button=document.querySelector('[data-breadcrumb-selector-button]');
+	    button.click();
+	    var dialog=document.querySelector('[data-breadcrumb-selector-dialog]');
+	    await waitFor(function(){ return dialog.open && document.querySelector('[data-breadcrumb-selector-results]').textContent.indexOf('Before SSE') !== -1; });
+	    window.dispatchEvent(new CustomEvent('sse-task-event', { detail: { type: 'task_status_changed', task_id: 'one', project_id: 'project-live' } }));
+	    await waitFor(function(){ return dialog.open && document.querySelector('[data-breadcrumb-selector-results]').textContent.indexOf('After SSE') !== -1; });
+	    document.body.setAttribute('data-test-result','pass');
+	  })().catch(function(error){ var message=String(error.stack||error); document.body.setAttribute('data-test-result','fail'); document.body.setAttribute('data-test-error',message); document.body.appendChild(document.createTextNode(' BREADCRUMB_SSE_TEST_ERROR: '+message)); });
+	});
+	</script>`
+	page := `<!doctype html><html><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
+	var resultRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			_, _ = fmt.Fprint(w, page)
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/results":
+			if resultRequests.Add(1) == 1 {
+				_, _ = fmt.Fprint(w, beforeResults)
+			} else {
+				_, _ = fmt.Fprint(w, afterResults)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "breadcrumb selector SSE refresh", 900, 20*time.Second)
 }
 
 func TestBreadcrumbSelectorLongTitleClampsInsideNarrowViewportInChrome(t *testing.T) {
