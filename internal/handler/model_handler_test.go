@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -635,9 +636,12 @@ func TestCustomOAuthModelDiscoveryRejectsStaleConfigurationBeforeRequest(t *test
 func TestListOpenAICompatibleAvailableModelsFallsBackToV1Models(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, _ := setupTestHandler(t)
+	var mu sync.Mutex
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		paths = append(paths, r.URL.Path)
+		mu.Unlock()
 		if r.URL.Path == "/models" {
 			http.NotFound(w, r)
 			return
@@ -654,16 +658,175 @@ func TestListOpenAICompatibleAvailableModelsFallsBackToV1Models(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if len(paths) != 2 || paths[0] != "/models" || paths[1] != "/v1/models" {
-		t.Fatalf("paths = %#v", paths)
+	mu.Lock()
+	gotPaths := append([]string(nil), paths...)
+	mu.Unlock()
+	if len(gotPaths) != 2 || !containsModelDiscoveryPath(gotPaths, "/models") || !containsModelDiscoveryPath(gotPaths, "/v1/models") {
+		t.Fatalf("paths = %#v", gotPaths)
 	}
 	var out openAICompatibleModelsResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
+	if len(out.TriedURLs) != 2 || out.TriedURLs[0] != srv.URL+"/models" || out.TriedURLs[1] != srv.URL+"/v1/models" {
+		t.Fatalf("tried_urls = %#v", out.TriedURLs)
+	}
 	if len(out.Models) != 2 || out.ResolvedID != "" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
+}
+
+func TestListOpenAICompatibleAvailableModelsRacesSlowModelsWithFastV1Fallback(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, _ := setupTestHandler(t)
+	modelsStarted := make(chan struct{})
+	modelsCancelled := make(chan struct{})
+	var startOnce, cancelOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			startOnce.Do(func() { close(modelsStarted) })
+			select {
+			case <-r.Context().Done():
+				cancelOnce.Do(func() { close(modelsCancelled) })
+				return
+			case <-time.After(700 * time.Millisecond):
+				http.NotFound(w, r)
+				return
+			}
+		case "/v1/models":
+			select {
+			case <-modelsStarted:
+			case <-time.After(time.Second):
+				http.Error(w, "slow probe did not start", http.StatusGatewayTimeout)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"fast-fallback-model"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	start := time.Now()
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?allow_private=1&base_url="+url.QueryEscape(srv.URL), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	elapsed := time.Since(start)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d after %s: %s", rec.Code, elapsed, rec.Body.String())
+	}
+	// Before #1263, discovery waited for the slow /models probe before trying /v1/models and
+	// took roughly the 700 ms first-probe delay. The racing fallback should return well below
+	// that delay when /v1/models is immediately available.
+	if elapsed >= 350*time.Millisecond {
+		t.Fatalf("fallback discovery took %s; expected fast /v1/models response under 350ms", elapsed)
+	}
+	select {
+	case <-modelsCancelled:
+	case <-time.After(350 * time.Millisecond):
+		t.Fatal("slow /models fallback request was not cancelled after fast fallback success")
+	}
+	var out openAICompatibleModelsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(out.Models) != 1 || out.Models[0].ID != "fast-fallback-model" || out.ResolvedID != "fast-fallback-model" {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+}
+
+func TestListOpenAICompatibleAvailableModelsCancelsProviderRequestWhenClientContextCancels(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, _ := setupTestHandler(t)
+	started := make(chan struct{})
+	providerCancelled := make(chan struct{})
+	var startedOnce, cancelledOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedOnce.Do(func() { close(started) })
+		select {
+		case <-r.Context().Done():
+			cancelledOnce.Do(func() { close(providerCancelled) })
+		case <-time.After(2 * time.Second):
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?allow_private=1&base_url="+url.QueryEscape(srv.URL+"/v1"), nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		e.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("provider request did not start")
+	}
+	cancel()
+	select {
+	case <-providerCancelled:
+	case <-time.After(350 * time.Millisecond):
+		t.Fatal("provider request did not observe client context cancellation")
+	}
+	select {
+	case <-done:
+	case <-time.After(350 * time.Millisecond):
+		t.Fatal("handler did not return promptly after client context cancellation")
+	}
+}
+
+func TestListOpenAICompatibleAvailableModelsExplicitModelsURLOnlyRequestsExplicitURL(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	_, e, _ := setupTestHandler(t)
+	var mu sync.Mutex
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		if r.URL.Path != "/custom/catalog" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"explicit-model"}]}`))
+	}))
+	defer srv.Close()
+
+	query := url.Values{
+		"allow_private": {"1"},
+		"base_url":      {srv.URL + "/v1"},
+		"models_url":    {srv.URL + "/custom/catalog"},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?"+query.Encode(), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	mu.Lock()
+	gotPaths := append([]string(nil), paths...)
+	mu.Unlock()
+	if len(gotPaths) != 1 || gotPaths[0] != "/custom/catalog" {
+		t.Fatalf("explicit models_url should be the only request, paths = %#v", gotPaths)
+	}
+}
+
+func containsModelDiscoveryPath(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCreateModel_Mixture(t *testing.T) {
