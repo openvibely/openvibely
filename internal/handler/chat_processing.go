@@ -2103,6 +2103,7 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 
 func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, execID, taskID, output, workDir string, tokensUsed int, durationMs int64, republishOpenPR bool, completionOptions ...interface{}) (repository.CompleteSuccessOutcome, error) {
 	telegramMessageID, channelReply := parseCompletionOptions(completionOptions...)
+	var trustedPublication *startupSyncPublication
 	if republishOpenPR {
 		readiness, err := h.execRepo.SuccessCompletionReadiness(ctx, execID)
 		if err != nil {
@@ -2111,7 +2112,8 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 		if readiness != repository.CompleteSuccessCompleted {
 			return readiness, nil
 		}
-		if err := h.republishOpenPullRequestAfterStartupSync(ctx, taskID); err != nil {
+		trustedPublication, err = h.republishOpenPullRequestAfterStartupSync(ctx, taskID)
+		if err != nil {
 			return readiness, err
 		}
 	}
@@ -2140,7 +2142,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess task=%s error getting task: %v", taskID, err)
 	}
-	if blocked, reason := h.blockGitHubSDLCSuccessWithoutPullRequest(ctx, task, republishOpenPR); blocked {
+	if blocked, reason := h.blockGitHubSDLCSuccessWithoutPullRequest(ctx, task, trustedPublication); blocked {
 		return repository.CompleteSuccessCompleted, errors.New(reason)
 	}
 
@@ -2187,7 +2189,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 	return repository.CompleteSuccessCompleted, nil
 }
 
-func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task, trustRecordedPublication bool) (bool, string) {
+func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task, trustedPublication *startupSyncPublication) (bool, string) {
 	if h == nil || task == nil || h.automationGraphSvc == nil {
 		return false, ""
 	}
@@ -2215,10 +2217,10 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 		}
 		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is %s; rerun after resolving PR publication", pullRequest.PRNumber, state)
 	}
-	if trustRecordedPublication {
-		// Startup reconciliation verified this PR immediately before and after the
-		// successful branch update. Trust the recorded publication SHA rather than
-		// racing GitHub's eventually consistent pull-request representation again.
+	if trustedPublication != nil {
+		if pullRequest.PRNumber != trustedPublication.prNumber || !strings.EqualFold(strings.TrimSpace(pullRequest.PublishedHeadSHA), trustedPublication.headSHA) {
+			return true, "GitHub SDLC pull request publication record changed after startup reconciliation"
+		}
 		return false, ""
 	}
 	if h.githubSvc == nil || h.projectRepo == nil {
@@ -2868,6 +2870,11 @@ type startupSyncPublicationReservation struct {
 	prNumber   int
 }
 
+type startupSyncPublication struct {
+	prNumber int
+	headSHA  string
+}
+
 func (h *Handler) reserveStartupSyncPublication(ctx context.Context, task *models.Task) (startupSyncPublicationReservation, error) {
 	if task == nil || h.taskPullRequestRepo == nil {
 		return startupSyncPublicationReservation{}, nil
@@ -2925,47 +2932,47 @@ func (h *Handler) startupSyncPublicationContext(ctx context.Context, task *model
 	return fmt.Sprintf("# Pull Request Reconciliation Required\n\nThis task has unpublished target-branch reconciliation work for %s. Existing pull request #%d does not yet contain the reconciled worktree state. Treat this as a reconciliation turn, not an audit-only turn: preserve the merge or conflict resolution, resolve any remaining implementation work, run relevant validation, and report the result. On successful completion OpenVibely will update the existing pull request automatically; do not reset the task branch merely to match its previous published SHA. A fresh audit can run in the next goal turn.", target, reservation.prNumber), true, nil
 }
 
-func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, taskID string) error {
+func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, taskID string) (*startupSyncPublication, error) {
 	if h == nil || h.taskPullRequestRepo == nil {
-		return fmt.Errorf("task pull request repository unavailable")
+		return nil, fmt.Errorf("task pull request repository unavailable")
 	}
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("loading synchronized task: %w", err)
+		return nil, fmt.Errorf("loading synchronized task: %w", err)
 	}
 	if task == nil {
-		return fmt.Errorf("synchronized task not found: %s", taskID)
+		return nil, fmt.Errorf("synchronized task not found: %s", taskID)
 	}
 	pullRequest, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
 	if err != nil {
-		return fmt.Errorf("loading synchronized task pull request: %w", err)
+		return nil, fmt.Errorf("loading synchronized task pull request: %w", err)
 	}
 	if pullRequest == nil {
-		return fmt.Errorf("synchronized task no longer has a recorded pull request")
+		return nil, fmt.Errorf("synchronized task no longer has a recorded pull request")
 	}
 	if !service.IsOpenPullRequestState(pullRequest.PRState) {
 		if pullRequest.NeedsRepublish {
 			if err := h.taskPullRequestRepo.SetNeedsRepublish(ctx, task.ID, false); err != nil {
-				return fmt.Errorf("clearing closed pull request publication requirement: %w", err)
+				return nil, fmt.Errorf("clearing closed pull request publication requirement: %w", err)
 			}
 		}
-		return nil // A closed PR cancels the startup publication requirement.
+		return nil, nil // A closed PR cancels the startup publication requirement.
 	}
 	if h.githubSvc != nil {
 		livePR, err := h.liveStartupSyncPullRequest(ctx, task, pullRequest.PRNumber)
 		if err != nil {
-			return fmt.Errorf("checking live pull request before startup publication: %w", err)
+			return nil, fmt.Errorf("checking live pull request before startup publication: %w", err)
 		}
 		if !service.IsOpenPullRequestState(livePR.State) {
-			return h.recordClosedStartupSyncPullRequest(ctx, pullRequest, livePR)
+			return nil, h.recordClosedStartupSyncPullRequest(ctx, pullRequest, livePR)
 		}
 	}
 	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
 	if err != nil {
-		return fmt.Errorf("loading synchronized task project: %w", err)
+		return nil, fmt.Errorf("loading synchronized task project: %w", err)
 	}
 	if project == nil {
-		return fmt.Errorf("synchronized task project not found")
+		return nil, fmt.Errorf("synchronized task project not found")
 	}
 	result, err := h.newTaskPullRequestService().OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
 		Base:                   task.MergeTargetBranch,
@@ -2975,17 +2982,21 @@ func (h *Handler) republishOpenPullRequestAfterStartupSync(ctx context.Context, 
 		RequireExistingOpenPR:  pullRequest.PRNumber,
 	})
 	if err != nil {
-		// The PR may have been closed between our live-state check and the
-		// serialized publication attempt. Honor that closure without replacing it.
+		// The PR may have closed before publication began. Record that closure
+		// without creating or adopting a replacement.
 		if livePR, liveErr := h.liveStartupSyncPullRequest(ctx, task, pullRequest.PRNumber); liveErr == nil && !service.IsOpenPullRequestState(livePR.State) {
-			return h.recordClosedStartupSyncPullRequest(ctx, pullRequest, livePR)
+			return nil, h.recordClosedStartupSyncPullRequest(ctx, pullRequest, livePR)
 		}
-		return fmt.Errorf("updating existing pull request #%d after startup synchronization: %w", pullRequest.PRNumber, err)
+		return nil, fmt.Errorf("updating existing pull request #%d after startup synchronization: %w", pullRequest.PRNumber, err)
 	}
 	if result == nil || result.Record == nil || result.Record.PRNumber != pullRequest.PRNumber {
-		return fmt.Errorf("startup synchronization publication did not reuse pull request #%d", pullRequest.PRNumber)
+		return nil, fmt.Errorf("startup synchronization publication did not reuse pull request #%d", pullRequest.PRNumber)
 	}
-	return nil
+	headSHA := strings.TrimSpace(result.Record.PublishedHeadSHA)
+	if headSHA == "" {
+		return nil, fmt.Errorf("startup synchronization publication did not record a head sha")
+	}
+	return &startupSyncPublication{prNumber: result.Record.PRNumber, headSHA: headSHA}, nil
 }
 
 func (h *Handler) liveStartupSyncPullRequest(ctx context.Context, task *models.Task, number int) (*service.GitHubPullRequest, error) {

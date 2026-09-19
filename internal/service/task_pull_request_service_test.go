@@ -1015,7 +1015,7 @@ func TestTaskPullRequestServiceStartupReconciliationNeverReplacesClosedPR(t *tes
 	}
 }
 
-func TestTaskPullRequestServiceStartupReconciliationTrustsSuccessfulPublicationSHA(t *testing.T) {
+func TestTaskPullRequestServiceStartupReconciliationTrustsSuccessfulPublication(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
@@ -1054,8 +1054,8 @@ func TestTaskPullRequestServiceStartupReconciliationTrustsSuccessfulPublicationS
 	if err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	if getCalls != 2 {
-		t.Fatalf("GetPullRequest calls = %d, want pre- and post-publication state verification", getCalls)
+	if getCalls != 1 {
+		t.Fatalf("GetPullRequest calls = %d, want one pre-publication verification", getCalls)
 	}
 	if createCalls != 0 {
 		t.Fatalf("CreatePullRequest calls = %d, want zero", createCalls)
