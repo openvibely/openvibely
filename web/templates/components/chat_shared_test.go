@@ -5029,6 +5029,9 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 	if !strings.Contains(errBody, "evaluatePlanCompletionPrompt") {
 		t.Error("error handler must re-evaluate plan prompt for chat (non-thread) context")
 	}
+	if !strings.Contains(errBody, "container._chatTerminalTransitionPromise") {
+		t.Error("error handler must expose its terminal render and transcript sync as an awaitable transition")
+	}
 
 	// onerror handler
 	oeIdx := strings.Index(content, "eventSource.onerror")
@@ -5101,6 +5104,9 @@ func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 	}
 	if !strings.Contains(content, "function connectResumeExecutionStream()") || !strings.Contains(content, "scheduleResumeExecutionStreamRetry()") {
 		t.Error("_initThreadStreaming must retry early execution stream races for promoted/resumed rows")
+	}
+	if !strings.Contains(content, "container._chatTerminalTransitionPromise") {
+		t.Error("_initThreadStreaming must expose terminal render and transcript sync as an awaitable transition")
 	}
 }
 
