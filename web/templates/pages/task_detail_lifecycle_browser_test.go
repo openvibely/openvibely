@@ -68,6 +68,17 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 	newerAfterCalls := []string{}
 	sawProject := false
 	sawBoundedLimit := false
+	firstOlderRelease := make(chan struct{})
+	firstNewerRelease := make(chan struct{})
+	staleInitialRelease := make(chan struct{})
+	var firstOlderReleaseOnce sync.Once
+	var firstNewerReleaseOnce sync.Once
+	var staleInitialReleaseOnce sync.Once
+	t.Cleanup(func() {
+		firstOlderReleaseOnce.Do(func() { close(firstOlderRelease) })
+		firstNewerReleaseOnce.Do(func() { close(firstNewerRelease) })
+		staleInitialReleaseOnce.Do(func() { close(staleInitialRelease) })
+	})
 
 	page := ""
 	browserResult := make(chan string, 8)
@@ -83,6 +94,27 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 		case "/tasks/task-lifecycle-browser":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(page))
+			return
+		case "/browser-state":
+			mu.Lock()
+			state := map[string]int{"initial": initialCalls, "older": olderCalls, "newer": newerCalls}
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(state)
+			return
+		case "/browser-release":
+			switch r.URL.Query().Get("gate") {
+			case "older":
+				firstOlderReleaseOnce.Do(func() { close(firstOlderRelease) })
+			case "newer":
+				firstNewerReleaseOnce.Do(func() { close(firstNewerRelease) })
+			case "stale":
+				staleInitialReleaseOnce.Do(func() { close(staleInitialRelease) })
+			default:
+				http.Error(w, "unknown browser gate", http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 			return
 		case "/api/tasks/task-lifecycle-browser/lifecycle-executions":
 			// Continue below with the deterministic pagination fixture.
@@ -112,12 +144,15 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 			initialCalls++
 		}
 		currentInitialCall := initialCalls
+		currentOlderCall := olderCalls
 		currentNewerCall := newerCalls
 		mu.Unlock()
 		if before != "" {
-			// Delaying the page makes two rapid loader clicks exercise the
-			// browser's single-flight guard instead of racing a fast response.
-			time.Sleep(100 * time.Millisecond)
+			// Hold the first page until the browser has exercised the loader's
+			// single-flight guard; elapsed time is not part of the contract.
+			if currentOlderCall == 1 {
+				<-firstOlderRelease
+			}
 			switch before {
 			case "cursor-initial", "cursor-fresh", "cursor-empty":
 				writePage(w, []map[string]any{row("event-0", 0, "hook-0"), row("event-minus-1", -1, "hook-minus-1")}, true, "cursor-final")
@@ -133,7 +168,7 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 				if currentNewerCall == 1 {
 					// The first newer request intentionally misses a row that is
 					// announced while the request is still in flight.
-					time.Sleep(300 * time.Millisecond)
+					<-firstNewerRelease
 					writePage(w, []map[string]any{}, false, "")
 				} else {
 					writePage(w, []map[string]any{row("event-5", 5, "live-hook")}, false, "")
@@ -159,7 +194,7 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 		case 4:
 			// This response must arrive after the fifth refresh response and
 			// must never insert event-stale into the DOM.
-			time.Sleep(250 * time.Millisecond)
+			<-staleInitialRelease
 			writePage(w, []map[string]any{row("event-stale", 6, "stale-hook"), row("event-5", 5, "live-hook")}, true, "cursor-fresh")
 		case 5:
 			writePage(w, []map[string]any{
@@ -178,6 +213,17 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+	function frame() { return new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); }); }
+	async function waitForServerCount(name, minimum) {
+		var started = performance.now();
+		while (performance.now() - started <= 6000) {
+			var state = await fetch('/browser-state').then(function(response) { return response.json(); });
+			if ((state[name] || 0) >= minimum) return;
+			await wait(10);
+		}
+		throw new Error('timed out waiting for server ' + name + ' count ' + minimum);
+	}
+	function releaseGate(name) { return fetch('/browser-release?gate=' + encodeURIComponent(name), {method:'POST'}); }
   function waitFor(check, label, timeout) {
     var started = performance.now();
     return new Promise(function(resolve, reject) {
@@ -214,15 +260,16 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]')) fail('initial lifecycle rows missing');
     if (list().textContent.indexOf('Selected skills') < 0 || list().textContent.indexOf('testing_coverage_and_performance.md') < 0) fail('selected lifecycle evidence was not rendered');
 
-    var lifecyclePort = port();
-    lifecyclePort.scrollTop = 50;
-    lifecyclePort.dispatchEvent(new Event('scroll', {bubbles:true}));
-    await wait(20);
-    var anchor = list().querySelector('[data-lifecycle-execution-id="event-4"]');
-    var anchorBeforeLive = anchor.getBoundingClientRect().top;
+	    var lifecyclePort = port();
+	    lifecyclePort.scrollTop = 50;
+	    lifecyclePort.dispatchEvent(new Event('scroll', {bubbles:true}));
+	    await frame();
+	    var anchor = list().querySelector('[data-lifecycle-execution-id="event-4"]');
+	    var anchorBeforeLive = anchor.getBoundingClientRect().top;
 			window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-browser', project_id:'project-lifecycle-browser'}}));
-			await wait(240);
+			await waitForServerCount('newer', 1);
 			window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-browser', project_id:'project-lifecycle-browser'}}));
+			await releaseGate('newer');
 			await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-5"]'); }, 'newer live insert after pending retry');    var anchorAfterLive = list().querySelector('[data-lifecycle-execution-id="event-4"]').getBoundingClientRect().top;
     if (Math.abs(anchorAfterLive - anchorBeforeLive) > 2) fail('newer live insert moved the reading anchor: before=' + anchorBeforeLive + ' after=' + anchorAfterLive);
 
@@ -231,8 +278,10 @@ window.addEventListener('DOMContentLoaded', function() {
     var anchorAfterRefresh = list().querySelector('[data-lifecycle-execution-id="event-4"]').getBoundingClientRect().top;
     if (Math.abs(anchorAfterRefresh - anchorBeforeRefresh) > 2) fail('refresh moved the reading anchor: before=' + anchorBeforeRefresh + ' after=' + anchorAfterRefresh);
 
-    var staleRefresh = window.refreshLifecycleActivity('task-lifecycle-browser', 'project-lifecycle-browser');
-    var freshRefresh = window.refreshLifecycleActivity('task-lifecycle-browser', 'project-lifecycle-browser');
+	    var staleRefresh = window.refreshLifecycleActivity('task-lifecycle-browser', 'project-lifecycle-browser');
+	    await waitForServerCount('initial', 4);
+	    var freshRefresh = window.refreshLifecycleActivity('task-lifecycle-browser', 'project-lifecycle-browser');
+	    await releaseGate('stale');
     await Promise.all([staleRefresh, freshRefresh]);
     await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-fresh"]'); }, 'latest refresh response');
     if (list().querySelector('[data-lifecycle-execution-id="event-stale"]')) fail('stale refresh response was applied');
@@ -249,8 +298,10 @@ window.addEventListener('DOMContentLoaded', function() {
 			var older = list().querySelector('[data-lifecycle-load-older]');
 			if (!older) fail('initial bounded lifecycle page did not expose older loader');
 			older.click();
+			await waitForServerCount('older', 1);
 			lifecyclePort.dispatchEvent(new Event('scroll', {bubbles:true}));
 			lifecyclePort.dispatchEvent(new Event('scroll', {bubbles:true}));
+			await releaseGate('older');
 			await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-minus-1"]'); }, 'first older page');    var olderAgain = list().querySelector('[data-lifecycle-load-older]');
     if (!olderAgain) fail('older continuation disappeared after first page');
     olderAgain.click();

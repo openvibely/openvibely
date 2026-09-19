@@ -308,7 +308,7 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 		!strings.Contains(bubbleSection, "var terminalIntentRevision = tracker ? (tracker.intentRevision || 0) : 0;") ||
 		!strings.Contains(bubbleSection, "function shouldScrollTerminalNow()") ||
 		!strings.Contains(bubbleSection, "if ((tracker.intentRevision || 0) !== terminalIntentRevision) return tracker.shouldAutoScroll();") ||
-		!strings.Contains(bubbleSection, "failedRender.then(revealTerminalError, revealTerminalError)") {
+		!strings.Contains(bubbleSection, "contentDiv._chatTerminalTransitionPromise = Promise.resolve(failedRender).then(revealTerminalError, revealTerminalError)") {
 		t.Fatal("live-created assistant bubble must keep render backpressure, fence deferred scrolling by reader intent, and defer terminal presentation until the owned async render settles")
 	}
 }

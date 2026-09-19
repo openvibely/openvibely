@@ -790,6 +790,16 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	      poll();
 	    });
 	  }
+	  function nextPaint() {
+	    return new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+	  }
+	  async function waitForAlertsSettled(label) {
+	    await waitFor(function() {
+	      var state = window.openVibelyAlertsViewport || {};
+	      return !state.swap && !state.settlingSwap;
+	    }, label + ' settle');
+	    await nextPaint();
+	  }
 	  function row(id) { return document.querySelector('[data-alert-scroll-anchor="' + id + '"]'); }
 	  function remove(id) {
 	    var button = row(id) && row(id).querySelector('[data-alert-delete]');
@@ -850,7 +860,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    await fetch('/browser-add?kind=operational', {method:'POST'});
 		    htmx.trigger(document.body, 'alertUpdate');
 		    await waitFor(function() { return !!row('live-operational'); }, 'live operational alert refresh');
-		    await wait(1250);
+		    await waitForAlertsSettled('live operational alert refresh');
 		    detectTransientTopJump = false;
 		    root = document.getElementById('alerts-container');
 		    if (document.getElementById('system-update-card') !== originalUpdateCard) fail('live operational alert replaced the active system update card');
@@ -872,7 +882,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    await fetch('/browser-add?kind=notification', {method:'POST'});
 		    htmx.trigger(document.body, 'alertUpdate');
 		    await waitFor(function() { return !!row('live-notification'); }, 'live actionable notification refresh');
-		    await wait(1250);
+		    await waitForAlertsSettled('live actionable notification refresh');
 		    detectTransientTopJump = false;
 		    root = document.getElementById('alerts-container');
 		    if (document.getElementById('system-update-card') !== originalUpdateCard) fail('live actionable notification replaced the active system update card');
@@ -890,10 +900,10 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    await waitFor(function() { return !new URL(window.location.href).searchParams.has('search'); }, 'search URL clear');
 		    await wait(50);
 
-		    var stableTop = row('item-14').getBoundingClientRect().top;
+	    var stableTop = row('item-14').getBoundingClientRect().top;
 	    detectTransientTopJump = true;
 	    await remove('item-15');
-	    await wait(250);
+	    await waitForAlertsSettled('item-15 deletion');
 	    detectTransientTopJump = false;
 	    root = document.getElementById('alerts-container');
 	    if (root !== originalScrollport) fail('single delete replaced the Alerts scrollport');
@@ -905,17 +915,17 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 
 	    var repeatedTop = row('item-14').getBoundingClientRect().top;
 	    await remove('item-16');
-	    await wait(250);
+	    await waitForAlertsSettled('item-16 deletion');
 	    assertNear(row('item-14').getBoundingClientRect().top, repeatedTop, 'repeated delete nearest surviving anchor');
 	    if (document.activeElement !== row('item-17').querySelector('[data-alert-delete]')) fail('repeated delete focus was not predictable');
 
 	    var visibleAnchor = row('item-17').getBoundingClientRect().top;
 	    await remove('item-01');
-	    await wait(250);
+	    await waitForAlertsSettled('item-01 deletion');
 	    assertNear(row('item-17').getBoundingClientRect().top, visibleAnchor, 'deletion above viewport');
 	    var beforeBelow = row('item-17').getBoundingClientRect().top;
 	    await remove('item-29');
-	    await wait(250);
+	    await waitForAlertsSettled('item-29 deletion');
 	    assertNear(row('item-17').getBoundingClientRect().top, beforeBelow, 'deletion below viewport');
 	    if (document.getElementById('alerts-container').scrollTop < 100) fail('off-viewport deletion reset the scrollport');
 
@@ -923,7 +933,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    root.scrollTop = root.scrollHeight;
 	    await wait(50);
 	    await remove('item-28');
-	    await wait(250);
+	    await waitForAlertsSettled('item-28 deletion');
 	    root = document.getElementById('alerts-container');
 	    if (Math.abs((root.scrollHeight - root.clientHeight) - root.scrollTop) > 3) fail('deleting the last visible item did not preserve the end-of-list anchor');
 	    if (document.activeElement !== row('item-27').querySelector('[data-alert-delete]')) fail('deleting the last visible item did not focus the previous delete control');
@@ -940,7 +950,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	    if (getComputedStyle(row('item-14')).display === 'none') fail('card search hid the expected focus fallback row');
 	    var filteredTop = row('item-08').getBoundingClientRect().top;
 	    await remove('item-11');
-	    await wait(250);
+	    await waitForAlertsSettled('item-11 deletion');
 	    assertNear(row('item-08').getBoundingClientRect().top, filteredTop, 'filtered delete nearest surviving visible anchor');
 	    if (document.activeElement !== row('item-14').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
 	    if (getComputedStyle(row('item-12')).display !== 'none') fail('persisted card search was not reapplied after deletion');

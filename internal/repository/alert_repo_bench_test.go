@@ -354,3 +354,159 @@ func BenchmarkAlertRuntimeListProjectionResponse(b *testing.B) {
 		}
 	})
 }
+
+const (
+	alertAutomationInboxBenchProjectID        = "bench-automation-alert-project"
+	alertAutomationInboxBenchTargetAutomation = "bench-target-automation"
+	alertAutomationInboxBenchOtherAutomation  = "bench-other-automation"
+	alertAutomationInboxBenchRows             = 100000
+	alertAutomationInboxBenchTargetEvery      = 1000
+	alertAutomationInboxBenchOtherEvery       = 10
+	alertAutomationInboxBenchTargetOwnedRows  = alertAutomationInboxBenchRows / alertAutomationInboxBenchTargetEvery
+	alertAutomationInboxBenchOtherOwnedRows   = alertAutomationInboxBenchRows / alertAutomationInboxBenchOtherEvery
+	alertAutomationInboxBenchLimit            = 50
+	alertAutomationInboxBenchBaselineProbes   = alertAutomationInboxBenchRows - (alertAutomationInboxBenchRows - ((alertAutomationInboxBenchLimit - 1) * alertAutomationInboxBenchTargetEvery)) + 1
+)
+
+func seedAlertAutomationInboxBenchFixture(tb testing.TB, db *sql.DB) {
+	tb.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		tb.Fatalf("begin Automation inbox fixture: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES (?, 'Automation Inbox Bench', '', '')`, alertAutomationInboxBenchProjectID); err != nil {
+		tb.Fatalf("insert benchmark project: %v", err)
+	}
+	for _, automationID := range []string{alertAutomationInboxBenchTargetAutomation, alertAutomationInboxBenchOtherAutomation} {
+		if _, err := tx.Exec(`INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state) VALUES (?, ?, ?, ?, 'active')`, automationID, alertAutomationInboxBenchProjectID, automationID, automationID); err != nil {
+			tb.Fatalf("insert benchmark automation %s: %v", automationID, err)
+		}
+	}
+	if _, err := tx.Exec(`WITH RECURSIVE seq(n) AS (
+		SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?
+	)
+	INSERT INTO alerts
+		(id, project_id, scope, type, severity, title, message, body, source, metadata_json, decision_state, processing_state, implementation_task_was_linked, created_at, updated_at)
+	SELECT printf('automation-alert-%06d', n), ?, 'project', 'suggestion', 'info', 'Automation alert ' || n, 'summary', 'body', 'benchmark', '{}', 'approved', 'unclaimed', 0,
+		datetime('2026-01-01 00:00:00', '+' || n || ' seconds'), datetime('2026-01-01 00:00:00', '+' || n || ' seconds')
+	FROM seq`, alertAutomationInboxBenchRows, alertAutomationInboxBenchProjectID); err != nil {
+		tb.Fatalf("insert benchmark alerts: %v", err)
+	}
+	if _, err := tx.Exec(`WITH RECURSIVE seq(n) AS (
+		SELECT ? UNION ALL SELECT n + ? FROM seq WHERE n + ? <= ?
+	)
+	INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+	SELECT ?, ?, 'alert', printf('automation-alert-%06d', n), 'producer', 'notify', 'approve', 'inbox'
+	FROM seq`, alertAutomationInboxBenchTargetEvery, alertAutomationInboxBenchTargetEvery, alertAutomationInboxBenchTargetEvery, alertAutomationInboxBenchRows, alertAutomationInboxBenchProjectID, alertAutomationInboxBenchTargetAutomation); err != nil {
+		tb.Fatalf("insert target benchmark ownership: %v", err)
+	}
+	if _, err := tx.Exec(`WITH RECURSIVE seq(n) AS (
+		SELECT ? UNION ALL SELECT n + ? FROM seq WHERE n + ? <= ?
+	)
+	INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+	SELECT ?, ?, 'alert', printf('automation-alert-%06d', n), 'producer', 'notify', 'approve', 'inbox'
+	FROM seq`, alertAutomationInboxBenchOtherEvery, alertAutomationInboxBenchOtherEvery, alertAutomationInboxBenchOtherEvery, alertAutomationInboxBenchRows, alertAutomationInboxBenchProjectID, alertAutomationInboxBenchOtherAutomation); err != nil {
+		tb.Fatalf("insert other benchmark ownership: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		tb.Fatalf("commit Automation inbox fixture: %v", err)
+	}
+}
+
+func benchmarkAlertAutomationInboxList(b *testing.B, query string, args []any) int {
+	ctx := context.Background()
+	db := newAlertBenchDB(b)
+	seedAlertAutomationInboxBenchFixture(b, db)
+	b.Logf("sql_plan=%s", alertBenchExplain(b, db, query, args...))
+	warmRows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		b.Fatalf("warm list query: %v", err)
+	}
+	warmCount := 0
+	for warmRows.Next() {
+		if _, err := scanAlertSummary(warmRows); err != nil {
+			_ = warmRows.Close()
+			b.Fatalf("scan warm summary: %v", err)
+		}
+		warmCount++
+	}
+	if err := warmRows.Close(); err != nil {
+		b.Fatalf("close warm rows: %v", err)
+	}
+	if warmCount != alertAutomationInboxBenchLimit {
+		b.Fatalf("warm list returned %d rows, want %d", warmCount, alertAutomationInboxBenchLimit)
+	}
+
+	durations := make([]time.Duration, 0, b.N)
+	responseBytes := 0
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			b.Fatalf("list query: %v", err)
+		}
+		summaries := make([]models.AlertSummary, 0, alertAutomationInboxBenchLimit)
+		for rows.Next() {
+			summary, err := scanAlertSummary(rows)
+			if err != nil {
+				_ = rows.Close()
+				b.Fatalf("scan summary: %v", err)
+			}
+			summaries = append(summaries, *summary)
+		}
+		if err := rows.Close(); err != nil {
+			b.Fatalf("close rows: %v", err)
+		}
+		if len(summaries) != alertAutomationInboxBenchLimit {
+			b.Fatalf("list returned %d rows, want %d", len(summaries), alertAutomationInboxBenchLimit)
+		}
+		payload, err := json.Marshal(map[string]any{"notifications": summaries, "project_id": alertAutomationInboxBenchProjectID, "offset": 0, "next_offset": alertAutomationInboxBenchLimit})
+		if err != nil {
+			b.Fatalf("marshal response: %v", err)
+		}
+		responseBytes = len(payload)
+		durations = append(durations, time.Since(start))
+	}
+	b.StopTimer()
+	if len(durations) > 0 {
+		sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+		median := durations[len(durations)/2]
+		b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
+	}
+	b.ReportMetric(float64(responseBytes), "response_B")
+	return responseBytes
+}
+
+// BenchmarkAlertAutomationInboxOwnerScopedList compares the pre-optimization
+// alert-driven correlated ownership probe shape against the production optimized
+// owner-driven scoped summary query on 100k lifecycle-matching notifications.
+// It reports ns/op, B/op, allocs/op, p50_ms, response_B, and approximate touched
+// rows/probes for the sparse first page.
+func BenchmarkAlertAutomationInboxOwnerScopedList(b *testing.B) {
+	filter := normalizeAlertListFilter(models.AlertListFilter{
+		DecisionState:            models.AlertDecisionApproved,
+		ProcessingState:          models.AlertProcessingUnclaimed,
+		ImplementationTaskLinked: ptrBool(false),
+		AutomationInboxBindings:  []models.AutomationBinding{{AutomationID: alertAutomationInboxBenchTargetAutomation}},
+		Limit:                    alertAutomationInboxBenchLimit,
+	})
+	baselineQuery, baselineArgs := buildAlertListQuery(alertSummarySelectColumns, alertAutomationInboxBenchProjectID, filter)
+	ownerQuery, ownerArgs := buildAlertSummaryListQuery(alertAutomationInboxBenchProjectID, filter)
+
+	b.Run("alert_driven_baseline", func(b *testing.B) {
+		benchmarkAlertAutomationInboxList(b, baselineQuery, baselineArgs)
+		b.ReportMetric(float64(alertAutomationInboxBenchBaselineProbes), "candidate_alert_rows")
+		b.ReportMetric(float64(alertAutomationInboxBenchBaselineProbes), "ownership_probes")
+	})
+	b.Run("owner_driven", func(b *testing.B) {
+		benchmarkAlertAutomationInboxList(b, ownerQuery, ownerArgs)
+		b.ReportMetric(float64(alertAutomationInboxBenchTargetOwnedRows), "owned_rows")
+	})
+}
+
+func ptrBool(v bool) *bool { return &v }

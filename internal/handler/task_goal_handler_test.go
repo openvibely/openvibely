@@ -36,12 +36,30 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 		t.Fatalf("goal panel should use the status pill instead of redundant boolean active text: %s", rec.Body.String())
 	}
 
-	for _, path := range []string{"/pause", "/resume", "/clear"} {
-		rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal" + path + "?project_id=" + project.ID).Execute()
-		if rec.Code != http.StatusOK {
-			t.Fatalf("post %s status=%d body=%s", path, rec.Code, rec.Body.String())
-		}
+	rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal/pause?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("pause goal status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), "All checks pass") || !strings.Contains(rec.Body.String(), `>paused</span>`) {
+		t.Fatalf("pause goal body missing refreshed paused panel: %s", rec.Body.String())
+	}
+
+	rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal/resume?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resume goal status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "All checks pass") || !strings.Contains(rec.Body.String(), `>active</span>`) {
+		t.Fatalf("resume goal body missing refreshed active panel: %s", rec.Body.String())
+	}
+
+	rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal/clear?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear goal status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "No goal set") || strings.Contains(rec.Body.String(), "All checks pass") {
+		t.Fatalf("clear goal body missing refreshed empty panel: %s", rec.Body.String())
+	}
+
 	goal, err := tc.handler.taskGoalSvc.GetGoal(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("get goal: %v", err)
