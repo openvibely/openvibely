@@ -32,6 +32,7 @@ const (
 	openAICompatibleExtraHeadersHeader     = "X-OpenAI-Compatible-Extra-Headers"
 	openAICompatibleModelsArrayPathHeader  = "X-OpenAI-Compatible-Models-Array-Path"
 	openAICompatibleModelIDFieldHeader     = "X-OpenAI-Compatible-Model-ID-Field"
+	openAICompatibleDiscoveryBudget        = 5 * time.Second
 )
 
 func modelCardListFilter(c echo.Context, page cardPageRequest) repository.ModelCardListFilter {
@@ -1424,32 +1425,15 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 	}
-	client := llmcustomauth.NewHTTPClient(10*time.Second, requestPrivate)
-	tried := make([]string, 0, len(urls))
-	var lastErr error
-	for _, modelsURL := range urls {
-		tried = append(tried, modelsURL)
-		var modelsFound []openAICompatibleModelInfo
-		if configured != nil && configured.AuthMethod == models.AuthMethodOAuth {
-			modelsFound, err = h.fetchCustomOpenAICompatibleModels(c.Request().Context(), client, modelsURL, *configured)
-			if errors.Is(err, errCustomOAuthUnauthorized) {
-				if refreshErr := h.refreshCustomCompatibleOAuth(c.Request().Context(), configured, client, configured.OAuthAccessToken); refreshErr == nil {
-					modelsFound, err = h.fetchCustomOpenAICompatibleModels(c.Request().Context(), client, modelsURL, *configured)
-				} else {
-					err = refreshErr
-				}
-			}
-		} else {
-			discoveryKey := apiKey
-			if configured != nil && discoveryKey == "" {
-				discoveryKey = configured.APIKey
-			}
-			modelsFound, err = fetchOpenAICompatibleModels(c.Request().Context(), client, modelsURL, discoveryKey, configured)
-		}
-		if err != nil {
-			lastErr = err
-			continue
-		}
+	discoveryCtx, cancelDiscovery := context.WithTimeout(c.Request().Context(), openAICompatibleDiscoveryBudget)
+	defer cancelDiscovery()
+	client := llmcustomauth.NewHTTPClient(openAICompatibleDiscoveryBudget, requestPrivate)
+	discoveryKey := apiKey
+	if configured != nil && discoveryKey == "" {
+		discoveryKey = configured.APIKey
+	}
+	modelsFound, tried, lastErr := h.discoverOpenAICompatibleModels(discoveryCtx, client, urls, discoveryKey, configured)
+	if lastErr == nil {
 		response := openAICompatibleModelsResponse{Models: modelsFound, TriedURLs: tried}
 		if len(modelsFound) == 1 {
 			response.ResolvedID = modelsFound[0].ID
@@ -1461,6 +1445,89 @@ func (h *Handler) ListOpenAICompatibleAvailableModels(c echo.Context) error {
 	}
 	applog.Infof("[handler] ListOpenAICompatibleAvailableModels error: %v", lastErr)
 	return c.JSON(http.StatusBadGateway, map[string]any{"error": lastErr.Error(), "tried_urls": tried})
+}
+
+type openAICompatibleDiscoveryResult struct {
+	models []openAICompatibleModelInfo
+	err    error
+}
+
+func (h *Handler) discoverOpenAICompatibleModels(ctx context.Context, client *http.Client, urls []string, apiKey string, configured *models.LLMConfig) ([]openAICompatibleModelInfo, []string, error) {
+	if len(urls) == 0 {
+		return nil, nil, fmt.Errorf("no model discovery URLs were available")
+	}
+	if len(urls) == 1 || (configured != nil && configured.AuthMethod == models.AuthMethodOAuth) {
+		return h.discoverOpenAICompatibleModelsSequential(ctx, client, urls, apiKey, configured)
+	}
+
+	racingCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan openAICompatibleDiscoveryResult, len(urls))
+	for _, modelsURL := range urls {
+		modelsURL := modelsURL
+		go func() {
+			modelsFound, err := h.fetchOpenAICompatibleDiscoveryURL(racingCtx, client, modelsURL, apiKey, configured)
+			results <- openAICompatibleDiscoveryResult{models: modelsFound, err: err}
+		}()
+	}
+
+	var lastErr error
+	for remaining := len(urls); remaining > 0; remaining-- {
+		select {
+		case result := <-results:
+			if result.err == nil {
+				cancel()
+				return result.models, append([]string(nil), urls...), nil
+			}
+			lastErr = result.err
+		case <-ctx.Done():
+			cancel()
+			if lastErr != nil {
+				return nil, append([]string(nil), urls...), lastErr
+			}
+			return nil, append([]string(nil), urls...), ctx.Err()
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("model discovery failed")
+	}
+	return nil, append([]string(nil), urls...), lastErr
+}
+
+func (h *Handler) discoverOpenAICompatibleModelsSequential(ctx context.Context, client *http.Client, urls []string, apiKey string, configured *models.LLMConfig) ([]openAICompatibleModelInfo, []string, error) {
+	tried := make([]string, 0, len(urls))
+	var lastErr error
+	for _, modelsURL := range urls {
+		tried = append(tried, modelsURL)
+		modelsFound, err := h.fetchOpenAICompatibleDiscoveryURL(ctx, client, modelsURL, apiKey, configured)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return nil, tried, lastErr
+			}
+			continue
+		}
+		return modelsFound, tried, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no model discovery URLs were available")
+	}
+	return nil, tried, lastErr
+}
+
+func (h *Handler) fetchOpenAICompatibleDiscoveryURL(ctx context.Context, client *http.Client, modelsURL string, apiKey string, configured *models.LLMConfig) ([]openAICompatibleModelInfo, error) {
+	if configured != nil && configured.AuthMethod == models.AuthMethodOAuth {
+		modelsFound, err := h.fetchCustomOpenAICompatibleModels(ctx, client, modelsURL, *configured)
+		if errors.Is(err, errCustomOAuthUnauthorized) {
+			if refreshErr := h.refreshCustomCompatibleOAuth(ctx, configured, client, configured.OAuthAccessToken); refreshErr == nil {
+				modelsFound, err = h.fetchCustomOpenAICompatibleModels(ctx, client, modelsURL, *configured)
+			} else {
+				err = refreshErr
+			}
+		}
+		return modelsFound, err
+	}
+	return fetchOpenAICompatibleModels(ctx, client, modelsURL, apiKey, configured)
 }
 
 func (h *Handler) refreshCustomCompatibleOAuth(ctx context.Context, agent *models.LLMConfig, client *http.Client, tokenUsed string) error {
