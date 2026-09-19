@@ -824,7 +824,7 @@ func TestGetPullRequestReturnsHeadRefAndMergedStateFromResolvedRepository(t *tes
 			t.Fatalf("expected configured PAT bearer auth, got %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"number":4,"html_url":"https://github.com/openvibely/openvibely-hosted/pull/4","state":"closed","merged":true,"head":{"ref":"task/clean-history","repo":{"full_name":"openvibely/openvibely-hosted"}}}`))
+		_, _ = w.Write([]byte(`{"number":4,"html_url":"https://github.com/openvibely/openvibely-hosted/pull/4","body":"Existing review notes","state":"closed","merged":true,"head":{"ref":"task/clean-history","repo":{"full_name":"openvibely/openvibely-hosted"}}}`))
 	}))
 	defer server.Close()
 
@@ -834,7 +834,7 @@ func TestGetPullRequestReturnsHeadRefAndMergedStateFromResolvedRepository(t *tes
 	if err != nil {
 		t.Fatalf("GetPullRequest: %v", err)
 	}
-	if pr.Number != 4 || pr.State != "closed" || !pr.Merged || pr.HeadRef != "task/clean-history" || pr.HeadRepoFullName != "openvibely/openvibely-hosted" {
+	if pr.Number != 4 || pr.Body != "Existing review notes" || pr.State != "closed" || !pr.Merged || pr.HeadRef != "task/clean-history" || pr.HeadRepoFullName != "openvibely/openvibely-hosted" {
 		t.Fatalf("unexpected pull request: %#v", pr)
 	}
 }
@@ -1439,12 +1439,12 @@ func TestGitHubServicePullRequestAndIssueHTTPActions(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/7":
-			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/acme/widgets/pull/7","state":"open","merged":true,"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"acme/widgets"}}}`))
+			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/acme/widgets/pull/7","body":"Fetched body","state":"open","merged":true,"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"acme/widgets"}}}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls":
 			if r.URL.Query().Get("state") != "all" || r.URL.Query().Get("head") != "acme:feature" {
 				t.Fatalf("unexpected pull list query %s", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`[{"number":6,"html_url":"https://github.com/acme/widgets/pull/6","state":"closed","head":{"ref":"feature","sha":"old","repo":{"full_name":"acme/widgets"}}},{"number":8,"html_url":"https://github.com/acme/widgets/pull/8","state":"open","head":{"ref":"feature","sha":"new","repo":{"full_name":"acme/widgets"}}}]`))
+			_, _ = w.Write([]byte(`[{"number":6,"html_url":"https://github.com/acme/widgets/pull/6","state":"closed","head":{"ref":"feature","sha":"old","repo":{"full_name":"acme/widgets"}}},{"number":8,"html_url":"https://github.com/acme/widgets/pull/8","body":"Found body","state":"open","head":{"ref":"feature","sha":"new","repo":{"full_name":"acme/widgets"}}}]`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/pulls":
 			var payload map[string]any
 			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
@@ -1503,12 +1503,12 @@ func TestGitHubServicePullRequestAndIssueHTTPActions(t *testing.T) {
 	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets"}
 	pr, err := svc.GetPullRequest(ctx, repo, 7)
 	requireNoError(t, err)
-	if pr.Number != 7 || !pr.Merged || pr.HeadRef != "feature" || pr.HeadSHA != "abc123" {
+	if pr.Number != 7 || pr.Body != "Fetched body" || !pr.Merged || pr.HeadRef != "feature" || pr.HeadSHA != "abc123" {
 		t.Fatalf("unexpected pull request: %+v", pr)
 	}
 	found, err := svc.FindPullRequestByBranch(ctx, repo, " feature ")
 	requireNoError(t, err)
-	if found == nil || found.Number != 8 || found.HeadSHA != "new" {
+	if found == nil || found.Number != 8 || found.Body != "Found body" || found.HeadSHA != "new" {
 		t.Fatalf("expected open PR to be selected, got %+v", found)
 	}
 	created, err := svc.CreatePullRequest(ctx, repo, GitHubCreatePullRequestRequest{Title: "Open coverage PR", Head: "feature", Base: "main", Body: "body", Draft: true})

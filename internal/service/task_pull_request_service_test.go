@@ -1355,7 +1355,7 @@ func TestTaskPullRequestServiceOpenForTaskReusedRecordAppliesDefaultIssueBody(t 
 	updatedBody := ""
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
 		getPullRequestFn: func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: 23, URL: "https://github.com/openvibely/openvibely/pull/23", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+			return &GitHubPullRequest{Number: 23, URL: "https://github.com/openvibely/openvibely/pull/23", Body: "Existing review notes", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error { updatedBody = body; return nil },
 	}, prRepo)
@@ -1363,8 +1363,8 @@ func TestTaskPullRequestServiceOpenForTaskReusedRecordAppliesDefaultIssueBody(t 
 	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}); err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	if !strings.Contains(updatedBody, "Closes #123") {
-		t.Fatalf("updated body = %q, want default closing line", updatedBody)
+	if updatedBody != "Existing review notes\n\nCloses #123" {
+		t.Fatalf("updated body = %q, want existing body with closing line", updatedBody)
 	}
 }
 
@@ -1385,7 +1385,7 @@ func TestTaskPullRequestServiceOpenForTaskReusedRemoteAppliesDefaultIssueBody(t 
 	updatedBody := ""
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
 		findPRFn: func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: 24, URL: "https://github.com/openvibely/openvibely/pull/24", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+			return &GitHubPullRequest{Number: 24, URL: "https://github.com/openvibely/openvibely/pull/24", Body: "Remote review notes", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		updatePRBodyFn: func(_ context.Context, _ *GitHubRepoRef, _ int, body string) error { updatedBody = body; return nil },
 	}, prRepo)
@@ -1393,7 +1393,34 @@ func TestTaskPullRequestServiceOpenForTaskReusedRemoteAppliesDefaultIssueBody(t 
 	if _, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}); err != nil {
 		t.Fatalf("OpenForTask: %v", err)
 	}
-	if !strings.Contains(updatedBody, "Closes #456") {
-		t.Fatalf("updated body = %q, want default closing line", updatedBody)
+	if updatedBody != "Remote review notes\n\nCloses #456" {
+		t.Fatalf("updated body = %q, want existing body with closing line", updatedBody)
+	}
+}
+
+func TestReusedPullRequestBody(t *testing.T) {
+	issueNumber := 123
+	tests := []struct {
+		name         string
+		existingBody string
+		defaultBody  string
+		opts         OpenTaskPullRequestOptions
+		wantBody     string
+		wantUpdate   bool
+	}{
+		{name: "no issue leaves body unchanged", existingBody: "Human-written notes", defaultBody: "Generated summary", opts: OpenTaskPullRequestOptions{}},
+		{name: "issue appends closing line", existingBody: "Human-written notes", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, wantBody: "Human-written notes\n\nCloses #123", wantUpdate: true},
+		{name: "existing closing line is unchanged", existingBody: "Human-written notes\n\ncloses #123", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}},
+		{name: "equivalent closing keyword is unchanged", existingBody: "Human-written notes\n\n- Fixes #123.", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}},
+		{name: "empty body uses default", defaultBody: "Generated summary\n\nCloses #123", opts: OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, wantBody: "Generated summary\n\nCloses #123", wantUpdate: true},
+		{name: "explicit body replaces existing", existingBody: "Human-written notes", opts: OpenTaskPullRequestOptions{Body: "Replacement"}, wantBody: "Replacement", wantUpdate: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotBody, gotUpdate := reusedPullRequestBody(tt.existingBody, tt.defaultBody, tt.opts)
+			if gotBody != tt.wantBody || gotUpdate != tt.wantUpdate {
+				t.Fatalf("reusedPullRequestBody() = (%q, %t), want (%q, %t)", gotBody, gotUpdate, tt.wantBody, tt.wantUpdate)
+			}
+		})
 	}
 }

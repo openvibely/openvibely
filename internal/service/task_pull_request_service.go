@@ -355,7 +355,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 			return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
 		}
 		if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, publishedHeadSHA); err == nil {
-			if body := strings.TrimSpace(createReq.Body); body != "" {
+			if body, update := reusedPullRequestBody(livePR.Body, createReq.Body, opts); update {
 				if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
 					if err := updater.UpdatePullRequestBody(ctx, repoRef, existingPR.PRNumber, body); err != nil {
 						return nil, fmt.Errorf("updating existing pull request #%d body: %w", existingPR.PRNumber, err)
@@ -433,7 +433,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		return nil, fmt.Errorf("pull request #%d is not current: %w", prNumber, err)
 	}
 	if !created {
-		if body := strings.TrimSpace(createReq.Body); body != "" {
+		if body, update := reusedPullRequestBody(pr.Body, createReq.Body, opts); update {
 			if updater, ok := s.github.(taskPullRequestBodyUpdater); ok {
 				if err := updater.UpdatePullRequestBody(ctx, repoRef, prNumber, body); err != nil {
 					return nil, fmt.Errorf("updating existing pull request #%d body: %w", prNumber, err)
@@ -467,6 +467,43 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		ReusedRemote: foundPR != nil || !created,
 		Created:      created,
 	}, nil
+}
+
+func reusedPullRequestBody(existingBody, defaultBody string, opts OpenTaskPullRequestOptions) (string, bool) {
+	if body := strings.TrimSpace(opts.Body); body != "" {
+		return body, true
+	}
+	if opts.IssueNumber == nil {
+		return "", false
+	}
+
+	closingLine := fmt.Sprintf("Closes #%d", *opts.IssueNumber)
+	body := strings.TrimSpace(existingBody)
+	if pullRequestBodyClosesIssue(body, *opts.IssueNumber) {
+		return "", false
+	}
+	if body == "" {
+		return strings.TrimSpace(defaultBody), true
+	}
+	return body + "\n\n" + closingLine, true
+}
+
+func pullRequestBodyClosesIssue(body string, issueNumber int) bool {
+	issueRef := fmt.Sprintf("#%d", issueNumber)
+	for _, line := range strings.Split(body, "\n") {
+		fields := strings.Fields(line)
+		for i := 0; i+1 < len(fields); i++ {
+			keyword := strings.ToLower(strings.Trim(fields[i], "*_`:-[]()"))
+			switch keyword {
+			case "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved":
+				ref := strings.Trim(fields[i+1], "*_`.,;:[]()")
+				if strings.EqualFold(ref, issueRef) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (s *TaskPullRequestService) recordPublishedCommitStat(ctx context.Context, task *models.Task, publishResult *GitHubPublishBranchResult, fallbackBaseRef, subject string) {
