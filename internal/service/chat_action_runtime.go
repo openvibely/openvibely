@@ -2122,34 +2122,44 @@ func ExecuteUpdateAgentRuntime(ctx context.Context, opts UpdateAgentRuntimeOptio
 }
 
 func DecodeUpdateAgentRuntimeInput(input json.RawMessage) (UpdateAgentRuntimeInput, error) {
+	var req UpdateAgentRuntimeInput
+	if err := decodeRuntimeAgentInput("update_agent", input, updateAgentRuntimeAllowedKeys, true, &req); err != nil {
+		return UpdateAgentRuntimeInput{}, err
+	}
+	return req, nil
+}
+
+var updateAgentRuntimeAllowedKeys = map[string]bool{
+	"agent_id": true, "agent_name": true, "key": true, "project_id": true,
+	"name": true, "description": true, "system_prompt": true, "model": true, "tools": true,
+	"scoped_files": true, "enabled": true, "selectable_as_primary": true,
+}
+
+func decodeRuntimeAgentInput(action string, input json.RawMessage, allowed map[string]bool, validateScopedFiles bool, out any) error {
 	payload := strings.TrimSpace(string(input))
 	if payload == "" {
 		payload = `{}`
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
-		return UpdateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
-	}
-	allowed := map[string]bool{
-		"agent_id": true, "agent_name": true, "key": true, "project_id": true,
-		"name": true, "description": true, "system_prompt": true, "model": true, "tools": true,
-		"scoped_files": true, "enabled": true, "selectable_as_primary": true,
+		return fmt.Errorf("invalid tool input JSON: %w", err)
 	}
 	for key := range raw {
 		if !allowed[key] {
-			return UpdateAgentRuntimeInput{}, fmt.Errorf("update_agent does not support %q", key)
+			return fmt.Errorf("%s does not support %q", action, key)
 		}
 	}
-	if scopedFilesRaw, ok := raw["scoped_files"]; ok {
-		if err := validateRuntimeScopedFilesJSON(scopedFilesRaw, "update_agent"); err != nil {
-			return UpdateAgentRuntimeInput{}, err
+	if validateScopedFiles {
+		if scopedFilesRaw, ok := raw["scoped_files"]; ok {
+			if err := validateRuntimeScopedFilesJSON(scopedFilesRaw, action); err != nil {
+				return err
+			}
 		}
 	}
-	var req UpdateAgentRuntimeInput
-	if err := json.Unmarshal([]byte(payload), &req); err != nil {
-		return UpdateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	if err := json.Unmarshal([]byte(payload), out); err != nil {
+		return fmt.Errorf("invalid tool input JSON: %w", err)
 	}
-	return req, nil
+	return nil
 }
 
 func validateRuntimeScopedFilesJSON(raw json.RawMessage, action string) error {
@@ -2241,6 +2251,10 @@ func validateRuntimeAgentUpdateTarget(ctx context.Context, projectRepo *reposito
 }
 
 func normalizeRuntimeAgentToolsForUpdate(input []string) ([]string, error) {
+	return normalizeRuntimeAgentToolList(input)
+}
+
+func normalizeRuntimeAgentToolList(input []string) ([]string, error) {
 	canonical := make(map[string]string, len(models.AllAgentTools))
 	for _, tool := range models.AllAgentTools {
 		canonical[strings.ToLower(tool)] = tool
@@ -2290,28 +2304,16 @@ func scopedFilesEqual(a, b []models.ScopedFilesConfig) bool {
 }
 
 func DecodeCreateAgentRuntimeInput(input json.RawMessage) (CreateAgentRuntimeInput, error) {
-	payload := strings.TrimSpace(string(input))
-	if payload == "" {
-		payload = `{}`
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
-		return CreateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
-	}
-	allowed := map[string]bool{
-		"name": true, "description": true, "system_prompt": true, "model": true, "tools": true,
-		"scoped_files": true, "scope": true, "project_id": true, "enabled": true, "selectable_as_primary": true,
-	}
-	for key := range raw {
-		if !allowed[key] {
-			return CreateAgentRuntimeInput{}, fmt.Errorf("create_agent does not support %q", key)
-		}
-	}
 	var req CreateAgentRuntimeInput
-	if err := json.Unmarshal([]byte(payload), &req); err != nil {
-		return CreateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	if err := decodeRuntimeAgentInput("create_agent", input, createAgentRuntimeAllowedKeys, false, &req); err != nil {
+		return CreateAgentRuntimeInput{}, err
 	}
 	return req, nil
+}
+
+var createAgentRuntimeAllowedKeys = map[string]bool{
+	"name": true, "description": true, "system_prompt": true, "model": true, "tools": true,
+	"scoped_files": true, "scope": true, "project_id": true, "enabled": true, "selectable_as_primary": true,
 }
 
 func runtimeAgentCreateError(err error) string {
@@ -2361,34 +2363,14 @@ func defaultRuntimeAgentTools() []string {
 }
 
 func normalizeRuntimeAgentTools(input []string) ([]string, error) {
-	if len(input) == 0 {
+	tools, err := normalizeRuntimeAgentToolList(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(tools) == 0 {
 		return defaultRuntimeAgentTools(), nil
 	}
-	canonical := make(map[string]string, len(models.AllAgentTools))
-	for _, tool := range models.AllAgentTools {
-		canonical[strings.ToLower(tool)] = tool
-	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(input))
-	for _, raw := range input {
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" {
-			continue
-		}
-		tool, ok := canonical[strings.ToLower(trimmed)]
-		if !ok {
-			return nil, fmt.Errorf("unknown tool %q", trimmed)
-		}
-		if _, exists := seen[tool]; exists {
-			continue
-		}
-		seen[tool] = struct{}{}
-		out = append(out, tool)
-	}
-	if len(out) == 0 {
-		return defaultRuntimeAgentTools(), nil
-	}
-	return out, nil
+	return tools, nil
 }
 
 func runtimeAgentToolListContains(tools []string, target string) bool {
