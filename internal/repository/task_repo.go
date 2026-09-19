@@ -358,50 +358,122 @@ func (r *TaskRepo) ListBreadcrumbSelector(ctx context.Context, projectID, search
 		return r.listEmptyBreadcrumbSelector(ctx, projectID, currentID, scheduleOnly, limit)
 	}
 
-	return r.listBreadcrumbSelectorRows(ctx, breadcrumbSelectorRelevanceQuery, limit,
-		projectID, scheduleOnly, search, search, models.StatusRunning, currentID, search, search, limit)
+	return r.listSearchBreadcrumbSelector(ctx, projectID, search, currentID, scheduleOnly, limit)
 }
 
-const breadcrumbSelectorRelevanceQuery = `SELECT id, title, status, category
-			FROM tasks
-			WHERE project_id = ? AND category != 'chat'
-				AND (? = FALSE OR EXISTS (
-					SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
-				))
-				AND (? = '' OR INSTR(LOWER(title), ?) > 0)
-			ORDER BY CASE WHEN status = ? THEN 0 ELSE 1 END,
-				CASE WHEN id = ? THEN 0 ELSE 1 END,
-				CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
-				updated_at DESC, id ASC
-			LIMIT ?`
+const breadcrumbSelectorSelectColumns = `id, title, status, category, merge_status,
+				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = tasks.id AND g.status = 'achieved') AS goal_met`
 
-const breadcrumbSelectorCurrentQuery = `SELECT id, title, status, category
-			FROM tasks
-			WHERE project_id = ? AND id = ? AND category != 'chat'
-				AND (? = FALSE OR EXISTS (
-					SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
-				))`
+const breadcrumbSelectorCurrentQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
+				FROM tasks
+				WHERE project_id = ? AND id = ? AND category != 'chat'
+					AND (? = FALSE OR EXISTS (
+						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
+					))`
 
-const breadcrumbSelectorRunningQuery = `SELECT id, title, status, category
-			FROM tasks INDEXED BY idx_tasks_status
-			WHERE project_id = ? AND category != 'chat'
-				AND (? = FALSE OR EXISTS (
-					SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
-				))
-				AND id != ?
-				AND status = ?
-			ORDER BY updated_at DESC, id ASC
-			LIMIT ?`
+const breadcrumbSelectorCurrentSearchQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
+				FROM tasks
+				WHERE project_id = ? AND id = ? AND category != 'chat'
+					AND (? = FALSE OR EXISTS (
+						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
+					))
+					AND (? = '' OR INSTR(LOWER(title), ?) > 0)`
 
-const breadcrumbSelectorRecencyQuery = `SELECT id, title, status, category
-			FROM tasks
-			WHERE project_id = ? AND category != 'chat'
-				AND (? = FALSE OR EXISTS (
-					SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
-				))
-				AND id != ?
-			ORDER BY updated_at DESC, id ASC
-			LIMIT ?`
+const breadcrumbSelectorRunningQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
+				FROM tasks INDEXED BY idx_tasks_status
+				WHERE project_id = ? AND category != 'chat'
+					AND (? = FALSE OR EXISTS (
+						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
+					))
+					AND id != ?
+					AND status = ?
+				ORDER BY updated_at DESC, id ASC
+				LIMIT ?`
+
+const breadcrumbSelectorSearchRunningQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
+				FROM tasks
+				WHERE project_id = ? AND category != 'chat'
+					AND (? = FALSE OR EXISTS (
+						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
+					))
+					AND (? = '' OR INSTR(LOWER(title), ?) > 0)
+					AND id != ?
+					AND status = ?
+				ORDER BY CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
+					updated_at DESC, id ASC
+				LIMIT ?`
+
+const breadcrumbSelectorSearchOtherQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
+				FROM tasks
+				WHERE project_id = ? AND category != 'chat'
+					AND (? = FALSE OR EXISTS (
+						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
+					))
+					AND (? = '' OR INSTR(LOWER(title), ?) > 0)
+					AND id != ?
+					AND status != ?
+				ORDER BY CASE WHEN LOWER(title) = ? THEN 0 WHEN LOWER(title) LIKE ? || '%' THEN 1 ELSE 2 END,
+					updated_at DESC, id ASC
+				LIMIT ?`
+
+const breadcrumbSelectorRecencyQuery = `SELECT ` + breadcrumbSelectorSelectColumns + `
+				FROM tasks
+				WHERE project_id = ? AND category != 'chat'
+					AND (? = FALSE OR EXISTS (
+						SELECT 1 FROM schedules WHERE schedules.task_id = tasks.id
+					))
+					AND id != ?
+				ORDER BY updated_at DESC, id ASC
+				LIMIT ?`
+
+func (r *TaskRepo) listSearchBreadcrumbSelector(ctx context.Context, projectID, search, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
+	var current []models.BreadcrumbSelectorItem
+	if currentID != "" {
+		var err error
+		current, err = r.listBreadcrumbSelectorRows(ctx, breadcrumbSelectorCurrentSearchQuery, 1,
+			projectID, currentID, scheduleOnly, search, search)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	currentIsRunning := len(current) > 0 && current[0].Status == models.StatusRunning
+	runningLimit := limit
+	if len(current) > 0 {
+		runningLimit--
+	}
+	if runningLimit < 0 {
+		runningLimit = 0
+	}
+
+	items := make([]models.BreadcrumbSelectorItem, 0, limit)
+	if currentIsRunning {
+		items = append(items, current[0])
+	}
+	if runningLimit > 0 {
+		running, err := r.listBreadcrumbSelectorRows(ctx, breadcrumbSelectorSearchRunningQuery, runningLimit,
+			projectID, scheduleOnly, search, search, currentID, models.StatusRunning, search, search, runningLimit)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, running...)
+	}
+	if len(current) > 0 && !currentIsRunning {
+		items = append(items, current[0])
+	}
+	if len(items) >= limit {
+		return items, nil
+	}
+
+	remaining := limit - len(items)
+	other, err := r.listBreadcrumbSelectorRows(ctx, breadcrumbSelectorSearchOtherQuery, remaining,
+		projectID, scheduleOnly, search, search, currentID, models.StatusRunning, search, search, remaining)
+	if err != nil {
+		return nil, err
+	}
+	items = append(items, other...)
+	return items, nil
+}
 
 func (r *TaskRepo) listEmptyBreadcrumbSelector(ctx context.Context, projectID, currentID string, scheduleOnly bool, limit int) ([]models.BreadcrumbSelectorItem, error) {
 	var current []models.BreadcrumbSelectorItem
@@ -477,7 +549,7 @@ func (r *TaskRepo) listBreadcrumbSelectorRows(ctx context.Context, query string,
 	items := make([]models.BreadcrumbSelectorItem, 0, capacity)
 	for rows.Next() {
 		var item models.BreadcrumbSelectorItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.Category); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.Category, &item.MergeStatus, &item.GoalMet); err != nil {
 			return nil, fmt.Errorf("scanning task breadcrumb selector: %w", err)
 		}
 		items = append(items, item)

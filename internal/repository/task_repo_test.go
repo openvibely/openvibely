@@ -292,6 +292,83 @@ func TestTaskRepo_BreadcrumbSelectorPrioritizesRunningTasks(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_BreadcrumbSelectorSearchRetainsMatchingCurrentWithinMatchesBucket(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewTaskRepo(db, nil)
+
+	current := &models.Task{ProjectID: "default", Title: "deploy current selected", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending}
+	if err := repo.Create(ctx, current); err != nil {
+		t.Fatalf("create current: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = '2020-01-01 00:00:00' WHERE id = ?`, current.ID); err != nil {
+		t.Fatalf("set current timestamp: %v", err)
+	}
+
+	newestRunningIDs := make([]string, 0, 19)
+	for i := 0; i < 20; i++ {
+		task := &models.Task{ProjectID: "default", Title: fmt.Sprintf("deploy running %02d", i), Category: models.CategoryActive, Priority: 2, Status: models.StatusRunning}
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create running %d: %v", i, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id = ?`, fmt.Sprintf("2026-01-%02d 00:00:00", i+1), task.ID); err != nil {
+			t.Fatalf("set running timestamp %d: %v", i, err)
+		}
+		if i > 0 {
+			newestRunningIDs = append([]string{task.ID}, newestRunningIDs...)
+		}
+	}
+
+	items, err := repo.ListBreadcrumbSelector(ctx, "default", "deploy", current.ID, false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector search: %v", err)
+	}
+	got := make([]string, len(items))
+	for i, item := range items {
+		got[i] = item.ID
+	}
+	want := append(newestRunningIDs, current.ID)
+	if !slices.Equal(got, want) {
+		t.Fatalf("search result order = %v, want running bucket plus matching current at top of matches bucket %v", got, want)
+	}
+}
+
+func TestTaskRepo_BreadcrumbSelectorProjectsTaskStateMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewTaskRepo(db, nil)
+	goals := NewTaskGoalRepo(db)
+
+	merged := &models.Task{ProjectID: "default", Title: "selector merged state", Category: models.CategoryCompleted, Priority: 2, Status: models.StatusCompleted}
+	goalMet := &models.Task{ProjectID: "default", Title: "selector goal state", Category: models.CategoryCompleted, Priority: 2, Status: models.StatusCompleted}
+	for _, task := range []*models.Task{merged, goalMet} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create %q: %v", task.Title, err)
+		}
+	}
+	if err := repo.UpdateMergeStatus(ctx, merged.ID, models.MergeStatusMerged); err != nil {
+		t.Fatalf("mark merged: %v", err)
+	}
+	if err := goals.CreateOrReplace(ctx, &models.TaskGoal{TaskID: goalMet.ID, GoalID: "goal-met", Objective: "finish", Status: models.TaskGoalStatusAchieved}); err != nil {
+		t.Fatalf("create achieved goal: %v", err)
+	}
+
+	items, err := repo.ListBreadcrumbSelector(ctx, "default", "selector", "", false, 20)
+	if err != nil {
+		t.Fatalf("ListBreadcrumbSelector: %v", err)
+	}
+	byID := make(map[string]models.BreadcrumbSelectorItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	if got := byID[merged.ID]; got.MergeStatus != models.MergeStatusMerged || got.GoalMet {
+		t.Fatalf("merged projection = merge:%q goal:%t, want merged/false", got.MergeStatus, got.GoalMet)
+	}
+	if got := byID[goalMet.ID]; got.MergeStatus != "" || !got.GoalMet {
+		t.Fatalf("goal projection = merge:%q goal:%t, want empty/true", got.MergeStatus, got.GoalMet)
+	}
+}
+
 func TestTaskRepo_BreadcrumbSelectorScheduleScopeRequiresScheduleRow(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

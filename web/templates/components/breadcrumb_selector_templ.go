@@ -440,7 +440,7 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(breadcrumbSelectorCheck(item.ID == currentID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 69, Col: 99}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 69, Col: 100}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
@@ -451,7 +451,7 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 					return templ_7745c5c3_Err
 				}
 				if kind == "Task" {
-					templ_7745c5c3_Err = TaskStateIcon(models.Task{Status: item.Status, Category: item.Category}).Render(ctx, templ_7745c5c3_Buffer)
+					templ_7745c5c3_Err = TaskStateIcon(models.Task{Status: item.Status, Category: item.Category, MergeStatus: item.MergeStatus, GoalMet: item.GoalMet}).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -463,7 +463,7 @@ func BreadcrumbSelectorResults(kind string, currentID string, items []models.Bre
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(item.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 73, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/breadcrumb_selector.templ`, Line: 73, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
