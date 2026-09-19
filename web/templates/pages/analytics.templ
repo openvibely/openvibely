@@ -142,6 +142,7 @@ templ analyticsContent(currentProject *models.Project) {
 								var latestUsageAnalytics = null;
 								var latestDashboard = null;
 								var evidencePageLoading = false;
+								var preserveActiveCharts = false;
 								var evidenceRequestGeneration = 0;
 								var skillEvidenceRequest = 0;
 								var usageEvidenceRequest = 0;
@@ -214,8 +215,9 @@ templ analyticsContent(currentProject *models.Project) {
 								if (failedBody) failedBody.innerHTML = '\x3ctr>\x3ctd colspan="4" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 							}
 						function renderChartState(key, canvasID, rows, message) {
+							if (preserveActiveCharts && charts[key]) return null;
 							destroyChart(key);
-								const canvas = document.getElementById(canvasID);
+							const canvas = document.getElementById(canvasID);
 								if (!canvas) return null;
 								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Cycle-time distribution', followupDistributionChart: 'Follow-up distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill effectiveness versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', costOutcomeTrendChart: 'Known cost and outcomes over time', modelEfficiencyChart: 'Model efficiency by task category', successFailureChart: 'Technical execution completion over time', hourlyTrendsChart: 'Task executions by hour', avgTimeTaskChart: 'Average execution duration by task', avgTimeAgentChart: 'Average execution duration by model', agentUsageChart: 'Model breakdown by executions', agentOutcomeTrendChart: 'Selected Agent technical outcomes over time', agentModelMixChart: 'Selected Agent model mix' };
 								canvas.setAttribute('role', 'img');
@@ -297,7 +299,7 @@ templ analyticsContent(currentProject *models.Project) {
 							history.pushState({}, '', '/analytics?' + params.toString());
 							applyView(view, false);
 							const label = document.getElementById(labelID);
-							if (label) { label.textContent = text; label.classList.remove('hidden'); label.scrollIntoView({block:'nearest'}); }
+							if (label) { label.textContent = text; label.classList.remove('hidden'); }
 						}
 						function restoreAggregateSelectionState() {
 							const params = new URLSearchParams(window.location.search);
@@ -342,10 +344,10 @@ templ analyticsContent(currentProject *models.Project) {
 									if (previous && (card.kind === 'duration' || card.kind === 'p90')) { const field=card.kind==='p90'?'p90_cycle_time_ms':'median_cycle_time_ms'; const change = Number(current[field] || 0) - Number(previous[field] || 0); delta = (change >= 0 ? '+' : '-') + formatDuration(Math.abs(change)) + '; previous ' + formatDuration(previous[field] || 0) + '; n=' + (previous.cycle_sample_size || 0); }
 									if (previous && card.kind === 'cost') { delta = previous.known_cost_per_achieved_goal ? 'previous ' + costCoverageText(previous.known_cost_per_achieved_goal) : 'previous unavailable'; }
 									const params = clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view', 'outcomes'); params.set('evidence', card.key);
-									return '\x3ca class="card bg-base-100 border border-base-300 hover:border-primary" href="/analytics?' + escapeHTML(params.toString()) + '">\x3cdiv class="card-body p-4">\x3cdiv class="text-sm font-semibold">' + escapeHTML(card.label) + '\x3c/div>\x3cdiv class="text-xl font-bold">' + escapeHTML(card.value) + '\x3c/div>\x3cdiv class="text-xs opacity-60">sample n=' + card.sample + (delta ? ' · ' + escapeHTML(delta) : '') + '\x3c/div>\x3cdiv class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator\x3c/div>\x3c/div>\x3c/a>';
+									return '\x3ca class="card bg-base-100 border border-base-300 hover:border-primary" data-analytics-evidence-link href="/analytics?' + escapeHTML(params.toString()) + '">\x3cdiv class="card-body p-4">\x3cdiv class="text-sm font-semibold">' + escapeHTML(card.label) + '\x3c/div>\x3cdiv class="text-xl font-bold">' + escapeHTML(card.value) + '\x3c/div>\x3cdiv class="text-xs opacity-60">sample n=' + card.sample + (delta ? ' · ' + escapeHTML(delta) : '') + '\x3c/div>\x3cdiv class="text-xs opacity-60" title="' + escapeHTML(definition ? definition.definition + ' Denominator: ' + definition.denominator : 'Selected-period task sample.') + '">Definition and denominator\x3c/div>\x3c/div>\x3c/a>';
 								}).join('');
-								const kpis = document.getElementById('analyticsKpis'); if (kpis) kpis.innerHTML = cardHTML;
-								const outcomeSummary = document.getElementById('outcomeSummaryCards'); if (outcomeSummary) outcomeSummary.innerHTML = cardHTML;
+								const kpis = document.getElementById('analyticsKpis'); if (kpis) { kpis.innerHTML = cardHTML; bindEvidenceLinks(kpis); }
+								const outcomeSummary = document.getElementById('outcomeSummaryCards'); if (outcomeSummary) { outcomeSummary.innerHTML = cardHTML; bindEvidenceLinks(outcomeSummary); }
 								const recent = data.recent_outcomes || [];
 								renderProjectOutcomeTrend(data.outcome_trend || []);
 								renderOutcomeFunnel('overviewOutcomeFunnel', data.funnel || []);
@@ -437,7 +439,8 @@ templ analyticsContent(currentProject *models.Project) {
 							function renderOutcomeFunnel(targetID, stages) {
 								const target = document.getElementById(targetID); if (!target) return;
 								const max = Math.max(1, ...stages.map(function(stage){ return Number(stage.denominator || stage.count || 0); }));
-								target.innerHTML = stages.length ? stages.map(function(stage) { const params=clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view','outcomes'); params.set('evidence',stage.key); const width=Math.max(18,Number(stage.count||0)*100/max); return '\x3ca class="flex-1 card bg-base-200 hover:border-primary border border-transparent" href="/analytics?'+escapeHTML(params.toString())+'">\x3cdiv class="card-body p-3">\x3cspan class="text-sm">'+escapeHTML(stage.label)+'\x3c/span>\x3cdiv class="h-3 bg-base-300 rounded">\x3cdiv class="h-3 bg-primary rounded" style="width:'+width.toFixed(1)+'%">\x3c/div>\x3c/div>\x3cstrong>'+stage.count+'\x3c/strong>\x3cspan class="text-xs opacity-60">eligible n='+stage.denominator+'\x3c/span>\x3c/div>\x3c/a>'; }).join('') : '\x3cp class="opacity-50">No funnel evidence in this period.\x3c/p>';
+								target.innerHTML = stages.length ? stages.map(function(stage) { const params=clearEvidenceParams(new URLSearchParams(window.location.search)); params.set('view','outcomes'); params.set('evidence',stage.key); const width=Math.max(18,Number(stage.count||0)*100/max); return '\x3ca class="flex-1 card bg-base-200 hover:border-primary border border-transparent" data-analytics-evidence-link href="/analytics?'+escapeHTML(params.toString())+'">\x3cdiv class="card-body p-3">\x3cspan class="text-sm">'+escapeHTML(stage.label)+'\x3c/span>\x3cdiv class="h-3 bg-base-300 rounded">\x3cdiv class="h-3 bg-primary rounded" style="width:'+width.toFixed(1)+'%">\x3c/div>\x3c/div>\x3cstrong>'+stage.count+'\x3c/strong>\x3cspan class="text-xs opacity-60">eligible n='+stage.denominator+'\x3c/span>\x3c/div>\x3c/a>'; }).join('') : '\x3cp class="opacity-50">No funnel evidence in this period.\x3c/p>';
+								bindEvidenceLinks(target);
 							}
 							function renderProjectOutcomeTrend(rows) {
 								const canvas=renderChartState('projectOutcomeTrend','projectOutcomeTrendChart',rows,'No grouped outcome evidence in this period'); if(!canvas)return;
@@ -508,16 +511,37 @@ templ analyticsContent(currentProject *models.Project) {
 									return '\x3ctr>\x3ctd>\x3ca class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+escapeHTML(row.technical_result)+'\x3c/td>\x3ctd>'+escapeHTML(row.goal_result||'Not goal-bearing')+'\x3c/td>\x3ctd>'+escapeHTML(row.model)+'\x3c/td>\x3ctd>'+row.execution_count+'\x3c/td>\x3ctd>'+row.follow_up_count+'\x3c/td>\x3c/tr>';
 								}).join('') : '\x3ctr>\x3ctd colspan="6" class="text-center opacity-50">No recent supporting tasks in this period\x3c/td>\x3c/tr>';
 							}
-							function navigateEvidence(view, key, value, extra) {
-								const params = clearEvidenceParams(new URLSearchParams(window.location.search));
-								params.set('view', view);
-								params.set('evidence', key);
-								if (value !== undefined && value !== null && value !== '') params.set(key, value); else params.delete(key);
-								Object.entries(extra || {}).forEach(function(entry) { if (entry[1]) params.set(entry[0], entry[1]); else params.delete(entry[0]); });
-								history.pushState({}, '', '/analytics?' + params.toString());
-								applyView(view, false);
-								renderDashboard(latestDashboard || {});
-							}
+								function openEvidenceURL(href) {
+									const url = new URL(href, window.location.href);
+									const targetView = validViews.includes(url.searchParams.get('view')) ? url.searchParams.get('view') : selectedView;
+									const viewChanged = targetView !== selectedView;
+									history.pushState({}, '', url.pathname + '?' + url.searchParams.toString());
+									applyView(targetView, false);
+									if (viewChanged) {
+										loadAllData(false);
+										return;
+									}
+									preserveActiveCharts = true;
+									try { renderDashboard(latestDashboard || {}); } finally { preserveActiveCharts = false; }
+								}
+								function bindEvidenceLinks(root) {
+									if (!root) return;
+									root.querySelectorAll('[data-analytics-evidence-link]').forEach(function(link) {
+										link.addEventListener('click', function(event) {
+											event.preventDefault();
+											event.stopPropagation();
+											openEvidenceURL(link.getAttribute('href'));
+										}, { signal: eventSignal });
+									});
+								}
+								function navigateEvidence(view, key, value, extra) {
+									const params = clearEvidenceParams(new URLSearchParams(window.location.search));
+									params.set('view', view);
+									params.set('evidence', key);
+									if (value !== undefined && value !== null && value !== '') params.set(key, value); else params.delete(key);
+									Object.entries(extra || {}).forEach(function(entry) { if (entry[1]) params.set(entry[0], entry[1]); else params.delete(entry[0]); });
+									openEvidenceURL('/analytics?' + params.toString());
+								}
 							function renderAgentDetail(detail) {
 								const trend = detail ? (detail.outcome_trend || []) : [];
 								let canvas = renderChartState('agentOutcomeTrend', 'agentOutcomeTrendChart', trend, 'Select an Agent to see its outcome trend');
@@ -564,7 +588,7 @@ templ analyticsContent(currentProject *models.Project) {
 									render('workflowDurationTable',durations,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.sample_count+'\x3c/td>\x3ctd>'+escapeHTML(formatDuration(Number(row.average_seconds||0)*1000))+'\x3c/td>\x3c/tr>';},'No completed node durations in this period');
 									render('workflowFailureTable',failures,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.count+'\x3c/td>\x3ctd>'+escapeHTML(row.last_failure?new Date(row.last_failure).toLocaleString():'Unavailable')+'\x3c/td>\x3c/tr>';},'No node failures in this period');
 									render('workflowBottleneckTable',bottlenecks,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.waiting+'\x3c/td>\x3ctd>'+row.blocked+'\x3c/td>\x3c/tr>';},'No current bottlenecks');
-									function bar(key,id,rows,label,value,color,empty){const canvas=renderChartState(key,id,rows,empty);if(canvas)charts[key]=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.node_name),datasets:[{label:label,data:rows.map(value),backgroundColor:color}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const details=document.getElementById('automationExactValues');if(details){details.open=true;details.scrollIntoView({block:'nearest'});}}},scales:{x:{beginAtZero:true}}}});}
+									function bar(key,id,rows,label,value,color,empty){const canvas=renderChartState(key,id,rows,empty);if(canvas)charts[key]=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.node_name),datasets:[{label:label,data:rows.map(value),backgroundColor:color}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,onClick:function(_,items){if(items.length){const details=document.getElementById('automationExactValues');if(details){details.open=true;}}},scales:{x:{beginAtZero:true}}}});}
 									bar('automationFunnel','automationFunnelChart',funnel,'Entered',r=>r.entered_count,'#3b82f6','Select an automation to inspect its node funnel');
 									bar('automationDuration','automationDurationChart',durations,'Average seconds',r=>Number(r.average_seconds||0),'#8b5cf6','No completed node durations');
 									bar('automationFailure','automationFailureChart',failures,'Failures',r=>r.count,'#ef4444','No node failures');
@@ -1028,8 +1052,8 @@ templ analyticsContent(currentProject *models.Project) {
 									if (row) {
 										const key = usageModelKey(row);
 										const target = Array.from(table.querySelectorAll('[data-usage-model]')).find(function(node) { return node.dataset.usageModel === key; });
-										if (target) { target.classList.add('bg-primary/10'); target.scrollIntoView({block:'nearest'}); }
-									} else table.scrollIntoView({block:'nearest'});
+										if (target) target.classList.add('bg-primary/10');
+									}
 								}
 									function showUsageSelection(period, modelKey, tokens, row) {
 										const modelLabel = modelKey === 'combined' ? 'All models combined' : usageModelLabel(modelKey);

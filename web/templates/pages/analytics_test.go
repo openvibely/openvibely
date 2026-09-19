@@ -134,6 +134,43 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestAnalyticsContent_KPIAndChartEvidenceDoNotReloadOrJumpInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+(function(){
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=overview');
+  var result=document.getElementById('reconnect-result'),charts={},destroyed=0,scrollCalls=0,dashboardRequests=0;
+  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+  Element.prototype.scrollIntoView=function(){scrollCalls++;};
+  window.Chart=function(ctx,config){var id=ctx&&ctx.canvas?ctx.canvas.id:'';this.config=config;this.destroy=function(){destroyed++;};if(id)charts[id]=this;};
+  function dashboard(){return {definitions:[],current:{technical_completion:{numerator:1,denominator:1,percent:100},goal_achievement:{numerator:1,denominator:1,percent:100},first_pass:{numerator:1,denominator:1,percent:100},follow_up:{numerator:0,denominator:1,percent:0},tasks_evaluated:1},outcome_trend:[{period:'2026-01-10',technical_completion:{percent:100,denominator:1},goal_achievement:{percent:100,denominator:1},first_pass:{percent:100,denominator:1},follow_up:{percent:0,denominator:1}}],funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],agent_skill_outcomes:[],skill_outcomes:[],model_categories:[],workflows:[],evidence_total:1,evidence_limit:20,evidence_offset:0,recent_outcomes:[{task_id:'task-1',task_title:'Task One',technical_result:'completed',goal_result:'achieved',merge_state:'',agent_name:'Agent',model:'Model',model_config_ids:[],terminal_period_statuses:['2026-01-10|completed'],category:'completed',created_in_period:true,started_in_period:true,first_pass_eligible:true,first_pass_completed:true,goal_achievement_eligible:true,goal_achieved_in_period:true,cycle_eligible:true,cycle_time_ms:1000,execution_count:1,period_completed_count:1,period_failed_count:0,period_cancelled_count:0,follow_up_count:0}],insights:[]};}
+  window.fetch=function(url){var value=String(url),payload=[];if(value.indexOf('/api/analytics/dashboard')>=0){dashboardRequests++;payload=dashboard();}if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(value.indexOf('/api/analytics/execution-trends-by-hour')>=0)payload=[{Hour:10,Count:1}];return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
+  function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out');setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
+  window.addEventListener('load',function(){waitFor(function(){return document.querySelector('#analyticsKpis a')&&charts.projectOutcomeTrendChart;},function(){
+    var analyticsRoot=document.querySelector('[data-analytics-navigation]').parentElement;
+    document.querySelector('#analyticsKpis a').click();
+    waitFor(function(){return new URLSearchParams(location.search).get('view')==='outcomes'&&charts.hourlyTrendsChart;},function(){
+      if(document.querySelector('[data-analytics-navigation]').parentElement!==analyticsRoot)fail('KPI click replaced the Analytics page');
+      var chart=window._analyticsCharts.hourlyTrends,requests=dashboardRequests,destroyedBefore=destroyed;
+      chart.config.options.onClick({},[{index:10}]);
+      setTimeout(function(){
+        if(window._analyticsCharts.hourlyTrends!==chart)fail('chart evidence click recreated the chart');
+        if(destroyed!==destroyedBefore)fail('chart evidence click destroyed active charts');
+        if(dashboardRequests!==requests)fail('chart evidence click reloaded dashboard data');
+        if(scrollCalls!==0)fail('evidence click forced a page scroll');
+        if(new URLSearchParams(location.search).get('evidence')!=='execution_hour')fail('chart evidence URL was not preserved');
+        result.setAttribute('data-test-result','pass');
+      },40);
+    });
+  });});
+})();</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_FiltersHistoryAndFailuresBehaviorInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
