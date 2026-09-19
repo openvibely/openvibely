@@ -1895,6 +1895,7 @@ for _, agent := range modelOptions {
 			}
 
 			function populateModelEditForm(button) {
+				cancelOpenAICompatibleDiscovery();
 				var id = button.dataset.modelId;
 				var name = button.dataset.modelName;
 					var dbProvider = button.dataset.modelProvider;
@@ -2018,6 +2019,7 @@ for _, agent := range modelOptions {
 			}
 
 			function toggleProviderFields(selectedModel, selectedReasoningEffort) {
+				cancelOpenAICompatibleDiscovery();
 				var provider = document.getElementById('model_provider').value;
 				var effectiveProvider = canonicalProvider(provider);
 				var modelField = document.getElementById('model_field');
@@ -2292,6 +2294,7 @@ for _, agent := range modelOptions {
 					}
 
 				function closeModelModal() {
+					cancelOpenAICompatibleDiscovery();
 					window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;
 					window._modelEditRequestedID = '';
 					new_model_modal.close();
@@ -2326,6 +2329,7 @@ for _, agent := range modelOptions {
 				}
 
 				function openNewModelModal() {
+					cancelOpenAICompatibleDiscovery();
 					window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;
 					window._modelEditRequestedID = '';
 					var form = document.getElementById('model_form');
