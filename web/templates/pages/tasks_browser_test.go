@@ -126,7 +126,7 @@ func driveNativeTaskDrags(debugPort int, serverURL string, dragReady <-chan task
 	return result
 }
 
-func TestTasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testing.T) {
+func TestBrowserFunctional_TasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -667,7 +667,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestBacklogExecuteAllSubmitsWithoutConfirmationInChrome(t *testing.T) {
+func TestBrowserFunctional_BacklogExecuteAllSubmitsWithoutConfirmationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -839,7 +839,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestCapacityQueuedAutomationAndTerminalTasksAreVisibleInChrome(t *testing.T) {
+func TestBrowserFunctional_CapacityQueuedAutomationAndTerminalTasksAreVisibleInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -1013,7 +1013,7 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 	}
 }
 
-func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
+func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var page bytes.Buffer
 	if err := layout.Base("Primary action color", nil, "").Render(context.Background(), &page); err != nil {
@@ -1348,7 +1348,7 @@ func TestThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *testing.T) {
 	}
 }
 
-func TestTaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := models.Task{
 		ID:          "mobile-merged",
@@ -1522,7 +1522,7 @@ func TestTaskCardActionsOwnDirectRequestMetadata(t *testing.T) {
 	}
 }
 
-func TestTaskCardMergeMenuDirectActionNon2xxRetryAndBoardRefreshInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndBoardRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -1863,7 +1863,7 @@ func TestTaskCardMergeMenuDirectActionNon2xxRetryAndBoardRefreshInChrome(t *test
 	}
 }
 
-func TestTaskAndAutomationCardKebabMenuRowHeightParityAndDropZoneGeometryInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZoneGeometryInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -2073,7 +2073,7 @@ func TestTaskAndAutomationCardKebabMenuRowHeightParityAndDropZoneGeometryInChrom
 		t.Fatalf("Task card menu browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
 }
-func TestTaskBoardDeleteAllConfirmationFlowInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskBoardDeleteAllConfirmationFlowInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -2345,7 +2345,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestTaskBoardDeleteAllConfirmationResponsiveInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskBoardDeleteAllConfirmationResponsiveInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {

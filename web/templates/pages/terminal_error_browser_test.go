@@ -107,7 +107,7 @@ func awaitTerminalBrowserTransition(browser *composerFocusCDP, execID, label str
 	}
 }
 
-func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
+func TestBrowserFunctional_TaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -313,7 +313,7 @@ func TestTaskThreadLiveFailureProductionWiringInChrome(t *testing.T) {
 	}
 }
 
-func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
