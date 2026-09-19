@@ -152,8 +152,9 @@ func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID 
 		hasFilters = true
 	}
 	if title := strings.TrimSpace(filter.Title); title != "" {
-		where += ` AND t.title LIKE ?`
-		args = append(args, "%"+title+"%")
+		titlePattern := escapeSQLLikePatternLiteral(title)
+		where += ` AND t.title LIKE ? ESCAPE '\'`
+		args = append(args, "%"+titlePattern+"%")
 		hasFilters = true
 	}
 	if filter.Enabled != nil {

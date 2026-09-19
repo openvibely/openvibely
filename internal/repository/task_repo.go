@@ -1999,6 +1999,10 @@ const taskDiscoverySelectColumns = `id, title, category, status, priority, updat
 // swarm_config, and local worktree paths.
 const swarmInspectionSelectColumns = `id, project_id, title, category, priority, status, updated_at, parent_task_id, swarm_role, swarm_status, swarm_sequence, worktree_branch, merge_status`
 
+func escapeSQLLikePatternLiteral(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+}
+
 // ListTasksForDiscovery returns a bounded, deterministic page of non-chat tasks for
 // a single project, plus the total number of matching rows for pagination. It never
 // crosses project boundaries and always excludes internal chat rows (CategoryChat).
@@ -2012,8 +2016,9 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 
 	query := strings.TrimSpace(filter.Query)
 	if query != "" {
-		where += ` AND title LIKE ?`
-		args = append(args, "%"+query+"%")
+		queryPattern := escapeSQLLikePatternLiteral(query)
+		where += ` AND title LIKE ? ESCAPE '\'`
+		args = append(args, "%"+queryPattern+"%")
 	}
 	if cat := strings.TrimSpace(filter.Category); cat != "" {
 		where += ` AND category = ?`
@@ -2032,12 +2037,13 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 	orderClause := ` ORDER BY updated_at DESC, id ASC`
 	selectArgs := append([]any{}, args...)
 	if query != "" {
+		prefixPattern := escapeSQLLikePatternLiteral(query) + "%"
 		orderClause = ` ORDER BY
-			   CASE WHEN LOWER(title) = LOWER(?) THEN 0
-			        WHEN LOWER(title) LIKE LOWER(? || '%') THEN 1
-			        ELSE 2 END,
-			   updated_at DESC, id ASC`
-		selectArgs = append(selectArgs, query, query)
+				   CASE WHEN LOWER(title) = LOWER(?) THEN 0
+				        WHEN LOWER(title) LIKE LOWER(?) ESCAPE '\' THEN 1
+				        ELSE 2 END,
+				   updated_at DESC, id ASC`
+		selectArgs = append(selectArgs, query, prefixPattern)
 	}
 
 	limit := filter.Limit

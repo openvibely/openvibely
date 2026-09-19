@@ -949,7 +949,7 @@ func TestScheduleRepo_ListSchedulesForDiscoveryFilteredAndOffsetPathsRemainCorre
 	// join plus temp-sort strategy instead of forcing the global order index; selective
 	// task, title, and enabled predicates can be cheaper than scanning ordered rows
 	// across every project.
-	filteredQuery := scheduleDiscoverySelectSQL(`t.project_id = ? AND t.title LIKE ?`, false)
+	filteredQuery := scheduleDiscoverySelectSQL(`t.project_id = ? AND t.title LIKE ? ESCAPE '\'`, false)
 	filteredPlan := explainScheduleDiscoveryQueryPlan(t, db, filteredQuery, scheduleDiscoveryTargetProjectID, "%task-00001%", 20, 0)
 	if strings.Contains(filteredPlan, "idx_schedules_discovery_order") {
 		t.Fatalf("filtered plan = %s, should not force global order index", filteredPlan)

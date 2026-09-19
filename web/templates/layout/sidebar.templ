@@ -279,7 +279,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-							if (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
+							if (eventType === 'task_board_updated' || eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_lifecycle_execution_changed' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_steered' || eventType === 'task_thread_input_cancelled' || eventType === 'task_goal_updated' || eventType === 'task_goal_paused' || eventType === 'task_goal_resumed' || eventType === 'task_goal_cleared' || eventType === 'task_goal_evaluated' || eventType === 'task_goal_followup_queued' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 								if (eventType.indexOf('automation_') === 0) {
 									window._tabVisibility.dispatchSSEEvent('sse-automation-event', data);
@@ -352,46 +352,52 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							return '/events/live?' + params.toString();
 						}
 
-						var liveSSEHandlers = {
-							onopen: function() {
-								console.log('[SSE-Live] Connected to shared live events');
-								window._tabVisibility.dispatchSSEEvent('sse-live-connected', {
-									reconnected: liveSSEHasConnected
-								});
-								liveSSEHasConnected = true;
-							},
-							onerror: function(err) {
-								console.error('[SSE-Live] Connection error:', err);
-							},
-							listeners: {
-								'task_board_updated': handleLiveEvent,
-								'task_status_changed': handleLiveEvent,
-								'task_category_changed': handleLiveEvent,
-								'task_thread_execution_started': handleLiveEvent,
-								'task_lifecycle_execution_changed': handleLiveEvent,
-								'task_thread_input_applied': handleLiveEvent,
-								'task_thread_input_queued': handleLiveEvent,
-								'task_thread_input_steered': handleLiveEvent,
-								'task_thread_input_cancelled': handleLiveEvent,
-								'alert_created': handleLiveEvent,
-								'automation_definition_updated': handleLiveEvent,
-								'automation_invocation_started': handleLiveEvent,
-								'automation_invocation_updated': handleLiveEvent,
-								'automation_work_item_updated': handleLiveEvent,
-								'automation_transition_created': handleLiveEvent,
-								'automation_resource_linked': handleLiveEvent,
-								'chat_new_message': handleLiveEvent,
-								'chat_response_done': handleLiveEvent,
-								'chat_turn_steered': handleLiveEvent,
-								'chat_thread_input_applied': handleLiveEvent,
-'chat_thread_input_cancelled': handleLiveEvent,
+							var liveSSEHandlers = {
+								onopen: function() {
+									console.log('[SSE-Live] Connected to shared live events');
+									window._tabVisibility.dispatchSSEEvent('sse-live-connected', {
+										reconnected: liveSSEHasConnected
+									});
+									liveSSEHasConnected = true;
+								},
+								onerror: function(err) {
+									console.error('[SSE-Live] Connection error:', err);
+								},
+								listeners: {
+									'task_board_updated': handleLiveEvent,
+									'task_status_changed': handleLiveEvent,
+									'task_category_changed': handleLiveEvent,
+									'task_thread_execution_started': handleLiveEvent,
+									'task_lifecycle_execution_changed': handleLiveEvent,
+									'task_thread_input_applied': handleLiveEvent,
+									'task_thread_input_queued': handleLiveEvent,
+									'task_thread_input_steered': handleLiveEvent,
+									'task_thread_input_cancelled': handleLiveEvent,
+									'task_goal_updated': handleLiveEvent,
+									'task_goal_paused': handleLiveEvent,
+									'task_goal_resumed': handleLiveEvent,
+									'task_goal_cleared': handleLiveEvent,
+									'task_goal_evaluated': handleLiveEvent,
+									'task_goal_followup_queued': handleLiveEvent,
+									'alert_created': handleLiveEvent,
+									'automation_definition_updated': handleLiveEvent,
+									'automation_invocation_started': handleLiveEvent,
+									'automation_invocation_updated': handleLiveEvent,
+									'automation_work_item_updated': handleLiveEvent,
+									'automation_transition_created': handleLiveEvent,
+									'automation_resource_linked': handleLiveEvent,
+									'chat_new_message': handleLiveEvent,
+									'chat_response_done': handleLiveEvent,
+									'chat_turn_steered': handleLiveEvent,
+									'chat_thread_input_applied': handleLiveEvent,
+									'chat_thread_input_cancelled': handleLiveEvent,
 									'chat_user_input_requested': handleLiveEvent,
-									'mixture_progress': handleLiveEvent,								'file_modified': handleLiveEvent,
-								'file_deleted': handleLiveEvent,
-								'diff_snapshot': handleLiveEvent
-							}
-						};
-
+									'mixture_progress': handleLiveEvent,
+									'file_modified': handleLiveEvent,
+									'file_deleted': handleLiveEvent,
+									'diff_snapshot': handleLiveEvent
+								}
+							};
 						function retargetLiveEvents(projectID, taskID) {
 							if (!projectID) {
 								if (window._sidebarSSE) window._sidebarSSE.close();
