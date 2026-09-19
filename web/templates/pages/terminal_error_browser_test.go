@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
@@ -405,7 +406,10 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		browser.waitFor("native upward Chat reading intent during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker;return String(!!(tracker&&tracker.userScrolledUp&&messages.scrollTop<messages.scrollHeight-messages.clientHeight-100));})()`, "true")
 		browser.waitFor("stable native Chat scroll position during terminal render", `(function(){var top=document.getElementById('chat-messages').scrollTop;if(window.__terminalChatLastTop===top)window.__terminalChatStable=(window.__terminalChatStable||0)+1;else{window.__terminalChatLastTop=top;window.__terminalChatStable=0;}return String(window.__terminalChatStable>=3);})()`, "true")
 		releaseTerminalBrowserRender(browser, "failed page-level Chat render")
-		browser.waitFor("page-level Chat terminal render and sync", `String(window.__terminalRenderSettled>=window.__terminalSettledBeforeFailure+1&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure)`, "true")
+		// Production live rendering has its own 30-second cancellation fallback.
+		// Keep this integration assertion beyond that contract so a contended CI
+		// runner cannot fail while the renderer is still allowed to be pending.
+		browser.waitForTimeout("page-level Chat terminal render and sync", `String(window.__terminalRenderSettled>=window.__terminalSettledBeforeFailure+1&&window.__terminalSyncCalls>window.__terminalSyncBeforeFailure)`, "true", 35*time.Second)
 		browser.waitFor("page-level Chat terminal alert", `(function(){var pair=document.getElementById('chat-execution-`+execID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&err.getAttribute('role')==='alert'&&err.textContent==='Error: live Chat terminal <unsafe>'&&err.innerHTML.indexOf('<unsafe>')===-1&&pair.querySelectorAll('[data-terminal-error="true"]').length===1));})()`, "true")
 		browser.waitFor("page-level Chat reader remains above bottom", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker,bottomGap=messages.scrollHeight-messages.scrollTop-messages.clientHeight;return String(!!(tracker&&tracker.userScrolledUp&&bottomGap>2));})()`, "true")
 
@@ -427,7 +431,7 @@ func TestChatLiveCreatedFailureProductionWiringInChrome(t *testing.T) {
 		browser.wheel("#chat-messages", 12000)
 		browser.waitFor("page-level Chat reader returns to bottom during terminal render", `(function(){var messages=document.getElementById('chat-messages'),tracker=window._chatPageTracker,pair=document.getElementById('chat-execution-`+returnExecID+`');return String(!!(tracker&&!tracker.userScrolledUp&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=100&&pair&&!pair.querySelector('[data-terminal-error="true"]')));})()`, "true")
 		releaseTerminalBrowserRender(browser, "failed returning page-level Chat render")
-		browser.waitFor("returning page-level Chat reader pinned after terminal render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+returnExecID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__returnSettledBeforeFailure&&window.__terminalSyncCalls>window.__returnSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true")
+		browser.waitForTimeout("returning page-level Chat reader pinned after terminal render", `(function(){var messages=document.getElementById('chat-messages'),pair=document.getElementById('chat-execution-`+returnExecID+`'),out=pair&&pair.querySelector('[data-raw-content]'),err=pair&&pair.querySelector('[data-terminal-error="true"]');return String(!!(window.__terminalRenderSettled>window.__returnSettledBeforeFailure&&window.__terminalSyncCalls>window.__returnSyncBeforeFailure&&out&&err&&(out.compareDocumentPosition(err)&Node.DOCUMENT_POSITION_FOLLOWING)&&(messages.scrollHeight-messages.scrollTop-messages.clientHeight)<=2));})()`, "true", 35*time.Second)
 	})
 	if chatRequests.Load() < 3 {
 		t.Fatalf("production Chat requests = %d, want initial page plus two authoritative terminal syncs", chatRequests.Load())
