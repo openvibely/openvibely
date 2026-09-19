@@ -153,25 +153,46 @@ jobs:
       - name: Ensure generated files are committed
         run: git diff --exit-code
 
+      - name: Validate browser test naming
+        shell: bash
+        run: |
+          legacy_names="$(grep -REn --include='*_test.go' '^func Test.*InChrome\(' web/templates/components web/templates/pages | grep -Ev '^.*func TestBrowser(Functional|Performance)_' || true)"
+          direct_browser_violations="$(
+            awk '
+              /^func Test/ {
+                test_name = $2
+                sub(/\(.*/, "", test_name)
+              }
+              /chatNavigationChromePath\(t\)|testChromePath\(t\)|runReconnectChromeFixture\(t,/ {
+                if (test_name !~ /^TestBrowser(Functional|Performance)_/) {
+                  print FILENAME ": " test_name
+                }
+              }
+            ' web/templates/components/*_test.go web/templates/pages/*_test.go
+          )"
+          if [[ -n "$legacy_names" || -n "$direct_browser_violations" ]]; then
+            echo "Browser tests must use TestBrowserFunctional_ or TestBrowserPerformance_."
+            [[ -z "$legacy_names" ]] || echo "$legacy_names"
+            [[ -z "$direct_browser_violations" ]] || echo "$direct_browser_violations"
+            exit 1
+          fi
+
       - name: Run all tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_TESTS: "1"
-          OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: go test ./... -count=1 -timeout 600s -coverpkg=./... -coverprofile=coverage.txt
 
-      - name: Run component browser tests
-        env:
-          OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./web/templates/components -count=1 -timeout 180s
+      - name: Run component functional browser tests
+        run: go test ./web/templates/components -run '^TestBrowserFunctional_' -count=1 -timeout 180s
 
-      - name: Run page browser tests
-        run: go test ./web/templates/pages -count=1 -timeout 300s
+      - name: Run page functional browser tests
+        run: go test ./web/templates/pages -run '^TestBrowserFunctional_' -count=1 -timeout 300s
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
 
-      - name: Run browser performance regression
-        run: go test ./web/templates/components -run '^TestLargeToolOutputHydrationIsLazyAndStatefulInChrome$' -count=1 -timeout 60s
+      - name: Run browser performance regressions
+        run: go test ./web/templates/components -run '^TestBrowserPerformance_' -count=1 -timeout 120s
 
       - name: Show coverage summary (excluding generated/fixture code)
         run: |

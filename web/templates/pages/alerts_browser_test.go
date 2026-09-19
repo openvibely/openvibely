@@ -18,7 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestAlertsTaskLinkedCardsSupportNativeKeyboardNavigationInChrome(t *testing.T) {
+func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projectID := "project-alerts-keyboard"
 	taskID := "task-alert-direct"
@@ -173,7 +173,7 @@ func TestAlertsTaskLinkedCardsSupportNativeKeyboardNavigationInChrome(t *testing
 	})
 }
 
-func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
+func TestBrowserFunctional_AlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
 	implementationTaskID := "implementation-task-1"
@@ -308,7 +308,7 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	}
 }
 
-func TestAlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *testing.T) {
+func TestBrowserFunctional_AlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	projectID := "project-alerts-markdown"
 	body := "# Heading\r\n\r\n**emphasis** with `getJSON`\r\n\r\n- first\r\n- second\r\n\r\n[external](https://example.test/link) [internal](/tasks/internal)\r\n\r\n```go\r\nline 1\r\nline 2\r\n```\r\n\r\n<img src=x onerror=alert(1)>\rbare carriage return café"
@@ -562,7 +562,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
-func TestSystemUpdateSurfacesShareNormalizedSnapshotStateInChrome(t *testing.T) {
+func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 
 	currentSnapshot := `{"current_version":"0.3.0","state":"available","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.0","release_notes_url":"https://example.test/releases/0.4.0"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`
@@ -690,7 +690,7 @@ func TestSystemUpdateSurfacesShareNormalizedSnapshotStateInChrome(t *testing.T) 
 	}
 }
 
-func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) {
+func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {

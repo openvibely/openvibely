@@ -118,7 +118,7 @@ func TestWorkerSettingsContentShowsUnlimitedForProjectRunningColumn(t *testing.T
 	}
 }
 
-func TestWorkerSettingsManyRowsScrollInMainContentAfterHTMXRefreshInChrome(t *testing.T) {
+func TestBrowserFunctional_WorkerSettingsManyRowsScrollInMainContentAfterHTMXRefreshInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {

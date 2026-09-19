@@ -16,7 +16,7 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-func TestChatRenderedLinksOpenOutsideAppAndDesktopExternalBrowserBridge(t *testing.T) {
+func TestBrowserFunctional_ChatRenderedLinksOpenOutsideAppAndDesktopExternalBrowserBridge(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 
 	var base bytes.Buffer

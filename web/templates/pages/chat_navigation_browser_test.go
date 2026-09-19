@@ -20,7 +20,7 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-func TestChatNavigationStateAndActiveStreamInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatNavigationStateAndActiveStreamInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -403,7 +403,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 	}
 }
 
-func TestChatActionsDropdownRuntimeInChrome(t *testing.T) {
+func TestBrowserFunctional_ChatActionsDropdownRuntimeInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {

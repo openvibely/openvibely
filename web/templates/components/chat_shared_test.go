@@ -214,7 +214,7 @@ func TestLatestMessageButtonAndControllerContract(t *testing.T) {
 	}
 }
 
-func TestLatestMessageButtonDynamicBehaviorInChrome(t *testing.T) {
+func TestBrowserFunctional_LatestMessageButtonDynamicBehaviorInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var chatButton, threadButton, chatScript bytes.Buffer
 	if err := ChatLatestMessageButton("chat-messages", "scrollTracker_chat-messages").Render(context.Background(), &chatButton); err != nil {
@@ -1083,7 +1083,7 @@ func TestCompletedErrorBubbleUsesSharedHydratorWithoutInlineScript(t *testing.T)
 	}
 }
 
-func TestCompletedBubbleSharedHydrationInChrome(t *testing.T) {
+func TestBrowserFunctional_CompletedBubbleSharedHydrationInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var bubble bytes.Buffer
 	if err := ChatBubble("Assistant", "# Rendered\n\n```go\nfmt.Println(\"hi\")\n```").Render(context.Background(), &bubble); err != nil {
@@ -1175,7 +1175,7 @@ func TestCompletedBubbleSharedHydrationInChrome(t *testing.T) {
 	}
 }
 
-func TestFailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T) {
+func TestBrowserFunctional_FailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	longOutput := strings.Repeat("partial generated line\n", 120)
 	var initial, liveBottom, liveReader, chatScript bytes.Buffer
@@ -1317,7 +1317,7 @@ func TestFailedAssistantTerminalErrorOrderingAndSmartScrollInChrome(t *testing.T
 	}
 }
 
-func TestCodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
+func TestBrowserPerformance_CodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	type slowWorkerResult struct {
 		status      string
@@ -5629,7 +5629,7 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 	}
 }
 
-func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
+func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var chatScript bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
@@ -6042,7 +6042,7 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 	}
 }
 
-func TestLargeToolOutputHydrationIsLazyAndStatefulInChrome(t *testing.T) {
+func TestBrowserPerformance_LargeToolOutputHydrationIsLazyAndStatefulInChrome(t *testing.T) {
 	if os.Getenv("OPENVIBELY_SKIP_BROWSER_TESTS") == "1" {
 		t.Skip("browser tests run in an isolated CI step")
 	}
