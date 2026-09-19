@@ -3242,6 +3242,57 @@ func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
 		})
 	}
 
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`   `)} {
+		decoded, decodeErr := DecodeCreateAgentRuntimeInput(raw)
+		require.NoError(t, decodeErr)
+		require.Empty(t, decoded.Name)
+		require.Empty(t, decoded.SystemPrompt)
+	}
+
+	_, defaulted, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input: CreateAgentRuntimeInput{
+			Name:         "Default Tool Agent",
+			SystemPrompt: "Use default tools.",
+			Scope:        "project",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, defaultRuntimeAgentTools(), defaulted.Tools)
+
+	_, blankDefaulted, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input: CreateAgentRuntimeInput{
+			Name:         "Blank Tool Agent",
+			SystemPrompt: "Use default tools after blank normalization.",
+			Tools:        []string{" ", "\t"},
+			Scope:        "project",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, defaultRuntimeAgentTools(), blankDefaulted.Tools)
+
+	_, normalized, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input: CreateAgentRuntimeInput{
+			Name:         "Normalized Tool Agent",
+			SystemPrompt: "Normalize tools.",
+			Tools:        []string{"  grep ", "READ", "Grep", "read"},
+			Scope:        "project",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Grep", "Read"}, normalized.Tools)
+
 	_, decodeErr := DecodeCreateAgentRuntimeInput(json.RawMessage(`{"name":"Unsafe","system_prompt":"x","mcp_servers":[{"env":{"API_KEY":"secret"}}]}`))
 	require.Error(t, decodeErr)
 	require.Contains(t, decodeErr.Error(), `create_agent does not support "mcp_servers"`)
@@ -3335,6 +3386,35 @@ func TestUpdateAgentRuntimePatchesSafeFieldsAndPreservesOwnership(t *testing.T) 
 	require.NoError(t, err, out)
 	require.NotNil(t, updated)
 	require.Equal(t, "Updated by key", updated.Description)
+
+	out, updated, err = ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input:         UpdateAgentRuntimeInput{AgentID: agent.ID, Tools: &[]string{"  grep ", "READ", "Grep", "read"}},
+	})
+	require.NoError(t, err, out)
+	require.Equal(t, []string{"Grep", "Read"}, updated.Tools)
+
+	explicitEmptyTools := []string{}
+	out, updated, err = ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input:         UpdateAgentRuntimeInput{AgentID: agent.ID, Tools: &explicitEmptyTools},
+	})
+	require.NoError(t, err, out)
+	require.Empty(t, updated.Tools)
+
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`   `)} {
+		decoded, decodeErr := DecodeUpdateAgentRuntimeInput(raw)
+		require.NoError(t, decodeErr)
+		require.Empty(t, decoded.AgentID)
+		require.Empty(t, decoded.AgentName)
+		require.Empty(t, decoded.Key)
+	}
 
 	selectable, err := agentRepo.ListSelectableForProject(ctx, project.ID, 10)
 	require.NoError(t, err)
