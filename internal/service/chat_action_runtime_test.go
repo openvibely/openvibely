@@ -2919,6 +2919,42 @@ func TestExecuteUpdateProjectSettingsRuntimeTreatsZeroProjectLimitAsInherited(t 
 	require.False(t, resp.WorkerLimit.Set)
 }
 
+func TestApplyProjectWorkerLimitUpdateClassifiesDispatchFromEffectiveLimits(t *testing.T) {
+	ptr := func(v int) *int { return &v }
+
+	for _, tt := range []struct {
+		name            string
+		oldLimit        *int
+		inputLimit      *int
+		clearMaxWorkers bool
+		wantChanged     bool
+		wantDispatch    bool
+		wantLimit       *int
+	}{
+		{name: "lower finite cap", oldLimit: ptr(4), inputLimit: ptr(2), wantChanged: true, wantDispatch: false, wantLimit: ptr(2)},
+		{name: "raise finite cap", oldLimit: ptr(2), inputLimit: ptr(4), wantChanged: true, wantDispatch: true, wantLimit: ptr(4)},
+		{name: "clear finite cap", oldLimit: ptr(2), inputLimit: ptr(0), wantChanged: true, wantDispatch: true},
+		{name: "clear legacy zero cap", oldLimit: ptr(0), clearMaxWorkers: true, wantChanged: false, wantDispatch: false},
+		{name: "unchanged finite cap", oldLimit: ptr(2), inputLimit: ptr(2), wantChanged: false, wantDispatch: false, wantLimit: ptr(2)},
+		{name: "unchanged inherited nil to zero", oldLimit: nil, inputLimit: ptr(0), wantChanged: false, wantDispatch: false},
+		{name: "initially unlimited to finite", oldLimit: nil, inputLimit: ptr(3), wantChanged: true, wantDispatch: false, wantLimit: ptr(3)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			project := &models.Project{Name: "Runtime Dispatch Project", MaxWorkers: tt.oldLimit}
+			changed, shouldDispatch, errMsg := applyProjectWorkerLimitUpdate(project, UpdateProjectSettingsRuntimeInput{MaxWorkers: tt.inputLimit, ClearMaxWorkers: tt.clearMaxWorkers}, 0)
+			require.Empty(t, errMsg)
+			require.Equal(t, tt.wantChanged, changed)
+			require.Equal(t, tt.wantDispatch, shouldDispatch)
+			if tt.wantLimit == nil {
+				require.Nil(t, project.MaxWorkers)
+			} else {
+				require.NotNil(t, project.MaxWorkers)
+				require.Equal(t, *tt.wantLimit, *project.MaxWorkers)
+			}
+		})
+	}
+}
+
 func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUpdate(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

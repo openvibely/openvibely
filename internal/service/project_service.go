@@ -161,18 +161,11 @@ func (s *ProjectService) validateProjectWorkerLimit(ctx context.Context, p *mode
 		if err != nil {
 			return err
 		}
-		if current != nil && projectWorkerLimitsEqual(current.MaxWorkers, p.MaxWorkers) {
+		if current != nil && models.ProjectWorkerLimitsEqual(current.MaxWorkers, p.MaxWorkers) {
 			return nil
 		}
 	}
 	return models.ValidateProjectWorkerLimit(p.MaxWorkers, globalMaxWorkers)
-}
-
-func projectWorkerLimitsEqual(a, b *int) bool {
-	if a == nil || b == nil {
-		return (a == nil || *a == 0) && (b == nil || *b == 0)
-	}
-	return *a == *b
 }
 
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
