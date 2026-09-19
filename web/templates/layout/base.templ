@@ -3008,10 +3008,34 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 			const taskCardMergeOptionRequests = new Map();
 
+			function setTaskCardMergeOptionsStatus(options, mode, dropdown, label) {
+				if (!options) return;
+				const idle = options.querySelector('[data-task-card-merge-options-label]');
+				const loading = options.querySelector('[data-task-card-merge-options-loading-status]');
+				const error = options.querySelector('[data-task-card-merge-options-error]');
+				const retry = options.querySelector('[data-task-card-merge-options-retry]');
+				if (idle) idle.classList.toggle('hidden', mode !== 'idle');
+				if (loading) loading.classList.toggle('hidden', mode !== 'loading');
+				if (error) error.classList.toggle('hidden', mode !== 'error');
+				if (retry) {
+					retry.classList.toggle('hidden', mode !== 'error');
+					retry.disabled = mode === 'loading';
+					if (!retry.__openVibelyMergeOptionsRetry) {
+						retry.__openVibelyMergeOptionsRetry = true;
+						retry.addEventListener('click', function(event) {
+							event.preventDefault();
+							event.stopPropagation();
+							loadTaskCardMergeOptions(dropdown, label);
+						});
+					}
+				}
+				options.setAttribute('aria-busy', mode === 'loading' ? 'true' : 'false');
+			}
+
 			function taskCardMergeOptionsRequest(refreshURL) {
 				let request = taskCardMergeOptionRequests.get(refreshURL);
 				if (request) return request;
-				request = fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true'}}).then(function(response) {
+				request = fetch(refreshURL, {credentials: 'same-origin', headers: {'HX-Request': 'true', 'HX-Current-URL': window.location.href}}).then(function(response) {
 					const redirectURL = response.headers.get('HX-Redirect');
 					if (redirectURL) {
 						const redirectError = new Error('Authentication redirect');
@@ -3036,8 +3060,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				const refreshURL = options && options.getAttribute('data-task-card-merge-options-url');
 				if (!options || !refreshURL || options.hasAttribute('data-task-card-merge-options-loading')) return;
 				options.setAttribute('data-task-card-merge-options-loading', 'true');
-				options.setAttribute('aria-busy', 'true');
 				options.classList.add('htmx-request');
+				setTaskCardMergeOptionsStatus(options, 'loading', dropdown, label);
 				taskCardMergeOptionsRequest(refreshURL).then(function(html) {
 					if (!options.isConnected) return;
 					options.outerHTML = html;
@@ -3047,19 +3071,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (error && error.taskCardMergeOptionsRedirect) return;
 					if (!options.isConnected) return;
 					options.removeAttribute('data-task-card-merge-options-loading');
-					options.removeAttribute('aria-busy');
 					options.classList.remove('htmx-request');
-					options.replaceChildren();
-					const retry = document.createElement('button');
-					retry.type = 'button';
-					retry.className = 'text-error text-left';
-					retry.textContent = 'Could not load Git actions. Retry';
-					retry.addEventListener('click', function(event) {
-						event.preventDefault();
-						event.stopPropagation();
-						loadTaskCardMergeOptions(dropdown, label);
-					});
-					options.appendChild(retry);
+					setTaskCardMergeOptionsStatus(options, 'error', dropdown, label);
 					if (dropdown.getAttribute('data-kanban-menu-open') === 'true') positionDropdownForViewport(label);
 				});
 			}

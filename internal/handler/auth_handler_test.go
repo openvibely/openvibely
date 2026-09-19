@@ -214,16 +214,46 @@ func TestAuthMiddleware_FullPageRedirectWhenUnauthenticated(t *testing.T) {
 
 func TestAuthMiddleware_HTMXGets401WithHXRedirect(t *testing.T) {
 	_, e := authTestHandler(t)
-	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=p1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/task-1/card/merge-options?project_id=p1", nil)
 	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Current-URL", "http://example.com/tasks?project_id=p1")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
-	if !strings.HasPrefix(rec.Header().Get("HX-Redirect"), "/login?next=") {
-		t.Fatalf("expected HX-Redirect to login, got %q", rec.Header().Get("HX-Redirect"))
+	redirectURL, err := url.Parse(rec.Header().Get("HX-Redirect"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextURL, err := auth.DecodeNext(redirectURL.Query().Get("next"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextURL != "/tasks?project_id=p1" {
+		t.Fatalf("expected login to return to the current Tasks page, got %q", nextURL)
+	}
+}
+
+func TestAuthMiddleware_HTMXRejectsCrossOriginCurrentURL(t *testing.T) {
+	_, e := authTestHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/task-1/card/merge-options?project_id=p1", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Current-URL", "https://attacker.example/phishing")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	redirectURL, err := url.Parse(rec.Header().Get("HX-Redirect"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextURL, err := auth.DecodeNext(redirectURL.Query().Get("next"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextURL != "/tasks/task-1/card/merge-options?project_id=p1" {
+		t.Fatalf("expected unsafe current URL to fall back to the request URI, got %q", nextURL)
 	}
 }
 

@@ -511,8 +511,12 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						data-task-card-merge-options
 						data-task-card-merge-options-url={ fmt.Sprintf("/tasks/%s/card/merge-options?project_id=%s", task.ID, projectID) }
 						role="status"
+						aria-live="polite"
 					>
-						<span class="opacity-60"><span class="loading loading-spinner loading-xs htmx-indicator"></span> Merge options</span>
+						<span data-task-card-merge-options-label class="opacity-60">Merge options</span>
+						<span data-task-card-merge-options-loading-status class="hidden opacity-60"><span class="loading loading-spinner loading-xs" aria-hidden="true"></span> Loading Git actions...</span>
+						<span data-task-card-merge-options-error class="hidden text-error">Could not load Git actions.</span>
+						<button type="button" data-task-card-merge-options-retry class="hidden text-error text-left">Retry</button>
 					</li>
 				}
 
