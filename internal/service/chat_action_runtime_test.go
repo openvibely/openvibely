@@ -684,6 +684,45 @@ func TestAlertRuntimeOwnedNotificationMutationsRequireCallerAndService(t *testin
 	}
 }
 
+func TestAlertRuntimeOwnedNotificationMutationsRejectUnownedAutomationInboxNotification(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Unowned inbox notification"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+	createdJSON, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"product","title":"Unowned preflight target"}`))
+	require.NoError(t, err)
+	var created struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+
+	automationCtx := WithAutomationContext(ctx, models.AutomationContext{
+		ProjectID: project.ID,
+		Bindings:  []models.AutomationBinding{{AutomationID: "automation-a", VersionID: "version-a", NodeID: "inbox-a"}},
+	})
+	inputs := map[string]json.RawMessage{
+		"claim_alert":                      json.RawMessage(`{"alert_id":"` + created.Notification.ID + `"}`),
+		"create_alert_implementation_task": json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"x","prompt":"y"}`),
+		"link_alert_implementation_task":   json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","task_id":"` + caller.ID + `"}`),
+		"complete_alert_processing":        json.RawMessage(`{"alert_id":"` + created.Notification.ID + `"}`),
+		"fail_alert_processing":            json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","message":"failed"}`),
+		"release_alert_claim":              json.RawMessage(`{"alert_id":"` + created.Notification.ID + `"}`),
+	}
+	for name, input := range inputs {
+		t.Run(name, func(t *testing.T) {
+			_, err := handlers[name](automationCtx, input)
+			require.ErrorContains(t, err, "notification is not owned by this Automation inbox")
+		})
+	}
+}
+
 func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
