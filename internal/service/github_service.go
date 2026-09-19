@@ -76,6 +76,7 @@ type GitHubRepoRef struct {
 type GitHubPullRequest struct {
 	Number           int
 	URL              string
+	Body             string
 	State            string
 	Merged           bool
 	HeadRef          string
@@ -1723,6 +1724,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 	var pr struct {
 		Number int    `json:"number"`
 		URL    string `json:"html_url"`
+		Body   string `json:"body"`
 		State  string `json:"state"`
 		Merged bool   `json:"merged"`
 		Head   struct {
@@ -1736,7 +1738,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 	if err := s.doGitHubJSON(req, &pr); err != nil {
 		return nil, err
 	}
-	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA}, nil
+	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, Body: pr.Body, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA}, nil
 }
 
 func (s *GitHubService) UpdatePullRequestBody(ctx context.Context, repo *GitHubRepoRef, number int, body string) error {
@@ -1788,6 +1790,7 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 	var prs []struct {
 		Number int    `json:"number"`
 		URL    string `json:"html_url"`
+		Body   string `json:"body"`
 		State  string `json:"state"`
 		Head   struct {
 			Ref  string `json:"ref"`
@@ -1810,7 +1813,7 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 			break
 		}
 	}
-	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, State: selected.State, HeadRef: selected.Head.Ref, HeadRepoFullName: selected.Head.Repo.FullName, HeadSHA: selected.Head.SHA}, nil
+	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, Body: selected.Body, State: selected.State, HeadRef: selected.Head.Ref, HeadRepoFullName: selected.Head.Repo.FullName, HeadSHA: selected.Head.SHA}, nil
 }
 
 func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
@@ -1846,6 +1849,7 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 	var created struct {
 		Number int    `json:"number"`
 		URL    string `json:"html_url"`
+		Body   string `json:"body"`
 		State  string `json:"state"`
 		Head   struct {
 			Ref  string `json:"ref"`
@@ -1859,7 +1863,7 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		return nil, err
 	}
 
-	return &GitHubPullRequest{Number: created.Number, URL: created.URL, State: created.State, HeadRef: created.Head.Ref, HeadRepoFullName: created.Head.Repo.FullName, HeadSHA: created.Head.SHA}, nil
+	return &GitHubPullRequest{Number: created.Number, URL: created.URL, Body: created.Body, State: created.State, HeadRef: created.Head.Ref, HeadRepoFullName: created.Head.Repo.FullName, HeadSHA: created.Head.SHA}, nil
 }
 
 func (s *GitHubService) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, requested []string) error {
