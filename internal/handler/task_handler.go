@@ -800,8 +800,7 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, projectID string, sortPrefs taskSortPreferences, llmModels []models.LLMConfig) error {
 	tasks = service.AttachSwarmChildren(tasks)
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
-	menuStates := h.taskCardMergeMenuStates(c.Request().Context(), tasks, projectID)
-	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs, menuStates))
+	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
 }
 
 func (h *Handler) renderTaskBoardRefresh(c echo.Context, projectID string, adjustSort func(*taskSortPreferences)) error {
@@ -871,13 +870,12 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
-	menuStates := h.taskCardMergeMenuStates(c.Request().Context(), tasks, projectID)
 
 	if isHTMX {
-		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed, menuStates))
+		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
 	}
 
-	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed, menuStates))
+	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
 }
 
 func isSwarmTaskForm(c echo.Context) bool {

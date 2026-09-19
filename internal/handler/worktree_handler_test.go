@@ -435,11 +435,20 @@ func TestHandler_TaskBoardRelationshipSnapshotSupportsShallowRepositories(t *tes
 	if rec.Code != http.StatusOK {
 		t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if taskCardActionDisabled(rec.Body.String(), "merge") || taskCardActionDisabled(rec.Body.String(), "ff") {
-		t.Fatalf("shallow repository disabled canonically eligible Local actions: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `data-task-card-merge-options`) || strings.Contains(rec.Body.String(), `data-merge-type="merge"`) {
+		t.Fatalf("task board did not defer shallow repository merge inspection: %s", rec.Body.String())
 	}
-	if !taskCardActionDisabled(rec.Body.String(), "rebase") {
-		t.Fatalf("shallow repository exposed Rebase without two-sided divergence: %s", rec.Body.String())
+	optionsReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil)
+	optionsRec := httptest.NewRecorder()
+	e.ServeHTTP(optionsRec, optionsReq)
+	if optionsRec.Code != http.StatusOK {
+		t.Fatalf("merge options status=%d body=%s", optionsRec.Code, optionsRec.Body.String())
+	}
+	if taskCardActionDisabled(optionsRec.Body.String(), "merge") || taskCardActionDisabled(optionsRec.Body.String(), "ff") {
+		t.Fatalf("shallow repository disabled canonically eligible Local actions: %s", optionsRec.Body.String())
+	}
+	if !taskCardActionDisabled(optionsRec.Body.String(), "rebase") {
+		t.Fatalf("shallow repository exposed Rebase without two-sided divergence: %s", optionsRec.Body.String())
 	}
 }
 
@@ -519,8 +528,8 @@ func TestTaskCardRelationshipSnapshotFailsClosedAbovePairLimit(t *testing.T) {
 	}
 }
 
-func TestHandler_TaskBoardRelationshipSnapshotFailureDisablesLocalActions(t *testing.T) {
-	h, e, _, db := setupTestHandlerWithDB(t)
+func TestTaskCardRelationshipSnapshotFailureDisablesLocalActions(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
 	ctx := context.Background()
 	repoDir := createHandlerTestGitRepo(t)
@@ -589,18 +598,13 @@ exec "$OPENVIBELY_REAL_GIT" "$@"
 				t.Fatal(err)
 			}
 			t.Setenv("OPENVIBELY_RELATION_FAILURE", failureMode)
-			req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+project.ID, nil)
-			req.Header.Set("HX-Request", "true")
-			req.Header.Set("HX-Target", "kanban-board")
-			rec := httptest.NewRecorder()
-			e.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("tasks refresh status=%d body=%s", rec.Code, rec.Body.String())
+			current, err := h.taskRepo.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
 			}
-			for _, mergeType := range []string{"merge", "ff", "rebase", "squash"} {
-				if !taskCardActionDisabled(rec.Body.String(), mergeType) {
-					t.Fatalf("%s relationship snapshot exposed %s action", failureMode, mergeType)
-				}
+			state := h.taskCardMergeMenuStates(ctx, []models.Task{*current}, project.ID)[task.ID]
+			if state.LocalEligible || state.FastForwardEligible || state.RebaseEligible {
+				t.Fatalf("%s relationship snapshot exposed Local action: %#v", failureMode, state)
 			}
 			if failureMode == "incomplete" {
 				unchanged, err := h.taskRepo.GetByID(ctx, task.ID)
@@ -615,7 +619,7 @@ exec "$OPENVIBELY_REAL_GIT" "$@"
 	}
 }
 
-func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
+func TestHandler_TaskBoardDefersTerminalCardGitState(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
 	ctx := context.Background()
@@ -692,57 +696,18 @@ func TestHandler_TaskBoardBatchesTerminalCardGitState(t *testing.T) {
 			t.Fatalf("terminal card %d missing from board refresh", i)
 		}
 	}
-	enabledMergeActions := 0
-	for searchFrom := 0; ; {
-		markerIndex := strings.Index(body[searchFrom:], `data-merge-type="merge"`)
-		if markerIndex < 0 {
-			break
-		}
-		markerIndex += searchFrom
-		buttonIndex := strings.LastIndex(body[:markerIndex], "<button")
-		if buttonIndex >= 0 && !strings.Contains(body[buttonIndex:markerIndex], " disabled") {
-			enabledMergeActions++
-		}
-		searchFrom = markerIndex + 1
+	if got := strings.Count(body, `data-task-card-merge-options`); got != taskCount {
+		t.Fatalf("lazy merge option loaders=%d, want %d", got, taskCount)
 	}
-	if enabledMergeActions != taskCount {
-		t.Fatalf("enabled terminal merge actions=%d, want %d", enabledMergeActions, taskCount)
-	}
-	for i, task := range tasks {
-		cardStart := strings.Index(body, `id="task-`+task.ID+`"`)
-		if cardStart < 0 {
-			t.Fatalf("terminal card %d missing task id", i)
-		}
-		cardEnd := strings.Index(body[cardStart+1:], `id="task-`)
-		if cardEnd < 0 {
-			cardEnd = len(body) - cardStart
-		} else {
-			cardEnd++
-		}
-		cardBody := body[cardStart : cardStart+cardEnd]
-		ffDisabled := taskCardActionDisabled(cardBody, "ff")
-		rebaseDisabled := taskCardActionDisabled(cardBody, "rebase")
-		if i == taskCount-1 {
-			if !ffDisabled || !rebaseDisabled {
-				t.Fatalf("dirty terminal card retained clean-only actions: %s", cardBody)
-			}
-		} else {
-			if ffDisabled {
-				t.Fatalf("clean terminal card %d lost fast-forward action: %s", i, cardBody)
-			}
-			wantRebase := task.MergeTargetBranch == "target-two"
-			if rebaseDisabled == wantRebase {
-				t.Fatalf("terminal card %d rebase disabled=%v, want %v for target %s", i, rebaseDisabled, !wantRebase, task.MergeTargetBranch)
-			}
-		}
+	if strings.Contains(body, `data-merge-type="merge"`) {
+		t.Fatal("task board eagerly rendered terminal merge actions")
 	}
 	logData, err := os.ReadFile(logPath)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	invocations := len(strings.FieldsFunc(strings.TrimSpace(string(logData)), func(r rune) bool { return r == '\n' }))
-	if invocations > 5 {
-		t.Fatalf("%d terminal cards across %d targets executed %d git commands, want one five-command repository snapshot; commands:\n%s", taskCount, len(targets), invocations, logData)
+	if len(strings.TrimSpace(string(logData))) != 0 {
+		t.Fatalf("task board executed Git while rendering lazy merge options:\n%s", logData)
 	}
 }
 
@@ -896,7 +861,16 @@ func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testin
 		if updated.WorktreePath != "" || updated.WorktreeBranch != "" {
 			t.Fatalf("%s card persisted request-local recovery metadata: %#v", task.Status, updated)
 		}
-		button := findButtonWithAttributes(rec.Body.String(),
+		if !strings.Contains(rec.Body.String(), `hx-get="/tasks/`+task.ID+`/card/merge-options`) {
+			t.Fatalf("%s card missing lazy merge options loader", task.Status)
+		}
+		optionsReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil)
+		optionsRec := httptest.NewRecorder()
+		e.ServeHTTP(optionsRec, optionsReq)
+		if optionsRec.Code != http.StatusOK {
+			t.Fatalf("%s merge options status=%d body=%s", task.Status, optionsRec.Code, optionsRec.Body.String())
+		}
+		button := findButtonWithAttributes(optionsRec.Body.String(),
 			`data-task-card-pr-action`,
 			`data-task-id="`+task.ID+`"`,
 			`data-project-id="`+project.ID+`"`,
@@ -997,8 +971,17 @@ func TestHandler_TaskCardMenuUsesRepositoryDefaultMergeTarget(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("tasks status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "Rebase onto develop") || strings.Contains(rec.Body.String(), "Rebase onto main") {
-		t.Fatalf("implicit merge target should render repository default branch, body=%s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `data-task-card-merge-options`) {
+		t.Fatalf("implicit merge target card missing lazy merge options: %s", rec.Body.String())
+	}
+	optionsReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil)
+	optionsRec := httptest.NewRecorder()
+	e.ServeHTTP(optionsRec, optionsReq)
+	if optionsRec.Code != http.StatusOK {
+		t.Fatalf("merge options status=%d body=%s", optionsRec.Code, optionsRec.Body.String())
+	}
+	if !strings.Contains(optionsRec.Body.String(), "Rebase onto develop") || strings.Contains(optionsRec.Body.String(), "Rebase onto main") {
+		t.Fatalf("implicit merge target should render repository default branch, body=%s", optionsRec.Body.String())
 	}
 }
 
