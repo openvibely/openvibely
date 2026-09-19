@@ -813,6 +813,9 @@ func (r *AutomationRepo) CancelDispatchesForTask(ctx context.Context, taskID, me
 				WHERE id = ? AND status = 'running'`, message, item.executionID); err != nil {
 				return err
 			}
+			if err := cancelOpenAIAsyncToolCallsForExecution(ctx, conn, item.executionID, message); err != nil {
+				return err
+			}
 			result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'cancelled',
 				category = CASE WHEN category IN ('active', 'scheduled') THEN 'backlog' ELSE category END,
 				updated_at = CURRENT_TIMESTAMP
@@ -996,6 +999,11 @@ func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant,
 				WHERE id = ? AND task_id = ? AND status = 'running'`, executionTerminalStatus, failureMessage, now.UTC(), executionID, taskID); err != nil {
 				return err
 			}
+			if executionTerminalStatus == models.ExecCancelled {
+				if err := cancelOpenAIAsyncToolCallsForExecution(ctx, conn, executionID, failureMessage); err != nil {
+					return err
+				}
+			}
 			var activityID string
 			err := conn.QueryRowContext(ctx, `UPDATE automation_activities SET status = ?, error_message = ?,
 				completed_at = COALESCE(completed_at, ?) WHERE invocation_id = ? AND activity_key = ?
@@ -1136,9 +1144,15 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 		Scan(&invocationID, &projectID, &automationID, &versionID, &nodeID, &taskID, &taskTitle, &taskCategory); err != nil {
 		return err
 	}
+	trimmedMessage := strings.TrimSpace(message)
 	if _, err := conn.ExecContext(ctx, `UPDATE executions SET status = ?, error_message = ?, completed_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND status = 'running'`, status, strings.TrimSpace(message), executionID); err != nil {
+		WHERE id = ? AND status = 'running'`, status, trimmedMessage, executionID); err != nil {
 		return err
+	}
+	if status == models.ExecCancelled {
+		if err := cancelOpenAIAsyncToolCallsForExecution(ctx, conn, executionID, trimmedMessage); err != nil {
+			return err
+		}
 	}
 	taskResult, err := conn.ExecContext(ctx, `UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND status = 'running'`, taskStatus, taskID)
@@ -1189,7 +1203,7 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 	}
 	var activityID string
 	if err := conn.QueryRowContext(ctx, `UPDATE automation_activities SET status = ?, completed_at = CURRENT_TIMESTAMP,
-		error_message = ? WHERE invocation_id = ? AND activity_key = ? RETURNING id`, activityStatus, strings.TrimSpace(message), invocationID, "dispatch:"+dispatchID+":execute").Scan(&activityID); err != nil {
+		error_message = ? WHERE invocation_id = ? AND activity_key = ? RETURNING id`, activityStatus, trimmedMessage, invocationID, "dispatch:"+dispatchID+":execute").Scan(&activityID); err != nil {
 		return err
 	}
 	if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
@@ -1213,7 +1227,7 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 	if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = ?,
 		completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END,
 		error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, invocationStatus, terminalInvocation,
-		strings.TrimSpace(message), invocationID); err != nil {
+		trimmedMessage, invocationID); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatchID); err != nil {
