@@ -536,6 +536,13 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					</div>
 					@automationLiveDetailsPanel(graph)
 					<div class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden style="display: none" aria-label="Saved automation YAML">
+						<div class="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-base-300 px-4 pb-3 font-sans">
+							<p class="text-sm text-base-content/70">Read-only saved YAML definition</p>
+							<button class="btn btn-outline btn-sm" type="button" data-automation-copy-yaml data-default-label="Copy YAML" aria-label="Copy saved Automation YAML">
+								<span data-automation-copy-yaml-label>Copy YAML</span>
+								<span class="sr-only" aria-live="polite" data-automation-copy-yaml-status></span>
+							</button>
+						</div>
 						<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
 							<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
 								<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(graph.YAML) }</pre>
@@ -673,6 +680,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						var yamlLineNumbers = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-line-numbers]');
 						var yamlHighlight = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-highlight]');
 						var yamlGutter = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-gutter]');
+						var yamlCopyButton = yamlPanel && yamlPanel.querySelector('[data-automation-copy-yaml]');
 						if (!yamlEditor || !yamlLineNumbers || !yamlHighlight) return;
 						var shared = window.openVibelyYAML;
 						function renderYAMLLineNumbers() {
@@ -700,8 +708,62 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							yamlEditor.scrollTop += delta;
 							if (yamlEditor.scrollTop !== previousTop) { syncYAMLHighlightScroll(); event.preventDefault(); }
 						}
+						function setYAMLCopyFeedback(label, failed) {
+							if (!yamlCopyButton) return;
+							var defaultLabel = yamlCopyButton.dataset.defaultLabel || 'Copy YAML';
+							var labelEl = yamlCopyButton.querySelector('[data-automation-copy-yaml-label]');
+							var statusEl = yamlCopyButton.querySelector('[data-automation-copy-yaml-status]');
+							if (labelEl) labelEl.textContent = label;
+							if (statusEl) statusEl.textContent = label;
+							yamlCopyButton.classList.toggle('btn-success', !failed);
+							yamlCopyButton.classList.toggle('btn-error', !!failed);
+							window.setTimeout(function() {
+								if (!yamlCopyButton || !yamlCopyButton.isConnected) return;
+								if (labelEl) labelEl.textContent = defaultLabel;
+								if (statusEl) statusEl.textContent = '';
+								yamlCopyButton.classList.remove('btn-success', 'btn-error');
+							}, 2000);
+						}
+						function copyTextToClipboard(text) {
+							if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+								return navigator.clipboard.writeText(text).catch(function() { return fallbackCopyTextToClipboard(text); });
+							}
+							return fallbackCopyTextToClipboard(text);
+						}
+						function fallbackCopyTextToClipboard(text) {
+							return new Promise(function(resolve, reject) {
+								var textarea = document.createElement('textarea');
+								textarea.value = text;
+								textarea.setAttribute('readonly', '');
+								textarea.style.position = 'fixed';
+								textarea.style.left = '-9999px';
+								textarea.style.top = '0';
+								document.body.appendChild(textarea);
+								textarea.focus();
+								textarea.select();
+								try {
+									if (document.execCommand && document.execCommand('copy')) resolve();
+									else reject(new Error('copy failed'));
+								} catch (error) {
+									reject(error);
+								} finally {
+									textarea.remove();
+								}
+							});
+						}
+						function copyLiveYAML(event) {
+							if (event) { event.preventDefault(); event.stopImmediatePropagation(); }
+							copyTextToClipboard(yamlEditor.value).then(function() {
+								setYAMLCopyFeedback('Copied', false);
+								if (window.showToast) window.showToast('YAML copied to clipboard', 'completed', '', {toastKey: 'automation-yaml-copy:' + (liveRoot && liveRoot.dataset.automationId || '')});
+							}).catch(function() {
+								setYAMLCopyFeedback('Copy failed', true);
+								if (window.showToast) window.showToast('Failed to copy YAML', 'failed', '', {toastKey: 'automation-yaml-copy-failed:' + (liveRoot && liveRoot.dataset.automationId || '')});
+							});
+						}
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
 						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
+						if (yamlCopyButton) yamlCopyButton.addEventListener('click', copyLiveYAML);
 						renderYAMLLineNumbers();
 						renderYAMLHighlight();
 					})();

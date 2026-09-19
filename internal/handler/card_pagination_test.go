@@ -929,6 +929,52 @@ func TestCardPaginationAgentHandlerBoundsSearchResults(t *testing.T) {
 	require.Contains(t, last.Body.String(), "Paged Handler Agent 02")
 }
 
+func TestCardBrowserRenderShellSetsPaginationHeadersForFragmentsAndHTMXRefreshes(t *testing.T) {
+	t.Run("agents", func(t *testing.T) {
+		h, e, _, db := setupTestHandlerWithDB(t)
+		agentRepo := repository.NewAgentRepo(db)
+		h.SetAgentRepo(agentRepo)
+		ctx := context.Background()
+		for i := 0; i < cardPageDefaultSize+1; i++ {
+			agent := &models.Agent{Name: fmt.Sprintf("Header Contract Agent %02d", i), Description: "header contract", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+			require.NoError(t, agentRepo.Create(ctx, agent))
+		}
+
+		fragment := serveCardPageRequest(t, e, "/agents?page=0&page_size=20&search=header+contract&card_page=1")
+		require.Equal(t, http.StatusOK, fragment.Code, fragment.Body.String())
+		require.Equal(t, "true", fragment.Header().Get(cardPageHasMoreHeader))
+		require.Equal(t, "no-store", fragment.Header().Get("Cache-Control"))
+
+		refresh := serveCardPageRequest(t, e, "/agents?search=header+contract")
+		require.Equal(t, http.StatusOK, refresh.Code, refresh.Body.String())
+		require.Equal(t, fragment.Header().Get(cardPageHasMoreHeader), refresh.Header().Get(cardPageHasMoreHeader))
+		require.Equal(t, fragment.Header().Get("Cache-Control"), refresh.Header().Get("Cache-Control"))
+	})
+
+	t.Run("alerts", func(t *testing.T) {
+		_, e, _, db := setupTestHandlerWithDB(t)
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(db)
+		project := &models.Project{Name: "Header contract alerts"}
+		require.NoError(t, projectRepo.Create(ctx, project))
+		alertRepo := repository.NewAlertRepo(db)
+		for i := 0; i < cardPageDefaultSize+1; i++ {
+			alert := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: fmt.Sprintf("Header Contract Alert %02d", i), Message: "header contract", Source: "header-contract"}
+			require.NoError(t, alertRepo.Create(ctx, alert))
+		}
+
+		fragment := serveCardPageRequest(t, e, "/alerts?project_id="+project.ID+"&page=0&page_size=20&search=header+contract&card_page=1")
+		require.Equal(t, http.StatusOK, fragment.Code, fragment.Body.String())
+		require.Equal(t, "true", fragment.Header().Get(cardPageHasMoreHeader))
+		require.Equal(t, "no-store", fragment.Header().Get("Cache-Control"))
+
+		refresh := serveCardPageRequest(t, e, "/alerts?project_id="+project.ID+"&search=header+contract")
+		require.Equal(t, http.StatusOK, refresh.Code, refresh.Body.String())
+		require.Equal(t, fragment.Header().Get(cardPageHasMoreHeader), refresh.Header().Get(cardPageHasMoreHeader))
+		require.Equal(t, fragment.Header().Get("Cache-Control"), refresh.Header().Get("Cache-Control"))
+	})
+}
+
 func TestCardPaginationAutomationHandlerReturnsProjectScopedPages(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

@@ -356,7 +356,7 @@ func activeStatusDropZone(t *testing.T, body, status string) string {
 	return body[start : start+len(marker)+next]
 }
 
-func TestTaskCardPreRendersStableMergeSubmenus(t *testing.T) {
+func TestTaskCardDefersMergeSubmenusUntilMenuOpen(t *testing.T) {
 	task := models.Task{
 		ID:                "merge-card-task",
 		ProjectID:         "project-1",
@@ -372,30 +372,27 @@ func TestTaskCardPreRendersStableMergeSubmenus(t *testing.T) {
 	body := buf.String()
 	for _, want := range []string{
 		`data-task-card-menu-trigger`,
-		`data-task-card-local-submenu`,
-		`data-task-card-github-submenu`,
-		`group-hover:block`,
-		`group-focus-within:block`,
+		`data-task-card-merge-options`,
+		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
+		`hx-swap="outerHTML"`,
 		`w-52`,
-		`Merge commit`,
-		`Fast-forward only`,
-		`Rebase onto main`,
-		`Squash merge`,
-		`Create PR`,
+		`Merge options`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected stable pre-rendered task card menu contract %q, body=%s", want, body)
+			t.Fatalf("expected lazy task card menu contract %q, body=%s", want, body)
 		}
 	}
 	for _, unwanted := range []string{
-		`hx-get="/tasks/merge-card-task/card/merge-options`,
-		`hx-trigger="task-card-menu-open"`,
-		`>Merge options<`,
+		`data-task-card-local-submenu`,
+		`data-task-card-github-submenu`,
+		`Merge commit`,
+		`Fast-forward only`,
+		`Create PR`,
 		`<details`,
 		`<summary`,
 	} {
 		if strings.Contains(body, unwanted) {
-			t.Fatalf("task card menu must not hydrate or expand after opening, found %q in %s", unwanted, body)
+			t.Fatalf("task card menu must defer merge-option hydration, found %q in %s", unwanted, body)
 		}
 	}
 }

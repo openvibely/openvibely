@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
@@ -37,7 +38,6 @@ func alertCardListState(projectID string, filter models.AlertListFilter) pages.C
 }
 
 func (h *Handler) ListAlerts(c echo.Context) error {
-	htmxRequest := isHTMX(c)
 	ctx := c.Request().Context()
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
@@ -66,14 +66,17 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 
 	// applog.Debugf("[handler] ListAlerts project=%s count=%d unread=%d htmx=%v", currentProjectID, len(alerts), unreadCount, isHTMX)
 
-	if htmxRequest || page.IsFragment {
-		if page.IsFragment {
-			setCardPageResponse(c, hasMore)
-		}
-		return render(c, http.StatusOK, pages.AlertsContentPageWithState(alerts, currentProjectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, alertCardListState(currentProjectID, filter)))
-	}
-	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
-	return render(c, http.StatusOK, pages.AlertsPageWithState(projects, currentProjectID, alerts, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, alertCardListState(currentProjectID, filter)))
+	listState := alertCardListState(currentProjectID, filter)
+	return h.renderCardBrowserPage(
+		c,
+		currentProjectID,
+		page,
+		hasMore,
+		pages.AlertsContentPageWithState(alerts, currentProjectID, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, listState),
+		func(projects []models.Project, projectID string) templ.Component {
+			return pages.AlertsPageWithState(projects, projectID, alerts, unreadCount, hasMore, filter.DecisionState, filter.ProcessingState, listState)
+		},
+	)
 }
 
 func alertListFilter(c echo.Context, page cardPageRequest) models.AlertListFilter {
