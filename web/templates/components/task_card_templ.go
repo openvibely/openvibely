@@ -833,20 +833,20 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<li data-task-card-merge-options hx-get=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<li data-task-card-merge-options data-task-card-merge-options-url=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var25 string
 				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/card/merge-options?project_id=%s", task.ID, projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 512, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 512, Col: 118}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" hx-swap=\"outerHTML\"><span class=\"opacity-60\"><span class=\"loading loading-spinner loading-xs htmx-indicator\"></span> Merge options</span></li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" role=\"status\"><span class=\"opacity-60\"><span class=\"loading loading-spinner loading-xs htmx-indicator\"></span> Merge options</span></li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
