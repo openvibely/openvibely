@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 const (
@@ -163,6 +166,15 @@ func optionalBoolQuery(c echo.Context, key string) *bool {
 func setCardPageResponse(c echo.Context, hasMore bool) {
 	c.Response().Header().Set(cardPageHasMoreHeader, strconv.FormatBool(hasMore))
 	c.Response().Header().Set("Cache-Control", "no-store")
+}
+
+func (h *Handler) renderCardBrowserPage(c echo.Context, currentProjectID string, page cardPageRequest, hasMore bool, content templ.Component, fullPage func([]models.Project, string) templ.Component) error {
+	if isHTMX(c) || page.IsFragment {
+		setCardPageResponse(c, hasMore)
+		return render(c, http.StatusOK, content)
+	}
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
+	return render(c, http.StatusOK, fullPage(projects, currentProjectID))
 }
 
 func cardPageItems[T any](items []T, pageSize int) ([]T, bool) {
