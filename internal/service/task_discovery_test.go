@@ -141,6 +141,131 @@ func TestExecuteListTasksTool(t *testing.T) {
 	}
 }
 
+func TestExecuteListTasksToolTreatsLikeWildcardsAsLiteralTitleText(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	other := &models.Project{Name: "List Tasks Wildcard Other Project"}
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	createTask := func(projectID, title string, category models.TaskCategory) *models.Task {
+		t.Helper()
+		task := &models.Task{ProjectID: projectID, Title: title, Category: category, Status: models.StatusPending, Prompt: "p"}
+		require.NoError(t, taskRepo.Create(ctx, task))
+		return task
+	}
+
+	percent := createTask("default", "literal percent % task", models.CategoryActive)
+	underscore := createTask("default", "literal_under_score", models.CategoryActive)
+	createTask("default", "plain task", models.CategoryActive)
+	createTask(other.ID, "other literal percent % task", models.CategoryActive)
+	createTask("default", "chat literal percent % task", models.CategoryChat)
+
+	out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"query":"%"}`))
+	require.NoError(t, err)
+	percentResult := decodeListTasksResult(t, out)
+	require.Equal(t, 1, percentResult.Total)
+	require.Len(t, percentResult.Tasks, 1)
+	require.Equal(t, percent.ID, percentResult.Tasks[0].TaskID)
+	require.Equal(t, "literal percent % task", percentResult.Tasks[0].Title)
+
+	out, err = ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"query":"_"}`))
+	require.NoError(t, err)
+	underscoreResult := decodeListTasksResult(t, out)
+	require.Equal(t, 1, underscoreResult.Total)
+	require.Len(t, underscoreResult.Tasks, 1)
+	require.Equal(t, underscore.ID, underscoreResult.Tasks[0].TaskID)
+	require.Equal(t, "literal_under_score", underscoreResult.Tasks[0].Title)
+}
+
+func TestExecuteListTasksToolPreservesOrdinaryQueryRelevanceAndPagination(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	createTask := func(title string) *models.Task {
+		t.Helper()
+		task := &models.Task{ProjectID: "default", Title: title, Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+		require.NoError(t, taskRepo.Create(ctx, task))
+		return task
+	}
+
+	exact := createTask("issue 25")
+	prefix := createTask("issue 25 followup")
+	contains := createTask("triage issue 25")
+	createTask("issue 26")
+
+	fixed := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
+	_, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE project_id = ?`, fixed, "default")
+	require.NoError(t, err)
+
+	out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"query":"issue 25","limit":2,"offset":0}`))
+	require.NoError(t, err)
+	page1 := decodeListTasksResult(t, out)
+	require.Equal(t, 3, page1.Total)
+	require.Equal(t, 2, page1.Count)
+	require.True(t, page1.HasMore)
+	require.Equal(t, []string{exact.ID, prefix.ID}, []string{page1.Tasks[0].TaskID, page1.Tasks[1].TaskID})
+
+	out, err = ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"query":"issue 25","limit":2,"offset":2}`))
+	require.NoError(t, err)
+	page2 := decodeListTasksResult(t, out)
+	require.Equal(t, 3, page2.Total)
+	require.Equal(t, 1, page2.Count)
+	require.False(t, page2.HasMore)
+	require.Equal(t, contains.ID, page2.Tasks[0].TaskID)
+}
+
+func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	other := &models.Project{Name: "List Schedules Wildcard Other Project"}
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	createTask := func(projectID, title string) *models.Task {
+		t.Helper()
+		task := &models.Task{ProjectID: projectID, Title: title, Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "p"}
+		require.NoError(t, taskRepo.Create(ctx, task))
+		return task
+	}
+	createSchedule := func(taskID string) *models.Schedule {
+		t.Helper()
+		schedule := &models.Schedule{TaskID: taskID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+		require.NoError(t, scheduleRepo.Create(ctx, schedule))
+		return schedule
+	}
+
+	percentSchedule := createSchedule(createTask("default", "literal percent % schedule").ID)
+	underscoreSchedule := createSchedule(createTask("default", "literal_under_schedule").ID)
+	createSchedule(createTask("default", "plain schedule").ID)
+	createSchedule(createTask(other.ID, "other literal percent % schedule").ID)
+	createSchedule(createTask(other.ID, "other_literal_under_schedule").ID)
+
+	out, err := ExecuteListSchedulesTool(ctx, scheduleRepo, "default", json.RawMessage(`{"title":"%"}`))
+	require.NoError(t, err)
+	var percentResult scheduleDiscoveryResult
+	require.NoError(t, json.Unmarshal([]byte(out), &percentResult))
+	require.Equal(t, 1, percentResult.Total)
+	require.Len(t, percentResult.Schedules, 1)
+	require.Equal(t, percentSchedule.ID, percentResult.Schedules[0].ScheduleID)
+	require.Equal(t, "literal percent % schedule", percentResult.Schedules[0].TaskTitle)
+
+	out, err = ExecuteListSchedulesTool(ctx, scheduleRepo, "default", json.RawMessage(`{"title":"_"}`))
+	require.NoError(t, err)
+	var underscoreResult scheduleDiscoveryResult
+	require.NoError(t, json.Unmarshal([]byte(out), &underscoreResult))
+	require.Equal(t, 1, underscoreResult.Total)
+	require.Len(t, underscoreResult.Schedules, 1)
+	require.Equal(t, underscoreSchedule.ID, underscoreResult.Schedules[0].ScheduleID)
+	require.Equal(t, "literal_under_schedule", underscoreResult.Schedules[0].TaskTitle)
+}
+
 func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
