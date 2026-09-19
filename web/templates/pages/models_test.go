@@ -522,6 +522,20 @@ func TestModelsContent_OpenAICompatibleDiscoveryCancelsStaleRequest(t *testing.T
 			t.Fatalf("expected %s lifecycle to cancel stale OpenAI-compatible discovery", lifecycle.name)
 		}
 	}
+	successCloseStart := strings.Index(out, "document.body.addEventListener('htmx:afterSwap'")
+	if successCloseStart < 0 {
+		t.Fatal("expected rendered script to include the HTMX success modal close handler")
+	}
+	successCloseEnd := strings.Index(out[successCloseStart:], "document.body.addEventListener('htmx:responseError'")
+	if successCloseEnd < 0 {
+		t.Fatal("expected rendered script to include the HTMX response error handler after success close handler")
+	}
+	successCloseHandler := out[successCloseStart : successCloseStart+successCloseEnd]
+	cancelIndex := strings.Index(successCloseHandler, "cancelOpenAICompatibleDiscovery();")
+	closeIndex := strings.Index(successCloseHandler, "modal.close();")
+	if cancelIndex < 0 || closeIndex < 0 || cancelIndex > closeIndex {
+		t.Fatal("expected successful HTMX model save modal close to cancel stale OpenAI-compatible discovery before closing")
+	}
 }
 
 func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
