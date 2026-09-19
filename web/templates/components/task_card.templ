@@ -509,8 +509,8 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 				} else {
 					<li
 						data-task-card-merge-options
-						hx-get={ fmt.Sprintf("/tasks/%s/card/merge-options?project_id=%s", task.ID, projectID) }
-						hx-swap="outerHTML"
+						data-task-card-merge-options-url={ fmt.Sprintf("/tasks/%s/card/merge-options?project_id=%s", task.ID, projectID) }
+						role="status"
 					>
 						<span class="opacity-60"><span class="loading loading-spinner loading-xs htmx-indicator"></span> Merge options</span>
 					</li>

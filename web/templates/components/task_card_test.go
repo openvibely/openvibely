@@ -373,8 +373,8 @@ func TestTaskCardDefersMergeSubmenusUntilMenuOpen(t *testing.T) {
 	for _, want := range []string{
 		`data-task-card-menu-trigger`,
 		`data-task-card-merge-options`,
-		`hx-get="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
-		`hx-swap="outerHTML"`,
+		`data-task-card-merge-options-url="/tasks/merge-card-task/card/merge-options?project_id=project-1"`,
+		`role="status"`,
 		`w-52`,
 		`Merge options`,
 	} {
@@ -383,6 +383,7 @@ func TestTaskCardDefersMergeSubmenusUntilMenuOpen(t *testing.T) {
 		}
 	}
 	for _, unwanted := range []string{
+		`hx-get="/tasks/merge-card-task/card/merge-options`,
 		`data-task-card-local-submenu`,
 		`data-task-card-github-submenu`,
 		`Merge commit`,

@@ -696,7 +696,7 @@ func TestHandler_TaskBoardDefersTerminalCardGitState(t *testing.T) {
 			t.Fatalf("terminal card %d missing from board refresh", i)
 		}
 	}
-	if got := strings.Count(body, `data-task-card-merge-options`); got != taskCount {
+	if got := strings.Count(body, `data-task-card-merge-options data-task-card-merge-options-url=`); got != taskCount {
 		t.Fatalf("lazy merge option loaders=%d, want %d", got, taskCount)
 	}
 	if strings.Contains(body, `data-merge-type="merge"`) {
@@ -861,7 +861,7 @@ func TestHandler_TaskBoardRecoversPendingAndBlockedBranchesForCreatePR(t *testin
 		if updated.WorktreePath != "" || updated.WorktreeBranch != "" {
 			t.Fatalf("%s card persisted request-local recovery metadata: %#v", task.Status, updated)
 		}
-		if !strings.Contains(rec.Body.String(), `hx-get="/tasks/`+task.ID+`/card/merge-options`) {
+		if !strings.Contains(rec.Body.String(), `data-task-card-merge-options-url="/tasks/`+task.ID+`/card/merge-options`) {
 			t.Fatalf("%s card missing lazy merge options loader", task.Status)
 		}
 		optionsReq := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil)

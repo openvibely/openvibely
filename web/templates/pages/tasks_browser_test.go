@@ -1493,6 +1493,31 @@ func TestTasksRendersDirectTaskCardMergeActionsWithoutConfirmation(t *testing.T)
 	}
 }
 
+func TestTasksMergeOptionLoaderSupportsKeyboardDeduplicationAndRetry(t *testing.T) {
+	project := models.Project{ID: "project-merge-loader", Name: "Merge Loader Project"}
+	var out bytes.Buffer
+	if err := Tasks([]models.Project{project}, &project, nil, nil, nil, "", "").Render(context.Background(), &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, required := range []string{
+		`function loadTaskCardMergeOptions(dropdown, label)`,
+		`options.hasAttribute('data-task-card-merge-options-loading')`,
+		`fetch(refreshURL, {headers: {'HX-Request': 'true'}})`,
+		`options.outerHTML = html`,
+		`event.target === trigger && trigger.matches('[data-task-card-menu-trigger]')`,
+		`Could not load Git actions. Retry`,
+		`loadTaskCardMergeOptions(openDropdown, openDropdown.querySelector('[data-kanban-menu-trigger]'))`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("task-card merge loader safeguard missing %q", required)
+		}
+	}
+	if strings.Contains(body, `const refreshURL = options && options.getAttribute('hx-get')`) {
+		t.Fatal("task-card merge loader retained the duplicate declarative request path")
+	}
+}
+
 func TestTaskCardActionsOwnDirectRequestMetadata(t *testing.T) {
 	task := models.Task{ID: "task-direct", ProjectID: "project-merge", Title: "Direct", WorktreeBranch: "task/direct", MergeTargetBranch: "main"}
 	var out bytes.Buffer

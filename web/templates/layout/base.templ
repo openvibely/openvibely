@@ -3006,6 +3006,41 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				requestAnimationFrame(settlePosition);
 			}
 
+			function loadTaskCardMergeOptions(dropdown, label) {
+				if (!dropdown || !window.htmx) return;
+				const options = dropdown.querySelector('[data-task-card-merge-options]');
+				const refreshURL = options && options.getAttribute('data-task-card-merge-options-url');
+				if (!options || !refreshURL || options.hasAttribute('data-task-card-merge-options-loading')) return;
+				options.setAttribute('data-task-card-merge-options-loading', 'true');
+				options.setAttribute('aria-busy', 'true');
+				fetch(refreshURL, {headers: {'HX-Request': 'true'}}).then(function(response) {
+					if (!response.ok) throw new Error('HTTP ' + response.status);
+					return response.text();
+				}).then(function(html) {
+					if (!options.isConnected) return;
+					options.outerHTML = html;
+					htmx.process(dropdown);
+					if (dropdown.getAttribute('data-kanban-menu-open') === 'true') positionDropdownForViewport(label);
+				}).catch(function() {
+					if (!options.isConnected) return;
+					options.removeAttribute('data-task-card-merge-options-loading');
+					options.removeAttribute('aria-busy');
+					options.replaceChildren();
+					const retry = document.createElement('button');
+					retry.type = 'button';
+					retry.className = 'text-error text-left';
+					retry.textContent = 'Could not load Git actions. Retry';
+					retry.addEventListener('click', function(event) {
+						event.preventDefault();
+						event.stopPropagation();
+						loadTaskCardMergeOptions(dropdown, label);
+					});
+					options.appendChild(retry);
+					if (dropdown.getAttribute('data-kanban-menu-open') === 'true') positionDropdownForViewport(label);
+				});
+			}
+			window.loadTaskCardMergeOptions = loadTaskCardMergeOptions;
+
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
@@ -3039,21 +3074,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (board && openKanbanMenuKey) board.setAttribute('data-open-kanban-menu-key', openKanbanMenuKey);
 						setKanbanMenuExpanded(kanbanDropdown, true);
 						window.dispatchEvent(new CustomEvent('kanban-menu-opened'));
-						if (label.matches('[data-task-card-menu-trigger]') && window.htmx) {
-							const options = kanbanDropdown.querySelector('[data-task-card-merge-options]');
-							const refreshURL = options && options.getAttribute('hx-get');
-							if (options && refreshURL && !options.hasAttribute('data-task-card-merge-options-loading')) {
-								options.setAttribute('data-task-card-merge-options-loading', 'true');
-								const request = htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
-								if (request && typeof request.then === 'function') {
-									const finishMergeOptionsRequest = function() {
-										if (options.isConnected) options.removeAttribute('data-task-card-merge-options-loading');
-										if (kanbanDropdown.getAttribute('data-kanban-menu-open') === 'true') positionDropdownForViewport(label);
-									};
-									request.then(finishMergeOptionsRequest, finishMergeOptionsRequest);
-								}
-							}
-						}
+						if (label.matches('[data-task-card-menu-trigger]')) loadTaskCardMergeOptions(kanbanDropdown, label);
 					} else {
 						requestAnimationFrame(function() { positionDropdownForViewport(label); });
 					}
@@ -3861,6 +3882,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					document.querySelectorAll('[data-kanban-menu-key]').forEach(function(candidate) {
 						setKanbanMenuExpanded(candidate, candidate === dropdown);
 					});
+					if (event.target === trigger && trigger.matches('[data-task-card-menu-trigger]')) {
+						loadTaskCardMergeOptions(dropdown, trigger);
+					}
 				});
 				document.addEventListener('pointerdown', function(event) {
 					if (!kanbanDropdownForTarget(event.target)) {
@@ -4061,9 +4085,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								}
 							}
 							const options = savedKanbanInteraction && savedKanbanInteraction.refreshTaskOptions && openDropdown && openDropdown.querySelector('[data-task-card-merge-options]');
-							const refreshURL = options && options.getAttribute('hx-get');
-							if (options && refreshURL && window.htmx) {
-								htmx.ajax('GET', refreshURL, {target: options, swap: 'outerHTML'});
+							if (options && window.htmx) {
+								loadTaskCardMergeOptions(openDropdown, openDropdown.querySelector('[data-kanban-menu-trigger]'));
 								return;
 							}
 							savedKanbanInteraction = null;
