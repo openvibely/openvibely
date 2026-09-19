@@ -189,6 +189,16 @@ func TestBreadcrumbSelectorScheduleOriginShowsOnlyTasksWithScheduleRows(t *testi
 	require.NotContains(t, body, ordinary.Title)
 	require.NotContains(t, body, foreignScheduled.Title)
 	require.Contains(t, body, "/tasks/"+scheduledWithSchedule.ID+"?from=schedule&amp;project_id="+project.ID+"&amp;tab=schedules")
+
+	req = httptest.NewRequest(http.MethodGet, "/breadcrumb-selectors/tasks?project_id="+project.ID+"&current_id="+activeWithSchedule.ID+"&search=selector&tab=schedules&from=chat", nil)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body = rec.Body.String()
+	require.Contains(t, body, ordinary.Title)
+	require.Contains(t, body, staleScheduledCategory.Title)
+	require.NotContains(t, body, foreignScheduled.Title)
+	require.Contains(t, body, "/tasks/"+ordinary.ID+"?from=chat&amp;project_id="+project.ID+"&amp;tab=schedules")
 }
 
 func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveViews(t *testing.T) {
@@ -246,11 +256,20 @@ func TestBreadcrumbSelectorAutomationResultsAreProjectScopedBoundedAndPreserveVi
 }
 
 func TestBreadcrumbSelectorItemURLPreservesOnlySupportedContext(t *testing.T) {
-	taskURL := breadcrumbSelectorItemURL("tasks", "task/id", "project id", "changes", "", "")
+	taskURL := breadcrumbSelectorItemURL("tasks", "task/id", "project id", "changes", "", "", "", "")
 	require.Equal(t, "/tasks/task%2Fid?project_id=project+id&tab=changes", taskURL)
-	require.NotContains(t, breadcrumbSelectorItemURL("tasks", "task", "project", "../../admin", "", ""), "tab=")
-	require.Equal(t, "/tasks/task?from=schedule&project_id=project&tab=schedules", breadcrumbSelectorItemURL("tasks", "task", "project", "schedules", "", "schedule"))
-	require.NotContains(t, breadcrumbSelectorItemURL("tasks", "task", "project", "", "", "other"), "from=")
-	require.Equal(t, "/automations/automation/builder?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", "edit", ""))
-	require.Equal(t, "/automations/automation?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", strings.Repeat("x", 20), ""))
+	require.NotContains(t, breadcrumbSelectorItemURL("tasks", "task", "project", "../../admin", "", "", "", ""), "tab=")
+	require.Equal(t, "/tasks/task?from=schedule&project_id=project&tab=schedules", breadcrumbSelectorItemURL("tasks", "task", "project", "schedules", "", "schedule", "", ""))
+	require.Equal(t, "/tasks/task?from=chat&project_id=project&tab=chat", breadcrumbSelectorItemURL("tasks", "task", "project", "chat", "", "chat", "", ""))
+	require.Equal(t, "/tasks/task?from=alerts&project_id=project&tab=details", breadcrumbSelectorItemURL("tasks", "task", "project", "details", "", "alerts", "", ""))
+	require.Equal(t, "/tasks/task%2Fid?automation_id=automation%2Fid&automation_name=Build+%26+Ship&from=automation&project_id=project+id&tab=chat", breadcrumbSelectorItemURL("tasks", "task/id", "project id", "chat", "", "automation", "automation/id", "Build & Ship"))
+	unknownURL := breadcrumbSelectorItemURL("tasks", "task", "project", "", "", "other", "automation", "Ignored")
+	require.NotContains(t, unknownURL, "from=")
+	require.NotContains(t, unknownURL, "automation_id=")
+	require.NotContains(t, unknownURL, "automation_name=")
+	chatURL := breadcrumbSelectorItemURL("tasks", "task", "project", "", "", "chat", "automation", "Ignored")
+	require.NotContains(t, chatURL, "automation_id=")
+	require.NotContains(t, chatURL, "automation_name=")
+	require.Equal(t, "/automations/automation/builder?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", "edit", "", "", ""))
+	require.Equal(t, "/automations/automation?project_id=project", breadcrumbSelectorItemURL("automations", "automation", "project", "", strings.Repeat("x", 20), "", "", ""))
 }
