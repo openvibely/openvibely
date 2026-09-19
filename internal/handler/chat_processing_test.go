@@ -6499,7 +6499,7 @@ func TestStartupSyncSkipsClosedLivePullRequestAndCancelsPendingPublication(t *te
 	require.False(t, recorded.NeedsRepublish)
 }
 
-func TestStartupSyncPublicationDoesNotRecheckPRAfterSuccessfulPublish(t *testing.T) {
+func TestStartupSyncPublicationHonorsPRClosedDuringPublish(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
 	prRepo := repository.NewTaskPullRequestRepo(db)
@@ -6534,13 +6534,13 @@ func TestStartupSyncPublicationDoesNotRecheckPRAfterSuccessfulPublish(t *testing
 	})
 
 	require.NoError(t, h.republishOpenPullRequestAfterStartupSync(ctx, task.ID))
-	require.Equal(t, 2, getCalls)
+	require.GreaterOrEqual(t, getCalls, 4)
 	require.Zero(t, createCalls)
 	recorded, err := prRepo.GetByTaskID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1196, recorded.PRNumber)
-	require.Equal(t, "open", recorded.PRState)
-	require.True(t, recorded.NeedsRepublish)
+	require.Equal(t, "closed", recorded.PRState)
+	require.False(t, recorded.NeedsRepublish)
 }
 
 func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T) {
@@ -6565,6 +6565,7 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 
 	publishedHead := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	publishCalls := 0
+	getCalls := 0
 	var executionID string
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
@@ -6578,7 +6579,8 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 			return &service.GitHubPublishBranchResult{HeadSHA: publishedHead}, nil
 		},
 		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedHead}, nil
+			getCalls++
+			return &service.GitHubPullRequest{Number: 1196, URL: "https://github.com/openvibely/openvibely/pull/1196", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	})
 	mock := testutil.NewMockLLMCaller()
@@ -6598,6 +6600,7 @@ func TestProcessStreamingResponseRepublishesOpenPRAfterStartupSync(t *testing.T)
 	})
 
 	require.Equal(t, 1, publishCalls)
+	require.Equal(t, 3, getCalls, "completion must not perform another eventually consistent PR head read")
 	completed, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ExecCompleted, completed.Status)

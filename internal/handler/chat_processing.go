@@ -2140,7 +2140,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 	if err != nil {
 		applog.Infof("[handler] completeWithSuccess task=%s error getting task: %v", taskID, err)
 	}
-	if blocked, reason := h.blockGitHubSDLCSuccessWithoutPullRequest(ctx, task); blocked {
+	if blocked, reason := h.blockGitHubSDLCSuccessWithoutPullRequest(ctx, task, republishOpenPR); blocked {
 		return repository.CompleteSuccessCompleted, errors.New(reason)
 	}
 
@@ -2187,7 +2187,7 @@ func (h *Handler) completeWithSuccessWithPRReconciliation(ctx context.Context, e
 	return repository.CompleteSuccessCompleted, nil
 }
 
-func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task) (bool, string) {
+func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task, trustRecordedPublication bool) (bool, string) {
 	if h == nil || task == nil || h.automationGraphSvc == nil {
 		return false, ""
 	}
@@ -2214,6 +2214,12 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 			state = "not open"
 		}
 		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is %s; rerun after resolving PR publication", pullRequest.PRNumber, state)
+	}
+	if trustRecordedPublication {
+		// Startup reconciliation verified this PR immediately before and after the
+		// successful branch update. Trust the recorded publication SHA rather than
+		// racing GitHub's eventually consistent pull-request representation again.
+		return false, ""
 	}
 	if h.githubSvc == nil || h.projectRepo == nil {
 		return true, "GitHub SDLC pull request publication could not be verified because GitHub live-state verification is unavailable"
