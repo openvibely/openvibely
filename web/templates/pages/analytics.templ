@@ -280,13 +280,16 @@ templ analyticsContent(currentProject *models.Project) {
 						function rememberAnalyticsView(view) {
 							try { window.localStorage.setItem(savedViewKey, view); } catch (_) {}
 						}
+						function comparisonEnabled(view) {
+							return ['overview','outcomes'].includes(view) && document.getElementById('comparePeriod').checked;
+						}
 						function analyticsURL(view) {
 							const params = new URLSearchParams(window.location.search);
 							params.set('project_id', projectID);
 							params.set('view', view);
 							params.set('range', usageRangeParam());
 							params.set('group_by', document.getElementById('groupBy').value);
-								params.set('compare', document.getElementById('comparePeriod').checked ? '1' : '0');
+								params.set('compare', comparisonEnabled(view) ? '1' : '0');
 								if (selectedAgent) params.set('agent', selectedAgent); else params.delete('agent');
 								if (selectedWorkflow) params.set('workflow', selectedWorkflow); else params.delete('workflow');
 								if (view === 'models' && selectedWorkType) params.set('work_type', selectedWorkType); else params.delete('work_type');
@@ -308,7 +311,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const automationFilter = document.querySelector('[data-automation-filter]');
 									if (automationFilter) automationFilter.classList.toggle('hidden', !['overview','models','automations'].includes(selectedView));
 									const compareFilter = document.querySelector('[data-compare-filter]');
-									if (compareFilter) compareFilter.classList.toggle('hidden', !['overview','outcomes','usage'].includes(selectedView));
+									if (compareFilter) compareFilter.classList.toggle('hidden', !['overview','outcomes'].includes(selectedView));
 									const workTypeFilter = document.querySelector('[data-model-work-type-filter]');
 									if (workTypeFilter) workTypeFilter.classList.toggle('hidden', selectedView !== 'models');
 									if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));
@@ -693,7 +696,7 @@ templ analyticsContent(currentProject *models.Project) {
 									evidencePageLoading = true;
 									if (loadMore) { loadMore.disabled = true; loadMore.setAttribute('aria-busy', 'true'); }
 								}
-									const params = analyticsParams({ project_id: projectID, view: selectedView, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, compare: document.getElementById('comparePeriod').checked ? '1' : '0', evidence_limit: '20', evidence_offset: String(evidenceOffset) });
+									const params = analyticsParams({ project_id: projectID, view: selectedView, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, compare: comparisonEnabled(selectedView) ? '1' : '0', evidence_limit: '20', evidence_offset: String(evidenceOffset) });
 								const selectedEvidence = new URLSearchParams(window.location.search);
 								['evidence_skill_handle', 'evidence_skill_scope', 'evidence_skill_agent'].forEach(function(key) {
 									if (selectedEvidence.has(key)) params.set(key, selectedEvidence.get(key));
