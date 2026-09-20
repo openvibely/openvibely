@@ -34,6 +34,11 @@ func (h *Handler) OpenExternal(c echo.Context) error {
 	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http" && parsed.Scheme != "mailto") {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "url must be a valid http/https/mailto URL"})
 	}
+	// url.Parse accepts scheme-only values like "https:github.com/org/repo"
+	// (empty Host, opaque path). Those are not usable web URLs.
+	if (parsed.Scheme == "http" || parsed.Scheme == "https") && (parsed.Host == "" || parsed.Opaque != "") {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "url must be a valid http/https/mailto URL"})
+	}
 
 	if err := openExternalURL(rawURL); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to open URL: " + err.Error()})
