@@ -269,6 +269,7 @@ func usageEvidenceRequested(filter repository.UsageFilter) bool {
 // @Param view query string false "Active Analytics view: overview, outcomes, agents, models, automations, learning, or usage"
 // @Param agent query string false "Reusable Agent definition ID or __unassigned__"
 // @Param workflow query string false "Automation workflow ID"
+// @Param work_type query string false "Model work type: interactive or recurring"
 // @Param evidence_limit query int false "Evidence rows per page, 1-100" default(20)
 // @Param evidence_offset query int false "Evidence rows to skip" default(0)
 // @Param evidence_skill_handle query string false "Exact skill handle for task-outcome evidence"
@@ -313,6 +314,7 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 		GroupBy:              c.QueryParam("group_by"),
 		AgentID:              strings.TrimSpace(c.QueryParam("agent")),
 		WorkflowID:           strings.TrimSpace(c.QueryParam("workflow")),
+		WorkType:             analyticsWorkType(c.QueryParam("work_type")),
 		EvidenceSkillHandle:  strings.TrimSpace(c.QueryParam("evidence_skill_handle")),
 		EvidenceSkillScope:   strings.TrimSpace(c.QueryParam("evidence_skill_scope")),
 		EvidenceSkillAgentID: strings.TrimSpace(c.QueryParam("evidence_skill_agent")),
@@ -322,6 +324,17 @@ func (h *Handler) GetAnalyticsDashboard(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, dashboard)
+}
+
+func analyticsWorkType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "interactive":
+		return "interactive"
+	case "recurring":
+		return "recurring"
+	default:
+		return ""
+	}
 }
 
 func parseAnalyticsTime(value string) time.Time {

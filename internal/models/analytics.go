@@ -142,18 +142,17 @@ type ModelCategoryPerformance struct {
 }
 
 // ModelPerformance compares configured models using observed work in the app.
-// Execution success is attributed to the model that ran each execution. Task-level
-// outcomes are attributed to the model used by the task's latest execution in the
-// selected period so each task appears in one comparison row.
+// Run success is attributed to the model that ran each run. Task-level metrics
+// disclose their own attribution and denominator.
 type ModelPerformance struct {
 	ModelConfigID       string          `json:"model_config_id"`
 	ConfigName          string          `json:"config_name"`
 	Provider            string          `json:"provider"`
 	Model               string          `json:"model"`
 	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
-	TasksEvaluated      int             `json:"tasks_evaluated"`
-	ExecutionCount      int             `json:"execution_count"`
-	AverageAttempts     float64         `json:"average_attempts"`
+	TasksUsed           int             `json:"tasks_used"`
+	RunCount            int             `json:"run_count"`
+	AverageRuns         float64         `json:"average_runs"`
 	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
 	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`
 	FirstPass           AnalyticsMetric `json:"first_pass"`
