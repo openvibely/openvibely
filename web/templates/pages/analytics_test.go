@@ -649,6 +649,11 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if !strings.Contains(content, `slice(0,12)`) || !strings.Contains(content, `canvas.parentElement.style.height`) || !strings.Contains(content, `legend:{display:false}`) {
 		t.Fatal("Skill charts should bound dense data, scale horizontal rows, and avoid a per-skill legend")
 	}
+	for _, expected := range []string{`gap-6 items-start`, `type:'scatter'`, `pointRadius:7`, `clip:false`, `layout:{padding:{top:12,right:10}}`, `Farther right means used on more tasks; higher means more goals achieved.`} {
+		if !strings.Contains(content, expected) {
+			t.Errorf("Skill effectiveness chart layout fix missing %q", expected)
+		}
+	}
 	if strings.Contains(content, `>${task.TaskTitle || 'Unknown'}<`) || strings.Contains(content, `<td>${pattern.TaskTitle || 'Unknown'}</td>`) {
 		t.Fatal("dynamic task titles must be escaped before innerHTML insertion")
 	}
