@@ -516,6 +516,26 @@ func TestBrowserFunctional_AnalyticsContent_DirectFilteredURLAppliesFirstRequest
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHoverInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+(function(){
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=models&range=30d');
+  var result=document.getElementById('reconnect-result');
+  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+  window.Chart=function(){this.destroy=function(){};};
+  window.fetch=function(url){var payload=[];if(String(url).indexOf('/api/analytics/dashboard')>=0)payload={definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},agents:[],workflows:[],model_categories:[],models:[{model_config_id:'model-1',config_name:'Fable',provider:'anthropic',model:'claude-fable',reasoning_effort:'high',tasks_evaluated:1,average_attempts:2,technical_completion:{numerator:2,denominator:2,percent:100},goal_achievement:{numerator:1,denominator:1,percent:100},first_pass:{numerator:0,denominator:1,percent:0},follow_up:{numerator:1,denominator:1,percent:100},median_duration_ms:60000,duration_sample_size:1,total_tokens:1000,token_covered_tasks:1,known_cost_usd:0.25,cost_covered_tasks:1}],recent_outcomes:[],insights:[]};return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
+  function wait(attempt){var score=document.getElementById('modelScorecard').textContent,cost=document.getElementById('modelCostRanking').textContent,efficiency=document.getElementById('modelEfficiencyRanking').textContent;if(score.indexOf('Fable')>=0){if(score.indexOf('100.0%')<0||score.indexOf('1 / 1 · n=1')<0)fail('scorecard hides exact outcome evidence: '+score);if(cost.indexOf('$0.2500 / task')<0||cost.indexOf('cost n=1')<0)fail('cost ranking is unclear: '+cost);if(efficiency.indexOf('2.00 attempts / task')<0||efficiency.indexOf('1m 0s median · n=1')<0)fail('efficiency ranking is unclear: '+efficiency);result.setAttribute('data-test-result','pass');return;}if((attempt||0)>100)fail('model scorecard did not render');setTimeout(function(){wait((attempt||0)+1);},20);}
+  window.addEventListener('load',function(){wait(0);});
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestBrowserFunctional_AnalyticsContent_DelayedChartLoaderInitializesNewestGenerationOnceInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
@@ -589,7 +609,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Follow-up rate`, `Median task turnaround time`, `Cost per achieved goal`,
 		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`, `id="usageFindings"`,
 		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
-		`Selected Agent outcome trend`, `Agent findings`, `Model outcome comparison`, `Goal achievement versus known cost`,
+		`Selected Agent outcome trend`, `Agent findings`, `Model outcome scorecard`, `Cost and token efficiency`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`, `Model success by task category`,
 		`Execution Results Over Time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 	} {
@@ -676,7 +696,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 		"overview":    {`id="projectOutcomeTrendChart"`, `id="overviewOutcomeFunnel"`, `Actionable exceptions`},
 		"outcomes":    {`id="successFailureChart"`, `id="hourlyTrendsChart"`, `id="avgTimeTaskChart"`, `id="frequentTasksList"`, `id="failedPatternsChart"`, `id="failedPatternsTable"`},
 		"agents":      {`id="agentComparisonChart"`, `id="agentEfficiencyChart"`, `id="agentCategoryChart"`},
-		"models":      {`id="modelOutcomeChart"`, `id="modelCostQualityChart"`, `id="modelAttemptsChart"`, `id="modelEfficiencyChart"`, `id="modelPerformanceTable"`},
+		"models":      {`id="modelScorecard"`, `id="modelCostRanking"`, `id="modelEfficiencyRanking"`, `id="modelEfficiencyChart"`, `id="modelPerformanceTable"`},
 		"automations": {`id="automationComparisonChart"`, `id="automationFunnelChart"`, `id="automationDurationChart"`, `id="automationFailureChart"`, `id="automationBottleneckChart"`},
 		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeChart"`, `id="skillEffectivenessChart"`},
 		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="costOutcomeTrendChart"`},
@@ -687,6 +707,11 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 			if !strings.Contains(body, marker) {
 				t.Errorf("%s does not physically own %q", name, marker)
 			}
+		}
+	}
+	for _, removed := range []string{`id="modelOutcomeChart"`, `id="modelCostQualityChart"`, `id="modelAttemptsChart"`} {
+		if strings.Contains(content, removed) {
+			t.Errorf("Models view should not render clipped scatter or dense comparison chart %q", removed)
 		}
 	}
 	if strings.Contains(section("overview", "outcomes"), `id="recentOutcomesTable"`) || strings.Contains(section("overview", "outcomes"), `Recent outcomes`) {
@@ -716,8 +741,8 @@ func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 	content := buf.String()
 	for _, metric := range []string{
 		"Token Usage", "Model Breakdown by Tokens", "Token Usage Breakdown",
-		"Task Execution by Hour", "Average Execution Time by Task", "Model outcome comparison",
-		"Goal achievement versus attempts", "Most Frequently Run Tasks", "Skill Activity Over Time",
+		"Task Execution by Hour", "Average Execution Time by Task", "Model outcome scorecard",
+		"Retry work and speed", "Most Frequently Run Tasks", "Skill Activity Over Time",
 		"Top Skills", "Follow-through / Selected Outcomes", "Top Agent/Skill Pairs",
 		"Least Active Enabled Skills", "Observed skill outcomes", "Model success by task category", "Failed Task Patterns", "accountUsageCards",
 	} {
