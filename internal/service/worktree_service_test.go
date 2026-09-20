@@ -135,8 +135,9 @@ func TestInitialManagedTaskFinalizationUsesRepositoryMutationBoundary(t *testing
 	}()
 	<-leaseEntered
 
-	finalizationDone := make(chan string, 1)
+	finalizationDone := make(chan WorktreeTaskOutputFinalizationResult, 1)
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	svc.SetWorktreeService(NewWorktreeService(nil, nil, nil))
 	go func() {
 		finalizationDone <- svc.captureWorktreeDiffAfterExecution(context.Background(),
 			&models.Execution{ID: "finalization-exec"},
