@@ -235,6 +235,22 @@ func TestAnalyticsDashboardViewAllowsOnlyCanonicalViews(t *testing.T) {
 	}
 }
 
+func TestAnalyticsWorkTypeAllowsOnlyCanonicalValues(t *testing.T) {
+	for _, workType := range []string{"interactive", "recurring"} {
+		if got := analyticsWorkType(workType); got != workType {
+			t.Errorf("analyticsWorkType(%q) = %q", workType, got)
+		}
+	}
+	if got := analyticsWorkType(" RECURRING "); got != "recurring" {
+		t.Errorf("analyticsWorkType normalizes recurring = %q", got)
+	}
+	for _, workType := range []string{"", "all", "scheduled", "unknown"} {
+		if got := analyticsWorkType(workType); got != "" {
+			t.Errorf("analyticsWorkType(%q) = %q, want empty", workType, got)
+		}
+	}
+}
+
 func TestGetAnalyticsUsage_WithDateRange(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage?date_from=2024-01-01T00:00:00Z&date_to=2024-12-31T23:59:59Z").Execute()

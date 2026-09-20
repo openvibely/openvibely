@@ -26,37 +26,38 @@ type AnalyticsDashboardFilter struct {
 	View                 string
 	AgentID              string
 	WorkflowID           string
+	WorkType             string
 	EvidenceSkillHandle  string
 	EvidenceSkillScope   string
 	EvidenceSkillAgentID string
 }
 
 var analyticsMetricDefinitions = []models.MetricDefinition{
-	{Key: "technical_completion", Label: "Execution success rate", Definition: "Successfully completed executions divided by all finished executions; cancelled executions remain visible in the denominator.", Denominator: "Completed, failed, and cancelled executions in the selected period."},
+	{Key: "technical_completion", Label: "Run success rate", Definition: "Successful runs divided by all finished runs; cancelled runs remain visible in the denominator.", Denominator: "Completed, failed, and cancelled runs in the selected period."},
 	{Key: "goal_achievement", Label: "Goal achievement rate", Definition: "Tasks with an achieved persisted goal divided by goal-bearing tasks that reached an evaluable task or goal state.", Denominator: "Non-cleared goal-bearing tasks whose task is terminal or whose goal is achieved or failed."},
-	{Key: "first_pass", Label: "First-attempt success rate", Definition: "Tasks whose first finished execution completed successfully divided by tasks with at least one finished execution.", Denominator: "Tasks with a completed, failed, or cancelled execution in the selected period."},
-	{Key: "follow_up", Label: "Follow-up rate", Definition: "Tasks with at least one follow-up execution divided by tasks with at least one execution; the distribution uses the same task cohort.", Denominator: "Tasks with an execution in the selected period."},
-	{Key: "median_cycle_time", Label: "Median task turnaround time", Definition: "Median elapsed time from a task's first execution start through its latest finished execution in the selected period, including retries and follow-ups.", Denominator: "Non-scheduled task instances with a finished execution in the selected period and a persisted historical first execution start; repeating task templates are excluded."},
-	{Key: "known_cost_per_achieved_goal", Label: "Known cost per achieved goal", Definition: "Selected-period recorded cost associated with tasks whose goal was achieved in the period, divided only by achieved-goal tasks represented by that cost.", Denominator: "Tasks with a selected-period execution, an achieved goal event in the period, and at least one selected-period usage event containing recorded cost; coverage is disclosed separately."},
+	{Key: "first_pass", Label: "First-run success rate", Definition: "Tasks whose first finished run succeeded divided by tasks with at least one finished run.", Denominator: "Tasks with a completed, failed, or cancelled run in the selected period."},
+	{Key: "follow_up", Label: "Follow-up run rate", Definition: "Tasks with at least one follow-up run divided by tasks with at least one run; the distribution uses the same task cohort.", Denominator: "Tasks with a run in the selected period."},
+	{Key: "median_cycle_time", Label: "Median task duration", Definition: "Median elapsed time from a task's first run start through its latest finished run in the selected period, including retries and follow-up runs.", Denominator: "Non-scheduled task instances with a finished run in the selected period and a persisted historical first run start; repeating task templates are excluded."},
+	{Key: "known_cost_per_achieved_goal", Label: "Known cost per achieved goal", Definition: "Selected-period recorded cost associated with tasks whose goal was achieved in the period, divided only by achieved-goal tasks represented by that cost.", Denominator: "Tasks with a selected-period run, an achieved goal event in the period, and at least one selected-period usage event containing recorded cost; coverage is disclosed separately."},
 	{Key: "known_cost_per_completed_task", Label: "Known cost per successful task", Definition: "Recorded task cost divided by successfully completed tasks represented by that cost.", Denominator: "Successfully completed tasks with recorded cost; cost coverage is disclosed."},
-	{Key: "known_failed_execution_cost", Label: "Known failed-execution cost", Definition: "Sum of recorded cost attached to failed executions.", Denominator: "Failed executions with recorded cost out of all failed executions; unavailable when none have recorded cost."},
-	{Key: "cancelled_executions", Label: "Cancelled executions", Definition: "Terminal executions explicitly cancelled in the selected period.", Denominator: "All terminal executions in the selected period."},
-	{Key: "cycle_time_p90", Label: "P90 task turnaround time", Definition: "90th percentile elapsed time from a task's first execution start through its latest finished execution in the selected period, including retries and follow-ups.", Denominator: "Non-scheduled task instances with a finished execution in the selected period and a persisted historical first execution start; repeating task templates are excluded."},
+	{Key: "known_failed_execution_cost", Label: "Known failed-run cost", Definition: "Sum of recorded cost attached to failed runs.", Denominator: "Failed runs with recorded cost out of all failed runs; unavailable when none have recorded cost."},
+	{Key: "cancelled_executions", Label: "Cancelled runs", Definition: "Runs explicitly cancelled in the selected period.", Denominator: "All finished runs in the selected period."},
+	{Key: "cycle_time_p90", Label: "P90 task duration", Definition: "90th percentile elapsed time from a task's first run start through its latest finished run in the selected period, including retries and follow-up runs.", Denominator: "Non-scheduled task instances with a finished run in the selected period and a persisted historical first run start; repeating task templates are excluded."},
 	{Key: "tokens_per_achieved_goal", Label: "Tokens per achieved goal", Definition: "Recorded tokens associated with achieved-goal tasks divided by represented achieved goals.", Denominator: "Achieved-goal tasks with usage records; coverage is disclosed."},
-	{Key: "agent_performance", Label: "Agent performance", Definition: "Task and execution outcomes attributed through tasks.agent_definition_id; duration uses historical first execution to the selected-period terminal outcome.", Denominator: "Selected-period tasks assigned to each reusable Agent definition, with unassigned work separate; duration samples are disclosed."},
+	{Key: "agent_performance", Label: "Agent performance", Definition: "Task and run outcomes attributed through tasks.agent_definition_id; duration uses the historical first run through the selected-period finished outcome.", Denominator: "Selected-period tasks assigned to each reusable Agent definition, with unassigned work separate; duration samples are disclosed."},
 	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations; selected-period invocation status counts are displayed as completed, failed, cancelled, skipped, or open, and terminal-duration sample size is disclosed.", Denominator: "All selected-period workflow invocations for completion rate; waiting and blocked values are explicitly current state."},
-	{Key: "agent_skill_outcomes", Label: "Observed Agent and skill outcomes", Definition: "Task outcomes grouped by assigned reusable Agent definition and selected or loaded skill.", Denominator: "Selected-period tasks with execution evidence and a selected or loaded skill event; association is observational, not causal."},
-	{Key: "skill_outcomes", Label: "Observed skill outcomes", Definition: "Observed task outcomes where a skill was selected or loaded; this is association, not causation.", Denominator: "Selected-period tasks with a selected or loaded skill event and execution evidence."},
-	{Key: "model_category", Label: "Model performance by task category", Definition: "Execution success grouped by configured model and task category.", Denominator: "Completed, failed, and cancelled executions in each model/category group during the selected period."},
-	{Key: "model_performance", Label: "Observed model performance", Definition: "Execution outcomes are attributed to the model that ran each execution. Task-level goals, first-attempt results, follow-up, attempts, and turnaround are attributed to the model used by the task's latest execution in the selected period. Configuration name, provider model, and reasoning effort remain separate.", Denominator: "Shown per metric for each configured model; token and known-cost coverage count only tasks with matching recorded usage events."},
+	{Key: "agent_skill_outcomes", Label: "Observed Agent and skill outcomes", Definition: "Task outcomes grouped by assigned reusable Agent definition and selected or loaded skill.", Denominator: "Selected-period tasks with run evidence and a selected or loaded skill event; association is observational, not causal."},
+	{Key: "skill_outcomes", Label: "Observed skill outcomes", Definition: "Observed task outcomes where a skill was selected or loaded; this is association, not causation.", Denominator: "Selected-period tasks with a selected or loaded skill event and run evidence."},
+	{Key: "model_category", Label: "Model performance by task category", Definition: "Run success grouped by configured model and task category.", Denominator: "Completed, failed, and cancelled runs in each model/category group during the selected period."},
+	{Key: "model_performance", Label: "Observed model performance", Definition: "Run results belong to the model that ran them. First-run success belongs to the model that ran the task's first finished run. Goal achievement and task duration belong to the model that finished the task. Follow-up rate counts tasks where that model ran a follow-up.", Denominator: "Shown separately in every metric cell. Tasks used is the distinct number of tasks the model ran; run count is the model's total runs. Token and known-cost coverage include only tasks with matching recorded usage."},
 	{Key: "token_usage", Label: "Token usage", Definition: "Locally recorded provider input, output, cache, reasoning, and total token counts.", Denominator: "Usage events in the selected project and period with the applicable task dimensions."},
 	{Key: "cache_utilization", Label: "Cache utilization", Definition: "Cached input tokens divided by recorded input tokens.", Denominator: "Recorded input tokens in the selected project and period."},
-	{Key: "execution_hour", Label: "Task execution by hour", Definition: "Execution starts grouped by local hour of day.", Denominator: "Executions in the selected project, period, Agent, and workflow scope."},
-	{Key: "duration_by_task", Label: "Execution duration by task", Definition: "Average recorded duration of completed executions grouped by task.", Denominator: "Completed executions with positive duration in each task group; samples are shown in tooltips."},
-	{Key: "duration_by_model", Label: "Execution duration by model", Definition: "Average recorded duration of completed executions grouped by configured model.", Denominator: "Completed executions with positive duration in each model group; samples are shown in tooltips."},
-	{Key: "model_execution_share", Label: "Model execution breakdown", Definition: "Execution count grouped by model configuration.", Denominator: "Executions in the selected project, period, Agent, and workflow scope."},
-	{Key: "frequent_tasks", Label: "Most frequently run tasks", Definition: "Tasks ordered by execution count.", Denominator: "Executions in the selected project, period, Agent, and workflow scope."},
-	{Key: "failed_patterns", Label: "Failed task patterns", Definition: "Failed executions grouped by task with the latest stored error.", Denominator: "Failed executions in the selected project, period, Agent, and workflow scope."},
+	{Key: "execution_hour", Label: "Runs by hour", Definition: "Run starts grouped by local hour of day.", Denominator: "Runs in the selected project, period, Agent, and workflow scope."},
+	{Key: "duration_by_task", Label: "Run duration by task", Definition: "Average recorded duration of completed runs grouped by task.", Denominator: "Completed runs with positive duration in each task group; samples are shown in tooltips."},
+	{Key: "duration_by_model", Label: "Run duration by model", Definition: "Average recorded duration of completed runs grouped by configured model.", Denominator: "Completed runs with positive duration in each model group; samples are shown in tooltips."},
+	{Key: "model_execution_share", Label: "Model run breakdown", Definition: "Run count grouped by model configuration.", Denominator: "Runs in the selected project, period, Agent, and workflow scope."},
+	{Key: "frequent_tasks", Label: "Most frequently run tasks", Definition: "Tasks ordered by run count.", Denominator: "Runs in the selected project, period, Agent, and workflow scope."},
+	{Key: "failed_patterns", Label: "Failed task patterns", Definition: "Failed runs grouped by task with the latest stored error.", Denominator: "Failed runs in the selected project, period, Agent, and workflow scope."},
 	{Key: "skill_activity", Label: "Skill activity", Definition: "Locally recorded selected, loaded, viewed, created, and edited skill events.", Denominator: "Skill events in the selected project, period, Agent, and workflow scope."},
 	{Key: "skill_follow_through", Label: "Skill follow-through", Definition: "Selected skill events observed with or without a later loaded or viewed event.", Denominator: "Selected skill events in the selected filter scope; this does not measure causality."},
 	{Key: "workflow_nodes", Label: "Workflow node metrics", Definition: "Node entries, elapsed transition samples, failed activities, and current waiting or blocked positions.", Denominator: "Selected-period transitions and activities for funnel, duration, and failures; bottlenecks are current state."},
@@ -133,6 +134,12 @@ func analyticsTaskDimensionClause(alias string, filter AnalyticsDashboardFilter)
 			JOIN automation_invocations ai ON ai.id=ado.invocation_id
 			WHERE ado.task_id=` + alias + `.id AND ai.project_id=` + alias + `.project_id AND ai.automation_id=?)`
 		args = append(args, filter.WorkflowID)
+	}
+	switch filter.WorkType {
+	case "interactive":
+		clause += " AND COALESCE(" + alias + ".category,'')<>'scheduled' AND NOT EXISTS (SELECT 1 FROM schedules analytics_schedule WHERE analytics_schedule.task_id=" + alias + ".id AND analytics_schedule.repeat_type<>'once')"
+	case "recurring":
+		clause += " AND (" + alias + ".category='scheduled' OR EXISTS (SELECT 1 FROM schedules analytics_schedule WHERE analytics_schedule.task_id=" + alias + ".id AND analytics_schedule.repeat_type<>'once'))"
 	}
 	return clause, args
 }
@@ -610,7 +617,7 @@ func (r *ExecutionRepo) queryOutcomeCosts(ctx context.Context, filter AnalyticsD
 	var failedCost sql.NullFloat64
 	var failedCovered, failedEligible int
 	if err := r.db.QueryRowContext(ctx, failedQuery, failedArgs...).Scan(&failedCost, &failedCovered, &failedEligible); err != nil {
-		return fmt.Errorf("getting known failed execution cost: %w", err)
+		return fmt.Errorf("getting known failed run cost: %w", err)
 	}
 	if failedCovered > 0 && failedCost.Valid {
 		out.KnownFailedExecutionCost = &models.CostCoverage{Value: failedCost.Float64, Covered: failedCovered, Eligible: failedEligible}
@@ -1181,40 +1188,44 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 	), execution_rollup AS (
 		SELECT model_config_id,COUNT(*) execution_count,COUNT(DISTINCT task_id) touched_tasks,
 		SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed_execs,
-		SUM(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_execs
+		SUM(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_execs,
+		COUNT(DISTINCT CASE WHEN is_followup=1 THEN task_id END) followed_tasks
 		FROM period_exec GROUP BY model_config_id
-	), ranked_latest AS (
-		SELECT p.*,ROW_NUMBER() OVER(PARTITION BY p.task_id ORDER BY p.started_at DESC,p.history_order DESC,p.id DESC) rn FROM period_exec p
-	), attributed_tasks AS (
-		SELECT task_id,model_config_id FROM ranked_latest WHERE rn=1
-	), terminal_task_ids AS (
-		SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')
-	), historical_terminal AS (
-		SELECT p.task_id,(SELECT e.status FROM executions e WHERE e.task_id=p.task_id AND e.status IN ('completed','failed','cancelled')
-		ORDER BY e.started_at,e.history_order,e.id LIMIT 1) first_status FROM terminal_task_ids p
-	), task_stats AS (
-		SELECT a.task_id,a.model_config_id,COUNT(p.id) attempts,
-		MAX(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END) followed,
-		MAX(CASE WHEN h.first_status IS NOT NULL THEN 1 ELSE 0 END) first_eligible,
-		MAX(CASE WHEN h.first_status='completed' THEN 1 ELSE 0 END) first_completed,
-		CASE WHEN EXISTS (SELECT 1 FROM tasks t LEFT JOIN schedules s ON s.task_id=t.id WHERE t.id=a.task_id AND (t.category='scheduled' OR s.repeat_type<>'once')) THEN NULL
-		ELSE CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-
-		julianday((SELECT MIN(all_e.started_at) FROM executions all_e WHERE all_e.task_id=a.task_id)))*86400000) AS INTEGER) END duration_ms
-		FROM attributed_tasks a JOIN period_exec p ON p.task_id=a.task_id LEFT JOIN historical_terminal h ON h.task_id=a.task_id
-		GROUP BY a.task_id,a.model_config_id
+	), ranked_first_finished AS (
+		SELECT e.id,e.task_id,COALESCE(e.agent_config_id,'') model_config_id,e.status,
+		ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn
+		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id WHERE e.status IN ('completed','failed','cancelled')
+	), period_first_finished AS (
+		SELECT h.* FROM ranked_first_finished h JOIN period_exec p ON p.id=h.id WHERE h.rn=1
+	), first_rollup AS (
+		SELECT model_config_id,SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) first_completed,COUNT(*) first_denominator
+		FROM period_first_finished GROUP BY model_config_id
+	), ranked_finishing_runs AS (
+		SELECT p.*,ROW_NUMBER() OVER(PARTITION BY p.task_id ORDER BY COALESCE(p.completed_at,p.started_at) DESC,p.history_order DESC,p.id DESC) rn
+		FROM period_exec p WHERE p.status IN ('completed','failed','cancelled')
+	), finishing_runs AS (
+		SELECT task_id,model_config_id,COALESCE(completed_at,started_at) terminal_at FROM ranked_finishing_runs WHERE rn=1
+	), duration_tasks AS (
+		SELECT f.task_id,f.model_config_id,CASE WHEN EXISTS (
+			SELECT 1 FROM tasks duration_task LEFT JOIN schedules duration_schedule ON duration_schedule.task_id=duration_task.id
+			WHERE duration_task.id=f.task_id AND (duration_task.category='scheduled' OR duration_schedule.repeat_type<>'once')
+		) THEN NULL ELSE CAST(MAX(0,(julianday(f.terminal_at)-julianday((SELECT MIN(all_e.started_at) FROM executions all_e WHERE all_e.task_id=f.task_id)))*86400000) AS INTEGER) END duration_ms
+		FROM finishing_runs f
 	), period_goals AS (
-		SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
+		SELECT g.task_id,g.status,COALESCE(g.achieved_at,g.updated_at) outcome_at FROM task_goals g JOIN scoped_tasks t ON t.id=g.task_id
+		WHERE g.status IN ('achieved','failed')` + goalWindow + `
 	), evaluable_goals AS (
-		SELECT task_id,status FROM period_goals
-		UNION SELECT g.task_id,g.status FROM task_goals g JOIN terminal_task_ids p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
-	), task_rollup AS (
-		SELECT s.model_config_id,COUNT(*) tasks_evaluated,SUM(s.attempts) attempts,
-		SUM(s.first_completed) first_completed,SUM(s.first_eligible) first_denominator,SUM(s.followed) followed,
-		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END) achieved,COUNT(g.task_id) goal_denominator
-		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id GROUP BY s.model_config_id
+		SELECT task_id,status,outcome_at FROM period_goals
+		UNION SELECT g.task_id,g.status,f.terminal_at FROM task_goals g JOIN finishing_runs f ON f.task_id=g.task_id
+		WHERE g.status IN ('active','paused','blocked')
+	), attributed_goals AS (
+		SELECT g.task_id,g.status,f.model_config_id FROM evaluable_goals g JOIN finishing_runs f ON f.task_id=g.task_id
+	), goal_rollup AS (
+		SELECT model_config_id,SUM(CASE WHEN status='achieved' THEN 1 ELSE 0 END) achieved,COUNT(*) goal_denominator
+		FROM attributed_goals WHERE model_config_id IS NOT NULL GROUP BY model_config_id
 	), ranked_durations AS (
 		SELECT model_config_id,duration_ms,ROW_NUMBER() OVER(PARTITION BY model_config_id ORDER BY duration_ms) rn,
-		COUNT(*) OVER(PARTITION BY model_config_id) duration_count FROM task_stats WHERE duration_ms IS NOT NULL
+		COUNT(*) OVER(PARTITION BY model_config_id) duration_count FROM duration_tasks WHERE duration_ms IS NOT NULL
 	), medians AS (
 		SELECT model_config_id,CAST(AVG(duration_ms) AS INTEGER) median_duration_ms,MAX(duration_count) duration_count
 		FROM ranked_durations WHERE rn IN ((duration_count+1)/2,(duration_count+2)/2) GROUP BY model_config_id
@@ -1225,14 +1236,15 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 		FROM llm_usage_events u WHERE u.project_id=? AND EXISTS (SELECT 1 FROM scoped_tasks st WHERE st.id=u.task_id)` + usageWindow + ` GROUP BY COALESCE(u.agent_config_id,'')
 	)
 	SELECT er.model_config_id,COALESCE(ac.name,'Unknown configuration'),COALESCE(ac.provider,''),COALESCE(ac.model,'Unknown'),COALESCE(ac.reasoning_effort,''),
-		COALESCE(tr.tasks_evaluated,er.touched_tasks),er.execution_count,
-		er.completed_execs,er.terminal_execs,COALESCE(tr.first_completed,0),COALESCE(tr.first_denominator,0),COALESCE(tr.followed,0),
-		COALESCE(tr.achieved,0),COALESCE(tr.goal_denominator,0),COALESCE(m.median_duration_ms,0),COALESCE(m.duration_count,0),
-		COALESCE(u.total_tokens,0),COALESCE(u.token_tasks,0),u.known_cost,COALESCE(u.cost_tasks,0),COALESCE(tr.attempts,0)
-	FROM execution_rollup er LEFT JOIN task_rollup tr ON tr.model_config_id=er.model_config_id
+		er.touched_tasks,er.execution_count,
+		er.completed_execs,er.terminal_execs,COALESCE(fr.first_completed,0),COALESCE(fr.first_denominator,0),er.followed_tasks,
+		COALESCE(gr.achieved,0),COALESCE(gr.goal_denominator,0),COALESCE(m.median_duration_ms,0),COALESCE(m.duration_count,0),
+		COALESCE(u.total_tokens,0),COALESCE(u.token_tasks,0),u.known_cost,COALESCE(u.cost_tasks,0)
+	FROM execution_rollup er LEFT JOIN first_rollup fr ON fr.model_config_id=er.model_config_id
+	LEFT JOIN goal_rollup gr ON gr.model_config_id=er.model_config_id
 	LEFT JOIN medians m ON m.model_config_id=er.model_config_id LEFT JOIN usage u ON u.model_config_id=er.model_config_id
 	LEFT JOIN agent_configs ac ON ac.id=er.model_config_id
-	ORDER BY COALESCE(tr.tasks_evaluated,er.touched_tasks) DESC,ac.name,ac.model`
+	ORDER BY er.touched_tasks DESC,ac.name,ac.model`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, execArgs...)
 	args = append(args, goalArgs...)
@@ -1246,20 +1258,20 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 	result := []models.ModelPerformance{}
 	for rows.Next() {
 		var row models.ModelPerformance
-		var completed, terminal, firstCompleted, firstDenom, followed, achieved, goalDenom, attempts int
+		var completed, terminal, firstCompleted, firstDenom, followed, achieved, goalDenom int
 		var knownCost sql.NullFloat64
 		if err := rows.Scan(&row.ModelConfigID, &row.ConfigName, &row.Provider, &row.Model, &row.ReasoningEffort,
-			&row.TasksEvaluated, &row.ExecutionCount, &completed, &terminal, &firstCompleted, &firstDenom, &followed,
+			&row.TasksUsed, &row.RunCount, &completed, &terminal, &firstCompleted, &firstDenom, &followed,
 			&achieved, &goalDenom, &row.MedianDurationMs, &row.DurationSampleSize, &row.TotalTokens, &row.TokenCoveredTasks,
-			&knownCost, &row.CostCoveredTasks, &attempts); err != nil {
+			&knownCost, &row.CostCoveredTasks); err != nil {
 			return nil, fmt.Errorf("scanning model performance: %w", err)
 		}
 		row.TechnicalCompletion = metric(completed, terminal)
 		row.GoalAchievement = metric(achieved, goalDenom)
 		row.FirstPass = metric(firstCompleted, firstDenom)
-		row.FollowUp = metric(followed, row.TasksEvaluated)
-		if row.TasksEvaluated > 0 {
-			row.AverageAttempts = float64(attempts) / float64(row.TasksEvaluated)
+		row.FollowUp = metric(followed, row.TasksUsed)
+		if row.TasksUsed > 0 {
+			row.AverageRuns = float64(row.RunCount) / float64(row.TasksUsed)
 		}
 		if knownCost.Valid {
 			value := knownCost.Float64
@@ -1484,8 +1496,8 @@ func buildAnalyticsInsights(current models.OutcomeMetrics, previous *models.Outc
 			lowerBetter       bool
 		}{
 			{"goal_achievement", "Goal achievement", "outcomes", current.GoalAchievement, previous.GoalAchievement, false},
-			{"first_pass", "First-attempt success rate", "agents", current.FirstPass, previous.FirstPass, false},
-			{"follow_up", "Follow-up rate", "outcomes", current.FollowUp, previous.FollowUp, true},
+			{"first_pass", "First-run success rate", "agents", current.FirstPass, previous.FirstPass, false},
+			{"follow_up", "Follow-up run rate", "outcomes", current.FollowUp, previous.FollowUp, true},
 		}
 		for _, item := range comparisons {
 			if item.current.Denominator < 5 || item.previous.Denominator < 5 {

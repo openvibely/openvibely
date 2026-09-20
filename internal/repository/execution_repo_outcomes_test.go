@@ -502,12 +502,48 @@ func TestAnalyticsDashboardModelsCompareConfiguredModelOutcomesAndUsage(t *testi
 		byID[row.ModelConfigID] = row
 	}
 	fable := byID["model-a"]
-	if fable.ConfigName != "Fable" || fable.ReasoningEffort != "high" || fable.TechnicalCompletion.Numerator != 1 || fable.TechnicalCompletion.Denominator != 2 || fable.GoalAchievement.Numerator != 0 || fable.GoalAchievement.Denominator != 1 || fable.FirstPass.Numerator != 1 {
+	if fable.ConfigName != "Fable" || fable.ReasoningEffort != "high" || fable.TasksUsed != 2 || fable.RunCount != 2 || fable.TechnicalCompletion.Numerator != 1 || fable.TechnicalCompletion.Denominator != 2 || fable.GoalAchievement.Numerator != 0 || fable.GoalAchievement.Denominator != 1 || fable.FirstPass.Numerator != 1 || fable.FirstPass.Denominator != 2 || fable.AverageRuns != 1 {
 		t.Fatalf("Fable comparison = %+v", fable)
 	}
 	luna := byID["model-b"]
-	if luna.ConfigName != "Luna XHigh" || luna.ReasoningEffort != "xhigh" || luna.GoalAchievement.Numerator != 1 || luna.GoalAchievement.Denominator != 1 || luna.FirstPass.Numerator != 0 || luna.FirstPass.Denominator != 1 || luna.FollowUp.Numerator != 1 || luna.AverageAttempts != 2 || luna.TotalTokens != 1000 || luna.CostCoveredTasks != 1 || luna.KnownCostUSD == nil || *luna.KnownCostUSD != 0.25 {
+	if luna.ConfigName != "Luna XHigh" || luna.ReasoningEffort != "xhigh" || luna.TasksUsed != 1 || luna.RunCount != 1 || luna.GoalAchievement.Numerator != 1 || luna.GoalAchievement.Denominator != 1 || luna.FirstPass.Denominator != 0 || luna.FollowUp.Numerator != 1 || luna.FollowUp.Denominator != 1 || luna.AverageRuns != 1 || luna.TotalTokens != 1000 || luna.CostCoveredTasks != 1 || luna.KnownCostUSD == nil || *luna.KnownCostUSD != 0.25 {
 		t.Fatalf("Luna comparison = %+v", luna)
+	}
+}
+
+func TestAnalyticsDashboardModelsFilterInteractiveAndRecurringWork(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO projects(id,name) VALUES ('work-type-project','Work type project');
+		INSERT INTO agent_configs(id,name,provider,model,auth_method) VALUES ('work-type-model','Model','openai','gpt-model','oauth');
+		INSERT INTO tasks(id,project_id,title,category,status,created_at) VALUES
+			('interactive-task','work-type-project','Interactive','backlog','completed','2026-09-01 09:00:00'),
+			('recurring-task','work-type-project','Recurring','scheduled','completed','2026-09-01 09:00:00');
+		INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,is_followup,history_order) VALUES
+			('interactive-run','interactive-task','work-type-model','completed','2026-09-01 10:00:00','2026-09-01 10:10:00',0,1),
+			('recurring-run','recurring-task','work-type-model','completed','2026-09-01 11:00:00','2026-09-01 11:10:00',0,1);
+	`); err != nil {
+		t.Fatalf("seed work type analytics: %v", err)
+	}
+
+	repo := NewExecutionRepo(db)
+	for _, test := range []struct {
+		workType  string
+		wantTasks int
+		wantRuns  int
+	}{
+		{workType: "", wantTasks: 2, wantRuns: 2},
+		{workType: "interactive", wantTasks: 1, wantRuns: 1},
+		{workType: "recurring", wantTasks: 1, wantRuns: 1},
+	} {
+		dashboard, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "work-type-project", View: "models", WorkType: test.workType})
+		if err != nil {
+			t.Fatalf("get %q model analytics: %v", test.workType, err)
+		}
+		if len(dashboard.Models) != 1 || dashboard.Models[0].TasksUsed != test.wantTasks || dashboard.Models[0].RunCount != test.wantRuns {
+			t.Fatalf("%q models = %+v, want tasks=%d runs=%d", test.workType, dashboard.Models, test.wantTasks, test.wantRuns)
+		}
 	}
 }
 
