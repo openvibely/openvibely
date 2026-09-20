@@ -393,6 +393,7 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 			want: analyticsDashboardSections{
 				outcomeMetrics:       true,
 				outcomeTrend:         true,
+				comparison:           true,
 				followUpDistribution: true, funnel: true,
 				evidenceRows:  true,
 				evidenceTotal: true,
@@ -419,6 +420,7 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 			want: analyticsDashboardSections{
 				outcomeMetrics:  true,
 				outcomeTrend:    true,
+				comparison:      true,
 				modelCategories: true},
 		},
 		{

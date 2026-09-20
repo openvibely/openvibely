@@ -213,6 +213,9 @@ func TestAnalyticsDashboardWorkflowFilterReturnsLinkedTaskAndNodeEvidence(t *tes
 	foundBlockedInsight := false
 	for _, insight := range dashboard.Insights {
 		if insight.MetricKey == "workflow_blocked" && insight.EvidenceID == fixture.AutomationID {
+			if insight.EvidenceView != "automations" {
+				t.Fatalf("blocked workflow insight links to %q, want automations", insight.EvidenceView)
+			}
 			foundBlockedInsight = true
 		}
 	}
