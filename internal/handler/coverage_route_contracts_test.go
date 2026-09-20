@@ -682,7 +682,8 @@ func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testi
 	require.NoError(t, agentRepo.Create(ctx, &models.Agent{Name: "Runtime Agent", Key: "runtime-agent", Description: "Does runtime work", Model: "gpt-test", Skills: []models.SkillConfig{{Name: "Audit"}}, MCPServers: []models.MCPServerConfig{{Name: "tools", Command: []string{"node"}}}, Scope: models.AgentScopeProject}))
 	require.NoError(t, tc.settingsRepo.Set(ctx, "personality", "direct"))
 
-	personalities := tc.handler.executeListPersonalities(ctx)
+	personalities, err := tc.handler.executeListPersonalities(ctx, nil)
+	require.NoError(t, err)
 	require.Contains(t, personalities, "Available Personalities")
 	require.Contains(t, personalities, "Current personality: **direct**")
 	require.Contains(t, tc.handler.executeSetPersonality(ctx, service.SetPersonalityRequest{Personality: "no_nonsense_pro"}), "Personality changed")

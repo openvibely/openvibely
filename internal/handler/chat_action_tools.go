@@ -554,8 +554,8 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"view_pulse": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return service.ExecuteViewPulseTool(ctx, h.upcomingSvc, params.ProjectID, input)
 		},
-		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			return strings.TrimSpace(h.executeListPersonalities(ctx)), nil
+		"list_personalities": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeListPersonalities(ctx, input)
 		},
 		"get_personality": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return h.executeGetPersonality(ctx), nil

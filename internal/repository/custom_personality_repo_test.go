@@ -228,6 +228,47 @@ func TestCustomPersonalityRepo_Delete(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
+func TestCustomPersonalityRepo_CountAndListRuntimePage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+
+	n, err := repo.Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 0, n)
+
+	page, err := repo.ListRuntimePage(ctx, 10, 0)
+	require.NoError(t, err)
+	assert.Empty(t, page)
+
+	for i := 0; i < 5; i++ {
+		require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+			Name:         fmt.Sprintf("Runtime %02d", i),
+			Key:          fmt.Sprintf("runtime_%02d", i),
+			Description:  fmt.Sprintf("desc %02d", i),
+			SystemPrompt: "Runtime page prompt text that is long enough.",
+		}))
+	}
+	n, err = repo.Count(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 5, n)
+
+	first, err := repo.ListRuntimePage(ctx, 2, 0)
+	require.NoError(t, err)
+	require.Len(t, first, 2)
+	assert.Equal(t, "runtime_00", first[0].Key)
+	assert.Equal(t, "runtime_01", first[1].Key)
+	assert.Empty(t, first[0].SystemPrompt)
+
+	second, err := repo.ListRuntimePage(ctx, 2, 2)
+	require.NoError(t, err)
+	require.Len(t, second, 2)
+	assert.Equal(t, "runtime_02", second[0].Key)
+
+	_, err = repo.ListRuntimePage(ctx, 0, 0)
+	assert.Error(t, err)
+}
+
 func TestCustomPersonalityRepo_UniqueKey(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewCustomPersonalityRepo(db)

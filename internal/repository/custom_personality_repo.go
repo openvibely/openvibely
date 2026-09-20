@@ -70,6 +70,45 @@ func (r *CustomPersonalityRepo) List(ctx context.Context) ([]models.CustomPerson
 	return personalities, rows.Err()
 }
 
+// Count returns the number of custom personalities.
+func (r *CustomPersonalityRepo) Count(ctx context.Context) (int, error) {
+	var n int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM custom_personalities`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count custom personalities: %w", err)
+	}
+	return n, nil
+}
+
+// ListRuntimePage returns one compact runtime page ordered by name, then id.
+// Limit and offset are applied as given; callers must validate them first.
+func (r *CustomPersonalityRepo) ListRuntimePage(ctx context.Context, limit, offset int) ([]models.CustomPersonality, error) {
+	if limit < 1 {
+		return nil, fmt.Errorf("list custom personality runtime page: limit must be positive")
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, key, description, SUBSTR(system_prompt, 1, ?) AS system_prompt_preview, created_at, updated_at
+		 FROM custom_personalities
+		 ORDER BY name ASC, id ASC
+		 LIMIT ? OFFSET ?`, customPersonalityPromptPreviewLength, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list custom personality runtime page: %w", err)
+	}
+	defer rows.Close()
+
+	personalities := make([]models.CustomPersonality, 0, limit)
+	for rows.Next() {
+		var p models.CustomPersonality
+		if err := rows.Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.SystemPromptPreview, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan custom personality runtime page: %w", err)
+		}
+		personalities = append(personalities, p)
+	}
+	return personalities, rows.Err()
+}
+
 // ListCardsByKeys returns compact card projections for fixed Personality context,
 // such as preset overrides and the currently selected custom personality. The
 // caller supplies a small key set; full prompts remain available only via GetByKey.

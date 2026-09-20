@@ -847,8 +847,8 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		"view_pulse": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return ExecuteViewPulseTool(ctx, opts.UpcomingSvc, opts.ProjectID, input)
 		},
-		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			return channelListPersonalitiesResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo), nil
+		"list_personalities": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteListPersonalitiesTool(ctx, opts.CustomPersonalityRepo, opts.SettingsRepo, input, false)
 		},
 		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return channelSetPersonalityResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo, input), nil
@@ -2659,31 +2659,12 @@ func channelGetPersonalityResult(ctx context.Context, settingsRepo *repository.S
 	return fmt.Sprintf("Current personality: %s", current)
 }
 
-func channelListPersonalitiesResult(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo) string {
-	personalities := AllPersonalitiesWithCustom(ctx, customRepo)
-	if len(personalities) == 0 {
-		return "No personalities available."
+func channelListPersonalitiesResult(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo, input json.RawMessage) string {
+	out, err := ExecuteListPersonalitiesTool(ctx, customRepo, settingsRepo, input, false)
+	if err != nil {
+		return err.Error()
 	}
-	var sb strings.Builder
-	sb.WriteString("Available Personalities:\n")
-	for _, p := range personalities {
-		if p.Key == "" {
-			sb.WriteString(fmt.Sprintf("- %s (default): %s\n", p.Name, p.Description))
-		} else if p.IsCustom {
-			sb.WriteString(fmt.Sprintf("- %s (key: %s, custom): %s\n", p.Name, p.Key, p.Description))
-		} else {
-			sb.WriteString(fmt.Sprintf("- %s (key: %s): %s\n", p.Name, p.Key, p.Description))
-		}
-	}
-	if settingsRepo != nil {
-		if current, err := settingsRepo.Get(ctx, "personality"); err == nil {
-			if current == "" {
-				current = "default"
-			}
-			sb.WriteString(fmt.Sprintf("\nCurrent personality: %s", current))
-		}
-	}
-	return strings.TrimSpace(sb.String())
+	return out
 }
 
 func channelSetPersonalityResult(ctx context.Context, settingsRepo *repository.SettingsRepo, customRepo *repository.CustomPersonalityRepo, input json.RawMessage) string {
