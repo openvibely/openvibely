@@ -408,6 +408,8 @@ func TestBrowserFunctional_AnalyticsContent_RestoresLastViewInChrome(t *testing.
     var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
     if (usageButton && usageButton.classList.contains('btn-primary') && dashboardURL && urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;})) {
       if (new URL(dashboardURL, location.href).searchParams.get('view') !== 'usage') fail('restored view was not sent to the dashboard endpoint: ' + dashboardURL);
+      if (new URL(dashboardURL, location.href).searchParams.get('compare') !== '0') fail('Usage requested an unused previous-period comparison: ' + dashboardURL);
+      if (!document.querySelector('[data-compare-filter]').classList.contains('hidden')) fail('previous-period comparison is visible on Usage');
       if (document.getElementById('analytics-usage').classList.contains('hidden')) fail('remembered Usage view was not shown');
       result.setAttribute('data-test-result', 'pass');
       return;
