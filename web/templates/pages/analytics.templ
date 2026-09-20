@@ -290,14 +290,14 @@ templ analyticsContent(currentProject *models.Project) {
 							params.set('range', usageRangeParam());
 							params.set('group_by', document.getElementById('groupBy').value);
 								params.set('compare', comparisonEnabled(view) ? '1' : '0');
-								if (selectedAgent) params.set('agent', selectedAgent); else params.delete('agent');
-								if (selectedWorkflow) params.set('workflow', selectedWorkflow); else params.delete('workflow');
+								if (selectedAgent && ['agents','outcomes'].includes(view)) params.set('agent', selectedAgent); else params.delete('agent');
+								if (selectedWorkflow && ['overview','automations'].includes(view)) params.set('workflow', selectedWorkflow); else params.delete('workflow');
 								if (view === 'models' && selectedWorkType) params.set('work_type', selectedWorkType); else params.delete('work_type');
 								return '/analytics?' + params.toString();						}
 							function analyticsParams(initial) {
 								const params = new URLSearchParams(initial || {});
-								if (selectedAgent) params.set('agent', selectedAgent);
-								if (selectedWorkflow) params.set('workflow', selectedWorkflow);
+								if (selectedAgent && ['agents','outcomes'].includes(selectedView)) params.set('agent', selectedAgent);
+								if (selectedWorkflow && ['overview','automations'].includes(selectedView)) params.set('workflow', selectedWorkflow);
 								if (selectedView === 'models' && selectedWorkType) params.set('work_type', selectedWorkType);
 								return params;
 							}
@@ -307,9 +307,9 @@ templ analyticsContent(currentProject *models.Project) {
 									document.querySelectorAll('[data-analytics-section]').forEach(function(section) { section.classList.toggle('hidden', section.dataset.analyticsSection !== selectedView); });
 									document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.classList.toggle('btn-primary', button.dataset.analyticsView === selectedView); });
 									const agentFilter = document.querySelector('[data-agent-filter]');
-									if (agentFilter) agentFilter.classList.toggle('hidden', !['agents','models'].includes(selectedView));
+									if (agentFilter) agentFilter.classList.toggle('hidden', selectedView !== 'agents');
 									const automationFilter = document.querySelector('[data-automation-filter]');
-									if (automationFilter) automationFilter.classList.toggle('hidden', !['overview','models','automations'].includes(selectedView));
+									if (automationFilter) automationFilter.classList.toggle('hidden', !['overview','automations'].includes(selectedView));
 									const compareFilter = document.querySelector('[data-compare-filter]');
 									if (compareFilter) compareFilter.classList.toggle('hidden', !['overview','outcomes'].includes(selectedView));
 									const workTypeFilter = document.querySelector('[data-model-work-type-filter]');
