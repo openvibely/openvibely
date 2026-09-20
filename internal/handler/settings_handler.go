@@ -739,10 +739,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 	privateKey := strings.TrimSpace(c.FormValue("github_app_private_key"))
 	pat := strings.TrimSpace(c.FormValue("github_pat"))
 	apiEndpoint := strings.TrimSpace(c.FormValue("github_api_endpoint"))
-
-	if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAPIEndpoint, apiEndpoint); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub API endpoint")
-	}
+	ctx := c.Request().Context()
 
 	if strings.TrimSpace(c.FormValue("github_auth_mode")) == "" && (appID != "" || appSlug != "" || privateKey != "") {
 		authMode = service.GitHubAuthModeApp
@@ -750,47 +747,54 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 
 	if authMode == service.GitHubAuthModePAT {
 		if pat == "" {
-			existingPAT, _ := h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingPAT)
+			existingPAT, _ := h.settingsRepo.Get(ctx, service.GitHubSettingPAT)
 			if strings.TrimSpace(existingPAT) == "" {
 				return echo.NewHTTPError(http.StatusBadRequest, "GitHub personal access token is required")
 			}
 			pat = strings.TrimSpace(existingPAT)
-		}
-		if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAuthMode, service.GitHubAuthModePAT); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub auth mode")
-		}
-		if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingPAT, pat); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub token")
-		}
-		if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingPATUserLogin, ""); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update GitHub token metadata")
 		}
 	} else {
 		if appID == "" || appSlug == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "GitHub App ID and slug are required")
 		}
 		if privateKey == "" {
-			existingPrivateKey, _ := h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAppPrivateKey)
+			existingPrivateKey, _ := h.settingsRepo.Get(ctx, service.GitHubSettingAppPrivateKey)
 			if strings.TrimSpace(existingPrivateKey) == "" {
 				return echo.NewHTTPError(http.StatusBadRequest, "GitHub App private key is required")
 			}
 			privateKey = existingPrivateKey
 		}
+	}
 
-		if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAppID, appID); err != nil {
+	if err := h.settingsRepo.Set(ctx, service.GitHubSettingAPIEndpoint, apiEndpoint); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub API endpoint")
+	}
+
+	if authMode == service.GitHubAuthModePAT {
+		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAuthMode, service.GitHubAuthModePAT); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub auth mode")
+		}
+		if err := h.settingsRepo.Set(ctx, service.GitHubSettingPAT, pat); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub token")
+		}
+		if err := h.settingsRepo.Set(ctx, service.GitHubSettingPATUserLogin, ""); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update GitHub token metadata")
+		}
+	} else {
+		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAppID, appID); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub App ID")
 		}
-		if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAppSlug, appSlug); err != nil {
+		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAppSlug, appSlug); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub App slug")
 		}
-		if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAppPrivateKey, privateKey); err != nil {
+		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAppPrivateKey, privateKey); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub App private key")
 		}
-		if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAuthMode, service.GitHubAuthModeApp); err != nil {
+		if err := h.settingsRepo.Set(ctx, service.GitHubSettingAuthMode, service.GitHubAuthModeApp); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub auth mode")
 		}
 		if h.githubSvc != nil {
-			_ = h.githubSvc.Disconnect(c.Request().Context())
+			_ = h.githubSvc.Disconnect(ctx)
 		}
 	}
 
