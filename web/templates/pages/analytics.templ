@@ -570,7 +570,7 @@ templ analyticsContent(currentProject *models.Project) {
 								if (!usageContext) return;
 								const inputTokens = totals && totals.input_tokens ? Number(totals.input_tokens) : 0;
 								const cachedTokens = totals && totals.cached_input_tokens ? Number(totals.cached_input_tokens) : 0;
-								const cacheText = inputTokens > 0 ? formatNumber(cachedTokens) + ' / ' + formatNumber(inputTokens) + ' input tokens (' + (cachedTokens * 100 / inputTokens).toFixed(1) + '%)' : 'Unavailable';
+								const cacheText = inputTokens > 0 ? (cachedTokens * 100 / inputTokens).toFixed(1) + '%' : 'Unavailable';
 									usageContext.innerHTML = [['Known total cost', totals && totals.cost_available ? formatCost(Number(totals.cost_usd || 0)) : 'Unavailable'], ['Total tokens', totals ? formatNumber(Number(totals.total_tokens || 0)) : 'Unavailable'], ['Cache utilization', cacheText], ['Known cost / achieved goal', costCoverageText(current.known_cost_per_achieved_goal)], ['Known failed-run cost', current.known_failed_execution_cost ? formatCost(current.known_failed_execution_cost.value) + ' recorded across ' + current.known_failed_execution_cost.covered + ' of ' + current.known_failed_execution_cost.eligible + ' failed runs' : 'Unavailable']].map(function(item) { return '\x3cdiv class="card bg-base-100 border border-base-300">\x3cdiv class="card-body p-4">\x3cspan class="text-sm">' + escapeHTML(item[0]) + '\x3c/span>\x3cstrong>' + escapeHTML(item[1]) + '\x3c/strong>\x3c/div>\x3c/div>'; }).join('');							}
 						function renderDistributionChart(key, canvasID, rows) {
 							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');

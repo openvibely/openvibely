@@ -352,7 +352,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
     var value = String(url); urls.push(value);
     var payload = [];
     if (value.indexOf('/api/analytics/dashboard') >= 0) payload = {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],skill_outcomes:[{skill_handle:'project:visible-on-learning',skill_scope:'project',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],agent_skill_outcomes:[],model_categories:[],workflows:[],recent_outcomes:[],insights:[]};
-    if (value.indexOf('/api/analytics/usage') >= 0) payload = {usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[{provider:'openai',subscription_label:'ChatGPT Pro',limits:[]},{provider:'openai',subscription_label:'Prolite',limits:[]},{provider:'anthropic',subscription_label:'Claude Max',limits:[]}]};
+    if (value.indexOf('/api/analytics/usage') >= 0) payload = {usage_rate:[],usage_rate_by_model:[],totals:{input_tokens:200,cached_input_tokens:150},model_breakdown:[],account_limits:[{provider:'openai',subscription_label:'ChatGPT Pro',limits:[]},{provider:'openai',subscription_label:'Prolite',limits:[]},{provider:'anthropic',subscription_label:'Claude Max',limits:[]}]};
     if (value.indexOf('/api/analytics/skills') >= 0) payload = {usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]};
     return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
@@ -368,6 +368,8 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
           var accountCards = document.querySelectorAll('#accountUsageCards > .card');
           if (accountCards.length !== 3 || accountCards[0].classList.contains('lg:col-span-2') || accountCards[1].classList.contains('lg:col-span-2') || !accountCards[2].classList.contains('lg:col-span-2')) fail('odd final provider account card did not span both desktop columns');
+          var usageContext = document.getElementById('usageOutcomeContext').textContent;
+          if (usageContext.indexOf('Cache utilization75.0%') < 0 || usageContext.indexOf('150 / 200 input tokens') >= 0) fail('cache utilization did not render as a percentage only');
           if (localStorage.getItem('openvibely.analytics.lastView.project-1') !== 'usage') fail('selected analytics tab was not remembered');
           document.querySelector('[data-analytics-view="learning"]').click();
           waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
