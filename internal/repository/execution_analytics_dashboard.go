@@ -36,12 +36,12 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "goal_achievement", Label: "Goal achievement rate", Definition: "Tasks with an achieved persisted goal divided by goal-bearing tasks that reached an evaluable task or goal state.", Denominator: "Non-cleared goal-bearing tasks whose task is terminal or whose goal is achieved or failed."},
 	{Key: "first_pass", Label: "Technical first-pass rate", Definition: "Tasks whose first terminal execution completed divided by tasks with at least one terminal execution.", Denominator: "Tasks with a completed, failed, or cancelled execution in the selected period."},
 	{Key: "follow_up", Label: "Follow-up rate", Definition: "Tasks with at least one follow-up execution divided by tasks with at least one execution; the distribution uses the same task cohort.", Denominator: "Tasks with an execution in the selected period."},
-	{Key: "median_cycle_time", Label: "Median task cycle time", Definition: "Median elapsed time from a task's historical first execution start to its latest terminal execution in the selected period.", Denominator: "Tasks with a terminal execution in the selected period and a persisted historical first execution start."},
+	{Key: "median_cycle_time", Label: "Median task cycle time", Definition: "Median elapsed time from a task's historical first execution start to its latest terminal execution in the selected period.", Denominator: "Non-scheduled task instances with a terminal execution in the selected period and a persisted historical first execution start; repeating task templates are excluded."},
 	{Key: "known_cost_per_achieved_goal", Label: "Known cost per achieved goal", Definition: "Selected-period recorded cost associated with tasks whose goal was achieved in the period, divided only by achieved-goal tasks represented by that cost.", Denominator: "Tasks with a selected-period execution, an achieved goal event in the period, and at least one selected-period usage event containing recorded cost; coverage is disclosed separately."},
 	{Key: "known_cost_per_completed_task", Label: "Known cost per technical completion", Definition: "Recorded task cost divided by technically completed tasks represented by that cost.", Denominator: "Technically completed tasks with recorded cost; cost coverage is disclosed."},
 	{Key: "known_failed_execution_cost", Label: "Known failed-execution cost", Definition: "Sum of recorded cost attached to failed executions.", Denominator: "Failed executions with recorded cost out of all failed executions; unavailable when none have recorded cost."},
 	{Key: "cancelled_executions", Label: "Cancelled executions", Definition: "Terminal executions explicitly cancelled in the selected period.", Denominator: "All terminal executions in the selected period."},
-	{Key: "cycle_time_p90", Label: "P90 task cycle time", Definition: "90th percentile elapsed time from historical first execution start to latest terminal execution in the selected period.", Denominator: "Tasks with a terminal execution in the selected period and a persisted historical first execution start."},
+	{Key: "cycle_time_p90", Label: "P90 task cycle time", Definition: "90th percentile elapsed time from historical first execution start to latest terminal execution in the selected period.", Denominator: "Non-scheduled task instances with a terminal execution in the selected period and a persisted historical first execution start; repeating task templates are excluded."},
 	{Key: "tokens_per_achieved_goal", Label: "Tokens per achieved goal", Definition: "Recorded tokens associated with achieved-goal tasks divided by represented achieved goals.", Denominator: "Achieved-goal tasks with usage records; coverage is disclosed."},
 	{Key: "agent_performance", Label: "Agent performance", Definition: "Task and execution outcomes attributed through tasks.agent_definition_id; duration uses historical first execution to the selected-period terminal outcome.", Denominator: "Selected-period tasks assigned to each reusable Agent definition, with unassigned work separate; duration samples are disclosed."},
 	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations; selected-period invocation status counts are displayed as completed, failed, cancelled, skipped, or open, and terminal-duration sample size is disclosed.", Denominator: "All selected-period workflow invocations for completion rate; waiting and blocked values are explicitly current state."},
@@ -472,10 +472,12 @@ func (r *ExecutionRepo) queryOutcomeMetrics(ctx context.Context, filter Analytic
 
 	terminalWindow, terminalWindowArgs := analyticsWindowClause("e2", filter)
 	cycleQuery := `WITH scoped_tasks AS (
-			SELECT t.id FROM tasks t WHERE t.project_id=?` + dimension + `
+			SELECT t.id,t.category FROM tasks t WHERE t.project_id=?` + dimension + `
 	), terminal_tasks AS (
 		SELECT t.id task_id FROM scoped_tasks t
-		WHERE EXISTS (
+		WHERE t.category<>'scheduled'
+		AND NOT EXISTS (SELECT 1 FROM schedules s WHERE s.task_id=t.id AND s.repeat_type<>'once')
+		AND EXISTS (
 			SELECT 1 FROM executions e
 			WHERE e.task_id=t.id AND e.status IN ('completed','failed','cancelled')` + window + `
 			LIMIT 1
@@ -725,7 +727,8 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 			SUM(CASE WHEN p.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_execs,
 			MAX(CASE WHEN f.status='completed' THEN 1 ELSE 0 END) first_completed,
 			MAX(CASE WHEN f.status IS NOT NULL THEN 1 ELSE 0 END) has_first,
-			CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(h.first_started_at))*86400000) AS INTEGER) duration_ms
+			CASE WHEN EXISTS (SELECT 1 FROM tasks t LEFT JOIN schedules s ON s.task_id=t.id WHERE t.id=p.task_id AND (t.category='scheduled' OR s.repeat_type<>'once')) THEN NULL
+			ELSE CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(h.first_started_at))*86400000) AS INTEGER) END duration_ms
 			FROM period_exec p LEFT JOIN historical_terminal f ON f.task_id=p.task_id
 			LEFT JOIN historical_start h ON h.task_id=p.task_id GROUP BY p.task_id,p.agent_definition_id		), period_goals AS (
 			SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
@@ -1022,6 +1025,9 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 		), historical_start AS (
 			SELECT e.task_id,MIN(e.started_at) first_started_at FROM selected_terminal_task_ids p
 			CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=p.task_id GROUP BY e.task_id
+		), recurring_task_ids AS (
+			SELECT t.id task_id FROM scoped_tasks t JOIN selected_terminal_task_ids p ON p.task_id=t.id WHERE t.category='scheduled'
+			UNION SELECT s.task_id FROM schedules s JOIN selected_terminal_task_ids p ON p.task_id=s.task_id WHERE s.repeat_type<>'once'
 		), usage AS (
 			SELECT u.task_id,SUM(u.cost_usd) cost,MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) known
 			FROM selected_evidence_tasks s CROSS JOIN llm_usage_events u INDEXED BY idx_llm_usage_events_task_project_time_cost
@@ -1043,7 +1049,7 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 		COALESCE(SUM(CASE WHEN p.status='failed' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN p.status='cancelled' THEN 1 ELSE 0 END),0),
 		COALESCE(SUM(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END),0),
-		COALESCE(CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(hs.first_started_at))*86400000) AS INTEGER),0),
+		CASE WHEN rt.task_id IS NULL THEN COALESCE(CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(hs.first_started_at))*86400000) AS INTEGER),0) ELSE 0 END,
 		CASE WHEN pt.task_id IS NOT NULL THEN 1 ELSE 0 END,
 		CASE WHEN eg.task_id IS NOT NULL THEN 1 ELSE 0 END,
 		CASE WHEN eg.status='achieved' THEN 1 ELSE 0 END,
@@ -1053,7 +1059,7 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 		CASE WHEN ct.task_id IS NOT NULL AND eg.status='achieved' THEN 1 ELSE 0 END,
 		CASE WHEN ct.task_id IS NOT NULL AND t.worktree_path<>'' THEN 1 ELSE 0 END,
 		CASE WHEN ct.task_id IS NOT NULL AND t.worktree_path<>'' AND t.merge_status='merged' THEN 1 ELSE 0 END,
-		CASE WHEN pt.task_id IS NOT NULL AND hs.first_started_at IS NOT NULL THEN 1 ELSE 0 END,
+		CASE WHEN pt.task_id IS NOT NULL AND hs.first_started_at IS NOT NULL AND rt.task_id IS NULL THEN 1 ELSE 0 END,
 		u.cost,u.known,COALESCE(mi.ids,''),COALESCE(te.statuses,''),
 		COALESCE(GROUP_CONCAT(DISTINCT CAST(strftime('%H',p.started_at,'localtime') AS INTEGER)),'')
 	FROM selected_evidence_tasks selected JOIN scoped_tasks t ON t.id=selected.task_id
@@ -1061,6 +1067,7 @@ func (r *ExecutionRepo) queryRecentOutcomes(ctx context.Context, filter Analytic
 	LEFT JOIN period_terminal_task_ids pt ON pt.task_id=t.id
 	LEFT JOIN created_task_ids ct ON ct.task_id=t.id
 	LEFT JOIN historical_start hs ON hs.task_id=t.id
+	LEFT JOIN recurring_task_ids rt ON rt.task_id=t.id
 	LEFT JOIN task_goals g ON g.task_id=t.id
 	LEFT JOIN evaluable_goals eg ON eg.task_id=t.id
 	LEFT JOIN agents a ON a.id=t.agent_definition_id
