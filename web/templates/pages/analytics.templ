@@ -50,7 +50,7 @@ templ analyticsContent(currentProject *models.Project) {
 							<div class="form-control hidden" data-model-work-type-filter><label class="label" for="analyticsWorkType"><span class="label-text">Work Type</span></label><select id="analyticsWorkType" class="select select-bordered select-sm"><option value="">All work</option><option value="interactive">Interactive tasks</option><option value="recurring">Recurring work</option></select></div>
 							<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
 						</div>
-						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="overview">Overview</button><button class="btn btn-sm" data-analytics-view="usage">Usage</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="agents">Agents</button><button class="btn btn-sm" data-analytics-view="outcomes">Outcomes</button></nav>
+						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="usage">Usage</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="agents">Agents</button></nav>
 					</div></div>
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
@@ -263,9 +263,9 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 
 							const validViews = ['overview', 'outcomes', 'agents', 'models', 'automations', 'learning', 'usage'];
-							const visibleViews = ['overview', 'usage', 'models', 'learning', 'agents', 'outcomes'];						const initialURLParams = new URLSearchParams(window.location.search);
+							const visibleViews = ['usage', 'models', 'learning', 'agents'];						const initialURLParams = new URLSearchParams(window.location.search);
 						const savedViewKey = 'openvibely.analytics.lastView.' + projectID;
-						let selectedView = 'overview';
+						let selectedView = 'usage';
 						let selectedAgent = initialURLParams.get('agent') || '';
 						let selectedWorkflow = initialURLParams.get('workflow') || '';
 						let selectedWorkType = ['interactive','recurring'].includes(initialURLParams.get('work_type')) ? initialURLParams.get('work_type') : '';
@@ -299,7 +299,7 @@ templ analyticsContent(currentProject *models.Project) {
 								return params;
 							}
 								function applyView(view, updateHistory) {
-									selectedView = validViews.includes(view) ? view : 'overview';
+									selectedView = validViews.includes(view) ? view : 'usage';
 									rememberAnalyticsView(selectedView);
 									document.querySelectorAll('[data-analytics-section]').forEach(function(section) { section.classList.toggle('hidden', section.dataset.analyticsSection !== selectedView); });
 									document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.classList.toggle('btn-primary', button.dataset.analyticsView === selectedView); });
@@ -1516,7 +1516,7 @@ templ analyticsContent(currentProject *models.Project) {
 								document.getElementById('analyticsWorkflowFilter').value = selectedWorkflow;
 								document.getElementById('analyticsWorkType').value = selectedWorkType;
 								const requestedView = params.get('view');
-								applyView(validViews.includes(requestedView) ? requestedView : (savedAnalyticsView() || 'overview'), false);
+								applyView(validViews.includes(requestedView) ? requestedView : (savedAnalyticsView() || 'usage'), false);
 								restoreAggregateSelectionState();
 						}
 						document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.addEventListener('click', function() { applyView(button.dataset.analyticsView, true); loadAllData(false); }, { signal: eventSignal }); });
