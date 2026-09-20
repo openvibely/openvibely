@@ -212,16 +212,20 @@ func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
 	})
 
 	deadline := time.Now().Add(2 * time.Second)
+	var lastData []byte
+	var lastErr error
 	for {
 		data, err := os.ReadFile(portFile)
-		if err == nil {
-			if string(data) != "45678" {
-				t.Fatalf("PORT = %q, want 45678", data)
-			}
+		lastData = data
+		lastErr = err
+		if err == nil && string(data) == "45678" {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("child did not write port file: %v", err)
+			if lastErr != nil {
+				t.Fatalf("child did not write port file: %v", lastErr)
+			}
+			t.Fatalf("PORT = %q, want 45678", lastData)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
