@@ -15,7 +15,7 @@ always_use:
 
 ## openvibely_skill_index_staleness
 
-[OpenVibely Skill Index Staleness](openvibely_skill_index_staleness/SKILL.md) — Diagnose and regress stale skill or agent index entries after metadata patches, archives, or deletes.
+[OpenVibely Skill Index Staleness](openvibely_skill_index_staleness/SKILL.md) — Diagnose and regress stale skill or agent index entries after metadata patches, archives, deletes, or re-imports.
 
 ## openvibely_validation_workflow
 
@@ -116,7 +116,7 @@ always_use:
 
 ## openvibely_skill_analytics_workflow
 
-[OpenVibely Skill Analytics Workflow](openvibely_skill_analytics_workflow/SKILL.md) — Implement and audit OpenVibely Skill Curator analytics telemetry, aggregations, and dashboard surfaces.
+[OpenVibely Skill Curator Analytics Workflow](openvibely_skill_analytics_workflow/SKILL.md) — Implement and audit OpenVibely Skill Curator analytics telemetry, aggregations, and dashboard surfaces.
 ## openvibely_skill_import_workflow
 
 [OpenVibely Skill Import Workflow](openvibely_skill_import_workflow/SKILL.md) — Implement and audit OpenVibely skill package import across runtime tools, UI upload, YAML normalization, grants, and catalog indexing.
@@ -239,7 +239,7 @@ always_use:
 
 ## openvibely_task_create_edit_workflow
 
-[OpenVibely Task Create/Edit Workflow](openvibely_task_create_edit_workflow/SKILL.md) — Implement and audit OpenVibely task creation, edit, runtime create_task, and duplicate-title behavior.
+[OpenVibely Task Create/Edit Workflow](openvibely_task_create_edit_workflow/SKILL.md) — Implement and audit OpenVibely task creation, edit, runtime create_task, task chains, and duplicate-title behavior.
 
 ## openvibely_reflection_metrics_workflow
 
@@ -306,7 +306,7 @@ always_use:
 
 ## openvibely_project_deletion_workflow
 
-[OpenVibely Project Deletion Workflow](openvibely_project_deletion_workflow/SKILL.md) — Investigate and implement safe, atomic OpenVibely project deletion across relational data, runtime cleanup, migrations, and UI confirmation.
+[OpenVibely Project Deletion Workflow](openvibely_project_deletion_workflow/SKILL.md) — Investigate and implement safe, atomic OpenVibely project deletion across relational data, runtime cleanup, and UI confirmation.
 
 ## openvibely_interactive_user_input_workflow
 
@@ -315,3 +315,31 @@ always_use:
 ## openvibely_shared_dependency_wiring_workflow
 
 [OpenVibely Shared Dependency Wiring Workflow](openvibely_shared_dependency_wiring_workflow/SKILL.md) — Consolidate repeated service construction and dependency attachment across OpenVibely runtime paths without collapsing caller-specific behavior.
+
+## openvibely_shared_oauth_connection_workflow
+
+[OpenVibely Shared OAuth Connection Workflow](openvibely_shared_oauth_connection_workflow/SKILL.md) — Implement shared, explicitly linked OAuth accounts for OpenAI and Anthropic model configurations while preserving credential and analytics isolation.
+
+## openvibely_outcome_analytics_workflow
+
+[OpenVibely Outcome Analytics Workflow](openvibely_outcome_analytics_workflow/SKILL.md) — Implement and audit project-scoped task outcome, goal, Agent, workflow, cost-coverage, and Analytics dashboard surfaces.
+
+## openvibely_task_thread_full_output_boundary_workflow
+
+[OpenVibely Task Thread Full-Output Boundary Workflow](openvibely_task_thread_full_output_boundary_workflow/SKILL.md) — Safely bound OpenVibely Task Thread execution payloads and hydrate lazy full-output HTMX swaps without leaking content or breaking rendering.
+
+## openvibely_openai_astra_workflow
+
+[OpenVibely OpenAI Astra Workflow](openvibely_openai_astra_workflow/SKILL.md) — Implement and audit GPT-6 Astra-specific OpenAI Responses workflow controls without broadening other model behavior.
+
+## openvibely_shared_templ_component_script_workflow
+
+[OpenVibely Shared Templ Component Script Workflow](openvibely_shared_templ_component_script_workflow/SKILL.md) — Consolidate JavaScript helper contracts required by reusable OpenVibely templ components without merging page-specific UI flows.
+
+## openvibely_plugin_marketplace_workflow
+
+[OpenVibely Plugin Marketplace Workflow](openvibely_plugin_marketplace_workflow/SKILL.md) — Implement and audit OpenVibely built-in plugin marketplace seeding, reset-defaults, and regression coverage.
+
+## openvibely_sql_text_filter_workflow
+
+[OpenVibely SQL Text Filter Workflow](openvibely_sql_text_filter_workflow/SKILL.md) — Implement and audit user-entered SQLite text filters without accidental LIKE wildcards or ordering drift.
