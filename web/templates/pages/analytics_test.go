@@ -192,7 +192,7 @@ func TestBrowserFunctional_AnalyticsContent_FiltersHistoryAndFailuresBehaviorInC
     waitFor(function(){return document.querySelector('#analyticsAgentFilter option[value="agent-1"]');},function(){
       var agent=document.getElementById('analyticsAgentFilter');agent.value='agent-1';agent.dispatchEvent(new Event('change'));
       waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard')>=0&&url.indexOf('agent=agent-1')>=0;});},function(){
-        document.querySelector('[data-analytics-view="automations"]').click();
+        history.pushState({},'',location.pathname+'?project_id=project-1&view=automations&agent=agent-1');window.dispatchEvent(new PopStateEvent('popstate'));
         waitFor(function(){return document.querySelector('#analyticsWorkflowFilter option[value="automation-1"]');},function(){
           var automation=document.getElementById('analyticsWorkflowFilter');automation.value='automation-1';automation.dispatchEvent(new Event('change'));
           waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard')>=0&&url.indexOf('workflow=automation-1')>=0&&url.indexOf('view=automations')>=0;});},function(){
@@ -601,7 +601,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	content := buf.String()
 	for _, expected := range []string{
 		`data-analytics-view="overview"`, `data-analytics-view="outcomes"`,
-		`data-analytics-view="agents"`, `data-analytics-view="automations"`,
+		`data-analytics-view="agents"`,
 		`data-analytics-view="learning"`, `data-analytics-view="usage"`,
 		`data-model-work-type-filter`, `id="analyticsWorkType"`, `Interactive tasks`, `Recurring work`,
 		`data-analytics-section="overview"`, `data-analytics-section="outcomes"`,
@@ -663,7 +663,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 	}
 	content := buf.String()
 
-	views := []string{"overview", "outcomes", "agents", "models", "automations", "learning", "usage"}
+	views := []string{"overview", "usage", "models", "learning", "agents", "outcomes"}
 	if got := strings.Count(content, `data-analytics-view=`); got != len(views) {
 		t.Fatalf("Analytics view count = %d, want exactly %d", got, len(views))
 	}
@@ -672,7 +672,15 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 			t.Errorf("Analytics missing canonical %q view or section", view)
 		}
 	}
-	for _, forbidden := range []string{`data-analytics-view="all"`, `data-analytics-section="workflows"`, `viewDetailElements`} {
+	previous := -1
+	for _, view := range views {
+		at := strings.Index(content, `data-analytics-view="`+view+`"`)
+		if at <= previous {
+			t.Fatalf("Analytics navigation order is wrong at %q", view)
+		}
+		previous = at
+	}
+	for _, forbidden := range []string{`data-analytics-view="all"`, `data-analytics-view="automations"`, `data-analytics-section="workflows"`, `viewDetailElements`} {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("Analytics retains removed navigation/ownership construct %q", forbidden)
 		}

@@ -50,7 +50,7 @@ templ analyticsContent(currentProject *models.Project) {
 							<div class="form-control hidden" data-model-work-type-filter><label class="label" for="analyticsWorkType"><span class="label-text">Work Type</span></label><select id="analyticsWorkType" class="select select-bordered select-sm"><option value="">All work</option><option value="interactive">Interactive tasks</option><option value="recurring">Recurring work</option></select></div>
 							<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
 						</div>
-						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="overview">Overview</button><button class="btn btn-sm" data-analytics-view="outcomes">Outcomes</button><button class="btn btn-sm" data-analytics-view="agents">Agents</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="automations">Automations</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="usage">Usage</button></nav>
+						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="overview">Overview</button><button class="btn btn-sm" data-analytics-view="usage">Usage</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="agents">Agents</button><button class="btn btn-sm" data-analytics-view="outcomes">Outcomes</button></nav>
 					</div></div>
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
@@ -262,7 +262,8 @@ templ analyticsContent(currentProject *models.Project) {
 								Object.entries(loadingCharts[selectedView] || {}).forEach(function(entry) { renderChartState(entry[0], entry[1], [], 'Loading analytics…'); });
 							}
 
-							const validViews = ['overview', 'outcomes', 'agents', 'models', 'automations', 'learning', 'usage'];						const initialURLParams = new URLSearchParams(window.location.search);
+							const validViews = ['overview', 'outcomes', 'agents', 'models', 'automations', 'learning', 'usage'];
+							const visibleViews = ['overview', 'usage', 'models', 'learning', 'agents', 'outcomes'];						const initialURLParams = new URLSearchParams(window.location.search);
 						const savedViewKey = 'openvibely.analytics.lastView.' + projectID;
 						let selectedView = 'overview';
 						let selectedAgent = initialURLParams.get('agent') || '';
@@ -271,7 +272,7 @@ templ analyticsContent(currentProject *models.Project) {
 						function savedAnalyticsView() {
 							try {
 								const saved = window.localStorage.getItem(savedViewKey);
-								return validViews.includes(saved) ? saved : '';
+								return visibleViews.includes(saved) ? saved : '';
 							} catch (_) {
 								return '';
 							}
