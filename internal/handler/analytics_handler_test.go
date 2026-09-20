@@ -223,7 +223,7 @@ func TestGetAnalyticsUsage_WithProjectFilter(t *testing.T) {
 }
 
 func TestAnalyticsDashboardViewAllowsOnlyCanonicalViews(t *testing.T) {
-	for _, view := range []string{"overview", "outcomes", "agents", "automations", "learning", "usage"} {
+	for _, view := range []string{"overview", "outcomes", "agents", "models", "automations", "learning", "usage"} {
 		if got := analyticsDashboardView(view); got != view {
 			t.Errorf("analyticsDashboardView(%q) = %q", view, got)
 		}
