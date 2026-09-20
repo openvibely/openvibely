@@ -89,8 +89,21 @@ templ analyticsContent(currentProject *models.Project) {
 				</section>
 
 				<section id="analytics-models" data-analytics-section="models" class="space-y-6 mb-6">
-					<div><h3 class="text-xl font-bold">Models</h3><p class="text-sm opacity-60">Real-world model evaluation from tasks run in this app. Each configuration includes its model and reasoning effort.</p></div>
-					<div class="alert"><span>Run results belong to the model that ran them. First-run success credits the first model. Goal achievement and task duration credit the model that finished the task. Every metric shows its own sample size.</span></div>
+					<div>
+						<div class="flex items-center gap-2">
+							<h3 class="text-xl font-bold">Models</h3>
+							<button
+								type="button"
+								class="tooltip tooltip-right btn btn-ghost btn-circle btn-xs"
+								data-model-attribution-help
+								data-tip="Run results belong to the model that ran them. First-run success credits the first model. Goal achievement and task duration credit the model that finished the task. Every metric shows its own sample size."
+								aria-label="Run results belong to the model that ran them. First-run success credits the first model. Goal achievement and task duration credit the model that finished the task. Every metric shows its own sample size."
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path stroke-linecap="round" d="M12 11v6"></path><path stroke-linecap="round" d="M12 7h.01"></path></svg>
+							</button>
+						</div>
+						<p class="text-sm opacity-60">Real-world model evaluation from tasks run in this app. Each configuration includes its model and reasoning effort.</p>
+					</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Model findings</h4><div id="modelFindings"></div></div></div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Model outcome scorecard</h4><p class="text-sm opacity-60">Read across a model to compare quality. Every cell shows its own sample size; blank evidence is marked unavailable.</p><div id="modelScorecard" class="overflow-x-auto"></div></div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">

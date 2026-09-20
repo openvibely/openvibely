@@ -632,6 +632,12 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if strings.Contains(content, `id="overviewAccountUsageCards"`) || strings.Contains(content, `data-analytics-provider-usage`) {
 		t.Fatal("provider usage should live only on the Usage view")
 	}
+	if !strings.Contains(content, `data-model-attribution-help`) || !strings.Contains(content, `class="tooltip tooltip-right btn btn-ghost btn-circle btn-xs"`) {
+		t.Fatal("model metric attribution guidance should be available from a compact tooltip")
+	}
+	if strings.Contains(content, `<div class="alert"><span>Run results belong to the model`) {
+		t.Fatal("model metric attribution guidance should not occupy a persistent alert")
+	}
 	if !strings.Contains(content, `openvibely.analytics.lastView.`) || !strings.Contains(content, `savedAnalyticsView()`) {
 		t.Fatal("Analytics should remember the selected view across navigation")
 	}
