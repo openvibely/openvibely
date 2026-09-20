@@ -892,6 +892,75 @@ func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestAlertRuntimeListToolsRejectExplicitZeroPageSize(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Alert list page size"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	for i := 0; i < 2; i++ {
+		createdJSON, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"bug_suggestion","title":"Finding `+string(rune('A'+i))+`"}`))
+		require.NoError(t, err)
+		var created struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+	}
+
+	listedJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	var listed struct {
+		Notifications []models.Alert `json:"notifications"`
+		Offset        int            `json:"offset"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(listedJSON), &listed))
+	require.Len(t, listed.Notifications, 2, "omitted limit still defaults to 50")
+
+	pageErr := "limit must be 1-100 and offset must be non-negative"
+	for _, tc := range []struct {
+		name  string
+		tool  string
+		input string
+	}{
+		{name: "list_alerts explicit zero", tool: "list_alerts", input: `{"limit":0}`},
+		{name: "list_alerts Limit zero", tool: "list_alerts", input: `{"Limit":0}`},
+		{name: "list_alerts over max", tool: "list_alerts", input: `{"limit":101}`},
+		{name: "list_alerts negative offset", tool: "list_alerts", input: `{"offset":-1}`},
+		{name: "list_existing_automation_notifications explicit zero", tool: "list_existing_automation_notifications", input: `{"limit":0}`},
+		{name: "list_existing_automation_notifications Limit zero", tool: "list_existing_automation_notifications", input: `{"Limit":0}`},
+		{name: "list_existing_automation_notifications over max", tool: "list_existing_automation_notifications", input: `{"limit":101}`},
+		{name: "list_existing_automation_notifications negative offset", tool: "list_existing_automation_notifications", input: `{"offset":-1}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			counter.Reset()
+			counter.SetEnabled(true)
+			_, err := handlers[tc.tool](ctx, json.RawMessage(tc.input))
+			counter.SetEnabled(false)
+			require.EqualError(t, err, pageErr)
+			for _, stmt := range counter.Statements() {
+				require.NotContains(t, strings.ToLower(stmt), "from alerts", "rejected pagination must not query the alert repository")
+			}
+		})
+	}
+
+	okJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":1,"offset":0}`))
+	require.NoError(t, err)
+	var onePage struct {
+		Notifications []models.Alert `json:"notifications"`
+		NextOffset    int            `json:"next_offset"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(okJSON), &onePage))
+	require.Len(t, onePage.Notifications, 1)
+	require.Equal(t, 1, onePage.NextOffset)
+}
+
 func TestAlertRuntimeCreateAlertPreservesOperationalContract(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

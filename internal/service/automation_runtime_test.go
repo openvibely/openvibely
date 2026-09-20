@@ -5055,6 +5055,16 @@ func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwners
 	require.NotContains(t, output, `"idempotency_key"`)
 	require.NotContains(t, output, "Unowned alert")
 
+	omitted, err := handlers["list_existing_automation_notifications"](producerCtx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Contains(t, omitted, owned.ID)
+	pageErr := "limit must be 1-100 and offset must be non-negative"
+	for _, input := range []string{`{"limit":0}`, `{"Limit":0}`, `{"limit":101}`, `{"offset":-1}`} {
+		_, err := handlers["list_existing_automation_notifications"](producerCtx, json.RawMessage(input))
+		require.EqualError(t, err, pageErr)
+		require.NotContains(t, err.Error(), owned.ID)
+	}
+
 	detail, err := handlers["get_alert"](producerCtx, json.RawMessage(`{"alert_id":"`+owned.ID+`"}`))
 	require.NoError(t, err)
 	require.Contains(t, detail, "detailed duplicate context")
