@@ -3529,6 +3529,7 @@ func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *
 	execRepo := repository.NewExecutionRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -3543,6 +3544,7 @@ func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *
 	caller := &fileWritingLLMCaller{fileName: "anthropic-style.txt", content: "provider left this edit\n"}
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(caller)
+	svc.SetTaskCommitStatRepo(statRepo)
 	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
 
 	agent := ensureDefaultAgent(t, llmConfigRepo)
@@ -3591,6 +3593,22 @@ func TestLLMService_ExecuteTaskWithAgent_CommitsWorktreeEditsAndPersistsDiff(t *
 	if stored == nil || !strings.Contains(stored.DiffOutput, "provider left this edit") {
 		t.Fatalf("expected persisted diff_output to contain provider edit, got %#v", stored)
 	}
+	if commitCount := runGitTest(t, repoDir, "rev-list", "--count", targetBranch+".."+updatedTask.WorktreeBranch); commitCount != "1" {
+		t.Fatalf("task branch produced commits = %s, want 1", commitCount)
+	}
+	if updatedTask.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("merge status = %q, want pending", updatedTask.MergeStatus)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("list produced commit stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("produced commit stats = %d, want 1", len(stats))
+	}
+	if stats[0].ExecutionID == nil || *stats[0].ExecutionID != execRec.ID {
+		t.Fatalf("stat execution_id = %v, want %s", stats[0].ExecutionID, execRec.ID)
+	}
 }
 
 func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *testing.T) {
@@ -3599,6 +3617,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *t
 	execRepo := repository.NewExecutionRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	projectRepo := repository.NewProjectRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -3611,6 +3630,7 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *t
 
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
+	svc.SetTaskCommitStatRepo(statRepo)
 	svc.SetWorktreeService(NewWorktreeService(taskRepo, projectRepo, settingsRepo))
 
 	repoDir := createTestGitRepo(t)
@@ -3659,6 +3679,23 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *t
 	}
 	if updatedTask.Category != models.CategoryCompleted {
 		t.Fatalf("expected task moved to completed category, got %s", updatedTask.Category)
+	}
+	if updatedTask.MergeStatus != "" {
+		t.Fatalf("merge status = %q, want empty for no-change completion", updatedTask.MergeStatus)
+	}
+	targetBranch := updatedTask.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = GetDefaultBranch(repoDir)
+	}
+	if commitCount := runGitTest(t, repoDir, "rev-list", "--count", targetBranch+".."+updatedTask.WorktreeBranch); commitCount != "0" {
+		t.Fatalf("no-change task branch produced commits = %s, want 0", commitCount)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("list produced commit stats: %v", err)
+	}
+	if len(stats) != 0 {
+		t.Fatalf("produced commit stats = %d, want 0", len(stats))
 	}
 }
 
