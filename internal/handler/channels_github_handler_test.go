@@ -208,6 +208,87 @@ func TestChannelsGitHubConfigurePAT(t *testing.T) {
 	}
 }
 
+func TestChannelsGitHubConfigure_FailedSaveLeavesAPIEndpointUnchanged(t *testing.T) {
+	const existingEndpoint = "https://api.github.com/"
+	const attemptedEndpoint = "https://ghe.example/api/v3"
+
+	t.Run("PAT mode missing token", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		if err := h.settingsRepo.Set(context.Background(), service.GitHubSettingAPIEndpoint, existingEndpoint); err != nil {
+			t.Fatal(err)
+		}
+
+		form := url.Values{}
+		form.Set("github_auth_mode", service.GitHubAuthModePAT)
+		form.Set("github_api_endpoint", attemptedEndpoint)
+
+		rec := htmxPost(e, "/channels/github/configure", form)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d (%s)", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "GitHub personal access token is required") {
+			t.Fatalf("expected PAT required error, got %s", rec.Body.String())
+		}
+		stored, err := h.settingsRepo.Get(context.Background(), service.GitHubSettingAPIEndpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored != existingEndpoint {
+			t.Fatalf("endpoint after failed PAT save = %q, want %q", stored, existingEndpoint)
+		}
+	})
+
+	t.Run("App mode missing ID and slug", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		if err := h.settingsRepo.Set(context.Background(), service.GitHubSettingAPIEndpoint, existingEndpoint); err != nil {
+			t.Fatal(err)
+		}
+
+		form := url.Values{}
+		form.Set("github_auth_mode", service.GitHubAuthModeApp)
+		form.Set("github_api_endpoint", attemptedEndpoint)
+
+		rec := htmxPost(e, "/channels/github/configure", form)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d (%s)", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "GitHub App ID and slug are required") {
+			t.Fatalf("expected App ID/slug required error, got %s", rec.Body.String())
+		}
+		stored, err := h.settingsRepo.Get(context.Background(), service.GitHubSettingAPIEndpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored != existingEndpoint {
+			t.Fatalf("endpoint after failed App save = %q, want %q", stored, existingEndpoint)
+		}
+	})
+}
+
+func TestChannelsGitHubConfigurePAT_SavesAPIEndpoint(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	if err := h.settingsRepo.Set(context.Background(), service.GitHubSettingAPIEndpoint, "https://api.github.com/"); err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{}
+	form.Set("github_auth_mode", service.GitHubAuthModePAT)
+	form.Set("github_pat", "ghp_test_token")
+	form.Set("github_api_endpoint", "https://ghe.example/api/v3")
+
+	rec := htmxPost(e, "/channels/github/configure", form)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	stored, err := h.settingsRepo.Get(context.Background(), service.GitHubSettingAPIEndpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != "https://ghe.example/api/v3" {
+		t.Fatalf("endpoint after successful PAT save = %q, want ghe endpoint", stored)
+	}
+}
+
 func TestChannelsGitHubRemove(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	_ = h.settingsRepo.Set(context.Background(), service.GitHubSettingAppID, "123")
