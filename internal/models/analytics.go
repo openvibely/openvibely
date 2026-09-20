@@ -141,6 +141,31 @@ type ModelCategoryPerformance struct {
 	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
 }
 
+// ModelPerformance compares configured models using observed work in the app.
+// Execution success is attributed to the model that ran each execution. Task-level
+// outcomes are attributed to the model used by the task's latest execution in the
+// selected period so each task appears in one comparison row.
+type ModelPerformance struct {
+	ModelConfigID       string          `json:"model_config_id"`
+	ConfigName          string          `json:"config_name"`
+	Provider            string          `json:"provider"`
+	Model               string          `json:"model"`
+	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
+	TasksEvaluated      int             `json:"tasks_evaluated"`
+	ExecutionCount      int             `json:"execution_count"`
+	AverageAttempts     float64         `json:"average_attempts"`
+	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
+	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`
+	FirstPass           AnalyticsMetric `json:"first_pass"`
+	FollowUp            AnalyticsMetric `json:"follow_up"`
+	MedianDurationMs    int64           `json:"median_duration_ms"`
+	DurationSampleSize  int             `json:"duration_sample_size"`
+	TotalTokens         int64           `json:"total_tokens"`
+	TokenCoveredTasks   int             `json:"token_covered_tasks"`
+	KnownCostUSD        *float64        `json:"known_cost_usd,omitempty"`
+	CostCoveredTasks    int             `json:"cost_covered_tasks"`
+}
+
 type WorkflowAnalyticsDetail struct {
 	WorkflowID  string                        `json:"workflow_id"`
 	Funnel      []AutomationFunnelPoint       `json:"funnel"`
@@ -229,6 +254,7 @@ type AnalyticsDashboard struct {
 	SkillOutcomes        []SkillOutcomePerformance      `json:"skill_outcomes"`
 	AgentSkillOutcomes   []AgentSkillOutcomePerformance `json:"agent_skill_outcomes"`
 	ModelCategories      []ModelCategoryPerformance     `json:"model_categories"`
+	Models               []ModelPerformance             `json:"models"`
 	Workflows            []WorkflowPerformance          `json:"workflows"`
 	WorkflowDetail       *WorkflowAnalyticsDetail       `json:"workflow_detail,omitempty"`
 	RecentOutcomes       []EvidenceTaskRow              `json:"recent_outcomes"`

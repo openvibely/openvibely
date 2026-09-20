@@ -424,6 +424,15 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 			},
 		},
 		{
+			view: "models",
+			want: analyticsDashboardSections{
+				models:          true,
+				modelCategories: true,
+				agents:          true,
+				workflows:       true,
+			},
+		},
+		{
 			view: "learning",
 			want: analyticsDashboardSections{
 				skills:      true,
@@ -433,10 +442,9 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 		{
 			view: "usage",
 			want: analyticsDashboardSections{
-				outcomeMetrics:  true,
-				outcomeTrend:    true,
-				comparison:      true,
-				modelCategories: true},
+				outcomeMetrics: true,
+				outcomeTrend:   true,
+				comparison:     true},
 		},
 		{
 			view: "automations", want: analyticsDashboardSections{
@@ -453,8 +461,53 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 		})
 	}
 	all := analyticsDashboardSectionsForView("")
-	if !all.outcomeMetrics || !all.outcomeTrend || !all.followUpDistribution || !all.comparison || !all.funnel || !all.agents || !all.skills || !all.agentSkills || !all.modelCategories || !all.workflows || !all.evidenceRows || !all.evidenceTotal || !all.agentDetail || !all.workflowDetail || !all.insights {
+	if !all.outcomeMetrics || !all.outcomeTrend || !all.followUpDistribution || !all.comparison || !all.funnel || !all.agents || !all.skills || !all.agentSkills || !all.modelCategories || !all.models || !all.workflows || !all.evidenceRows || !all.evidenceTotal || !all.agentDetail || !all.workflowDetail || !all.insights {
 		t.Fatalf("legacy empty view must retain all dashboard sections: %+v", all)
+	}
+}
+
+func TestAnalyticsDashboardModelsCompareConfiguredModelOutcomesAndUsage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO projects(id,name) VALUES ('model-project','Model project');
+		INSERT INTO agent_configs(id,name,provider,model,auth_method,reasoning_effort) VALUES
+			('model-a','Fable','anthropic','claude-fable','oauth','high'),
+			('model-b','Luna XHigh','openai','gpt-luna','oauth','xhigh');
+		INSERT INTO tasks(id,project_id,title,status,created_at) VALUES
+			('task-a','model-project','Recovered task','completed','2026-09-01 09:00:00'),
+			('task-b','model-project','Direct task','completed','2026-09-01 09:00:00');
+		INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,is_followup,history_order) VALUES
+			('exec-a1','task-a','model-a','failed','2026-09-01 10:00:00','2026-09-01 10:10:00',0,1),
+			('exec-a2','task-a','model-b','completed','2026-09-01 11:00:00','2026-09-01 11:20:00',1,2),
+			('exec-b1','task-b','model-a','completed','2026-09-01 12:00:00','2026-09-01 12:30:00',0,1);
+		INSERT INTO task_goals(task_id,goal_id,objective,status,achieved_at,updated_at) VALUES
+			('task-a','goal-a','Recover','achieved','2026-09-01 11:20:00','2026-09-01 11:20:00'),
+			('task-b','goal-b','Complete','failed',NULL,'2026-09-01 12:30:00');
+		INSERT INTO llm_usage_events(id,provider,project_id,task_id,execution_id,agent_config_id,model,total_tokens,cost_usd,occurred_at) VALUES
+			('usage-b','openai','model-project','task-a','exec-a2','model-b','gpt-luna',1000,0.25,'2026-09-01 11:20:00');
+	`); err != nil {
+		t.Fatalf("seed model analytics: %v", err)
+	}
+
+	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "model-project", View: "models"})
+	if err != nil {
+		t.Fatalf("get model analytics: %v", err)
+	}
+	if len(dashboard.Models) != 2 {
+		t.Fatalf("models = %+v, want two configurations", dashboard.Models)
+	}
+	byID := map[string]models.ModelPerformance{}
+	for _, row := range dashboard.Models {
+		byID[row.ModelConfigID] = row
+	}
+	fable := byID["model-a"]
+	if fable.ConfigName != "Fable" || fable.ReasoningEffort != "high" || fable.TechnicalCompletion.Numerator != 1 || fable.TechnicalCompletion.Denominator != 2 || fable.GoalAchievement.Numerator != 0 || fable.GoalAchievement.Denominator != 1 || fable.FirstPass.Numerator != 1 {
+		t.Fatalf("Fable comparison = %+v", fable)
+	}
+	luna := byID["model-b"]
+	if luna.ConfigName != "Luna XHigh" || luna.ReasoningEffort != "xhigh" || luna.GoalAchievement.Numerator != 1 || luna.GoalAchievement.Denominator != 1 || luna.FirstPass.Numerator != 0 || luna.FirstPass.Denominator != 1 || luna.FollowUp.Numerator != 1 || luna.AverageAttempts != 2 || luna.TotalTokens != 1000 || luna.CostCoveredTasks != 1 || luna.KnownCostUSD == nil || *luna.KnownCostUSD != 0.25 {
+		t.Fatalf("Luna comparison = %+v", luna)
 	}
 }
 
