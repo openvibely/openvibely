@@ -248,6 +248,34 @@ type AlertRuntimeOptions struct {
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 }
 
+func runtimeToolInputHasField(input json.RawMessage, field string) bool {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(input, &object); err != nil {
+		return false
+	}
+	for key := range object {
+		if strings.EqualFold(key, field) {
+			return true
+		}
+	}
+	return false
+}
+
+// alertRuntimeListPage preserves the default of 50 only when limit is omitted.
+// An explicit zero (including Limit:0) is invalid, matching the 1-100 schema.
+func alertRuntimeListPage(input json.RawMessage, limit, offset int) (int, int, error) {
+	if limit == 0 && runtimeToolInputHasField(input, "limit") {
+		return 0, 0, fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+	}
+	if limit == 0 {
+		limit = 50
+	}
+	if limit < 1 || limit > 100 || offset < 0 {
+		return 0, 0, fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+	}
+	return limit, offset, nil
+}
+
 type telegramAuthCountByProjectStore interface {
 	CountByProject(ctx context.Context, projectID string) (int, error)
 }
@@ -2994,12 +3022,11 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := requireService(); err != nil {
 				return "", err
 			}
-			if req.Limit == 0 {
-				req.Limit = 50
+			limit, offset, err := alertRuntimeListPage(input, req.Limit, req.Offset)
+			if err != nil {
+				return "", err
 			}
-			if req.Limit < 1 || req.Limit > 100 || req.Offset < 0 {
-				return "", fmt.Errorf("limit must be 1-100 and offset must be non-negative")
-			}
+			req.Limit, req.Offset = limit, offset
 			notifications, err := opts.AlertSvc.ListExistingAutomationNotificationSummariesForRuntime(ctx, opts.ProjectID, models.AlertListFilter{Limit: req.Limit, Offset: req.Offset})
 			if err != nil {
 				return "", err
@@ -3049,12 +3076,11 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := requireService(); err != nil {
 				return "", err
 			}
-			if req.Limit == 0 {
-				req.Limit = 50
+			limit, offset, err := alertRuntimeListPage(input, req.Limit, req.Offset)
+			if err != nil {
+				return "", err
 			}
-			if req.Limit < 1 || req.Limit > 100 || req.Offset < 0 {
-				return "", fmt.Errorf("limit must be 1-100 and offset must be non-negative")
-			}
+			req.Limit, req.Offset = limit, offset
 			if req.DecisionState != "" && req.DecisionState != string(models.AlertDecisionNotRequired) && req.DecisionState != string(models.AlertDecisionPending) && req.DecisionState != string(models.AlertDecisionApproved) && req.DecisionState != string(models.AlertDecisionRejected) && req.DecisionState != string(models.AlertDecisionDismissed) {
 				return "", fmt.Errorf("invalid decision_state %q", req.DecisionState)
 			}
