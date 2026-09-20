@@ -163,29 +163,30 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 }
 
 func (c *GitHubIssueActionCore) ExecuteListExistingAutomationIssues(ctx context.Context, input json.RawMessage) (string, error) {
-	req, repo, err := c.requestAndRepo(ctx, input, nil)
+	req, err := c.request(input)
 	if err != nil {
 		return "", err
 	}
-	limit := req.Limit
-	if limit == 0 {
-		limit = 50
+	limit, offset, err := existingAutomationIssueListPageForInput(input, req)
+	if err != nil {
+		return "", err
 	}
-	if limit < 1 || limit > 100 || req.Offset < 0 {
-		return "", fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+	repo, err := c.resolve(ctx, req.RepoURL)
+	if err != nil {
+		return "", err
 	}
 	user, issues, err := c.provider.ListAuthenticatedCreatedIssues(ctx, repo)
 	if err != nil {
 		return "", err
 	}
-	summaries := compactExistingGitHubIssues(issues, limit, req.Offset)
+	summaries := compactExistingGitHubIssues(issues, limit, offset)
 	nextOffset := 0
-	if req.Offset+len(summaries) < len(issues) {
-		nextOffset = req.Offset + len(summaries)
+	if offset+len(summaries) < len(issues) {
+		nextOffset = offset + len(summaries)
 	}
 	return githubIssueActionJSON(map[string]any{
 		"ok": true, "account": user, "repository": repo.FullName,
-		"issues": summaries, "returned": len(summaries), "total": len(issues), "offset": req.Offset, "next_offset": nextOffset, "truncated": nextOffset > 0,
+		"issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0,
 	})
 }
 
@@ -255,6 +256,20 @@ func assignedIssueListPageForInput(input json.RawMessage, req GitHubIssueActionR
 		return 0, 0, fmt.Errorf("limit must be 1-100 and offset must be non-negative")
 	}
 	return assignedIssueListPage(req)
+}
+
+func existingAutomationIssueListPageForInput(input json.RawMessage, req GitHubIssueActionRequest) (int, int, error) {
+	if req.Limit == 0 && githubIssueActionInputHasField(input, "limit") {
+		return 0, 0, fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+	}
+	limit := req.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	if limit < 1 || limit > 100 || req.Offset < 0 {
+		return 0, 0, fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+	}
+	return limit, req.Offset, nil
 }
 
 func githubIssueActionInputHasField(input json.RawMessage, field string) bool {

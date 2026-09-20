@@ -23,6 +23,7 @@ type fakeGitHubIssueActionProvider struct {
 	myAssignedIssues          []GitHubIssue
 	assignedIssues            []GitHubIssue
 	assignedIssuesWithPRs     []GitHubIssueWithPullRequest
+	createdIssuesCalls        int
 	myAssignedCalls           int
 	assignedIssuesCalls       int
 	assignedIssuesWithPRCalls int
@@ -40,6 +41,7 @@ func (f *fakeGitHubIssueActionProvider) ListAuthenticatedAssignedIssues(_ contex
 	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 1}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAuthenticatedCreatedIssues(_ context.Context, _ *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	f.createdIssuesCalls++
 	if f.createdIssues != nil {
 		return &GitHubAuthenticatedUser{Login: "Me"}, f.createdIssues, nil
 	}
@@ -204,6 +206,51 @@ func TestGitHubIssueActionCoreListExistingAutomationIssuesPaginatesCallerVisible
 
 	if _, err := core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"offset":-1}`)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
 		t.Fatalf("negative offset error=%v, want validation error", err)
+	}
+}
+
+func TestGitHubIssueActionCoreListExistingAutomationIssuesDistinguishesOmittedLimitFromExplicitZero(t *testing.T) {
+	issues := make([]GitHubIssue, 51)
+	for i := range issues {
+		issues[i] = GitHubIssue{Number: i + 1, Title: fmt.Sprintf("Issue %d", i+1), State: "open", UserLogin: "Me"}
+	}
+	provider := &fakeGitHubIssueActionProvider{createdIssues: issues}
+	resolveCalls := 0
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			resolveCalls++
+			return &GitHubRepoRef{FullName: "owner/repo"}, nil
+		})
+
+	output, err := core.ExecuteListExistingAutomationIssues(context.Background(), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("omitted limit error=%v output=%q", err, output)
+	}
+	for _, want := range []string{`"returned":50`, `"total":51`, `"offset":0`, `"next_offset":50`, `"truncated":true`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("omitted-limit output missing %s: %q", want, output)
+		}
+	}
+	if provider.createdIssuesCalls != 1 {
+		t.Fatalf("provider calls after omitted limit=%d, want 1", provider.createdIssuesCalls)
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("resolve calls after omitted limit=%d, want 1", resolveCalls)
+	}
+
+	callsBeforeInvalid := provider.createdIssuesCalls
+	resolveBeforeInvalid := resolveCalls
+	for _, input := range []string{`{"limit":0}`, `{"Limit":0}`, `{"LIMIT":0}`, `{"limit":101}`, `{"offset":-1}`, `{"Offset":-1}`} {
+		if out, err := core.ExecuteListExistingAutomationIssues(context.Background(), json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+			t.Fatalf("invalid input %s output=%q error=%v, want validation error", input, out, err)
+		}
+		if provider.createdIssuesCalls != callsBeforeInvalid {
+			t.Fatalf("provider calls after invalid input %s=%d, want %d", input, provider.createdIssuesCalls, callsBeforeInvalid)
+		}
+		if resolveCalls != resolveBeforeInvalid {
+			t.Fatalf("resolve calls after invalid input %s=%d, want %d", input, resolveCalls, resolveBeforeInvalid)
+		}
 	}
 }
 
