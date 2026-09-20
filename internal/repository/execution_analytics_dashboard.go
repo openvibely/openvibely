@@ -209,13 +209,13 @@ func analyticsDashboardSectionsForView(view string) analyticsDashboardSections {
 	case "overview":
 		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, comparison: true, funnel: true, workflows: true, evidenceRows: true, insights: true}
 	case "outcomes":
-		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, followUpDistribution: true, funnel: true, evidenceRows: true, evidenceTotal: true}
+		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, followUpDistribution: true, comparison: true, funnel: true, evidenceRows: true, evidenceTotal: true}
 	case "agents":
 		return analyticsDashboardSections{agents: true, skills: true, evidenceRows: true, agentDetail: true}
 	case "learning":
 		return analyticsDashboardSections{skills: true, agentSkills: true}
 	case "usage":
-		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, modelCategories: true}
+		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, comparison: true, modelCategories: true}
 	case "automations":
 		return analyticsDashboardSections{workflows: true, workflowDetail: true}
 	default:
@@ -1393,7 +1393,7 @@ func buildAnalyticsInsights(current models.OutcomeMetrics, previous *models.Outc
 	}
 	for _, workflow := range workflows {
 		if workflow.BlockedCount > 0 {
-			insights = append(insights, models.AnalyticsInsight{Kind: "attention", Title: workflow.WorkflowName + " has blocked work", Detail: fmt.Sprintf("%d blocked work items in current workflow state.", workflow.BlockedCount), MetricKey: "workflow_blocked", SampleSize: workflow.BlockedCount, ComparisonWindow: "current state", EvidenceView: "workflows", EvidenceID: workflow.WorkflowID})
+			insights = append(insights, models.AnalyticsInsight{Kind: "attention", Title: workflow.WorkflowName + " has blocked work", Detail: fmt.Sprintf("%d blocked work items in current workflow state.", workflow.BlockedCount), MetricKey: "workflow_blocked", SampleSize: workflow.BlockedCount, ComparisonWindow: "current state", EvidenceView: "automations", EvidenceID: workflow.WorkflowID})
 		}
 	}
 	return insights

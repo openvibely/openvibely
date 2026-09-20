@@ -358,22 +358,64 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
   };
   function waitFor(check, next, attempt) { if (check()) { next(); return; } if ((attempt || 0) > 100) fail('timed out; urls=' + urls.join('|')); setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20); }
   window.addEventListener('load', function() {
-    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;}) && urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('overviewAccountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('overviewAccountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
+    waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});}, function() {
       setTimeout(function() {
         var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
         if (!dashboardURL || new URL(dashboardURL, location.href).searchParams.get('view') !== 'overview') fail('dashboard request did not preserve the visible view: ' + urls.join('|'));
-        if (urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0 || url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('overview eagerly loaded unrelated hidden-view analytics: ' + urls.join('|'));
-        if (document.getElementById('overviewAccountUsageCards').closest('.hidden')) fail('provider usage cards are hidden on overview');
+        if (urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0 || url.indexOf('/api/analytics/skills') >= 0 || url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('overview eagerly loaded unrelated hidden-view analytics: ' + urls.join('|'));
         if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('skillOutcomeTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelCategoryTable').innerHTML) fail('overview synchronously rendered hidden-view analytics');
-        document.querySelector('[data-analytics-view="learning"]').click();
-        waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
-          if (urls.some(function(url){return url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('learning loaded unrelated analytics: ' + urls.join('|'));
-          if (!document.querySelector('[data-analytics-provider-usage]').closest('[data-analytics-section]').classList.contains('hidden')) fail('provider usage summary remained visible outside Overview and Usage');
-          result.setAttribute('data-test-result', 'pass');
+        document.querySelector('[data-analytics-view="usage"]').click();
+        waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
+          if (localStorage.getItem('openvibely.analytics.lastView.project-1') !== 'usage') fail('selected analytics tab was not remembered');
+          document.querySelector('[data-analytics-view="learning"]').click();
+          waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
+            if (urls.some(function(url){return url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('learning loaded unrelated analytics: ' + urls.join('|'));
+            if (!document.getElementById('analytics-usage').classList.contains('hidden')) fail('usage remained visible outside the Usage tab');
+            result.setAttribute('data-test-result', 'pass');
+          });
         });
       }, 50);
     });
   });
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_AnalyticsContent_RestoresLastViewInChrome(t *testing.T) {
+	project := &models.Project{ID: "project-remember-view", Name: "Project One"}
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+
+	fixture := `<main id="reconnect-result"></main><script>
+(function() {
+  var result = document.getElementById('reconnect-result'), urls = [];
+  function fail(message) { result.setAttribute('data-test-result', 'fail'); result.setAttribute('data-test-error', message); throw new Error(message); }
+  history.replaceState({}, '', location.pathname + '?project_id=project-remember-view');
+  localStorage.setItem('openvibely.analytics.lastView.project-remember-view', 'usage');
+  window.Chart = function() { this.destroy = function() {}; };
+  window.fetch = function(url) {
+    var value = String(url); urls.push(value);
+    var payload = [];
+    if (value.indexOf('/api/analytics/dashboard') >= 0) payload = {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},model_categories:[],recent_outcomes:[],insights:[]};
+    if (value.indexOf('/api/analytics/usage') >= 0) payload = {usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};
+    return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
+  };
+  function wait(attempt) {
+    var usageButton = document.querySelector('[data-analytics-view="usage"]');
+    var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
+    if (usageButton && usageButton.classList.contains('btn-primary') && dashboardURL && urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;})) {
+      if (new URL(dashboardURL, location.href).searchParams.get('view') !== 'usage') fail('restored view was not sent to the dashboard endpoint: ' + dashboardURL);
+      if (document.getElementById('analytics-usage').classList.contains('hidden')) fail('remembered Usage view was not shown');
+      result.setAttribute('data-test-result', 'pass');
+      return;
+    }
+    if ((attempt || 0) > 100) fail('remembered Usage view did not load; urls=' + urls.join('|'));
+    setTimeout(function(){wait((attempt || 0) + 1);}, 20);
+  }
+  window.addEventListener('load', function(){wait(0);});
 })();
 </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
@@ -545,8 +587,8 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`data-analytics-section="agents"`, `data-analytics-section="automations"`,
 		`Technical completion rate`, `Goal achievement rate`, `Technical first-pass rate`,
 		`Follow-up rate`, `Median task cycle time`, `Cost per achieved goal`,
-		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`,
-		`Observed skill outcomes`, `Exact skill outcome values`, `Current OAuth account limits · not date-filtered`,
+		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`, `id="usageFindings"`,
+		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
 		`Selected Agent outcome trend`, `Selected Agent model mix`, `Agent findings`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`, `Model efficiency`,
 		`Technical Execution Completion Over Time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
@@ -561,10 +603,14 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if strings.Contains(content, `onClick:`) || strings.Contains(content, `data-analytics-evidence-link`) {
 		t.Fatal("Analytics charts, KPI cards, and funnel visuals must be display-only")
 	}
-	accountUsage := strings.Index(content, `id="overviewAccountUsageCards"`)
-	overviewMetrics := strings.Index(content, `id="analyticsKpis"`)
-	if accountUsage < 0 || overviewMetrics < 0 || accountUsage > overviewMetrics {
-		t.Fatal("OpenAI and Anthropic usage should render above the Overview metrics")
+	if strings.Contains(content, `id="overviewAccountUsageCards"`) || strings.Contains(content, `data-analytics-provider-usage`) {
+		t.Fatal("provider usage should live only on the Usage view")
+	}
+	if !strings.Contains(content, `openvibely.analytics.lastView.`) || !strings.Contains(content, `savedAnalyticsView()`) {
+		t.Fatal("Analytics should remember the selected view across navigation")
+	}
+	if !strings.Contains(content, `return 'Unavailable · n=0'`) || !strings.Contains(content, `usagePeriodForGroup`) {
+		t.Fatal("Analytics should distinguish unavailable ratios and align cost with grouped outcome periods")
 	}
 	if strings.Contains(content, `>${task.TaskTitle || 'Unknown'}<`) || strings.Contains(content, `<td>${pattern.TaskTitle || 'Unknown'}</td>`) {
 		t.Fatal("dynamic task titles must be escaped before innerHTML insertion")
