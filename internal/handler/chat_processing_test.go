@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -7145,6 +7146,291 @@ func TestSelectAgent_AutoStillWorks(t *testing.T) {
 	if selected == nil {
 		t.Fatal("selectAgent auto returned nil")
 	}
+}
+
+func TestSelectAgent_AutoUsesCompactCatalogAndHydratesSelectedModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	clearModelConfigs(t, db)
+
+	haiku := richAutoSelectionConfig("Haiku", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "claude-3-haiku", false)
+	sonnet := richAutoSelectionConfig("Sonnet", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "claude-3-5-sonnet", true)
+	for _, cfg := range []*models.LLMConfig{haiku, sonnet} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	selected, err := h.selectAgent(ctx, "auto", "build endpoint handler service database integration test", false)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("selectAgent auto failed: %v", err)
+	}
+	if selected.ID != sonnet.ID {
+		t.Fatalf("selected ID = %s, want %s", selected.ID, sonnet.ID)
+	}
+	assertSelectedModelFullyHydrated(t, selected)
+	assertAutoSelectionQueryShape(t, counter.Statements(), false)
+}
+
+func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	clearModelConfigs(t, db)
+
+	legacyCLI := richAutoSelectionConfig("Anthropic CLI", models.ProviderAnthropic, models.AuthMethodCLI, "claude-opus-legacy-cli", false)
+	apiKey := richAutoSelectionConfig("Anthropic API", models.ProviderAnthropic, models.AuthMethodAPIKey, "claude-3-haiku", false)
+	oauth := richAutoSelectionConfig("Anthropic OAuth", models.ProviderAnthropic, models.AuthMethodOAuth, "claude-opus-5-20250929", false)
+	for _, cfg := range []*models.LLMConfig{legacyCLI, apiKey, oauth} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	selected, err := h.selectAgent(ctx, "auto", "architect a comprehensive distributed migration plan", true)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("selectAgent auto with images failed: %v", err)
+	}
+	if selected.ID != oauth.ID {
+		t.Fatalf("selected ID = %s, want OAuth vision-capable model %s", selected.ID, oauth.ID)
+	}
+	if selected.IsAnthropicCLI() {
+		t.Fatalf("selected legacy CLI model for image request: %#v", selected)
+	}
+	if selected.OAuthAccessToken != "oauth-secret" || selected.OAuthRefreshToken != "oauth-refresh-secret" {
+		t.Fatalf("selected OAuth model was not fully hydrated: %#v", selected)
+	}
+	assertSelectedModelFullyHydrated(t, selected)
+	assertAutoSelectionQueryShape(t, counter.Statements(), true)
+}
+
+func TestSelectAgent_AutoCompactSelectionLargeFixtureBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser/task-thread auto-selection performance guard in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	clearModelConfigs(t, db)
+	seedLargeAutoSelectionConfigs(t, ctx, llmConfigRepo, 50)
+	message := "build endpoint handler service database integration test"
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			selected, err := benchmarkFullListAutoSelectAgent(h, ctx, message, false)
+			if err != nil {
+				b.Fatal(err)
+			}
+			assertSelectedModelFullyHydrated(b, selected)
+		}
+	})
+	compactThenGet := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			selected, err := h.autoSelectAgent(ctx, message, false)
+			if err != nil {
+				b.Fatal(err)
+			}
+			assertSelectedModelFullyHydrated(b, selected)
+		}
+	})
+
+	const (
+		maxCompactDuration   = 200 * time.Microsecond
+		maxCompactBytesPerOp = 300 * 1024
+		minImprovementRatio  = 20
+	)
+	t.Logf("browser/task-thread auto full-list baseline: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp())
+	t.Logf("browser/task-thread auto compact+GetByID: %d ns/op, %d B/op", compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
+	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
+		t.Fatalf("compact auto selection took %s/op, want <= %s", time.Duration(compactThenGet.NsPerOp()), maxCompactDuration)
+	}
+	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
+		t.Fatalf("compact auto selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxCompactBytesPerOp)
+	}
+	if testing.CoverMode() == "" && fullList.NsPerOp()/compactThenGet.NsPerOp() < minImprovementRatio {
+		t.Fatalf("compact auto selection latency improvement = %.1fx, want >= %dx", float64(fullList.NsPerOp())/float64(compactThenGet.NsPerOp()), minImprovementRatio)
+	}
+	if fullList.AllocedBytesPerOp()/compactThenGet.AllocedBytesPerOp() < minImprovementRatio {
+		t.Fatalf("compact auto selection allocation improvement = %.1fx, want >= %dx", float64(fullList.AllocedBytesPerOp())/float64(compactThenGet.AllocedBytesPerOp()), minImprovementRatio)
+	}
+}
+
+func BenchmarkBrowserTaskThreadAutoSelection(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		run  func(*Handler, context.Context, string) (*models.LLMConfig, error)
+	}{
+		{
+			name: "full_list_baseline",
+			run: func(h *Handler, ctx context.Context, message string) (*models.LLMConfig, error) {
+				return benchmarkFullListAutoSelectAgent(h, ctx, message, false)
+			},
+		},
+		{
+			name: "compact_then_get",
+			run: func(h *Handler, ctx context.Context, message string) (*models.LLMConfig, error) {
+				return h.autoSelectAgent(ctx, message, false)
+			},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			h, _, llmConfigRepo := setupTestHandlerForDB(b, db)
+			ctx := context.Background()
+			clearModelConfigs(b, db)
+			seedLargeAutoSelectionConfigs(b, ctx, llmConfigRepo, 50)
+			message := "build endpoint handler service database integration test"
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				selected, err := tc.run(h, ctx, message)
+				if err != nil {
+					b.Fatal(err)
+				}
+				assertSelectedModelFullyHydrated(b, selected)
+			}
+		})
+	}
+}
+
+func clearModelConfigs(tb testing.TB, db interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}) {
+	tb.Helper()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		tb.Fatalf("clear model configs: %v", err)
+	}
+}
+
+func richAutoSelectionConfig(name string, provider models.LLMProvider, authMethod models.AuthMethod, model string, isDefault bool) *models.LLMConfig {
+	largeBody := strings.Repeat("x", 64*1024)
+	cfg := &models.LLMConfig{
+		Name:                 name,
+		Provider:             provider,
+		AuthMethod:           authMethod,
+		Model:                model,
+		APIKey:               "api-secret",
+		OAuthAccessToken:     "oauth-secret",
+		OAuthRefreshToken:    "oauth-refresh-secret",
+		OAuthClientSecret:    "client-secret",
+		BaseURL:              "https://example.com/v1/",
+		Transport:            "chat_completions",
+		PresetSlug:           "custom",
+		ExtraHeadersJSON:     `{"secret":"header"}`,
+		ExtraBodyJSON:        largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON:  `{"token":"secret"}`,
+		MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+		MaxWorkers:           3,
+		WorkerTimeout:        90,
+		IsDefault:            isDefault,
+	}
+	if authMethod == models.AuthMethodCLI {
+		cfg.APIKey = ""
+		cfg.OAuthAccessToken = ""
+		cfg.OAuthRefreshToken = ""
+	}
+	return cfg
+}
+
+func seedLargeAutoSelectionConfigs(tb testing.TB, ctx context.Context, repo *repository.LLMConfigRepo, count int) {
+	tb.Helper()
+	for i := 0; i < count; i++ {
+		cfg := richAutoSelectionConfig(fmt.Sprintf("Large Custom %02d", i), models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "claude-3-5-sonnet", i == 0)
+		if err := repo.Create(ctx, cfg); err != nil {
+			tb.Fatalf("create large auto-selection config %d: %v", i, err)
+		}
+	}
+}
+
+func benchmarkFullListAutoSelectAgent(h *Handler, ctx context.Context, message string, hasImages bool) (*models.LLMConfig, error) {
+	agents, err := h.llmConfigRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(agents) == 0 {
+		return nil, fmt.Errorf("no agents configured - please add at least one agent/model in settings")
+	}
+	complexity := service.AnalyzeComplexity(message)
+	if result := service.SelectLLMWithVision(complexity, agents, hasImages); result != nil && result.LLMConfig != nil {
+		return result.LLMConfig, nil
+	}
+	return &agents[0], nil
+}
+
+func assertSelectedModelFullyHydrated(tb testing.TB, selected *models.LLMConfig) {
+	tb.Helper()
+	if selected == nil {
+		tb.Fatal("selected model is nil")
+	}
+	if selected.ExtraBodyJSON == "" || selected.MixtureConfigJSON == "" || selected.BaseURL == "" || selected.Transport == "" || selected.CustomAuthConfigJSON == "" || selected.CustomAuthStateJSON == "" || selected.OAuthClientSecret == "" || selected.MaxWorkers == 0 || selected.WorkerTimeout == 0 {
+		tb.Fatalf("selected model was not fully hydrated: %#v", selected)
+	}
+}
+
+func assertAutoSelectionQueryShape(t *testing.T, statements []string, hasImages bool) {
+	t.Helper()
+	var modelSelects []string
+	for _, stmt := range statements {
+		normalized := strings.ToLower(strings.Join(strings.Fields(stmt), " "))
+		if strings.HasPrefix(normalized, "select ") && strings.Contains(normalized, " from agent_configs") {
+			modelSelects = append(modelSelects, normalized)
+		}
+	}
+	if len(modelSelects) != 2 {
+		t.Fatalf("model select statements = %#v, want compact catalog plus selected GetByID", statements)
+	}
+	catalog, hydrate := modelSelects[0], modelSelects[1]
+	if strings.Contains(catalog, "left join") || strings.Contains(catalog, " from agent_configs a") {
+		t.Fatalf("auto-selection catalog query used full model shape: %s", catalog)
+	}
+	if !strings.Contains(catalog, "order by is_default desc, name asc") {
+		t.Fatalf("auto-selection catalog query lost default/name ordering: %s", catalog)
+	}
+	if hasImages {
+		wantProjection := "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '') != '' then 1 else 0 end, case when coalesce(oauth_connection_id, '') != '' then exists(select 1 from oauth_connections c where c.id = oauth_connection_id and c.oauth_access_token != '') else coalesce(oauth_access_token, '') != '' end"
+		projection := strings.Split(catalog, " from agent_configs ")[0]
+		if projection != wantProjection {
+			t.Fatalf("vision auto-selection projection = %q, want %q", projection, wantProjection)
+		}
+	} else {
+		wantProjection := "select id, name, provider, model, is_default"
+		projection := strings.Split(catalog, " from agent_configs ")[0]
+		if projection != wantProjection {
+			t.Fatalf("chat auto-selection projection = %q, want %q", projection, wantProjection)
+		}
+	}
+	for _, forbidden := range autoSelectionCatalogForbiddenColumns(hasImages) {
+		if strings.Contains(catalog, forbidden) {
+			t.Fatalf("auto-selection catalog selected forbidden column %q: %s", forbidden, catalog)
+		}
+	}
+	if !strings.Contains(hydrate, "left join oauth_connections") || !strings.Contains(hydrate, "extra_body_json") || !strings.Contains(hydrate, "mixture_config_json") || !strings.Contains(hydrate, "oauth_client_secret") {
+		t.Fatalf("selected model hydration query was not full GetByID shape: %s", hydrate)
+	}
+}
+
+func autoSelectionCatalogForbiddenColumns(hasImages bool) []string {
+	forbidden := []string{
+		"oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes",
+		"ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix",
+		"extra_headers_json", "extra_body_json", "default_max_tokens", "context_window", "compaction_threshold",
+		"token_exchange_format", "token_refresh_format", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision",
+		"mixture_config_json", "auto_start_tasks", "created_at", "updated_at", "max_tokens", "temperature", "reasoning_effort",
+		"max_workers", "worker_timeout",
+	}
+	if !hasImages {
+		forbidden = append(forbidden, "api_key", "oauth_access_token", "oauth_connection_id")
+	}
+	return forbidden
 }
 
 func TestSelectAgent_ExplicitIDStillWorks(t *testing.T) {
