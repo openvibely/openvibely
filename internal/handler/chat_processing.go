@@ -2773,7 +2773,7 @@ func (h *Handler) selectExplicitAgent(ctx context.Context, agentID string, hasIm
 
 // autoSelectAgent automatically selects an agent based on message complexity and vision requirements.
 func (h *Handler) autoSelectAgent(ctx context.Context, message string, hasImages bool) (*models.LLMConfig, error) {
-	agents, err := h.llmConfigRepo.List(ctx)
+	agents, err := h.listAutoSelectionOptions(ctx, hasImages)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list agents for auto-selection: %w", err)
 	}
@@ -2781,16 +2781,29 @@ func (h *Handler) autoSelectAgent(ctx context.Context, message string, hasImages
 		return nil, fmt.Errorf("no agents configured - please add at least one agent/model in settings")
 	}
 
+	selectedID := agents[0].ID
 	complexity := service.AnalyzeComplexity(message)
-	if result := service.SelectLLMWithVision(complexity, agents, hasImages); result != nil {
-		return result.LLMConfig, nil
-	}
-
-	// Fallback to first agent
-	if hasImages {
+	if result := service.SelectLLMWithVision(complexity, agents, hasImages); result != nil && result.LLMConfig != nil {
+		selectedID = result.LLMConfig.ID
+	} else if hasImages {
 		applog.Infof("[handler] autoSelectAgent has images but no vision-capable agents, falling back to first available")
 	}
-	return &agents[0], nil
+
+	agent, err := h.llmConfigRepo.GetByID(ctx, selectedID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hydrate selected agent %s: %w", selectedID, err)
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("selected agent %s not found", selectedID)
+	}
+	return agent, nil
+}
+
+func (h *Handler) listAutoSelectionOptions(ctx context.Context, hasImages bool) ([]models.LLMConfig, error) {
+	if hasImages {
+		return h.llmConfigRepo.ListVisionSelectionOptions(ctx)
+	}
+	return h.llmConfigRepo.ListChatSelectionOptions(ctx)
 }
 
 // resolveWorkDir retrieves the repository path for a project to use as the
