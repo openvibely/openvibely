@@ -1242,7 +1242,7 @@ templ analyticsContent(currentProject *models.Project) {
 											accountContainers.forEach(function(container){container.innerHTML = '\x3cp class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.\x3c/p>';});
 											return;
 										}
-										const accountHTML = accounts.map(account => {
+										const accountHTML = accounts.map((account, index) => {
 											let accountLimits = account.limits || [];
 											if (accountLimits.length === 0) {
 												if (account.primary_limit) accountLimits.push(account.primary_limit);
@@ -1268,7 +1268,8 @@ templ analyticsContent(currentProject *models.Project) {
 											const subscriptionHtml = subscription ? '\x3cdiv class="text-sm opacity-90">' + escapeHTML(subscription) + '\x3c/div>' : '';
 											const metaHtml = meta ? '\x3cdiv class="text-xs opacity-80">' + escapeHTML(meta) + '\x3c/div>' : '';
 											const detailHtml = detail ? '\x3cdiv class="text-xs opacity-60">' + escapeHTML(detail) + '\x3c/div>' : '';
-											return '\x3cdiv class="card bg-base-100 shadow-sm border border-base-300 h-full">\x3cdiv class="card-body">\x3cdiv class="font-semibold">' + escapeHTML(providerTitle) + '\x3c/div>' + subscriptionHtml + metaHtml + detailHtml + extraUsage + (limits || '\x3cdiv class="text-xs opacity-50 mt-2">No live limit snapshot yet\x3c/div>') + error + '\x3c/div>\x3c/div>';
+											const span = accounts.length % 2 === 1 && index === accounts.length - 1 ? ' lg:col-span-2' : '';
+											return '\x3cdiv class="card bg-base-100 shadow-sm border border-base-300 h-full' + span + '">\x3cdiv class="card-body">\x3cdiv class="font-semibold">' + escapeHTML(providerTitle) + '\x3c/div>' + subscriptionHtml + metaHtml + detailHtml + extraUsage + (limits || '\x3cdiv class="text-xs opacity-50 mt-2">No live limit snapshot yet\x3c/div>') + error + '\x3c/div>\x3c/div>';
 										}).join('');
 										accountContainers.forEach(function(container){container.innerHTML=accountHTML;});
 									}
