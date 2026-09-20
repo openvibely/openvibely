@@ -585,13 +585,13 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`data-analytics-view="learning"`, `data-analytics-view="usage"`,
 		`data-analytics-section="overview"`, `data-analytics-section="outcomes"`,
 		`data-analytics-section="agents"`, `data-analytics-section="automations"`,
-		`Technical completion rate`, `Goal achievement rate`, `Technical first-pass rate`,
-		`Follow-up rate`, `Median task cycle time`, `Cost per achieved goal`,
+		`Execution success rate`, `Goal achievement rate`, `First-attempt success rate`,
+		`Follow-up rate`, `Median task turnaround time`, `Cost per achieved goal`,
 		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`, `id="usageFindings"`,
 		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
 		`Selected Agent outcome trend`, `Selected Agent model mix`, `Agent findings`,
-		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`, `Model efficiency`,
-		`Technical Execution Completion Over Time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
+		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`, `Model success by task category`,
+		`Execution Results Over Time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 	} {
 		if !strings.Contains(content, expected) {
 			t.Errorf("analytics outcome dashboard missing %q", expected)
@@ -611,6 +611,14 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	}
 	if !strings.Contains(content, `return 'Unavailable · n=0'`) || !strings.Contains(content, `usagePeriodForGroup`) {
 		t.Fatal("Analytics should distinguish unavailable ratios and align cost with grouped outcome periods")
+	}
+	if strings.Contains(content, `label:'Sample size'`) || strings.Contains(content, `Definition and denominator`) {
+		t.Fatal("KPI cards should not imply one universal sample or repeat definition tooltips")
+	}
+	for _, expected := range []string{`Current: n=`, `Compared with previous:`, `Low sample`, `finished executions`, `goal-bearing tasks`, `tasks with activity`} {
+		if !strings.Contains(content, expected) {
+			t.Errorf("KPI comparison context missing %q", expected)
+		}
 	}
 	if strings.Contains(content, `sticky top-0`) {
 		t.Fatal("Analytics navigation should scroll with the page")
@@ -707,7 +715,7 @@ func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 		"Task Execution by Hour", "Average Execution Time by Task", "Average Execution Time by Model",
 		"Model Breakdown by Executions", "Most Frequently Run Tasks", "Skill Activity Over Time",
 		"Top Skills", "Follow-through / Selected Outcomes", "Top Agent/Skill Pairs",
-		"Least Active Enabled Skills", "Observed skill outcomes", "Model efficiency", "Failed Task Patterns", "accountUsageCards",
+		"Least Active Enabled Skills", "Observed skill outcomes", "Model success by task category", "Failed Task Patterns", "accountUsageCards",
 	} {
 		if !strings.Contains(content, metric) {
 			t.Errorf("Focused Analytics views lost existing metric %q", metric)

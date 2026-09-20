@@ -138,6 +138,9 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 			t.Fatal(err)
 		}
 	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET worktree_path='' WHERE id=?`, achieved.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
@@ -200,6 +203,18 @@ func TestExecutionRepo_GetAnalyticsDashboardUsesTaskOutcomesAndProjectPeriod(t *
 	}
 	if len(dashboard.Funnel) < 4 || dashboard.Funnel[3].Denominator != 2 {
 		t.Errorf("goal funnel denominator = %+v, want two evaluable goal-bearing tasks", dashboard.Funnel)
+	}
+	if len(dashboard.Funnel) < 5 || dashboard.Funnel[4].Count != 1 || dashboard.Funnel[4].Denominator != 1 {
+		t.Errorf("merge funnel lost cleaned-up merged worktree: %+v", dashboard.Funnel)
+	}
+	foundMergedEvidence := false
+	for _, row := range dashboard.RecentOutcomes {
+		if row.TaskID == achieved.ID {
+			foundMergedEvidence = row.FunnelMergeEligible && row.FunnelMerged
+		}
+	}
+	if !foundMergedEvidence {
+		t.Errorf("merged task evidence lost eligibility after worktree cleanup: %+v", dashboard.RecentOutcomes)
 	}
 	if len(dashboard.SkillOutcomes) != 2 {
 		t.Fatalf("observed skill outcomes merged identical handles across scopes: %+v", dashboard.SkillOutcomes)
