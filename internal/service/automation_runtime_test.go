@@ -3171,11 +3171,13 @@ func replaceAutomationGitHubIssueGraphWithCandidate(t *testing.T, fixture automa
 }
 
 func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T) {
+	providerCalls := 0
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
 			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		listCreatedIssuesFn: func(_ context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			providerCalls++
 			require.Equal(t, "example/runtime", repo.FullName)
 			return &GitHubAuthenticatedUser{Login: "automation-bot", Source: GitHubAuthModePAT}, []GitHubIssue{
 				{Number: 42, URL: "https://github.com/example/runtime/issues/42", Title: "Existing duplicate candidate", Body: "## Summary\nExisting covered behavior", State: "open", UserLogin: "automation-bot", Labels: []string{"bug"}},
@@ -3196,6 +3198,12 @@ func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T)
 	require.Contains(t, output, `"title":"Existing duplicate candidate"`)
 	require.NotContains(t, output, `"body_excerpt"`)
 	require.NotContains(t, output, "Existing covered behavior")
+	callsBeforeInvalid := providerCalls
+	for _, input := range []string{`{"limit":0}`, `{"Limit":0}`, `{"limit":101}`, `{"offset":-1}`} {
+		_, err := handlers["github_list_existing_automation_issues"](ctx, json.RawMessage(input))
+		require.EqualError(t, err, "limit must be 1-100 and offset must be non-negative")
+	}
+	require.Equal(t, callsBeforeInvalid, providerCalls)
 }
 
 func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsPaginates(t *testing.T) {
