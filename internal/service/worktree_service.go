@@ -646,6 +646,23 @@ type WorktreeCommitMessageContext struct {
 	DiffSummary string
 }
 
+type WorktreeTaskOutputFinalizationOptions struct {
+	TurnIntent    string
+	Summary       string
+	Agent         *models.LLMConfig
+	LLMService    *LLMService
+	DiffSummary   string
+	SkipSummarize bool
+}
+
+type WorktreeTaskOutputFinalizationResult struct {
+	Finalized      bool
+	WorktreeBranch string
+	TargetBranch   string
+	DiffOutput     string
+	CommitError    error
+}
+
 // BuildWorktreeCommitMessage builds a descriptive commit message from the
 // current uncommitted worktree diff. If an LLM summary produced from the actual
 // diff is available, it wins; otherwise the fallback is deterministic from the
@@ -3059,35 +3076,88 @@ func (ws *WorktreeService) reconcileVerifiedMergedTask(ctx context.Context, task
 	})
 }
 
+func (ws *WorktreeService) FinalizeTaskOutputChanges(ctx context.Context, task *models.Task, execModel *models.Execution, repoDir string, opts WorktreeTaskOutputFinalizationOptions) WorktreeTaskOutputFinalizationResult {
+	result := WorktreeTaskOutputFinalizationResult{}
+	if task == nil || task.WorktreePath == "" || repoDir == "" {
+		return result
+	}
+	if err := ws.WithRepositoryMutation(repoDir, func() error {
+		result = ws.finalizeTaskOutputChangesUnlocked(ctx, task, execModel, repoDir, opts)
+		return result.CommitError
+	}); err != nil && result.CommitError == nil {
+		result.Finalized = true
+		result.CommitError = err
+	}
+	return result
+}
+
+func (ws *WorktreeService) finalizeTaskOutputChangesUnlocked(ctx context.Context, task *models.Task, execModel *models.Execution, repoDir string, opts WorktreeTaskOutputFinalizationOptions) WorktreeTaskOutputFinalizationResult {
+	result := WorktreeTaskOutputFinalizationResult{Finalized: true}
+	result.WorktreeBranch = GetCurrentBranch(task.WorktreePath)
+	if result.WorktreeBranch == "" {
+		result.WorktreeBranch = task.WorktreeBranch
+	}
+	result.TargetBranch = task.MergeTargetBranch
+	if result.TargetBranch == "" {
+		result.TargetBranch = GetDefaultBranch(repoDir)
+	}
+
+	commitCtx := WorktreeCommitMessageContext{
+		Phase:       WorktreeCommitPhaseInitial,
+		TaskTitle:   task.Title,
+		TurnIntent:  opts.TurnIntent,
+		Summary:     opts.Summary,
+		DiffSummary: opts.DiffSummary,
+	}
+	llmSvc := opts.LLMService
+	if llmSvc == nil {
+		llmSvc = ws.llmSvc
+	}
+	if !opts.SkipSummarize && commitCtx.DiffSummary == "" && llmSvc != nil {
+		if opts.Agent != nil {
+			commitCtx.DiffSummary = llmSvc.SummarizeWorktreeCommitDiff(WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, *opts.Agent, commitCtx)
+		} else if task.AgentID != nil {
+			commitCtx.DiffSummary = llmSvc.SummarizeWorktreeCommitDiffForAgentID(WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, *task.AgentID, commitCtx)
+		}
+	}
+	message := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
+	if llmSvc != nil {
+		result.CommitError = llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, message)
+	} else {
+		result.CommitError = CommitWorktreeChanges(task.WorktreePath, message)
+	}
+
+	// Persist and review the authoritative branch diff when the auto-commit succeeds
+	// or the provider already committed. If the app-level commit fails, include any
+	// uncommitted edits so the Changes view does not appear empty.
+	if result.WorktreeBranch != "" && result.TargetBranch != "" {
+		result.DiffOutput = GetWorktreeDiffWithUncommitted(repoDir, result.WorktreeBranch, result.TargetBranch, task.WorktreePath)
+	}
+	return result
+}
+
 // HandlePostExecution handles worktree operations after task execution completes.
 // Called by the LLM service after a task finishes successfully.
 func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models.Task, execModel *models.Execution, repoDir string) {
-	if task.WorktreePath == "" || task.WorktreeBranch == "" {
+	result := ws.FinalizeTaskOutputChanges(ctx, task, execModel, repoDir, WorktreeTaskOutputFinalizationOptions{})
+	ws.HandlePostExecutionWithFinalizedTaskOutput(ctx, task, execModel, repoDir, result)
+}
+
+func (ws *WorktreeService) HandlePostExecutionWithFinalizedTaskOutput(ctx context.Context, task *models.Task, execModel *models.Execution, repoDir string, result WorktreeTaskOutputFinalizationResult) {
+	if task == nil || task.WorktreePath == "" || task.WorktreeBranch == "" {
 		return
 	}
-
-	// Commit any changes in the worktree. If this fails, do not mark the task
-	// branch as ready/pending; otherwise the Changes tab can offer a branch merge
-	// for a branch that does not actually contain the provider's file edits.
-	commitCtx := WorktreeCommitMessageContext{
-		Phase:     WorktreeCommitPhaseInitial,
-		TaskTitle: task.Title,
+	if !result.Finalized {
+		result = ws.FinalizeTaskOutputChanges(ctx, task, execModel, repoDir, WorktreeTaskOutputFinalizationOptions{})
 	}
-	if ws.llmSvc != nil && task.AgentID != nil {
-		commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, *task.AgentID, commitCtx)
-	}
-	msg := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	commitErr := ws.WithRepositoryMutation(repoDir, func() error {
-		if ws.llmSvc != nil {
-			return ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, msg)
-		}
-		return CommitWorktreeChanges(task.WorktreePath, msg)
-	})
-	if commitErr != nil {
-		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, commitErr)
+	if result.CommitError != nil {
+		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, result.CommitError)
 		if ws.taskRepo != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		}
+		return
+	}
+	if strings.TrimSpace(result.DiffOutput) == "" {
 		return
 	}
 

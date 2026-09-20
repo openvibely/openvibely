@@ -1658,11 +1658,12 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Capture git diff of changes made during execution. Only a worktree
 	// successfully established for this execution may use target-relative review
 	// capture; persisted task metadata can refer to stale historical lineage.
+	var finalizedTaskOutput WorktreeTaskOutputFinalizationResult
 	if workDir != "" {
 		if managedWorktree {
-			diffOutput := s.captureWorktreeDiffAfterExecution(finalizeCtx, exec, &task, repoDir, output, agent)
-			if diffOutput != "" {
-				exec.DiffOutput = diffOutput
+			finalizedTaskOutput = s.captureWorktreeDiffAfterExecution(finalizeCtx, exec, &task, repoDir, output, agent)
+			if finalizedTaskOutput.DiffOutput != "" {
+				exec.DiffOutput = finalizedTaskOutput.DiffOutput
 			}
 		} else if diffOutput := s.CaptureGitDiff(workDir); diffOutput != "" {
 			if diffErr := s.execRepo.UpdateDiffOutput(finalizeCtx, exec.ID, diffOutput); diffErr != nil {
@@ -1675,10 +1676,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 	}
 
-	// Commit, merge, and update worktree status only for the managed worktree
-	// established for this execution, never from retained task metadata alone.
+	// Merge and update worktree status only for the managed worktree established
+	// for this execution, reusing the commit/diff finalization result instead of
+	// rebuilding and attempting a second task-output commit.
 	if managedWorktree && s.worktreeSvc != nil && repoDir != "" {
-		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, exec, repoDir)
+		s.worktreeSvc.HandlePostExecutionWithFinalizedTaskOutput(finalizeCtx, &task, exec, repoDir, finalizedTaskOutput)
 	}
 	// Keep the task non-terminal until all managed-worktree commit, diff, merge,
 	// and cleanup writers have left the shared repository mutation boundary.
@@ -2004,56 +2006,29 @@ func PublishDiffSnapshotIfChanged(ctx context.Context, execRepo interface {
 	return true
 }
 
-func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
-	if exec == nil || task == nil || task.WorktreePath == "" || repoDir == "" {
-		return ""
+func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) WorktreeTaskOutputFinalizationResult {
+	if exec == nil || task == nil || task.WorktreePath == "" || repoDir == "" || s.worktreeSvc == nil {
+		return WorktreeTaskOutputFinalizationResult{}
 	}
-	var diffOutput string
-	if err := WithRepositoryMutation(repoDir, func() error {
-		diffOutput = s.captureWorktreeDiffAfterExecutionUnlocked(ctx, exec, task, repoDir, outputSummary, agent)
-		return nil
-	}); err != nil {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent error acquiring finalization lease task=%s worktree=%s: %v", task.ID, task.WorktreePath, err)
-	}
-	return diffOutput
-}
-
-func (s *LLMService) captureWorktreeDiffAfterExecutionUnlocked(ctx context.Context, exec *models.Execution, task *models.Task, repoDir string, outputSummary string, agent models.LLMConfig) string {
-	worktreeBranch := GetCurrentBranch(task.WorktreePath)
-	if worktreeBranch == "" {
-		worktreeBranch = task.WorktreeBranch
-	}
-	targetBranch := task.MergeTargetBranch
-	if targetBranch == "" {
-		targetBranch = GetDefaultBranch(repoDir)
-	}
-	commitCtx := WorktreeCommitMessageContext{
-		Phase:      WorktreeCommitPhaseInitial,
-		TaskTitle:  task.Title,
+	result := s.worktreeSvc.FinalizeTaskOutputChanges(ctx, task, exec, repoDir, WorktreeTaskOutputFinalizationOptions{
 		TurnIntent: exec.PromptSent,
 		Summary:    outputSummary,
+		Agent:      &agent,
+		LLMService: s,
+	})
+	if result.CommitError != nil {
+		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, result.WorktreeBranch, result.CommitError)
 	}
-	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(WithDirectUsageProject(ctx, task.ProjectID), task.WorktreePath, agent, commitCtx)
-	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	if err := s.CommitTaskWorktreeChanges(ctx, task, exec, task.WorktreePath, commitMessage); err != nil {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, worktreeBranch, err)
+	if result.DiffOutput == "" {
+		return result
 	}
-
-	// Persist the authoritative branch diff when the auto-commit succeeds or the
-	// provider already committed. If the provider left uncommitted edits and the
-	// app-level commit fails, preserve those edits in diff_output so Changes does
-	// not appear empty and the merge path can still commit them just-in-time.
-	diffOutput := GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, task.WorktreePath)
-	if diffOutput == "" {
-		return ""
-	}
-	if diffErr := s.execRepo.UpdateDiffOutput(ctx, exec.ID, diffOutput); diffErr != nil {
+	if diffErr := s.execRepo.UpdateDiffOutput(ctx, exec.ID, result.DiffOutput); diffErr != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error saving worktree diff output: %v", diffErr)
-		return diffOutput
+		return result
 	}
-	applog.Infof("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", exec.ID, len(diffOutput))
-	PublishDiffSnapshotIfChanged(ctx, nil, s.fileChangeBroadcaster, &DiffSnapshotState{}, task.ID, exec.ID, diffOutput, true)
-	return diffOutput
+	applog.Infof("[agent-svc] ExecuteTaskWithAgent captured worktree diff output for exec=%s (%d bytes)", exec.ID, len(result.DiffOutput))
+	PublishDiffSnapshotIfChanged(ctx, nil, s.fileChangeBroadcaster, &DiffSnapshotState{}, task.ID, exec.ID, result.DiffOutput, true)
+	return result
 }
 
 // broadcastDiffSnapshots periodically captures and broadcasts git diff snapshots
