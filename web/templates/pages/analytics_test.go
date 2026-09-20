@@ -478,12 +478,12 @@ func TestBrowserFunctional_AnalyticsContent_ImmediateNavigationAwayAbortsWorkInC
     return new Promise(function() {});
   };
   function waitForRequest(attempt) {
-    if (requestSignals.length === 2 && requestSignals.every(Boolean)) {
+	if (requestSignals.length === 1 && requestSignals.every(Boolean)) {
       var nav = document.getElementById('other-nav');
       nav.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true}));
       if (requestSignals.some(function(signal) { return !signal.aborted; })) fail('Analytics requests were not aborted before sidebar navigation');
       setTimeout(function() {
-        if (requests !== 2) fail('Analytics started more work after navigation: ' + requests + ' requests');
+		if (requests !== 1) fail('Analytics started more work after navigation: ' + requests + ' requests');
         result.setAttribute('data-test-result', 'pass');
       }, 50);
       return;
@@ -510,7 +510,7 @@ func TestBrowserFunctional_AnalyticsContent_DirectFilteredURLAppliesFirstRequest
   function dashboard(){return {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[{agent_id:'agent-1',agent_name:'Agent One',technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}}],skill_outcomes:[],model_categories:[],workflows:[{workflow_id:'workflow-1',workflow_name:'Workflow One'}],recent_outcomes:[],insights:[]};}
   window.Chart=function(){this.destroy=function(){};};
   window.fetch=function(url){var value=String(url);urls.push(value);result.setAttribute('data-observed-urls',urls.join('|'));var payload=[];if(value.indexOf('/api/analytics/dashboard')>=0)payload=dashboard();if(value.indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(value.indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{},underused:[]};return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
-	  function wait(){var required=['/api/analytics/dashboard','/api/analytics/avg-execution-time-by-agent','/api/analytics/agent-usage-by-project'];var ready=required.every(function(path){return urls.some(function(url){return url.indexOf(path)>=0&&url.indexOf('agent=agent-1')>=0&&url.indexOf('workflow=workflow-1')>=0;});});if(ready&&document.getElementById('analyticsAgentFilter').value==='agent-1'&&document.getElementById('analyticsWorkflowFilter').value==='workflow-1'){if(urls.some(function(url){return url.indexOf('/api/analytics/usage')>=0||url.indexOf('/api/analytics/skills')>=0||url.indexOf('success-failure-rates')>=0;})){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error','agents view loaded unrelated analytics');return;}result.setAttribute('data-test-result','pass');return;}setTimeout(wait,20);}  window.addEventListener('load',wait);
+	  function wait(){var required=['/api/analytics/dashboard'];var ready=required.every(function(path){return urls.some(function(url){return url.indexOf(path)>=0&&url.indexOf('agent=agent-1')>=0&&url.indexOf('workflow=workflow-1')>=0;});});if(ready&&document.getElementById('analyticsAgentFilter').value==='agent-1'&&document.getElementById('analyticsWorkflowFilter').value==='workflow-1'){if(urls.some(function(url){return url.indexOf('/api/analytics/usage')>=0||url.indexOf('/api/analytics/skills')>=0||url.indexOf('success-failure-rates')>=0||url.indexOf('avg-execution-time-by-agent')>=0||url.indexOf('agent-usage-by-project')>=0;})){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error','agents view loaded unrelated analytics');return;}result.setAttribute('data-test-result','pass');return;}setTimeout(wait,20);}  window.addEventListener('load',wait);
 })();
 </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
@@ -589,7 +589,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Follow-up rate`, `Median task turnaround time`, `Cost per achieved goal`,
 		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`, `id="usageFindings"`,
 		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
-		`Selected Agent outcome trend`, `Selected Agent model mix`, `Agent findings`,
+		`Selected Agent outcome trend`, `Agent findings`, `Model outcome comparison`, `Goal achievement versus known cost`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`, `Model success by task category`,
 		`Execution Results Over Time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 	} {
@@ -615,10 +615,13 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if strings.Contains(content, `label:'Sample size'`) || strings.Contains(content, `Definition and denominator`) {
 		t.Fatal("KPI cards should not imply one universal sample or repeat definition tooltips")
 	}
-	for _, expected := range []string{`Current: n=`, `Compared with previous:`, `Low sample`, `finished executions`, `goal-bearing tasks`, `tasks with activity`} {
+	for _, expected := range []string{`Current: n=`, `Compared with previous:`, `finished executions`, `goal-bearing tasks`, `tasks with activity`} {
 		if !strings.Contains(content, expected) {
 			t.Errorf("KPI comparison context missing %q", expected)
 		}
+	}
+	if strings.Contains(content, `Low sample`) {
+		t.Fatal("Analytics should rely on visible n values instead of low-sample badges")
 	}
 	if strings.Contains(content, `sticky top-0`) {
 		t.Fatal("Analytics navigation should scroll with the page")
@@ -639,7 +642,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 	}
 	content := buf.String()
 
-	views := []string{"overview", "outcomes", "agents", "automations", "learning", "usage"}
+	views := []string{"overview", "outcomes", "agents", "models", "automations", "learning", "usage"}
 	if got := strings.Count(content, `data-analytics-view=`); got != len(views) {
 		t.Fatalf("Analytics view count = %d, want exactly %d", got, len(views))
 	}
@@ -672,12 +675,13 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 	for name, expected := range map[string][]string{
 		"overview":    {`id="projectOutcomeTrendChart"`, `id="overviewOutcomeFunnel"`, `Actionable exceptions`},
 		"outcomes":    {`id="successFailureChart"`, `id="hourlyTrendsChart"`, `id="avgTimeTaskChart"`, `id="frequentTasksList"`, `id="failedPatternsChart"`, `id="failedPatternsTable"`},
-		"agents":      {`id="agentComparisonChart"`, `id="agentEfficiencyChart"`, `id="agentCategoryChart"`, `id="avgTimeAgentChart"`, `id="agentUsageChart"`},
+		"agents":      {`id="agentComparisonChart"`, `id="agentEfficiencyChart"`, `id="agentCategoryChart"`},
+		"models":      {`id="modelOutcomeChart"`, `id="modelCostQualityChart"`, `id="modelAttemptsChart"`, `id="modelEfficiencyChart"`, `id="modelPerformanceTable"`},
 		"automations": {`id="automationComparisonChart"`, `id="automationFunnelChart"`, `id="automationDurationChart"`, `id="automationFailureChart"`, `id="automationBottleneckChart"`},
 		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeChart"`, `id="skillEffectivenessChart"`},
-		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="costOutcomeTrendChart"`, `id="modelEfficiencyChart"`},
+		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="costOutcomeTrendChart"`},
 	} {
-		next := map[string]string{"overview": "outcomes", "outcomes": "agents", "agents": "automations", "automations": "learning", "learning": "usage"}[name]
+		next := map[string]string{"overview": "outcomes", "outcomes": "agents", "agents": "models", "models": "automations", "automations": "learning", "learning": "usage"}[name]
 		body := section(name, next)
 		for _, marker := range expected {
 			if !strings.Contains(body, marker) {
@@ -712,8 +716,8 @@ func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 	content := buf.String()
 	for _, metric := range []string{
 		"Token Usage", "Model Breakdown by Tokens", "Token Usage Breakdown",
-		"Task Execution by Hour", "Average Execution Time by Task", "Average Execution Time by Model",
-		"Model Breakdown by Executions", "Most Frequently Run Tasks", "Skill Activity Over Time",
+		"Task Execution by Hour", "Average Execution Time by Task", "Model outcome comparison",
+		"Goal achievement versus attempts", "Most Frequently Run Tasks", "Skill Activity Over Time",
 		"Top Skills", "Follow-through / Selected Outcomes", "Top Agent/Skill Pairs",
 		"Least Active Enabled Skills", "Observed skill outcomes", "Model success by task category", "Failed Task Patterns", "accountUsageCards",
 	} {

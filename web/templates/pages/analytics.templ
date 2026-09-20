@@ -49,7 +49,7 @@ templ analyticsContent(currentProject *models.Project) {
 							<div class="form-control" data-automation-filter><label class="label" for="analyticsWorkflowFilter"><span class="label-text">Automation</span></label><select id="analyticsWorkflowFilter" class="select select-bordered select-sm"><option value="">All Automations</option></select></div>
 							<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
 						</div>
-						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="overview">Overview</button><button class="btn btn-sm" data-analytics-view="outcomes">Outcomes</button><button class="btn btn-sm" data-analytics-view="agents">Agents &amp; Models</button><button class="btn btn-sm" data-analytics-view="automations">Automations</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="usage">Usage</button></nav>
+						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="overview">Overview</button><button class="btn btn-sm" data-analytics-view="outcomes">Outcomes</button><button class="btn btn-sm" data-analytics-view="agents">Agents</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="automations">Automations</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="usage">Usage</button></nav>
 					</div></div>
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
@@ -78,14 +78,23 @@ templ analyticsContent(currentProject *models.Project) {
 				</section>
 
 				<section id="analytics-agents" data-analytics-section="agents" class="space-y-6 mb-6">
-					<div><h3 class="text-xl font-bold">Agents &amp; Models</h3><p class="text-sm opacity-60">Reusable Agent definitions are compared separately from model configurations.</p></div>
+					<div><h3 class="text-xl font-bold">Agents</h3><p class="text-sm opacity-60">Compare reusable Agent definitions and inspect how each one performs.</p></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Agent outcome comparison", "Goal achievement, first-attempt success, and follow-up with sample sizes.", "agentComparisonChart", "h-80") @analyticsChartCard("Quality versus efficiency", "Outcome quality against duration or covered cost.", "agentEfficiencyChart", "h-80")</div>
-					<div id="agentDetail" class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Selected Agent outcome trend", "Select an Agent for period detail.", "agentOutcomeTrendChart", "h-64") @analyticsChartCard("Selected Agent model mix", "Executions by model configuration.", "agentModelMixChart", "h-64")</div>
+					<div id="agentDetail">@analyticsChartCard("Selected Agent outcome trend", "Select an Agent for period detail.", "agentOutcomeTrendChart", "h-64")</div>
 					@analyticsChartCard("Performance by task category", "Execution success, goal achievement, and follow-up for the selected Agent.", "agentCategoryChart", "h-72")
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Average Execution Time by Model", "Completed execution duration by model.", "avgTimeAgentChart", "h-64") @analyticsChartCard("Model Breakdown by Executions", "Execution share by model configuration.", "agentUsageChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Agent findings</h4><div id="agentFindings"></div></div></div>
-					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact values and category evidence</summary><div class="collapse-content space-y-4"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Execution success</th><th>Goal</th><th>First attempt</th><th>Follow-up</th><th>Turnaround</th><th>Cost / goal</th><th>Model</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div><table class="table table-sm"><tbody id="agentCategoryTable"></tbody></table><table class="table table-sm"><tbody id="agentFailureTable"></tbody></table><table class="table table-sm"><tbody id="agentSkillTable"></tbody></table></div></details>
+					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact values and category evidence</summary><div class="collapse-content space-y-4"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Execution success</th><th>Goal</th><th>First attempt</th><th>Follow-up</th><th>Turnaround</th><th>Cost / goal</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div><table class="table table-sm"><tbody id="agentCategoryTable"></tbody></table><table class="table table-sm"><tbody id="agentFailureTable"></tbody></table><table class="table table-sm"><tbody id="agentSkillTable"></tbody></table></div></details>
 					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Supporting Agent tasks</summary><div class="collapse-content"><table class="table table-sm"><tbody id="agentEvidenceTable"></tbody></table></div></details>
+				</section>
+
+				<section id="analytics-models" data-analytics-section="models" class="space-y-6 mb-6">
+					<div><h3 class="text-xl font-bold">Models</h3><p class="text-sm opacity-60">Real-world model evaluation from tasks run in this app. Each configuration includes its model and reasoning effort.</p></div>
+					<div class="alert"><span>Execution results belong to the model that ran each execution. Goal, first-attempt, follow-up, attempts, and turnaround belong to the model used by the task's latest execution in this period.</span></div>
+					@analyticsChartCard("Model outcome comparison", "Execution success, goal achievement, first-attempt success, and follow-up. Hover for each metric's n.", "modelOutcomeChart", "h-96")
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Goal achievement versus known cost", "Average known cost per covered task; models without recorded cost are omitted.", "modelCostQualityChart", "h-80") @analyticsChartCard("Goal achievement versus attempts", "Average executions per attributed task. Lower attempts can indicate less retry work.", "modelAttemptsChart", "h-80")</div>
+					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Model findings</h4><div id="modelFindings"></div></div></div>
+					@analyticsChartCard("Model success by task category", "Execution success by configured model and task category.", "modelEfficiencyChart", "h-72")
+					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact model values</summary><div class="collapse-content space-y-4 overflow-x-auto"><table class="table table-sm"><thead><tr><th>Configuration</th><th>Model</th><th>Effort</th><th>Tasks</th><th>Execution success</th><th>Goal</th><th>First attempt</th><th>Follow-up</th><th>Attempts / task</th><th>Turnaround</th><th>Tokens / covered task</th><th>Known cost / covered task</th></tr></thead><tbody id="modelPerformanceTable"></tbody></table><table class="table table-sm"><tbody id="modelCategoryTable"></tbody></table></div></details>
 				</section>
 
 				<section id="analytics-automations" data-analytics-section="automations" class="space-y-6 mb-6">
@@ -112,8 +121,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Usage readout</h4><div id="usageFindings"></div></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Cost and outcomes over time", "Known cost uses a separate axis and may be incomplete.", "costOutcomeTrendChart", "h-72") @analyticsChartCard("Model success by task category", "Execution success by model and task category.", "modelEfficiencyChart", "h-72")</div>
-					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact model/category values</summary><div class="collapse-content"><table class="table table-sm"><tbody id="modelCategoryTable"></tbody></table></div></details>
+					@analyticsChartCard("Cost and outcomes over time", "Known cost uses a separate axis and may be incomplete.", "costOutcomeTrendChart", "h-72")
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
 				</section>
 			<!-- Chart.js and Custom Script -->
@@ -220,7 +228,7 @@ templ analyticsContent(currentProject *models.Project) {
 							destroyChart(key);
 							const canvas = document.getElementById(canvasID);
 								if (!canvas) return null;
-								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Task turnaround distribution', followupDistributionChart: 'Follow-up distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill outcomes versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', costOutcomeTrendChart: 'Known cost and outcomes over time', modelEfficiencyChart: 'Model success by task category', successFailureChart: 'Execution results over time', hourlyTrendsChart: 'Task executions by hour', avgTimeTaskChart: 'Average execution duration by task', avgTimeAgentChart: 'Average execution duration by model', agentUsageChart: 'Model breakdown by executions', agentOutcomeTrendChart: 'Selected Agent execution outcomes over time', agentModelMixChart: 'Selected Agent model mix' };
+								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Task turnaround distribution', followupDistributionChart: 'Follow-up distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', modelOutcomeChart: 'Model outcome comparison', modelCostQualityChart: 'Goal achievement versus known cost', modelAttemptsChart: 'Goal achievement versus attempts', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill outcomes versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', costOutcomeTrendChart: 'Known cost and outcomes over time', modelEfficiencyChart: 'Model success by task category', successFailureChart: 'Execution results over time', hourlyTrendsChart: 'Task executions by hour', avgTimeTaskChart: 'Average execution duration by task', agentOutcomeTrendChart: 'Selected Agent execution outcomes over time' };
 								canvas.setAttribute('role', 'img');
 								canvas.setAttribute('aria-label', chartLabels[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
 							if (old) old.remove();
@@ -241,14 +249,16 @@ templ analyticsContent(currentProject *models.Project) {
 								const loadingCharts = {
 									overview: { projectOutcomeTrend: 'projectOutcomeTrendChart' },
 							outcomes: { cycleDistribution: 'cycleDistributionChart', followupDistribution: 'followupDistributionChart', successFailure: 'successFailureChart', hourlyTrends: 'hourlyTrendsChart', avgTimeTask: 'avgTimeTaskChart', failedPatterns: 'failedPatternsChart' },
-							agents: { agentComparison: 'agentComparisonChart', agentEfficiency: 'agentEfficiencyChart', avgTimeAgent: 'avgTimeAgentChart', agentUsage: 'agentUsageChart', agentOutcomeTrend: 'agentOutcomeTrendChart', agentModelMix: 'agentModelMixChart', agentCategory: 'agentCategoryChart' },									automations: { automationComparison: 'automationComparisonChart', automationFunnel: 'automationFunnelChart', automationDuration: 'automationDurationChart', automationFailure: 'automationFailureChart', automationBottleneck: 'automationBottleneckChart' },
+							agents: { agentComparison: 'agentComparisonChart', agentEfficiency: 'agentEfficiencyChart', agentOutcomeTrend: 'agentOutcomeTrendChart', agentCategory: 'agentCategoryChart' },
+							models: { modelOutcome: 'modelOutcomeChart', modelCostQuality: 'modelCostQualityChart', modelAttempts: 'modelAttemptsChart', modelEfficiency: 'modelEfficiencyChart' },
+							automations: { automationComparison: 'automationComparisonChart', automationFunnel: 'automationFunnelChart', automationDuration: 'automationDurationChart', automationFailure: 'automationFailureChart', automationBottleneck: 'automationBottleneckChart' },
 									learning: { skillUsageTrend: 'skillUsageTrendChart', skillTop: 'skillTopChart', skillFollow: 'skillFollowChart', skillAgent: 'skillAgentChart', skillOutcome: 'skillOutcomeChart', skillEffectiveness: 'skillEffectivenessChart' },
-									usage: { usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart', costOutcomeTrend: 'costOutcomeTrendChart', modelEfficiency: 'modelEfficiencyChart' }
+									usage: { usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart', costOutcomeTrend: 'costOutcomeTrendChart' }
 								};
 								Object.entries(loadingCharts[selectedView] || {}).forEach(function(entry) { renderChartState(entry[0], entry[1], [], 'Loading analytics…'); });
 							}
 
-							const validViews = ['overview', 'outcomes', 'agents', 'automations', 'learning', 'usage'];						const initialURLParams = new URLSearchParams(window.location.search);
+							const validViews = ['overview', 'outcomes', 'agents', 'models', 'automations', 'learning', 'usage'];						const initialURLParams = new URLSearchParams(window.location.search);
 						const savedViewKey = 'openvibely.analytics.lastView.' + projectID;
 						let selectedView = 'overview';
 						let selectedAgent = initialURLParams.get('agent') || '';
@@ -286,9 +296,9 @@ templ analyticsContent(currentProject *models.Project) {
 									document.querySelectorAll('[data-analytics-section]').forEach(function(section) { section.classList.toggle('hidden', section.dataset.analyticsSection !== selectedView); });
 									document.querySelectorAll('[data-analytics-view]').forEach(function(button) { button.classList.toggle('btn-primary', button.dataset.analyticsView === selectedView); });
 									const agentFilter = document.querySelector('[data-agent-filter]');
-									if (agentFilter) agentFilter.classList.toggle('hidden', selectedView !== 'agents');
+									if (agentFilter) agentFilter.classList.toggle('hidden', !['agents','models'].includes(selectedView));
 									const automationFilter = document.querySelector('[data-automation-filter]');
-									if (automationFilter) automationFilter.classList.toggle('hidden', !['overview','automations'].includes(selectedView));
+									if (automationFilter) automationFilter.classList.toggle('hidden', !['overview','models','automations'].includes(selectedView));
 									const compareFilter = document.querySelector('[data-compare-filter]');
 									if (compareFilter) compareFilter.classList.toggle('hidden', !['overview','outcomes','usage'].includes(selectedView));
 									if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));
@@ -349,7 +359,7 @@ templ analyticsContent(currentProject *models.Project) {
 								{label:'Follow-up', key:'follow_up', lowerBetter:true}
 							].map(function(item){const now=current[item.key]||{},before=previous?(previous[item.key]||{}):{};return {...item,now:now, before:before, delta:Number(now.percent||0)-Number(before.percent||0)};}).filter(function(item){return item.now.denominator && item.before.denominator;}).sort(function(a,b){return Math.abs(b.delta)-Math.abs(a.delta);});
 							const lines = [];
-							if (changes.length) { const change=changes[0],better=change.lowerBetter?change.delta<0:change.delta>0,lowSample=change.now.denominator<5||change.before.denominator<5; lines.push('\x3cp>\x3cstrong>Largest change:\x3c/strong> '+escapeHTML(change.label)+' '+(change.delta>=0?'+':'')+change.delta.toFixed(1)+' points versus the previous period ('+(better?'better':'worse')+'). Current n='+change.now.denominator+'; previous n='+change.before.denominator+'.'+(lowSample?' \x3cspan class="badge badge-warning badge-sm">Low sample\x3c/span>':'')+'\x3c/p>'); }
+							if (changes.length) { const change=changes[0],better=change.lowerBetter?change.delta<0:change.delta>0; lines.push('\x3cp>\x3cstrong>Largest change:\x3c/strong> '+escapeHTML(change.label)+' '+(change.delta>=0?'+':'')+change.delta.toFixed(1)+' points versus the previous period ('+(better?'better':'worse')+'). Current n='+change.now.denominator+'; previous n='+change.before.denominator+'.\x3c/p>'); }
 							else lines.push('\x3cp>No comparable prior-period denominator is available.\x3c/p>');
 							const followUp=current.follow_up||{}; if (followUp.denominator) lines.push('\x3cp>\x3cstrong>Current rework:\x3c/strong> '+Number(followUp.percent||0).toFixed(1)+'% of '+followUp.denominator+' eligible tasks had follow-up work.\x3c/p>');
 							target.innerHTML=lines.join('');
@@ -375,8 +385,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if (previous && previous.cycle_sample_size && current.cycle_sample_size && (card.kind === 'duration' || card.kind === 'p90')) { const field=card.kind==='p90'?'p90_cycle_time_ms':'median_cycle_time_ms'; const change = Number(current[field] || 0) - Number(previous[field] || 0); previousSample=previous.cycle_sample_size; delta = (change >= 0 ? '+' : '-') + formatDuration(Math.abs(change)) + ' · previous ' + formatDuration(previous[field] || 0); }
 									if (previous && card.kind === 'cost' && previous.known_cost_per_achieved_goal) { previousSample=previous.known_cost_per_achieved_goal.covered||0; delta = 'previous ' + costCoverageText(previous.known_cost_per_achieved_goal); }
 									if (previous && card.kind === 'count' && (previous.technical_completion||{}).denominator) { previousSample=previous.technical_completion.denominator; const change=Number(current.cancelled_execution_count||0)-Number(previous.cancelled_execution_count||0); delta=(change>=0?'+':'')+change+' cancelled · previous '+Number(previous.cancelled_execution_count||0); }
-									const lowSample = delta && (card.sample < 5 || previousSample < 5);
-									return '\x3cdiv class="card bg-base-100 border border-base-300">\x3cdiv class="card-body p-4">\x3cdiv class="text-sm font-semibold">' + escapeHTML(card.label) + '\x3c/div>\x3cdiv class="text-xl font-bold">' + escapeHTML(card.value) + '\x3c/div>\x3cdiv class="text-xs opacity-60">Current: n=' + card.sample + ' ' + escapeHTML(card.sampleUnit) + '\x3c/div>' + (delta ? '\x3cdiv class="text-xs opacity-60">Compared with previous: ' + escapeHTML(delta) + ' · n=' + previousSample + (lowSample ? ' \x3cspan class="badge badge-warning badge-xs">Low sample\x3c/span>' : '') + '\x3c/div>' : '') + '\x3c/div>\x3c/div>';
+									return '\x3cdiv class="card bg-base-100 border border-base-300">\x3cdiv class="card-body p-4">\x3cdiv class="text-sm font-semibold">' + escapeHTML(card.label) + '\x3c/div>\x3cdiv class="text-xl font-bold">' + escapeHTML(card.value) + '\x3c/div>\x3cdiv class="text-xs opacity-60">Current: n=' + card.sample + ' ' + escapeHTML(card.sampleUnit) + '\x3c/div>' + (delta ? '\x3cdiv class="text-xs opacity-60">Compared with previous: ' + escapeHTML(delta) + ' · n=' + previousSample + '\x3c/div>' : '') + '\x3c/div>\x3c/div>';
 								}).join('');
 								const kpis = document.getElementById('analyticsKpis'); if (kpis) kpis.innerHTML = cardHTML;
 								const outcomeSummary = document.getElementById('outcomeSummaryCards'); if (outcomeSummary) outcomeSummary.innerHTML = cardHTML;
@@ -453,14 +462,17 @@ templ analyticsContent(currentProject *models.Project) {
 										renderAgentComparison(data.agents || []);
 										renderAgentDetail(data.agent_detail || null);
 									}
+									if (selectedView === 'models') {
+										renderModelPerformance(data.models || []);
+										renderModelCategories(data.model_categories || []);
+										renderModelEfficiency(data.model_categories || []);
+									}
 									if (selectedView === 'learning') {
 										renderSkillOutcomes(data.skill_outcomes || []);
 										renderSkillOutcomeCharts(data.skill_outcomes || []);
 										renderAgentSkillOutcomes(data.agent_skill_outcomes || []);
 									}
 									if (selectedView === 'usage') {
-										renderModelCategories(data.model_categories || []);
-										renderModelEfficiency(data.model_categories || []);
 										renderUsageOutcomeContext(current, latestUsageAnalytics ? latestUsageAnalytics.totals : null);
 										renderUsageFindings(latestUsageAnalytics, current);
 										renderCostOutcomeTrend(data.outcome_trend || [], latestUsageAnalytics ? latestUsageAnalytics.daily_usage : []);
@@ -504,6 +516,25 @@ templ analyticsContent(currentProject *models.Project) {
 								const comparable=supported.filter(r=>Number((r.goal_achievement||{}).denominator||0)>=2).sort((a,b)=>Number((b.goal_achievement||{}).percent||0)-Number((a.goal_achievement||{}).percent||0));const rec=document.getElementById('skillRecommendations');if(rec){if(!comparable.length)rec.innerHTML='\x3cp class="opacity-50">At least two goal-eligible tasks per skill are required.\x3c/p>';else{const strongest=comparable[0],weakest=comparable[comparable.length-1],lines=['\x3cp>\x3cstrong>Strongest observed association:\x3c/strong> '+escapeHTML(strongest.skill_handle)+' had '+Number((strongest.goal_achievement||{}).percent||0).toFixed(1)+'% goal achievement (n='+(strongest.goal_achievement||{}).denominator+').\x3c/p>'];if(weakest.skill_handle!==strongest.skill_handle||weakest.skill_scope!==strongest.skill_scope)lines.push('\x3cp>\x3cstrong>Weakest observed association:\x3c/strong> '+escapeHTML(weakest.skill_handle)+' had '+Number((weakest.goal_achievement||{}).percent||0).toFixed(1)+'% goal achievement (n='+(weakest.goal_achievement||{}).denominator+').\x3c/p>');rec.innerHTML=lines.join('');}}
 							}
 							function renderModelEfficiency(rows){const canvas=renderChartState('modelEfficiency','modelEfficiencyChart',rows,'No model/category outcome samples in this period');if(canvas)charts.modelEfficiency=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.model+' · '+r.category),datasets:[{label:'Execution success',data:rows.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#14b8a6'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100}}}});}
+							function modelConfigLabel(row) {
+								return row.config_name || row.model || 'Unknown configuration';
+							}
+							function modelDetailLabel(row) {
+								return [row.provider, row.model, row.reasoning_effort ? row.reasoning_effort + ' reasoning' : ''].filter(Boolean).join(' · ');
+							}
+							function renderModelPerformance(rows) {
+								const outcomeCanvas=renderChartState('modelOutcome','modelOutcomeChart',rows,'No configured model outcomes in this period');
+								if(outcomeCanvas){outcomeCanvas.parentElement.style.height=Math.max(384,rows.length*58+100)+'px';const metricKeys=['technical_completion','goal_achievement','first_pass','follow_up'];charts.modelOutcome=new Chart(outcomeCanvas.getContext('2d'),{type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[{label:'Execution success',data:rows.map(r=>(r.technical_completion||{}).denominator?Number(r.technical_completion.percent||0):null),backgroundColor:'#22c55e'},{label:'Goal achievement',data:rows.map(r=>(r.goal_achievement||{}).denominator?Number(r.goal_achievement.percent||0):null),backgroundColor:'#3b82f6'},{label:'First-attempt success',data:rows.map(r=>(r.first_pass||{}).denominator?Number(r.first_pass.percent||0):null),backgroundColor:'#8b5cf6'},{label:'Follow-up',data:rows.map(r=>(r.follow_up||{}).denominator?Number(r.follow_up.percent||0):null),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100,title:{display:true,text:'Percent'}}},plugins:{tooltip:{callbacks:{title:function(items){if(!items.length)return '';const row=rows[items[0].dataIndex];return modelConfigLabel(row)+' — '+modelDetailLabel(row);},footer:function(items){if(!items.length)return '';const metric=(rows[items[0].dataIndex][metricKeys[items[0].datasetIndex]]||{});return 'n='+Number(metric.denominator||0);}}}}}});}
+								const withCost=rows.filter(r=>r.known_cost_usd!=null&&Number(r.cost_covered_tasks||0)>0&&Number((r.goal_achievement||{}).denominator||0)>0);
+								let canvas=renderChartState('modelCostQuality','modelCostQualityChart',withCost,'No models have both goal outcomes and recorded task cost');
+								if(canvas)charts.modelCostQuality=new Chart(canvas.getContext('2d'),{type:'bubble',data:{datasets:withCost.map(function(r,i){return {label:modelConfigLabel(r),data:[{x:Number(r.known_cost_usd)/Number(r.cost_covered_tasks),y:Number((r.goal_achievement||{}).percent||0),r:Math.min(20,5+Math.sqrt(r.tasks_evaluated||0)*2)}],backgroundColor:'hsla('+(i*67%360)+',70%,55%,.65)'};})},options:{responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,title:{display:true,text:'Known cost / covered task (USD)'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Goal achievement (%)'}}},plugins:{tooltip:{callbacks:{afterLabel:function(context){const r=withCost[context.datasetIndex];return modelDetailLabel(r)+' · goal n='+Number((r.goal_achievement||{}).denominator||0)+' · cost n='+r.cost_covered_tasks;}}}}}});
+								const withAttempts=rows.filter(r=>Number(r.tasks_evaluated||0)>0&&Number((r.goal_achievement||{}).denominator||0)>0);
+								canvas=renderChartState('modelAttempts','modelAttemptsChart',withAttempts,'No models have both task and goal evidence');
+								if(canvas)charts.modelAttempts=new Chart(canvas.getContext('2d'),{type:'bubble',data:{datasets:withAttempts.map(function(r,i){return {label:modelConfigLabel(r),data:[{x:Number(r.average_attempts||0),y:Number((r.goal_achievement||{}).percent||0),r:Math.min(20,5+Math.sqrt(r.tasks_evaluated||0)*2)}],backgroundColor:'hsla('+(i*67%360)+',70%,55%,.65)'};})},options:{responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,title:{display:true,text:'Average attempts / task'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Goal achievement (%)'}}},plugins:{tooltip:{callbacks:{afterLabel:function(context){const r=withAttempts[context.datasetIndex];return modelDetailLabel(r)+' · tasks n='+r.tasks_evaluated+' · goal n='+Number((r.goal_achievement||{}).denominator||0);}}}}}});
+								const table=document.getElementById('modelPerformanceTable');if(table)table.innerHTML=rows.length?rows.map(function(r){const tokens=r.token_covered_tasks?formatNumber(Number(r.total_tokens||0)/Number(r.token_covered_tasks))+' · n='+r.token_covered_tasks:'Unavailable · n=0';const cost=r.known_cost_usd!=null&&r.cost_covered_tasks?formatCost(Number(r.known_cost_usd)/Number(r.cost_covered_tasks))+' · n='+r.cost_covered_tasks:'Unavailable · n=0';return '\x3ctr>\x3ctd>\x3cbutton class="link" type="button" data-model-summary-evidence="'+escapeHTML(r.model_config_id)+'">'+escapeHTML(modelConfigLabel(r))+'\x3c/button>\x3c/td>\x3ctd>'+escapeHTML((r.provider||'unknown')+'/'+(r.model||'unknown'))+'\x3c/td>\x3ctd>'+escapeHTML(r.reasoning_effort||'default')+'\x3c/td>\x3ctd>'+r.tasks_evaluated+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(r.technical_completion))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(r.goal_achievement))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(r.first_pass))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(r.follow_up))+'\x3c/td>\x3ctd>'+Number(r.average_attempts||0).toFixed(2)+' · n='+r.tasks_evaluated+'\x3c/td>\x3ctd>'+escapeHTML(r.duration_sample_size?formatDuration(r.median_duration_ms||0)+' · n='+r.duration_sample_size:'Unavailable · n=0')+'\x3c/td>\x3ctd>'+escapeHTML(tokens)+'\x3c/td>\x3ctd>'+escapeHTML(cost)+'\x3c/td>\x3c/tr>';}).join(''):'\x3ctr>\x3ctd colspan="12" class="text-center opacity-50">No configured model evidence in this period\x3c/td>\x3c/tr>';
+								if(table)table.querySelectorAll('[data-model-summary-evidence]').forEach(function(button){button.addEventListener('click',function(){navigateEvidence('outcomes','model_id',button.dataset.modelSummaryEvidence,{});},{signal:eventSignal});});
+								const findings=document.getElementById('modelFindings');if(findings){const goalRows=rows.filter(r=>Number((r.goal_achievement||{}).denominator||0)>0).sort((a,b)=>Number((b.goal_achievement||{}).percent||0)-Number((a.goal_achievement||{}).percent||0));const costRows=withCost.slice().sort((a,b)=>(Number(a.known_cost_usd)/Number(a.cost_covered_tasks))-(Number(b.known_cost_usd)/Number(b.cost_covered_tasks)));const lines=[];if(goalRows.length){const r=goalRows[0];lines.push('\x3cp>\x3cstrong>Highest observed goal achievement:\x3c/strong> '+escapeHTML(modelConfigLabel(r))+' at '+Number((r.goal_achievement||{}).percent||0).toFixed(1)+'% (n='+(r.goal_achievement||{}).denominator+'), averaging '+Number(r.average_attempts||0).toFixed(2)+' attempts across '+r.tasks_evaluated+' tasks.\x3c/p>');}if(costRows.length){const r=costRows[0];lines.push('\x3cp>\x3cstrong>Lowest known cost per covered task:\x3c/strong> '+escapeHTML(modelConfigLabel(r))+' at '+formatCost(Number(r.known_cost_usd)/Number(r.cost_covered_tasks))+' (cost n='+r.cost_covered_tasks+'), with '+Number((r.goal_achievement||{}).percent||0).toFixed(1)+'% goal achievement (n='+(r.goal_achievement||{}).denominator+').\x3c/p>');}findings.innerHTML=lines.length?lines.join(''):'\x3cp class="opacity-50">No model comparison evidence in this period.\x3c/p>';}
+							}
 							function usagePeriodForGroup(day, groupBy) {
 								if (groupBy === 'month') return String(day || '').slice(0, 7);
 								if (groupBy !== 'week') return day;
@@ -541,16 +572,16 @@ templ analyticsContent(currentProject *models.Project) {
 										}
 										select.value = selected;
 									}
-									updateOptions(document.getElementById('analyticsAgentFilter'), agents, 'agent_id', 'agent_name', 'All Agents', selectedAgent, selectedView === 'agents');
-									updateOptions(document.getElementById('analyticsWorkflowFilter'), workflows, 'workflow_id', 'workflow_name', 'All Automations', selectedWorkflow, selectedView === 'overview' || selectedView === 'automations');
+									updateOptions(document.getElementById('analyticsAgentFilter'), agents, 'agent_id', 'agent_name', 'All Agents', selectedAgent, selectedView === 'agents' || selectedView === 'models');
+									updateOptions(document.getElementById('analyticsWorkflowFilter'), workflows, 'workflow_id', 'workflow_name', 'All Automations', selectedWorkflow, selectedView === 'overview' || selectedView === 'models' || selectedView === 'automations');
 								}
 							function renderAgentPerformance(rows) {
 								const selected = selectedAgent;
 								const visible = rows.filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								const table = document.getElementById('agentPerformanceTable'); if (table) table.innerHTML = visible.length ? visible.map(function(row) {
 									const name = row.agent_id ? '\x3ca class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '\x3c/a>' : escapeHTML(row.agent_name);
-									return '\x3ctr>\x3ctd>' + name + '\x3c/td>\x3ctd>' + row.tasks_evaluated + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.technical_completion)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.goal_achievement)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.first_pass)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.follow_up)) + '\x3c/td>\x3ctd>' + escapeHTML(row.duration_sample_size ? formatDuration(row.median_duration_ms || 0) + ' · n=' + row.duration_sample_size : 'Unavailable · n=0') + '\x3c/td>\x3ctd>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '\x3c/td>\x3ctd>' + escapeHTML(row.most_used_model || 'Unavailable') + '\x3c/td>\x3c/tr>';
-								}).join('') : '\x3ctr>\x3ctd colspan="9" class="text-center opacity-50">No Agent evidence in this period\x3c/td>\x3c/tr>';
+									return '\x3ctr>\x3ctd>' + name + '\x3c/td>\x3ctd>' + row.tasks_evaluated + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.technical_completion)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.goal_achievement)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.first_pass)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.follow_up)) + '\x3c/td>\x3ctd>' + escapeHTML(row.duration_sample_size ? formatDuration(row.median_duration_ms || 0) + ' · n=' + row.duration_sample_size : 'Unavailable · n=0') + '\x3c/td>\x3ctd>' + escapeHTML(costCoverageText(row.known_cost_per_achieved_goal)) + '\x3c/td>\x3c/tr>';
+								}).join('') : '\x3ctr>\x3ctd colspan="8" class="text-center opacity-50">No Agent evidence in this period\x3c/td>\x3c/tr>';
 								const evidence = ((latestDashboard && latestDashboard.recent_outcomes) || []).filter(function(row) { return !selected || (row.agent_id || '__unassigned__') === selected; });
 								const evidenceTable = document.getElementById('agentEvidenceTable'); if (evidenceTable) evidenceTable.innerHTML = evidence.length ? evidence.map(function(row) {
 									const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);
@@ -590,9 +621,6 @@ templ analyticsContent(currentProject *models.Project) {
 								const trend = detail ? (detail.outcome_trend || []) : [];
 								let canvas = renderChartState('agentOutcomeTrend', 'agentOutcomeTrendChart', trend, 'Select an Agent to see its outcome trend');
 								if (canvas) charts.agentOutcomeTrend = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:trend.map(r=>r.period),datasets:[{label:'Completed',data:trend.map(r=>r.completed),backgroundColor:'rgba(34,197,94,.65)'},{label:'Failed',data:trend.map(r=>r.failed),backgroundColor:'rgba(239,68,68,.65)'},{label:'Cancelled',data:trend.map(r=>r.cancelled),backgroundColor:'rgba(245,158,11,.65)'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+trend[items[0].dataIndex].sample_size:'';}}}},scales:{y:{beginAtZero:true}}}});
-								const mix = detail ? (detail.model_mix || []) : [];
-								canvas = renderChartState('agentModelMix', 'agentModelMixChart', mix, 'Select an Agent to see its model mix');
-								if (canvas) charts.agentModelMix = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:mix.map(r=>r.model),datasets:[{label:'Executions',data:mix.map(r=>r.execution_count),backgroundColor:'rgba(59,130,246,.65)'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}}}});
 								const categories = detail ? (detail.categories || []) : [];
 									canvas = renderChartState('agentCategory', 'agentCategoryChart', categories, 'Select an Agent to compare task categories');
 									if (canvas) charts.agentCategory = new Chart(canvas.getContext('2d'), {type:'bar',data:{labels:categories.map(r=>r.category),datasets:[{label:'Execution success',data:categories.map(r=>Number((r.technical_completion||{}).percent||0)),backgroundColor:'#22c55e'},{label:'Goal achievement',data:categories.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'Follow-up',data:categories.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+categories[items[0].dataIndex].tasks_evaluated:'';}}}}}});
@@ -1383,79 +1411,6 @@ templ analyticsContent(currentProject *models.Project) {
 						} catch (e) { console.error('loadAvgTimeByTask:', e); showAnalyticsError(e); }
 					}
 
-					// Load Avg Execution Time by Agent
-					async function loadAvgTimeByAgent() {
-						try {
-							const { dateFrom, dateTo } = getDateRange();
-							const params = analyticsParams({ project_id: projectID });
-							if (dateFrom) params.set('date_from', dateFrom);
-							if (dateTo) params.set('date_to', dateTo);
-							const data = await fetchJSON('/api/analytics/avg-execution-time-by-agent?' + params.toString());
-							const ctx = renderChartState('avgTimeAgent', 'avgTimeAgentChart', data, 'No model duration samples in this period');
-							if (!ctx) return;
-							charts.avgTimeAgent = new Chart(ctx.getContext('2d'), {
-							type: 'bar',
-							data: {
-								labels: data.map(d => d.Name || 'Unknown'),
-								datasets: [{
-									label: 'Avg Time (min)',
-									data: data.map(d => (d.AvgMs || 0) / 60000),
-									backgroundColor: 'rgba(20, 184, 166, 0.5)',
-									borderColor: 'rgb(20, 184, 166)',
-									borderWidth: 1
-								}]
-							},
-							options: {
-								responsive: true,
-									maintainAspectRatio: false,
-									scales: { y: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },								plugins: {
-									tooltip: {
-										callbacks: {
-											label: function(context) {
-												return 'Avg: ' + formatDuration(data[context.dataIndex].AvgMs || 0) + ' · n=' + (data[context.dataIndex].Count || 0);
-											}
-										}
-									}
-								}
-							}
-						});
-						} catch (e) { console.error('loadAvgTimeByAgent:', e); showAnalyticsError(e); }
-					}
-
-					// Load Agent Usage
-					async function loadAgentUsage() {
-						try {
-							const { dateFrom, dateTo } = getDateRange();
-							const params = analyticsParams({ project_id: projectID });
-							if (dateFrom) params.set('date_from', dateFrom);
-							if (dateTo) params.set('date_to', dateTo);
-							const data = await fetchJSON('/api/analytics/agent-usage-by-project?' + params.toString());
-							const ctx = renderChartState('agentUsage', 'agentUsageChart', data, 'No model executions in this period');
-							if (!ctx) return;
-							charts.agentUsage = new Chart(ctx.getContext('2d'), {
-								type: 'bar',
-							data: {
-								labels: data.map(d => d.AgentName || 'Unknown'),
-								datasets: [{
-									data: data.map(d => d.ExecutionCount || 0),
-									backgroundColor: [
-										'rgba(239, 68, 68, 0.7)',
-										'rgba(34, 197, 94, 0.7)',
-										'rgba(59, 130, 246, 0.7)',
-										'rgba(251, 146, 60, 0.7)',
-										'rgba(147, 51, 234, 0.7)',
-										'rgba(20, 184, 166, 0.7)'
-									]
-								}]
-							},
-							options: {
-									responsive: true,
-									maintainAspectRatio: false,
-									plugins: { legend: { position: 'bottom' } }							}
-						});
-						} catch (e) { console.error('loadAgentUsage:', e); showAnalyticsError(e); }
-					}
-
 					// Load Most Frequent Tasks
 					async function loadMostFrequentTasks() {
 						try {
@@ -1525,7 +1480,6 @@ templ analyticsContent(currentProject *models.Project) {
 							document.getElementById('analyticsError').classList.add('hidden');
 							const loaders = [loadDashboard];
 								if (selectedView === 'outcomes') loaders.push(loadSuccessFailureRates, loadHourlyTrends, loadAvgTimeByTask, loadMostFrequentTasks, loadFailedTaskPatterns);
-								if (selectedView === 'agents') loaders.push(loadAvgTimeByAgent, loadAgentUsage);
 								if (selectedView === 'learning') loaders.push(loadSkillAnalytics);
 								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); });							for (let index = 0; index < loaders.length; index += 2) {
 								if (loadGeneration !== dataGeneration) return;

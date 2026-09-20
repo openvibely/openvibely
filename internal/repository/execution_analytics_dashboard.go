@@ -48,6 +48,7 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "agent_skill_outcomes", Label: "Observed Agent and skill outcomes", Definition: "Task outcomes grouped by assigned reusable Agent definition and selected or loaded skill.", Denominator: "Selected-period tasks with execution evidence and a selected or loaded skill event; association is observational, not causal."},
 	{Key: "skill_outcomes", Label: "Observed skill outcomes", Definition: "Observed task outcomes where a skill was selected or loaded; this is association, not causation.", Denominator: "Selected-period tasks with a selected or loaded skill event and execution evidence."},
 	{Key: "model_category", Label: "Model performance by task category", Definition: "Execution success grouped by configured model and task category.", Denominator: "Completed, failed, and cancelled executions in each model/category group during the selected period."},
+	{Key: "model_performance", Label: "Observed model performance", Definition: "Execution outcomes are attributed to the model that ran each execution. Task-level goals, first-attempt results, follow-up, attempts, and turnaround are attributed to the model used by the task's latest execution in the selected period. Configuration name, provider model, and reasoning effort remain separate.", Denominator: "Shown per metric for each configured model; token and known-cost coverage count only tasks with matching recorded usage events."},
 	{Key: "token_usage", Label: "Token usage", Definition: "Locally recorded provider input, output, cache, reasoning, and total token counts.", Denominator: "Usage events in the selected project and period with the applicable task dimensions."},
 	{Key: "cache_utilization", Label: "Cache utilization", Definition: "Cached input tokens divided by recorded input tokens.", Denominator: "Recorded input tokens in the selected project and period."},
 	{Key: "execution_hour", Label: "Task execution by hour", Definition: "Execution starts grouped by local hour of day.", Denominator: "Executions in the selected project, period, Agent, and workflow scope."},
@@ -196,6 +197,7 @@ type analyticsDashboardSections struct {
 	skills               bool
 	agentSkills          bool
 	modelCategories      bool
+	models               bool
 	workflows            bool
 	evidenceRows         bool
 	evidenceTotal        bool
@@ -212,16 +214,18 @@ func analyticsDashboardSectionsForView(view string) analyticsDashboardSections {
 		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, followUpDistribution: true, comparison: true, funnel: true, evidenceRows: true, evidenceTotal: true}
 	case "agents":
 		return analyticsDashboardSections{agents: true, skills: true, evidenceRows: true, agentDetail: true}
+	case "models":
+		return analyticsDashboardSections{models: true, modelCategories: true, agents: true, workflows: true}
 	case "learning":
 		return analyticsDashboardSections{skills: true, agentSkills: true}
 	case "usage":
-		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, comparison: true, modelCategories: true}
+		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, comparison: true}
 	case "automations":
 		return analyticsDashboardSections{workflows: true, workflowDetail: true}
 	default:
 		return analyticsDashboardSections{
 			outcomeMetrics: true, outcomeTrend: true, followUpDistribution: true, comparison: true, funnel: true, agents: true, skills: true,
-			agentSkills: true, modelCategories: true, workflows: true, evidenceRows: true, evidenceTotal: true,
+			agentSkills: true, modelCategories: true, models: true, workflows: true, evidenceRows: true, evidenceTotal: true,
 			agentDetail: true, workflowDetail: true, insights: true,
 		}
 	}
@@ -247,6 +251,7 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		SkillOutcomes:        []models.SkillOutcomePerformance{},
 		AgentSkillOutcomes:   []models.AgentSkillOutcomePerformance{},
 		ModelCategories:      []models.ModelCategoryPerformance{},
+		Models:               []models.ModelPerformance{},
 		Workflows:            []models.WorkflowPerformance{},
 		RecentOutcomes:       []models.EvidenceTaskRow{},
 		Insights:             []models.AnalyticsInsight{},
@@ -303,6 +308,11 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 	}
 	if sections.modelCategories {
 		if dashboard.ModelCategories, err = r.queryModelCategoryPerformance(ctx, filter); err != nil {
+			return dashboard, err
+		}
+	}
+	if sections.models {
+		if dashboard.Models, err = r.queryModelPerformance(ctx, filter); err != nil {
 			return dashboard, err
 		}
 	}
@@ -1153,6 +1163,108 @@ func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filte
 			row.Category = "Uncategorized"
 		}
 		row.TechnicalCompletion = metric(completed, terminal)
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.ModelPerformance, error) {
+	execWindow, execArgs := analyticsWindowClause("e", filter)
+	usageWindow, usageArgs := analyticsEventWindowClause("u", "occurred_at", filter)
+	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
+	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
+	query := `WITH scoped_tasks AS (
+		SELECT t.id FROM tasks t WHERE t.project_id=?` + dimension + `
+	), period_exec AS (
+		SELECT e.id,e.task_id,COALESCE(e.agent_config_id,'') model_config_id,e.status,e.started_at,e.completed_at,e.is_followup,e.history_order
+		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id WHERE 1=1` + execWindow + `
+	), execution_rollup AS (
+		SELECT model_config_id,COUNT(*) execution_count,COUNT(DISTINCT task_id) touched_tasks,
+		SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed_execs,
+		SUM(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_execs
+		FROM period_exec GROUP BY model_config_id
+	), ranked_latest AS (
+		SELECT p.*,ROW_NUMBER() OVER(PARTITION BY p.task_id ORDER BY p.started_at DESC,p.history_order DESC,p.id DESC) rn FROM period_exec p
+	), attributed_tasks AS (
+		SELECT task_id,model_config_id FROM ranked_latest WHERE rn=1
+	), terminal_task_ids AS (
+		SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')
+	), historical_terminal AS (
+		SELECT p.task_id,(SELECT e.status FROM executions e WHERE e.task_id=p.task_id AND e.status IN ('completed','failed','cancelled')
+		ORDER BY e.started_at,e.history_order,e.id LIMIT 1) first_status FROM terminal_task_ids p
+	), task_stats AS (
+		SELECT a.task_id,a.model_config_id,COUNT(p.id) attempts,
+		MAX(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END) followed,
+		MAX(CASE WHEN h.first_status IS NOT NULL THEN 1 ELSE 0 END) first_eligible,
+		MAX(CASE WHEN h.first_status='completed' THEN 1 ELSE 0 END) first_completed,
+		CASE WHEN EXISTS (SELECT 1 FROM tasks t LEFT JOIN schedules s ON s.task_id=t.id WHERE t.id=a.task_id AND (t.category='scheduled' OR s.repeat_type<>'once')) THEN NULL
+		ELSE CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-
+		julianday((SELECT MIN(all_e.started_at) FROM executions all_e WHERE all_e.task_id=a.task_id)))*86400000) AS INTEGER) END duration_ms
+		FROM attributed_tasks a JOIN period_exec p ON p.task_id=a.task_id LEFT JOIN historical_terminal h ON h.task_id=a.task_id
+		GROUP BY a.task_id,a.model_config_id
+	), period_goals AS (
+		SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
+	), evaluable_goals AS (
+		SELECT task_id,status FROM period_goals
+		UNION SELECT g.task_id,g.status FROM task_goals g JOIN terminal_task_ids p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
+	), task_rollup AS (
+		SELECT s.model_config_id,COUNT(*) tasks_evaluated,SUM(s.attempts) attempts,
+		SUM(s.first_completed) first_completed,SUM(s.first_eligible) first_denominator,SUM(s.followed) followed,
+		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END) achieved,COUNT(g.task_id) goal_denominator
+		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id GROUP BY s.model_config_id
+	), ranked_durations AS (
+		SELECT model_config_id,duration_ms,ROW_NUMBER() OVER(PARTITION BY model_config_id ORDER BY duration_ms) rn,
+		COUNT(*) OVER(PARTITION BY model_config_id) duration_count FROM task_stats WHERE duration_ms IS NOT NULL
+	), medians AS (
+		SELECT model_config_id,CAST(AVG(duration_ms) AS INTEGER) median_duration_ms,MAX(duration_count) duration_count
+		FROM ranked_durations WHERE rn IN ((duration_count+1)/2,(duration_count+2)/2) GROUP BY model_config_id
+	), usage AS (
+		SELECT COALESCE(u.agent_config_id,'') model_config_id,COALESCE(SUM(u.total_tokens),0) total_tokens,
+		COUNT(DISTINCT CASE WHEN u.task_id IS NOT NULL AND u.task_id<>'' THEN u.task_id END) token_tasks,
+		SUM(u.cost_usd) known_cost,COUNT(DISTINCT CASE WHEN u.cost_usd IS NOT NULL AND u.task_id IS NOT NULL AND u.task_id<>'' THEN u.task_id END) cost_tasks
+		FROM llm_usage_events u WHERE u.project_id=? AND EXISTS (SELECT 1 FROM scoped_tasks st WHERE st.id=u.task_id)` + usageWindow + ` GROUP BY COALESCE(u.agent_config_id,'')
+	)
+	SELECT er.model_config_id,COALESCE(ac.name,'Unknown configuration'),COALESCE(ac.provider,''),COALESCE(ac.model,'Unknown'),COALESCE(ac.reasoning_effort,''),
+		COALESCE(tr.tasks_evaluated,er.touched_tasks),er.execution_count,
+		er.completed_execs,er.terminal_execs,COALESCE(tr.first_completed,0),COALESCE(tr.first_denominator,0),COALESCE(tr.followed,0),
+		COALESCE(tr.achieved,0),COALESCE(tr.goal_denominator,0),COALESCE(m.median_duration_ms,0),COALESCE(m.duration_count,0),
+		COALESCE(u.total_tokens,0),COALESCE(u.token_tasks,0),u.known_cost,COALESCE(u.cost_tasks,0),COALESCE(tr.attempts,0)
+	FROM execution_rollup er LEFT JOIN task_rollup tr ON tr.model_config_id=er.model_config_id
+	LEFT JOIN medians m ON m.model_config_id=er.model_config_id LEFT JOIN usage u ON u.model_config_id=er.model_config_id
+	LEFT JOIN agent_configs ac ON ac.id=er.model_config_id
+	ORDER BY COALESCE(tr.tasks_evaluated,er.touched_tasks) DESC,ac.name,ac.model`
+	args := append([]any{filter.ProjectID}, dimensionArgs...)
+	args = append(args, execArgs...)
+	args = append(args, goalArgs...)
+	args = append(args, filter.ProjectID)
+	args = append(args, usageArgs...)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("getting model performance: %w", err)
+	}
+	defer rows.Close()
+	result := []models.ModelPerformance{}
+	for rows.Next() {
+		var row models.ModelPerformance
+		var completed, terminal, firstCompleted, firstDenom, followed, achieved, goalDenom, attempts int
+		var knownCost sql.NullFloat64
+		if err := rows.Scan(&row.ModelConfigID, &row.ConfigName, &row.Provider, &row.Model, &row.ReasoningEffort,
+			&row.TasksEvaluated, &row.ExecutionCount, &completed, &terminal, &firstCompleted, &firstDenom, &followed,
+			&achieved, &goalDenom, &row.MedianDurationMs, &row.DurationSampleSize, &row.TotalTokens, &row.TokenCoveredTasks,
+			&knownCost, &row.CostCoveredTasks, &attempts); err != nil {
+			return nil, fmt.Errorf("scanning model performance: %w", err)
+		}
+		row.TechnicalCompletion = metric(completed, terminal)
+		row.GoalAchievement = metric(achieved, goalDenom)
+		row.FirstPass = metric(firstCompleted, firstDenom)
+		row.FollowUp = metric(followed, row.TasksEvaluated)
+		if row.TasksEvaluated > 0 {
+			row.AverageAttempts = float64(attempts) / float64(row.TasksEvaluated)
+		}
+		if knownCost.Valid {
+			value := knownCost.Float64
+			row.KnownCostUSD = &value
+		}
 		result = append(result, row)
 	}
 	return result, rows.Err()
