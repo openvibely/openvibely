@@ -715,13 +715,13 @@ var registry = []ActionDef{
 	// --- Personality domain ---
 	{
 		Name:         "list_personalities",
-		Description:  "List available personality presets.",
+		Description:  "List one bounded page of personality presets and custom personalities. Built-in presets sort first, then custom personalities by name. Defaults to 20 items and caps at 50. Returns pagination metadata (total, has_more, next_offset). Use set_personality with an exact key even when that key is not on the current page.",
 		Domain:       DomainPersonality,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Maximum personalities to return. Defaults to 20 and caps at 50."},"offset":{"type":"integer","minimum":0,"description":"Number of personalities to skip; use next_offset from the previous response."}},"additionalProperties":false}`),
 	},
 	{
 		Name:         "get_personality",

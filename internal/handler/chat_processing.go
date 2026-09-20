@@ -3631,31 +3631,9 @@ func (h *Handler) formatThreadTranscriptPage(task *models.Task, executions []mod
 	return threadTranscriptFormatResult{transcript: sb.String(), budgetExceeded: budgetExceeded}
 }
 
-// executeListPersonalities returns all available personality presets.
-func (h *Handler) executeListPersonalities(ctx context.Context) string {
-	personalities := service.AllPersonalitiesWithCustom(ctx, h.customPersonalityRepo)
-	var sb strings.Builder
-	sb.WriteString("\n\n---\nAvailable Personalities:\n")
-	for _, p := range personalities {
-		if p.Key == "" {
-			sb.WriteString(fmt.Sprintf("- **%s** (default) — %s\n", p.Name, p.Description))
-		} else if p.IsCustom {
-			sb.WriteString(fmt.Sprintf("- **%s** (key: `%s`, custom) — %s\n", p.Name, p.Key, p.Description))
-		} else {
-			sb.WriteString(fmt.Sprintf("- **%s** (key: `%s`) — %s\n", p.Name, p.Key, p.Description))
-		}
-	}
-
-	// Also show current personality
-	current, err := h.settingsRepo.Get(ctx, "personality")
-	if err != nil {
-		applog.Infof("[handler] executeListPersonalities error reading current personality: %v", err)
-	}
-	if current == "" {
-		current = "default"
-	}
-	sb.WriteString(fmt.Sprintf("\nCurrent personality: **%s**\n", current))
-	return sb.String()
+// executeListPersonalities returns one bounded page of personality presets and custom personalities.
+func (h *Handler) executeListPersonalities(ctx context.Context, input json.RawMessage) (string, error) {
+	return service.ExecuteListPersonalitiesTool(ctx, h.customPersonalityRepo, h.settingsRepo, input, true)
 }
 
 // executeSetPersonality applies a typed set_personality runtime action.
