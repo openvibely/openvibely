@@ -266,7 +266,7 @@ func usageEvidenceRequested(filter repository.UsageFilter) bool {
 // @Param date_to query string false "Optional exclusive end datetime"
 // @Param compare query boolean false "Compare with the immediately preceding equivalent period"
 // @Param group_by query string false "Trend grouping: day, week, or month" default(day)
-// @Param view query string false "Active Analytics view: overview, outcomes, agents, automations, learning, or usage"
+// @Param view query string false "Active Analytics view: overview, outcomes, agents, models, automations, learning, or usage"
 // @Param agent query string false "Reusable Agent definition ID or __unassigned__"
 // @Param workflow query string false "Automation workflow ID"
 // @Param evidence_limit query int false "Evidence rows per page, 1-100" default(20)
@@ -281,7 +281,7 @@ func usageEvidenceRequested(filter repository.UsageFilter) bool {
 func analyticsDashboardView(value string) string {
 	view := strings.ToLower(strings.TrimSpace(value))
 	switch view {
-	case "overview", "outcomes", "agents", "automations", "learning", "usage":
+	case "overview", "outcomes", "agents", "models", "automations", "learning", "usage":
 		return view
 	default:
 		return "overview"
