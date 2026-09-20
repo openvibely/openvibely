@@ -16,6 +16,14 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func assertOAuthCredentialStateCleared(t *testing.T, cfg *models.LLMConfig) {
+	t.Helper()
+	if cfg.OAuthAccessToken != "" || cfg.OAuthRefreshToken != "" || cfg.OAuthExpiresAt != 0 ||
+		cfg.OAuthAccountID != "" || cfg.OAuthNeedsReauth || cfg.CustomAuthStateJSON != "" {
+		t.Fatalf("OAuth credential state was not cleared: %#v", cfg)
+	}
+}
+
 func TestDisconnectModelOAuthConnectionAffectsAllLinkedModels(t *testing.T) {
 	_, e, repo := setupTestHandler(t)
 	ctx := context.Background()
@@ -1807,11 +1815,16 @@ func TestUpdateCustomOAuthSecurityEndpointInvalidatesStoredCredentials(t *testin
 		Model:                "premium",
 		BaseURL:              "https://api.example.test/inference/v1",
 		ModelsURL:            "https://api.example.test/inference/v1/model/info",
+		OAuthClientID:        "client-id",
+		OAuthClientSecret:    "client-secret",
 		OAuthAuthorizeURL:    "https://login.example.test/login",
 		OAuthTokenURL:        "https://api.example.test/auth/token",
+		OAuthScopes:          "openid profile",
 		OAuthAccessToken:     "connected-access",
 		OAuthRefreshToken:    "connected-refresh",
 		OAuthExpiresAt:       time.Now().Add(time.Hour).UnixMilli(),
+		OAuthAccountID:       "connected-account",
+		OAuthNeedsReauth:     true,
 		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
 		CustomAuthStateJSON:  `{"instance_id":"instance-1"}`,
 	}
@@ -1827,8 +1840,11 @@ func TestUpdateCustomOAuthSecurityEndpointInvalidatesStoredCredentials(t *testin
 		"models_url":                    {"https://new-api.example.test/models"},
 		"preset_slug":                   {"custom"},
 		"transport":                     {"chat_completions"},
+		"oauth_client_id":               {agent.OAuthClientID},
+		"oauth_client_secret":           {agent.OAuthClientSecret},
 		"oauth_authorize_url":           {agent.OAuthAuthorizeURL},
 		"oauth_token_url":               {agent.OAuthTokenURL},
+		"oauth_scopes":                  {agent.OAuthScopes},
 		"custom_refresh_url":            {cfg.RefreshURL},
 		"custom_profile_url":            {cfg.ProfileURL},
 		"custom_access_token_field":     {"token"},
@@ -1854,8 +1870,11 @@ func TestUpdateCustomOAuthSecurityEndpointInvalidatesStoredCredentials(t *testin
 	if updated.ModelsURL != "https://new-api.example.test/models" {
 		t.Fatalf("models URL not updated: %q", updated.ModelsURL)
 	}
-	if updated.OAuthAccessToken != "" || updated.OAuthRefreshToken != "" || updated.CustomAuthStateJSON != "" {
-		t.Fatalf("security endpoint change retained OAuth credentials: %#v", updated)
+	assertOAuthCredentialStateCleared(t, updated)
+	if updated.OAuthClientID != "client-id" || updated.OAuthClientSecret != "client-secret" ||
+		updated.OAuthAuthorizeURL != agent.OAuthAuthorizeURL || updated.OAuthTokenURL != agent.OAuthTokenURL ||
+		updated.OAuthScopes != "openid profile" {
+		t.Fatalf("security endpoint change cleared OAuth client configuration: %#v", updated)
 	}
 }
 
@@ -2271,18 +2290,21 @@ func TestNormalizeBrowserModelFormNewOAuthConnectionDoesNotCopyExistingCredentia
 	agent := &models.LLMConfig{
 		ID:                  "id",
 		OAuthConnectionID:   "existing-connection",
+		OAuthConnectionName: "Existing account",
 		OAuthAccessToken:    "existing-access",
 		OAuthRefreshToken:   "existing-refresh",
 		OAuthExpiresAt:      time.Now().Add(time.Hour).UnixMilli(),
 		OAuthAccountID:      "existing-account",
 		OAuthNeedsReauth:    true,
+		CustomAuthStateJSON: `{"instance_id":"instance-1"}`,
 		OAuthConfigRevision: 7,
 	}
 	if err := h.normalizeBrowserModelForm(context.Background(), e.NewContext(req, httptest.NewRecorder()), agent, modelFormOptions{mode: modelFormUpdate}); err != nil {
 		t.Fatal(err)
 	}
-	if agent.OAuthConnectionID != "" || agent.OAuthAccessToken != "" || agent.OAuthRefreshToken != "" || agent.OAuthExpiresAt != 0 || agent.OAuthAccountID != "" || agent.OAuthNeedsReauth || agent.OAuthConfigRevision != 0 {
-		t.Fatalf("new OAuth connection retained existing account state: %#v", agent)
+	assertOAuthCredentialStateCleared(t, agent)
+	if agent.OAuthConnectionID != "" || agent.OAuthConnectionName != "" || agent.OAuthConfigRevision != 0 {
+		t.Fatalf("new OAuth connection retained existing account linkage state: %#v", agent)
 	}
 }
 
@@ -2944,11 +2966,15 @@ func TestUpdateModel_SwitchCustomOAuthToAPIKeyClearsOAuthSecrets(t *testing.T) {
 		APIKey:               "",
 		OAuthAccessToken:     "access-token",
 		OAuthRefreshToken:    "refresh-token",
+		OAuthExpiresAt:       time.Now().Add(time.Hour).UnixMilli(),
+		OAuthAccountID:       "account-id",
+		OAuthNeedsReauth:     true,
 		OAuthClientID:        "client-id",
 		OAuthClientSecret:    "client-secret",
 		OAuthAuthorizeURL:    "https://login.example.test/authorize",
 		OAuthTokenURL:        "https://login.example.test/token",
 		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+		CustomAuthStateJSON:  `{"instance_id":"instance-1"}`,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -2981,9 +3007,10 @@ func TestUpdateModel_SwitchCustomOAuthToAPIKeyClearsOAuthSecrets(t *testing.T) {
 	if updated.AuthMethod != models.AuthMethodAPIKey || updated.APIKey != "new-api-key" {
 		t.Fatalf("unexpected updated credentials: auth=%s api_key=%q", updated.AuthMethod, updated.APIKey)
 	}
-	if updated.OAuthAccessToken != "" || updated.OAuthRefreshToken != "" ||
-		updated.OAuthClientID != "" || updated.OAuthClientSecret != "" {
-		t.Fatalf("OAuth credentials survived auth-mode switch: %#v", updated)
+	assertOAuthCredentialStateCleared(t, updated)
+	if updated.OAuthClientID != "" || updated.OAuthClientSecret != "" ||
+		updated.OAuthAuthorizeURL != "" || updated.OAuthTokenURL != "" || updated.OAuthScopes != "" {
+		t.Fatalf("OAuth client configuration survived auth-mode switch: %#v", updated)
 	}
 	updatedCfg, err := llmcustomauth.ParseConfig(updated.CustomAuthConfigJSON)
 	if err != nil {

@@ -559,27 +559,26 @@ func clearOpenAICompatibleFields(agent *models.LLMConfig) {
 	agent.CustomAuthStateJSON = ""
 }
 
-func clearOAuthState(agent *models.LLMConfig) {
+func clearOAuthCredentialState(agent *models.LLMConfig) {
 	agent.OAuthAccessToken = ""
 	agent.OAuthRefreshToken = ""
 	agent.OAuthExpiresAt = 0
 	agent.OAuthAccountID = ""
 	agent.OAuthNeedsReauth = false
+	agent.CustomAuthStateJSON = ""
+}
+
+func clearOAuthState(agent *models.LLMConfig) {
+	clearOAuthCredentialState(agent)
 	agent.OAuthClientID = ""
 	agent.OAuthClientSecret = ""
 	agent.OAuthAuthorizeURL = ""
 	agent.OAuthTokenURL = ""
 	agent.OAuthScopes = ""
-	agent.CustomAuthStateJSON = ""
 }
 
 func clearOAuthCredentials(agent *models.LLMConfig) {
-	agent.OAuthAccessToken = ""
-	agent.OAuthRefreshToken = ""
-	agent.OAuthExpiresAt = 0
-	agent.OAuthAccountID = ""
-	agent.OAuthNeedsReauth = false
-	agent.CustomAuthStateJSON = ""
+	clearOAuthCredentialState(agent)
 }
 
 func oauthSecurityConfigChanged(before, after models.LLMConfig) bool {
@@ -766,11 +765,7 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 		if connectionID, ok := formValueIfPresent(c, "oauth_connection_id"); ok {
 			if connectionID == "new" {
 				connectionID = ""
-				agent.OAuthAccessToken = ""
-				agent.OAuthRefreshToken = ""
-				agent.OAuthExpiresAt = 0
-				agent.OAuthAccountID = ""
-				agent.OAuthNeedsReauth = false
+				clearOAuthCredentialState(agent)
 				agent.OAuthConnectionName = ""
 				agent.OAuthConfigRevision = 0
 			}
