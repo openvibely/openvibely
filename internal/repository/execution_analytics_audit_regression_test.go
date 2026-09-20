@@ -72,6 +72,68 @@ func TestAnalyticsDashboardPeriodDoesNotResurrectHistoricalOutcomes(t *testing.T
 	}
 }
 
+func TestAnalyticsDashboardCycleTimeExcludesRecurringTaskTemplates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Cycle cohort", RepoPath: "/cycle-cohort"}
+	if err := NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	config := &models.LLMConfig{Name: "Model", Provider: models.ProviderTest, Model: "model"}
+	if err := NewLLMConfigRepo(db).Create(ctx, config); err != nil {
+		t.Fatal(err)
+	}
+	tasks := NewTaskRepo(db, nil)
+	executions := NewExecutionRepo(db)
+	makeTerminal := func(task *models.Task, id, started, completed string) {
+		t.Helper()
+		execution := &models.Execution{ID: id, TaskID: task.ID, AgentConfigID: config.ID, Status: models.ExecRunning, PromptSent: "work"}
+		if err := executions.Create(ctx, execution); err != nil {
+			t.Fatal(err)
+		}
+		if err := executions.Complete(ctx, execution.ID, models.ExecCompleted, "", "", 0, 0); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at=?,completed_at=? WHERE id=?`, started, completed, execution.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	normal := &models.Task{ProjectID: project.ID, Title: "Normal task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "work"}
+	if err := tasks.Create(ctx, normal); err != nil {
+		t.Fatal(err)
+	}
+	makeTerminal(normal, "normal-cycle-exec", "2026-01-10 10:00:00", "2026-01-10 11:00:00")
+	recurring := &models.Task{ProjectID: project.ID, Title: "Recurring task template", Category: models.CategoryScheduled, Status: models.StatusCompleted, Prompt: "work"}
+	if err := tasks.Create(ctx, recurring); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO schedules (id,task_id,run_at,repeat_type,repeat_interval,enabled) VALUES ('recurring-cycle-schedule',?,'2025-12-01 00:00:00','daily',1,1)`, recurring.ID); err != nil {
+		t.Fatal(err)
+	}
+	makeTerminal(recurring, "recurring-cycle-old", "2025-12-01 10:00:00", "2025-12-01 10:01:00")
+	makeTerminal(recurring, "recurring-cycle-current", "2026-01-15 10:00:00", "2026-01-15 10:01:00")
+
+	dashboard, err := executions.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: project.ID, DateFrom: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dashboard.Current.CycleSampleSize != 1 || dashboard.Current.MedianCycleTimeMs != int64(time.Hour/time.Millisecond) || dashboard.Current.P90CycleTimeMs != int64(time.Hour/time.Millisecond) {
+		t.Fatalf("cycle metrics included recurring task template: %+v", dashboard.Current)
+	}
+	foundRecurring := false
+	for _, row := range dashboard.RecentOutcomes {
+		if row.TaskID == recurring.ID {
+			foundRecurring = true
+			if row.CycleEligible || row.CycleTimeMs != 0 {
+				t.Fatalf("recurring task template exposed invalid cycle evidence: %+v", row)
+			}
+		}
+	}
+	if !foundRecurring {
+		t.Fatal("recurring task should remain in non-cycle outcome evidence")
+	}
+}
+
 func TestAnalyticsDashboardWorkflowCompletionRateIncludesAllInvocationStatuses(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

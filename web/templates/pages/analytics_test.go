@@ -612,6 +612,12 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if !strings.Contains(content, `return 'Unavailable · n=0'`) || !strings.Contains(content, `usagePeriodForGroup`) {
 		t.Fatal("Analytics should distinguish unavailable ratios and align cost with grouped outcome periods")
 	}
+	if strings.Contains(content, `sticky top-0`) {
+		t.Fatal("Analytics navigation should scroll with the page")
+	}
+	if !strings.Contains(content, `slice(0,12)`) || !strings.Contains(content, `canvas.parentElement.style.height`) || !strings.Contains(content, `legend:{display:false}`) {
+		t.Fatal("Skill charts should bound dense data, scale horizontal rows, and avoid a per-skill legend")
+	}
 	if strings.Contains(content, `>${task.TaskTitle || 'Unknown'}<`) || strings.Contains(content, `<td>${pattern.TaskTitle || 'Unknown'}</td>`) {
 		t.Fatal("dynamic task titles must be escaped before innerHTML insertion")
 	}
