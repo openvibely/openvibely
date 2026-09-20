@@ -153,7 +153,7 @@ func TestBrowserFunctional_AnalyticsContent_KPIsFunnelsAndChartsAreDisplayOnlyIn
   window.addEventListener('load',function(){waitFor(function(){return document.querySelector('#analyticsKpis .card')&&charts.projectOutcomeTrendChart;},function(){
     if(document.querySelector('#analyticsKpis a,[data-analytics-evidence-link]'))fail('KPI or funnel rendered as a link');
     if(typeof charts.projectOutcomeTrendChart.config.options.onClick==='function')fail('overview chart is clickable');
-    document.querySelector('[data-analytics-view="outcomes"]').click();
+    history.pushState({},'',location.pathname+'?project_id=project-1&view=outcomes');window.dispatchEvent(new PopStateEvent('popstate'));
     waitFor(function(){return charts.hourlyTrendsChart&&document.querySelector('#outcomeSummaryCards .card');},function(){
       if(document.querySelector('#outcomeSummaryCards a,#outcomeFunnel a'))fail('outcome KPI or funnel rendered as a link');
       Object.keys(charts).forEach(function(id){if(charts[id].config.options&&typeof charts[id].config.options.onClick==='function')fail(id+' chart is clickable');});
@@ -600,7 +600,6 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	}
 	content := buf.String()
 	for _, expected := range []string{
-		`data-analytics-view="overview"`, `data-analytics-view="outcomes"`,
 		`data-analytics-view="agents"`,
 		`data-analytics-view="learning"`, `data-analytics-view="usage"`,
 		`data-model-work-type-filter`, `id="analyticsWorkType"`, `Interactive tasks`, `Recurring work`,
@@ -663,7 +662,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 	}
 	content := buf.String()
 
-	views := []string{"overview", "usage", "models", "learning", "agents", "outcomes"}
+	views := []string{"usage", "models", "learning", "agents"}
 	if got := strings.Count(content, `data-analytics-view=`); got != len(views) {
 		t.Fatalf("Analytics view count = %d, want exactly %d", got, len(views))
 	}
@@ -680,7 +679,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 		}
 		previous = at
 	}
-	for _, forbidden := range []string{`data-analytics-view="all"`, `data-analytics-view="automations"`, `data-analytics-section="workflows"`, `viewDetailElements`} {
+	for _, forbidden := range []string{`data-analytics-view="all"`, `data-analytics-view="overview"`, `data-analytics-view="outcomes"`, `data-analytics-view="automations"`, `data-analytics-section="workflows"`, `viewDetailElements`} {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("Analytics retains removed navigation/ownership construct %q", forbidden)
 		}
