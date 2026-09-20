@@ -114,8 +114,29 @@ func AllPersonalities() []PersonalityInfo {
 	return presetPersonalities()
 }
 
+const (
+	PersonalityListDefaultLimit = 20
+	PersonalityListMaxLimit     = 50
+	personalityListDescMaxRunes = 160
+)
+
+type PersonalityListPage struct {
+	Items      []PersonalityInfo
+	Limit      int
+	Offset     int
+	Returned   int
+	Total      int
+	HasMore    bool
+	NextOffset int
+}
+
+type personalityListRequest struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
 // AllPersonalitiesWithCustom returns presets merged with custom personalities from the database.
-// Custom personalities appear after the presets.
+// Custom personalities appear after the presets. Prefer ListPersonalitiesRuntimePage for Chat tools.
 func AllPersonalitiesWithCustom(ctx context.Context, repo *repository.CustomPersonalityRepo) []PersonalityInfo {
 	result := presetPersonalities()
 	if repo == nil {
@@ -129,6 +150,183 @@ func AllPersonalitiesWithCustom(ctx context.Context, repo *repository.CustomPers
 		result = append(result, customToPersonalityInfo(c))
 	}
 	return result
+}
+
+func personalityListInputHasField(input json.RawMessage, field string) bool {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(input, &object); err != nil {
+		return false
+	}
+	for key := range object {
+		if strings.EqualFold(key, field) {
+			return true
+		}
+	}
+	return false
+}
+
+// PersonalityListPageArgs parses list_personalities limit/offset.
+// Omitted limit defaults to 20. Explicit 0 is invalid.
+func PersonalityListPageArgs(input json.RawMessage) (int, int, error) {
+	var req personalityListRequest
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return 0, 0, err
+	}
+	if req.Limit == 0 && personalityListInputHasField(input, "limit") {
+		return 0, 0, fmt.Errorf("limit must be 1-50 and offset must be non-negative")
+	}
+	limit := req.Limit
+	if limit == 0 {
+		limit = PersonalityListDefaultLimit
+	}
+	if limit < 1 || limit > PersonalityListMaxLimit || req.Offset < 0 {
+		return 0, 0, fmt.Errorf("limit must be 1-50 and offset must be non-negative")
+	}
+	return limit, req.Offset, nil
+}
+
+// ListPersonalitiesRuntimePage returns one combined page: built-in presets first,
+// then custom personalities by name. Custom rows are fetched with LIMIT/OFFSET so
+// a large catalog is not fully materialized.
+func ListPersonalitiesRuntimePage(ctx context.Context, repo *repository.CustomPersonalityRepo, limit, offset int) (PersonalityListPage, error) {
+	if limit < 1 || limit > PersonalityListMaxLimit || offset < 0 {
+		return PersonalityListPage{}, fmt.Errorf("limit must be 1-50 and offset must be non-negative")
+	}
+	presets := presetPersonalities()
+	customTotal := 0
+	if repo != nil {
+		n, err := repo.Count(ctx)
+		if err != nil {
+			return PersonalityListPage{}, err
+		}
+		customTotal = n
+	}
+	total := len(presets) + customTotal
+	page := PersonalityListPage{Limit: limit, Offset: offset, Total: total, Items: make([]PersonalityInfo, 0, limit)}
+	if offset >= total {
+		return page, nil
+	}
+	remaining := limit
+	cursor := offset
+	if cursor < len(presets) {
+		end := cursor + remaining
+		if end > len(presets) {
+			end = len(presets)
+		}
+		page.Items = append(page.Items, presets[cursor:end]...)
+		remaining -= end - cursor
+		cursor = len(presets)
+	}
+	if remaining > 0 && repo != nil {
+		customOffset := cursor - len(presets)
+		if customOffset < 0 {
+			customOffset = 0
+		}
+		customs, err := repo.ListRuntimePage(ctx, remaining, customOffset)
+		if err != nil {
+			return PersonalityListPage{}, err
+		}
+		for _, c := range customs {
+			page.Items = append(page.Items, customToPersonalityInfo(c))
+		}
+	}
+	page.Returned = len(page.Items)
+	if page.Offset+page.Returned < total {
+		page.HasMore = true
+		page.NextOffset = page.Offset + page.Returned
+	}
+	return page, nil
+}
+
+func compactPersonalityDescription(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) <= personalityListDescMaxRunes {
+		return s
+	}
+	return string(runes[:personalityListDescMaxRunes-3]) + "..."
+}
+
+func formatPersonalityListLine(p PersonalityInfo, markdown bool) string {
+	desc := compactPersonalityDescription(p.Description)
+	name := p.Name
+	if markdown {
+		name = "**" + p.Name + "**"
+	}
+	switch {
+	case p.Key == "":
+		if markdown {
+			return fmt.Sprintf("- %s (default) — %s\n", name, desc)
+		}
+		return fmt.Sprintf("- %s (default): %s\n", p.Name, desc)
+	case p.IsCustom:
+		if markdown {
+			return fmt.Sprintf("- %s (key: `%s`, custom) — %s\n", name, p.Key, desc)
+		}
+		return fmt.Sprintf("- %s (key: %s, custom): %s\n", p.Name, p.Key, desc)
+	default:
+		if markdown {
+			return fmt.Sprintf("- %s (key: `%s`) — %s\n", name, p.Key, desc)
+		}
+		return fmt.Sprintf("- %s (key: %s): %s\n", p.Name, p.Key, desc)
+	}
+}
+
+// FormatPersonalityListPage renders one model-facing list_personalities page.
+func FormatPersonalityListPage(page PersonalityListPage, current string, markdown bool) string {
+	var sb strings.Builder
+	if markdown {
+		sb.WriteString("\n\n---\nAvailable Personalities:\n")
+	} else {
+		sb.WriteString("Available Personalities:\n")
+	}
+	if len(page.Items) == 0 {
+		sb.WriteString("No personalities on this page.\n")
+	} else {
+		for _, p := range page.Items {
+			sb.WriteString(formatPersonalityListLine(p, markdown))
+		}
+	}
+	if current == "" {
+		current = "default"
+	}
+	if markdown {
+		sb.WriteString(fmt.Sprintf("\nCurrent personality: **%s**\n", current))
+	} else {
+		sb.WriteString(fmt.Sprintf("\nCurrent personality: %s\n", current))
+	}
+	next := 0
+	if page.HasMore {
+		next = page.NextOffset
+	}
+	start := page.Offset + 1
+	end := page.Offset + page.Returned
+	if page.Returned == 0 {
+		start = 0
+		end = 0
+	}
+	sb.WriteString(fmt.Sprintf("limit=%d offset=%d returned=%d total=%d has_more=%t next_offset=%d showing=%d-%d\n",
+		page.Limit, page.Offset, page.Returned, page.Total, page.HasMore, next, start, end))
+	return sb.String()
+}
+
+// ExecuteListPersonalitiesTool lists one bounded personality page for Chat runtimes.
+func ExecuteListPersonalitiesTool(ctx context.Context, customRepo *repository.CustomPersonalityRepo, settingsRepo *repository.SettingsRepo, input json.RawMessage, markdown bool) (string, error) {
+	limit, offset, err := PersonalityListPageArgs(input)
+	if err != nil {
+		return "", err
+	}
+	page, err := ListPersonalitiesRuntimePage(ctx, customRepo, limit, offset)
+	if err != nil {
+		return "", err
+	}
+	current := ""
+	if settingsRepo != nil {
+		if value, getErr := settingsRepo.Get(ctx, "personality"); getErr == nil {
+			current = value
+		}
+	}
+	return strings.TrimSpace(FormatPersonalityListPage(page, current, markdown)), nil
 }
 
 // customToPersonalityInfo converts a CustomPersonality model to PersonalityInfo.
@@ -148,13 +346,21 @@ func IsPresetPersonality(key string) bool {
 }
 
 // FindPersonality returns the matching built-in or custom personality for an exact key.
+// Custom keys use GetByKey so a large catalog is not fully listed.
 func FindPersonality(ctx context.Context, key string, repo *repository.CustomPersonalityRepo) (PersonalityInfo, bool) {
-	for _, personality := range AllPersonalitiesWithCustom(ctx, repo) {
+	for _, personality := range presetPersonalities() {
 		if personality.Key == key {
 			return personality, true
 		}
 	}
-	return PersonalityInfo{}, false
+	if repo == nil {
+		return PersonalityInfo{}, false
+	}
+	custom, err := repo.GetByKey(ctx, key)
+	if err != nil || custom == nil {
+		return PersonalityInfo{}, false
+	}
+	return customToPersonalityInfo(*custom), true
 }
 
 // IsAvailablePersonalityKey reports whether key is empty/default, a built-in preset, or an existing custom personality.
