@@ -397,6 +397,7 @@ func healthCheckMetrics(hc *models.HealthCheck) []gradeReportMetric {
 		{Label: "Tasks", Value: fmt.Sprintf("%d", hc.TasksTotal)},
 		{Label: "Completed", Value: fmt.Sprintf("%d", hc.TasksCompleted), ValueClass: "text-success"},
 		{Label: "Failed", Value: fmt.Sprintf("%d", hc.TasksFailed), ValueClass: "text-error"},
+		{Label: "Pending", Value: fmt.Sprintf("%d", hc.TasksPending)},
 		{Label: "Backlog", Value: fmt.Sprintf("%d", hc.BacklogSize)},
 		{Label: "Completion", Value: fmt.Sprintf("%.0f%%", hc.AvgCompletionPct)},
 	}
