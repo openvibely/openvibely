@@ -118,3 +118,31 @@ func TestTask_SetChainConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskCancellableByUser(t *testing.T) {
+	tests := []struct {
+		name string
+		task *Task
+		want bool
+	}{
+		{name: "nil", task: nil, want: false},
+		{name: "running", task: &Task{Status: StatusRunning, Category: CategoryActive}, want: true},
+		{name: "queued", task: &Task{Status: StatusQueued, Category: CategoryActive}, want: true},
+		{name: "pending active", task: &Task{Status: StatusPending, Category: CategoryActive}, want: true},
+		{name: "blocked swarm parent active", task: &Task{Status: StatusBlocked, Category: CategoryActive, SwarmRole: SwarmRoleParent}, want: true},
+		{name: "completed", task: &Task{Status: StatusCompleted, Category: CategoryCompleted}, want: false},
+		{name: "failed", task: &Task{Status: StatusFailed, Category: CategoryBacklog}, want: false},
+		{name: "cancelled", task: &Task{Status: StatusCancelled, Category: CategoryBacklog}, want: false},
+		{name: "pending backlog", task: &Task{Status: StatusPending, Category: CategoryBacklog}, want: false},
+		{name: "pending scheduled", task: &Task{Status: StatusPending, Category: CategoryScheduled}, want: false},
+		{name: "blocked without swarm parent", task: &Task{Status: StatusBlocked, Category: CategoryActive}, want: false},
+		{name: "blocked swarm parent backlog", task: &Task{Status: StatusBlocked, Category: CategoryBacklog, SwarmRole: SwarmRoleParent}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.task.CancellableByUser(); got != tt.want {
+				t.Errorf("CancellableByUser() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

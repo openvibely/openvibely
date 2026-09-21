@@ -2070,13 +2070,6 @@ type taskCancellationResult struct {
 	Message          string              `json:"message"`
 }
 
-func taskIsCancellableByUser(task *models.Task) bool {
-	if task == nil {
-		return false
-	}
-	return task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) || (task.SwarmRole == models.SwarmRoleParent && task.Status == models.StatusBlocked && task.Category == models.CategoryActive)
-}
-
 func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, cutoff int64, composerStop bool, operation string) (*taskCancellationResult, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task not found")
@@ -2090,7 +2083,7 @@ func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, cutoff 
 		FinalStatus:      task.Status,
 		FinalCategory:    task.Category,
 	}
-	if !taskIsCancellableByUser(task) {
+	if !task.CancellableByUser() {
 		result.Accepted = false
 		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
 		return result, nil

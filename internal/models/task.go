@@ -240,6 +240,16 @@ func IsTerminalStatus(s TaskStatus) bool {
 	return s == StatusCompleted || s == StatusFailed || s == StatusCancelled
 }
 
+// CancellableByUser reports whether a user-facing Stop/Cancel should be admitted
+// before mutation. Browser handlers and Chat/channel runtime actions share this
+// rule so eligibility cannot drift across surfaces.
+func (t *Task) CancellableByUser() bool {
+	if t == nil {
+		return false
+	}
+	return t.Status == StatusRunning || t.Status == StatusQueued || (t.Status == StatusPending && t.Category == CategoryActive) || (t.SwarmRole == SwarmRoleParent && t.Status == StatusBlocked && t.Category == CategoryActive)
+}
+
 // ChainConfiguration defines the chaining behavior for tasks
 type ChainConfiguration struct {
 	Enabled                bool                `json:"enabled"`                             // Whether chaining is enabled

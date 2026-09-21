@@ -432,13 +432,6 @@ type cancelTaskRuntimeResponse struct {
 	Message          string              `json:"message"`
 }
 
-func taskIsCancellableByUser(task *models.Task) bool {
-	if task == nil {
-		return false
-	}
-	return task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) || (task.SwarmRole == models.SwarmRoleParent && task.Status == models.StatusBlocked && task.Category == models.CategoryActive)
-}
-
 func taskRepoFromChannelTaskOptions(opts channelTaskActionHandlerOptions) *repository.TaskRepo {
 	if opts.TaskRepo != nil {
 		return opts.TaskRepo
@@ -478,7 +471,7 @@ func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandl
 		}
 	}
 	result := cancelTaskRuntimeResponse{OK: true, TaskID: task.ID, Title: task.Title, PreviousStatus: task.Status, PreviousCategory: task.Category, FinalStatus: task.Status, FinalCategory: task.Category}
-	if !taskIsCancellableByUser(task) {
+	if !task.CancellableByUser() {
 		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
 		b, err := json.Marshal(result)
 		return string(b), err
