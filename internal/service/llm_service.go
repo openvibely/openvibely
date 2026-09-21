@@ -820,7 +820,9 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 	category := resolveTaskCreationCategory(request, selectedAgentID, agents)
 	task := &models.Task{ProjectID: projectID, Title: request.Title, Prompt: request.Prompt,
 		Status: models.StatusPending, Category: category, Priority: request.Priority,
-		CreatedVia: repository.AutomationCompilerTaskCreatedVia(plan.sourceBinding.AutomationID, plan.targetNode.NodeKey)}
+		AutoMerge: request.AutoMerge, AutoMergeOnGoalAchieved: request.AutoMergeOnGoalAchieved,
+		MergeTargetBranch: strings.TrimSpace(request.MergeTargetBranch),
+		CreatedVia:        repository.AutomationCompilerTaskCreatedVia(plan.sourceBinding.AutomationID, plan.targetNode.NodeKey)}
 	if selectedAgentID != "" {
 		task.AgentID = &selectedAgentID
 	}
