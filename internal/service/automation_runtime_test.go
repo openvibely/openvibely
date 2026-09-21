@@ -2739,6 +2739,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 
 	firstOutput, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
 		"title":"Implement exact issue","prompt":"opaque implementation prompt","category":"backlog",
+		"auto_merge":true,"auto_merge_on_goal_achieved":true,"merge_target_branch":"release/next",
 		"source_github_issue_number":42,"source_github_repo_url":"https://github.com/attacker/override"
 	}`))
 	require.NoError(t, err)
@@ -2749,6 +2750,9 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NotNil(t, implementationTask)
 	require.Equal(t, repository.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, implementationNode.NodeKey), implementationTask.CreatedVia,
 		"issue-specific Automation Tasks need a durable origin marker after graph replacement deletes projection")
+	require.True(t, implementationTask.AutoMerge, "GitHub inbox create_task must persist advertised auto_merge")
+	require.True(t, implementationTask.AutoMergeOnGoalAchieved, "GitHub inbox create_task must persist advertised auto_merge_on_goal_achieved")
+	require.Equal(t, "release/next", implementationTask.MergeTargetBranch, "GitHub inbox create_task must persist advertised merge_target_branch")
 	require.Contains(t, firstOutput, implementationTask.ID)
 	implementationContext, err := fixture.repo.ContextForTask(ctx, fixture.project.ID, implementationTask.ID)
 	require.NoError(t, err)
@@ -2760,12 +2764,19 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 
 	secondOutput, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
 		"title":"Duplicate model title for issue 42","prompt":"must reuse canonical task","category":"backlog",
+		"auto_merge":false,"auto_merge_on_goal_achieved":false,"merge_target_branch":"main",
 		"source_github_issue_number":42,"source_github_repo_url":"https://github.com/another/override"
 	}`))
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.Contains(t, secondOutput, implementationTask.ID)
+	reusedTask, err := fixture.taskRepo.GetByID(ctx, implementationTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, reusedTask)
+	require.True(t, reusedTask.AutoMerge, "duplicate GitHub issue create_task must not rewrite canonical auto_merge")
+	require.True(t, reusedTask.AutoMergeOnGoalAchieved, "duplicate GitHub issue create_task must not rewrite canonical auto_merge_on_goal_achieved")
+	require.Equal(t, "release/next", reusedTask.MergeTargetBranch, "duplicate GitHub issue create_task must not rewrite canonical merge_target_branch")
 	afterDuplicateTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
 	require.Len(t, afterDuplicateTasks, len(beforeTasks)+3, "one issue work item must have at most one implementation task")
