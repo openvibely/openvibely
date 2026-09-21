@@ -4,6 +4,33 @@ import (
 	"testing"
 )
 
+func TestTaskIsUserCancellable(t *testing.T) {
+	tests := []struct {
+		name string
+		task *Task
+		want bool
+	}{
+		{name: "nil task", task: nil, want: false},
+		{name: "running active task", task: &Task{Status: StatusRunning, Category: CategoryActive}, want: true},
+		{name: "queued active task", task: &Task{Status: StatusQueued, Category: CategoryActive}, want: true},
+		{name: "pending active task", task: &Task{Status: StatusPending, Category: CategoryActive}, want: true},
+		{name: "blocked active swarm parent", task: &Task{Status: StatusBlocked, Category: CategoryActive, SwarmRole: SwarmRoleParent}, want: true},
+		{name: "blocked active non swarm parent", task: &Task{Status: StatusBlocked, Category: CategoryActive}, want: false},
+		{name: "blocked backlog swarm parent", task: &Task{Status: StatusBlocked, Category: CategoryBacklog, SwarmRole: SwarmRoleParent}, want: false},
+		{name: "pending backlog task", task: &Task{Status: StatusPending, Category: CategoryBacklog}, want: false},
+		{name: "pending scheduled task", task: &Task{Status: StatusPending, Category: CategoryScheduled}, want: false},
+		{name: "completed task", task: &Task{Status: StatusCompleted, Category: CategoryCompleted}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := TaskIsUserCancellable(tt.task); got != tt.want {
+				t.Fatalf("TaskIsUserCancellable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTask_ParseChainConfig(t *testing.T) {
 	tests := []struct {
 		name        string
