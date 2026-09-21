@@ -1163,6 +1163,7 @@ func TestCancelTaskRuntimeToolDelegatesSwarmParentCancellation(t *testing.T) {
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked))
 	require.NoError(t, h.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusRunning))
 	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
 
