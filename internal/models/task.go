@@ -240,6 +240,15 @@ func IsTerminalStatus(s TaskStatus) bool {
 	return s == StatusCompleted || s == StatusFailed || s == StatusCancelled
 }
 
+// TaskIsUserCancellable reports whether a user-facing cancellation request should
+// be admitted before surface-specific cancellation side effects run.
+func TaskIsUserCancellable(task *Task) bool {
+	if task == nil {
+		return false
+	}
+	return task.Status == StatusRunning || task.Status == StatusQueued || (task.Status == StatusPending && task.Category == CategoryActive) || (task.SwarmRole == SwarmRoleParent && task.Status == StatusBlocked && task.Category == CategoryActive)
+}
+
 // ChainConfiguration defines the chaining behavior for tasks
 type ChainConfiguration struct {
 	Enabled                bool                `json:"enabled"`                             // Whether chaining is enabled

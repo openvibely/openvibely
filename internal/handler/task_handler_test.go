@@ -737,7 +737,7 @@ func TestHandler_CancelTaskPulseDelegatesSwarmCascade(t *testing.T) {
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
-	require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusBlocked))
 	require.NoError(t, h.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusRunning))
 
 	req := httptest.NewRequest(http.MethodPost, "/tasks/"+parent.ID+"/cancel?pulse=1&project_id="+project.ID, nil)
