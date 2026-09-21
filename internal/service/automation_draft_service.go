@@ -1704,6 +1704,21 @@ func (s *AutomationDraftService) PreviewValidatedCandidate(candidate models.Auto
 	return draftPreviewResult(candidate, definition)
 }
 
+func (s *AutomationDraftService) ApplyVisionSourcePreview(ctx context.Context, projectID string, result *models.AutomationDraftResult) {
+	if result == nil {
+		return
+	}
+	repoPath := ""
+	if s != nil && s.capabilities != nil && s.capabilities.projectRepo != nil && strings.TrimSpace(projectID) != "" {
+		if project, err := s.capabilities.projectRepo.GetByID(ctx, projectID); err == nil && project != nil {
+			repoPath = project.RepoPath
+		}
+	}
+	annotated := AnnotateMaintainedSDLCVisionSource(result.Candidate, repoPath)
+	result.Assumptions = annotated.Assumptions
+	result.Warnings = annotated.Warnings
+}
+
 func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
 	candidate, err := s.NormalizeCandidate(candidate)
 	if err != nil {
@@ -1715,6 +1730,7 @@ func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID
 	}
 	result := draftPreviewResult(candidate, definition)
 	result.ValidationErrors = issues
+	s.ApplyVisionSourcePreview(ctx, projectID, result)
 	return result, nil
 }
 
@@ -1744,7 +1760,9 @@ func (s *AutomationDraftService) LoadCurrentCandidate(ctx context.Context, proje
 	if err != nil {
 		return nil, err
 	}
-	return draftPreviewResult(candidate, current), nil
+	result := draftPreviewResult(candidate, current)
+	s.ApplyVisionSourcePreview(ctx, projectID, result)
+	return result, nil
 }
 
 // LoadLiveCandidate loads the YAML candidate for an already-loaded Live graph.
