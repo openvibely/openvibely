@@ -88,13 +88,14 @@ func TestInsightsContent_RendersHealthDisplayAndIdeaEmptyStateWithoutLeakage(t *
 			TasksTotal:       12,
 			TasksCompleted:   8,
 			TasksFailed:      2,
+			TasksPending:     3,
 			BacklogSize:      4,
 			AvgCompletionPct: 67,
 			CreatedAt:        created,
 		},
 	}))
 
-	for _, expected := range []string{"Project Grade", "B+", "Tasks", "12", "Completed", "8", "Failed", "2", "Backlog", "4", "Completion", "67%", "Health strengths", "Health improvements", "Health assessment", "Health next steps", `text-success/80`, "Grade My Ideas"} {
+	for _, expected := range []string{"Project Grade", "B+", "Tasks", "12", "Completed", "8", "Failed", "2", "Pending", "3", "Backlog", "4", "Completion", "67%", "Health strengths", "Health improvements", "Health assessment", "Health next steps", `text-success/80`, "Grade My Ideas"} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected health-only Insights content to contain %q\n%s", expected, body)
 		}
@@ -134,6 +135,43 @@ func TestInsightsContent_RendersIdeaDisplayAndHealthEmptyStateWithoutLeakage(t *
 		if strings.Contains(body, unexpected) {
 			t.Fatalf("idea-only Insights content leaked health display %q\n%s", unexpected, body)
 		}
+	}
+}
+
+func TestHealthCheckDisplay_ShowsActivePendingMetric(t *testing.T) {
+	created := time.Date(2026, time.August, 16, 9, 0, 0, 0, time.UTC)
+	nonzero := renderInsightsComponentForTest(t, HealthCheckDisplay(&models.HealthCheck{
+		Grade:        "B",
+		TasksPending: 3,
+		CreatedAt:    created,
+	}, nil))
+	for _, expected := range []string{`stat-title text-xs">Pending`, ">3</div>"} {
+		if !strings.Contains(nonzero, expected) {
+			t.Fatalf("expected pending=3 health card to contain %q\n%s", expected, nonzero)
+		}
+	}
+	assertOrderedContains(t, nonzero, "Failed", "Pending")
+	assertOrderedContains(t, nonzero, "Pending", "Backlog")
+
+	zero := renderInsightsComponentForTest(t, HealthCheckDisplay(&models.HealthCheck{
+		Grade:        "B",
+		TasksPending: 0,
+		CreatedAt:    created,
+	}, nil))
+	if !strings.Contains(zero, `stat-title text-xs">Pending`) {
+		t.Fatalf("expected pending=0 health card to keep the Pending label\n%s", zero)
+	}
+	if strings.Count(zero, `stat-title text-xs">Pending`) != 1 {
+		t.Fatalf("pending metric should render once\n%s", zero)
+	}
+
+	refresh := renderInsightsComponentForTest(t, HealthCheckResult(&models.HealthCheck{
+		Grade:        "A",
+		TasksPending: 3,
+		CreatedAt:    created,
+	}, nil))
+	if !strings.Contains(refresh, `stat-title text-xs">Pending`) || !strings.Contains(refresh, ">3</div>") {
+		t.Fatalf("HealthCheckResult should show pending=3\n%s", refresh)
 	}
 }
 
