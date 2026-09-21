@@ -1532,6 +1532,31 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 	}
 }
 
+func TestAutomationBuilderShowsMaintainedVisionSourceNotice(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Native SDLC",
+		AutomationType: "native_sdlc",
+		AdapterKey:     "native_sdlc",
+		Nodes:          []models.AutomationDraftNode{{Key: "vision_suggestions", Name: "Vision Suggestions", Type: models.AutomationNodeTrigger, Role: "task", Config: map[string]any{"prompt": "check VISION.md"}}},
+	}
+	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{
+		Candidate: candidate,
+		Warnings:  []string{"Vision Suggestions can run, but no root VISION.md was found; add one or customize the prompt/source before enabling this schedule."},
+	}, YAML: "schema_version: 1\nname: Native SDLC\n"}
+	var out bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-vision-source").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation builder: %v", err)
+	}
+	body := out.String()
+	if !strings.Contains(body, `data-automation-vision-source="vision_suggestions"`) {
+		t.Fatal("Vision Suggestions node must show a vision-source preflight")
+	}
+	if !strings.Contains(body, "no root VISION.md was found") {
+		t.Fatal("missing VISION.md warning must be visible in the builder")
+	}
+}
+
 func TestAutomationBuilderSerializesGitHubImplementationCategoryToYAML(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "GitHub SDLC", AutomationType: "github_sdlc", AdapterKey: "github_sdlc"}
 	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, YAML: "schema_version: 1\nname: GitHub SDLC\n"}

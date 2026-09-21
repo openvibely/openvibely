@@ -263,6 +263,7 @@ func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, project
 	result := h.automationDraftSvc.PreviewValidatedCandidate(normalized, definition)
 	result.Candidate = normalized
 	result.ValidationErrors = plan.Validation
+	h.automationDraftSvc.ApplyVisionSourcePreview(ctx, projectID, result)
 	return result, nil
 }
 
