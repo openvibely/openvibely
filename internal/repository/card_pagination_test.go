@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 	"strings"
@@ -225,6 +226,118 @@ func modelConfigNames(configs []models.LLMConfig) []string {
 	return names
 }
 
+func BenchmarkAgentRepoListPageFilteredLargeCatalog(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	projectID := seedLargeAgentCatalogForPagination(b, db, 1200)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name   string
+		offset int
+	}{
+		{name: "page1", offset: 0},
+		{name: "offset500", offset: 500},
+	} {
+		b.Run(tc.name+"_indexed_repository", func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				agents, err := repo.ListPageFiltered(ctx, 51, tc.offset, AgentPageFilter{ProjectID: projectID})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(agents) == 0 {
+					b.Fatal("expected at least one agent")
+				}
+			}
+		})
+
+		b.Run(tc.name+"_temp_sort_baseline", func(b *testing.B) {
+			query, args := buildAgentPageFilteredQuery(51, tc.offset, AgentPageFilter{ProjectID: projectID})
+			query = strings.Replace(query, " FROM agents WHERE ", " FROM agents NOT INDEXED WHERE ", 1)
+			for i := 0; i < b.N; i++ {
+				count := benchmarkAgentPageQuery(b, db, ctx, query, args...)
+				if count == 0 {
+					b.Fatal("expected at least one agent")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkAgentRepoWriteOverheadPageIndexes(b *testing.B) {
+	for _, tc := range []struct {
+		name        string
+		dropIndexes bool
+	}{
+		{name: "with_page_indexes"},
+		{name: "without_page_indexes", dropIndexes: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			if tc.dropIndexes {
+				dropAgentPageIndexes(b, db)
+			}
+			repo := NewAgentRepo(db)
+			ctx := context.Background()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				agent := &models.Agent{
+					Name:                fmt.Sprintf("Write Benchmark Agent %06d", i),
+					Description:         "write overhead fixture",
+					SystemPrompt:        "prompt",
+					Model:               "inherit",
+					SelectableAsPrimary: true,
+					Enabled:             true,
+				}
+				if err := repo.Create(ctx, agent); err != nil {
+					b.Fatal(err)
+				}
+				agent.Description = "updated write overhead fixture"
+				if err := repo.Update(ctx, agent); err != nil {
+					b.Fatal(err)
+				}
+				if err := repo.Delete(ctx, agent.ID); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func benchmarkAgentPageQuery(b *testing.B, db *sql.DB, ctx context.Context, query string, args ...any) int {
+	b.Helper()
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		if _, err := scanAgent(rows); err != nil {
+			b.Fatal(err)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		b.Fatal(err)
+	}
+	return count
+}
+
+func dropAgentPageIndexes(b *testing.B, db *sql.DB) {
+	b.Helper()
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_agents_live_created_page`,
+		`DROP INDEX IF EXISTS idx_agents_live_updated_page`,
+		`DROP INDEX IF EXISTS idx_agents_live_name_page`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestLLMConfigRepoListCardsPageBoundsSearchAndCompactProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -295,6 +408,118 @@ func TestAgentRepoListPageFiltersArchivedAndSearchesBeforeOffset(t *testing.T) {
 	for _, agent := range append(first, second...) {
 		require.NotEqual(t, models.AgentStatusArchived, agent.GeneratedStatus)
 	}
+}
+
+func TestAgentRepoListPageFilteredSortsAvoidTempBTreeOnLargeCatalog(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectID := seedLargeAgentCatalogForPagination(t, db, 1200)
+
+	for _, tc := range []struct {
+		name      string
+		sort      string
+		wantIndex string
+	}{
+		{name: "default_name_asc", sort: "", wantIndex: "idx_agents_live_name_page"},
+		{name: "name_desc_reverse_scan", sort: "name_desc", wantIndex: "idx_agents_live_name_page"},
+		{name: "updated_desc", sort: "updated_desc", wantIndex: "idx_agents_live_updated_page"},
+		{name: "created_desc", sort: "created_desc", wantIndex: "idx_agents_live_created_page"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query, args := buildAgentPageFilteredQuery(51, 250, AgentPageFilter{ProjectID: projectID, Sort: tc.sort})
+			plan := explainSQLitePlan(t, db, ctx, query, args...)
+			require.NotContains(t, strings.ToUpper(plan), "USE TEMP B-TREE", plan)
+			require.Contains(t, plan, tc.wantIndex, plan)
+		})
+	}
+
+	repo := NewAgentRepo(db)
+	page, err := repo.ListPageFiltered(ctx, 25, 100, AgentPageFilter{ProjectID: projectID})
+	require.NoError(t, err)
+	require.Len(t, page, 25)
+	for _, agent := range page {
+		require.NotEqual(t, models.AgentStatusArchived, agent.GeneratedStatus)
+		if agent.Scope == models.AgentScopeProject {
+			require.Equal(t, projectID, agent.ProjectID)
+		}
+	}
+}
+
+func explainSQLitePlan(t *testing.T, db *sql.DB, ctx context.Context, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+query, args...)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &notUsed, &detail))
+		details = append(details, detail)
+	}
+	require.NoError(t, rows.Err())
+	return strings.Join(details, "\n")
+}
+
+func seedLargeAgentCatalogForPagination(t testing.TB, db *sql.DB, total int) string {
+	t.Helper()
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	currentProject := &models.Project{Name: "Agent pagination current"}
+	otherProject := &models.Project{Name: "Agent pagination other"}
+	require.NoError(t, projectRepo.Create(ctx, currentProject))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
+
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO agents (
+			id, name, description, system_prompt, model, tools, tool_config,
+			plugins, mcp_servers, skills, key, scope, project_id, selectable_as_primary,
+			enabled, created_by, generated_status, source_refs_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, 'inherit', '[]', '{}', '[]', '[]', '[]', ?, ?, ?, 1, ?, 'user', ?, '[]', ?, ?)`)
+	require.NoError(t, err)
+	defer stmt.Close()
+
+	baseCreated := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < total; i++ {
+		scope := string(models.AgentScopeGlobal)
+		var projectID any
+		if i%3 == 1 {
+			scope = string(models.AgentScopeProject)
+			projectID = currentProject.ID
+		} else if i%3 == 2 {
+			scope = string(models.AgentScopeProject)
+			projectID = otherProject.ID
+		}
+		status := string(models.AgentStatusUserEdited)
+		if i%29 == 0 {
+			status = string(models.AgentStatusArchived)
+		}
+		enabled := 1
+		if i%7 == 0 {
+			enabled = 0
+		}
+		createdAt := baseCreated.Add(time.Duration(i) * time.Minute)
+		updatedAt := baseCreated.Add(time.Duration(total-i) * time.Minute)
+		_, err := stmt.ExecContext(ctx,
+			fmt.Sprintf("agent_page_%04d", i),
+			fmt.Sprintf("Pagination Agent %04d", total-i),
+			"large catalog pagination fixture",
+			"bounded prompt",
+			fmt.Sprintf("agent_page_%04d", i),
+			scope,
+			projectID,
+			enabled,
+			status,
+			createdAt.Format("2006-01-02 15:04:05"),
+			updatedAt.Format("2006-01-02 15:04:05"),
+		)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tx.Commit())
+	return currentProject.ID
 }
 
 func TestWebhookRepoListCardsByProjectPageIsolatedAndSearchable(t *testing.T) {
