@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,7 +58,16 @@ func InspectRootVisionSource(repoPath string) VisionSourceStatus {
 	if info.Mode()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
 	}
-	if info.Size() > maxRootVisionSourceBytes {
+	file, err := os.Open(target)
+	if err != nil {
+		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
+	}
+	defer file.Close()
+	read, err := io.CopyN(io.Discard, file, maxRootVisionSourceBytes+1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
+	}
+	if read > maxRootVisionSourceBytes {
 		return VisionSourceStatus{State: visionSourceTruncated, Path: rootVisionSourceName, Message: visionSourceTruncatedMessage}
 	}
 	return VisionSourceStatus{State: visionSourceFound, Path: rootVisionSourceName, Message: visionSourceFoundMessage}
