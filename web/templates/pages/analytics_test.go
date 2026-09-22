@@ -365,11 +365,19 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         if (urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0 || url.indexOf('/api/analytics/skills') >= 0 || url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('overview eagerly loaded unrelated hidden-view analytics: ' + urls.join('|'));
         if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('skillOutcomeTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelScorecard').innerHTML) fail('overview synchronously rendered hidden-view analytics');
         document.querySelector('[data-analytics-view="usage"]').click();
+        var usageShells=Array.from(document.querySelectorAll('#usageSummary > .card'));
+        if(usageShells.length!==3||!usageShells.every(function(card){return card.textContent.indexOf('Loading analytics')>=0;}))fail('Usage must reserve summary cards while loading');
+        if(document.querySelectorAll('#accountUsageCards > .card').length!==2||document.getElementById('accountUsageCards').getAttribute('aria-busy')!=='true')fail('Usage must reserve provider cards while loading');
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
+          if(!usageShells.every(function(card,index){return card===document.querySelectorAll('#usageSummary > .card')[index];}))fail('summary card shells were replaced when data arrived');
+          if(document.getElementById('accountUsageCards').hasAttribute('aria-busy'))fail('provider cards still marked loading');
           var accountCards = document.querySelectorAll('#accountUsageCards > .card');
           if (accountCards.length !== 3 || accountCards[0].classList.contains('lg:col-span-2') || accountCards[1].classList.contains('lg:col-span-2') || !accountCards[2].classList.contains('lg:col-span-2')) fail('odd final provider account card did not span both desktop columns');
-          var usageContext = document.getElementById('usageOutcomeContext').textContent;
+	          var usageContext = document.getElementById('usageSummary').textContent;
           if (usageContext.indexOf('Cache utilization75.0%') < 0 || usageContext.indexOf('150 / 200 input tokens') >= 0) fail('cache utilization did not render as a percentage only');
+          if (document.querySelectorAll('#usageSummary > .card').length !== 3 || usageContext.indexOf('Known total cost') < 0 || usageContext.indexOf('Total tokens') < 0) fail('consumption summary cards missing');
+          var usageText=document.getElementById('analytics-usage').textContent;
+          if (document.getElementById('costOutcomeTrendChart') || /achieved goal|failed-run cost|Outcome context|Cost and outcomes/.test(usageText)) fail('Usage still mixes consumption with outcomes');
           if (localStorage.getItem('openvibely.analytics.lastView.project-1') !== 'usage') fail('selected analytics tab was not remembered');
           document.querySelector('[data-analytics-view="learning"]').click();
           waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
@@ -670,8 +678,8 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if !strings.Contains(content, `openvibely.analytics.lastView.`) || !strings.Contains(content, `savedAnalyticsView()`) {
 		t.Fatal("Analytics should remember the selected view across navigation")
 	}
-	if !strings.Contains(content, `return 'Unavailable · n=0'`) || !strings.Contains(content, `usagePeriodForGroup`) {
-		t.Fatal("Analytics should distinguish unavailable ratios and align cost with grouped outcome periods")
+	if !strings.Contains(content, `return 'Unavailable · n=0'`) {
+		t.Fatal("Analytics should distinguish unavailable ratios")
 	}
 	if strings.Contains(content, `label:'Sample size'`) || strings.Contains(content, `Definition and denominator`) {
 		t.Fatal("KPI cards should not imply one universal sample or repeat definition tooltips")
@@ -753,7 +761,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 		"models":      {`id="modelScorecard"`, `Model comparison`},
 		"automations": {`id="automationComparisonChart"`, `id="automationFunnelChart"`, `id="automationDurationChart"`, `id="automationFailureChart"`, `id="automationBottleneckChart"`},
 		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeChart"`, `id="skillEffectivenessChart"`},
-		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="costOutcomeTrendChart"`},
+		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="usageSummary"`},
 	} {
 		next := map[string]string{"overview": "outcomes", "outcomes": "agents", "agents": "models", "models": "automations", "automations": "learning", "learning": "usage"}[name]
 		body := section(name, next)

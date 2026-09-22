@@ -133,12 +133,20 @@ templ analyticsContent(currentProject *models.Project) {
 				</section>
 
 				<section id="analytics-usage" data-analytics-section="usage" class="space-y-6 mb-6">
-					<div><h3 class="text-xl font-bold">Usage</h3><p class="text-sm opacity-60">Provider limits, local token usage, known cost, and observed outcomes.</p><p id="usageEvidenceSelection" class="hidden"></p></div><div id="usageOutcomeContext" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4"></div>
-					<div><h4 class="font-semibold mb-2">Provider Account Limits</h4><div id="accountUsageCards" class="grid grid-cols-1 lg:grid-cols-2 gap-6"></div></div>
-					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Usage readout</h4><div id="usageFindings"></div></div></div>
+					<div><h3 class="text-xl font-bold">Usage</h3><p class="text-sm opacity-60">Provider limits, token usage, cache utilization, and recorded cost.</p><p id="usageEvidenceSelection" class="hidden"></p></div>
+					<div id="usageSummary" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization"} {
+							<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-usage-summary-value class="text-sm" aria-live="polite">Loading analytics…</strong></div></div>
+						}
+					</div>
+					<div><h4 class="font-semibold mb-2">Provider Account Limits</h4><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
+						for range 2 {
+							<div class="card bg-base-100 border border-base-300" style="min-height:12rem"><div class="card-body"><p class="opacity-50">Loading analytics…</p></div></div>
+						}
+					</div></div>
+					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Usage readout</h4><div id="usageFindings" style="min-height:4rem">Loading analytics…</div></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
-					@analyticsChartCard("Cost and outcomes over time", "Known cost uses a separate axis and may be incomplete.", "costOutcomeTrendChart", "h-72")
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
 				</section>
 			<!-- Chart.js and Custom Script -->
@@ -236,7 +244,11 @@ templ analyticsContent(currentProject *models.Project) {
 									const table = document.getElementById(item[0]);
 									if (table) table.innerHTML = '\x3ctr>\x3ctd colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 								});
-								['analyticsKpis','analyticsMetricDefinitions','outcomeFunnel','analyticsImprovements','analyticsAttention','modelScorecard','usageOutcomeContext','accountUsageCards','frequentTasksList'].forEach(function(id) { const node=document.getElementById(id); if (node) node.textContent='Analytics unavailable'; });
+								['analyticsKpis','analyticsMetricDefinitions','outcomeFunnel','analyticsImprovements','analyticsAttention','modelScorecard','frequentTasksList'].forEach(function(id) { const node=document.getElementById(id); if (node) node.textContent='Analytics unavailable'; });
+								document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
+								const usageAccounts=document.getElementById('accountUsageCards');usageAccounts.removeAttribute('aria-busy');
+								usageAccounts.querySelectorAll('.card-body').forEach(body=>body.textContent='Analytics unavailable');
+								document.getElementById('usageFindings').textContent='Analytics unavailable';
 								const failedBody = document.querySelector('#failedPatternsTable tbody');
 								if (failedBody) failedBody.innerHTML = '\x3ctr>\x3ctd colspan="4" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 							}
@@ -245,7 +257,7 @@ templ analyticsContent(currentProject *models.Project) {
 							destroyChart(key);
 							const canvas = document.getElementById(canvasID);
 								if (!canvas) return null;
-								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Task duration distribution', followupDistributionChart: 'Follow-up run distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill outcomes versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', costOutcomeTrendChart: 'Known cost and outcomes over time', successFailureChart: 'Run results over time', hourlyTrendsChart: 'Runs by hour', avgTimeTaskChart: 'Average run duration by task', agentOutcomeTrendChart: 'Selected Agent run outcomes over time' };
+								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Task duration distribution', followupDistributionChart: 'Follow-up run distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill outcomes versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', successFailureChart: 'Run results over time', hourlyTrendsChart: 'Runs by hour', avgTimeTaskChart: 'Average run duration by task', agentOutcomeTrendChart: 'Selected Agent run outcomes over time' };
 								canvas.setAttribute('role', 'img');
 								canvas.setAttribute('aria-label', chartLabels[canvasID] || ({modelTimeChart:'Task time by model',modelTokensChart:'Tokens per task by model',modelGoalsTrendChart:'Goal achievement over time',modelMergesTrendChart:'Merged work over time'})[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
 							if (old) old.remove();
@@ -263,6 +275,13 @@ templ analyticsContent(currentProject *models.Project) {
 						}
 
 							function showAnalyticsLoading() {
+								if(selectedView==='usage') {
+									document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Loading analytics…');
+									const accounts=document.getElementById('accountUsageCards');
+									accounts.setAttribute('aria-busy','true');
+									accounts.querySelectorAll('.card-body').forEach(body=>{body.style.minHeight=body.getBoundingClientRect().height+'px';body.textContent='Loading analytics…';});
+									document.getElementById('usageFindings').textContent='Loading analytics…';
+								}
 								const loadingCharts = {
 									overview: { projectOutcomeTrend: 'projectOutcomeTrendChart' },
 							outcomes: { cycleDistribution: 'cycleDistributionChart', followupDistribution: 'followupDistributionChart', successFailure: 'successFailureChart', hourlyTrends: 'hourlyTrendsChart', avgTimeTask: 'avgTimeTaskChart', failedPatterns: 'failedPatternsChart' },
@@ -270,7 +289,7 @@ templ analyticsContent(currentProject *models.Project) {
 							models: { modelTime: 'modelTimeChart', modelTokens: 'modelTokensChart', modelGoalsTrend: 'modelGoalsTrendChart', modelMergesTrend: 'modelMergesTrendChart' },
 							automations: { automationComparison: 'automationComparisonChart', automationFunnel: 'automationFunnelChart', automationDuration: 'automationDurationChart', automationFailure: 'automationFailureChart', automationBottleneck: 'automationBottleneckChart' },
 									learning: { skillUsageTrend: 'skillUsageTrendChart', skillTop: 'skillTopChart', skillFollow: 'skillFollowChart', skillAgent: 'skillAgentChart', skillOutcome: 'skillOutcomeChart', skillEffectiveness: 'skillEffectivenessChart' },
-									usage: { usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart', costOutcomeTrend: 'costOutcomeTrendChart' }
+									usage: { usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart' }
 								};
 								Object.entries(loadingCharts[selectedView] || {}).forEach(function(entry) { renderChartState(entry[0], entry[1], [], 'Loading analytics…'); });
 							}
@@ -497,9 +516,7 @@ templ analyticsContent(currentProject *models.Project) {
 										renderAgentSkillOutcomes(data.agent_skill_outcomes || []);
 									}
 									if (selectedView === 'usage') {
-										renderUsageOutcomeContext(current, latestUsageAnalytics ? latestUsageAnalytics.totals : null);
-										renderUsageFindings(latestUsageAnalytics, current);
-										renderCostOutcomeTrend(data.outcome_trend || [], latestUsageAnalytics ? latestUsageAnalytics.daily_usage : []);
+										// Usage cards are populated only by the usage response, not the dashboard response.
 									}
 									if (selectedView === 'automations') {
 										renderWorkflowPerformance(data.workflows || []);
@@ -644,27 +661,16 @@ templ analyticsContent(currentProject *models.Project) {
 										(tasks?value(Number(r.average_follow_ups||0).toFixed(1),'Average · n='+tasks):value('Unavailable','n=0'))+'\x3c/tr>';
 								}).join('')+'\x3c/tbody>\x3c/table>':'\x3cp class="opacity-50">No finished tasks in this period.\x3c/p>';
 							}
-							function usagePeriodForGroup(day, groupBy) {
-								if (groupBy === 'month') return String(day || '').slice(0, 7);
-								if (groupBy !== 'week') return day;
-								const date = new Date(String(day) + 'T12:00:00');
-								if (Number.isNaN(date.getTime())) return day;
-								const year = date.getFullYear();
-								const jan1 = new Date(year, 0, 1, 12);
-								const dayOfYear = Math.floor((date - jan1) / 86400000);
-								const jan1MondayOffset = (jan1.getDay() + 6) % 7;
-								const week = Math.floor((dayOfYear + 7 - jan1MondayOffset) / 7);
-								return year + '-W' + String(week).padStart(2, '0');
-							}
-							function renderCostOutcomeTrend(outcomes, usageRows){const costs={},groupBy=document.getElementById('groupBy').value;(usageRows||[]).forEach(function(row){const period=usagePeriodForGroup(row.period,groupBy);costs[period]=(costs[period]||0)+Number(row.cost_usd||0);});const rows=(outcomes||[]);const canvas=renderChartState('costOutcomeTrend','costOutcomeTrendChart',rows,'No cost and outcome trend in this period');if(canvas)charts.costOutcomeTrend=new Chart(canvas.getContext('2d'),{data:{labels:rows.map(r=>r.period),datasets:[{type:'line',label:'Known cost',data:rows.map(r=>costs[r.period]||0),yAxisID:'cost',borderColor:'#f59e0b'},{type:'bar',label:'Successful runs',data:rows.map(r=>Number((r.technical_completion||{}).numerator||0)),yAxisID:'count',backgroundColor:'#22c55e'},{type:'bar',label:'Achieved goals',data:rows.map(r=>Number((r.goal_achievement||{}).numerator||0)),yAxisID:'count',backgroundColor:'#3b82f6'}]},options:{responsive:true,maintainAspectRatio:false,scales:{cost:{position:'right',beginAtZero:true,title:{display:true,text:'Known USD'}},count:{beginAtZero:true,title:{display:true,text:'Outcomes'}}}}});}
 
-							function renderUsageOutcomeContext(current, totals) {
-								const usageContext = document.getElementById('usageOutcomeContext');
+							function renderUsageSummary(totals) {
+								const usageContext = document.getElementById('usageSummary');
 								if (!usageContext) return;
 								const inputTokens = totals && totals.input_tokens ? Number(totals.input_tokens) : 0;
 								const cachedTokens = totals && totals.cached_input_tokens ? Number(totals.cached_input_tokens) : 0;
 								const cacheText = inputTokens > 0 ? (cachedTokens * 100 / inputTokens).toFixed(1) + '%' : 'Unavailable';
-									usageContext.innerHTML = [['Known total cost', totals && totals.cost_available ? formatCost(Number(totals.cost_usd || 0)) : 'Unavailable'], ['Total tokens', totals ? formatNumber(Number(totals.total_tokens || 0)) : 'Unavailable'], ['Cache utilization', cacheText], ['Known cost / achieved goal', costCoverageText(current.known_cost_per_achieved_goal)], ['Known failed-run cost', current.known_failed_execution_cost ? formatCost(current.known_failed_execution_cost.value) + ' recorded across ' + current.known_failed_execution_cost.covered + ' of ' + current.known_failed_execution_cost.eligible + ' failed runs' : 'Unavailable']].map(function(item) { return '\x3cdiv class="card bg-base-100 border border-base-300">\x3cdiv class="card-body p-4">\x3cspan class="text-sm">' + escapeHTML(item[0]) + '\x3c/span>\x3cstrong>' + escapeHTML(item[1]) + '\x3c/strong>\x3c/div>\x3c/div>'; }).join('');							}
+								const values=[totals && totals.cost_available ? formatCost(Number(totals.cost_usd || 0)) : 'Unavailable',totals ? formatNumber(Number(totals.total_tokens || 0)) : 'Unavailable',cacheText];
+								usageContext.querySelectorAll('[data-usage-summary-value]').forEach((node,index)=>node.textContent=values[index]);
+							}
 						function renderDistributionChart(key, canvasID, rows) {
 							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');
 							if (!canvas) return;
@@ -697,13 +703,12 @@ templ analyticsContent(currentProject *models.Project) {
 									return '\x3ctr>\x3ctd>\x3ca class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+escapeHTML(row.technical_result)+'\x3c/td>\x3ctd>'+escapeHTML(row.goal_result||'Not goal-bearing')+'\x3c/td>\x3ctd>'+escapeHTML(row.model)+'\x3c/td>\x3ctd>'+row.execution_count+'\x3c/td>\x3ctd>'+row.follow_up_count+'\x3c/td>\x3c/tr>';
 								}).join('') : '\x3ctr>\x3ctd colspan="6" class="text-center opacity-50">No recent supporting tasks in this period\x3c/td>\x3c/tr>';
 							}
-							function renderUsageFindings(data, current) {
+							function renderUsageFindings(data) {
 								const target=document.getElementById('usageFindings'); if(!target)return;
 								const totals=(data&&data.totals)||{},breakdown=(data&&data.model_breakdown)||[],lines=[];
 								if(totals.call_count){lines.push('\x3cp>\x3cstrong>Recorded activity:\x3c/strong> '+formatNumber(totals.call_count)+' model calls used '+formatNumber(totals.total_tokens||0)+' tokens'+(totals.cost_available?' with '+formatCost(totals.cost_usd)+' known cost.':'; cost coverage is unavailable.')+'\x3c/p>');}
 								if(breakdown.length){const top=breakdown.slice().sort((a,b)=>Number(b.total_tokens||0)-Number(a.total_tokens||0))[0],share=totals.total_tokens?Number(top.total_tokens||0)*100/Number(totals.total_tokens):0;lines.push('\x3cp>\x3cstrong>Largest token share:\x3c/strong> '+escapeHTML((top.provider||'unknown')+'/'+(top.model||'unknown'))+' used '+share.toFixed(1)+'% of recorded tokens.\x3c/p>');}
-								const completion=(current||{}).technical_completion||{};if(completion.denominator)lines.push('\x3cp>\x3cstrong>Outcome context:\x3c/strong> '+Number(completion.percent||0).toFixed(1)+'% run success across '+completion.denominator+' finished runs. This is context, not proof that token use caused the result.\x3c/p>');
-								target.innerHTML=lines.length?lines.join(''):'\x3cp class="opacity-50">No local usage or outcome evidence in this period.\x3c/p>';
+								target.innerHTML=lines.length?lines.join(''):'\x3cp class="opacity-50">No local usage evidence in this period.\x3c/p>';
 							}
 								function openEvidenceURL(href) {
 									const url = new URL(href, window.location.href);
@@ -1277,8 +1282,8 @@ templ analyticsContent(currentProject *models.Project) {
 
 								function renderUsageAnalytics(data) {
 									const totals = data.totals || {};
-									renderUsageEventEvidence(data.evidence || [], data.evidence_total || 0);									renderUsageOutcomeContext(latestDashboard ? latestDashboard.current || {} : {}, totals);
-									renderUsageFindings(data, latestDashboard ? latestDashboard.current || {} : {});
+									renderUsageEventEvidence(data.evidence || [], data.evidence_total || 0);									renderUsageSummary(totals);
+									renderUsageFindings(data);
 									const lastUpdated = document.getElementById('usageLastUpdated');
 									lastUpdated.textContent = data.last_updated_at ? 'Last updated ' + new Date(data.last_updated_at).toLocaleString() : 'Local usage history';
 										renderUsageRateChart(data);
@@ -1321,13 +1326,12 @@ templ analyticsContent(currentProject *models.Project) {
 											});
 											}
 											renderAccountUsageCards(data.account_limits || []);
-											if (latestDashboard) renderCostOutcomeTrend(latestDashboard.outcome_trend || [], data.daily_usage || []);
 										}
 									function renderAccountUsageCards(accounts) {
 										const accountContainers = ['accountUsageCards'].map(function(id){return document.getElementById(id);}).filter(Boolean);
 										if (!accountContainers.length) return;
 										if (accounts.length === 0) {
-											accountContainers.forEach(function(container){container.innerHTML = '\x3cp class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.\x3c/p>';});
+											accountContainers.forEach(function(container){container.removeAttribute('aria-busy');container.innerHTML = '\x3cp class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.\x3c/p>';});
 											return;
 										}
 										const accountHTML = accounts.map((account, index) => {
@@ -1359,7 +1363,7 @@ templ analyticsContent(currentProject *models.Project) {
 											const span = accounts.length % 2 === 1 && index === accounts.length - 1 ? ' lg:col-span-2' : '';
 											return '\x3cdiv class="card bg-base-100 shadow-sm border border-base-300 h-full' + span + '">\x3cdiv class="card-body">\x3cdiv class="font-semibold">' + escapeHTML(providerTitle) + '\x3c/div>' + subscriptionHtml + metaHtml + detailHtml + extraUsage + (limits || '\x3cdiv class="text-xs opacity-50 mt-2">No live limit snapshot yet\x3c/div>') + error + '\x3c/div>\x3c/div>';
 										}).join('');
-										accountContainers.forEach(function(container){container.innerHTML=accountHTML;});
+										accountContainers.forEach(function(container){container.removeAttribute('aria-busy');container.innerHTML=accountHTML;});
 									}
 
 									async function loadUsageAnalytics(refreshUsage) {
