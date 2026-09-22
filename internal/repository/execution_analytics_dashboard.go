@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -49,7 +50,7 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "agent_skill_outcomes", Label: "Observed Agent and skill outcomes", Definition: "Task outcomes grouped by assigned reusable Agent definition and selected or loaded skill.", Denominator: "Selected-period tasks with run evidence and a selected or loaded skill event; association is observational, not causal."},
 	{Key: "skill_outcomes", Label: "Observed skill outcomes", Definition: "Observed task outcomes where a skill was selected or loaded; this is association, not causation.", Denominator: "Selected-period tasks with a selected or loaded skill event and run evidence."},
 	{Key: "model_category", Label: "Model performance by task category", Definition: "Run success grouped by configured model and task category.", Denominator: "Completed, failed, and cancelled runs in each model/category group during the selected period."},
-	{Key: "model_performance", Label: "Observed model performance", Definition: "Run results belong to the model that ran them. First-run success belongs to the model that ran the task's first finished run. Goal achievement and task duration belong to the model that finished the task. Follow-up rate counts tasks where that model ran a follow-up.", Denominator: "Shown separately in every metric cell. Tasks used is the distinct number of tasks the model ran; run count is the model's total runs. Token and known-cost coverage include only tasks with matching recorded usage."},
+	{Key: "model_performance", Label: "Model task outcomes", Definition: "Tasks whose latest run finished in the selected period, including failed and cancelled tasks, with their full recorded history. Mixed configurations are grouped separately. Goal achievement and merging are separate outcomes; follow-ups measure effort, not failure.", Denominator: "Goal rates include non-cleared goals; merge rates include tasks with worktrees or merge status. Duration is median elapsed first-start to latest-finish time, excluding recurring tasks. Usage averages include tasks with recorded tokens or cost; records may be incomplete."},
 	{Key: "token_usage", Label: "Token usage", Definition: "Locally recorded provider input, output, cache, reasoning, and total token counts.", Denominator: "Usage events in the selected project and period with the applicable task dimensions."},
 	{Key: "cache_utilization", Label: "Cache utilization", Definition: "Cached input tokens divided by recorded input tokens.", Denominator: "Recorded input tokens in the selected project and period."},
 	{Key: "execution_hour", Label: "Runs by hour", Definition: "Run starts grouped by local hour of day.", Denominator: "Runs in the selected project, period, Agent, and workflow scope."},
@@ -1176,80 +1177,83 @@ func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filte
 }
 
 func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.ModelPerformance, error) {
-	execWindow, execArgs := analyticsWindowClause("e", filter)
-	usageWindow, usageArgs := analyticsEventWindowClause("u", "occurred_at", filter)
+	window, windowArgs := analyticsEventWindowClause("e", "completed_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
-	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
+	// Select whole tasks by their latest run, then include their entire history.
+	// A configuration switch must not assign all effort/outcomes to the last model.
 	query := `WITH scoped_tasks AS (
-		SELECT t.id FROM tasks t WHERE t.project_id=?` + dimension + `
-	), period_exec AS (
-		SELECT e.id,e.task_id,COALESCE(e.agent_config_id,'') model_config_id,e.status,e.started_at,e.completed_at,e.is_followup,e.history_order
-		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id WHERE 1=1` + execWindow + `
-	), execution_rollup AS (
-		SELECT model_config_id,COUNT(*) execution_count,COUNT(DISTINCT task_id) touched_tasks,
-		SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) completed_execs,
-		SUM(CASE WHEN status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_execs,
-		COUNT(DISTINCT CASE WHEN is_followup=1 THEN task_id END) followed_tasks
-		FROM period_exec GROUP BY model_config_id
-	), ranked_first_finished AS (
-		SELECT e.id,e.task_id,COALESCE(e.agent_config_id,'') model_config_id,e.status,
-		ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at,e.history_order,e.id) rn
-		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id WHERE e.status IN ('completed','failed','cancelled')
-	), period_first_finished AS (
-		SELECT h.* FROM ranked_first_finished h JOIN period_exec p ON p.id=h.id WHERE h.rn=1
-	), first_rollup AS (
-		SELECT model_config_id,SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) first_completed,COUNT(*) first_denominator
-		FROM period_first_finished GROUP BY model_config_id
-	), ranked_finishing_runs AS (
-		SELECT p.*,ROW_NUMBER() OVER(PARTITION BY p.task_id ORDER BY COALESCE(p.completed_at,p.started_at) DESC,p.history_order DESC,p.id DESC) rn
-		FROM period_exec p WHERE p.status IN ('completed','failed','cancelled')
-	), finishing_runs AS (
-		SELECT task_id,model_config_id,COALESCE(completed_at,started_at) terminal_at FROM ranked_finishing_runs WHERE rn=1
-	), duration_tasks AS (
-		SELECT f.task_id,f.model_config_id,CASE WHEN EXISTS (
-			SELECT 1 FROM tasks duration_task LEFT JOIN schedules duration_schedule ON duration_schedule.task_id=duration_task.id
-			WHERE duration_task.id=f.task_id AND (duration_task.category='scheduled' OR duration_schedule.repeat_type<>'once')
-		) THEN NULL ELSE CAST(MAX(0,(julianday(f.terminal_at)-julianday((SELECT MIN(all_e.started_at) FROM executions all_e WHERE all_e.task_id=f.task_id)))*86400000) AS INTEGER) END duration_ms
-		FROM finishing_runs f
-	), period_goals AS (
-		SELECT g.task_id,g.status,COALESCE(g.achieved_at,g.updated_at) outcome_at FROM task_goals g JOIN scoped_tasks t ON t.id=g.task_id
-		WHERE g.status IN ('achieved','failed')` + goalWindow + `
-	), evaluable_goals AS (
-		SELECT task_id,status,outcome_at FROM period_goals
-		UNION SELECT g.task_id,g.status,f.terminal_at FROM task_goals g JOIN finishing_runs f ON f.task_id=g.task_id
-		WHERE g.status IN ('active','paused','blocked')
-	), attributed_goals AS (
-		SELECT g.task_id,g.status,f.model_config_id FROM evaluable_goals g JOIN finishing_runs f ON f.task_id=g.task_id
-	), goal_rollup AS (
-		SELECT model_config_id,SUM(CASE WHEN status='achieved' THEN 1 ELSE 0 END) achieved,COUNT(*) goal_denominator
-		FROM attributed_goals WHERE model_config_id IS NOT NULL GROUP BY model_config_id
+		SELECT t.id,t.status,t.category,t.worktree_path,t.merge_status FROM tasks t WHERE t.project_id=? AND COALESCE(t.category,'')<>'chat'` + dimension + `
+	), ranked_runs AS (
+		SELECT e.task_id,e.status,e.completed_at,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at DESC,e.history_order DESC,e.id DESC) rn
+		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id
+	), selected_tasks AS MATERIALIZED (
+		SELECT t.*,e.completed_at FROM scoped_tasks t JOIN ranked_runs e ON e.task_id=t.id AND e.rn=1
+		WHERE t.status IN ('completed','failed','cancelled') AND e.status IN ('completed','failed','cancelled')
+		AND e.completed_at IS NOT NULL` + window + `
+	), task_usage_events AS MATERIALIZED (
+		SELECT u.task_id,u.agent_config_id,u.total_tokens,u.cost_usd
+		FROM selected_tasks t JOIN llm_usage_events u ON u.task_id=t.id
+		WHERE u.operation IN ('task','task_followup') OR (u.operation='' AND EXISTS (
+			SELECT 1 FROM executions e WHERE e.id=u.execution_id AND e.task_id=t.id
+		))
+	), identities AS (
+		SELECT e.task_id,COALESCE(e.agent_config_id,'') config_id
+		FROM selected_tasks t JOIN executions e ON e.task_id=t.id
+		UNION SELECT u.task_id,u.agent_config_id FROM task_usage_events u
+		WHERE u.agent_config_id IS NOT NULL AND u.agent_config_id<>''
+	), attribution AS (
+		SELECT task_id,CASE WHEN COUNT(DISTINCT config_id)>1 THEN '__mixed__' ELSE MIN(config_id) END model_config_id
+		FROM identities GROUP BY task_id
+	), task_runs AS MATERIALIZED (
+		SELECT t.id,a.model_config_id,COUNT(*) runs,
+		SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END) completed_runs,
+		SUM(CASE WHEN e.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_runs,
+		SUM(CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END) followups,
+		CASE WHEN t.category='scheduled' OR EXISTS (SELECT 1 FROM schedules s WHERE s.task_id=t.id AND s.repeat_type<>'once')
+			THEN NULL ELSE CAST(MAX(0,(julianday(t.completed_at)-julianday(MIN(e.started_at)))*86400000) AS INTEGER) END duration_ms
+		FROM selected_tasks t JOIN attribution a ON a.task_id=t.id JOIN executions e ON e.task_id=t.id
+		GROUP BY t.id
+	), task_usage AS (
+		SELECT u.task_id,SUM(u.total_tokens) tokens,SUM(u.cost_usd) cost
+		FROM task_usage_events u GROUP BY u.task_id
 	), ranked_durations AS (
 		SELECT model_config_id,duration_ms,ROW_NUMBER() OVER(PARTITION BY model_config_id ORDER BY duration_ms) rn,
-		COUNT(*) OVER(PARTITION BY model_config_id) duration_count FROM duration_tasks WHERE duration_ms IS NOT NULL
-	), medians AS (
-		SELECT model_config_id,CAST(AVG(duration_ms) AS INTEGER) median_duration_ms,MAX(duration_count) duration_count
-		FROM ranked_durations WHERE rn IN ((duration_count+1)/2,(duration_count+2)/2) GROUP BY model_config_id
-	), usage AS (
-		SELECT COALESCE(u.agent_config_id,'') model_config_id,COALESCE(SUM(u.total_tokens),0) total_tokens,
-		COUNT(DISTINCT CASE WHEN u.task_id IS NOT NULL AND u.task_id<>'' THEN u.task_id END) token_tasks,
-		SUM(u.cost_usd) known_cost,COUNT(DISTINCT CASE WHEN u.cost_usd IS NOT NULL AND u.task_id IS NOT NULL AND u.task_id<>'' THEN u.task_id END) cost_tasks
-		FROM llm_usage_events u WHERE u.project_id=? AND EXISTS (SELECT 1 FROM scoped_tasks st WHERE st.id=u.task_id)` + usageWindow + ` GROUP BY COALESCE(u.agent_config_id,'')
+		COUNT(*) OVER(PARTITION BY model_config_id) n FROM task_runs WHERE duration_ms IS NOT NULL
+	), durations AS (
+		SELECT model_config_id,CAST(AVG(CASE WHEN rn IN ((n+1)/2,(n+2)/2) THEN duration_ms END) AS INTEGER) median_ms,
+		MAX(CASE WHEN rn=((n*9+9)/10) THEN duration_ms END) p90_ms,MAX(n) n
+		FROM ranked_durations GROUP BY model_config_id
+	), trend_periods AS (
+		SELECT tr.model_config_id,` + analyticsPeriodExpression(filter.GroupBy, "t.completed_at") + ` period,
+		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END) achieved,
+		SUM(CASE WHEN g.status IN ('achieved','failed','active','paused','blocked') THEN 1 ELSE 0 END) goal_n,
+		SUM(CASE WHEN t.merge_status='merged' THEN 1 ELSE 0 END) merged,
+		SUM(CASE WHEN t.worktree_path<>'' OR t.merge_status<>'' THEN 1 ELSE 0 END) merge_n
+		FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id LEFT JOIN task_goals g ON g.task_id=t.id
+		GROUP BY tr.model_config_id,period
+	), trends AS (
+		SELECT model_config_id,json_group_array(json_object('period',period,
+		'goal_achievement',json_object('numerator',achieved,'denominator',goal_n),
+		'merge_completion',json_object('numerator',merged,'denominator',merge_n))) points
+		FROM (SELECT * FROM trend_periods ORDER BY model_config_id,period) GROUP BY model_config_id
 	)
-	SELECT er.model_config_id,COALESCE(ac.name,'Unknown configuration'),COALESCE(ac.provider,''),COALESCE(ac.model,'Unknown'),COALESCE(ac.reasoning_effort,''),
-		er.touched_tasks,er.execution_count,
-		er.completed_execs,er.terminal_execs,COALESCE(fr.first_completed,0),COALESCE(fr.first_denominator,0),er.followed_tasks,
-		COALESCE(gr.achieved,0),COALESCE(gr.goal_denominator,0),COALESCE(m.median_duration_ms,0),COALESCE(m.duration_count,0),
-		COALESCE(u.total_tokens,0),COALESCE(u.token_tasks,0),u.known_cost,COALESCE(u.cost_tasks,0)
-	FROM execution_rollup er LEFT JOIN first_rollup fr ON fr.model_config_id=er.model_config_id
-	LEFT JOIN goal_rollup gr ON gr.model_config_id=er.model_config_id
-	LEFT JOIN medians m ON m.model_config_id=er.model_config_id LEFT JOIN usage u ON u.model_config_id=er.model_config_id
-	LEFT JOIN agent_configs ac ON ac.id=er.model_config_id
-	ORDER BY er.touched_tasks DESC,ac.name,ac.model`
+	SELECT tr.model_config_id,COALESCE(ac.name,'Unknown configuration'),COALESCE(ac.provider,''),COALESCE(ac.model,'Unknown'),COALESCE(ac.reasoning_effort,''),
+		COUNT(*),SUM(tr.runs),SUM(tr.completed_runs),SUM(tr.terminal_runs),
+		SUM(CASE WHEN tr.followups>0 THEN 1 ELSE 0 END),SUM(tr.followups),
+		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN g.status IN ('achieved','failed','active','paused','blocked') THEN 1 ELSE 0 END),
+		SUM(CASE WHEN t.merge_status='merged' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN t.worktree_path<>'' OR t.merge_status<>'' THEN 1 ELSE 0 END),
+		COALESCE(d.median_ms,0),COALESCE(d.p90_ms,0),COALESCE(d.n,0),
+		COALESCE(SUM(u.tokens),0),COUNT(u.tokens),SUM(u.cost),COUNT(u.cost),COALESCE(trends.points,'[]')
+	FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id
+	LEFT JOIN task_goals g ON g.task_id=t.id LEFT JOIN task_usage u ON u.task_id=t.id
+	LEFT JOIN durations d ON d.model_config_id=tr.model_config_id
+	LEFT JOIN trends ON trends.model_config_id=tr.model_config_id
+	LEFT JOIN agent_configs ac ON ac.id=tr.model_config_id
+	GROUP BY tr.model_config_id ORDER BY COUNT(*) DESC,ac.name,tr.model_config_id`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
-	args = append(args, execArgs...)
-	args = append(args, goalArgs...)
-	args = append(args, filter.ProjectID)
-	args = append(args, usageArgs...)
+	args = append(args, windowArgs...)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting model performance: %w", err)
@@ -1258,20 +1262,34 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 	result := []models.ModelPerformance{}
 	for rows.Next() {
 		var row models.ModelPerformance
-		var completed, terminal, firstCompleted, firstDenom, followed, achieved, goalDenom int
+		var completed, terminal, followed, followups, achieved, goalDenom, merged, mergeDenom int
 		var knownCost sql.NullFloat64
+		var trendJSON string
 		if err := rows.Scan(&row.ModelConfigID, &row.ConfigName, &row.Provider, &row.Model, &row.ReasoningEffort,
-			&row.TasksUsed, &row.RunCount, &completed, &terminal, &firstCompleted, &firstDenom, &followed,
-			&achieved, &goalDenom, &row.MedianDurationMs, &row.DurationSampleSize, &row.TotalTokens, &row.TokenCoveredTasks,
-			&knownCost, &row.CostCoveredTasks); err != nil {
+			&row.TasksUsed, &row.RunCount, &completed, &terminal, &followed, &followups,
+			&achieved, &goalDenom, &merged, &mergeDenom, &row.MedianDurationMs, &row.P90DurationMs, &row.DurationSampleSize,
+			&row.TotalTokens, &row.TokenCoveredTasks, &knownCost, &row.CostCoveredTasks, &trendJSON); err != nil {
 			return nil, fmt.Errorf("scanning model performance: %w", err)
+		}
+		row.MixedModels = row.ModelConfigID == "__mixed__"
+		if err := json.Unmarshal([]byte(trendJSON), &row.OutcomeTrend); err != nil {
+			return nil, fmt.Errorf("decoding model outcome trend: %w", err)
+		}
+		for i := range row.OutcomeTrend {
+			p := &row.OutcomeTrend[i]
+			p.GoalAchievement = metric(p.GoalAchievement.Numerator, p.GoalAchievement.Denominator)
+			p.MergeCompletion = metric(p.MergeCompletion.Numerator, p.MergeCompletion.Denominator)
+		}
+		if row.MixedModels {
+			row.ConfigName, row.Model = "Mixed models", ""
 		}
 		row.TechnicalCompletion = metric(completed, terminal)
 		row.GoalAchievement = metric(achieved, goalDenom)
-		row.FirstPass = metric(firstCompleted, firstDenom)
+		row.MergeCompletion = metric(merged, mergeDenom)
 		row.FollowUp = metric(followed, row.TasksUsed)
 		if row.TasksUsed > 0 {
 			row.AverageRuns = float64(row.RunCount) / float64(row.TasksUsed)
+			row.AverageFollowUps = float64(followups) / float64(row.TasksUsed)
 		}
 		if knownCost.Valid {
 			value := knownCost.Float64

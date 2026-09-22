@@ -142,27 +142,39 @@ type ModelCategoryPerformance struct {
 }
 
 // ModelPerformance compares configured models using observed work in the app.
-// Run success is attributed to the model that ran each run. Task-level metrics
-// disclose their own attribution and denominator.
+// Each row contains whole-task history for one configuration, or the separate
+// mixed-configuration group. Outcome and usage metrics disclose their coverage.
 type ModelPerformance struct {
-	ModelConfigID       string          `json:"model_config_id"`
-	ConfigName          string          `json:"config_name"`
-	Provider            string          `json:"provider"`
-	Model               string          `json:"model"`
-	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
-	TasksUsed           int             `json:"tasks_used"`
-	RunCount            int             `json:"run_count"`
-	AverageRuns         float64         `json:"average_runs"`
-	TechnicalCompletion AnalyticsMetric `json:"technical_completion"`
-	GoalAchievement     AnalyticsMetric `json:"goal_achievement"`
-	FirstPass           AnalyticsMetric `json:"first_pass"`
-	FollowUp            AnalyticsMetric `json:"follow_up"`
-	MedianDurationMs    int64           `json:"median_duration_ms"`
-	DurationSampleSize  int             `json:"duration_sample_size"`
-	TotalTokens         int64           `json:"total_tokens"`
-	TokenCoveredTasks   int             `json:"token_covered_tasks"`
-	KnownCostUSD        *float64        `json:"known_cost_usd,omitempty"`
-	CostCoveredTasks    int             `json:"cost_covered_tasks"`
+	OutcomeTrend        []ModelOutcomeTrend `json:"outcome_trend"`
+	ModelConfigID       string              `json:"model_config_id"`
+	ConfigName          string              `json:"config_name"`
+	Provider            string              `json:"provider"`
+	Model               string              `json:"model"`
+	ReasoningEffort     string              `json:"reasoning_effort,omitempty"`
+	TasksUsed           int                 `json:"tasks_used"`
+	RunCount            int                 `json:"run_count"`
+	AverageRuns         float64             `json:"average_runs"`
+	AverageFollowUps    float64             `json:"average_follow_ups"`
+	MixedModels         bool                `json:"mixed_models"`
+	TechnicalCompletion AnalyticsMetric     `json:"technical_completion"`
+	GoalAchievement     AnalyticsMetric     `json:"goal_achievement"`
+	MergeCompletion     AnalyticsMetric     `json:"merge_completion"`
+	FollowUp            AnalyticsMetric     `json:"follow_up"`
+	MedianDurationMs    int64               `json:"median_duration_ms"`
+	P90DurationMs       int64               `json:"p90_duration_ms"`
+	DurationSampleSize  int                 `json:"duration_sample_size"`
+	TotalTokens         int64               `json:"total_tokens"`
+	TokenCoveredTasks   int                 `json:"token_covered_tasks"`
+	KnownCostUSD        *float64            `json:"known_cost_usd,omitempty"`
+	CostCoveredTasks    int                 `json:"cost_covered_tasks"`
+}
+
+// ModelOutcomeTrend groups current task outcomes by latest run finish date.
+// It is not a historical snapshot of goal or merge status on that date.
+type ModelOutcomeTrend struct {
+	Period          string          `json:"period"`
+	GoalAchievement AnalyticsMetric `json:"goal_achievement"`
+	MergeCompletion AnalyticsMetric `json:"merge_completion"`
 }
 
 type WorkflowAnalyticsDetail struct {
