@@ -284,7 +284,11 @@ func purposeMAC(key, domain, payload []byte) []byte {
 }
 
 func SanitizeDestination(destination string) string {
-	if destination == "" || len(destination) > 4096 || !utf8.ValidString(destination) || hasASCIIControl(destination) || !strings.HasPrefix(destination, "/") || strings.HasPrefix(destination, "//") {
+	return sanitizeInternalDestination(destination)
+}
+
+func sanitizeInternalDestination(destination string) string {
+	if destination == "" || len(destination) > 4096 || !utf8.ValidString(destination) || hasASCIIControl(destination) || !strings.HasPrefix(destination, "/") || strings.HasPrefix(destination, "//") || strings.Contains(destination, "#") {
 		return "/"
 	}
 	u, err := url.ParseRequestURI(destination)
