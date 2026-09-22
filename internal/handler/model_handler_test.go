@@ -646,12 +646,20 @@ func TestListOpenAICompatibleAvailableModelsFallsBackToV1Models(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	var mu sync.Mutex
 	var paths []string
+	modelsRequested := make(chan struct{})
+	var modelsRequestedOnce sync.Once
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		paths = append(paths, r.URL.Path)
 		mu.Unlock()
 		if r.URL.Path == "/models" {
+			modelsRequestedOnce.Do(func() { close(modelsRequested) })
 			http.NotFound(w, r)
+			return
+		}
+		select {
+		case <-modelsRequested:
+		case <-r.Context().Done():
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
