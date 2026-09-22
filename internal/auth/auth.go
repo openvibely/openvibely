@@ -200,7 +200,7 @@ func sign(payload, secret string) []byte {
 }
 
 func RedirectURL(next string) string {
-	next = sanitizeNext(next)
+	next = sanitizeInternalDestination(next)
 	return "/login?next=" + base64.RawURLEncoding.EncodeToString([]byte(next))
 }
 
@@ -212,13 +212,5 @@ func DecodeNext(encoded string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid next value: %w", err)
 	}
-	return sanitizeNext(string(b)), nil
-}
-
-func sanitizeNext(next string) string {
-	next = strings.TrimSpace(next)
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, "\\") || strings.Contains(strings.ToLower(next), "%5c") {
-		return "/"
-	}
-	return next
+	return sanitizeInternalDestination(string(b)), nil
 }
