@@ -61,6 +61,19 @@ func TestInspectRootVisionSourceBoundsReads(t *testing.T) {
 	require.Equal(t, visionSourceTruncatedMessage, status.Message)
 }
 
+func TestInspectRootVisionSourceRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), rootVisionSourceName)
+	require.NoError(t, os.WriteFile(outside, []byte("outside vision"), 0o600))
+	if err := os.Symlink(outside, filepath.Join(root, rootVisionSourceName)); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	status := InspectRootVisionSource(root)
+	require.Equal(t, visionSourceUnreadable, status.State)
+	require.Equal(t, visionSourceUnreadableMessage, status.Message)
+}
+
 func TestAnnotateMaintainedSDLCVisionSourceWarnsWhenMissing(t *testing.T) {
 	t.Parallel()
 
