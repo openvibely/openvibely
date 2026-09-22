@@ -56,7 +56,7 @@ func InspectRootVisionSource(repoPath string) VisionSourceStatus {
 	if info.Mode()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
 	}
-	file, err := root.Open(rootVisionSourceName)
+	file, err := openRootVisionSource(root)
 	if err != nil {
 		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
 	}
