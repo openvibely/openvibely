@@ -151,7 +151,7 @@ func TestHostedSessionStrictClaims(t *testing.T) {
 }
 
 func TestSafeDestinationAndBoundedNext(t *testing.T) {
-	for _, unsafe := range []string{"//evil.example", "/\\evil.example", "/%5cevil", "/%2fevil", "/%00evil", "https://evil.example", "/bad%zz", "/bad\n"} {
+	for _, unsafe := range []string{"//evil.example", "/\\evil.example", "/%5cevil", "/%2fevil", "/%00evil", "https://evil.example", "/bad%zz", "/bad\n", "/safe#fragment"} {
 		if got := SanitizeDestination(unsafe); got != "/" {
 			t.Fatalf("SanitizeDestination(%q)=%q", unsafe, got)
 		}

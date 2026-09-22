@@ -279,7 +279,7 @@ func TestDecodeNextRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestSanitizeNext(t *testing.T) {
+func TestDecodeNextSanitizesUnsafeDestinations(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -295,14 +295,26 @@ func TestSanitizeNext(t *testing.T) {
 		{name: "encoded backslash authority form", input: "/%5Cattacker.example", want: "/"},
 		{name: "encoded double backslash authority form", input: "/%5c%5cattacker.example", want: "/"},
 		{name: "encoded mixed slash authority form", input: "/%5c/attacker.example", want: "/"},
+		{name: "encoded slash authority form", input: "/%2fevil", want: "/"},
+		{name: "encoded null", input: "/%00evil", want: "/"},
+		{name: "malformed escape", input: "/bad%zz", want: "/"},
+		{name: "control character", input: "/bad\n", want: "/"},
+		{name: "fragment", input: "/safe#fragment", want: "/"},
 		{name: "backslash in path", input: "/safe\\path", want: "/"},
 		{name: "safe internal path", input: "/safe", want: "/safe"},
+		{name: "safe internal path with query", input: "/tasks?project_id=p1&tab=thread", want: "/tasks?project_id=p1&tab=thread"},
+		{name: "oversized value", input: "/" + strings.Repeat("a", 4096), want: "/"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := sanitizeNext(tt.input); got != tt.want {
-				t.Fatalf("sanitizeNext(%q) = %q, want %q", tt.input, got, tt.want)
+			encoded := base64.RawURLEncoding.EncodeToString([]byte(tt.input))
+			got, err := DecodeNext(encoded)
+			if err != nil {
+				t.Fatalf("DecodeNext error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("DecodeNext(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
