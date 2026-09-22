@@ -5,7 +5,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -42,13 +41,12 @@ func InspectRootVisionSource(repoPath string) VisionSourceStatus {
 	if repoPath == "" {
 		return VisionSourceStatus{State: visionSourceNoRepo, Message: visionSourceNoRepoMessage}
 	}
-	root := filepath.Clean(repoPath)
-	target := filepath.Join(root, rootVisionSourceName)
-	rel, err := filepath.Rel(root, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+	root, err := os.OpenRoot(repoPath)
+	if err != nil {
 		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
 	}
-	info, err := os.Lstat(target)
+	defer root.Close()
+	info, err := root.Lstat(rootVisionSourceName)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return VisionSourceStatus{State: visionSourceMissing, Path: rootVisionSourceName, Message: visionSourceMissingMessage}
@@ -58,11 +56,15 @@ func InspectRootVisionSource(repoPath string) VisionSourceStatus {
 	if info.Mode()&fs.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
 	}
-	file, err := os.Open(target)
+	file, err := root.Open(rootVisionSourceName)
 	if err != nil {
 		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
 	}
 	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
+	}
 	read, err := io.CopyN(io.Discard, file, maxRootVisionSourceBytes+1)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return VisionSourceStatus{State: visionSourceUnreadable, Path: rootVisionSourceName, Message: visionSourceUnreadableMessage}
