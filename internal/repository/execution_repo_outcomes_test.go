@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -474,16 +475,16 @@ func TestAnalyticsDashboardModelsCompareConfiguredModelOutcomesAndUsage(t *testi
 		INSERT INTO agent_configs(id,name,provider,model,auth_method,reasoning_effort) VALUES
 			('model-a','Fable','anthropic','claude-fable','oauth','high'),
 			('model-b','Luna XHigh','openai','gpt-luna','oauth','xhigh');
-		INSERT INTO tasks(id,project_id,title,status,created_at) VALUES
-			('task-a','model-project','Recovered task','completed','2026-09-01 09:00:00'),
-			('task-b','model-project','Direct task','completed','2026-09-01 09:00:00');
-		INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,is_followup,history_order) VALUES
-			('exec-a1','task-a','model-a','failed','2026-09-01 10:00:00','2026-09-01 10:10:00',0,1),
-			('exec-a2','task-a','model-b','completed','2026-09-01 11:00:00','2026-09-01 11:20:00',1,2),
-			('exec-b1','task-b','model-a','completed','2026-09-01 12:00:00','2026-09-01 12:30:00',0,1);
+		INSERT INTO tasks(id,project_id,title,status,created_at,worktree_path,merge_status) VALUES
+			('task-a','model-project','Recovered task','completed','2026-09-01 09:00:00','',''),
+			('task-b','model-project','Direct task','completed','2026-09-01 09:00:00','/tmp/task-b','pending');
+		INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,duration_ms,is_followup,history_order) VALUES
+			('exec-a1','task-a','model-a','failed','2026-09-01 10:00:00','2026-09-01 10:10:00',600000,0,1),
+			('exec-a2','task-a','model-b','completed','2026-09-01 11:00:00','2026-09-01 11:20:00',1200000,1,2),
+			('exec-b1','task-b','model-a','completed','2026-09-01 12:00:00','2026-09-01 12:30:00',1800000,0,1);
 		INSERT INTO task_goals(task_id,goal_id,objective,status,achieved_at,updated_at) VALUES
 			('task-a','goal-a','Recover','achieved','2026-09-01 11:20:00','2026-09-01 11:20:00'),
-			('task-b','goal-b','Complete','failed',NULL,'2026-09-01 12:30:00');
+			('task-b','goal-b','Complete','achieved','2026-09-01 12:30:00','2026-09-01 12:30:00');
 		INSERT INTO llm_usage_events(id,provider,project_id,task_id,execution_id,agent_config_id,model,total_tokens,cost_usd,occurred_at) VALUES
 			('usage-b','openai','model-project','task-a','exec-a2','model-b','gpt-luna',1000,0.25,'2026-09-01 11:20:00');
 	`); err != nil {
@@ -502,12 +503,112 @@ func TestAnalyticsDashboardModelsCompareConfiguredModelOutcomesAndUsage(t *testi
 		byID[row.ModelConfigID] = row
 	}
 	fable := byID["model-a"]
-	if fable.ConfigName != "Fable" || fable.ReasoningEffort != "high" || fable.TasksUsed != 2 || fable.RunCount != 2 || fable.TechnicalCompletion.Numerator != 1 || fable.TechnicalCompletion.Denominator != 2 || fable.GoalAchievement.Numerator != 0 || fable.GoalAchievement.Denominator != 1 || fable.FirstPass.Numerator != 1 || fable.FirstPass.Denominator != 2 || fable.AverageRuns != 1 {
-		t.Fatalf("Fable comparison = %+v", fable)
+	if fable.ConfigName != "Fable" || fable.ReasoningEffort != "high" || fable.TasksUsed != 1 || fable.RunCount != 1 ||
+		fable.GoalAchievement.Numerator != 1 || fable.GoalAchievement.Denominator != 1 ||
+		fable.MergeCompletion.Numerator != 0 || fable.MergeCompletion.Denominator != 1 ||
+		fable.MedianDurationMs < 1799000 || fable.MedianDurationMs > 1801000 || fable.TokenCoveredTasks != 0 || fable.KnownCostUSD != nil {
+		t.Fatalf("single-model task comparison = %+v", fable)
 	}
-	luna := byID["model-b"]
-	if luna.ConfigName != "Luna XHigh" || luna.ReasoningEffort != "xhigh" || luna.TasksUsed != 1 || luna.RunCount != 1 || luna.GoalAchievement.Numerator != 1 || luna.GoalAchievement.Denominator != 1 || luna.FirstPass.Denominator != 0 || luna.FollowUp.Numerator != 1 || luna.FollowUp.Denominator != 1 || luna.AverageRuns != 1 || luna.TotalTokens != 1000 || luna.CostCoveredTasks != 1 || luna.KnownCostUSD == nil || *luna.KnownCostUSD != 0.25 {
-		t.Fatalf("Luna comparison = %+v", luna)
+	if _, ok := byID["model-b"]; ok {
+		t.Fatal("finishing model must not receive credit for a mixed-model task")
+	}
+	mixed := byID["__mixed__"]
+	if !mixed.MixedModels || mixed.ConfigName != "Mixed models" || mixed.TasksUsed != 1 || mixed.RunCount != 2 ||
+		mixed.GoalAchievement.Numerator != 1 || mixed.GoalAchievement.Denominator != 1 || mixed.MergeCompletion.Denominator != 0 ||
+		mixed.AverageFollowUps != 1 || mixed.MedianDurationMs < 4799000 || mixed.MedianDurationMs > 4801000 ||
+		mixed.TotalTokens != 1000 || mixed.CostCoveredTasks != 1 || mixed.KnownCostUSD == nil || *mixed.KnownCostUSD != 0.25 {
+		t.Fatalf("mixed-model comparison = %+v", mixed)
+	}
+}
+
+func TestAnalyticsDashboardModelsWholeTaskEffortAndPeriod(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO projects(id,name) VALUES ('p','Project');
+		INSERT INTO agent_configs(id,name,provider,model,auth_method) VALUES ('m','Model','openai','model','oauth');
+		INSERT INTO tasks(id,project_id,title,status,merge_status) VALUES
+			('delivered','p','Delivered without goal','completed','merged'),
+			('failed','p','Failed task','failed','pending'),
+			('running','p','Reopened task','running','');
+		INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at,is_followup,history_order) VALUES
+			('d1','delivered','m','failed','2026-08-31 23:00:00','2026-08-31 23:10:00',0,1),
+			('d2','delivered','m','completed','2026-09-01 07:00:00','2026-09-01 07:30:00',1,2),
+			('f','failed','m','failed','2026-09-01 10:00:00','2026-09-01 10:30:00',0,1),
+			('r1','running','m','completed','2026-09-01 11:00:00','2026-09-01 11:30:00',0,1),
+			('r2','running','m','running','2026-09-01 12:00:00',NULL,1,2);
+		INSERT INTO task_goals(task_id,goal_id,objective,status) VALUES ('failed','g','Goal','failed');
+		INSERT INTO llm_usage_events(id,provider,project_id,task_id,execution_id,agent_config_id,model,total_tokens,cost_usd,occurred_at) VALUES
+			('u1','openai','p','delivered','d1','m','model',1000,1,'2026-08-31 23:10:00'),
+			('u2','openai','p','delivered','d2','m','model',2000,2,'2026-09-01 07:30:00'),
+			('u3','openai','p','failed','f','m','model',500,0.5,'2026-09-01 10:30:00');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	dashboard, err := NewExecutionRepo(db).GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "p", View: "models", DateFrom: from, DateTo: from.AddDate(0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dashboard.Models) != 1 {
+		t.Fatalf("models: %+v", dashboard.Models)
+	}
+	r := dashboard.Models[0]
+	if r.TasksUsed != 2 || r.RunCount != 3 || r.TotalTokens != 3500 || r.KnownCostUSD == nil || *r.KnownCostUSD != 3.5 || r.AverageFollowUps != 0.5 {
+		t.Fatalf("must include historical and unsuccessful effort, exclude reopened tasks: %+v", r)
+	}
+	if r.GoalAchievement.Numerator != 0 || r.GoalAchievement.Denominator != 1 || r.MergeCompletion.Numerator != 1 || r.MergeCompletion.Denominator != 2 {
+		t.Fatalf("goal and delivery must remain independent: %+v", r)
+	}
+	// Median of 8h30m and 30m is 4h30m; the earlier failed run starts the clock.
+	if r.DurationSampleSize != 2 || r.MedianDurationMs < 16199000 || r.MedianDurationMs > 16201000 {
+		t.Fatalf("whole-task elapsed time: %+v", r)
+	}
+	if len(r.OutcomeTrend) != 1 || r.OutcomeTrend[0].Period != "2026-09-01" || r.OutcomeTrend[0].GoalAchievement.Denominator != 1 || r.OutcomeTrend[0].MergeCompletion.Percent != 50 {
+		t.Fatalf("trend must match scorecard samples: %+v", r.OutcomeTrend)
+	}
+	if _, err := db.Exec(`UPDATE executions SET started_at='2026-09-02 10:00:00',completed_at='2026-09-02 10:30:00' WHERE id='f'`); err != nil {
+		t.Fatal(err)
+	}
+	filter := AnalyticsDashboardFilter{ProjectID: "p", View: "models", DateFrom: from, DateTo: from.AddDate(0, 0, 3)}
+	daily, err := NewExecutionRepo(db).queryModelPerformance(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	points := daily[0].OutcomeTrend
+	if len(points) != 2 || points[0].Period != "2026-09-01" || points[1].Period != "2026-09-02" || points[0].GoalAchievement.Denominator != 0 || points[0].MergeCompletion.Percent != 100 || points[1].MergeCompletion.Percent != 0 {
+		t.Fatalf("missing goal evidence must not become zero success; periods must be ordered: %+v", points)
+	}
+	filter.GroupBy = "month"
+	monthly, err := NewExecutionRepo(db).queryModelPerformance(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(monthly[0].OutcomeTrend) != 1 || monthly[0].OutcomeTrend[0].Period != "2026-09" || monthly[0].OutcomeTrend[0].MergeCompletion.Percent != 50 {
+		t.Fatalf("monthly trend: %+v", monthly)
+	}
+	// Neither chat tasks nor non-task usage attributed to a real task may change
+	// any model metric, attribution, or trend point.
+	_, err = db.Exec(`
+		INSERT INTO agent_configs(id,name,provider,model,auth_method) VALUES ('chat-model','Chat model','openai','chat','oauth');
+		INSERT INTO tasks(id,project_id,title,category,status,merge_status) VALUES ('chat','p','Chat','chat','completed','merged');
+		INSERT INTO executions(id,task_id,agent_config_id,status,started_at,completed_at) VALUES ('chat-run','chat','chat-model','completed','2026-09-01 10:00:00','2026-09-01 10:00:10');
+		INSERT INTO task_goals(task_id,goal_id,objective,status) VALUES ('chat','chat-goal','Chat goal','achieved');
+		INSERT INTO llm_usage_events(id,provider,project_id,task_id,execution_id,agent_config_id,model,operation,total_tokens,cost_usd) VALUES
+		('chat-usage','openai','p','chat','chat-run','chat-model','chat','task',999999,99),
+		('hook-usage','openai','p','delivered','d2','chat-model','chat','direct',999999,99),
+		('stream-usage','openai','p','delivered','d2','chat-model','chat','streaming',999999,99);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskOnly, err := NewExecutionRepo(db).queryModelPerformance(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(monthly, taskOnly) {
+		t.Fatalf("chat or non-task usage contaminated Models: before=%+v after=%+v", monthly, taskOnly)
 	}
 }
 
