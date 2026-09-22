@@ -33,6 +33,34 @@ func TestInspectRootVisionSourceStates(t *testing.T) {
 	require.Equal(t, visionSourceUnreadableMessage, unreadable.Message)
 }
 
+func TestInspectRootVisionSourceRejectsUnreadableRegularFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, rootVisionSourceName)
+	require.NoError(t, os.WriteFile(path, []byte("vision"), 0o600))
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	file, err := os.Open(path)
+	if err == nil {
+		_ = file.Close()
+		t.Skip("test process can read mode-000 files")
+	}
+	status := InspectRootVisionSource(root)
+	require.Equal(t, visionSourceUnreadable, status.State)
+	require.Equal(t, visionSourceUnreadableMessage, status.Message)
+}
+
+func TestInspectRootVisionSourceBoundsReads(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, rootVisionSourceName)
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	require.NoError(t, os.Truncate(path, maxRootVisionSourceBytes+1))
+
+	status := InspectRootVisionSource(root)
+	require.Equal(t, visionSourceTruncated, status.State)
+	require.Equal(t, visionSourceTruncatedMessage, status.Message)
+}
+
 func TestAnnotateMaintainedSDLCVisionSourceWarnsWhenMissing(t *testing.T) {
 	t.Parallel()
 
