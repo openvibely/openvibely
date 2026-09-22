@@ -23,6 +23,13 @@ import (
 
 // --- Analytics page ---
 
+func analyticsLargePayloadDeadline() time.Duration {
+	if testing.CoverMode() != "" {
+		return 3 * time.Second
+	}
+	return 2 * time.Second
+}
+
 func TestAnalytics_NoProjects(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/analytics").Execute()
@@ -438,8 +445,8 @@ func TestGetAnalyticsDashboardLargePayloadAgentsIsBounded(t *testing.T) {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Fatalf("large-payload Agents took %s, want <= 2s with the sole reader", elapsed)
+	if elapsed, deadline := time.Since(started), analyticsLargePayloadDeadline(); elapsed > deadline {
+		t.Fatalf("large-payload Agents took %s, want <= %s with the sole reader", elapsed, deadline)
 	}
 	var dashboard models.AnalyticsDashboard
 	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
@@ -493,8 +500,8 @@ func TestGetAnalyticsDashboardLargePayloadOverviewIsBounded(t *testing.T) {
 		body, _ := io.ReadAll(response.Body)
 		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
 	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Fatalf("large-payload Overview took %s, want <= 2s with the sole reader", elapsed)
+	if elapsed, deadline := time.Since(started), analyticsLargePayloadDeadline(); elapsed > deadline {
+		t.Fatalf("large-payload Overview took %s, want <= %s with the sole reader", elapsed, deadline)
 	}
 	var dashboard models.AnalyticsDashboard
 	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
