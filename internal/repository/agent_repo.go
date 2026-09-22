@@ -448,6 +448,25 @@ func (r *AgentRepo) ListPage(ctx context.Context, limit, offset int, search stri
 
 func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, filter AgentPageFilter) ([]models.Agent, error) {
 	limit, offset = normalizeCardPageArgs(limit, offset)
+	query, args := buildAgentPageFilteredQuery(limit, offset, filter)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent page: %w", err)
+	}
+	defer rows.Close()
+
+	agents := make([]models.Agent, 0, limit)
+	for rows.Next() {
+		agent, err := scanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning agent page: %w", err)
+		}
+		agents = append(agents, *agent)
+	}
+	return agents, rows.Err()
+}
+
+func buildAgentPageFilteredQuery(limit, offset int, filter AgentPageFilter) (string, []any) {
 	query := `SELECT ` + agentColumns + ` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived'`
 	args := make([]any, 0, 4)
 	if projectID := strings.TrimSpace(filter.ProjectID); projectID != "" {
@@ -494,21 +513,7 @@ func (r *AgentRepo) ListPageFiltered(ctx context.Context, limit, offset int, fil
 	}
 	query += ` LIMIT ? OFFSET ?`
 	args = append(args, limit, offset)
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("listing agent page: %w", err)
-	}
-	defer rows.Close()
-
-	agents := make([]models.Agent, 0, limit)
-	for rows.Next() {
-		agent, err := scanAgent(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scanning agent page: %w", err)
-		}
-		agents = append(agents, *agent)
-	}
-	return agents, rows.Err()
+	return query, args
 }
 
 func (r *AgentRepo) ListChatAssignableDefinitions(ctx context.Context) ([]models.ChatAssignableAgentDefinition, error) {
