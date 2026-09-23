@@ -371,8 +371,8 @@ func TestAnalyticsAgentCategoryUsesTaskCategoryAndTerminalExecutionDenominator(t
 			break
 		}
 	}
-	if selectedAgentPerformance == nil || selectedAgentPerformance.DurationSampleSize != 1 || selectedAgentPerformance.MedianDurationMs < int64(20*24*time.Hour/time.Millisecond) {
-		t.Fatalf("Agent duration must use historical first start and disclose one sample: %+v", dashboard.Agents)
+	if selectedAgentPerformance == nil || selectedAgentPerformance.DurationSampleSize != 1 || selectedAgentPerformance.MedianDurationMs != 0 {
+		t.Fatalf("Agent run time must exclude historical runs and idle gaps; fixture period runs have zero duration: %+v", dashboard.Agents)
 	}
 	if len(dashboard.AgentSkillOutcomes) != 1 || dashboard.AgentSkillOutcomes[0].AgentID != agent.ID || dashboard.AgentSkillOutcomes[0].SkillHandle != "project:category" || dashboard.AgentSkillOutcomes[0].TasksEvaluated != 1 {
 		t.Fatalf("Agent/skill outcome association missing: %+v", dashboard.AgentSkillOutcomes)

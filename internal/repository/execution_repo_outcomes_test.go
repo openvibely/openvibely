@@ -654,6 +654,57 @@ func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 	}
 }
 
+func TestAnalyticsAgentsUseTaskActivityAndActiveRunTime(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	_, err := db.Exec(`INSERT INTO projects(id,name) VALUES ('agent-metrics','Agents');
+	INSERT INTO agents(id,name,model) VALUES ('worker','Worker','inherit');
+	INSERT INTO tasks(id,project_id,title,category,status,agent_definition_id,merge_status) VALUES
+	('a','agent-metrics','A','completed','completed','worker','merged'),
+	('b','agent-metrics','B','scheduled','completed','worker',''),
+	('c','agent-metrics','C','active','running','worker',''),
+	('chat','agent-metrics','Chat','chat','completed','worker','merged'),
+	('lifecycle','agent-metrics','Lifecycle only','active','pending','worker','');
+	INSERT INTO executions(id,task_id,status,started_at,completed_at,is_followup) VALUES
+	('old','a','completed','2026-08-01 10:00:00','2026-08-01 20:00:00',0),
+	('a1','a','completed','2026-09-01 10:00:00','2026-09-01 10:05:00',0),
+	('a2','a','completed','2026-09-02 10:00:00','2026-09-02 10:05:00',1),
+	('b1','b','completed','2026-09-02 10:00:00','2026-09-02 10:20:00',0),
+	('chat1','chat','completed','2026-09-01 10:00:00','2026-09-01 23:00:00',0);
+	INSERT INTO task_goals(task_id,goal_id,objective,status,achieved_at,updated_at) VALUES
+	('a','ga','Goal A','achieved','2026-08-01 10:00:00','2026-08-01 10:00:00'),
+	('b','gb','Goal B','failed',NULL,'2026-08-01 10:00:00');
+	INSERT INTO llm_usage_events(id,provider,project_id,task_id,model,operation,status,total_tokens,occurred_at) VALUES
+	('uc','openai','agent-metrics','c','model','task','completed',100,'2026-09-01 10:00:00'),
+	('ul','openai','agent-metrics','lifecycle','model','lifecycle','completed',100,'2026-09-01 10:00:00');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := AnalyticsDashboardFilter{ProjectID: "agent-metrics", View: "agents", WorkType: "interactive", DateFrom: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), DateTo: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)}
+	repo := NewExecutionRepo(db)
+	rows, err := repo.queryAgentPerformance(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows: %+v", rows)
+	}
+	r := rows[0]
+	if r.TasksEvaluated != 3 || r.DurationSampleSize != 2 || r.MedianDurationMs < 899998 || r.MedianDurationMs > 900001 {
+		t.Fatalf("population/run time: %+v", r)
+	}
+	if r.GoalAchievement != metric(1, 2) || r.MergeCompletion != metric(1, 1) || r.AverageFollowUps != 1.0/3 {
+		t.Fatalf("outcomes/effort: %+v", r)
+	}
+	summary, err := repo.queryAnalyticsTaskSummary(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.TasksWorkedOn != r.TasksEvaluated || summary.GoalAchievement != r.GoalAchievement || summary.MergeCompletion != r.MergeCompletion {
+		t.Fatalf("summary and comparison disagree: %+v %+v", summary, r)
+	}
+}
+
 func TestAnalyticsTaskSummaryCountsTasksOnceAndFiltersAgents(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
