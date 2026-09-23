@@ -284,7 +284,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 						if agent.IsDefault {
 							data-card-select-disabled-reason="Default models cannot be deleted"
 						}
-						onclick="editModelFromData(this)"
+						onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editModelFromData(this)"
 					>
 						<div class="card-body relative">
 							<!-- Kebab menu in top right -->

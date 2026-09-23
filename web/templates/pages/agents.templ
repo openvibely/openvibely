@@ -128,7 +128,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 						if agent.GeneratedStatus == models.AgentStatusProtected {
 							data-card-select-disabled-reason="Protected agents cannot be deleted"
 						}
-						onclick="editAgentFromData(this)"
+						onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editAgentFromData(this)"
 					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">

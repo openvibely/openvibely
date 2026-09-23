@@ -583,7 +583,7 @@ func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
 	out := buf.String()
 
 	defaultCard := renderedModelCard(t, out, "default-model")
-	if !strings.Contains(defaultCard, `onclick="editModelFromData(this)"`) || !strings.Contains(defaultCard, "Default</span>") {
+	if !strings.Contains(defaultCard, `return; editModelFromData(this)"`) || !strings.Contains(defaultCard, "Default</span>") {
 		t.Fatal("expected default card to remain directly editable and display its default badge")
 	}
 	if strings.Contains(defaultCard, `data-model-set-default-url=`) {
@@ -596,7 +596,7 @@ func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
 	}
 
 	otherCard := renderedModelCard(t, out, "other-model")
-	if !strings.Contains(otherCard, `onclick="editModelFromData(this)"`) || !strings.Contains(otherCard, "Reasoning effort: high") {
+	if !strings.Contains(otherCard, `return; editModelFromData(this)"`) || !strings.Contains(otherCard, "Reasoning effort: high") {
 		t.Fatal("expected non-default card display and edit action to remain intact")
 	}
 	for _, want := range []string{"/edit-details", "details.id !== id", "populateModelEditForm", "modelReasoningEffort: details.reasoning_effort"} {

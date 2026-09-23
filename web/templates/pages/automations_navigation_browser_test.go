@@ -472,6 +472,9 @@ func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcro
 		exerciseActionIsolation := func(id string, actionSelectors []string) {
 			parentURL := cardURL(id)
 			moreSelector := cardSelector(id) + ` [data-automation-card-action] label`
+			// Exercise the card's own interactive-descendant guard instead of
+			// relying only on the action wrapper's propagation handler.
+			browser.evaluate(fmt.Sprintf(`document.querySelector(%q).removeAttribute('onclick'); 'ready'`, cardSelector(id)+` [data-automation-card-action]`))
 			browser.click(`input[data-card-search]`)
 			for _, actionSelector := range actionSelectors {
 				before := navigationCount(parentURL)

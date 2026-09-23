@@ -784,7 +784,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, " onclick=\"editModelFromData(this)\"><div class=\"card-body relative\"><!-- Kebab menu in top right --><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, " onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editModelFromData(this)\"><div class=\"card-body relative\"><!-- Kebab menu in top right --><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

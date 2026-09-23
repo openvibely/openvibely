@@ -144,7 +144,7 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 							data-card-select-ref={ `{"handle":"` + skill.Handle + `","scope":"` + skill.Scope + `"}` }
 							data-card-select-eligible="true"
 						}
-						onclick="editSkillFromData(this)"					>
+						onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editSkillFromData(this)"					>
 						<div class="card-body relative">
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
 								@components.CardActionDropdown(components.CardActionDropdownConfig{Label: "More actions for " + firstSkillNonEmpty(skill.Name, skill.Handle), MenuClass: "dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300"}) {

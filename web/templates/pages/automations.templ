@@ -90,7 +90,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 						data-search-text={ automationCardSearchText(card) }
 						data-card-select-id={ card.Automation.ID }
 						data-card-select-eligible="true"
-						onclick="window.openVibelyNavigate(this.dataset.automationUrl)"
+						onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; window.openVibelyNavigate(this.dataset.automationUrl)"
 						onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); window.openVibelyNavigate(this.dataset.automationUrl)"
 					>
 						<div class="card-body relative">

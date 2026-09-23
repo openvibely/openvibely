@@ -165,6 +165,9 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 		}
 
 		before = navigationCount(taskURL)
+		// Prove the card's own guard protects nested controls even when a
+		// descendant does not stop propagation itself.
+		browser.evaluate(fmt.Sprintf(`document.querySelector(%q).setAttribute('onclick', 'openAlertTaskDialog(this.dataset.taskId)'); 'ready'`, cardSelector+` button[data-task-id="`+implementationTaskID+`"]`))
 		browser.click(cardSelector + ` button[data-task-id="` + implementationTaskID + `"]`)
 		if got := navigationCount(taskURL); got != before {
 			t.Fatalf("View implementation task navigated parent task card: count %s, want %s", got, before)
