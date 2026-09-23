@@ -405,7 +405,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         document.querySelector('[data-analytics-view="usage"]').click();
         var usageShells=Array.from(document.querySelectorAll('#usageSummary > .card'));
         if(usageShells.length!==3||!usageShells.every(function(card){return card.textContent.indexOf('Loading analytics')>=0;}))fail('Usage must reserve summary cards while loading');
-        document.querySelectorAll('#usageSummary [data-usage-summary-value], #accountUsageCards p, #usageFindings p').forEach(function(node){if(!node.classList.contains('text-center')||!node.classList.contains('opacity-50'))fail('Usage loading text must match Learning alignment and color');});
+        document.querySelectorAll('#usageSummary [data-usage-summary-value], #accountUsageCards p').forEach(function(node){if(!node.classList.contains('text-center')||!node.classList.contains('opacity-50'))fail('Usage loading text must match Learning alignment and color');});
         if(document.querySelectorAll('#accountUsageCards > .card').length!==2||document.getElementById('accountUsageCards').getAttribute('aria-busy')!=='true')fail('Usage must reserve provider cards while loading');
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
           if(!usageShells.every(function(card,index){return card===document.querySelectorAll('#usageSummary > .card')[index];}))fail('summary card shells were replaced when data arrived');
@@ -730,7 +730,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`data-analytics-section="agents"`, `data-analytics-section="automations"`,
 		`Run success rate`, `Goal achievement rate`, `First-run success rate`,
 		`Follow-up run rate`, `Median task duration`, `Cost per achieved goal`,
-		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`, `id="usageFindings"`,
+		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`,
 		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
 		`Selected Agent outcome trend`, `Agent findings`, `Model comparison`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`,
@@ -742,6 +742,9 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	}
 	if strings.Contains(content, `data-analytics-view="all"`) || strings.Contains(content, `>All Metrics</button>`) {
 		t.Fatal("Analytics should not expose the All Metrics view")
+	}
+	if strings.Contains(content, `usageFindings`) || strings.Contains(content, `Usage readout`) || strings.Contains(content, `renderUsageFindings`) {
+		t.Fatal("Usage must not duplicate KPI cards with a readout")
 	}
 	if strings.Contains(content, `onClick:`) || strings.Contains(content, `data-analytics-evidence-link`) {
 		t.Fatal("Analytics charts, KPI cards, and funnel visuals must be display-only")

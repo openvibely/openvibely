@@ -158,7 +158,6 @@ templ analyticsContent(currentProject *models.Project) {
 							<div class="card bg-base-100 border border-base-300" style="min-height:12rem"><div class="card-body"><p class="text-center opacity-50 py-12">Loading analytics…</p></div></div>
 						}
 					</div></div>
-					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Usage readout</h4><div id="usageFindings" style="min-height:7.5rem"><p class="text-center opacity-50 py-12">Loading analytics…</p></div></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
@@ -263,7 +262,6 @@ templ analyticsContent(currentProject *models.Project) {
 								document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
 								const usageAccounts=document.getElementById('accountUsageCards');usageAccounts.removeAttribute('aria-busy');
 								usageAccounts.querySelectorAll('.card-body').forEach(body=>body.textContent='Analytics unavailable');
-								document.getElementById('usageFindings').textContent='Analytics unavailable';
 								const failedBody = document.querySelector('#failedPatternsTable tbody');
 								if (failedBody) failedBody.innerHTML = '\x3ctr>\x3ctd colspan="4" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 							}
@@ -313,7 +311,6 @@ templ analyticsContent(currentProject *models.Project) {
 									const accounts=document.getElementById('accountUsageCards');
 									accounts.setAttribute('aria-busy','true');
 									accounts.querySelectorAll('.card-body').forEach(body=>{body.style.minHeight=body.getBoundingClientRect().height+'px';loadingText(body);});
-									loadingText(document.getElementById('usageFindings'));
 								}
 								const loadingCharts = {
 									overview: { projectOutcomeTrend: 'projectOutcomeTrendChart' },
@@ -761,13 +758,6 @@ templ analyticsContent(currentProject *models.Project) {
 									const taskURL='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);
 									return '\x3ctr>\x3ctd>\x3ca class="link" href="'+taskURL+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+escapeHTML(row.technical_result)+'\x3c/td>\x3ctd>'+escapeHTML(row.goal_result||'Not goal-bearing')+'\x3c/td>\x3ctd>'+escapeHTML(row.model)+'\x3c/td>\x3ctd>'+row.execution_count+'\x3c/td>\x3ctd>'+row.follow_up_count+'\x3c/td>\x3c/tr>';
 								}).join('') : '\x3ctr>\x3ctd colspan="6" class="text-center opacity-50">No recent supporting tasks in this period\x3c/td>\x3c/tr>';
-							}
-							function renderUsageFindings(data) {
-								const target=document.getElementById('usageFindings'); if(!target)return;
-								const totals=(data&&data.totals)||{},breakdown=(data&&data.model_breakdown)||[],lines=[];
-								if(totals.call_count){lines.push('\x3cp>\x3cstrong>Recorded activity:\x3c/strong> '+formatNumber(totals.call_count)+' model calls used '+formatNumber(totals.total_tokens||0)+' tokens'+(totals.cost_available?' with '+formatCost(totals.cost_usd)+' known cost.':'; cost coverage is unavailable.')+'\x3c/p>');}
-								if(breakdown.length){const top=breakdown.slice().sort((a,b)=>Number(b.total_tokens||0)-Number(a.total_tokens||0))[0],share=totals.total_tokens?Number(top.total_tokens||0)*100/Number(totals.total_tokens):0;lines.push('\x3cp>\x3cstrong>Largest token share:\x3c/strong> '+escapeHTML((top.provider||'unknown')+'/'+(top.model||'unknown'))+' used '+share.toFixed(1)+'% of recorded tokens.\x3c/p>');}
-								target.innerHTML=lines.length?lines.join(''):'\x3cp class="opacity-50">No local usage evidence in this period.\x3c/p>';
 							}
 								function openEvidenceURL(href) {
 									const url = new URL(href, window.location.href);
@@ -1342,7 +1332,6 @@ templ analyticsContent(currentProject *models.Project) {
 								function renderUsageAnalytics(data) {
 									const totals = data.totals || {};
 									renderUsageEventEvidence(data.evidence || [], data.evidence_total || 0);									renderUsageSummary(totals);
-									renderUsageFindings(data);
 									const lastUpdated = document.getElementById('usageLastUpdated');
 									lastUpdated.textContent = data.last_updated_at ? 'Last updated ' + new Date(data.last_updated_at).toLocaleString() : 'Local usage history';
 										renderUsageRateChart(data);
