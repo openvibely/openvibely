@@ -54,7 +54,7 @@ templ analyticsContent(currentProject *models.Project) {
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
 
-				<section id="analytics-overview" data-analytics-section="overview" class="space-y-6 mb-6">
+				<section id="analytics-overview" data-analytics-section="overview" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Overview</h3><p class="text-sm opacity-60">What changed, what drove it, and what to inspect next.</p></div>
 					<div id="analyticsKpis" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
 					@analyticsChartCard("Project outcome trend", "Run success, goal achievement, first-run success, and follow-up runs by selected interval.", "projectOutcomeTrendChart", "h-72")
@@ -64,7 +64,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="collapse collapse-arrow bg-base-100 border border-base-300"><input type="checkbox" aria-label="Show metric definitions"/><div class="collapse-title font-semibold">Metric definitions and denominators</div><div class="collapse-content"><dl id="analyticsMetricDefinitions" class="grid grid-cols-1 lg:grid-cols-2 gap-3 text-sm"></dl></div></div>
 				</section>
 
-				<section id="analytics-outcomes" data-analytics-section="outcomes" class="space-y-6 mb-6">
+				<section id="analytics-outcomes" data-analytics-section="outcomes" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Outcomes</h3><p class="text-sm opacity-60">Visual outcome, rework, timing, and failure evidence.</p></div><div id="outcomeSummaryCards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">What changed</h4><div id="outcomeReadout"></div></div></div>
 					@analyticsChartCard("Run results over time", "Completed, failed, and cancelled runs.", "successFailureChart", "h-72")
@@ -77,7 +77,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Supporting task evidence</summary><div class="collapse-content"><p id="outcomeEvidenceFilter" class="text-sm opacity-60"></p><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Task</th><th>Run result</th><th>Goal</th><th>Agent</th><th>Model</th><th>Runs</th><th>Follow-up runs</th><th>Task duration</th><th>Known cost</th></tr></thead><tbody id="outcomeEvidenceTable"></tbody></table></div><button id="loadMoreEvidence" type="button" class="btn btn-sm btn-outline hidden">Load more evidence</button></div></details>
 				</section>
 
-				<section id="analytics-agents" data-analytics-section="agents" class="space-y-6 mb-6">
+				<section id="analytics-agents" data-analytics-section="agents" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Agents</h3><p class="text-sm opacity-60">Compare reusable Agent definitions and inspect how each one performs.</p></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Agent outcome comparison", "Goal achievement, first-run success, and follow-up runs with sample sizes.", "agentComparisonChart", "h-80") @analyticsChartCard("Quality versus efficiency", "Outcome quality against duration or covered cost.", "agentEfficiencyChart", "h-80")</div>
 					<div id="agentDetail">@analyticsChartCard("Selected Agent outcome trend", "Select an Agent for period detail.", "agentOutcomeTrendChart", "h-64")</div>
@@ -86,7 +86,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact values and category evidence</summary><div class="collapse-content space-y-4"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Run success</th><th>Goal</th><th>First-run success</th><th>Follow-up runs</th><th>Task duration</th><th>Cost / goal</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div><table class="table table-sm"><tbody id="agentCategoryTable"></tbody></table><table class="table table-sm"><tbody id="agentFailureTable"></tbody></table><table class="table table-sm"><tbody id="agentSkillTable"></tbody></table></div></details>
 					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Supporting Agent tasks</summary><div class="collapse-content"><table class="table table-sm"><tbody id="agentEvidenceTable"></tbody></table></div></details>
 				</section>
-				<section id="analytics-models" data-analytics-section="models" class="space-y-6 mb-6">
+				<section id="analytics-models" data-analytics-section="models" class="hidden space-y-6 mb-6">
 					<div class="flex items-center gap-2">
 						<h3 class="text-xl font-bold">Models</h3>
 						<button type="button" class="btn btn-ghost btn-circle btn-xs" data-model-attribution-help
@@ -113,7 +113,7 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 				</section>
 
-				<section id="analytics-automations" data-analytics-section="automations" class="space-y-6 mb-6">
+				<section id="analytics-automations" data-analytics-section="automations" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Automations</h3><p class="text-sm opacity-60">Automation graph invocation and node behavior.</p></div>
 					@analyticsChartCard("Automation comparison", "Invocation, completion, failure, duration, and current waiting state.", "automationComparisonChart", "h-80")<div id="automationEmptyState" class="hidden alert"></div>
 					<div id="workflowDetail" class="space-y-6">@analyticsChartCard("Visual node funnel", "Entered count and conversion through the graph.", "automationFunnelChart", "h-72")<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Duration by node", "Average elapsed transition time.", "automationDurationChart", "h-64") @analyticsChartCard("Failures by node", "Failed activity count.", "automationFailureChart", "h-64")</div>@analyticsChartCard("Current bottlenecks", "Current waiting and blocked positions.", "automationBottleneckChart", "h-64")</div>
@@ -121,7 +121,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<details id="automationExactValues" class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact automation and node values</summary><div class="collapse-content"><table class="table table-sm"><tbody id="workflowPerformanceTable"></tbody></table><table class="table table-sm"><tbody id="workflowFunnelTable"></tbody></table><table class="table table-sm"><tbody id="workflowDurationTable"></tbody></table><table class="table table-sm"><tbody id="workflowFailureTable"></tbody></table><table class="table table-sm"><tbody id="workflowBottleneckTable"></tbody></table></div></details>
 				</section>
 
-				<section id="analytics-learning" data-analytics-section="learning" class="space-y-6 mb-6">
+				<section id="analytics-learning" data-analytics-section="learning" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Learning</h3><p class="text-sm opacity-60">Observed skill activity and outcomes. Association only; not causation.</p><p id="skillEvidenceSelection" class="hidden"></p></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Skill Activity Over Time", "Created, edited, and used skill activity.", "skillUsageTrendChart", "h-64") @analyticsChartCard("Top Skills", "Highest skill activity by event type.", "skillTopChart", "h-64") @analyticsChartCard("Follow-through / Selected Outcomes", "Selected skills later used or ignored.", "skillFollowChart", "h-64") @analyticsChartCard("Top Agent/Skill Pairs", "Most active Agent and skill combinations.", "skillAgentChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Least Active Enabled Skills</h4><table class="table table-sm"><tbody id="underusedSkillsTable"></tbody></table></div></div>
@@ -146,7 +146,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<details id="skillEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting skill events</summary><div class="collapse-content"><p id="skillEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="skillEventEvidenceTable"></tbody></table></div></details>
 				</section>
 
-				<section id="analytics-usage" data-analytics-section="usage" class="space-y-6 mb-6">
+				<section id="analytics-usage" data-analytics-section="usage" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Usage</h3><p class="text-sm opacity-60">Provider limits, token usage, cache utilization, and recorded cost.</p><p id="usageEvidenceSelection" class="hidden"></p></div>
 					<div id="usageSummary" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization"} {

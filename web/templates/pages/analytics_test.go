@@ -743,6 +743,11 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if strings.Contains(content, `data-analytics-view="all"`) || strings.Contains(content, `>All Metrics</button>`) {
 		t.Fatal("Analytics should not expose the All Metrics view")
 	}
+	for _, view := range []string{"overview", "outcomes", "automations", "usage", "models", "learning", "agents"} {
+		if !strings.Contains(content, `data-analytics-section="`+view+`" class="hidden space-y-6 mb-6"`) {
+			t.Errorf("%s must stay hidden until analytics initializes the selected view", view)
+		}
+	}
 	if strings.Contains(content, `usageFindings`) || strings.Contains(content, `Usage readout`) || strings.Contains(content, `renderUsageFindings`) {
 		t.Fatal("Usage must not duplicate KPI cards with a readout")
 	}

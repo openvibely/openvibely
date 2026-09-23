@@ -241,6 +241,7 @@ window.addEventListener('DOMContentLoaded', function() {
     unsaved.remove();
 
     window.confirm = function() { confirmCalls++; return true; };
+    history.replaceState({}, '', '/analytics?project_id=default&view=models&range=7d&agent=old-project-agent');
     trigger.click();
     var confirmed = document.createElement('dialog');
     confirmed.id = 'confirmed-dialog';
@@ -249,7 +250,7 @@ window.addEventListener('DOMContentLoaded', function() {
     document.querySelector('[data-project-id="payments-api"]').click();
     await wait(0);
     if (select.value !== 'payments-api' || trigger.textContent.trim() !== 'Payments API') fail('confirmed project switch did not update the selected project');
-    if (confirmed.hasAttribute('open') || navigations[navigations.length - 1] !== '/analytics?project_id=payments-api' || preferences !== 1) fail('confirmed project switch did not persist and navigate on the current page family');
+    if (confirmed.hasAttribute('open') || navigations[navigations.length - 1] !== '/analytics?project_id=payments-api&view=models&range=7d' || preferences !== 1) fail('confirmed project switch must retain the analytics tab and period, but clear project-specific filters');
     var retarget = window.sidebarSSERetargets && window.sidebarSSERetargets[window.sidebarSSERetargets.length - 1];
     if (!retarget || retarget[0] !== 'live-events' || retarget[1] !== '/events/live?project_id=payments-api') fail('confirmed project switch did not retarget scoped live events');
 
