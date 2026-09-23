@@ -625,6 +625,40 @@ func taskCardPullRequestNotFound(c echo.Context) error {
 	return c.String(http.StatusNotFound, message)
 }
 
+func (h *Handler) taskPullRequestProjectContext(c echo.Context) (string, bool, error) {
+	ctx := c.Request().Context()
+	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" && projectID != "default" {
+		project, err := h.projectSvc.GetByID(ctx, projectID)
+		if err != nil {
+			return "", true, err
+		}
+		if project == nil {
+			return "", true, nil
+		}
+		return projectID, true, nil
+	}
+	if h.settingsRepo == nil {
+		return "", false, nil
+	}
+	selectedProjectID, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey)
+	if err != nil {
+		applog.Debugf("[handler] failed to load selected project preference for task pull request: %v", err)
+		return "", false, nil
+	}
+	selectedProjectID = strings.TrimSpace(selectedProjectID)
+	if selectedProjectID == "" {
+		return "", false, nil
+	}
+	project, err := h.projectSvc.GetByID(ctx, selectedProjectID)
+	if err != nil {
+		return "", true, err
+	}
+	if project == nil {
+		return "", true, nil
+	}
+	return selectedProjectID, true, nil
+}
+
 // CreateTaskPullRequest creates or reuses a pull request for a task worktree branch.
 func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	taskID := c.Param("taskId")
@@ -636,13 +670,24 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		}
 		return taskPullRequestFailure(c, false, "Task not found")
 	}
+	requestProjectID := ""
 	if fromTaskCard {
-		projectID := strings.TrimSpace(c.FormValue("project_id"))
-		if projectID == "" || task.ProjectID != projectID {
+		requestProjectID = strings.TrimSpace(c.FormValue("project_id"))
+		if requestProjectID == "" || task.ProjectID != requestProjectID {
 			return taskCardPullRequestNotFound(c)
 		}
+	} else {
+		var hasRequestProject bool
+		var projectErr error
+		requestProjectID, hasRequestProject, projectErr = h.taskPullRequestProjectContext(c)
+		if projectErr != nil || (hasRequestProject && task.ProjectID != requestProjectID) {
+			return taskCardPullRequestNotFound(c)
+		}
+		if !hasRequestProject {
+			requestProjectID = task.ProjectID
+		}
 	}
-	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
+	project, err := h.projectRepo.GetByID(c.Request().Context(), requestProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
 		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
 	}
