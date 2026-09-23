@@ -2,12 +2,17 @@ package agentplugins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -392,6 +397,137 @@ func TestResolveRuntimeBundle_UsesSelectedPlugins(t *testing.T) {
 	}
 	if len(bundle.PluginIDs) != 1 {
 		t.Fatalf("expected selected plugin in runtime bundle, got %v", bundle.PluginIDs)
+	}
+}
+
+func TestResolveRuntimeBundleDoesNotProbePluginMCPServers(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		t.Errorf("ResolveRuntimeBundle must not contact MCP server during plugin resource merge")
+		http.Error(w, "unexpected MCP request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	pluginRoot := writeRuntimeBundleMCPPlugin(t, server.URL)
+	origUserPluginBase := userPluginBaseFn
+	defer func() { userPluginBaseFn = origUserPluginBase }()
+	userPluginBaseFn = func() string { return pluginRoot }
+
+	bundle, err := ResolveRuntimeBundle(context.Background(), []string{"playwright@demo-marketplace"})
+	if err != nil {
+		t.Fatalf("resolve runtime bundle: %v", err)
+	}
+	if len(bundle.MCPServers) != 1 || bundle.MCPServers[0].Name != "browser" || bundle.MCPServers[0].URL != server.URL {
+		t.Fatalf("expected plugin MCP server to be merged without setup, got %+v", bundle.MCPServers)
+	}
+	if len(bundle.MCPToolNames) != 0 {
+		t.Fatalf("expected no preflight MCP tool names, got %v", bundle.MCPToolNames)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("ResolveRuntimeBundle contacted MCP server %d times", got)
+	}
+}
+
+func writeRuntimeBundleMCPPlugin(tb testing.TB, serverURL string) string {
+	tb.Helper()
+	pluginRoot := filepath.Join(tb.TempDir(), "plugins")
+	installPath := filepath.Join(pluginRoot, "cache", "demo-marketplace", "playwright", "20240101T010101")
+	if err := os.MkdirAll(filepath.Join(installPath, "skills", "audit"), 0o755); err != nil {
+		tb.Fatalf("mkdir install path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(installPath, "skills", "audit", "SKILL.md"), []byte("---\nname: audit\n---\ncheck"), 0o644); err != nil {
+		tb.Fatalf("write skill file: %v", err)
+	}
+	mcpConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"browser": map[string]any{
+				"type": "http",
+				"url":  serverURL,
+			},
+		},
+	}
+	data, err := json.Marshal(mcpConfig)
+	if err != nil {
+		tb.Fatalf("marshal mcp config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(installPath, ".mcp.json"), data, 0o644); err != nil {
+		tb.Fatalf("write mcp config: %v", err)
+	}
+	return pluginRoot
+}
+
+func BenchmarkResolveRuntimeBundleSkipsMCPPreflightDelay(b *testing.B) {
+	var initializeCalls atomic.Int64
+	var toolsListCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      int64           `json:"id"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			b.Errorf("decode MCP request: %v", err)
+			http.Error(w, "bad MCP request", http.StatusBadRequest)
+			return
+		}
+		switch req.Method {
+		case "initialize":
+			initializeCalls.Add(1)
+			writeMCPJSONRPCResult(b, w, req.ID, map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{}})
+		case "tools/list":
+			toolsListCalls.Add(1)
+			time.Sleep(100 * time.Millisecond)
+			writeMCPJSONRPCResult(b, w, req.ID, map[string]any{"tools": []map[string]any{{"name": "screenshot", "description": "Capture", "inputSchema": map[string]any{"type": "object"}}}})
+		default:
+			b.Errorf("unexpected MCP method %q", req.Method)
+			http.Error(w, "unexpected MCP method", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	pluginRoot := writeRuntimeBundleMCPPlugin(b, server.URL)
+	origUserPluginBase := userPluginBaseFn
+	defer func() { userPluginBaseFn = origUserPluginBase }()
+	userPluginBaseFn = func() string { return pluginRoot }
+
+	servers := []models.MCPServerConfig{{Name: "browser", Type: "http", URL: server.URL}}
+	b.Run("resolve_bundle_no_mcp_setup", func(b *testing.B) {
+		initializeCalls.Store(0)
+		toolsListCalls.Store(0)
+		for i := 0; i < b.N; i++ {
+			bundle, err := ResolveRuntimeBundle(context.Background(), []string{"playwright@demo-marketplace"})
+			if err != nil {
+				b.Fatalf("resolve runtime bundle: %v", err)
+			}
+			if len(bundle.MCPServers) != 1 {
+				b.Fatalf("expected merged MCP server, got %+v", bundle.MCPServers)
+			}
+		}
+		if initializeCalls.Load() != 0 || toolsListCalls.Load() != 0 {
+			b.Fatalf("bundle resolution performed MCP setup: initialize=%d tools/list=%d", initializeCalls.Load(), toolsListCalls.Load())
+		}
+	})
+	b.Run("old_introspection_path_with_100ms_tools_list", func(b *testing.B) {
+		initializeCalls.Store(0)
+		toolsListCalls.Store(0)
+		for i := 0; i < b.N; i++ {
+			if names := IntrospectMCPToolNames(context.Background(), servers); len(names) != 1 || names[0] != "browser__screenshot" {
+				b.Fatalf("unexpected introspected names: %v", names)
+			}
+		}
+		if initializeCalls.Load() != int64(b.N) || toolsListCalls.Load() != int64(b.N) {
+			b.Fatalf("introspection setup count initialize=%d tools/list=%d want %d", initializeCalls.Load(), toolsListCalls.Load(), b.N)
+		}
+	})
+}
+
+func writeMCPJSONRPCResult(tb testing.TB, w http.ResponseWriter, id int64, result any) {
+	tb.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": result}); err != nil {
+		tb.Fatalf("write MCP response: %v", err)
 	}
 }
 
