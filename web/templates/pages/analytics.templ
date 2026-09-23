@@ -11,6 +11,14 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 	}
 }
 
+templ analyticsTaskSummary(view string) {
+	<div data-task-summary={ view } class="grid grid-cols-1 md:grid-cols-3 gap-4">
+		for _, label := range []string{"Tasks worked on", "Goals achieved", "Work merged"} {
+			<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-task-summary-value class="text-center opacity-50 font-normal text-base" style="min-height:1.5rem">Loading analytics…</strong><span data-task-summary-sample class="text-xs opacity-60"></span></div></div>
+		}
+	</div>
+}
+
 templ analyticsChartCard(title, description, canvasID, heightClass string) {
 	<div class="card bg-base-100 border border-base-300"><div class="card-body">
 		<h4 class="card-title">{ title }</h4>
@@ -79,6 +87,7 @@ templ analyticsContent(currentProject *models.Project) {
 
 				<section id="analytics-agents" data-analytics-section="agents" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Agents</h3><p class="text-sm opacity-60">Compare reusable Agent definitions and inspect how each one performs.</p></div>
+					@analyticsTaskSummary("agents")
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Agent outcome comparison", "Goal achievement, first-run success, and follow-up runs with sample sizes.", "agentComparisonChart", "h-80") @analyticsChartCard("Quality versus efficiency", "Outcome quality against duration or covered cost.", "agentEfficiencyChart", "h-80")</div>
 					<div id="agentDetail">@analyticsChartCard("Selected Agent outcome trend", "Select an Agent for period detail.", "agentOutcomeTrendChart", "h-64")</div>
 					@analyticsChartCard("Performance by task category", "Run success, goal achievement, and follow-up runs for the selected Agent.", "agentCategoryChart", "h-72")
@@ -97,6 +106,7 @@ templ analyticsContent(currentProject *models.Project) {
 						</button>
 					</div>
 					<div id="modelMetricHelp" popover="auto" role="tooltip" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-xl p-3 text-sm" style="position:fixed;margin:0;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto"></div>
+					@analyticsTaskSummary("models")
 					<div class="card bg-base-100 border border-base-300"><div class="card-body">
 						<h4 class="card-title">Model comparison</h4>
 						<p class="text-sm opacity-60">Goals met, work delivered, and the effort required. Follow-ups can reflect changed goals—not just corrections.</p>
@@ -263,7 +273,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if (table) table.innerHTML = '\x3ctr>\x3ctd colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 								});
 								['analyticsKpis','analyticsMetricDefinitions','outcomeFunnel','analyticsImprovements','analyticsAttention','modelScorecard','frequentTasksList'].forEach(function(id) { const node=document.getElementById(id); if (node) node.textContent='Analytics unavailable'; });
-								document.querySelectorAll('[data-usage-summary-value], [data-skill-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
+								document.querySelectorAll('[data-usage-summary-value], [data-skill-summary-value], [data-task-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
 								const usageAccounts=document.getElementById('accountUsageCards');usageAccounts.removeAttribute('aria-busy');
 								usageAccounts.querySelectorAll('.card-body').forEach(body=>body.textContent='Analytics unavailable');
 								const failedBody = document.querySelector('#failedPatternsTable tbody');
@@ -299,6 +309,8 @@ templ analyticsContent(currentProject *models.Project) {
 								});
 							}
 							function showAnalyticsLoading() {
+								document.querySelectorAll('[data-task-summary="'+selectedView+'"] [data-task-summary-value]').forEach(node=>{node.textContent='Loading analytics…';node.className='text-center opacity-50 font-normal text-base';});
+								document.querySelectorAll('[data-task-summary="'+selectedView+'"] [data-task-summary-sample]').forEach(node=>node.textContent='');
 								if(selectedView==='learning')document.querySelectorAll('[data-skill-summary-value]').forEach(node=>{node.textContent='Loading analytics…';node.className='text-center opacity-50 font-normal text-base';});
 								const panels=selectedView==='models'?[['modelScorecard',0]]:selectedView==='agents'?[['agentFindings',0],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5]]:[];
 								panels.forEach(function(entry){
@@ -535,11 +547,13 @@ templ analyticsContent(currentProject *models.Project) {
 									}
 									renderDashboardFilterOptions(data.agents || [], data.workflows || []);
 									if (selectedView === 'agents') {
+										renderTaskSummary(data.task_summary);
 										renderAgentPerformance(data.agents || []);
 										renderAgentComparison(data.agents || []);
 										renderAgentDetail(data.agent_detail || null);
 									}
 									if (selectedView === 'models') {
+										renderTaskSummary(data.task_summary);
 										renderModelPerformance(data.models || []);
 									}
 									if (selectedView === 'learning') {
@@ -650,6 +664,14 @@ templ analyticsContent(currentProject *models.Project) {
 									modelChartColors.set(key,palette[index]||'hsl('+((index*137.508)%360)+',65%,65%)');
 								}
 								return modelChartColors.get(key);
+							}
+							function renderTaskSummary(summary) {
+								const metrics=summary?[null,summary.goal_achievement,summary.merge_completion]:[];
+								document.querySelectorAll('[data-task-summary="'+selectedView+'"] [data-task-summary-value]').forEach((node,i)=>{
+									const m=metrics[i];node.className='text-lg tabular-nums';
+									node.textContent=!summary?'Unavailable':i===0?formatNumber(summary.tasks_worked_on):m&&m.denominator?Number(m.percent).toFixed(1)+'%':'Unavailable';
+									node.parentElement.querySelector('[data-task-summary-sample]').textContent=i&&summary?(m.numerator+' / '+m.denominator+(i===1?' evaluated':' eligible')):'';
+								});
 							}
 							function renderModelCharts(rows) {
 								const models=rows.filter(r=>!r.mixed_models).sort((a,b)=>Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));

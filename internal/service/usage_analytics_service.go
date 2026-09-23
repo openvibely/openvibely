@@ -174,6 +174,13 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Conte
 	return view, configsByID, refreshErrors, nil
 }
 
+func (s *UsageAnalyticsService) BuildUsagePage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+	if s == nil || s.usageRepo == nil {
+		return nil, fmt.Errorf("usage analytics service is not configured")
+	}
+	return s.usageRepo.GetUsagePage(ctx, filter)
+}
+
 func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
 	if s == nil || s.usageRepo == nil {
 		return nil, fmt.Errorf("usage analytics service is not configured")

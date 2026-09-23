@@ -300,6 +300,12 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		}
 	}
 	if sections.agents {
+		if filter.View == "agents" {
+			dashboard.TaskSummary, err = r.queryAnalyticsTaskSummary(ctx, filter)
+			if err != nil {
+				return dashboard, err
+			}
+		}
 		if dashboard.Agents, err = r.queryAgentPerformance(ctx, filter); err != nil {
 			return dashboard, err
 		}
@@ -326,6 +332,18 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		if dashboard.Models, err = r.queryModelPerformance(ctx, filter); err != nil {
 			return dashboard, err
 		}
+		summary := &models.AnalyticsTaskSummary{}
+		var goals, goalN, merged, mergeN int
+		for _, row := range dashboard.Models {
+			summary.TasksWorkedOn += row.TasksUsed
+			goals += row.GoalAchievement.Numerator
+			goalN += row.GoalAchievement.Denominator
+			merged += row.MergeCompletion.Numerator
+			mergeN += row.MergeCompletion.Denominator
+		}
+		summary.GoalAchievement = metric(goals, goalN)
+		summary.MergeCompletion = metric(merged, mergeN)
+		dashboard.TaskSummary = summary
 	}
 	if sections.workflows {
 		if dashboard.Workflows, err = r.queryWorkflowPerformance(ctx, filter); err != nil {
@@ -716,6 +734,30 @@ func (r *ExecutionRepo) queryOutcomeFunnel(ctx context.Context, filter Analytics
 		{Key: "goal_achieved", Label: "Goal achieved", Count: achieved, Denominator: goalEligible},
 		{Key: "merged", Label: "Merge-tracked tasks merged", Count: merged, Denominator: mergeEligible},
 	}, nil
+}
+
+func (r *ExecutionRepo) queryAnalyticsTaskSummary(ctx context.Context, filter AnalyticsDashboardFilter) (*models.AnalyticsTaskSummary, error) {
+	window, args := analyticsWindowClause("e", filter)
+	usageWindow, usageArgs := analyticsEventWindowClause("u", "occurred_at", filter)
+	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
+	query := `WITH active_tasks AS (
+		SELECT e.task_id FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + window + `
+		UNION SELECT u.task_id FROM llm_usage_events u WHERE u.project_id=? AND (u.operation IN ('task','task_followup') OR (u.operation='' AND EXISTS (SELECT 1 FROM executions e WHERE e.id=u.execution_id AND e.task_id=u.task_id)))` + usageWindow + `
+	) SELECT COUNT(*),COALESCE(SUM(g.status='achieved'),0),COALESCE(SUM(g.status IN ('achieved','failed','active','paused','blocked')),0),
+	COALESCE(SUM(t.merge_status='merged'),0),COALESCE(SUM(t.worktree_path<>'' OR t.merge_status<>''),0)
+	FROM active_tasks a JOIN tasks t ON t.id=a.task_id LEFT JOIN task_goals g ON g.task_id=t.id
+	WHERE t.project_id=? AND COALESCE(t.category,'')<>'chat'` + dimension
+	params := append([]any{filter.ProjectID}, args...)
+	params = append(params, filter.ProjectID)
+	params = append(params, usageArgs...)
+	params = append(params, filter.ProjectID)
+	params = append(params, dimensionArgs...)
+	summary := &models.AnalyticsTaskSummary{}
+	var goals, goalN, merged, mergeN int
+	err := r.db.QueryRowContext(ctx, query, params...).Scan(&summary.TasksWorkedOn, &goals, &goalN, &merged, &mergeN)
+	summary.GoalAchievement = metric(goals, goalN)
+	summary.MergeCompletion = metric(merged, mergeN)
+	return summary, err
 }
 
 func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.AgentPerformance, error) {

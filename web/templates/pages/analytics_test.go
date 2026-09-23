@@ -86,6 +86,29 @@ window.addEventListener('load',function(){
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsContent_TaskSummaryCards(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+history.replaceState({},'',location.pathname+'?project_id=p&view=models');
+window.Chart=function(){this.destroy=function(){};};
+window.fetch=function(){return Promise.resolve({ok:true,json:function(){return Promise.resolve({task_summary:{tasks_worked_on:42,goal_achievement:{numerator:24,denominator:30,percent:80},merge_completion:{numerator:18,denominator:24,percent:75}},models:[],agents:[],recent_outcomes:[]});}});};
+window.addEventListener('load',function(){
+ var result=document.getElementById('reconnect-result'),view='models',attempts=0;
+ function check(){
+  var box=document.querySelector('[data-task-summary="'+view+'"]');
+  if(box.textContent.includes('Loading')){if(++attempts>100){result.dataset.testResult='fail';result.dataset.testError='KPI loading stuck';return;}setTimeout(check,20);return;}
+  if(Array.from(box.querySelectorAll('[data-task-summary-value]')).map(el=>el.textContent).join('|')!=='42|80.0%|75.0%'||!box.textContent.includes('24 / 30 evaluated')||!box.textContent.includes('18 / 24 eligible')){result.dataset.testResult='fail';result.dataset.testError='KPI values missing on '+view;return;}
+  if(view==='models'){view='agents';document.querySelector('[data-analytics-view="agents"]').click();setTimeout(check,20);return;}
+  result.dataset.testResult='pass';
+ }check();
+});
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_LearningKPIsPrecedeCharts(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {

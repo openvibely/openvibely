@@ -259,6 +259,7 @@ type SkillOutcomeSummary struct {
 }
 
 type AnalyticsDashboard struct {
+	TaskSummary          *AnalyticsTaskSummary          `json:"task_summary,omitempty"`
 	SkillSummary         SkillOutcomeSummary            `json:"skill_summary"`
 	Definitions          []MetricDefinition             `json:"definitions"`
 	Current              OutcomeMetrics                 `json:"current"`
@@ -280,4 +281,10 @@ type AnalyticsDashboard struct {
 	EvidenceLimit        int                            `json:"evidence_limit"`
 	EvidenceOffset       int                            `json:"evidence_offset"`
 	Insights             []AnalyticsInsight             `json:"insights"`
+}
+
+type AnalyticsTaskSummary struct {
+	TasksWorkedOn   int             `json:"tasks_worked_on"`
+	GoalAchievement AnalyticsMetric `json:"goal_achievement"`
+	MergeCompletion AnalyticsMetric `json:"merge_completion"`
 }

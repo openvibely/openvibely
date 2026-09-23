@@ -90,7 +90,7 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 	var view *models.AnalyticsUsageViewModel
 	var err error
 	if analyticsUsageProjection(c) == "local" {
-		view, err = h.usageAnalyticsSvc.BuildLocalAnalyticsUsage(c.Request().Context(), filter)
+		view, err = h.usageAnalyticsSvc.BuildUsagePage(c.Request().Context(), filter)
 	} else {
 		view, err = h.usageAnalyticsSvc.BuildAnalyticsUsage(c.Request().Context(), filter)
 	}

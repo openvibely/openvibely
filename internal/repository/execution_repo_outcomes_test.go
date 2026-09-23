@@ -654,6 +654,33 @@ func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 	}
 }
 
+func TestAnalyticsTaskSummaryCountsTasksOnceAndFiltersAgents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	_, err := db.Exec(`INSERT INTO projects(id,name) VALUES ('kpi','KPI');
+	INSERT INTO agents(id,name,model) VALUES ('agent','Agent','inherit');
+	INSERT INTO tasks(id,project_id,title,status,agent_definition_id,merge_status) VALUES ('a','kpi','A','completed','agent','merged'),('b','kpi','B','completed',NULL,'');
+	INSERT INTO executions(id,task_id,status,started_at,completed_at) VALUES ('a1','a','completed','2026-09-01 10:00:00','2026-09-01 11:00:00'),('a2','a','completed','2026-09-01 12:00:00','2026-09-01 13:00:00'),('b1','b','completed','2026-09-01 10:00:00','2026-09-01 11:00:00');
+	INSERT INTO task_goals(task_id,goal_id,objective,status) VALUES ('a','g','Goal','achieved');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewExecutionRepo(db)
+	for _, view := range []string{"models", "agents"} {
+		d, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "kpi", View: view})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.TaskSummary == nil || d.TaskSummary.TasksWorkedOn != 2 || d.TaskSummary.GoalAchievement != metric(1, 1) || d.TaskSummary.MergeCompletion != metric(1, 1) {
+			t.Fatalf("%s: %+v", view, d.TaskSummary)
+		}
+	}
+	s, err := repo.queryAnalyticsTaskSummary(ctx, AnalyticsDashboardFilter{ProjectID: "kpi", AgentID: "__unassigned__"})
+	if err != nil || s.TasksWorkedOn != 1 || s.GoalAchievement.Denominator != 0 {
+		t.Fatalf("filtered summary: %+v %v", s, err)
+	}
+}
+
 func TestAnalyticsDashboardModelsIncludeAllWorkTypes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
