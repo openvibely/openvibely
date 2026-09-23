@@ -145,7 +145,19 @@ window.addEventListener('load',function(){
   var box=document.querySelector('[data-task-summary="'+view+'"]');
   if(box.textContent.includes('Loading')){if(++attempts>100){result.dataset.testResult='fail';result.dataset.testError='KPI loading stuck';return;}setTimeout(check,20);return;}
   if(Array.from(box.querySelectorAll('[data-task-summary-value]')).map(el=>el.textContent).join('|')!=='42|80.0%|75.0%'||!box.textContent.includes('24 / 30 evaluated')||!box.textContent.includes('18 / 24 eligible')){result.dataset.testResult='fail';result.dataset.testError='KPI values missing on '+view;return;}
+  var help=box.querySelectorAll('[data-model-help]')[1],tip=document.getElementById('modelMetricHelp');
+  help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
+  if(!tip.matches(':popover-open')||!tip.textContent.includes('24 / 30 evaluated')||!tip.textContent.includes('goal was met')||!help.querySelector('[data-task-summary-sample]').hidden){result.dataset.testResult='fail';result.dataset.testError='sample must be hidden in card and visible in immediate tooltip';return;}
+  help.click();
+  if(!tip.matches(':popover-open')){result.dataset.testResult='fail';result.dataset.testError='click must pin tooltip';return;}
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   if(view==='models'){view='agents';document.querySelector('[data-analytics-view="agents"]').click();setTimeout(check,20);return;}
+  for(var name of ['usage','learning']){
+   document.querySelector('[data-analytics-view="'+name+'"]').click();
+   var button=document.querySelector('#analytics-'+name+' [data-analytics-kpi] [data-model-help]');button.click();
+   if(!tip.matches(':popover-open')||tip.textContent!==button.dataset.modelHelp){result.dataset.testResult='fail';result.dataset.testError='KPI tooltip missing on '+name;return;}
+   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  }
   result.dataset.testResult='pass';
  }check();
 });
@@ -159,20 +171,19 @@ func TestAnalyticsContent_KPICardsShareLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := rendered.String()
-	// Four visible tabs, three cards each. Every card reserves the same
-	// title, value, and sample rows even when loading or lacking sample text.
+	// Four visible tabs, three compact cards each, without reserved sample rows.
 	if got := strings.Count(content, `data-analytics-kpi`); got != 12 {
 		t.Fatalf("KPI cards = %d, want 12", got)
 	}
-	if got := strings.Count(content, `grid-template-rows:2.5rem 1.75rem 1rem`); got != 12 {
-		t.Fatalf("shared KPI row layouts = %d, want 12", got)
+	if strings.Contains(content, `grid-template-rows:2.5rem 1.75rem 1rem`) {
+		t.Fatal("KPI cards must not reserve empty rows")
 	}
 	for _, kind := range []string{"usage", "skill", "task"} {
 		var card bytes.Buffer
-		if err := analyticsKPICard("Test", kind).Render(context.Background(), &card); err != nil {
+		if err := analyticsKPICard("Goals achieved", kind).Render(context.Background(), &card); err != nil {
 			t.Fatal(err)
 		}
-		for _, expected := range []string{"data-" + kind + "-summary-value", "data-" + kind + "-summary-sample", `aria-live="polite"`, "Loading analytics…"} {
+		for _, expected := range []string{"data-" + kind + "-summary-value", "data-" + kind + "-summary-sample", `aria-live="polite"`, "Loading analytics…", "data-model-help", "goal was met", `hidden aria-hidden="true"`} {
 			if !strings.Contains(card.String(), expected) {
 				t.Errorf("%s card missing %s", kind, expected)
 			}
