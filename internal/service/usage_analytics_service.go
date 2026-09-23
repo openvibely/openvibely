@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -140,8 +141,25 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Conte
 		if err != nil {
 			view.Errors = append(view.Errors, fmt.Sprintf("listing OAuth accounts: %v", err))
 		} else {
+			// Profile lookups can also involve provider requests. Resolve
+			// independent credential owners concurrently before grouping accounts.
+			owners := map[string][]int{}
+			for i, cfg := range configs {
+				key := accountUsageCredentialOwnerKeyForConfig(cfg)
+				owners[key] = append(owners[key], i)
+			}
+			var resolving sync.WaitGroup
+			for _, indices := range owners {
+				resolving.Add(1)
+				go func(indices []int) {
+					defer resolving.Done()
+					for _, i := range indices {
+						configs[i] = s.resolveAccountUsageOAuthAccountID(ctx, configs[i])
+					}
+				}(indices)
+			}
+			resolving.Wait()
 			for i := range configs {
-				configs[i] = s.resolveAccountUsageOAuthAccountID(ctx, configs[i])
 				configsByID[configs[i].ID] = configs[i]
 			}
 			view.AccountLimits = append(view.AccountLimits, s.oauthAccountPlaceholders(configs, filter.Provider)...)
@@ -599,8 +617,8 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 	if provider != "" {
 		return s.refreshProviderAccountSnapshots(ctx, configs, provider, force)
 	}
-	// Independent providers can refresh concurrently. Keep each provider's
-	// credential fallback and account deduplication sequence intact.
+	// Independent providers can refresh concurrently; each provider also
+	// parallelizes independent account/credential groups.
 	type result struct {
 		snapshots []models.AccountUsageSnapshot
 		errors    map[string]string
@@ -627,6 +645,73 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 }
 
 func (s *UsageAnalyticsService) refreshProviderAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
+	// Group transitively by account or credential owner. Independent groups
+	// run concurrently; aliases and credential fallbacks retain their order.
+	var eligible []models.LLMConfig
+	for _, cfg := range configs {
+		if string(cfg.Provider) == provider && cfg.AuthMethod == models.AuthMethodOAuth && strings.TrimSpace(cfg.OAuthAccessToken) != "" {
+			eligible = append(eligible, cfg)
+		}
+	}
+	parents := make([]int, len(eligible))
+	for i := range parents {
+		parents[i] = i
+	}
+	var root func(int) int
+	root = func(i int) int {
+		if parents[i] != i {
+			parents[i] = root(parents[i])
+		}
+		return parents[i]
+	}
+	owners := map[string]int{}
+	for i, cfg := range eligible {
+		for _, key := range []string{"account:" + accountUsageKeyForConfig(cfg), "credential:" + accountUsageCredentialOwnerKeyForConfig(cfg)} {
+			if previous, ok := owners[key]; ok {
+				parents[root(i)] = root(previous)
+			} else {
+				owners[key] = i
+			}
+		}
+	}
+	var groups [][]models.LLMConfig
+	indices := map[int]int{}
+	for i, cfg := range eligible {
+		key := root(i)
+		index, ok := indices[key]
+		if !ok {
+			index = len(groups)
+			indices[key] = index
+			groups = append(groups, nil)
+		}
+		groups[index] = append(groups[index], cfg)
+	}
+	type result struct {
+		snapshots []models.AccountUsageSnapshot
+		errors    map[string]string
+	}
+	results := make([]chan result, len(groups))
+	for i, group := range groups {
+		ch := make(chan result, 1)
+		results[i] = ch
+		go func(configs []models.LLMConfig) {
+			snapshots, errs := s.refreshAccountSnapshotGroup(ctx, configs, provider, force)
+			ch <- result{snapshots, errs}
+		}(group)
+	}
+	var snapshots []models.AccountUsageSnapshot
+	errs := map[string]string{}
+	for _, ch := range results {
+		r := <-ch
+		snapshots = append(snapshots, r.snapshots...)
+		for key, value := range r.errors {
+			errs[key] = value
+		}
+	}
+	return snapshots, errs
+}
+
+func (s *UsageAnalyticsService) refreshAccountSnapshotGroup(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
 	if s.accountFetcher == nil {
 		return nil, nil
 	}
