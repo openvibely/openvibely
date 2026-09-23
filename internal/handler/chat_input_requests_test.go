@@ -27,7 +27,12 @@ func TestRequestUserInputToolWebOnlyRegistryAndHandler(t *testing.T) {
 			continue
 		}
 		require.Equal(t, string(chatcontrol.AccessWrite), string(def.Access))
-		require.JSONEq(t, `{"type":"object","required":["questions"],"additionalProperties":false,"properties":{"questions":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","required":["id","question","options"],"additionalProperties":false,"properties":{"id":{"type":"string","description":"Stable question id used in the answer result."},"question":{"type":"string","description":"Plain-text question to show to the user."},"options":{"type":"array","minItems":2,"maxItems":3,"items":{"type":"object","required":["label","description"],"additionalProperties":false,"properties":{"label":{"type":"string","description":"Clickable option label returned exactly when selected."},"description":{"type":"string","description":"Short plain-text explanation shown under the label."}}}}}}}}}`, string(def.Parameters))
+		require.JSONEq(t, `{"type":"object","required":["questions"],"additionalProperties":false,"properties":{"questions":{"type":"array","description":"Ask 1 to 3 questions. Put the recommended/default path first for each question and include a move-forward option for proceeding with sensible defaults when practical.","minItems":1,"maxItems":3,"items":{"type":"object","required":["id","question","options"],"additionalProperties":false,"properties":{"id":{"type":"string","description":"Stable question id used in the answer result."},"question":{"type":"string","description":"Plain-text question to show to the user."},"options":{"type":"array","description":"Clickable choices. The first option should be the recommended/default path; include a move-forward/defaults option when practical.","minItems":2,"maxItems":3,"items":{"type":"object","required":["label","description"],"additionalProperties":false,"properties":{"label":{"type":"string","description":"Clickable option label returned exactly when selected."},"description":{"type":"string","description":"Short plain-text explanation shown under the label."}}}}}}}}}`, string(def.Parameters))
+		description := strings.ToLower(def.Description)
+		require.Contains(t, description, "recommended/default")
+		require.Contains(t, description, "move-forward")
+		require.Contains(t, description, "model/agent")
+		require.Contains(t, description, "persistent goal")
 	}
 
 	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceAPI, chatcontrol.SurfaceSlack, chatcontrol.SurfaceTelegram, chatcontrol.SurfaceEmail, chatcontrol.SurfaceDiscord, chatcontrol.SurfaceX} {
@@ -315,6 +320,8 @@ func TestChatPageRendersInputRequestClientControls(t *testing.T) {
 	require.Contains(t, body, "chat_user_input_requested")
 	require.Contains(t, body, "renderChatInputRequest")
 	require.Contains(t, body, "button[data-chat-input-option]")
+	require.Contains(t, body, "chat-input-option-btn")
+	require.Contains(t, body, "--btn-focus-scale', '1'")
 	require.Contains(t, body, "textContent = option.description")
 	require.NotContains(t, body, "innerHTML = option.description")
 	require.NotContains(t, body, "innerHTML = question.question")

@@ -1334,7 +1334,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (!label) return;
 									var button = document.createElement('button');
 									button.type = 'button';
-									button.className = 'btn ' + (optionIndex === 0 ? 'btn-primary' : 'btn-outline') + ' justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+									button.className = 'chat-input-option-btn btn ' + (optionIndex === 0 ? 'btn-primary' : 'btn-outline') + ' justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+									button.style.setProperty('--btn-focus-scale', '1');
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
 									button.setAttribute('data-option-label', label);
@@ -1358,7 +1359,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								});
 								var customButton = document.createElement('button');
 								customButton.type = 'button';
-								customButton.className = 'btn btn-outline justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+								customButton.className = 'chat-input-option-btn btn btn-outline justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+								customButton.style.setProperty('--btn-focus-scale', '1');
 								customButton.setAttribute('data-chat-input-option', 'true');
 								customButton.setAttribute('data-chat-input-custom-option', 'true');
 								customButton.setAttribute('data-question-id', qid);
