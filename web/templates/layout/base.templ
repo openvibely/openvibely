@@ -805,14 +805,64 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					padding: 0;
 					font-size: inherit;
 				}
-			/* Chat input container - matches chat bubble styling */
-			.chat-input-container {
-				background-color: hsl(var(--b1));
-				border: none;
-				margin-left: 0;
-			}					#pending-thread-inputs:has([data-thread-input-id]) {
-						padding-bottom: 1rem;
-					}
+				/* Chat input container - matches chat bubble styling */
+				.chat-input-container {
+					background-color: hsl(var(--b1));
+					border: none;
+					margin-left: 0;
+				}
+				.chat-input-request-card {
+					background: hsl(var(--b1));
+					border: none;
+					color: hsl(var(--bc));
+				}
+				.chat-input-option-btn {
+					display: flex;
+					align-items: flex-start;
+					gap: 0.5rem;
+					border: 1px solid hsl(var(--bc) / 0.12);
+					border-radius: 0.75rem;
+					background: hsl(var(--b2) / 0.34);
+					color: hsl(var(--bc) / 0.82);
+					transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+				}
+				.chat-input-option-btn:hover:where(:not(:disabled)) {
+					background: hsl(var(--bc) / 0.055);
+					border-color: hsl(var(--bc) / 0.2);
+					color: hsl(var(--bc) / 0.94);
+				}
+				.chat-input-option-btn:focus-visible {
+					outline: 2px solid hsl(var(--p) / 0.45);
+					outline-offset: 2px;
+				}
+				.chat-input-option-btn.chat-input-option-selected {
+					background: hsl(var(--p) / 0.16);
+					border-color: hsl(var(--p) / 0.48);
+					color: hsl(var(--bc));
+					box-shadow: inset 0 0 0 1px hsl(var(--p) / 0.2);
+				}
+				.chat-input-option-btn:disabled {
+					cursor: not-allowed;
+					opacity: 0.55;
+				}
+				.chat-input-recommended-badge {
+					display: inline-flex;
+					align-items: center;
+					border-radius: 9999px;
+					background: hsl(var(--p) / 0.16);
+					color: hsl(var(--bc) / 0.9);
+					padding: 0.125rem 0.45rem;
+					font-size: 0.6875rem;
+					font-weight: 600;
+					line-height: 1.2;
+				}
+				.chat-input-recommended-shortcut:hover:where(:not(:disabled):not(.btn-disabled)) {
+					background: hsl(var(--bc) / 0.075) !important;
+					border-color: transparent !important;
+				}
+				#pending-thread-inputs:has([data-thread-input-id]) {
+					padding-bottom: 1rem;
+				}
 				/* Chat message scrollports: scrollbar appearance only (geometry handled above). */
 				#chat-messages,
 				#task-thread-messages {

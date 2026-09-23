@@ -116,6 +116,8 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (!createButton) fail('create option button missing');
 				if (createButton.getAttribute('aria-pressed') !== 'false') fail('recommended option was preselected before user click');
 				if (createButton.textContent.indexOf('Recommended') === -1) fail('recommended option was not visually labeled');
+				if (createButton.classList.contains('btn-outline') || createButton.classList.contains('btn-primary')) fail('question option still uses distracting DaisyUI outline/primary styling');
+				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
 				if (getComputedStyle(createButton).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
@@ -131,6 +133,8 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				await waitFor(function() { return /1 of 2/.test(card.textContent); }, 'Previous did not return to the first question');
 				nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || nextButton.disabled) fail('Next should be enabled after the user selects the recommended option');
+				if (!createButton.classList.contains('chat-input-option-selected')) fail('selected option did not use the local selected styling');
+				if (createButton.classList.contains('btn-primary')) fail('selected option fell back to distracting primary button styling');
 				nextButton.click();
 				await waitFor(function() { return /2 of 2/.test(card.textContent) && card.textContent.indexOf('Which fallback should be used?') !== -1; }, 'Next did not show the second question');
 				card.querySelector('button[data-chat-input-nav="previous"]').click();

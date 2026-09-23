@@ -1299,7 +1299,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (emptyState) emptyState.remove();
 							var card = document.createElement('section');
 							card.id = 'chat-input-request-' + requestId;
-							card.className = 'chat-input-request-card card bg-base-100 shadow-lg border border-base-300/70';
+							card.className = 'chat-input-request-card card shadow-lg';
 							card.setAttribute('data-chat-input-request-id', requestId);
 							card.setAttribute('aria-labelledby', 'chat-input-request-title-' + requestId);
 							var body = document.createElement('div');
@@ -1334,7 +1334,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (!label) return;
 									var button = document.createElement('button');
 									button.type = 'button';
-									button.className = 'chat-input-option-btn btn btn-outline justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+									button.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
 									button.style.setProperty('--btn-focus-scale', '1');
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
@@ -1350,7 +1350,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									labelLine.appendChild(labelSpan);
 									if (optionIndex === 0) {
 										var recommendedBadge = document.createElement('span');
-										recommendedBadge.className = 'badge badge-primary badge-sm';
+										recommendedBadge.className = 'chat-input-recommended-badge';
 										recommendedBadge.textContent = 'Recommended';
 										labelLine.appendChild(recommendedBadge);
 									}
@@ -1364,7 +1364,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								});
 								var customButton = document.createElement('button');
 								customButton.type = 'button';
-								customButton.className = 'chat-input-option-btn btn btn-outline justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+								customButton.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
 								customButton.style.setProperty('--btn-focus-scale', '1');
 								customButton.setAttribute('data-chat-input-option', 'true');
 								customButton.setAttribute('data-chat-input-custom-option', 'true');
@@ -1398,7 +1398,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							position.setAttribute('data-chat-input-position', 'true');
 							var recommended = document.createElement('button');
 							recommended.type = 'button';
-							recommended.className = 'btn btn-secondary btn-sm';
+							recommended.className = 'btn btn-ghost btn-sm chat-input-recommended-shortcut';
 							recommended.style.setProperty('--btn-focus-scale', '1');
 							recommended.setAttribute('data-chat-input-nav', 'recommended');
 							recommended.setAttribute('aria-label', 'Use recommended answers and continue');
@@ -1518,8 +1518,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							fieldset.setAttribute('data-selected-label', isCustom ? '' : (button.getAttribute('data-option-label') || ''));
 							fieldset.querySelectorAll('button[data-chat-input-option]').forEach(function(btn) {
 								var selected = btn === button;
-								btn.classList.toggle('btn-outline', !selected);
-								btn.classList.toggle('btn-primary', selected);
+								btn.classList.toggle('chat-input-option-selected', selected);
 								btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
 							});
 							var customWrap = fieldset.querySelector('[data-chat-input-custom-wrap]');
