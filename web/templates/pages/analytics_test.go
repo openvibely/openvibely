@@ -153,6 +153,36 @@ window.addEventListener('load',function(){
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestAnalyticsContent_KPICardsShareLayout(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	content := rendered.String()
+	// Four visible tabs, three cards each. Every card reserves the same
+	// title, value, and sample rows even when loading or lacking sample text.
+	if got := strings.Count(content, `data-analytics-kpi`); got != 12 {
+		t.Fatalf("KPI cards = %d, want 12", got)
+	}
+	if got := strings.Count(content, `grid-template-rows:2.5rem 1.75rem 1rem`); got != 12 {
+		t.Fatalf("shared KPI row layouts = %d, want 12", got)
+	}
+	for _, kind := range []string{"usage", "skill", "task"} {
+		var card bytes.Buffer
+		if err := analyticsKPICard("Test", kind).Render(context.Background(), &card); err != nil {
+			t.Fatal(err)
+		}
+		for _, expected := range []string{"data-" + kind + "-summary-value", "data-" + kind + "-summary-sample", `aria-live="polite"`, "Loading analytics…"} {
+			if !strings.Contains(card.String(), expected) {
+				t.Errorf("%s card missing %s", kind, expected)
+			}
+		}
+	}
+	if !strings.Contains(content, "usageContext.querySelectorAll('[data-usage-summary-value]').forEach((node,index)=>{node.textContent=values[index];node.className='text-lg tabular-nums';})") {
+		t.Fatal("Usage KPI value styling must match Models, Agents, and Learning")
+	}
+}
+
 func TestAnalyticsContent_LearningKPIsPrecedeCharts(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
@@ -577,7 +607,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
           var accountCards = document.querySelectorAll('#accountUsageCards > .card');
           if (accountCards.length !== 3 || accountCards[0].classList.contains('lg:col-span-2') || accountCards[1].classList.contains('lg:col-span-2') || !accountCards[2].classList.contains('lg:col-span-2')) fail('odd final provider account card did not span both desktop columns');
 	          var usageContext = document.getElementById('usageSummary').textContent;
-          if (usageContext.indexOf('Cache utilization75.0%') < 0 || usageContext.indexOf('150 / 200 input tokens') >= 0) fail('cache utilization did not render as a percentage only');
+          if (document.querySelectorAll('#usageSummary [data-usage-summary-value]')[2].textContent !== '75.0%' || usageContext.indexOf('150 / 200 input tokens') >= 0) fail('cache utilization did not render as a percentage only');
           if (document.querySelectorAll('#usageSummary > .card').length !== 3 || usageContext.indexOf('Known total cost') < 0 || usageContext.indexOf('Total tokens') < 0) fail('consumption summary cards missing');
           var usageText=document.getElementById('analytics-usage').textContent;
           if (document.getElementById('costOutcomeTrendChart') || /achieved goal|failed-run cost|Outcome context|Cost and outcomes/.test(usageText)) fail('Usage still mixes consumption with outcomes');

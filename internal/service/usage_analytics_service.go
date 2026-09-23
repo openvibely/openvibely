@@ -18,6 +18,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
@@ -2014,9 +2015,19 @@ func isAccountUsageHTTPStatus(err error, status int) bool {
 func (s *UsageAnalyticsService) doAccountUsageRequest(req *http.Request) (map[string]any, error) {
 	client := s.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = &http.Client{Timeout: 5 * time.Second}
 	}
-	resp, err := client.Do(req)
+	// Usage/profile GETs can be replayed safely. Keep their retry budget
+	// small so an unavailable provider does not leave its card loading forever.
+	ctx, cancel := context.WithTimeout(req.Context(), 16*time.Second)
+	defer cancel()
+	policy := httpretry.DefaultPolicy()
+	policy.MaxRetries = 2
+	policy.BaseDelay = 250 * time.Millisecond
+	policy.MaxBackoff = 2 * time.Second
+	resp, err := httpretry.Do(ctx, client, func() (*http.Request, error) {
+		return req.Clone(ctx), nil
+	}, policy)
 	if err != nil {
 		return nil, err
 	}
