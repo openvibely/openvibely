@@ -11,10 +11,20 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 	}
 }
 
+templ analyticsKPICard(label, kind string) {
+	<div class="card bg-base-100 border border-base-300" data-analytics-kpi>
+		<div class="card-body p-4 gap-2" style="display:grid;grid-template-rows:2.5rem 1.75rem 1rem">
+			<span class="text-sm">{ label }</span>
+			<strong { templ.Attributes{"data-" + kind + "-summary-value": true}... } class="text-center opacity-50 font-normal text-base" aria-live="polite">Loading analytics…</strong>
+			<span { templ.Attributes{"data-" + kind + "-summary-sample": true}... } class="text-xs opacity-60"></span>
+		</div>
+	</div>
+}
+
 templ analyticsTaskSummary(view string) {
 	<div data-task-summary={ view } class="grid grid-cols-1 md:grid-cols-3 gap-4">
 		for _, label := range []string{"Tasks worked on", "Goals achieved", "Work merged"} {
-			<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-task-summary-value class="text-center opacity-50 font-normal text-base" style="min-height:1.5rem">Loading analytics…</strong><span data-task-summary-sample class="text-xs opacity-60"></span></div></div>
+			@analyticsKPICard(label, "task")
 		}
 	</div>
 }
@@ -135,7 +145,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div><h3 class="text-xl font-bold">Learning</h3><p class="text-sm opacity-60">Observed skill activity and outcomes. Association only; not causation.</p><p id="skillEvidenceSelection" class="hidden"></p></div>
 					<div id="skillSummary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
 						for _, label := range []string{"Skills used", "Tasks using skills", "Tasks with goal evidence"} {
-							<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-skill-summary-value class="text-center opacity-50 font-normal text-base" style="min-height:1.5rem">Loading analytics…</strong></div></div>
+							@analyticsKPICard(label, "skill")
 						}
 					</div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Skill Activity Over Time", "Created, edited, and used skill activity.", "skillUsageTrendChart", "h-64") @analyticsChartCard("Top Skills", "Highest skill activity by event type.", "skillTopChart", "h-64") @analyticsChartCard("Follow-through / Selected Outcomes", "Selected skills later used or ignored.", "skillFollowChart", "h-64") @analyticsChartCard("Top Agent/Skill Pairs", "Most active Agent and skill combinations.", "skillAgentChart", "h-64")</div>
@@ -162,9 +172,9 @@ templ analyticsContent(currentProject *models.Project) {
 
 				<section id="analytics-usage" data-analytics-section="usage" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Usage</h3><p class="text-sm opacity-60">Provider limits, token usage, cache utilization, and recorded cost.</p><p id="usageEvidenceSelection" class="hidden"></p></div>
-					<div id="usageSummary" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+					<div id="usageSummary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
 						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization"} {
-							<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-usage-summary-value class="text-center opacity-50 font-normal text-base" style="min-height:1.5rem" aria-live="polite">Loading analytics…</strong></div></div>
+							@analyticsKPICard(label, "usage")
 						}
 					</div>
 					<div><h4 class="font-semibold mb-2">Provider Account Limits</h4><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
@@ -751,7 +761,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const cachedTokens = totals && totals.cached_input_tokens ? Number(totals.cached_input_tokens) : 0;
 								const cacheText = inputTokens > 0 ? (cachedTokens * 100 / inputTokens).toFixed(1) + '%' : 'Unavailable';
 								const values=[totals && totals.cost_available ? formatCost(Number(totals.cost_usd || 0)) : 'Unavailable',totals ? formatNumber(Number(totals.total_tokens || 0)) : 'Unavailable',cacheText];
-								usageContext.querySelectorAll('[data-usage-summary-value]').forEach((node,index)=>{node.textContent=values[index];node.className='text-sm';});
+								usageContext.querySelectorAll('[data-usage-summary-value]').forEach((node,index)=>{node.textContent=values[index];node.className='text-lg tabular-nums';});
 							}
 						function renderDistributionChart(key, canvasID, rows) {
 							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');
