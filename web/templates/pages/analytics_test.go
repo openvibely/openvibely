@@ -64,6 +64,7 @@ window.Chart=function(){this.destroy=function(){};};
 var rejectAccounts,localCalls=0;
 window.fetch=function(url){
  var params=new URL(url,location.href).searchParams;
+ if(params.get('projection')==='accounts')return Promise.resolve({ok:true,json:async function(){return {accounts:[{key:'a',provider:'openai'}]};}});
  if(params.get('projection')==='account_limits')return new Promise(function(resolve,reject){rejectAccounts=reject;});
  if(params.get('projection')!=='local')throw new Error('usage must request local projection');
  localCalls++;return Promise.resolve({ok:true,json:function(){return Promise.resolve({totals:{total_tokens:1234},usage_rate:[],usage_rate_by_model:[],model_breakdown:[],evidence:[]});}});
@@ -81,6 +82,49 @@ window.addEventListener('load',function(){
    result.dataset.testResult='pass';
   },30);
  }check();
+});
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_AnalyticsContent_AccountsRenderIndependently(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+window.Chart=function(){this.destroy=function(){};};
+var pending={};
+function response(data){return {ok:true,json:async function(){return data;}};}
+window.fetch=function(url){
+ var p=new URL(url,location.href).searchParams;
+ if(p.get('projection')==='accounts')return Promise.resolve(response({accounts:[{key:'a',provider:'openai'},{key:'b',provider:'openai'},{key:'c',provider:'anthropic'}]}));
+ if(p.get('projection')==='account_limits')return new Promise(function(resolve,reject){pending[p.get('account_key')]={resolve:resolve,reject:reject};});
+ return Promise.resolve(response({totals:{total_tokens:1234},usage_rate:[],usage_rate_by_model:[],model_breakdown:[]}));
+};
+window.addEventListener('load',async function(){
+ var result=document.getElementById('reconnect-result');
+ function wait(){return new Promise(function(resolve){setTimeout(resolve,20);});}
+ function assert(ok,message){if(!ok)throw new Error(message);}
+ try {
+  for(var i=0;i<100&&!pending.c;i++)await wait();
+  assert(pending.a&&pending.b&&pending.c,'all accounts must start without waiting');
+  var cards=document.querySelectorAll('#accountUsageCards > .card');
+  assert(cards.length===3&&cards[2].textContent.includes('Anthropic'),'Anthropic shell missing');
+  assert(Array.from(cards).every(c=>c.textContent.includes('Loading analytics')),'all shells must start loading');
+  pending.c.resolve(response({account_limits:[{provider:'anthropic',plan_type:'Claude Max',limits:[]}]}));await wait();
+  assert(cards[2].textContent.includes('Claude Max')&&!cards[2].hasAttribute('aria-busy'),'Anthropic must render before OpenAI');
+  assert(cards[0].textContent.includes('Loading analytics')&&cards[1].textContent.includes('Loading analytics'),'OpenAI loading state lost');
+  pending.a.resolve(response({account_limits:[{provider:'openai',plan_type:'ChatGPT Pro',limits:[]}]}));await wait();
+  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[1].hasAttribute('aria-busy'),'OpenAI accounts must render independently');
+  pending.b.reject(new Error('unavailable'));await wait();
+  assert(cards[1].textContent.includes('Provider limits unavailable'),'failure not displayed');
+  assert(cards[0].textContent.includes('ChatGPT Pro')&&cards[2].textContent.includes('Claude Max'),'failure erased sibling results');
+  assert(document.getElementById('usageSummary').textContent.includes('1,234'),'local usage disappeared');
+  assert(!document.getElementById('accountUsageCards').hasAttribute('aria-busy'),'loading never finished');
+  result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
 });
 </script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
@@ -509,6 +553,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
     var payload = [];
     if (value.indexOf('/api/analytics/dashboard') >= 0) payload = {definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],skill_outcomes:[{skill_handle:'project:visible-on-learning',skill_scope:'project',tasks_evaluated:1,technical_completion:{},goal_achievement:{},follow_up:{}}],agent_skill_outcomes:[],model_categories:[],workflows:[],recent_outcomes:[],insights:[]};
     if (value.indexOf('/api/analytics/usage') >= 0) payload = {usage_rate:[],usage_rate_by_model:[],totals:{input_tokens:200,cached_input_tokens:150},model_breakdown:[],account_limits:[{provider:'openai',subscription_label:'ChatGPT Pro',limits:[]},{provider:'openai',subscription_label:'Prolite',limits:[]},{provider:'anthropic',subscription_label:'Claude Max',limits:[]}]};
+    if(value.indexOf('/api/analytics/usage')>=0){var params=new URL(value,location.href).searchParams;if(params.get('projection')==='accounts')payload={accounts:[{key:'0',provider:'openai'},{key:'1',provider:'openai'},{key:'2',provider:'anthropic'}]};else if(params.get('projection')==='account_limits')payload={account_limits:[payload.account_limits[Number(params.get('account_key'))]]};}
     if (value.indexOf('/api/analytics/skills') >= 0) payload = {usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]};
     return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});
   };
@@ -524,7 +569,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         var usageShells=Array.from(document.querySelectorAll('#usageSummary > .card'));
         if(usageShells.length!==3||!usageShells.every(function(card){return card.textContent.indexOf('Loading analytics')>=0;}))fail('Usage must reserve summary cards while loading');
         document.querySelectorAll('#usageSummary [data-usage-summary-value], #accountUsageCards p').forEach(function(node){if(!node.classList.contains('text-center')||!node.classList.contains('opacity-50'))fail('Usage loading text must match Learning alignment and color');});
-        if(document.querySelectorAll('#accountUsageCards > .card').length!==2||document.getElementById('accountUsageCards').getAttribute('aria-busy')!=='true')fail('Usage must reserve provider cards while loading');
+        if(document.getElementById('accountUsageCards').getAttribute('aria-busy')!=='true')fail('Usage must mark provider inventory loading');
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
           if(!usageShells.every(function(card,index){return card===document.querySelectorAll('#usageSummary > .card')[index];}))fail('summary card shells were replaced when data arrived');
           if(document.getElementById('accountUsageCards').hasAttribute('aria-busy'))fail('provider cards still marked loading');

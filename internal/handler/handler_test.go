@@ -5260,7 +5260,7 @@ func TestHandler_Analytics_FullPage(t *testing.T) {
 	assertContains(t, rec, "usage_rate_by_model")
 	assertContains(t, rec, "const params = usageEvidenceParams()")
 	assertNotContains(t, rec, "new URLSearchParams({ range: usageRangeParam(), group_by: groupBy })")
-	assertContains(t, rec, "refresh', 'true'")
+	assertContains(t, rec, "query.set('refresh','true')")
 	assertNotContains(t, rec, "usageReasoningTokens")
 }
 
@@ -5308,7 +5308,7 @@ func TestHandler_Analytics_ModelUsagePageWiring(t *testing.T) {
 	assertContains(t, rec, `id="modelTokenBreakdownChart"`)
 	assertContains(t, rec, "model_breakdown")
 	assertContains(t, rec, "const params = usageEvidenceParams()")
-	if count := strings.Count(body, "function renderAccountUsageCards(accounts)"); count != 1 {
+	if count := strings.Count(body, "function renderAccountUsageCards(accounts, target)"); count != 1 {
 		t.Fatalf("expected one account limits renderer in analytics script, got %d", count)
 	}
 	assertContains(t, rec, "let accountLimits = account.limits || []")
