@@ -86,6 +86,19 @@ window.addEventListener('load',function(){
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestAnalyticsContent_LearningKPIsPrecedeCharts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	content := rendered.String()
+	summary := strings.Index(content, `id="skillSummary"`)
+	chart := strings.Index(content, `id="skillUsageTrendChart"`)
+	if summary < 0 || chart < 0 || summary > chart {
+		t.Fatal("Learning KPI cards must precede the activity charts")
+	}
+}
+
 func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 
