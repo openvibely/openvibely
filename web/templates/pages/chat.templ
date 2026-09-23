@@ -1334,25 +1334,30 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (!label) return;
 									var button = document.createElement('button');
 									button.type = 'button';
-									button.className = 'chat-input-option-btn btn ' + (optionIndex === 0 ? 'btn-primary' : 'btn-outline') + ' justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+									button.className = 'chat-input-option-btn btn btn-outline justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
 									button.style.setProperty('--btn-focus-scale', '1');
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
 									button.setAttribute('data-option-label', label);
-									button.setAttribute('aria-pressed', optionIndex === 0 ? 'true' : 'false');
-									if (optionIndex === 0) {
-										fieldset.setAttribute('data-selected-kind', 'option');
-										fieldset.setAttribute('data-selected-label', label);
-									}
+									button.setAttribute('aria-pressed', 'false');
 									var wrap = document.createElement('span');
 									wrap.className = 'flex min-w-0 flex-col items-start';
+									var labelLine = document.createElement('span');
+									labelLine.className = 'flex min-w-0 flex-wrap items-center gap-2';
 									var labelSpan = document.createElement('span');
 									labelSpan.className = 'font-medium';
 									labelSpan.textContent = label;
+									labelLine.appendChild(labelSpan);
+									if (optionIndex === 0) {
+										var recommendedBadge = document.createElement('span');
+										recommendedBadge.className = 'badge badge-primary badge-sm';
+										recommendedBadge.textContent = 'Recommended';
+										labelLine.appendChild(recommendedBadge);
+									}
+									wrap.appendChild(labelLine);
 									var descSpan = document.createElement('span');
 									descSpan.className = 'text-xs opacity-70 whitespace-normal';
 									descSpan.textContent = option.description || '';
-									wrap.appendChild(labelSpan);
 									wrap.appendChild(descSpan);
 									button.appendChild(wrap);
 									fieldset.appendChild(button);
@@ -1420,20 +1425,20 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							card.setAttribute('data-current-question-index', String(nextIndex));
 							var position = card.querySelector('[data-chat-input-position]');
 							if (position) position.textContent = (nextIndex + 1) + ' of ' + groups.length;
-							var previous = card.querySelector('[data-chat-input-nav="previous"]');
-							var next = card.querySelector('[data-chat-input-nav="next"], [data-chat-input-nav="submit"]');
-							if (previous) {
-								previous.disabled = nextIndex === 0;
-								previous.classList.toggle('invisible', groups.length === 1);
-							}
-							if (next) {
-								var isLast = nextIndex === groups.length - 1;
-								next.textContent = isLast ? 'Submit' : 'Next';
-								next.setAttribute('data-chat-input-nav', isLast ? 'submit' : 'next');
-								next.setAttribute('aria-label', isLast ? 'Submit answers' : 'Next question');
-									next.disabled = isLast ? !chatInputRequestIsComplete(card) : false;
-							}
-							var legend = groups[nextIndex].querySelector('legend');
+								var previous = card.querySelector('[data-chat-input-nav="previous"]');
+								var next = card.querySelector('[data-chat-input-nav="next"], [data-chat-input-nav="submit"]');
+								if (previous) {
+									previous.disabled = nextIndex === 0;
+									previous.classList.toggle('invisible', groups.length === 1);
+								}
+								if (next) {
+									var isLast = nextIndex === groups.length - 1;
+									next.textContent = isLast ? 'Submit' : 'Next';
+									next.setAttribute('data-chat-input-nav', isLast ? 'submit' : 'next');
+									next.setAttribute('aria-label', isLast ? 'Submit answers' : 'Next question');
+									next.disabled = isLast ? !chatInputRequestIsComplete(card) : !chatInputQuestionAnswer(groups[nextIndex]);
+								}
+								var legend = groups[nextIndex].querySelector('legend');
 							if (legend) legend.focus && legend.focus();
 						}
 

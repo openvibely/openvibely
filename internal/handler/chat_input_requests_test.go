@@ -27,7 +27,7 @@ func TestRequestUserInputToolWebOnlyRegistryAndHandler(t *testing.T) {
 			continue
 		}
 		require.Equal(t, string(chatcontrol.AccessWrite), string(def.Access))
-		require.JSONEq(t, `{"type":"object","required":["questions"],"additionalProperties":false,"properties":{"questions":{"type":"array","description":"Ask 1 to 3 questions. Put the recommended/default path first for each question and include a move-forward option for proceeding with sensible defaults.","minItems":1,"maxItems":3,"items":{"type":"object","required":["id","question","options"],"additionalProperties":false,"properties":{"id":{"type":"string","description":"Stable question id used in the answer result."},"question":{"type":"string","description":"Plain-text question to show to the user."},"options":{"type":"array","description":"Clickable choices. The first option must be the recommended/default path; include a move-forward/defaults option for proceeding with sensible defaults.","minItems":2,"maxItems":3,"items":{"type":"object","required":["label","description"],"additionalProperties":false,"properties":{"label":{"type":"string","description":"Clickable option label returned exactly when selected."},"description":{"type":"string","description":"Short plain-text explanation shown under the label."}}}}}}}}}`, string(def.Parameters))
+		require.JSONEq(t, `{"type":"object","required":["questions"],"additionalProperties":false,"properties":{"questions":{"type":"array","description":"Ask 1 to 3 questions. Put the recommended/default path first for each question and include a move-forward option for proceeding with sensible defaults. These choices are not answers until the user explicitly selects them.","minItems":1,"maxItems":3,"items":{"type":"object","required":["id","question","options"],"additionalProperties":false,"properties":{"id":{"type":"string","description":"Stable question id used in the answer result."},"question":{"type":"string","description":"Plain-text question to show to the user."},"options":{"type":"array","description":"Clickable choices. The first option must be the recommended/default path; include a move-forward/defaults option for proceeding with sensible defaults. Do not treat any option as selected until the user clicks it.","minItems":2,"maxItems":3,"items":{"type":"object","required":["label","description"],"additionalProperties":false,"properties":{"label":{"type":"string","description":"Clickable option label returned exactly when selected."},"description":{"type":"string","description":"Short plain-text explanation shown under the label."}}}}}}}}}`, string(def.Parameters))
 		description := strings.ToLower(def.Description)
 		require.Contains(t, description, "recommended/default")
 		require.Contains(t, description, "move-forward")
@@ -35,6 +35,8 @@ func TestRequestUserInputToolWebOnlyRegistryAndHandler(t *testing.T) {
 		require.Contains(t, description, "persistent goal")
 		require.Contains(t, description, "each task-creation question must")
 		require.Contains(t, description, "move-forward/defaults")
+		require.Contains(t, description, "do not assume, preselect, or answer")
+		require.Contains(t, description, "user must explicitly select")
 	}
 
 	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceAPI, chatcontrol.SurfaceSlack, chatcontrol.SurfaceTelegram, chatcontrol.SurfaceEmail, chatcontrol.SurfaceDiscord, chatcontrol.SurfaceX} {
