@@ -123,13 +123,13 @@ templ analyticsContent(currentProject *models.Project) {
 
 				<section id="analytics-learning" data-analytics-section="learning" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Learning</h3><p class="text-sm opacity-60">Observed skill activity and outcomes. Association only; not causation.</p><p id="skillEvidenceSelection" class="hidden"></p></div>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Skill Activity Over Time", "Created, edited, and used skill activity.", "skillUsageTrendChart", "h-64") @analyticsChartCard("Top Skills", "Highest skill activity by event type.", "skillTopChart", "h-64") @analyticsChartCard("Follow-through / Selected Outcomes", "Selected skills later used or ignored.", "skillFollowChart", "h-64") @analyticsChartCard("Top Agent/Skill Pairs", "Most active Agent and skill combinations.", "skillAgentChart", "h-64")</div>
-					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Least Active Enabled Skills</h4><table class="table table-sm"><tbody id="underusedSkillsTable"></tbody></table></div></div>
 					<div id="skillSummary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
 						for _, label := range []string{"Skills used", "Tasks using skills", "Tasks with goal evidence"} {
 							<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-skill-summary-value class="text-center opacity-50 font-normal text-base" style="min-height:1.5rem">Loading analytics…</strong></div></div>
 						}
 					</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Skill Activity Over Time", "Created, edited, and used skill activity.", "skillUsageTrendChart", "h-64") @analyticsChartCard("Top Skills", "Highest skill activity by event type.", "skillTopChart", "h-64") @analyticsChartCard("Follow-through / Selected Outcomes", "Selected skills later used or ignored.", "skillFollowChart", "h-64") @analyticsChartCard("Top Agent/Skill Pairs", "Most active Agent and skill combinations.", "skillAgentChart", "h-64")</div>
+					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Least Active Enabled Skills</h4><table class="table table-sm"><tbody id="underusedSkillsTable"></tbody></table></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 						<div class="card bg-base-100 border border-base-300"><div class="card-body">
 							<div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">

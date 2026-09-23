@@ -379,7 +379,30 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</div><div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body\"><h4 class=\"card-title\">Automation findings</h4><div id=\"automationFindings\"></div></div></div><details id=\"automationExactValues\" class=\"collapse collapse-arrow bg-base-100 border border-base-300\"><summary class=\"collapse-title font-semibold\">Exact automation and node values</summary><div class=\"collapse-content\"><table class=\"table table-sm\"><tbody id=\"workflowPerformanceTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowFunnelTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowDurationTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowFailureTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowBottleneckTable\"></tbody></table></div></details></section><section id=\"analytics-learning\" data-analytics-section=\"learning\" class=\"hidden space-y-6 mb-6\"><div><h3 class=\"text-xl font-bold\">Learning</h3><p class=\"text-sm opacity-60\">Observed skill activity and outcomes. Association only; not causation.</p><p id=\"skillEvidenceSelection\" class=\"hidden\"></p></div><div class=\"grid grid-cols-1 lg:grid-cols-2 gap-6\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</div><div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body\"><h4 class=\"card-title\">Automation findings</h4><div id=\"automationFindings\"></div></div></div><details id=\"automationExactValues\" class=\"collapse collapse-arrow bg-base-100 border border-base-300\"><summary class=\"collapse-title font-semibold\">Exact automation and node values</summary><div class=\"collapse-content\"><table class=\"table table-sm\"><tbody id=\"workflowPerformanceTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowFunnelTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowDurationTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowFailureTable\"></tbody></table><table class=\"table table-sm\"><tbody id=\"workflowBottleneckTable\"></tbody></table></div></details></section><section id=\"analytics-learning\" data-analytics-section=\"learning\" class=\"hidden space-y-6 mb-6\"><div><h3 class=\"text-xl font-bold\">Learning</h3><p class=\"text-sm opacity-60\">Observed skill activity and outcomes. Association only; not causation.</p><p id=\"skillEvidenceSelection\" class=\"hidden\"></p></div><div id=\"skillSummary\" class=\"grid grid-cols-1 md:grid-cols-3 gap-4\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			for _, label := range []string{"Skills used", "Tasks using skills", "Tasks with goal evidence"} {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body p-4\"><span class=\"text-sm\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var12 string
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(label)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/analytics.templ`, Line: 128, Col: 116}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "</span><strong data-skill-summary-value class=\"text-center opacity-50 font-normal text-base\" style=\"min-height:1.5rem\">Loading analytics…</strong></div></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</div><div class=\"grid grid-cols-1 lg:grid-cols-2 gap-6\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -399,30 +422,7 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</div><div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body\"><h4 class=\"card-title\">Least Active Enabled Skills</h4><table class=\"table table-sm\"><tbody id=\"underusedSkillsTable\"></tbody></table></div></div><div id=\"skillSummary\" class=\"grid grid-cols-1 md:grid-cols-3 gap-4\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			for _, label := range []string{"Skills used", "Tasks using skills", "Tasks with goal evidence"} {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body p-4\"><span class=\"text-sm\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var12 string
-				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(label)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/analytics.templ`, Line: 130, Col: 116}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "</span><strong data-skill-summary-value class=\"text-center opacity-50 font-normal text-base\" style=\"min-height:1.5rem\">Loading analytics…</strong></div></div>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</div><div class=\"grid grid-cols-1 lg:grid-cols-2 gap-6 items-start\"><div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body\"><div class=\"flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0\"><h4 class=\"card-title\">Observed skill outcomes</h4><div class=\"form-control min-w-0 w-full sm:w-auto\"><select id=\"skillOutcomeMetric\" aria-label=\"Skill outcome metric\" class=\"select select-bordered select-xs w-full max-w-full sm:min-w-48\"><option value=\"goal_achievement\">Goal achievement</option> <option value=\"technical_completion\">Tasks with a successful run</option> <option value=\"follow_up\">Tasks with follow-ups</option></select></div></div><p id=\"skillOutcomeDescription\" class=\"text-sm opacity-60\"></p><div class=\"overflow-x-auto\"><div class=\"relative h-64\" style=\"min-width:420px\"><canvas id=\"skillOutcomeChart\"></canvas></div></div></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</div><div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body\"><h4 class=\"card-title\">Least Active Enabled Skills</h4><table class=\"table table-sm\"><tbody id=\"underusedSkillsTable\"></tbody></table></div></div><div class=\"grid grid-cols-1 lg:grid-cols-2 gap-6 items-start\"><div class=\"card bg-base-100 border border-base-300\"><div class=\"card-body\"><div class=\"flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0\"><h4 class=\"card-title\">Observed skill outcomes</h4><div class=\"form-control min-w-0 w-full sm:w-auto\"><select id=\"skillOutcomeMetric\" aria-label=\"Skill outcome metric\" class=\"select select-bordered select-xs w-full max-w-full sm:min-w-48\"><option value=\"goal_achievement\">Goal achievement</option> <option value=\"technical_completion\">Tasks with a successful run</option> <option value=\"follow_up\">Tasks with follow-ups</option></select></div></div><p id=\"skillOutcomeDescription\" class=\"text-sm opacity-60\"></p><div class=\"overflow-x-auto\"><div class=\"relative h-64\" style=\"min-width:420px\"><canvas id=\"skillOutcomeChart\"></canvas></div></div></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
