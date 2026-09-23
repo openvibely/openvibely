@@ -99,6 +99,31 @@ func TestDoRetriesTransientStatus(t *testing.T) {
 	}
 }
 
+func TestDoRetriesCustomRetryableResponse(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		status := http.StatusTooManyRequests
+		if attempts == 2 {
+			status = http.StatusOK
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("response")), Header: make(http.Header)}, nil
+	})}
+	policy := instantPolicy()
+	policy.AllowReplay = false
+	policy.RetryableResponse = func(resp *http.Response) bool { return resp.StatusCode == http.StatusTooManyRequests }
+	resp, err := Do(context.Background(), client, func() (*http.Request, error) {
+		return http.NewRequest(http.MethodGet, "https://provider.test/messages", nil)
+	}, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if attempts != 2 || resp.StatusCode != http.StatusOK {
+		t.Fatalf("attempts/status = %d/%d, want 2/200", attempts, resp.StatusCode)
+	}
+}
+
 func TestDoDrainsAndClosesResponseBeforeRetry(t *testing.T) {
 	attempts := 0
 	firstBody := &trackingBody{reader: strings.NewReader("retry response")}

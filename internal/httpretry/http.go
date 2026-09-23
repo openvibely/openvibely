@@ -42,7 +42,9 @@ type Policy struct {
 	AllowReplay bool
 	// RetryableError may extend the default transient-error classification.
 	RetryableError func(error) bool
-	Now            func() time.Time
+	// RetryableResponse may extend the default transient response classification.
+	RetryableResponse func(*http.Response) bool
+	Now               func() time.Time
 }
 
 type Doer interface {
@@ -432,7 +434,7 @@ func Do(ctx context.Context, client Doer, buildReq func() (*http.Request, error)
 			}
 			continue
 		}
-		if !IsRetryableStatus(resp.StatusCode) || attempt == policy.MaxRetries || !requestReplayable(req, policy) {
+		if !retryableResponse(policy, resp) || attempt == policy.MaxRetries || !requestReplayable(req, policy) {
 			return resp, nil
 		}
 		delay := Backoff(attempt, resp, policy.BaseDelay, policy.Now())
@@ -512,6 +514,16 @@ func retryableError(policy Policy, err error) bool {
 		return true
 	}
 	return policy.RetryableError != nil && policy.RetryableError(err)
+}
+
+func retryableResponse(policy Policy, resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+	if IsRetryableStatus(resp.StatusCode) {
+		return true
+	}
+	return policy.RetryableResponse != nil && policy.RetryableResponse(resp)
 }
 
 func requestReplayable(req *http.Request, policy Policy) bool {
