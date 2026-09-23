@@ -1334,7 +1334,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (!label) return;
 									var button = document.createElement('button');
 									button.type = 'button';
-									button.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+									button.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 									button.style.setProperty('--btn-focus-scale', '1');
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
@@ -1364,7 +1364,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								});
 								var customButton = document.createElement('button');
 								customButton.type = 'button';
-								customButton.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-3 py-2 text-left normal-case';
+								customButton.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 								customButton.style.setProperty('--btn-focus-scale', '1');
 								customButton.setAttribute('data-chat-input-option', 'true');
 								customButton.setAttribute('data-chat-input-custom-option', 'true');
