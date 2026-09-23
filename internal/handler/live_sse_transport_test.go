@@ -201,9 +201,7 @@ func TestLiveEventsSSE_ScopedTransportLimits50ClientFanout(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		for _, client := range clients {
-			closeLiveSSETransportClient(t, client)
-		}
+		closeLiveSSETransportClients(t, clients)
 	})
 
 	waitForLiveSubscriberCount(t, "task", taskBroadcaster.SubscriberCount, clientCount)
