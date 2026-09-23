@@ -1044,7 +1044,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string, state CardList
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" onclick=\"openAlertTaskDialog(this.dataset.taskId)\" onkeydown=\"if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details')) return; openAlertTaskDialog(this.dataset.taskId)\" onkeydown=\"if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

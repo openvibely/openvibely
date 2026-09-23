@@ -615,7 +615,7 @@ templ alertRow(alert models.AlertSummary, currentProjectID string, state CardLis
 			tabindex="0"
 			aria-label={ "Open task for alert " + alert.Title }
 			data-task-id={ *alert.TaskID }
-			onclick="openAlertTaskDialog(this.dataset.taskId)"
+			onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details')) return; openAlertTaskDialog(this.dataset.taskId)"
 			onkeydown="if (event.target !== this || event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return; event.preventDefault(); openAlertTaskDialog(this.dataset.taskId)"
 		}
 	>
