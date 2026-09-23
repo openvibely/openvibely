@@ -5336,3 +5336,65 @@ func insertAutomationScheduleOwner(t *testing.T, ctx context.Context, db *sql.DB
 		t.Fatalf("insert automation schedule owner: %v", err)
 	}
 }
+
+func TestTaskRepo_SearchByTitle_LiteralMetacharacters(t *testing.T) {
+	for _, tt := range []struct {
+		name, query, nonliteral string
+	}{
+		{"percent", "100% rollout", "100 day rollout"},
+		{"underscore", "QA_plan", "QA plan"},
+		{"backslash", "docs\\guide", "docsguide"},
+		{"combined", "docs\\_100%", "docs\\X100 days"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			repo := NewTaskRepo(db, nil)
+			ctx := context.Background()
+			foreign := &models.Project{Name: "Other project"}
+			if err := NewProjectRepo(db).Create(ctx, foreign); err != nil {
+				t.Fatal(err)
+			}
+			exact := strings.ToUpper(tt.query)
+			prefixOlder := tt.query + " older"
+			prefixNewer := tt.query + " newer"
+			// This starts like a wildcard match but only contains the literal query.
+			contains := tt.nonliteral + " then " + tt.query
+			tasks := []models.Task{
+				{ProjectID: "default", Title: exact, Category: models.CategoryBacklog},
+				{ProjectID: "default", Title: prefixOlder, Category: models.CategoryBacklog},
+				{ProjectID: "default", Title: prefixNewer, Category: models.CategoryActive},
+				{ProjectID: "default", Title: contains, Category: models.CategoryBacklog},
+				{ProjectID: "default", Title: tt.nonliteral, Category: models.CategoryBacklog},
+				{ProjectID: foreign.ID, Title: tt.query, Category: models.CategoryBacklog},
+				{ProjectID: "default", Title: tt.query, Category: models.CategoryChat},
+			}
+			for i := range tasks {
+				tasks[i].Status = models.StatusPending
+				tasks[i].Prompt = "test"
+				if err := repo.Create(ctx, &tasks[i]); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, "UPDATE tasks SET updated_at = ? WHERE id = ?",
+					fmt.Sprintf("2025-01-%02d 12:00:00", i+1), tasks[i].ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			results, err := repo.SearchByTitle(ctx, "default", tt.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, task := range results {
+				got = append(got, task.Title)
+				if task.ProjectID != "default" || task.Category == models.CategoryChat {
+					t.Errorf("unexpected task in title search: %+v", task)
+				}
+			}
+			want := []string{exact, prefixNewer, prefixOlder, contains}
+			if !slices.Equal(got, want) {
+				t.Errorf("SearchByTitle(%q) titles = %q, want %q", tt.query, got, want)
+			}
+		})
+	}
+}

@@ -109,3 +109,31 @@ func TestTaskReferenceAdaptersPreserveChannelScopeAndScheduleUnscopedID(t *testi
 	_, err = scheduleSvc.resolveTask(ctx, project.ID, foreignTask.ID, "")
 	require.EqualError(t, err, "task "+foreignTask.ID+" belongs to a different project")
 }
+
+func TestResolveTaskReferenceLiteralTitle(t *testing.T) {
+	for _, tt := range []struct {
+		query, literal, nonliteral string
+	}{
+		{"100% rollout", "Release 100% rollout today", "100 day rollout"},
+		{"QA_plan", "Release QA_plan today", "QA plan"},
+		{"docs\\guide", "Release docs\\guide today", "docsguide"},
+		{"deploy", "Deploy service", "Redeploy web"},
+	} {
+		t.Run(tt.query, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			taskRepo := repository.NewTaskRepo(db, nil)
+			tasks := []models.Task{
+				{ProjectID: "default", Title: tt.literal, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},
+				{ProjectID: "default", Title: tt.nonliteral, Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending},
+			}
+			for i := range tasks {
+				require.NoError(t, taskRepo.Create(ctx, &tasks[i]))
+			}
+
+			got, err := ResolveTaskReference(ctx, taskRepo, "default", "", " "+tt.query+" ", TaskReferenceResolutionOptions{})
+			require.NoError(t, err)
+			require.Equal(t, tasks[0].ID, got.ID)
+		})
+	}
+}
