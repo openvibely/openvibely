@@ -475,11 +475,6 @@ func ResolveRuntimeBundle(ctx context.Context, pluginIDs []string) (*RuntimeBund
 		return strings.ToLower(bundle.MCPServers[i].Name) < strings.ToLower(bundle.MCPServers[j].Name)
 	})
 
-	if len(bundle.MCPServers) > 0 {
-		toolNames := IntrospectMCPToolNames(ctx, bundle.MCPServers)
-		bundle.MCPToolNames = toolNames
-	}
-
 	if len(accum) == 0 && len(errs) > 0 {
 		return bundle, fmt.Errorf("%s", strings.Join(errs, "; "))
 	}

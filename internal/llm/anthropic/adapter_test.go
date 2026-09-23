@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -37,6 +38,69 @@ func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testin
 	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan)
 	if plan != "base" {
 		t.Fatalf("Plan prompt received action-mode guidance: %q", plan)
+	}
+}
+
+func TestBuildAnthropicRuntimeAdvertisesAndExecutesMCPToolsOnce(t *testing.T) {
+	var initializeCalls atomic.Int64
+	var toolsListCalls atomic.Int64
+	var toolsCallCalls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      int64           `json:"id"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode MCP request: %v", err)
+			http.Error(w, "bad MCP request", http.StatusBadRequest)
+			return
+		}
+		switch req.Method {
+		case "initialize":
+			initializeCalls.Add(1)
+			writeAnthropicMCPResult(t, w, req.ID, map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{}})
+		case "tools/list":
+			toolsListCalls.Add(1)
+			writeAnthropicMCPResult(t, w, req.ID, map[string]any{"tools": []map[string]any{{"name": "screenshot", "description": "Capture browser", "inputSchema": map[string]any{"type": "object"}}}})
+		case "tools/call":
+			toolsCallCalls.Add(1)
+			writeAnthropicMCPResult(t, w, req.ID, map[string]any{"content": []map[string]string{{"type": "text", "text": "captured"}}, "isError": false})
+		default:
+			t.Errorf("unexpected MCP method %q", req.Method)
+			http.Error(w, "unexpected MCP method", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	agentDef := &models.Agent{MCPServers: []models.MCPServerConfig{{Name: "browser", Type: "http", URL: server.URL}}}
+	extraTools, executeTool, allowTool, cleanup := buildAnthropicRuntime(context.Background(), t.TempDir(), agentDef)
+	defer cleanup()
+
+	if initializeCalls.Load() != 1 || toolsListCalls.Load() != 1 {
+		t.Fatalf("MCP setup counts initialize=%d tools/list=%d, want 1 each", initializeCalls.Load(), toolsListCalls.Load())
+	}
+	if len(extraTools) != 1 || extraTools[0].Name != "browser__screenshot" {
+		t.Fatalf("unexpected Anthropic MCP tool definitions: %#v", extraTools)
+	}
+	if !allowTool("browser__screenshot") {
+		t.Fatal("MCP tool was not allowed by runtime filter")
+	}
+	out, isErr, err := executeTool(context.Background(), "browser__screenshot", json.RawMessage(`{"url":"https://example.test"}`))
+	if err != nil || isErr || out != "captured" {
+		t.Fatalf("MCP execution output=%q isErr=%v err=%v", out, isErr, err)
+	}
+	if toolsCallCalls.Load() != 1 {
+		t.Fatalf("MCP tools/call count = %d, want 1", toolsCallCalls.Load())
+	}
+}
+
+func writeAnthropicMCPResult(t *testing.T, w http.ResponseWriter, id int64, result any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": result}); err != nil {
+		t.Fatalf("write MCP response: %v", err)
 	}
 }
 
