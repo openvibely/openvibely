@@ -644,6 +644,8 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	      if(document.getElementById('modelCategoryMatrix')||document.querySelector('[data-model-task-evidence]'))fail('unwanted category breakdown or drill-down');
 	      var timeChart=chartConfigs.modelTimeChart,tokensChart=chartConfigs.modelTokensChart,goalsChart=chartConfigs.modelGoalsTrendChart,mergesChart=chartConfigs.modelMergesTrendChart;
           if(!timeChart||!tokensChart||!goalsChart||!mergesChart)fail('comparison charts missing');
+          var colors=timeChart.data.datasets[0].backgroundColor;
+          if(!Array.isArray(colors)||colors[0]!==tokensChart.data.datasets[0].backgroundColor[0]||colors[0]!==goalsChart.data.datasets[0].borderColor||colors[0]!==mergesChart.data.datasets[0].borderColor)fail('model colors must match across effort and outcome charts');
           if(timeChart.type!=='bar'||timeChart.data.datasets[0].data[0]!==60000||tokensChart.data.datasets[0].data[0]!==1000)fail('effort charts differ from scorecard');
           if(goalsChart.type!=='line'||goalsChart.data.datasets[0].data[0]!==100||goalsChart.data.datasets[0].data[1]!==null||mergesChart.data.datasets[0].data[0]!==50)fail('outcome charts differ from evidence');
           if(goalsChart.data.datasets[0].clip!==false||goalsChart.options.layout.padding.top<6)fail('boundary points may be clipped');

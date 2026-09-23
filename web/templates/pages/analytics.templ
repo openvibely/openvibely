@@ -638,9 +638,19 @@ templ analyticsContent(currentProject *models.Project) {
 								document.addEventListener('scroll',function(e){if(e.target!==tip)close();},{capture:true,signal:eventSignal});
 								eventSignal.addEventListener('abort',close,{once:true});
 							}
+							const modelChartColors=new Map();
+							function modelChartColor(row) {
+								const key=row.model_config_id||JSON.stringify([row.provider,row.model,row.reasoning_effort,row.config_name]);
+								if(!modelChartColors.has(key)) {
+									const palette=['#60a5fa','#34d399','#c084fc','#fb923c','#22d3ee','#f472b6','#facc15','#f87171'];
+									const index=modelChartColors.size;
+									modelChartColors.set(key,palette[index]||'hsl('+((index*137.508)%360)+',65%,65%)');
+								}
+								return modelChartColors.get(key);
+							}
 							function renderModelCharts(rows) {
 								const models=rows.filter(r=>!r.mixed_models).sort((a,b)=>Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
-								const palette=['#60a5fa','#34d399','#c084fc','#fb923c','#22d3ee','#f472b6'];
+								models.forEach(modelChartColor);
 								const compact=n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(n);
 								function bar(key,id,supported,number,format,sample,axis) {
 									const existing=document.getElementById(id);if(existing)existing.parentElement.style.minWidth='';
@@ -653,7 +663,7 @@ templ analyticsContent(currentProject *models.Project) {
 									}
 									plot.style.minWidth=Math.max(320,supported.length*100)+'px';
 									charts[key]=new Chart(canvas.getContext('2d'),{
-										type:'bar',data:{labels:supported.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:supported.map(number),backgroundColor:'#60a5fa',maxBarThickness:48}]},
+										type:'bar',data:{labels:supported.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:supported.map(number),backgroundColor:supported.map(modelChartColor),maxBarThickness:48}]},
 										plugins:[{id:'modelValues',afterDatasetsDraw:function(chart){
 											const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
 											chart.getDatasetMeta(0).data.forEach((bar,i)=>ctx.fillText(format(number(supported[i])),bar.x,bar.y-6));ctx.restore();
@@ -669,7 +679,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const canvas=renderChartState(key,id,supported,'No outcome evidence in this period');if(!canvas)return;
 									const datasets=supported.map(function(r){
 										const points=new Map((r.outcome_trend||[]).map(p=>[p.period,p[metric]]));
-										return {label:modelConfigLabel(r),data:periods.map(p=>{const m=points.get(p);return m&&m.denominator>0?m.percent:null;}),borderColor:palette[busiest.indexOf(r)],backgroundColor:palette[busiest.indexOf(r)],pointRadius:4,pointHoverRadius:6,clip:false,spanGaps:false};
+										return {label:modelConfigLabel(r),data:periods.map(p=>{const m=points.get(p);return m&&m.denominator>0?m.percent:null;}),borderColor:modelChartColor(r),backgroundColor:modelChartColor(r),pointRadius:4,pointHoverRadius:6,clip:false,spanGaps:false};
 									});
 									charts[key]=new Chart(canvas.getContext('2d'),{type:'line',data:{labels:periods,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:10,right:10}},plugins:{legend:{position:'bottom',labels:{boxWidth:12}},tooltip:{callbacks:{label:function(item){const r=supported[item.datasetIndex],p=r.outcome_trend.find(p=>p.period===periods[item.dataIndex]),m=p[metric];return modelConfigLabel(r)+': '+Number(m.percent).toFixed(1)+'% · '+m.numerator+'/'+m.denominator+' tasks';}}}},scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}},x:{title:{display:true,text:'Task finish period'},ticks:{maxTicksLimit:8}}}}});
 								}
