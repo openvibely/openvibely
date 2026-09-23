@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,6 +114,38 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 	return view, nil
 }
 
+type UsageAccountDescriptor struct {
+	Key      string `json:"key"`
+	Provider string `json:"provider"`
+}
+
+func usageAccountGroupKey(configs []models.LLMConfig) string {
+	ids := make([]string, 0, len(configs))
+	for _, cfg := range configs {
+		ids = append(ids, cfg.ID)
+	}
+	sort.Strings(ids)
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(ids, "\x00"))))
+}
+
+// ListUsageAccounts discovers cards from local configuration, without network calls.
+func (s *UsageAnalyticsService) ListUsageAccounts(ctx context.Context) ([]UsageAccountDescriptor, error) {
+	result := []UsageAccountDescriptor{}
+	if s.llmConfigRepo == nil {
+		return result, nil
+	}
+	configs, err := s.llmConfigRepo.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, provider := range []string{"openai", "anthropic"} {
+		for _, group := range accountUsageGroups(configs, provider) {
+			result = append(result, UsageAccountDescriptor{Key: usageAccountGroupKey(group), Provider: provider})
+		}
+	}
+	return result, nil
+}
+
 func (s *UsageAnalyticsService) BuildAnalyticsAccountLimits(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageAccountLimitsViewModel, error) {
 	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
 	if err != nil {
@@ -141,6 +174,20 @@ func (s *UsageAnalyticsService) buildAnalyticsAccountLimitBase(ctx context.Conte
 		if err != nil {
 			view.Errors = append(view.Errors, fmt.Sprintf("listing OAuth accounts: %v", err))
 		} else {
+			if filter.AccountGroupKey != "" {
+				var selected []models.LLMConfig
+				for _, provider := range []string{"openai", "anthropic"} {
+					for _, group := range accountUsageGroups(configs, provider) {
+						if usageAccountGroupKey(group) == filter.AccountGroupKey {
+							selected = group
+						}
+					}
+				}
+				if len(selected) == 0 {
+					return nil, nil, nil, fmt.Errorf("usage account configuration changed; reload accounts")
+				}
+				configs = selected
+			}
 			// Profile lookups can also involve provider requests. Resolve
 			// independent credential owners concurrently before grouping accounts.
 			owners := map[string][]int{}
@@ -554,6 +601,18 @@ func (s *UsageAnalyticsService) populateAnalyticsAccountLimits(ctx context.Conte
 		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
 		return nil
 	}
+	if filter.AccountGroupKey != "" {
+		var selected []models.AccountUsageSnapshot
+		for _, snapshot := range snapshots {
+			for _, cfg := range configsByID {
+				if snapshotMatchesConfigAccount(snapshot, cfg) {
+					selected = append(selected, snapshot)
+					break
+				}
+			}
+		}
+		snapshots = selected
+	}
 	view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, snapshots, configsByID)
 	view.AccountLimits = dedupeAccountUsageViews(view.AccountLimits, configsByID)
 	view.AccountLimits = applyAccountErrors(view.AccountLimits, refreshErrors, configsByID)
@@ -651,7 +710,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 	return snapshots, errs
 }
 
-func (s *UsageAnalyticsService) refreshProviderAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
+func accountUsageGroups(configs []models.LLMConfig, provider string) [][]models.LLMConfig {
 	// Group transitively by account or credential owner. Independent groups
 	// run concurrently; aliases and credential fallbacks retain their order.
 	var eligible []models.LLMConfig
@@ -693,6 +752,11 @@ func (s *UsageAnalyticsService) refreshProviderAccountSnapshots(ctx context.Cont
 		}
 		groups[index] = append(groups[index], cfg)
 	}
+	return groups
+}
+
+func (s *UsageAnalyticsService) refreshProviderAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
+	groups := accountUsageGroups(configs, provider)
 	type result struct {
 		snapshots []models.AccountUsageSnapshot
 		errors    map[string]string

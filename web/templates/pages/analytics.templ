@@ -168,9 +168,7 @@ templ analyticsContent(currentProject *models.Project) {
 						}
 					</div>
 					<div><h4 class="font-semibold mb-2">Provider Account Limits</h4><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
-						for range 2 {
-							<div class="card bg-base-100 border border-base-300" style="min-height:12rem"><div class="card-body"><p class="text-center opacity-50 py-12">Loading analytics…</p></div></div>
-						}
+						<p class="text-center opacity-50 py-12 lg:col-span-2">Loading analytics…</p>
 					</div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
@@ -1402,8 +1400,8 @@ templ analyticsContent(currentProject *models.Project) {
 											});
 											}
 										}
-									function renderAccountUsageCards(accounts) {
-										const accountContainers = ['accountUsageCards'].map(function(id){return document.getElementById(id);}).filter(Boolean);
+									function renderAccountUsageCards(accounts, target) {
+										const accountContainers = [target || document.getElementById('accountUsageCards')].filter(Boolean);
 										if (!accountContainers.length) return;
 										if (accounts.length === 0) {
 											accountContainers.forEach(function(container){container.removeAttribute('aria-busy');container.innerHTML = '\x3cp class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.\x3c/p>';});
@@ -1456,15 +1454,41 @@ templ analyticsContent(currentProject *models.Project) {
 										}
 									}
 									async function loadUsageAccounts(refreshUsage) {
+										const target=document.getElementById('accountUsageCards'), generation=dataGeneration;
 										try {
-											const params=usageEvidenceParams();params.set('projection','account_limits');
-											if(refreshUsage)params.append('refresh', 'true');
-											const data=await fetchJSON('/api/analytics/usage?'+params.toString());
-											renderAccountUsageCards(data.account_limits||[]);
+											const params=usageEvidenceParams();params.set('projection','accounts');
+											const inventory=await fetchJSON('/api/analytics/usage?'+params.toString());
+											const accounts=inventory.accounts||[];
+											target.innerHTML='';
+											if(!accounts.length){target.removeAttribute('aria-busy');target.textContent='No connected OAuth accounts.';return;}
+											const cards=accounts.map(function(account,index){
+												const card=document.createElement('div');
+												card.className='card bg-base-100 shadow-sm border border-base-300 h-full'+(accounts.length%2===1&&index===accounts.length-1?' lg:col-span-2':'');
+												card.style.minHeight='12rem';card.setAttribute('aria-busy','true');
+												card.innerHTML='\x3cdiv class="card-body">\x3cdiv class="font-semibold">'+escapeHTML(account.provider==='openai'?'OpenAI':'Anthropic')+'\x3c/div>\x3cp class="text-center opacity-50 py-12">Loading analytics…\x3c/p>\x3c/div>';
+												target.appendChild(card);return card;
+											});
+											await Promise.allSettled(accounts.map(async function(account,index){
+												const card=cards[index];
+												try {
+													const query=usageEvidenceParams();query.set('projection','account_limits');query.set('account_key',account.key);
+													if(refreshUsage)query.set('refresh','true');
+													const data=await fetchJSON('/api/analytics/usage?'+query.toString());
+													const temporary=document.createElement('div');
+													renderAccountUsageCards(data.account_limits||[],temporary);
+													const bodies=temporary.querySelectorAll('.card-body');
+													if(bodies.length)card.replaceChildren(...bodies);
+													else card.querySelector('p').textContent='No live limit snapshot yet';
+												} catch(e) {
+													if(e.name==='AbortError'||generation!==dataGeneration)return;
+													card.querySelector('p').textContent='Provider limits unavailable';
+												}
+												card.removeAttribute('aria-busy');
+											}));
+											if(generation===dataGeneration)target.removeAttribute('aria-busy');
 										} catch(e) {
-											if(e.name==='AbortError')return;
-											const target=document.getElementById('accountUsageCards');target.removeAttribute('aria-busy');
-											target.querySelectorAll('.card-body').forEach(body=>{body.textContent='Provider limits unavailable';});
+											if(e.name==='AbortError'||generation!==dataGeneration)return;
+											target.removeAttribute('aria-busy');target.textContent='Provider limits unavailable';
 										}
 									}
 								// Load Success/Failure Rates

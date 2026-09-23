@@ -24,6 +24,49 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestUsageAnalyticsService_AccountInventoryAndScopedLimits(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	usageRepo := repository.NewUsageRepo(db)
+	configRepo := repository.NewLLMConfigRepo(db)
+	svc := NewUsageAnalyticsService(usageRepo, configRepo)
+	for i, account := range []string{"one", "one", "two"} {
+		cfg := &models.LLMConfig{Name: fmt.Sprintf("model-%d", i), Provider: models.ProviderOpenAI, Model: "test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token-" + account, OAuthAccountID: account}
+		if err := configRepo.Create(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	svc.SetAccountUsageFetcher(func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		calls++
+		return &models.AccountUsageSnapshot{Provider: "openai", AgentConfigID: cfg.ID, AccountID: cfg.OAuthAccountID, PlanType: cfg.OAuthAccountID}, nil
+	})
+	accounts, err := svc.ListUsageAccounts(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 2 || calls != 0 {
+		t.Fatalf("inventory = %+v, fetches = %d", accounts, calls)
+	}
+	for _, account := range accounts {
+		before := calls
+		view, err := svc.BuildAnalyticsAccountLimits(ctx, repository.UsageFilter{AccountGroupKey: account.Key, Refresh: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(view.AccountLimits) != 1 || calls != before+1 {
+			t.Fatalf("scoped response = %+v, fetches = %d", view, calls-before)
+		}
+	}
+	before := calls
+	if _, err := svc.BuildAnalyticsAccountLimits(ctx, repository.UsageFilter{AccountGroupKey: "stale", Refresh: true}); err == nil {
+		t.Fatal("stale key should fail")
+	}
+	if calls != before {
+		t.Fatal("stale key refreshed unrelated accounts")
+	}
+}
+
 func TestNormalizeUsageFilter_RangeSemantics(t *testing.T) {
 	oldLocal := time.Local
 	loc, err := time.LoadLocation("America/Los_Angeles")

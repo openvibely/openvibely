@@ -66,7 +66,8 @@ func (h *Handler) Analytics(c echo.Context) error {
 // @Param usage_period query string false "Exact grouped period for supporting usage events"
 // @Param usage_provider query string false "Exact provider for supporting usage events"
 // @Param usage_model_name query string false "Exact model for supporting usage events"
-// @Param projection query string false "local skips provider requests; account_limits returns only provider/account-limit rows"
+// @Param projection query string false "local skips provider requests; accounts lists local account keys; account_limits returns provider/account-limit rows"
+// @Param account_key query string false "Opaque account inventory key to fetch independently"
 // @Success 200 {object} models.AnalyticsUsageViewModel "Usage analytics"
 // @Failure 400 {object} ErrorResponse "Supporting evidence requires project_id"
 // @Failure 500 {object} ErrorResponse "Internal server error"
@@ -76,6 +77,14 @@ func (h *Handler) GetAnalyticsUsage(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "usage analytics service is not configured")
 	}
 	filter := parseUsageFilter(c)
+	if analyticsUsageProjection(c) == "accounts" {
+		accounts, err := h.usageAnalyticsSvc.ListUsageAccounts(c.Request().Context())
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		return c.JSON(http.StatusOK, map[string]any{"accounts": accounts})
+	}
+	filter.AccountGroupKey = strings.TrimSpace(c.QueryParam("account_key"))
 	if usageEvidenceRequested(filter) && strings.TrimSpace(filter.ProjectID) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for supporting usage evidence")
 	}

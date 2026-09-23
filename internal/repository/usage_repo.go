@@ -20,6 +20,7 @@ func NewUsageRepo(db *sql.DB) *UsageRepo {
 }
 
 type UsageFilter struct {
+	AccountGroupKey  string
 	ProjectID        string
 	Provider         string
 	AccountID        string
