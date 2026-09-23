@@ -137,7 +137,7 @@ templ analyticsContent(currentProject *models.Project) {
 							</select>
 							</div></div>
 							<p id="skillOutcomeDescription" class="text-sm opacity-60"></p>
-							<div class="overflow-x-auto"><div class="relative h-72" style="min-width:420px"><canvas id="skillOutcomeChart"></canvas></div></div>
+							<div class="overflow-x-auto"><div class="relative h-64" style="min-width:420px"><canvas id="skillOutcomeChart"></canvas></div></div>
 						</div></div>
 						@analyticsChartCard("Skill outcomes versus usage", "Farther right means used on more tasks; higher means more goals achieved. Association only.", "skillEffectivenessChart", "h-72")
 					</div>
@@ -582,12 +582,11 @@ templ analyticsContent(currentProject *models.Project) {
 								document.getElementById('skillOutcomeDescription').textContent=descriptions[metric]+' Up to 12 skills, highest rate first. Association only.';
 								const ranked=rows.slice().sort((a,b)=>Number((b[metric]||{}).denominator>0)-Number((a[metric]||{}).denominator>0)||Number((b[metric]||{}).percent||0)-Number((a[metric]||{}).percent||0)||Number(b.tasks_evaluated||0)-Number(a.tasks_evaluated||0)||a.skill_handle.localeCompare(b.skill_handle)).slice(0,12);
 								const canvas=renderChartState('skillOutcome','skillOutcomeChart',ranked,'No skill outcome samples in this period');if(!canvas)return;
-								canvas.parentElement.style.height=Math.max(288,ranked.length*38+60)+'px';
 								const values=ranked.map(row=>{const v=row[metric]||{};return Number(v.denominator||0)?Number(v.percent||0):null;});
 								const labels=ranked.map(row=>{const v=row[metric]||{},n=Number(v.denominator||0);return n?Number(v.percent||0).toFixed(1)+'% · '+Number(v.numerator||0)+'/'+n:'Unavailable';});
 								canvas.setAttribute('aria-label',ranked.map((row,i)=>row.skill_handle+': '+labels[i]).join('; '));
 								charts.skillOutcome=new Chart(canvas.getContext('2d'),{
-									type:'bar',data:{labels:ranked.map(r=>scopedSkillLabel(r.skill_handle,r.skill_scope)),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1,maxBarThickness:22}]},
+									type:'bar',data:{labels:ranked.map(r=>scopedSkillLabel(r.skill_handle,r.skill_scope)),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1}]},
 									plugins:[{id:'skillOutcomeValues',afterDatasetsDraw:function(chart){
 										const ctx=chart.ctx;ctx.save();ctx.fillStyle=Chart.defaults?.color||'#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
 										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
