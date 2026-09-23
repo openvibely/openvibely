@@ -136,15 +136,15 @@ templ analyticsContent(currentProject *models.Project) {
 					<div><h3 class="text-xl font-bold">Usage</h3><p class="text-sm opacity-60">Provider limits, token usage, cache utilization, and recorded cost.</p><p id="usageEvidenceSelection" class="hidden"></p></div>
 					<div id="usageSummary" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization"} {
-							<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-usage-summary-value class="text-sm" aria-live="polite">Loading analytics…</strong></div></div>
+							<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-usage-summary-value class="text-center opacity-50 font-normal text-base" style="min-height:1.5rem" aria-live="polite">Loading analytics…</strong></div></div>
 						}
 					</div>
 					<div><h4 class="font-semibold mb-2">Provider Account Limits</h4><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
 						for range 2 {
-							<div class="card bg-base-100 border border-base-300" style="min-height:12rem"><div class="card-body"><p class="opacity-50">Loading analytics…</p></div></div>
+							<div class="card bg-base-100 border border-base-300" style="min-height:12rem"><div class="card-body"><p class="text-center opacity-50 py-12">Loading analytics…</p></div></div>
 						}
 					</div></div>
-					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Usage readout</h4><div id="usageFindings" style="min-height:4rem">Loading analytics…</div></div></div>
+					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Usage readout</h4><div id="usageFindings" style="min-height:7.5rem"><p class="text-center opacity-50 py-12">Loading analytics…</p></div></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
@@ -276,11 +276,12 @@ templ analyticsContent(currentProject *models.Project) {
 
 							function showAnalyticsLoading() {
 								if(selectedView==='usage') {
-									document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Loading analytics…');
+									document.querySelectorAll('[data-usage-summary-value]').forEach(node=>{node.textContent='Loading analytics…';node.className='text-center opacity-50 font-normal text-base';});
+									function loadingText(target){const p=document.createElement('p');p.className='text-center opacity-50 py-12';p.textContent='Loading analytics…';target.replaceChildren(p);}
 									const accounts=document.getElementById('accountUsageCards');
 									accounts.setAttribute('aria-busy','true');
-									accounts.querySelectorAll('.card-body').forEach(body=>{body.style.minHeight=body.getBoundingClientRect().height+'px';body.textContent='Loading analytics…';});
-									document.getElementById('usageFindings').textContent='Loading analytics…';
+									accounts.querySelectorAll('.card-body').forEach(body=>{body.style.minHeight=body.getBoundingClientRect().height+'px';loadingText(body);});
+									loadingText(document.getElementById('usageFindings'));
 								}
 								const loadingCharts = {
 									overview: { projectOutcomeTrend: 'projectOutcomeTrendChart' },
@@ -669,7 +670,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const cachedTokens = totals && totals.cached_input_tokens ? Number(totals.cached_input_tokens) : 0;
 								const cacheText = inputTokens > 0 ? (cachedTokens * 100 / inputTokens).toFixed(1) + '%' : 'Unavailable';
 								const values=[totals && totals.cost_available ? formatCost(Number(totals.cost_usd || 0)) : 'Unavailable',totals ? formatNumber(Number(totals.total_tokens || 0)) : 'Unavailable',cacheText];
-								usageContext.querySelectorAll('[data-usage-summary-value]').forEach((node,index)=>node.textContent=values[index]);
+								usageContext.querySelectorAll('[data-usage-summary-value]').forEach((node,index)=>{node.textContent=values[index];node.className='text-sm';});
 							}
 						function renderDistributionChart(key, canvasID, rows) {
 							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');

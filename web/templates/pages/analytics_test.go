@@ -367,6 +367,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         document.querySelector('[data-analytics-view="usage"]').click();
         var usageShells=Array.from(document.querySelectorAll('#usageSummary > .card'));
         if(usageShells.length!==3||!usageShells.every(function(card){return card.textContent.indexOf('Loading analytics')>=0;}))fail('Usage must reserve summary cards while loading');
+        document.querySelectorAll('#usageSummary [data-usage-summary-value], #accountUsageCards p, #usageFindings p').forEach(function(node){if(!node.classList.contains('text-center')||!node.classList.contains('opacity-50'))fail('Usage loading text must match Learning alignment and color');});
         if(document.querySelectorAll('#accountUsageCards > .card').length!==2||document.getElementById('accountUsageCards').getAttribute('aria-busy')!=='true')fail('Usage must reserve provider cards while loading');
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
           if(!usageShells.every(function(card,index){return card===document.querySelectorAll('#usageSummary > .card')[index];}))fail('summary card shells were replaced when data arrived');
