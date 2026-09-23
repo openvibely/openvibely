@@ -90,8 +90,8 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="flex items-center gap-2">
 						<h3 class="text-xl font-bold">Models</h3>
 						<button type="button" class="btn btn-ghost btn-circle btn-xs" data-model-attribution-help
-							data-model-help="Tasks whose latest run finished in the selected period, including failed and cancelled tasks. All recorded task history is included. Mixed configurations are kept separate. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
-							aria-label="Tasks whose latest run finished in the selected period, including failed and cancelled tasks. All recorded task history is included. Mixed configurations are kept separate. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
+							data-model-help="Tasks with activity in the selected period. Runs are counted by start date; tokens and cost by usage date. Only activity in the selected period is included. Mixed configurations are kept separate. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
+							aria-label="Tasks with activity in the selected period. Runs are counted by start date; tokens and cost by usage date. Only activity in the selected period is included. Mixed configurations are kept separate. Model labels use the saved configuration; different task difficulty and changing goals affect comparisons."
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path stroke-linecap="round" d="M12 11v6"></path><path stroke-linecap="round" d="M12 7h.01"></path></svg>
 						</button>
@@ -103,10 +103,10 @@ templ analyticsContent(currentProject *models.Project) {
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsChartCard("Task time by model", "Median elapsed task time, including gaps between runs. Lower means faster—not necessarily better outcomes. Mixed models excluded.", "modelTimeChart", "h-80")
+						@analyticsChartCard("Run time per task by model", "Median total run time per task for runs started in the selected period. Includes scheduled tasks; excludes waiting between runs and unfinished runs. Mixed models excluded.", "modelTimeChart", "h-80")
 						@analyticsChartCard("Tokens per task by model", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
 					</div>
-					<p class="text-sm opacity-60">Trends show the six busiest single-model configurations, grouped by task finish date. Goal and merge statuses reflect what is known now.</p>
+					<p class="text-sm opacity-60">Trends show the six busiest single-model configurations, grouped by each task's latest activity date in the selected period. Goal and merge statuses reflect what is known now.</p>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						@analyticsChartCard("Goal achievement over time", "Are more tasks meeting their goals? Hover for each period's task count. Missing evidence leaves a gap.", "modelGoalsTrendChart", "h-80")
 						@analyticsChartCard("Merged work over time", "Are more eligible tasks getting delivered? This is separate from whether their goals were met.", "modelMergesTrendChart", "h-80")
@@ -259,7 +259,7 @@ templ analyticsContent(currentProject *models.Project) {
 								if (!canvas) return null;
 								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Task duration distribution', followupDistributionChart: 'Follow-up run distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill outcomes versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', successFailureChart: 'Run results over time', hourlyTrendsChart: 'Runs by hour', avgTimeTaskChart: 'Average run duration by task', agentOutcomeTrendChart: 'Selected Agent run outcomes over time' };
 								canvas.setAttribute('role', 'img');
-								canvas.setAttribute('aria-label', chartLabels[canvasID] || ({modelTimeChart:'Task time by model',modelTokensChart:'Tokens per task by model',modelGoalsTrendChart:'Goal achievement over time',modelMergesTrendChart:'Merged work over time'})[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
+								canvas.setAttribute('aria-label', chartLabels[canvasID] || ({modelTimeChart:'Run time per task by model',modelTokensChart:'Tokens per task by model',modelGoalsTrendChart:'Goal achievement over time',modelMergesTrendChart:'Merged work over time'})[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
 							if (old) old.remove();
 							if (!rows || rows.length === 0) {
 								canvas.classList.add('hidden');
@@ -627,7 +627,7 @@ templ analyticsContent(currentProject *models.Project) {
 										options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(supported[items[0].dataIndex])+' · '+modelDetailLabel(supported[items[0].dataIndex]):'',label:item=>format(number(supported[item.dataIndex]))+' · n='+sample(supported[item.dataIndex])}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',title:{display:true,text:axis},ticks:{callback:format}}}}
 									});
 								}
-								bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Elapsed task time');
+								bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Run time per task');
 								bar('modelTokens','modelTokensChart',models.filter(r=>r.token_covered_tasks>0),r=>Number(r.total_tokens||0)/r.token_covered_tasks,compact,r=>r.token_covered_tasks,'Recorded tokens / task');
 								const busiest=models.slice(0,6),periods=Array.from(new Set(busiest.flatMap(r=>(r.outcome_trend||[]).map(p=>p.period)))).sort();
 								function trend(key,id,metric) {
@@ -659,9 +659,9 @@ templ analyticsContent(currentProject *models.Project) {
 									['Model / reasoning','Saved model configuration. Tasks that used more than one configuration appear separately under Mixed models.'],
 									['Goal achieved','Tasks whose current goal is marked achieved / tasks with a non-cleared goal. An unmet or changed goal is not necessarily a model failure. Tasks without goals are excluded.'],
 									['Merged','Tasks with work merged into the target branch / tasks with a worktree or merge status. Goal achievement does not imply delivery; merging does not imply the goal was evaluated.'],
-									['Task time','Median elapsed time from first run start to latest run finish, including waiting between runs. This is not active running time or time to merge. Recurring tasks are excluded.'],
-									['Tokens / task','Average recorded tokens across all runs of each task, including unsuccessful runs and runs before the selected period. Only tasks with recorded usage are included; older records may be incomplete.'],
-									['Cost / task','Average recorded cost per task, including unsuccessful work. Only tasks with recorded cost are included; partial cost records may understate total cost.'],
+									['Run time / task','Median total duration of finished runs started in the selected period, per task. Includes scheduled tasks. Excludes waiting between runs and unfinished runs; not time to merge.'],
+									['Tokens / task','Average recorded tokens per task within the selected period, including unsuccessful work. Only tasks with recorded usage are included; older records may be incomplete.'],
+									['Cost / task','Average recorded cost per task within the selected period, including unsuccessful work. Only tasks with recorded cost are included; partial cost records may understate total cost.'],
 									['Follow-ups / task','Average number of runs marked as follow-ups per task. Additional effort can mean clarification, changed goals, or corrections—not necessarily model failure.']
 								];
 								const target=document.getElementById('modelScorecard');if(!target)return;
@@ -1602,7 +1602,7 @@ templ analyticsContent(currentProject *models.Project) {
 							beginDataGeneration();
 							const loadGeneration = dataGeneration;
 							document.getElementById('analyticsError').classList.add('hidden');
-							const loaders = [loadDashboard];
+							const loaders = selectedView === 'usage' ? [] : [loadDashboard];
 								if (selectedView === 'outcomes') loaders.push(loadSuccessFailureRates, loadHourlyTrends, loadAvgTimeByTask, loadMostFrequentTasks, loadFailedTaskPatterns);
 								if (selectedView === 'learning') loaders.push(loadSkillAnalytics);
 								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); });							for (let index = 0; index < loaders.length; index += 2) {

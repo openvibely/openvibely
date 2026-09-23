@@ -372,6 +372,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
           if(!usageShells.every(function(card,index){return card===document.querySelectorAll('#usageSummary > .card')[index];}))fail('summary card shells were replaced when data arrived');
           if(document.getElementById('accountUsageCards').hasAttribute('aria-busy'))fail('provider cards still marked loading');
+          if(urls.some(function(url){return url.indexOf('/api/analytics/dashboard')>=0 && new URL(url,location.href).searchParams.get('view')==='usage';}))fail('Usage fetched unused outcome analytics');
           var accountCards = document.querySelectorAll('#accountUsageCards > .card');
           if (accountCards.length !== 3 || accountCards[0].classList.contains('lg:col-span-2') || accountCards[1].classList.contains('lg:col-span-2') || !accountCards[2].classList.contains('lg:col-span-2')) fail('odd final provider account card did not span both desktop columns');
 	          var usageContext = document.getElementById('usageSummary').textContent;

@@ -223,11 +223,11 @@ func analyticsDashboardSectionsForView(view string) analyticsDashboardSections {
 	case "agents":
 		return analyticsDashboardSections{agents: true, skills: true, evidenceRows: true, agentDetail: true}
 	case "models":
-		return analyticsDashboardSections{models: true, modelCategories: true, agents: true, workflows: true}
+		return analyticsDashboardSections{models: true}
 	case "learning":
 		return analyticsDashboardSections{skills: true, agentSkills: true}
 	case "usage":
-		return analyticsDashboardSections{outcomeMetrics: true, outcomeTrend: true, comparison: true}
+		return analyticsDashboardSections{}
 	case "automations":
 		return analyticsDashboardSections{workflows: true, workflowDetail: true}
 	default:
@@ -1180,25 +1180,29 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 	// Model evaluation includes scheduled and interactive tasks together, even
 	// when an older saved URL or API client still sends a work-type filter.
 	filter.WorkType = ""
-	window, windowArgs := analyticsEventWindowClause("e", "completed_at", filter)
+	window, windowArgs := analyticsWindowClause("e", filter)
+	usageWindow, usageArgs := analyticsEventWindowClause("u", "occurred_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
-	// Select whole tasks by their latest run, then include their entire history.
-	// A configuration switch must not assign all effort/outcomes to the last model.
+	// Like the other tabs, count activity in the selected period, not lifetime
+	// effort for a cohort of tasks finishing in that period.
 	query := `WITH scoped_tasks AS (
 		SELECT t.id,t.status,t.category,t.worktree_path,t.merge_status FROM tasks t WHERE t.project_id=? AND COALESCE(t.category,'')<>'chat'` + dimension + `
-	), ranked_runs AS (
-		SELECT e.task_id,e.status,e.completed_at,ROW_NUMBER() OVER(PARTITION BY e.task_id ORDER BY e.started_at DESC,e.history_order DESC,e.id DESC) rn
-		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id
-	), selected_tasks AS MATERIALIZED (
-		SELECT t.*,e.completed_at FROM scoped_tasks t JOIN ranked_runs e ON e.task_id=t.id AND e.rn=1
-		WHERE t.status IN ('completed','failed','cancelled') AND e.status IN ('completed','failed','cancelled')
-		AND e.completed_at IS NOT NULL` + window + `
+	), period_runs AS MATERIALIZED (
+		SELECT e.task_id,e.agent_config_id,e.status,e.started_at,e.completed_at,e.is_followup
+		FROM scoped_tasks t JOIN executions e ON e.task_id=t.id WHERE 1=1` + window + `
 	), task_usage_events AS MATERIALIZED (
-		SELECT u.task_id,u.agent_config_id,u.total_tokens,u.cost_usd
-		FROM selected_tasks t JOIN llm_usage_events u ON u.task_id=t.id
-		WHERE u.operation IN ('task','task_followup') OR (u.operation='' AND EXISTS (
+		SELECT u.task_id,u.agent_config_id,u.total_tokens,u.cost_usd,u.occurred_at
+		FROM scoped_tasks t JOIN llm_usage_events u ON u.task_id=t.id
+		WHERE (u.operation IN ('task','task_followup') OR (u.operation='' AND EXISTS (
 			SELECT 1 FROM executions e WHERE e.id=u.execution_id AND e.task_id=t.id
-		))
+		)))` + usageWindow + `
+	), selected_tasks AS MATERIALIZED (
+		SELECT t.*,a.activity_at completed_at FROM scoped_tasks t JOIN (
+			SELECT task_id,MAX(activity_at) activity_at FROM (
+				SELECT task_id,started_at activity_at FROM period_runs
+				UNION ALL SELECT task_id,occurred_at FROM task_usage_events
+			) GROUP BY task_id
+		) a ON a.task_id=t.id
 	), identities AS (
 		SELECT e.task_id,COALESCE(e.agent_config_id,'') config_id
 		FROM selected_tasks t JOIN executions e ON e.task_id=t.id
@@ -1208,13 +1212,12 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 		SELECT task_id,CASE WHEN COUNT(DISTINCT config_id)>1 THEN '__mixed__' ELSE MIN(config_id) END model_config_id
 		FROM identities GROUP BY task_id
 	), task_runs AS MATERIALIZED (
-		SELECT t.id,a.model_config_id,COUNT(*) runs,
+		SELECT t.id,a.model_config_id,COUNT(e.task_id) runs,
 		SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END) completed_runs,
 		SUM(CASE WHEN e.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_runs,
 		SUM(CASE WHEN e.is_followup=1 THEN 1 ELSE 0 END) followups,
-		CASE WHEN t.category='scheduled' OR EXISTS (SELECT 1 FROM schedules s WHERE s.task_id=t.id AND s.repeat_type<>'once')
-			THEN NULL ELSE CAST(MAX(0,(julianday(t.completed_at)-julianday(MIN(e.started_at)))*86400000) AS INTEGER) END duration_ms
-		FROM selected_tasks t JOIN attribution a ON a.task_id=t.id JOIN executions e ON e.task_id=t.id
+		CAST(SUM(CASE WHEN e.completed_at IS NOT NULL THEN MAX(0,(julianday(e.completed_at)-julianday(e.started_at))*86400000) END) AS INTEGER) duration_ms
+		FROM selected_tasks t JOIN attribution a ON a.task_id=t.id LEFT JOIN period_runs e ON e.task_id=t.id
 		GROUP BY t.id
 	), task_usage AS (
 		SELECT u.task_id,SUM(u.total_tokens) tokens,SUM(u.cost_usd) cost
@@ -1257,6 +1260,7 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 	GROUP BY tr.model_config_id ORDER BY COUNT(*) DESC,ac.name,tr.model_config_id`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, windowArgs...)
+	args = append(args, usageArgs...)
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting model performance: %w", err)
