@@ -47,7 +47,6 @@ templ analyticsContent(currentProject *models.Project) {
 							<label class="label cursor-pointer gap-2 pb-2" data-compare-filter><input id="comparePeriod" type="checkbox" class="checkbox checkbox-sm" checked/><span class="label-text">Compare previous period</span></label>
 							<div class="form-control" data-agent-filter><label class="label" for="analyticsAgentFilter"><span class="label-text">Agent</span></label><select id="analyticsAgentFilter" class="select select-bordered select-sm"><option value="">All Agents</option></select></div>
 							<div class="form-control" data-automation-filter><label class="label" for="analyticsWorkflowFilter"><span class="label-text">Automation</span></label><select id="analyticsWorkflowFilter" class="select select-bordered select-sm"><option value="">All Automations</option></select></div>
-							<div class="form-control hidden" data-model-work-type-filter><label class="label" for="analyticsWorkType"><span class="label-text">Work Type</span></label><select id="analyticsWorkType" class="select select-bordered select-sm"><option value="">All work</option><option value="interactive">Interactive tasks</option><option value="recurring">Recurring work</option></select></div>
 							<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
 						</div>
 						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="usage">Usage</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="agents">Agents</button></nav>
@@ -319,7 +318,6 @@ templ analyticsContent(currentProject *models.Project) {
 						let selectedView = 'usage';
 								let selectedAgent = initialURLParams.get('agent') || '';
 								let selectedWorkflow = initialURLParams.get('workflow') || '';
-								let selectedWorkType = ['interactive','recurring'].includes(initialURLParams.get('work_type')) ? initialURLParams.get('work_type') : '';
 						function savedAnalyticsView() {
 							try {
 								const saved = window.localStorage.getItem(savedViewKey);
@@ -343,13 +341,12 @@ templ analyticsContent(currentProject *models.Project) {
 								params.set('compare', comparisonEnabled(view) ? '1' : '0');
 								if (selectedAgent && ['agents','outcomes'].includes(view)) params.set('agent', selectedAgent); else params.delete('agent');
 								if (selectedWorkflow && ['overview','automations'].includes(view)) params.set('workflow', selectedWorkflow); else params.delete('workflow');
-								if (view === 'models' && selectedWorkType) params.set('work_type', selectedWorkType); else params.delete('work_type');
+								params.delete('work_type');
 								return '/analytics?' + params.toString();						}
 							function analyticsParams(initial) {
 								const params = new URLSearchParams(initial || {});
 								if (selectedAgent && ['agents','outcomes'].includes(selectedView)) params.set('agent', selectedAgent);
 								if (selectedWorkflow && ['overview','automations'].includes(selectedView)) params.set('workflow', selectedWorkflow);
-								if (selectedView === 'models' && selectedWorkType) params.set('work_type', selectedWorkType);
 								return params;
 							}
 								function applyView(view, updateHistory) {
@@ -363,8 +360,6 @@ templ analyticsContent(currentProject *models.Project) {
 									if (automationFilter) automationFilter.classList.toggle('hidden', !['overview','automations'].includes(selectedView));
 									const compareFilter = document.querySelector('[data-compare-filter]');
 									if (compareFilter) compareFilter.classList.toggle('hidden', !['overview','outcomes'].includes(selectedView));
-									const workTypeFilter = document.querySelector('[data-model-work-type-filter]');
-									if (workTypeFilter) workTypeFilter.classList.toggle('hidden', selectedView !== 'models');
 									if (updateHistory) history.pushState({}, '', analyticsURL(selectedView));
 								}
 
@@ -1627,10 +1622,8 @@ templ analyticsContent(currentProject *models.Project) {
 							document.getElementById('comparePeriod').checked = params.get('compare') !== '0' && range !== 'all';
 								selectedAgent = params.get('agent') || '';
 								selectedWorkflow = params.get('workflow') || '';
-								selectedWorkType = ['interactive','recurring'].includes(params.get('work_type')) ? params.get('work_type') : '';
 								document.getElementById('analyticsAgentFilter').value = selectedAgent;
 								document.getElementById('analyticsWorkflowFilter').value = selectedWorkflow;
-								document.getElementById('analyticsWorkType').value = selectedWorkType;
 								const requestedView = params.get('view');
 								applyView(validViews.includes(requestedView) ? requestedView : (savedAnalyticsView() || 'usage'), false);
 								restoreAggregateSelectionState();
@@ -1640,7 +1633,6 @@ templ analyticsContent(currentProject *models.Project) {
 						['dateRange', 'groupBy', 'comparePeriod'].forEach(function(id) { document.getElementById(id).addEventListener('change', function() { if (document.getElementById('dateRange').value === 'all') document.getElementById('comparePeriod').checked = false; history.replaceState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal }); });
 							document.getElementById('analyticsAgentFilter').addEventListener('change', function() { selectedAgent = document.getElementById('analyticsAgentFilter').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
 							document.getElementById('analyticsWorkflowFilter').addEventListener('change', function() { selectedWorkflow = document.getElementById('analyticsWorkflowFilter').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
-							document.getElementById('analyticsWorkType').addEventListener('change', function() { selectedWorkType = document.getElementById('analyticsWorkType').value; history.pushState({}, '', analyticsURL(selectedView)); loadAllData(false); }, { signal: eventSignal });
 							const loadMoreEvidence = document.getElementById('loadMoreEvidence');
 							if (loadMoreEvidence) loadMoreEvidence.addEventListener('click', function() { loadDashboard(Number(loadMoreEvidence.dataset.nextOffset || 0), true); }, { signal: eventSignal });
 							const usageRateSelect = document.getElementById('usageRateModelSelect');						if (usageRateSelect) usageRateSelect.addEventListener('change', function() { if (latestUsageAnalytics) renderUsageRateChart(latestUsageAnalytics); }, { signal: eventSignal });

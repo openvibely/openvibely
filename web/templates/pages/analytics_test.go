@@ -577,7 +577,7 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	}
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
-	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=models&range=30d&agent=agent-1&workflow=workflow-1');
+	  history.replaceState({},'',location.pathname+'?project_id=project-1&view=models&range=30d&agent=agent-1&workflow=workflow-1&work_type=recurring');
 	  var result=document.getElementById('reconnect-result'),dashboardURL='';
   function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   var chartConfigs={}; window.Chart=function(ctx,config){chartConfigs[ctx.canvas.id]=config;this.destroy=function(){};};
@@ -585,6 +585,7 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	  function wait(attempt){
 	    var card=document.getElementById('modelScorecard'),score=card.textContent;
 	    if(score.indexOf('Fable')>=0){
+	      if(document.getElementById('analyticsWorkType')||new URL(dashboardURL,location.href).searchParams.has('work_type'))fail('Models must not expose or apply a work-type filter');
 	      if(score.indexOf('100.0%')<0||score.indexOf('50.0%')<0||score.indexOf('1 / 1 tasks')<0||score.indexOf('1 / 2 tasks')<0)fail('goal and merge outcomes must both be visible');
 	      if(score.indexOf('1m 0s')<0||score.indexOf('1,000')<0||score.indexOf('$0.2500')<0||score.indexOf('Follow-ups / task')<0)fail('whole-task effort missing');
 	      if(card.querySelectorAll('thead th').length!==7||card.querySelectorAll('tbody tr').length!==1)fail('expected one compact seven-column scorecard');
@@ -684,7 +685,6 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	for _, expected := range []string{
 		`data-analytics-view="agents"`,
 		`data-analytics-view="learning"`, `data-analytics-view="usage"`,
-		`data-model-work-type-filter`, `id="analyticsWorkType"`, `Interactive tasks`, `Recurring work`,
 		`data-analytics-section="overview"`, `data-analytics-section="outcomes"`,
 		`data-analytics-section="agents"`, `data-analytics-section="automations"`,
 		`Run success rate`, `Goal achievement rate`, `First-run success rate`,
@@ -693,7 +693,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
 		`Selected Agent outcome trend`, `Agent findings`, `Model comparison`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`,
-		`Run results over time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('work_type'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
+		`Run results over time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 	} {
 		if !strings.Contains(content, expected) {
 			t.Errorf("analytics outcome dashboard missing %q", expected)
