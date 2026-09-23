@@ -47,6 +47,44 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	}
 }
 
+func TestBrowserFunctional_AnalyticsContent_SkillOutcomeMetricSelectorInChrome(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+(function(){
+  var result=document.getElementById('reconnect-result');
+  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=learning');
+  window.Chart=function(){this.destroy=function(){};};
+  var rows=[
+    {skill_handle:'alpha',skill_scope:'project',tasks_evaluated:10,goal_achievement:{percent:50,numerator:5,denominator:10},technical_completion:{percent:100,numerator:10,denominator:10},follow_up:{percent:0,numerator:0,denominator:10}},
+    {skill_handle:'beta',skill_scope:'project',tasks_evaluated:5,goal_achievement:{percent:100,numerator:5,denominator:5},technical_completion:{percent:80,numerator:4,denominator:5},follow_up:{percent:20,numerator:1,denominator:5}},
+    {skill_handle:'unknown',skill_scope:'project',tasks_evaluated:1,goal_achievement:{denominator:0},technical_completion:{denominator:0},follow_up:{denominator:0}}
+  ];
+  window.fetch=function(url){return Promise.resolve({ok:true,json:function(){return Promise.resolve(String(url).includes('/dashboard')?{skill_outcomes:rows,agent_skill_outcomes:[]}:{usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]});}});};
+  window.addEventListener('load',function(){
+    var attempts=0;
+    function check(){
+      var bars=document.getElementById('skillOutcomeBars'),selector=document.getElementById('skillOutcomeMetric');
+      if(bars.hasAttribute('aria-busy')||!bars.querySelector('[data-skill-outcome-row]')){if(++attempts>100)fail('skill bars did not load');setTimeout(check,20);return;}
+      if(selector.value!=='goal_achievement')fail('default metric');
+      if(!bars.firstElementChild.textContent.includes('beta')||!bars.textContent.includes('100.0% · 5/5 tasks'))fail('goal order or visible values');
+      if(!bars.textContent.includes('Unavailable · n=0'))fail('missing evidence must not be zero');
+      selector.value='technical_completion';selector.dispatchEvent(new Event('change'));
+      if(!bars.firstElementChild.textContent.includes('alpha')||!bars.textContent.includes('100.0% · 10/10 tasks'))fail('run metric did not replace bars');
+      selector.value='follow_up';selector.dispatchEvent(new Event('change'));
+      if(!bars.firstElementChild.textContent.includes('beta')||!bars.textContent.includes('0.0% · 0/10 tasks'))fail('follow-up metric or zero evidence');
+      if(bars.querySelectorAll('[data-skill-outcome-row]').length!==3)fail('expected one bar per skill');
+      result.setAttribute('data-test-result','pass');
+    }check();
+  });
+})();
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestBrowserFunctional_AnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer
@@ -735,8 +773,8 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if strings.Contains(content, `sticky top-0`) {
 		t.Fatal("Analytics navigation should scroll with the page")
 	}
-	if !strings.Contains(content, `slice(0,12)`) || !strings.Contains(content, `canvas.parentElement.style.height`) || !strings.Contains(content, `legend:{display:false}`) {
-		t.Fatal("Skill charts should bound dense data, scale horizontal rows, and avoid a per-skill legend")
+	if !strings.Contains(content, `slice(0,12)`) || !strings.Contains(content, `data-skill-outcome-row`) || !strings.Contains(content, `id="skillOutcomeMetric"`) {
+		t.Fatal("Skill outcomes should show bounded, labeled bars with one selected metric")
 	}
 	for _, expected := range []string{`gap-6 items-start`, `type:'scatter'`, `pointRadius:7`, `clip:false`, `layout:{padding:{top:12,right:10}}`, `Farther right means used on more tasks; higher means more goals achieved.`} {
 		if !strings.Contains(content, expected) {
@@ -800,7 +838,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 		"agents":      {`id="agentComparisonChart"`, `id="agentEfficiencyChart"`, `id="agentCategoryChart"`},
 		"models":      {`id="modelScorecard"`, `Model comparison`},
 		"automations": {`id="automationComparisonChart"`, `id="automationFunnelChart"`, `id="automationDurationChart"`, `id="automationFailureChart"`, `id="automationBottleneckChart"`},
-		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeChart"`, `id="skillEffectivenessChart"`},
+		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeBars"`, `id="skillEffectivenessChart"`},
 		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="usageSummary"`},
 	} {
 		next := map[string]string{"overview": "outcomes", "outcomes": "agents", "agents": "models", "models": "automations", "automations": "learning", "learning": "usage"}[name]
