@@ -123,7 +123,16 @@ templ analyticsContent(currentProject *models.Project) {
 				<section id="analytics-agents" data-analytics-section="agents" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Agents</h3><p class="text-sm opacity-60">Compare reusable Agent definitions and inspect how each one performs.</p></div>
 					@analyticsTaskSummary("agents")
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Agent outcome comparison", "Goal achievement, first-run success, and follow-up runs with sample sizes.", "agentComparisonChart", "h-80") @analyticsChartCard("Quality versus efficiency", "Outcome quality against duration or covered cost.", "agentEfficiencyChart", "h-80")</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+						<div class="card bg-base-100 border border-base-300"><div class="card-body">
+							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Agent outcome comparison <button id="agentOutcomeHelp" type="button" class="btn btn-ghost btn-circle btn-xs" data-model-help="Share of evaluated tasks whose goal was met." aria-label="About the selected agent outcome metric">ⓘ</button></h4>
+								<select id="agentOutcomeMetric" aria-label="Agent outcome metric" class="select select-bordered select-xs w-full max-w-full sm:w-auto sm:min-w-48"><option value="goal_achievement">Goal achievement</option><option value="first_pass">First-run success</option><option value="follow_up">Follow-up rate</option></select>
+							</div>
+							<p id="agentOutcomeCount" class="text-sm opacity-60">Up to 12 agents, highest rate first.</p>
+							<div class="overflow-x-auto"><div class="relative h-64" style="min-width:420px"><canvas id="agentComparisonChart"></canvas></div></div>
+						</div></div>
+						@analyticsChartCard("Quality versus efficiency", "Outcome quality against duration or covered cost.", "agentEfficiencyChart", "h-80")
+					</div>
 					<div id="agentDetail">@analyticsChartCard("Selected Agent outcome trend", "Select an Agent for period detail.", "agentOutcomeTrendChart", "h-64")</div>
 					@analyticsChartCard("Performance by task category", "Run success, goal achievement, and follow-up runs for the selected Agent.", "agentCategoryChart", "h-72")
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Agent findings</h4><div id="agentFindings" style="min-height:7.5rem"></div></div></div>
@@ -624,12 +633,33 @@ templ analyticsContent(currentProject *models.Project) {
 								const ranked=rows.map(function(row){const reasons=[];let score=0;if(Number(row.period_failed_count||0)>0){score+=6+Number(row.period_failed_count);reasons.push(row.period_failed_count+' failed run(s)');}if(Number(row.follow_up_count||0)>1){score+=Number(row.follow_up_count);reasons.push(row.follow_up_count+' follow-up runs');}if(Number(row.cycle_time_ms||0)>=86400000){score+=2;reasons.push('task duration '+formatDuration(row.cycle_time_ms));}if(Number(row.known_cost_usd||0)>0){score+=1;reasons.push(formatCost(row.known_cost_usd)+' known cost');}return {row:row,reasons:reasons,score:score};}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,5);
 							}
 							function renderAgentComparison(rows) {
-								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=3); let canvas=renderChartState('agentComparison','agentComparisonChart',supported,'At least three task samples per Agent are required');
-								if(canvas)charts.agentComparison=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:supported.map(r=>r.agent_name),datasets:[{label:'Goal achievement',data:supported.map(r=>Number((r.goal_achievement||{}).percent||0)),backgroundColor:'#3b82f6'},{label:'First-run success',data:supported.map(r=>Number((r.first_pass||{}).percent||0)),backgroundColor:'#8b5cf6'},{label:'Follow-up runs',data:supported.map(r=>Number((r.follow_up||{}).percent||0)),backgroundColor:'#f59e0b'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,max:100}},plugins:{tooltip:{callbacks:{footer:function(items){return items.length?'sample n='+supported[items[0].dataIndex].tasks_evaluated:'';}}}}}});
+								renderAgentOutcomeBars(rows);
+								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=3); let canvas;
 								const efficiency=supported.filter(r=>Number(r.duration_sample_size||0)>=3); canvas=renderChartState('agentEfficiency','agentEfficiencyChart',efficiency,'At least three duration samples per Agent are required');
 								if(canvas)charts.agentEfficiency=new Chart(canvas.getContext('2d'),{type:'bubble',data:{datasets:efficiency.map(function(r,i){return {label:r.agent_name,data:[{x:Number(r.median_duration_ms||0)/60000,y:Number((r.goal_achievement||{}).percent||0),r:Math.min(20,5+Math.sqrt(r.tasks_evaluated||0)*2)}],backgroundColor:'hsla('+(i*67%360)+',70%,55%,.65)'};})},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'Median duration (minutes)'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Goal achievement (%)'}}}}});
 								const comparable=supported.filter(r=>Number((r.first_pass||{}).denominator||0)>=3).sort((a,b)=>Number((b.first_pass||{}).percent||0)-Number((a.first_pass||{}).percent||0));const findings=document.getElementById('agentFindings');if(findings){if(!comparable.length)findings.innerHTML='\x3cp class="opacity-50">At least three first-run-eligible tasks per Agent are required.\x3c/p>';else{const best=comparable[0],lowest=comparable[comparable.length-1],lines=['\x3cp>\x3cstrong>Strongest first-run success:\x3c/strong> '+escapeHTML(best.agent_name)+' at '+Number((best.first_pass||{}).percent||0).toFixed(1)+'% (n='+(best.first_pass||{}).denominator+').\x3c/p>'];if(lowest.agent_id!==best.agent_id)lines.push('\x3cp>\x3cstrong>Needs inspection:\x3c/strong> '+escapeHTML(lowest.agent_name)+' at '+Number((lowest.first_pass||{}).percent||0).toFixed(1)+'% first-run success and '+Number((lowest.follow_up||{}).percent||0).toFixed(1)+'% follow-up runs.\x3c/p>');findings.innerHTML=lines.join('');}}
 							}
+							function renderAgentOutcomeBars(rows) {
+								const metric=document.getElementById('agentOutcomeMetric').value;
+								const descriptions={goal_achievement:'Share of evaluated tasks whose goal was met.',first_pass:'Share of eligible tasks that succeeded on the first run.',follow_up:'Share of tasks with follow-ups. More follow-ups can reflect changed goals, not just mistakes.'};
+								document.getElementById('agentOutcomeHelp').dataset.modelHelp=descriptions[metric];
+								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=3);
+								const ranked=supported.slice().sort((a,b)=>Number((b[metric]||{}).denominator>0)-Number((a[metric]||{}).denominator>0)||Number((b[metric]||{}).percent||0)-Number((a[metric]||{}).percent||0)||Number(b.tasks_evaluated||0)-Number(a.tasks_evaluated||0)||a.agent_name.localeCompare(b.agent_name)).slice(0,12);
+								document.getElementById('agentOutcomeCount').textContent=(supported.length>12?'Showing 12 of '+supported.length+' agents. ':'')+'Highest rate first. At least 3 tasks per agent.';
+								const canvas=renderChartState('agentComparison','agentComparisonChart',ranked,'At least three task samples per Agent are required');if(!canvas)return;
+								const values=ranked.map(r=>Number((r[metric]||{}).denominator||0)?Number(r[metric].percent||0):null);
+								const labels=values.map(v=>v===null?'Unavailable':v.toFixed(1)+'%');
+								canvas.setAttribute('aria-label',ranked.map((r,i)=>r.agent_name+': '+labels[i]).join('; '));
+								charts.agentComparison=new Chart(canvas.getContext('2d'),{
+									type:'bar',data:{labels:ranked.map(r=>r.agent_name),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1}]},
+									plugins:[{id:'agentOutcomeValues',afterDatasetsDraw:function(chart){
+										const ctx=chart.ctx;ctx.save();ctx.fillStyle=Chart.defaults?.color||'#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
+									}}],
+									options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:85}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?ranked[items[0].dataIndex].agent_name:'',label:function(item){const m=ranked[item.dataIndex][metric]||{};return Number(m.denominator||0)?labels[item.dataIndex]+' · '+Number(m.numerator||0)+' / '+Number(m.denominator)+' tasks (n='+Number(m.denominator)+')':'Unavailable: no eligible tasks';}}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
+								});
+							}
+							document.getElementById('agentOutcomeMetric').addEventListener('change',function(){if(latestDashboard)renderAgentOutcomeBars(latestDashboard.agents||[]);},{signal:eventSignal});
 							function renderSkillOutcomeBars(rows) {
 								const metric=document.getElementById('skillOutcomeMetric').value;
 								const descriptions={goal_achievement:'Share of goal-evaluated tasks meeting their goal.',technical_completion:'Share of tasks with a finished run that had at least one successful run.',follow_up:'Share of tasks with follow-ups. More follow-ups can mean clarification or changed goals—not failure.'};
