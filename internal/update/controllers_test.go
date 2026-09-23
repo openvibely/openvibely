@@ -361,13 +361,16 @@ func TestHostedRestartReplaysPendingLeaseRenewalPastPreviousDeadline(t *testing.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/lease") {
 			key := r.Header.Get("Idempotency-Key")
-			if calls.Add(1) == 1 {
+			call := calls.Add(1)
+			if call == 1 {
 				firstKey.Store(key)
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
-			if got, _ := firstKey.Load().(string); key != got {
-				keyMismatch.Store(true)
+			if call == 2 {
+				if got, _ := firstKey.Load().(string); key != got {
+					keyMismatch.Store(true)
+				}
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"schema_version":1,"state":"draining","lease_expires_at":%q}`, authoritativeLease.Format(time.RFC3339Nano))
