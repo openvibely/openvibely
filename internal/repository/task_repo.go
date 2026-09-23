@@ -1934,20 +1934,21 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }
 
-// SearchByTitle searches for non-chat tasks matching a title substring within a project.
+// SearchByTitle searches for non-chat tasks matching a literal title substring within a project.
 // Returns tasks ordered by relevance: exact match first, then prefix match, then contains.
 // Excludes chat tasks (CategoryChat) since those are internal chat messages, not user tasks.
 func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQuery string) ([]models.Task, error) {
+	queryPattern := escapeSQLLikePatternLiteral(titleQuery)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
-		 FROM tasks WHERE project_id = ? AND category != 'chat' AND title LIKE ?
+		 FROM tasks WHERE project_id = ? AND category != 'chat' AND title LIKE ? ESCAPE '\'
 		 ORDER BY
 		   CASE WHEN LOWER(title) = LOWER(?) THEN 0
-		        WHEN LOWER(title) LIKE LOWER(? || '%') THEN 1
+		        WHEN LOWER(title) LIKE LOWER(? || '%') ESCAPE '\' THEN 1
 		        ELSE 2 END,
 		   updated_at DESC
 		 LIMIT 10`,
-		projectID, "%"+titleQuery+"%", titleQuery, titleQuery)
+		projectID, "%"+queryPattern+"%", titleQuery, queryPattern)
 	if err != nil {
 		return nil, fmt.Errorf("searching tasks by title: %w", err)
 	}

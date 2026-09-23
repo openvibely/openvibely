@@ -731,3 +731,45 @@ func TestScheduleActionServiceToggleResetsTerminalTaskOnlyWhenResumingRunnableSc
 	require.Equal(t, models.StatusPending, resumedTask.Status)
 	require.False(t, workerSvc.IsCancellationRequested(task.ID))
 }
+
+func TestScheduleActionServiceModifyLiteralTitle(t *testing.T) {
+	for _, tt := range []struct {
+		query, nonliteral string
+	}{
+		{"QA_plan", "QA plan"},
+		{"100% rollout", "100 day rollout"},
+	} {
+		t.Run(tt.query, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			taskRepo := repository.NewTaskRepo(db, nil)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			tasks := []models.Task{
+				{ProjectID: "default", Title: "Release " + tt.query + " today", Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending},
+				{ProjectID: "default", Title: tt.nonliteral, Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending},
+			}
+			schedules := make([]models.Schedule, len(tasks))
+			for i := range tasks {
+				require.NoError(t, taskRepo.Create(ctx, &tasks[i]))
+				schedules[i] = models.Schedule{
+					TaskID: tasks[i].ID, RunAt: time.Date(2030, time.January, 7, 8, 15, 0, 0, time.UTC),
+					RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true,
+				}
+				require.NoError(t, scheduleRepo.Create(ctx, &schedules[i]))
+			}
+
+			disabled := false
+			result, err := NewScheduleActionService(taskRepo, scheduleRepo).Modify(ctx, "default", ModifyScheduleRequest{
+				Title: tt.query, Enabled: &disabled,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tasks[0].ID, result.Task.ID)
+			require.Equal(t, schedules[0].ID, result.Schedule.ID)
+			for i := range schedules {
+				stored, err := scheduleRepo.GetByID(ctx, schedules[i].ID)
+				require.NoError(t, err)
+				require.Equal(t, i != 0, stored.Enabled, "only the literal title's schedule should be disabled")
+			}
+		})
+	}
+}
