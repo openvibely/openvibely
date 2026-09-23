@@ -112,7 +112,7 @@ func assertPersonalityCardCommon(t *testing.T, card, key, name, description, pre
 	assert.Contains(t, card, `data-personality-is-preset="`+isPreset+`"`)
 	assert.Contains(t, card, `data-personality-has-custom="`+hasCustom+`"`)
 	assert.Contains(t, card, `data-search-card`)
-	assert.Contains(t, card, `onclick="editPersonalityFromData(this)"`)
+	assert.Contains(t, card, `onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editPersonalityFromData(this)"`)
 	assert.Contains(t, card, `onclick="editPersonalityFromData(this.closest('[data-personality-key]'))"`)
 	assert.Contains(t, card, `handleDropdownToggle(event)`)
 }
