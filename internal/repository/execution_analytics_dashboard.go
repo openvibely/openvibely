@@ -305,6 +305,9 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		}
 	}
 	if sections.skills {
+		if dashboard.SkillSummary, err = r.querySkillOutcomeSummary(ctx, filter); err != nil {
+			return dashboard, err
+		}
 		if dashboard.SkillOutcomes, err = r.querySkillOutcomePerformance(ctx, filter); err != nil {
 			return dashboard, err
 		}
@@ -819,7 +822,7 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.SkillOutcomePerformance, error) {
+func skillOutcomePopulation(filter AnalyticsDashboardFilter) (string, []any) {
 	eventWindow, eventArgs := analyticsEventWindowClause("s", "created_at", filter)
 	execWindow, execArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -841,14 +844,29 @@ func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter
 		), evaluable_goals AS (
 			SELECT task_id,status FROM period_goals
 			UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_tasks p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
-		)
-		SELECT s.skill_handle,s.skill_scope,COUNT(*),SUM(s.completed),SUM(s.terminal),SUM(s.followed),
-			SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END),COUNT(g.task_id)
-		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id	GROUP BY s.skill_handle,s.skill_scope ORDER BY COUNT(*) DESC,s.skill_handle,s.skill_scope LIMIT 20`
+		) `
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, eventArgs...)
 	args = append(args, execArgs...)
 	args = append(args, goalArgs...)
+	return query, args
+}
+
+func (r *ExecutionRepo) querySkillOutcomeSummary(ctx context.Context, filter AnalyticsDashboardFilter) (models.SkillOutcomeSummary, error) {
+	query, args := skillOutcomePopulation(filter)
+	var summary models.SkillOutcomeSummary
+	err := r.db.QueryRowContext(ctx, query+`SELECT
+		(SELECT COUNT(*) FROM (SELECT DISTINCT skill_handle,skill_scope FROM task_stats)),
+		COUNT(DISTINCT s.task_id),COUNT(DISTINCT g.task_id)
+		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id`, args...).Scan(&summary.SkillsUsed, &summary.TasksUsingSkills, &summary.TasksWithGoalEvidence)
+	return summary, err
+}
+
+func (r *ExecutionRepo) querySkillOutcomePerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.SkillOutcomePerformance, error) {
+	query, args := skillOutcomePopulation(filter)
+	query += `SELECT s.skill_handle,s.skill_scope,COUNT(*),SUM(s.completed),SUM(s.terminal),SUM(s.followed),
+		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END),COUNT(g.task_id)
+		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id GROUP BY s.skill_handle,s.skill_scope ORDER BY COUNT(*) DESC,s.skill_handle,s.skill_scope LIMIT 20`
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getting skill outcome performance: %w", err)

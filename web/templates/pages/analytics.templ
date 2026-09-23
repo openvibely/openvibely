@@ -125,6 +125,11 @@ templ analyticsContent(currentProject *models.Project) {
 					<div><h3 class="text-xl font-bold">Learning</h3><p class="text-sm opacity-60">Observed skill activity and outcomes. Association only; not causation.</p><p id="skillEvidenceSelection" class="hidden"></p></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Skill Activity Over Time", "Created, edited, and used skill activity.", "skillUsageTrendChart", "h-64") @analyticsChartCard("Top Skills", "Highest skill activity by event type.", "skillTopChart", "h-64") @analyticsChartCard("Follow-through / Selected Outcomes", "Selected skills later used or ignored.", "skillFollowChart", "h-64") @analyticsChartCard("Top Agent/Skill Pairs", "Most active Agent and skill combinations.", "skillAgentChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Least Active Enabled Skills</h4><table class="table table-sm"><tbody id="underusedSkillsTable"></tbody></table></div></div>
+					<div id="skillSummary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+						for _, label := range []string{"Skills used", "Tasks using skills", "Tasks with goal evidence"} {
+							<div class="card bg-base-100 border border-base-300"><div class="card-body p-4"><span class="text-sm">{ label }</span><strong data-skill-summary-value class="text-center opacity-50 font-normal text-base" style="min-height:1.5rem">Loading analytics…</strong></div></div>
+						}
+					</div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 						<div class="card bg-base-100 border border-base-300"><div class="card-body">
 							<div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">
@@ -141,7 +146,6 @@ templ analyticsContent(currentProject *models.Project) {
 						</div></div>
 						@analyticsChartCard("Skill outcomes versus usage", "Farther right means used on more tasks; higher means more goals achieved. Association only.", "skillEffectivenessChart", "h-72")
 					</div>
-					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Observed skill signals</h4><div id="skillRecommendations"></div><p class="text-xs opacity-60">Associations are not causal. Memory effectiveness is unavailable because reliable outcome instrumentation does not exist.</p></div></div>
 					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact skill outcome values</summary><div class="collapse-content"><table class="table table-sm"><tbody id="skillOutcomeTable"></tbody></table><table class="table table-sm"><tbody id="agentSkillOutcomeTable"></tbody></table></div></details>
 					<details id="skillEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting skill events</summary><div class="collapse-content"><p id="skillEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="skillEventEvidenceTable"></tbody></table></div></details>
 				</section>
@@ -259,7 +263,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if (table) table.innerHTML = '\x3ctr>\x3ctd colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 								});
 								['analyticsKpis','analyticsMetricDefinitions','outcomeFunnel','analyticsImprovements','analyticsAttention','modelScorecard','frequentTasksList'].forEach(function(id) { const node=document.getElementById(id); if (node) node.textContent='Analytics unavailable'; });
-								document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
+								document.querySelectorAll('[data-usage-summary-value], [data-skill-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
 								const usageAccounts=document.getElementById('accountUsageCards');usageAccounts.removeAttribute('aria-busy');
 								usageAccounts.querySelectorAll('.card-body').forEach(body=>body.textContent='Analytics unavailable');
 								const failedBody = document.querySelector('#failedPatternsTable tbody');
@@ -295,6 +299,7 @@ templ analyticsContent(currentProject *models.Project) {
 								});
 							}
 							function showAnalyticsLoading() {
+								if(selectedView==='learning')document.querySelectorAll('[data-skill-summary-value]').forEach(node=>{node.textContent='Loading analytics…';node.className='text-center opacity-50 font-normal text-base';});
 								const panels=selectedView==='models'?[['modelScorecard',0]]:selectedView==='agents'?[['agentFindings',0],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5]]:[];
 								panels.forEach(function(entry){
 									const target=document.getElementById(entry[0]);if(!target)return;
@@ -538,6 +543,9 @@ templ analyticsContent(currentProject *models.Project) {
 										renderModelPerformance(data.models || []);
 									}
 									if (selectedView === 'learning') {
+										const summary=data.skill_summary;
+										const values=summary?[formatNumber(summary.skills_used),formatNumber(summary.tasks_using_skills),formatNumber(summary.tasks_with_goal_evidence)+' of '+formatNumber(summary.tasks_using_skills)]:['Unavailable','Unavailable','Unavailable'];
+										document.querySelectorAll('[data-skill-summary-value]').forEach((node,i)=>{node.textContent=values[i];node.className='text-lg tabular-nums';});
 										renderSkillOutcomes(data.skill_outcomes || []);
 										renderSkillOutcomeCharts(data.skill_outcomes || []);
 										renderAgentSkillOutcomes(data.agent_skill_outcomes || []);
@@ -599,7 +607,6 @@ templ analyticsContent(currentProject *models.Project) {
 								renderSkillOutcomeBars(rows);
 								let canvas;
 								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=2&&Number((r.goal_achievement||{}).denominator||0)>0).sort((a,b)=>Number(b.tasks_evaluated||0)-Number(a.tasks_evaluated||0)).slice(0,20);canvas=renderChartState('skillEffectiveness','skillEffectivenessChart',supported,'At least two task samples with goal evidence per skill are required');if(canvas){const points=supported.map((r,i)=>({x:r.tasks_evaluated,y:Number((r.goal_achievement||{}).percent||0),skill:r.skill_handle,color:'hsla('+(i*61%360)+',70%,55%,.75)'}));charts.skillEffectiveness=new Chart(canvas.getContext('2d'),{type:'scatter',data:{datasets:[{label:'Skills',data:points,pointRadius:7,pointHoverRadius:9,pointBackgroundColor:points.map(p=>p.color),clip:false}]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:12,right:10}},plugins:{legend:{display:false},tooltip:{callbacks:{label:function(context){const point=context.raw;return point.skill+': '+point.x+' tasks, '+point.y.toFixed(1)+'% goal achievement';}}}},scales:{x:{beginAtZero:true,grace:'5%',title:{display:true,text:'Tasks using skill'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Observed goal achievement (%)'}}}}});}
-								const comparable=supported.filter(r=>Number((r.goal_achievement||{}).denominator||0)>=2).sort((a,b)=>Number((b.goal_achievement||{}).percent||0)-Number((a.goal_achievement||{}).percent||0));const rec=document.getElementById('skillRecommendations');if(rec){if(!comparable.length)rec.innerHTML='\x3cp class="opacity-50">At least two goal-eligible tasks per skill are required.\x3c/p>';else{const strongest=comparable[0],weakest=comparable[comparable.length-1],lines=['\x3cp>\x3cstrong>Strongest observed association:\x3c/strong> '+escapeHTML(strongest.skill_handle)+' had '+Number((strongest.goal_achievement||{}).percent||0).toFixed(1)+'% goal achievement (n='+(strongest.goal_achievement||{}).denominator+').\x3c/p>'];if(weakest.skill_handle!==strongest.skill_handle||weakest.skill_scope!==strongest.skill_scope)lines.push('\x3cp>\x3cstrong>Weakest observed association:\x3c/strong> '+escapeHTML(weakest.skill_handle)+' had '+Number((weakest.goal_achievement||{}).percent||0).toFixed(1)+'% goal achievement (n='+(weakest.goal_achievement||{}).denominator+').\x3c/p>');rec.innerHTML=lines.join('');}}
 							}
 							function modelConfigLabel(row) {
 								return row.config_name || row.model || 'Unknown configuration';

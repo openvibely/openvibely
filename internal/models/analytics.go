@@ -252,7 +252,14 @@ type AnalyticsInsight struct {
 	EvidenceID       string  `json:"evidence_id,omitempty"`
 }
 
+type SkillOutcomeSummary struct {
+	SkillsUsed            int `json:"skills_used"`
+	TasksUsingSkills      int `json:"tasks_using_skills"`
+	TasksWithGoalEvidence int `json:"tasks_with_goal_evidence"`
+}
+
 type AnalyticsDashboard struct {
+	SkillSummary         SkillOutcomeSummary            `json:"skill_summary"`
 	Definitions          []MetricDefinition             `json:"definitions"`
 	Current              OutcomeMetrics                 `json:"current"`
 	Previous             *OutcomeMetrics                `json:"previous,omitempty"`

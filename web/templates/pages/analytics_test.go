@@ -108,13 +108,15 @@ func TestBrowserFunctional_AnalyticsContent_SkillOutcomeMetricSelectorInChrome(t
     {skill_handle:'beta',skill_scope:'project',tasks_evaluated:5,goal_achievement:{percent:100,numerator:5,denominator:5},technical_completion:{percent:80,numerator:4,denominator:5},follow_up:{percent:20,numerator:1,denominator:5}},
     {skill_handle:'unknown',skill_scope:'project',tasks_evaluated:1,goal_achievement:{denominator:0},technical_completion:{denominator:0},follow_up:{denominator:0}}
   ];
-  window.fetch=function(url){return Promise.resolve({ok:true,json:function(){return Promise.resolve(String(url).includes('/dashboard')?{skill_outcomes:rows,agent_skill_outcomes:[]}:{usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]});}});};
+  window.fetch=function(url){return Promise.resolve({ok:true,json:function(){return Promise.resolve(String(url).includes('/dashboard')?{skill_outcomes:rows,agent_skill_outcomes:[],skill_summary:{skills_used:3,tasks_using_skills:10,tasks_with_goal_evidence:7}}:{usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{agents:[],cells:[]},underused:[],evidence:[]});}});};
   window.addEventListener('load',function(){
     var attempts=0;
     function check(){
       var bars=document.getElementById('skillOutcomeChart'),selector=document.getElementById('skillOutcomeMetric');
       if(!bars.getAttribute('aria-label')?.includes('beta:')){if(++attempts>100)fail('skill bars did not load');setTimeout(check,20);return;}
       if(selector.value!=='goal_achievement')fail('default metric');
+      if(Array.from(document.querySelectorAll('[data-skill-summary-value]')).map(el=>el.textContent).join('|')!=='3|10|7 of 10')fail('skill KPI values must use distinct backend totals');
+      if(document.querySelectorAll('#skillSummary [data-skill-summary-value]').length!==3||document.getElementById('skillRecommendations'))fail('skill KPI cards must replace recommendations');
       if(!bars.parentElement.classList.contains('h-64')||bars.parentElement.style.height)fail('skill outcomes must use the same fixed chart height as Agent/Skill Pairs');
       if(skillChartConfig.data.datasets[0].maxBarThickness!==undefined||skillChartConfig.data.datasets[0].barThickness!==undefined)fail('skill outcomes must use standard bar spacing');
       if(!bars.getAttribute('aria-label').startsWith('beta:')||!bars.getAttribute('aria-label').includes('100.0% · 5/5'))fail('goal order or visible values');
@@ -781,7 +783,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
 		`Selected Agent outcome trend`, `Agent findings`, `Model comparison`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`,
-		`Run results over time`, `Memory effectiveness is unavailable`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
+		`Run results over time`, `id="skillSummary"`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 	} {
 		if !strings.Contains(content, expected) {
 			t.Errorf("analytics outcome dashboard missing %q", expected)

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -385,6 +386,44 @@ func TestExecutionRepo_SkillOutcomeEvidencePreservesAggregateEligibilityForRetri
 	}
 	if row.GoalResult != string(models.TaskGoalStatusAchieved) || row.GoalAchievementEligible || row.GoalAchievedInPeriod {
 		t.Fatalf("out-of-period current goal was treated as period evidence: %+v", row)
+	}
+}
+
+func TestSkillOutcomeSummaryCountsDistinctTasksBeyondChartLimit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	_, err := db.Exec(`INSERT INTO projects(id,name) VALUES ('summary','Summary');
+	INSERT INTO tasks(id,project_id,title,status) VALUES ('a','summary','A','completed'),('b','summary','B','completed');
+	INSERT INTO executions(id,task_id,status,started_at,completed_at) VALUES ('ea','a','completed','2026-09-01 10:00:00','2026-09-01 11:00:00'),('eb','b','completed','2026-09-01 10:00:00','2026-09-01 11:00:00');
+	INSERT INTO task_goals(task_id,goal_id,objective,status,achieved_at) VALUES ('a','goal','Goal','achieved','2026-09-01 11:00:00');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 22; i++ {
+		for _, task := range []string{"a", "a", "b"} {
+			if err := NewSkillAnalyticsRepo(db).RecordEvent(ctx, &models.SkillAnalyticsEvent{CreatedAt: from.Add(time.Hour), ProjectID: "summary", TaskID: task, SkillScope: models.SkillScopeProject, SkillHandle: fmt.Sprintf("skill-%d", i), EventType: models.SkillEventLoaded}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	repo := NewExecutionRepo(db)
+	filter := AnalyticsDashboardFilter{ProjectID: "summary", View: "learning", DateFrom: from, DateTo: from.AddDate(0, 0, 1)}
+	dashboard, err := repo.GetAnalyticsDashboard(ctx, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dashboard.SkillSummary != (models.SkillOutcomeSummary{SkillsUsed: 22, TasksUsingSkills: 2, TasksWithGoalEvidence: 1}) {
+		t.Fatalf("summary double-counted or truncated: %+v", dashboard.SkillSummary)
+	}
+	if len(dashboard.SkillOutcomes) != 20 {
+		t.Fatalf("expected chart limit, got %d", len(dashboard.SkillOutcomes))
+	}
+	filter.DateFrom = filter.DateTo
+	filter.DateTo = filter.DateTo.AddDate(0, 0, 1)
+	empty, err := repo.querySkillOutcomeSummary(ctx, filter)
+	if err != nil || empty != (models.SkillOutcomeSummary{}) {
+		t.Fatalf("empty period: %+v, %v", empty, err)
 	}
 }
 
