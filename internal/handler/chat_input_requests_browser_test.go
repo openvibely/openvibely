@@ -118,7 +118,10 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createButton.textContent.indexOf('Recommended') === -1) fail('recommended option was not visually labeled');
 				if (createButton.classList.contains('btn-outline') || createButton.classList.contains('btn-primary')) fail('question option still uses distracting DaisyUI outline/primary styling');
 				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
-				if (getComputedStyle(createButton).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
+				var createStyle = getComputedStyle(createButton);
+				if (createStyle.cursor !== 'pointer') fail('question option does not look clickable');
+				if (!createStyle.boxShadow || createStyle.boxShadow === 'none') fail('question option regressed to flat text styling');
+				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
 				if (getComputedStyle(recommendedShortcut).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('recommended shortcut can still shrink on click');
