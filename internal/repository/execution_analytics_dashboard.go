@@ -1177,6 +1177,9 @@ func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filte
 }
 
 func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.ModelPerformance, error) {
+	// Model evaluation includes scheduled and interactive tasks together, even
+	// when an older saved URL or API client still sends a work-type filter.
+	filter.WorkType = ""
 	window, windowArgs := analyticsEventWindowClause("e", "completed_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
 	// Select whole tasks by their latest run, then include their entire history.

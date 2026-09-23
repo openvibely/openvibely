@@ -612,7 +612,7 @@ func TestAnalyticsDashboardModelsWholeTaskEffortAndPeriod(t *testing.T) {
 	}
 }
 
-func TestAnalyticsDashboardModelsFilterInteractiveAndRecurringWork(t *testing.T) {
+func TestAnalyticsDashboardModelsIncludeAllWorkTypes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `
@@ -635,8 +635,8 @@ func TestAnalyticsDashboardModelsFilterInteractiveAndRecurringWork(t *testing.T)
 		wantRuns  int
 	}{
 		{workType: "", wantTasks: 2, wantRuns: 2},
-		{workType: "interactive", wantTasks: 1, wantRuns: 1},
-		{workType: "recurring", wantTasks: 1, wantRuns: 1},
+		{workType: "interactive", wantTasks: 2, wantRuns: 2},
+		{workType: "recurring", wantTasks: 2, wantRuns: 2},
 	} {
 		dashboard, err := repo.GetAnalyticsDashboard(ctx, AnalyticsDashboardFilter{ProjectID: "work-type-project", View: "models", WorkType: test.workType})
 		if err != nil {
