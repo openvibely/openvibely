@@ -53,6 +53,39 @@ window.addEventListener('load',function(){setTimeout(function(){
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsContent_LocalUsageDoesNotWaitForProviders(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+window.Chart=function(){this.destroy=function(){};};
+var rejectAccounts,localCalls=0;
+window.fetch=function(url){
+ var params=new URL(url,location.href).searchParams;
+ if(params.get('projection')==='account_limits')return new Promise(function(resolve,reject){rejectAccounts=reject;});
+ if(params.get('projection')!=='local')throw new Error('usage must request local projection');
+ localCalls++;return Promise.resolve({ok:true,json:function(){return Promise.resolve({totals:{total_tokens:1234},usage_rate:[],usage_rate_by_model:[],model_breakdown:[],evidence:[]});}});
+};
+window.addEventListener('load',function(){
+ var result=document.getElementById('reconnect-result'),attempts=0;
+ function fail(message){result.dataset.testResult='fail';result.dataset.testError=message;}
+ function check(){
+  if(!document.getElementById('usageSummary').textContent.includes('1,234')||!rejectAccounts){if(++attempts>100){fail('local results blocked by provider requests');return;}setTimeout(check,20);return;}
+  if(!document.getElementById('accountUsageCards').hasAttribute('aria-busy')){fail('local response cleared provider loading state');return;}
+  rejectAccounts(new Error('provider unavailable'));
+  setTimeout(function(){
+   if(!document.getElementById('usageSummary').textContent.includes('1,234')){fail('provider failure erased local results');return;}
+   if(!document.getElementById('accountUsageCards').textContent.includes('Provider limits unavailable')||localCalls!==1){fail('provider failure was not isolated');return;}
+   result.dataset.testResult='pass';
+  },30);
+ }check();
+});
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 

@@ -1249,7 +1249,7 @@ templ analyticsContent(currentProject *models.Project) {
 
 									function usageEvidenceParams() {
 										const selected = new URLSearchParams(window.location.search);
-										const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: document.getElementById('groupBy').value });
+										const params = analyticsParams({ project_id: projectID, range: usageRangeParam(), group_by: document.getElementById('groupBy').value, projection: 'local' });
 										['usage_period','usage_provider','usage_model_name'].forEach(function(key) { const value=selected.get(key); if(value) params.set(key,value); });
 										return params;
 									}
@@ -1379,7 +1379,6 @@ templ analyticsContent(currentProject *models.Project) {
 												}
 											});
 											}
-											renderAccountUsageCards(data.account_limits || []);
 										}
 									function renderAccountUsageCards(accounts) {
 										const accountContainers = ['accountUsageCards'].map(function(id){return document.getElementById(id);}).filter(Boolean);
@@ -1423,11 +1422,28 @@ templ analyticsContent(currentProject *models.Project) {
 									async function loadUsageAnalytics(refreshUsage) {
 										try {
 											const params = usageEvidenceParams();
-											if (refreshUsage) params.append('refresh', 'true');
+											params.set('projection','local');
 										latestUsageAnalytics = await fetchJSON('/api/analytics/usage?' + params.toString());
 										if (selectedView === 'usage') renderUsageAnalytics(latestUsageAnalytics);
-										else renderAccountUsageCards(latestUsageAnalytics.account_limits || []);
-										} catch (e) { console.error('loadUsageAnalytics:', e); showAnalyticsError(e); }
+										} catch (e) {
+											if(e.name==='AbortError')return;
+											document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
+											renderChartState('usageRate','usageRateChart',[],'Analytics unavailable');
+											renderChartState('modelTokenBreakdown','modelTokenBreakdownChart',[],'Analytics unavailable');
+											document.getElementById('usageBreakdownTable').innerHTML='<tr><td colspan="8" class="text-center opacity-50">Analytics unavailable</td></tr>';
+										}
+									}
+									async function loadUsageAccounts(refreshUsage) {
+										try {
+											const params=usageEvidenceParams();params.set('projection','account_limits');
+											if(refreshUsage)params.append('refresh', 'true');
+											const data=await fetchJSON('/api/analytics/usage?'+params.toString());
+											renderAccountUsageCards(data.account_limits||[]);
+										} catch(e) {
+											if(e.name==='AbortError')return;
+											const target=document.getElementById('accountUsageCards');target.removeAttribute('aria-busy');
+											target.querySelectorAll('.card-body').forEach(body=>{body.textContent='Provider limits unavailable';});
+										}
 									}
 								// Load Success/Failure Rates
 					async function loadSuccessFailureRates() {
@@ -1644,7 +1660,7 @@ templ analyticsContent(currentProject *models.Project) {
 							const loaders = selectedView === 'usage' ? [] : [loadDashboard];
 								if (selectedView === 'outcomes') loaders.push(loadSuccessFailureRates, loadHourlyTrends, loadAvgTimeByTask, loadMostFrequentTasks, loadFailedTaskPatterns);
 								if (selectedView === 'learning') loaders.push(loadSkillAnalytics);
-								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); });							for (let index = 0; index < loaders.length; index += 2) {
+								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); }, function() { return loadUsageAccounts(refreshUsage); });							for (let index = 0; index < loaders.length; index += 2) {
 								if (loadGeneration !== dataGeneration) return;
 								await Promise.allSettled(loaders.slice(index, index + 2).map(function(load) { return load(); }));
 								if (loadGeneration !== dataGeneration) return;

@@ -125,6 +125,15 @@ func TestGetAnalyticsUsage_AccountLimitsProjectionOmitsFullUsageSections(t *test
 	}
 
 	compact := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all&projection=account_limits").Execute()
+	local := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all&projection=local").Execute()
+	tc.Assert(local).StatusCode(http.StatusOK)
+	var localView models.AnalyticsUsageViewModel
+	if err := json.Unmarshal(local.Body.Bytes(), &localView); err != nil {
+		t.Fatal(err)
+	}
+	if localView.Totals.TotalTokens != 150 {
+		t.Fatalf("local projection missing usage: %+v", localView.Totals)
+	}
 	tc.Assert(compact).StatusCode(http.StatusOK)
 	var compactPayload map[string]json.RawMessage
 	if err := json.Unmarshal(compact.Body.Bytes(), &compactPayload); err != nil {
