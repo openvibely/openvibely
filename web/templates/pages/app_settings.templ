@@ -223,7 +223,7 @@ templ builtInPersonalityCard(card PersonalityListCard, personality string, state
 		data-personality-has-custom={ boolString(card.HasCustom) }
 		data-search-card
 		data-search-text={ card.Name + " " + card.Description + " " + card.Preview }
-		onclick="editPersonalityFromData(this)"
+		onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editPersonalityFromData(this)"
 	>
 		<div class="card-body relative">
 			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
@@ -287,7 +287,7 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string, pag
 		data-card-select-disabled-reason={ personalitySelectionDisabledReason(cp, personality) }
 		data-search-card
 		data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview }
-		onclick="editPersonalityFromData(this)"
+		onclick="if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editPersonalityFromData(this)"
 	>
 		<div class="card-body relative">
 			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">

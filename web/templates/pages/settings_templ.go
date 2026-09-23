@@ -494,7 +494,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if card.Kind == "x" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40\" data-channel-type=\"x\" data-card-sort-name=\"X (formerly Twitter)\" data-card-select-id=\"channel:x\" data-card-select-eligible=\"true\" data-search-card data-search-text=\"X formerly Twitter mentions posts\" onclick=\"openXConfigModal()\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40\" data-channel-type=\"x\" data-card-sort-name=\"X (formerly Twitter)\" data-card-select-id=\"channel:x\" data-card-select-eligible=\"true\" data-search-card data-search-text=\"X formerly Twitter mentions posts\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openXConfigModal()\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -625,7 +625,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -805,7 +805,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -988,7 +988,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><!-- Kebab menu in top right --><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 79, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editChannelFromData(this)\"><div class=\"card-body relative\"><!-- Kebab menu in top right --><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1105,7 +1105,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\" onclick=\"editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 92, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editChannelFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1273,7 +1273,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "\" onclick=\"openEmailConfigModal()\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 112, "\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openEmailConfigModal()\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1385,7 +1385,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_Buffer, templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)})
+				templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_Buffer, templ.ComponentScript{Call: fmt.Sprintf("if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openWebhookEditModal('%s')", wh.ID)})
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1497,7 +1497,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var56 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)}
+				var templ_7745c5c3_Var56 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openWebhookEditModal('%s')", wh.ID)}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56.Call)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -2610,7 +2610,7 @@ func OutboundTargetsCard(currentProjectID string, summary repository.ChannelTarg
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, "\" hx-trigger=\"outbound-targets-card-refresh from:body\" hx-target=\"this\" hx-swap=\"outerHTML\" onclick=\"openOutboundTargetsModal()\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 247, "\" hx-trigger=\"outbound-targets-card-refresh from:body\" hx-target=\"this\" hx-swap=\"outerHTML\" onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; openOutboundTargetsModal()\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

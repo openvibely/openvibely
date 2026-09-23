@@ -577,7 +577,7 @@ func skillsContent(skills []SkillCard, canManage bool, currentProjectID string, 
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " onclick=\"editSkillFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, " onclick=\"if (event.target !== this && event.target.closest('button, a, input, select, textarea, summary, details, label')) return; editSkillFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
