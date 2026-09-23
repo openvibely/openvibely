@@ -336,6 +336,10 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	require.Contains(t, content, llmprompt.ChatActionToolModeInstructions)
 	require.Contains(t, content, "Available action tools: request_user_input, create_task")
 	require.Contains(t, content, "replace that response with a request_user_input tool call")
+	require.Contains(t, content, "recommended/default path")
+	require.Contains(t, content, "move-forward option")
+	require.Contains(t, content, "which model/agent should run it")
+	require.Contains(t, content, "whether to assign a persistent goal")
 	require.NotContains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
 	tools := gotBody["tools"]
 	require.Contains(t, strings.ToLower(fmt.Sprint(tools)), "request_user_input")
