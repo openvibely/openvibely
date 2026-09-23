@@ -229,7 +229,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						} else if (currentPath.includes('/history')) {
 							newUrl = '/history?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/analytics')) {
-							newUrl = '/analytics?project_id=' + encodeURIComponent(newProjectId);
+							var analyticsParams = new URLSearchParams(window.location.search);
+							var activeAnalyticsTab = document.querySelector('[data-analytics-view].btn-primary');
+							var analyticsView = activeAnalyticsTab ? activeAnalyticsTab.dataset.analyticsView : analyticsParams.get('view');
+							var nextAnalyticsParams = new URLSearchParams({project_id: newProjectId, view: ['usage','models','learning','agents'].includes(analyticsView) ? analyticsView : 'usage'});
+							['range','group_by'].forEach(function(key) { if (analyticsParams.has(key)) nextAnalyticsParams.set(key, analyticsParams.get(key)); });
+							newUrl = '/analytics?' + nextAnalyticsParams.toString();
 						} else if (currentPath.includes('/alerts')) {
 							newUrl = '/alerts?project_id=' + encodeURIComponent(newProjectId);
 						} else if (currentPath.includes('/workers')) {

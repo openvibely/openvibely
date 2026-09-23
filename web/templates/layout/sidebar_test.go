@@ -245,6 +245,9 @@ func TestSidebar_ProjectSelectorPreservesRouteMappingAndConfirmation(t *testing.
 	}
 	for _, required := range []string{
 		`if (!confirm('You may have unsaved changes. Switch project anyway?'))`,
+		`document.querySelector('[data-analytics-view].btn-primary')`,
+		`['usage','models','learning','agents'].includes(analyticsView) ? analyticsView : 'usage'`,
+		`newUrl = '/analytics?' + nextAnalyticsParams.toString()`,
 		`var previousProjectID = sel.value;`,
 		`sel.value = previousProjectID;`,
 		`openModals.forEach(m => m.close());`,
