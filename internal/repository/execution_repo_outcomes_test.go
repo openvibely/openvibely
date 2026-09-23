@@ -427,10 +427,7 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 		{
 			view: "models",
 			want: analyticsDashboardSections{
-				models:          true,
-				modelCategories: true,
-				agents:          true,
-				workflows:       true,
+				models: true,
 			},
 		},
 		{
@@ -442,10 +439,7 @@ func TestAnalyticsDashboardSectionsForView(t *testing.T) {
 		},
 		{
 			view: "usage",
-			want: analyticsDashboardSections{
-				outcomeMetrics: true,
-				outcomeTrend:   true,
-				comparison:     true},
+			want: analyticsDashboardSections{},
 		},
 		{
 			view: "automations", want: analyticsDashboardSections{
@@ -515,13 +509,13 @@ func TestAnalyticsDashboardModelsCompareConfiguredModelOutcomesAndUsage(t *testi
 	mixed := byID["__mixed__"]
 	if !mixed.MixedModels || mixed.ConfigName != "Mixed models" || mixed.TasksUsed != 1 || mixed.RunCount != 2 ||
 		mixed.GoalAchievement.Numerator != 1 || mixed.GoalAchievement.Denominator != 1 || mixed.MergeCompletion.Denominator != 0 ||
-		mixed.AverageFollowUps != 1 || mixed.MedianDurationMs < 4799000 || mixed.MedianDurationMs > 4801000 ||
+		mixed.AverageFollowUps != 1 || mixed.MedianDurationMs < 1799000 || mixed.MedianDurationMs > 1801000 ||
 		mixed.TotalTokens != 1000 || mixed.CostCoveredTasks != 1 || mixed.KnownCostUSD == nil || *mixed.KnownCostUSD != 0.25 {
 		t.Fatalf("mixed-model comparison = %+v", mixed)
 	}
 }
 
-func TestAnalyticsDashboardModelsWholeTaskEffortAndPeriod(t *testing.T) {
+func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	_, err := db.ExecContext(ctx, `
@@ -541,7 +535,9 @@ func TestAnalyticsDashboardModelsWholeTaskEffortAndPeriod(t *testing.T) {
 		INSERT INTO llm_usage_events(id,provider,project_id,task_id,execution_id,agent_config_id,model,total_tokens,cost_usd,occurred_at) VALUES
 			('u1','openai','p','delivered','d1','m','model',1000,1,'2026-08-31 23:10:00'),
 			('u2','openai','p','delivered','d2','m','model',2000,2,'2026-09-01 07:30:00'),
-			('u3','openai','p','failed','f','m','model',500,0.5,'2026-09-01 10:30:00');
+			('u3','openai','p','failed','f','m','model',500,0.5,'2026-09-01 10:30:00'),
+			('upper-bound','openai','p','delivered',NULL,'m','model',999,9,'2026-09-02 00:00:00');
+		UPDATE llm_usage_events SET operation='task' WHERE id='upper-bound';
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -555,15 +551,22 @@ func TestAnalyticsDashboardModelsWholeTaskEffortAndPeriod(t *testing.T) {
 		t.Fatalf("models: %+v", dashboard.Models)
 	}
 	r := dashboard.Models[0]
-	if r.TasksUsed != 2 || r.RunCount != 3 || r.TotalTokens != 3500 || r.KnownCostUSD == nil || *r.KnownCostUSD != 3.5 || r.AverageFollowUps != 0.5 {
-		t.Fatalf("must include historical and unsuccessful effort, exclude reopened tasks: %+v", r)
+	usage, err := NewUsageRepo(db).GetUsageTotals(ctx, UsageFilter{ProjectID: "p", DateFrom: from, DateTo: from.AddDate(0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.TotalTokens != int64(usage.TotalTokens) {
+		t.Fatalf("Models and Usage must count the same period's task tokens: model=%d usage=%d", r.TotalTokens, usage.TotalTokens)
+	}
+	if r.TasksUsed != 3 || r.RunCount != 4 || r.TotalTokens != 2500 || r.KnownCostUSD == nil || *r.KnownCostUSD != 2.5 || r.AverageFollowUps != 2.0/3 {
+		t.Fatalf("must count only selected-period activity, including reopened tasks: %+v", r)
 	}
 	if r.GoalAchievement.Numerator != 0 || r.GoalAchievement.Denominator != 1 || r.MergeCompletion.Numerator != 1 || r.MergeCompletion.Denominator != 2 {
 		t.Fatalf("goal and delivery must remain independent: %+v", r)
 	}
-	// Median of 8h30m and 30m is 4h30m; the earlier failed run starts the clock.
-	if r.DurationSampleSize != 2 || r.MedianDurationMs < 16199000 || r.MedianDurationMs > 16201000 {
-		t.Fatalf("whole-task elapsed time: %+v", r)
+	// Each task has 30 minutes of finished run time in this period.
+	if r.DurationSampleSize != 3 || r.MedianDurationMs < 1799000 || r.MedianDurationMs > 1801000 {
+		t.Fatalf("selected-period run time: %+v", r)
 	}
 	if len(r.OutcomeTrend) != 1 || r.OutcomeTrend[0].Period != "2026-09-01" || r.OutcomeTrend[0].GoalAchievement.Denominator != 1 || r.OutcomeTrend[0].MergeCompletion.Percent != 50 {
 		t.Fatalf("trend must match scorecard samples: %+v", r.OutcomeTrend)
@@ -644,6 +647,9 @@ func TestAnalyticsDashboardModelsIncludeAllWorkTypes(t *testing.T) {
 		}
 		if len(dashboard.Models) != 1 || dashboard.Models[0].TasksUsed != test.wantTasks || dashboard.Models[0].RunCount != test.wantRuns {
 			t.Fatalf("%q models = %+v, want tasks=%d runs=%d", test.workType, dashboard.Models, test.wantTasks, test.wantRuns)
+		}
+		if dashboard.Models[0].DurationSampleSize != 2 {
+			t.Fatalf("scheduled tasks must contribute timing: %+v", dashboard.Models[0])
 		}
 	}
 }
