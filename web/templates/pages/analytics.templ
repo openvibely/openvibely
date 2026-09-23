@@ -127,16 +127,17 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Least Active Enabled Skills</h4><table class="table table-sm"><tbody id="underusedSkillsTable"></tbody></table></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 						<div class="card bg-base-100 border border-base-300"><div class="card-body">
+							<div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">
 							<h4 class="card-title">Observed skill outcomes</h4>
-							<p class="text-sm opacity-60">Task results when a skill was selected or loaded—not proof the skill caused the result.</p>
-							<label for="skillOutcomeMetric" class="text-sm">Compare</label>
-							<select id="skillOutcomeMetric" class="select select-bordered w-full">
+							<div class="form-control min-w-0 w-full sm:w-auto">
+							<select id="skillOutcomeMetric" aria-label="Skill outcome metric" class="select select-bordered select-xs w-full max-w-full sm:min-w-48">
 								<option value="goal_achievement">Goal achievement</option>
 								<option value="technical_completion">Tasks with a successful run</option>
 								<option value="follow_up">Tasks with follow-ups</option>
 							</select>
+							</div></div>
 							<p id="skillOutcomeDescription" class="text-sm opacity-60"></p>
-							<div id="skillOutcomeBars" style="min-height:18rem" aria-live="polite"></div>
+							<div class="overflow-x-auto"><div class="relative h-72" style="min-width:420px"><canvas id="skillOutcomeChart"></canvas></div></div>
 						</div></div>
 						@analyticsChartCard("Skill outcomes versus usage", "Farther right means used on more tasks; higher means more goals achieved. Association only.", "skillEffectivenessChart", "h-72")
 					</div>
@@ -296,7 +297,7 @@ templ analyticsContent(currentProject *models.Project) {
 								});
 							}
 							function showAnalyticsLoading() {
-								const panels=selectedView==='models'?[['modelScorecard',0]]:selectedView==='agents'?[['agentFindings',0],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5]]:selectedView==='learning'?[['skillOutcomeBars',0]]:[];
+								const panels=selectedView==='models'?[['modelScorecard',0]]:selectedView==='agents'?[['agentFindings',0],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5]]:[];
 								panels.forEach(function(entry){
 									const target=document.getElementById(entry[0]);if(!target)return;
 									const height=Math.max(120,target.getBoundingClientRect().height);
@@ -320,7 +321,7 @@ templ analyticsContent(currentProject *models.Project) {
 							agents: { agentComparison: 'agentComparisonChart', agentEfficiency: 'agentEfficiencyChart', agentOutcomeTrend: 'agentOutcomeTrendChart', agentCategory: 'agentCategoryChart' },
 							models: { modelTime: 'modelTimeChart', modelTokens: 'modelTokensChart', modelGoalsTrend: 'modelGoalsTrendChart', modelMergesTrend: 'modelMergesTrendChart' },
 							automations: { automationComparison: 'automationComparisonChart', automationFunnel: 'automationFunnelChart', automationDuration: 'automationDurationChart', automationFailure: 'automationFailureChart', automationBottleneck: 'automationBottleneckChart' },
-									learning: { skillUsageTrend: 'skillUsageTrendChart', skillTop: 'skillTopChart', skillFollow: 'skillFollowChart', skillAgent: 'skillAgentChart', skillEffectiveness: 'skillEffectivenessChart' },
+									learning: { skillUsageTrend: 'skillUsageTrendChart', skillTop: 'skillTopChart', skillFollow: 'skillFollowChart', skillAgent: 'skillAgentChart', skillOutcome: 'skillOutcomeChart', skillEffectiveness: 'skillEffectivenessChart' },
 									usage: { usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart' }
 								};
 								Object.entries(loadingCharts[selectedView] || {}).forEach(function(entry) { renderChartState(entry[0], entry[1], [], 'Loading analytics…'); });
@@ -570,7 +571,6 @@ templ analyticsContent(currentProject *models.Project) {
 							function renderActionableExceptions(rows) {
 								const target=document.getElementById('actionableExceptions'); if(!target)return;
 								const ranked=rows.map(function(row){const reasons=[];let score=0;if(Number(row.period_failed_count||0)>0){score+=6+Number(row.period_failed_count);reasons.push(row.period_failed_count+' failed run(s)');}if(Number(row.follow_up_count||0)>1){score+=Number(row.follow_up_count);reasons.push(row.follow_up_count+' follow-up runs');}if(Number(row.cycle_time_ms||0)>=86400000){score+=2;reasons.push('task duration '+formatDuration(row.cycle_time_ms));}if(Number(row.known_cost_usd||0)>0){score+=1;reasons.push(formatCost(row.known_cost_usd)+' known cost');}return {row:row,reasons:reasons,score:score};}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,5);
-								target.innerHTML=ranked.length?ranked.map(function(item){const row=item.row,url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '\x3ca class="block py-2 border-b border-base-300 link" href="'+url+'">\x3cstrong>'+escapeHTML(row.task_title)+'\x3c/strong>\x3cbr>\x3cspan class="text-sm">'+escapeHTML(item.reasons.join(' · '))+'\x3c/span>\x3c/a>';}).join(''):'\x3cp class="opacity-50">No actionable exceptions meet the current thresholds.\x3c/p>';
 							}
 							function renderAgentComparison(rows) {
 								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=3); let canvas=renderChartState('agentComparison','agentComparisonChart',supported,'At least three task samples per Agent are required');
@@ -582,16 +582,23 @@ templ analyticsContent(currentProject *models.Project) {
 							function renderSkillOutcomeBars(rows) {
 								const metric=document.getElementById('skillOutcomeMetric').value;
 								const descriptions={goal_achievement:'Share of goal-evaluated tasks meeting their goal.',technical_completion:'Share of tasks with a finished run that had at least one successful run.',follow_up:'Share of tasks with follow-ups. More follow-ups can mean clarification or changed goals—not failure.'};
-								document.getElementById('skillOutcomeDescription').textContent=descriptions[metric]+' Up to 12 skills, highest rate first.';
+								document.getElementById('skillOutcomeDescription').textContent=descriptions[metric]+' Up to 12 skills, highest rate first. Association only.';
 								const ranked=rows.slice().sort((a,b)=>Number((b[metric]||{}).denominator>0)-Number((a[metric]||{}).denominator>0)||Number((b[metric]||{}).percent||0)-Number((a[metric]||{}).percent||0)||Number(b.tasks_evaluated||0)-Number(a.tasks_evaluated||0)||a.skill_handle.localeCompare(b.skill_handle)).slice(0,12);
-								const target=document.getElementById('skillOutcomeBars');
-								target.innerHTML=ranked.length?ranked.map(function(row){
-									const value=row[metric]||{},n=Number(value.denominator||0),percent=Math.max(0,Math.min(100,Number(value.percent||0)));
-									const result=n?percent.toFixed(1)+'% · '+Number(value.numerator||0)+'/'+n+' tasks':'Unavailable · n=0';
-									return '\x3cdiv class="py-2" data-skill-outcome-row>\x3cdiv class="flex flex-wrap justify-between gap-x-3 gap-y-1 text-sm">\x3cspan class="break-all">'+escapeHTML(row.skill_handle)+'\x3cspan class="opacity-50"> ['+escapeHTML(row.skill_scope||'unknown')+']\x3c/span>\x3c/span>\x3cstrong class="tabular-nums whitespace-nowrap">'+result+'\x3c/strong>\x3c/div>\x3cdiv class="mt-1 h-3 rounded bg-base-300 overflow-hidden" aria-hidden="true">\x3cdiv class="h-full rounded bg-primary" style="width:'+(n?percent:0)+'%">\x3c/div>\x3c/div>\x3c/div>';
-								}).join(''):'\x3cp class="text-center opacity-50 py-12">No skill outcome samples in this period\x3c/p>';
+								const canvas=renderChartState('skillOutcome','skillOutcomeChart',ranked,'No skill outcome samples in this period');if(!canvas)return;
+								canvas.parentElement.style.height=Math.max(288,ranked.length*38+60)+'px';
+								const values=ranked.map(row=>{const v=row[metric]||{};return Number(v.denominator||0)?Number(v.percent||0):null;});
+								const labels=ranked.map(row=>{const v=row[metric]||{},n=Number(v.denominator||0);return n?Number(v.percent||0).toFixed(1)+'% · '+Number(v.numerator||0)+'/'+n:'Unavailable';});
+								canvas.setAttribute('aria-label',ranked.map((row,i)=>row.skill_handle+': '+labels[i]).join('; '));
+								charts.skillOutcome=new Chart(canvas.getContext('2d'),{
+									type:'bar',data:{labels:ranked.map(r=>scopedSkillLabel(r.skill_handle,r.skill_scope)),datasets:[{data:values,backgroundColor:'rgba(20, 184, 166, 0.5)',borderColor:'rgb(20, 184, 166)',borderWidth:1,maxBarThickness:22}]},
+									plugins:[{id:'skillOutcomeValues',afterDatasetsDraw:function(chart){
+										const ctx=chart.ctx;ctx.save();ctx.fillStyle=Chart.defaults?.color||'#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
+									}}],
+									options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:120}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>labels[item.dataIndex]+' tasks'}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
+								});
 							}
-							document.getElementById('skillOutcomeMetric').addEventListener('change',function(){if(latestDashboard&&!document.getElementById('skillOutcomeBars').hasAttribute('aria-busy'))renderSkillOutcomeBars(latestDashboard.skill_outcomes||[]);},{signal:eventSignal});
+							document.getElementById('skillOutcomeMetric').addEventListener('change',function(){if(latestDashboard&&charts.skillOutcome)renderSkillOutcomeBars(latestDashboard.skill_outcomes||[]);},{signal:eventSignal});
 							function renderSkillOutcomeCharts(rows) {
 								renderSkillOutcomeBars(rows);
 								let canvas;
