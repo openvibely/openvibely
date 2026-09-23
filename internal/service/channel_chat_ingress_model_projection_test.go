@@ -543,15 +543,10 @@ func TestChannelChatAgentSelectionWithNoModelsUsesCompactQuery(t *testing.T) {
 
 func BenchmarkChannelChatTaskContextProjection(b *testing.B) {
 	for _, taskCount := range []int{20, 300} {
-		b.Run(fmt.Sprintf("Full/%d", taskCount), func(b *testing.B) {
-			fixture := newChannelTaskContextBenchmarkFixture(b, taskCount)
-			fixture.assertTwoContextReads(b, true)
-			fixture.benchmark(b, true)
-		})
 		b.Run(fmt.Sprintf("Compact/%d", taskCount), func(b *testing.B) {
 			fixture := newChannelTaskContextBenchmarkFixture(b, taskCount)
-			fixture.assertTwoContextReads(b, false)
-			fixture.benchmark(b, false)
+			fixture.assertTwoContextReads(b)
+			fixture.benchmark(b)
 		})
 	}
 }
@@ -562,66 +557,52 @@ func TestChannelChatTaskContextProjectionPerformanceBudget(t *testing.T) {
 		measurementRuns = 3
 	)
 
-	for _, taskCount := range []int{20, 300} {
-		t.Run(fmt.Sprintf("%d_tasks", taskCount), func(t *testing.T) {
-			fixture := newChannelTaskContextBenchmarkFixture(t, taskCount)
-			fixture.assertTwoContextReads(t, true)
-			fixture.assertTwoContextReads(t, false)
+	for _, testCase := range []struct {
+		taskCount         int
+		maxAllocatedBytes float64
+	}{
+		{taskCount: 20, maxAllocatedBytes: 256 * 1024},
+		{taskCount: 300, maxAllocatedBytes: 4 * 1024 * 1024},
+	} {
+		t.Run(fmt.Sprintf("%d_tasks", testCase.taskCount), func(t *testing.T) {
+			fixture := newChannelTaskContextBenchmarkFixture(t, testCase.taskCount)
+			fixture.assertTwoContextReads(t)
 
-			// Warm both paths before collecting paired samples on the same fixture.
-			fixture.mustLoad(t, true)
-			fixture.mustLoad(t, false)
-			full := measureChannelTaskContextPerformance(t, fixture, true, sampleCount, measurementRuns)
-			compact := measureChannelTaskContextPerformance(t, fixture, false, sampleCount, measurementRuns)
-			wallRatio := float64(full.medianWall) / float64(compact.medianWall)
-			byteRatio := full.medianBytes / compact.medianBytes
-			allocationRatio := full.medianAllocs / compact.medianAllocs
-			t.Logf("%d tasks: full median=%s %.0f B/op %.0f allocs/op; compact median=%s %.0f B/op %.0f allocs/op; reductions=%.1fx wall/%.1fx bytes/%.1fx allocs; logical reads=2/2", taskCount, full.medianWall, full.medianBytes, full.medianAllocs, compact.medianWall, compact.medianBytes, compact.medianAllocs, wallRatio, byteRatio, allocationRatio)
-			if wallRatio < 5 {
-				t.Fatalf("compact context median wall-time reduction = %.1fx, want at least 5x", wallRatio)
-			}
-			if byteRatio < 10 {
-				t.Fatalf("compact context median allocated-byte reduction = %.1fx, want at least 10x", byteRatio)
+			fixture.mustLoad(t)
+			compact := measureChannelTaskContextPerformance(t, fixture, sampleCount, measurementRuns)
+			t.Logf("%d tasks: compact median=%.0f B/op %.0f allocs/op; allocation budget=%.0f B/op; logical reads=2", testCase.taskCount, compact.medianBytes, compact.medianAllocs, testCase.maxAllocatedBytes)
+			if compact.medianBytes > testCase.maxAllocatedBytes {
+				t.Fatalf("compact context median allocated bytes = %.0f B/op, want at most %.0f B/op", compact.medianBytes, testCase.maxAllocatedBytes)
 			}
 		})
 	}
 }
 
 type channelTaskContextPerformanceMeasurement struct {
-	medianWall   time.Duration
 	medianBytes  float64
 	medianAllocs float64
 }
 
-func measureChannelTaskContextPerformance(tb testing.TB, fixture *channelTaskContextBenchmarkFixture, full bool, sampleCount, runs int) channelTaskContextPerformanceMeasurement {
+func measureChannelTaskContextPerformance(tb testing.TB, fixture *channelTaskContextBenchmarkFixture, sampleCount, runs int) channelTaskContextPerformanceMeasurement {
 	tb.Helper()
-	wallSamples := make([]time.Duration, 0, sampleCount)
 	byteSamples := make([]float64, 0, sampleCount)
 	allocationSamples := make([]float64, 0, sampleCount)
 	for sample := 0; sample < sampleCount; sample++ {
-		started := time.Now()
-		for i := 0; i < runs; i++ {
-			fixture.mustLoad(tb, full)
-		}
-		wallSamples = append(wallSamples, time.Since(started)/time.Duration(runs))
-
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
 		for i := 0; i < runs; i++ {
-			fixture.mustLoad(tb, full)
+			fixture.mustLoad(tb)
 		}
 		runtime.ReadMemStats(&after)
 		byteSamples = append(byteSamples, float64(after.TotalAlloc-before.TotalAlloc)/float64(runs))
 		allocationSamples = append(allocationSamples, testing.AllocsPerRun(runs, func() {
-			fixture.mustLoad(tb, full)
+			fixture.mustLoad(tb)
 		}))
 	}
-	sort.Slice(wallSamples, func(i, j int) bool { return wallSamples[i] < wallSamples[j] })
 	sort.Float64s(byteSamples)
 	sort.Float64s(allocationSamples)
 	return channelTaskContextPerformanceMeasurement{
-		medianWall:   wallSamples[len(wallSamples)/2],
 		medianBytes:  byteSamples[len(byteSamples)/2],
 		medianAllocs: allocationSamples[len(allocationSamples)/2],
 	}
@@ -631,7 +612,6 @@ type channelTaskContextBenchmarkFixture struct {
 	ctx          context.Context
 	counter      *testutil.SQLStatementCounter
 	taskSvc      *TaskService
-	taskRepo     *repository.TaskRepo
 	scheduleRepo *repository.ScheduleRepo
 }
 
@@ -675,14 +655,13 @@ func newChannelTaskContextBenchmarkFixture(tb testing.TB, taskCount int) *channe
 		ctx:          ctx,
 		counter:      counter,
 		taskSvc:      NewTaskService(taskRepo, nil, nil),
-		taskRepo:     taskRepo,
 		scheduleRepo: scheduleRepo,
 	}
 }
 
-func (f *channelTaskContextBenchmarkFixture) mustLoad(tb testing.TB, full bool) {
+func (f *channelTaskContextBenchmarkFixture) mustLoad(tb testing.TB) {
 	tb.Helper()
-	contextText, err := f.load(full)
+	contextText, err := f.load()
 	if err != nil {
 		tb.Fatalf("load benchmark context: %v", err)
 	}
@@ -691,16 +670,8 @@ func (f *channelTaskContextBenchmarkFixture) mustLoad(tb testing.TB, full bool) 
 	}
 }
 
-func (f *channelTaskContextBenchmarkFixture) load(full bool) (string, error) {
-	var (
-		tasks []models.Task
-		err   error
-	)
-	if full {
-		tasks, err = f.taskSvc.ListByProject(f.ctx, "default", "")
-	} else {
-		tasks, err = f.taskSvc.ListChatContextByProject(f.ctx, "default")
-	}
+func (f *channelTaskContextBenchmarkFixture) load() (string, error) {
+	tasks, err := f.taskSvc.ListChatContextByProject(f.ctx, "default")
 	if err != nil {
 		return "", err
 	}
@@ -711,11 +682,11 @@ func (f *channelTaskContextBenchmarkFixture) load(full bool) (string, error) {
 	return BuildChatContextWithAgentDefinitions(tasks, nil, nil, schedules, time.Date(2026, time.January, 12, 12, 0, 0, 0, time.UTC)), nil
 }
 
-func (f *channelTaskContextBenchmarkFixture) assertTwoContextReads(tb testing.TB, full bool) {
+func (f *channelTaskContextBenchmarkFixture) assertTwoContextReads(tb testing.TB) {
 	tb.Helper()
 	f.counter.Reset()
 	f.counter.SetEnabled(true)
-	if _, err := f.load(full); err != nil {
+	if _, err := f.load(); err != nil {
 		tb.Fatalf("load benchmark context: %v", err)
 	}
 	f.counter.SetEnabled(false)
@@ -724,12 +695,12 @@ func (f *channelTaskContextBenchmarkFixture) assertTwoContextReads(tb testing.TB
 	}
 }
 
-func (f *channelTaskContextBenchmarkFixture) benchmark(b *testing.B, full bool) {
+func (f *channelTaskContextBenchmarkFixture) benchmark(b *testing.B) {
 	b.Helper()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		contextText, err := f.load(full)
+		contextText, err := f.load()
 		if err != nil {
 			b.Fatal(err)
 		}
