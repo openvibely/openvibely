@@ -3,11 +3,55 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestBrowserFunctional_AnalyticsContent_ProjectSwapKeepsSelectedTabInChrome(t *testing.T) {
+	htmx, err := os.ReadFile("../components/testdata/htmx-2.0.4.min.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first, second bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "first", Name: "First"}).Render(context.Background(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := AnalyticsContent(&models.Project{ID: "second", Name: "Second"}).Render(context.Background(), &second); err != nil {
+		t.Fatal(err)
+	}
+	next, err := json.Marshal(second.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>` + string(htmx) + `</script><script>
+history.replaceState({},'',location.pathname+'?project_id=first&view=models');
+window.Chart=function(){this.destroy=function(){};this.resize=function(){};};
+var requests=[];
+window.fetch=function(url){requests.push(String(url));return Promise.resolve({ok:true,json:function(){return Promise.resolve({models:[],skill_outcomes:[],agent_skill_outcomes:[],agents:[],recent_outcomes:[],usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]});}});};
+</script><div id="main-content">` + first.String() + `</div><script>
+window.addEventListener('load',function(){setTimeout(function(){
+  var result=document.getElementById('reconnect-result'),views=['models','usage','learning','agents'],index=0;
+  function fail(message){result.dataset.testResult='fail';result.dataset.testError=message;}
+  function nextView(){
+    if(index===views.length){result.dataset.testResult='pass';return;}
+    var view=views[index++];
+    history.replaceState({},'',location.pathname+'?project_id=second&view='+view);
+    htmx.swap('#main-content',` + string(next) + `,{swapStyle:'innerHTML',settleDelay:50});
+    setTimeout(function(){
+      var visible=Array.from(document.querySelectorAll('[data-analytics-section]')).filter(el=>!el.classList.contains('hidden'));
+      if(visible.length!==1||visible[0].dataset.analyticsSection!==view){fail('project swap lost '+view+' after settle');return;}
+      if(!requests.some(url=>url.includes('project_id=second')&&(view==='usage'?url.includes('/usage?'):url.includes('view='+view)))){fail('new project data not requested for '+view);return;}
+      nextView();
+    },150);
+  }nextView();
+},50);});
+</script>`
+	runReconnectChromeFixture(t, fixture)
+}
 
 func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
