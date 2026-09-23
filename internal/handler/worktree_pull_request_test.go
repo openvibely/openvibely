@@ -48,6 +48,127 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPullRequest_TaskDetailRejectsForeignProjectTaskBeforeGitHubSideEffects(t *testing.T) {
+	ctx := context.Background()
+	h, e, _, db := setupTestHandlerWithDB(t)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+
+	githubCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			githubCalls++
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+		},
+		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			githubCalls++
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		findPRFn: func(context.Context, *service.GitHubRepoRef, string) (*service.GitHubPullRequest, error) {
+			githubCalls++
+			return nil, nil
+		},
+		createPRFn: func(_ context.Context, _ *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			githubCalls++
+			return &service.GitHubPullRequest{Number: 1313, URL: "https://github.com/openvibely/openvibely/pull/1313", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+	})
+
+	current := &models.Project{Name: "Current Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/current"}
+	if err := h.projectSvc.Create(ctx, current); err != nil {
+		t.Fatalf("create current project: %v", err)
+	}
+	foreign := &models.Project{Name: "Foreign Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/foreign"}
+	if err := h.projectSvc.Create(ctx, foreign); err != nil {
+		t.Fatalf("create foreign project: %v", err)
+	}
+	if err := h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, current.ID); err != nil {
+		t.Fatalf("select current project: %v", err)
+	}
+	task := &models.Task{ProjectID: foreign.ID, Title: "Foreign PR", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/foreign-pr", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("foreign task-detail PR should return non-success, got %d body=%q trigger=%q", rec.Code, rec.Body.String(), rec.Header().Get("HX-Trigger"))
+	}
+	if githubCalls != 0 {
+		t.Fatalf("foreign task-detail PR reached GitHub service %d times", githubCalls)
+	}
+	record, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("load task pull request: %v", err)
+	}
+	if record != nil {
+		t.Fatalf("foreign task-detail PR inserted pull request record: %#v", record)
+	}
+}
+
+func TestCreateTaskPullRequest_TaskDetailAllowsSelectedProjectTask(t *testing.T) {
+	ctx := context.Background()
+	h, e, _, db := setupTestHandlerWithDB(t)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	h.SetTaskPullRequestRepo(prRepo)
+
+	createCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
+		},
+		publishBranchFn: func(context.Context, *service.GitHubRepoRef, service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+		findPRFn: func(context.Context, *service.GitHubRepoRef, string) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+		createPRFn: func(_ context.Context, _ *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			createCalls++
+			return &service.GitHubPullRequest{Number: 77, URL: "https://github.com/openvibely/openvibely/pull/77", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		},
+	})
+
+	project := &models.Project{Name: "Selected PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	other := &models.Project{Name: "Other Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/other"}
+	if err := h.projectSvc.Create(ctx, other); err != nil {
+		t.Fatalf("create other project: %v", err)
+	}
+	if err := h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, project.ID); err != nil {
+		t.Fatalf("select project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Selected PR", Category: models.CategoryCompleted, Status: models.StatusCompleted, WorktreeBranch: "task/selected-pr", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("selected task-detail PR status=%d body=%q trigger=%q", rec.Code, rec.Body.String(), rec.Header().Get("HX-Trigger"))
+	}
+	if createCalls != 1 {
+		t.Fatalf("expected one GitHub create call, got %d", createCalls)
+	}
+	record, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("load task pull request: %v", err)
+	}
+	if record == nil || record.PRNumber != 77 {
+		t.Fatalf("expected persisted PR #77, got %#v", record)
+	}
+}
+
 func TestCreateTaskPullRequest_TaskCardOwnershipFailuresAreIndistinguishable(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
