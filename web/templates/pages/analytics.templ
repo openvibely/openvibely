@@ -13,12 +13,36 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 
 templ analyticsKPICard(label, kind string) {
 	<div class="card bg-base-100 border border-base-300" data-analytics-kpi>
-		<div class="card-body p-4 gap-2" style="display:grid;grid-template-rows:2.5rem 1.75rem 1rem">
-			<span class="text-sm">{ label }</span>
-			<strong { templ.Attributes{"data-" + kind + "-summary-value": true}... } class="text-center opacity-50 font-normal text-base" aria-live="polite">Loading analytics…</strong>
-			<span { templ.Attributes{"data-" + kind + "-summary-sample": true}... } class="text-xs opacity-60"></span>
+		<div class="card-body p-4 gap-2">
+			<div class="flex items-center justify-between gap-2 text-sm"><span>{ label }</span><button type="button" class="btn btn-ghost btn-circle btn-xs shrink-0" data-model-help={ analyticsKPIHelp(label) } aria-label={ "About " + label } aria-expanded="false">ⓘ<span { templ.Attributes{"data-" + kind + "-summary-sample": true}... } hidden aria-hidden="true"></span></button></div>
+			<strong { templ.Attributes{"data-" + kind + "-summary-value": true}... } class="text-center opacity-50 font-normal text-base" style="min-height:1.75rem" aria-live="polite">Loading analytics…</strong>
 		</div>
 	</div>
+}
+
+func analyticsKPIHelp(label string) string {
+	switch label {
+	case "Tasks worked on":
+		return "Distinct tasks with activity in the selected period."
+	case "Goals achieved":
+		return "Share of evaluated tasks whose goal was met. This does not mean the work was merged."
+	case "Work merged":
+		return "Share of merge-eligible tasks whose work was merged."
+	case "Skills used":
+		return "Distinct skills used in the selected period."
+	case "Tasks using skills":
+		return "Distinct tasks that used a skill. Each task counts once."
+	case "Tasks with goal evidence":
+		return "Tasks with a recorded goal evaluation, out of tasks using skills. Not necessarily goals achieved."
+	case "Known total cost":
+		return "Recorded usage cost. Subscription fees and unpriced usage are not included."
+	case "Total tokens":
+		return "Recorded input and output tokens in the selected period."
+	case "Cache utilization":
+		return "Percentage of input tokens served from cache."
+	default:
+		return ""
+	}
 }
 
 templ analyticsTaskSummary(view string) {
@@ -71,6 +95,7 @@ templ analyticsContent(currentProject *models.Project) {
 					</div></div>
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
+				<div id="modelMetricHelp" popover="auto" role="tooltip" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-xl p-3 text-sm" style="position:fixed;margin:0;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto"></div>
 
 				<section id="analytics-overview" data-analytics-section="overview" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Overview</h3><p class="text-sm opacity-60">What changed, what drove it, and what to inspect next.</p></div>
@@ -115,7 +140,6 @@ templ analyticsContent(currentProject *models.Project) {
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path stroke-linecap="round" d="M12 11v6"></path><path stroke-linecap="round" d="M12 7h.01"></path></svg>
 						</button>
 					</div>
-					<div id="modelMetricHelp" popover="auto" role="tooltip" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-xl p-3 text-sm" style="position:fixed;margin:0;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto"></div>
 					@analyticsTaskSummary("models")
 					<div class="card bg-base-100 border border-base-300"><div class="card-body">
 						<h4 class="card-title">Model comparison</h4>
@@ -637,7 +661,7 @@ templ analyticsContent(currentProject *models.Project) {
 								return [row.provider, row.model, row.reasoning_effort ? row.reasoning_effort + ' reasoning' : ''].filter(Boolean).join(' · ');
 							}
 							function setupModelHelp() {
-								const root=document.getElementById('analytics-models'),tip=document.getElementById('modelMetricHelp');
+								const root=document.getElementById('analyticsError').parentElement,tip=document.getElementById('modelMetricHelp');
 								let active=null,pinned=false;
 								function close() {
 									if(active){active.removeAttribute('aria-describedby');active.setAttribute('aria-expanded','false');}
@@ -645,7 +669,8 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 								function show(button,pin) {
 									if(active!==button)close();active=button;pinned=pinned||pin;
-									tip.textContent=button.dataset.modelHelp;button.setAttribute('aria-describedby',tip.id);button.setAttribute('aria-expanded','true');
+									const sample=button.querySelector('[data-task-summary-sample]');
+									tip.textContent=button.dataset.modelHelp+(sample&&sample.textContent?' '+sample.textContent+'.':'');button.setAttribute('aria-describedby',tip.id);button.setAttribute('aria-expanded','true');
 									if(!tip.matches(':popover-open'))tip.showPopover();
 									const r=button.getBoundingClientRect(),box=tip.getBoundingClientRect();
 									tip.style.left=Math.max(8,Math.min(r.left,window.innerWidth-box.width-8))+'px';
