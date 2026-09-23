@@ -886,13 +886,14 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	      var timeChart=chartConfigs.modelTimeChart,tokensChart=chartConfigs.modelTokensChart,goalsChart=chartConfigs.modelOutcomesChart,followupsChart=chartConfigs.modelFollowupsChart;
           if(!timeChart||!tokensChart||!goalsChart||!followupsChart)fail('comparison charts missing');
           var colors=timeChart.data.datasets[0].backgroundColor;
-          if(!Array.isArray(colors)||colors[0]!==tokensChart.data.datasets[0].backgroundColor[0]||colors[0]!==goalsChart.data.datasets[0].backgroundColor||colors[0]!==followupsChart.data.datasets[0].backgroundColor[0])fail('model colors must match across effort and outcome charts');
+          if(!Array.isArray(colors)||colors[0]!==tokensChart.data.datasets[0].backgroundColor[0]||colors[0]!==goalsChart.data.datasets[0].backgroundColor[0]||colors[0]!==followupsChart.data.datasets[0].backgroundColor[0])fail('model colors must match across effort and outcome charts');
           if(timeChart.type!=='bar'||timeChart.data.datasets[0].data[0]!==60000||tokensChart.data.datasets[0].data[0]!==1000)fail('effort charts differ from scorecard');
-          if(goalsChart.type!=='bar'||goalsChart.data.datasets[0].data[0]!==100||goalsChart.data.datasets[0].data[1]!==null)fail('outcome bars must preserve missing evidence');
+          if(goalsChart.type!=='bar'||goalsChart.data.datasets.length!==1||goalsChart.data.labels.join('|')!=='Fable'||goalsChart.data.datasets[0].data[0]!==100)fail('outcome bars must compare models, not days');
           if(followupsChart.type!=='bar'||followupsChart.data.datasets[0].data[0]!==1||!followupsChart.options.plugins.tooltip.callbacks.label({dataIndex:0}).includes('n=1'))fail('follow-up average or denominator incorrect');
           var scoreBefore=card.innerHTML,selector=document.getElementById('modelOutcomeMetric');selector.value='merge_completion';selector.dispatchEvent(new Event('change'));
           var mergedChart=chartConfigs.modelOutcomesChart;
-          if(mergedChart.type!=='bar'||mergedChart.data.datasets[0].data[0]!==50||mergedChart.data.datasets[0].data[1]!==0)fail('merge selector must update bars and preserve real zeros');
+          if(mergedChart.type!=='bar'||mergedChart.data.labels.join('|')!=='Fable'||mergedChart.data.datasets[0].data[0]!==50)fail('merge selector must update model bars');
+          if(mergedChart===goalsChart||chartConfigs.modelTimeChart!==timeChart||chartConfigs.modelTokensChart!==tokensChart||chartConfigs.modelFollowupsChart!==followupsChart)fail('dropdown must refresh only the outcome chart');
           if(!mergedChart.options.plugins.tooltip.callbacks.label({datasetIndex:0,dataIndex:0}).includes('1/2 tasks'))fail('outcome tooltip sample missing');
           if(card.innerHTML!==scoreBefore||document.getElementById('modelComparisonSort'))fail('scorecard must remain unchanged');
           if(document.getElementById('modelGoalsTrendChart')||document.getElementById('modelMergesTrendChart'))fail('old separate trends remain');

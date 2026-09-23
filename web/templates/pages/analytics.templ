@@ -161,8 +161,8 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
-							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Task outcomes over time</h4><select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
-							<p class="text-sm opacity-60">Six busiest models. Current outcomes grouped by each task’s latest activity date—not the date its goal or merge happened. Missing evidence leaves a gap.</p>
+							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Task outcomes by model</h4><select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
+							<p class="text-sm opacity-60">Current outcomes for tasks with activity in the selected period. Mixed models excluded; missing evidence is unavailable.</p>
 							<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelOutcomesChart"></canvas></div></div>
 						</div></div>
 						@analyticsChartCard("Follow-ups per task by model", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
@@ -330,7 +330,7 @@ templ analyticsContent(currentProject *models.Project) {
 								if (!canvas) return null;
 								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Task duration distribution', followupDistributionChart: 'Follow-up run distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill outcomes versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', successFailureChart: 'Run results over time', hourlyTrendsChart: 'Runs by hour', avgTimeTaskChart: 'Average run duration by task', agentOutcomeTrendChart: 'Selected Agent run outcomes over time' };
 								canvas.setAttribute('role', 'img');
-								canvas.setAttribute('aria-label', chartLabels[canvasID] || ({modelTimeChart:'Run time per task by model',modelTokensChart:'Tokens per task by model',modelOutcomesChart:'Task outcomes over time',modelFollowupsChart:'Follow-ups per task by model'})[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
+								canvas.setAttribute('aria-label', chartLabels[canvasID] || ({modelTimeChart:'Run time per task by model',modelTokensChart:'Tokens per task by model',modelOutcomesChart:'Task outcomes by model',modelFollowupsChart:'Follow-ups per task by model'})[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
 							if (old) old.remove();
 							if (!rows || rows.length === 0) {
 								canvas.classList.add('hidden');
@@ -764,21 +764,27 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 								bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Run time per task');
 								bar('modelTokens','modelTokensChart',models.filter(r=>r.token_covered_tasks>0),r=>Number(r.total_tokens||0)/r.token_covered_tasks,compact,r=>r.token_covered_tasks,'Recorded tokens / task');
-								const busiest=models.slice(0,6),periods=Array.from(new Set(busiest.flatMap(r=>(r.outcome_trend||[]).map(p=>p.period)))).sort();
-								function trend(key,id,metric) {
-									const supported=busiest.filter(r=>(r.outcome_trend||[]).some(p=>p[metric]&&p[metric].denominator>0));
-									const canvas=renderChartState(key,id,supported,'No outcome evidence in this period');if(!canvas)return;
-									canvas.parentElement.style.minWidth=Math.max(320,periods.length*Math.max(72,supported.length*20))+'px';
-									const datasets=supported.map(function(r){
-										const points=new Map((r.outcome_trend||[]).map(p=>[p.period,p[metric]]));
-										return {label:modelConfigLabel(r),data:periods.map(p=>{const m=points.get(p);return m&&m.denominator>0?m.percent:null;}),borderColor:modelChartColor(r),backgroundColor:modelChartColor(r),maxBarThickness:32};
-									});
-									charts[key]=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:periods,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:10,right:10}},plugins:{legend:{position:'bottom',labels:{boxWidth:12}},tooltip:{callbacks:{label:function(item){const r=supported[item.datasetIndex],p=r.outcome_trend.find(p=>p.period===periods[item.dataIndex]),m=p[metric];return modelConfigLabel(r)+': '+Number(m.percent).toFixed(1)+'% · '+m.numerator+'/'+m.denominator+' tasks';}}}},scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}},x:{title:{display:true,text:'Latest task activity period'},ticks:{maxTicksLimit:8}}}}});
-								}
-								trend('modelOutcomes','modelOutcomesChart',document.getElementById('modelOutcomeMetric').value);
+								renderModelOutcomeChart(rows);
 								bar('modelFollowups','modelFollowupsChart',models.filter(r=>r.tasks_used>0),r=>Number(r.average_follow_ups||0),n=>Number(n).toFixed(1),r=>r.tasks_used,'Follow-up runs / task');
 							}
-							document.getElementById('modelOutcomeMetric').addEventListener('change',function(){if(latestDashboard)renderModelCharts(latestDashboard.models||[]);},{signal:eventSignal});
+							function renderModelOutcomeChart(rows) {
+								const metric=document.getElementById('modelOutcomeMetric').value;
+								const models=rows.filter(r=>!r.mixed_models).sort((a,b)=>Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
+								const hasEvidence=models.some(r=>Number((r[metric]||{}).denominator)>0);
+								const canvas=renderChartState('modelOutcomes','modelOutcomesChart',hasEvidence?models:[],'No outcome evidence in this period');if(!canvas)return;
+								canvas.parentElement.style.minWidth=Math.max(320,models.length*100)+'px';
+								const values=models.map(r=>Number((r[metric]||{}).denominator)>0?Number(r[metric].percent||0):null);
+								const labels=values.map(v=>v===null?'Unavailable':v.toFixed(1)+'%');
+								charts.modelOutcomes=new Chart(canvas.getContext('2d'),{
+									type:'bar',data:{labels:models.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:values,backgroundColor:models.map(modelChartColor),maxBarThickness:48}]},
+									plugins:[{id:'modelOutcomeValues',afterDatasetsDraw:function(chart){
+										const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+										chart.getDatasetMeta(0).data.forEach((bar,i)=>ctx.fillText(labels[i],bar.x,bar.y-6));ctx.restore();
+									}}],
+									options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(models[items[0].dataIndex])+' · '+modelDetailLabel(models[items[0].dataIndex]):'',label:function(item){const m=models[item.dataIndex][metric]||{};return Number(m.denominator)>0?labels[item.dataIndex]+' · '+m.numerator+'/'+m.denominator+' tasks':'Unavailable';}}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}}}
+								});
+							}
+							document.getElementById('modelOutcomeMetric').addEventListener('change',function(){if(latestDashboard)renderModelOutcomeChart(latestDashboard.models||[]);},{signal:eventSignal});
 							function renderModelPerformance(rows) {
 								renderModelCharts(rows);
 								const ordered=rows.slice().sort((a,b)=>Number(!!a.mixed_models)-Number(!!b.mixed_models)||Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
