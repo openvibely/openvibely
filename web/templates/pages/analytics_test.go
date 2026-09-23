@@ -458,9 +458,8 @@ func TestBrowserFunctional_AnalyticsContent_RestoresLastViewInChrome(t *testing.
   function wait(attempt) {
     var usageButton = document.querySelector('[data-analytics-view="usage"]');
     var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
-    if (usageButton && usageButton.classList.contains('btn-primary') && dashboardURL && urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;})) {
-      if (new URL(dashboardURL, location.href).searchParams.get('view') !== 'usage') fail('restored view was not sent to the dashboard endpoint: ' + dashboardURL);
-      if (new URL(dashboardURL, location.href).searchParams.get('compare') !== '0') fail('Usage requested an unused previous-period comparison: ' + dashboardURL);
+    if (usageButton && usageButton.classList.contains('btn-primary') && urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;})) {
+      if (dashboardURL) fail('Usage fetched unused dashboard data: ' + dashboardURL);
       if (!document.querySelector('[data-compare-filter]').classList.contains('hidden')) fail('previous-period comparison is visible on Usage');
       if (document.getElementById('analytics-usage').classList.contains('hidden')) fail('remembered Usage view was not shown');
       result.setAttribute('data-test-result', 'pass');
@@ -669,6 +668,7 @@ func TestBrowserFunctional_AnalyticsContent_DelayedChartLoaderInitializesNewestG
 	content := rendered.String()
 	fixture := `<main id="reconnect-result"></main><script>
 (function(){
+  history.replaceState({}, '', location.pathname+'?project_id=project-1&view=models');
   var result=document.getElementById('reconnect-result'),loader=null,dashboardCalls=0,append=document.head.appendChild.bind(document.head);
   document.head.appendChild=function(node){if(node&&node.matches&&node.matches('script[data-analytics-chart-loader]')){loader=node;node.removeAttribute('src');return append(node);}return append(node);};
   window.fetch=function(url){if(String(url).indexOf('/api/analytics/dashboard')>=0)dashboardCalls++;var payload=[];if(String(url).indexOf('/api/analytics/dashboard')>=0)payload={definitions:[],current:{technical_completion:{},goal_achievement:{},first_pass:{},follow_up:{}},funnel:[],cycle_distribution:[],follow_up_distribution:[],agents:[],skill_outcomes:[],model_categories:[],workflows:[],recent_outcomes:[],insights:[]};if(String(url).indexOf('/api/analytics/usage')>=0)payload={usage_rate:[],usage_rate_by_model:[],totals:{},model_breakdown:[],account_limits:[]};if(String(url).indexOf('/api/analytics/skills')>=0)payload={usage_over_time:[],top_skills:[],follow_through:[],agent_usage:{},underused:[]};return Promise.resolve({ok:true,json:function(){return Promise.resolve(payload);}});};
