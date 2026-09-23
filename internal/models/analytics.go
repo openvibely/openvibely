@@ -53,6 +53,8 @@ type AnalyticsDistributionPoint struct {
 }
 
 type AgentPerformance struct {
+	MergeCompletion          AnalyticsMetric `json:"merge_completion"`
+	AverageFollowUps         float64         `json:"average_follow_ups"`
 	AgentID                  string          `json:"agent_id,omitempty"`
 	AgentName                string          `json:"agent_name"`
 	TasksEvaluated           int             `json:"tasks_evaluated"`

@@ -45,7 +45,7 @@ var analyticsMetricDefinitions = []models.MetricDefinition{
 	{Key: "cancelled_executions", Label: "Cancelled runs", Definition: "Runs explicitly cancelled in the selected period.", Denominator: "All finished runs in the selected period."},
 	{Key: "cycle_time_p90", Label: "P90 task duration", Definition: "90th percentile elapsed time from a task's first run start through its latest finished run in the selected period, including retries and follow-up runs.", Denominator: "Non-scheduled task instances with a finished run in the selected period and a persisted historical first run start; repeating task templates are excluded."},
 	{Key: "tokens_per_achieved_goal", Label: "Tokens per achieved goal", Definition: "Recorded tokens associated with achieved-goal tasks divided by represented achieved goals.", Denominator: "Achieved-goal tasks with usage records; coverage is disclosed."},
-	{Key: "agent_performance", Label: "Agent performance", Definition: "Task and run outcomes attributed through tasks.agent_definition_id; duration uses the historical first run through the selected-period finished outcome.", Denominator: "Selected-period tasks assigned to each reusable Agent definition, with unassigned work separate; duration samples are disclosed."},
+	{Key: "agent_performance", Label: "Agent performance", Definition: "Current task outcomes attributed through tasks.agent_definition_id. Run time sums finished runs started in the selected period, excluding idle gaps; scheduled tasks are included and chats excluded.", Denominator: "Tasks with runs or task usage in the selected period, assigned to each reusable Agent definition. Goal rates use non-cleared goals; merge rates use merge-eligible tasks. Each metric discloses its sample."},
 	{Key: "workflow_performance", Label: "Workflow performance", Definition: "Invocation and current work-item state for project-owned automations; selected-period invocation status counts are displayed as completed, failed, cancelled, skipped, or open, and terminal-duration sample size is disclosed.", Denominator: "All selected-period workflow invocations for completion rate; waiting and blocked values are explicitly current state."},
 	{Key: "agent_skill_outcomes", Label: "Observed Agent and skill outcomes", Definition: "Task outcomes grouped by assigned reusable Agent definition and selected or loaded skill.", Denominator: "Selected-period tasks with run evidence and a selected or loaded skill event; association is observational, not causal."},
 	{Key: "skill_outcomes", Label: "Observed skill outcomes", Definition: "Observed task outcomes where a skill was selected or loaded; this is association, not causation.", Denominator: "Selected-period tasks with a selected or loaded skill event and run evidence."},
@@ -124,6 +124,10 @@ func analyticsGoalOutcomeWindowClause(alias string, filter AnalyticsDashboardFil
 func analyticsTaskDimensionClause(alias string, filter AnalyticsDashboardFilter) (string, []any) {
 	clause := ""
 	args := []any{}
+	if filter.View == "agents" {
+		clause += " AND COALESCE(" + alias + ".category,'')<>'chat'"
+		filter.WorkType = ""
+	}
 	if filter.AgentID == "__unassigned__" {
 		clause += " AND " + alias + ".agent_definition_id IS NULL"
 	} else if filter.AgentID != "" {
@@ -737,6 +741,9 @@ func (r *ExecutionRepo) queryOutcomeFunnel(ctx context.Context, filter Analytics
 }
 
 func (r *ExecutionRepo) queryAnalyticsTaskSummary(ctx context.Context, filter AnalyticsDashboardFilter) (*models.AnalyticsTaskSummary, error) {
+	if filter.View == "agents" {
+		filter.WorkType = ""
+	}
 	window, args := analyticsWindowClause("e", filter)
 	usageWindow, usageArgs := analyticsEventWindowClause("u", "occurred_at", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
@@ -761,17 +768,21 @@ func (r *ExecutionRepo) queryAnalyticsTaskSummary(ctx context.Context, filter An
 }
 
 func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.AgentPerformance, error) {
+	filter.WorkType = ""
 	window, windowArgs := analyticsWindowClause("e", filter)
 	usageWindow, usageWindowArgs := analyticsEventWindowClause("u", "occurred_at", filter)
 	comparisonFilter := filter
 	comparisonFilter.AgentID = ""
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", comparisonFilter)
-	goalWindow, goalArgs := analyticsGoalOutcomeWindowClause("g", filter)
 	query := `WITH scoped_tasks AS (
-			SELECT t.id,t.agent_definition_id FROM tasks t WHERE t.project_id=?` + dimension + `
+			SELECT t.id,t.agent_definition_id,t.merge_status,t.worktree_path FROM tasks t WHERE t.project_id=? AND COALESCE(t.category,'')<>'chat'` + dimension + `
 	), period_exec AS (
 			SELECT t.id task_id,e.agent_config_id,e.status,e.started_at,e.completed_at,e.is_followup,t.agent_definition_id
 			FROM scoped_tasks t CROSS JOIN executions e INDEXED BY idx_executions_task_analytics ON e.task_id=t.id WHERE 1=1` + window + `
+	), period_tasks AS (
+		SELECT task_id FROM period_exec
+		UNION SELECT u.task_id FROM scoped_tasks t JOIN llm_usage_events u ON u.task_id=t.id
+		WHERE (u.operation IN ('task','task_followup') OR (u.operation='' AND EXISTS (SELECT 1 FROM executions e WHERE e.id=u.execution_id AND e.task_id=t.id)))` + usageWindow + `
 	), period_terminal_task_ids AS (
 		SELECT DISTINCT task_id FROM period_exec WHERE status IN ('completed','failed','cancelled')
 	), historical_terminal AS (
@@ -780,28 +791,26 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 			WHERE e.task_id=p.task_id AND e.status IN ('completed','failed','cancelled')
 			ORDER BY e.started_at,e.history_order,e.id LIMIT 1
 		) status FROM period_terminal_task_ids p
-		), historical_start AS (
-			SELECT p.task_id,(
-				SELECT MIN(e.started_at) FROM executions e INDEXED BY idx_executions_task_analytics WHERE e.task_id=p.task_id
-			) first_started_at FROM period_terminal_task_ids p
 		), task_stats AS (
-			SELECT p.task_id,p.agent_definition_id,COUNT(*) executions,SUM(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END) followups,
+			SELECT pt.task_id,t.agent_definition_id,COUNT(p.task_id) executions,SUM(CASE WHEN p.is_followup=1 THEN 1 ELSE 0 END) followups,
 			SUM(CASE WHEN p.status='completed' THEN 1 ELSE 0 END) completed_execs,
 			SUM(CASE WHEN p.status IN ('completed','failed','cancelled') THEN 1 ELSE 0 END) terminal_execs,
 			MAX(CASE WHEN f.status='completed' THEN 1 ELSE 0 END) first_completed,
 			MAX(CASE WHEN f.status IS NOT NULL THEN 1 ELSE 0 END) has_first,
-			CASE WHEN EXISTS (SELECT 1 FROM tasks t LEFT JOIN schedules s ON s.task_id=t.id WHERE t.id=p.task_id AND (t.category='scheduled' OR s.repeat_type<>'once')) THEN NULL
-			ELSE CAST(MAX(0,(julianday(MAX(CASE WHEN p.status IN ('completed','failed','cancelled') THEN COALESCE(p.completed_at,p.started_at) END))-julianday(h.first_started_at))*86400000) AS INTEGER) END duration_ms
-			FROM period_exec p LEFT JOIN historical_terminal f ON f.task_id=p.task_id
-			LEFT JOIN historical_start h ON h.task_id=p.task_id GROUP BY p.task_id,p.agent_definition_id		), period_goals AS (
-			SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed')` + goalWindow + `
+			CAST(SUM(CASE WHEN p.completed_at IS NOT NULL THEN MAX(0,(julianday(p.completed_at)-julianday(p.started_at))*86400000) END) AS INTEGER) duration_ms
+			FROM period_tasks pt JOIN scoped_tasks t ON t.id=pt.task_id LEFT JOIN period_exec p ON p.task_id=pt.task_id
+			LEFT JOIN historical_terminal f ON f.task_id=pt.task_id
+			GROUP BY pt.task_id,t.agent_definition_id
+		), period_goals AS (
+			SELECT g.task_id,g.status FROM task_goals g WHERE g.status IN ('achieved','failed','active','paused','blocked')
 		), evaluable_goals AS (
 			SELECT task_id,status FROM period_goals
-			UNION SELECT g.task_id,g.status FROM task_goals g JOIN period_terminal_task_ids p ON p.task_id=g.task_id WHERE g.status IN ('active','paused','blocked')
 		), agent_rollup AS (		SELECT s.agent_definition_id,COUNT(*) tasks_evaluated,SUM(completed_execs) completed_execs,SUM(terminal_execs) terminal_execs,
 		SUM(first_completed) first_completed,SUM(has_first) first_denominator,SUM(CASE WHEN followups>0 THEN 1 ELSE 0 END) followed,
-		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END) achieved,COUNT(g.task_id) goal_denominator
-		FROM task_stats s LEFT JOIN evaluable_goals g ON g.task_id=s.task_id GROUP BY s.agent_definition_id
+		SUM(CASE WHEN g.status='achieved' THEN 1 ELSE 0 END) achieved,COUNT(g.task_id) goal_denominator,
+		SUM(s.followups) total_followups,SUM(CASE WHEN t.merge_status='merged' THEN 1 ELSE 0 END) merged,
+		SUM(CASE WHEN t.worktree_path<>'' OR t.merge_status<>'' THEN 1 ELSE 0 END) merge_n
+		FROM task_stats s JOIN scoped_tasks t ON t.id=s.task_id LEFT JOIN evaluable_goals g ON g.task_id=s.task_id GROUP BY s.agent_definition_id
 	), ranked_durations AS (
 		SELECT agent_definition_id,duration_ms,ROW_NUMBER() OVER(PARTITION BY agent_definition_id ORDER BY duration_ms) rn,
 		COUNT(*) OVER(PARTITION BY agent_definition_id) duration_count FROM task_stats WHERE duration_ms IS NOT NULL
@@ -818,7 +827,7 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 	), usage AS (
 		SELECT p.task_id,SUM(u.cost_usd) known_cost,MAX(CASE WHEN u.cost_usd IS NOT NULL THEN 1 ELSE 0 END) has_cost
 		FROM achieved_tasks p CROSS JOIN llm_usage_events u INDEXED BY idx_llm_usage_events_task_project_time_cost
-		ON u.task_id=p.task_id WHERE u.project_id=?` + usageWindow + ` GROUP BY p.task_id
+		ON u.task_id=p.task_id WHERE u.project_id=? AND (u.operation IN ('task','task_followup') OR (u.operation='' AND EXISTS (SELECT 1 FROM executions e WHERE e.id=u.execution_id AND e.task_id=p.task_id)))` + usageWindow + ` GROUP BY p.task_id
 	), costs AS (
 		SELECT s.agent_definition_id,COALESCE(SUM(CASE WHEN u.has_cost=1 THEN u.known_cost ELSE 0 END),0) known_cost,
 		COUNT(DISTINCT CASE WHEN u.has_cost=1 THEN s.task_id END) covered,COUNT(DISTINCT s.task_id) eligible
@@ -827,7 +836,7 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 	SELECT COALESCE(a.id,''),COALESCE(a.name,'Unassigned / Auto-routed'),r.tasks_evaluated,
 		r.completed_execs,r.terminal_execs,r.first_completed,r.first_denominator,r.followed,r.achieved,r.goal_denominator,
 		COALESCE(m.median_duration_ms,0),COALESCE(m.duration_count,0),COALESCE(ac.name || ' (' || ac.model || ')',rm.agent_config_id,'Unknown'),
-		COALESCE(c.known_cost,0),COALESCE(c.covered,0),COALESCE(c.eligible,0)
+		COALESCE(c.known_cost,0),COALESCE(c.covered,0),COALESCE(c.eligible,0),r.total_followups,r.merged,r.merge_n
 	FROM agent_rollup r LEFT JOIN agents a ON a.id=r.agent_definition_id
 	LEFT JOIN medians m ON m.agent_definition_id IS r.agent_definition_id
 	LEFT JOIN ranked_models rm ON rm.agent_definition_id IS r.agent_definition_id AND rm.rn=1
@@ -835,7 +844,7 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 	ORDER BY CASE WHEN a.id IS NULL THEN 1 ELSE 0 END,r.tasks_evaluated DESC,a.name`
 	args := append([]any{filter.ProjectID}, dimensionArgs...)
 	args = append(args, windowArgs...)
-	args = append(args, goalArgs...)
+	args = append(args, usageWindowArgs...)
 	args = append(args, filter.ProjectID)
 	args = append(args, usageWindowArgs...)
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -846,16 +855,20 @@ func (r *ExecutionRepo) queryAgentPerformance(ctx context.Context, filter Analyt
 	result := []models.AgentPerformance{}
 	for rows.Next() {
 		var row models.AgentPerformance
-		var completed, terminal, firstCompleted, firstDenom, followed, achieved, goalDenom int
+		var completed, terminal, firstCompleted, firstDenom, followed, achieved, goalDenom, followups, merged, mergeN int
 		var knownCost float64
 		var costCovered, costEligible int
-		if err := rows.Scan(&row.AgentID, &row.AgentName, &row.TasksEvaluated, &completed, &terminal, &firstCompleted, &firstDenom, &followed, &achieved, &goalDenom, &row.MedianDurationMs, &row.DurationSampleSize, &row.MostUsedModel, &knownCost, &costCovered, &costEligible); err != nil {
+		if err := rows.Scan(&row.AgentID, &row.AgentName, &row.TasksEvaluated, &completed, &terminal, &firstCompleted, &firstDenom, &followed, &achieved, &goalDenom, &row.MedianDurationMs, &row.DurationSampleSize, &row.MostUsedModel, &knownCost, &costCovered, &costEligible, &followups, &merged, &mergeN); err != nil {
 			return nil, fmt.Errorf("scanning agent performance: %w", err)
 		}
 		row.TechnicalCompletion = metric(completed, terminal)
 		row.FirstPass = metric(firstCompleted, firstDenom)
 		row.FollowUp = metric(followed, row.TasksEvaluated)
 		row.GoalAchievement = metric(achieved, goalDenom)
+		row.MergeCompletion = metric(merged, mergeN)
+		if row.TasksEvaluated > 0 {
+			row.AverageFollowUps = float64(followups) / float64(row.TasksEvaluated)
+		}
 		if costCovered > 0 {
 			row.KnownCostPerAchievedGoal = &models.CostCoverage{Value: knownCost / float64(costCovered), Covered: costCovered, Eligible: costEligible}
 		}
@@ -1368,9 +1381,11 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 }
 
 func (r *ExecutionRepo) queryAgentAnalyticsDetail(ctx context.Context, filter AnalyticsDashboardFilter, skills []models.SkillOutcomePerformance, recent []models.EvidenceTaskRow) (*models.AgentAnalyticsDetail, error) {
+	filter.WorkType = ""
 	detail := &models.AgentAnalyticsDetail{AgentID: filter.AgentID, OutcomeTrend: []models.AnalyticsTrendPoint{}, Categories: []models.AnalyticsCategoryPerformance{}, ModelMix: []models.AnalyticsModelMix{}, Failures: []models.AnalyticsFailurePattern{}, Skills: skills, RecentTasks: recent}
 	window, windowArgs := analyticsWindowClause("e", filter)
 	dimension, dimensionArgs := analyticsTaskDimensionClause("t", filter)
+	dimension += " AND COALESCE(t.category,'')<>'chat'"
 	periodExpr := analyticsPeriodExpression(filter.GroupBy, "e.started_at")
 	query := `SELECT ` + periodExpr + `,SUM(CASE WHEN e.status='completed' THEN 1 ELSE 0 END),SUM(CASE WHEN e.status='failed' THEN 1 ELSE 0 END),SUM(CASE WHEN e.status='cancelled' THEN 1 ELSE 0 END),COUNT(*)
 		FROM executions e JOIN tasks t ON t.id=e.task_id WHERE t.project_id=?` + dimension + window + ` GROUP BY 1 ORDER BY 1`

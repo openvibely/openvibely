@@ -174,7 +174,7 @@ func TestBrowserFunctional_AnalyticsContent_AgentOutcomeMetricSelector(t *testin
 history.replaceState({},'',location.pathname+'?project_id=p&view=agents');
 var configs={},requests=0;
 window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
-var agents=Array.from({length:15},(_,i)=>({agent_id:'a'+i,agent_name:'Agent '+i,tasks_evaluated:20,goal_achievement:{percent:i*5,numerator:i,denominator:20},first_pass:{percent:(20-i)*5,numerator:20-i,denominator:20},follow_up:{percent:(i%10)*10,numerator:i%10,denominator:10}}));
+var agents=Array.from({length:15},(_,i)=>({agent_id:'a'+i,agent_name:'Agent '+i,tasks_evaluated:20,median_duration_ms:60000,duration_sample_size:20,average_follow_ups:1.5,merge_completion:{percent:50,numerator:10,denominator:20},goal_achievement:{percent:i*5,numerator:i,denominator:20},first_pass:{percent:(20-i)*5,numerator:20-i,denominator:20},follow_up:{percent:(i%10)*10,numerator:i%10,denominator:10}}));
 window.fetch=async function(){requests++;return {ok:true,json:async function(){return {agents:agents,recent_outcomes:[]};}};};
 window.addEventListener('load',function(){
  var result=document.getElementById('reconnect-result'),attempts=0;
@@ -187,12 +187,20 @@ window.addEventListener('load',function(){
    assert(c.data.labels[0]==='Agent 14'&&c.options.indexAxis==='y','must rank horizontal bars by selected rate');
    assert(document.getElementById('agentOutcomeCount').textContent.includes('Showing 12 of 15 agents'),'cap must be visible');
    assert(c.options.plugins.tooltip.callbacks.label({dataIndex:0}).includes('n=20'),'goal tooltip missing metric sample');
+   var runTime=configs.agentRunTimeChart,followups=configs.agentFollowupsChart;
+   assert(runTime.type==='bar'&&runTime.data.datasets[0].data[0]===60000,'run time chart missing');
+   assert(followups.type==='bar'&&followups.data.datasets[0].data[0]===1.5,'follow-up average chart missing');
+   assert(!document.getElementById('agentEfficiencyChart')&&!document.getElementById('agentCategoryChart')&&!document.getElementById('agentFindings'),'removed clutter remains');
    var before=requests,select=document.getElementById('agentOutcomeMetric');select.value='first_pass';select.dispatchEvent(new Event('change'));
    c=configs.agentComparisonChart;assert(c.data.labels[0]==='Agent 0'&&c.data.datasets[0].data[0]===100,'metric switch must update values and ranking');
    select.value='follow_up';select.dispatchEvent(new Event('change'));c=configs.agentComparisonChart;
    assert(c.options.plugins.tooltip.callbacks.label({dataIndex:0}).includes('n=10'),'follow-up tooltip must use its own denominator');
    assert(document.getElementById('agentOutcomeHelp').dataset.modelHelp.includes('changed goals'),'follow-up explanation missing');
    assert(requests===before,'selector should use loaded data');
+   select.value='merge_completion';select.dispatchEvent(new Event('change'));c=configs.agentComparisonChart;
+   assert(c.data.datasets[0].data.every(v=>v===50),'merge outcome missing');
+   assert(configs.agentRunTimeChart===runTime&&configs.agentFollowupsChart===followups,'outcome dropdown refreshed other charts');
+   select.value='follow_up';
    agents.forEach(r=>r.follow_up={denominator:0});select.dispatchEvent(new Event('change'));c=configs.agentComparisonChart;
    assert(c.data.datasets[0].data.every(v=>v===null),'missing evidence must not become zero');
    result.dataset.testResult='pass';
@@ -822,7 +830,7 @@ func TestBrowserFunctional_AnalyticsContent_ModelAndAgentLoadingInChrome(t *test
 (function(){
   history.replaceState({},'',location.pathname+'?project_id=project-1&view=__VIEW__');
   var result=document.getElementById('reconnect-result'),calls=0;
-  var ids='__VIEW__'==='models'?['modelScorecard']:['agentFindings','agentPerformanceTable','agentEvidenceTable','agentCategoryTable','agentFailureTable','agentSkillTable'];
+  var ids='__VIEW__'==='models'?['modelScorecard']:['agentPerformanceTable','agentEvidenceTable','agentFailureTable','agentSkillTable'];
   function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   window.Chart=function(){this.destroy=function(){};};
   window.fetch=function(){
@@ -981,7 +989,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Follow-up run rate`, `Median task duration`, `Cost per achieved goal`,
 		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`,
 		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
-		`Selected Agent outcome trend`, `Agent findings`, `Model comparison`,
+		`Run time per task by agent`, `Follow-ups per task by agent`, `Model comparison`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`,
 		`Run results over time`, `id="skillSummary"`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
 	} {
@@ -1094,7 +1102,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 	for name, expected := range map[string][]string{
 		"overview":    {`id="projectOutcomeTrendChart"`, `id="overviewOutcomeFunnel"`, `Actionable exceptions`},
 		"outcomes":    {`id="successFailureChart"`, `id="hourlyTrendsChart"`, `id="avgTimeTaskChart"`, `id="frequentTasksList"`, `id="failedPatternsChart"`, `id="failedPatternsTable"`},
-		"agents":      {`id="agentComparisonChart"`, `id="agentEfficiencyChart"`, `id="agentCategoryChart"`},
+		"agents":      {`id="agentComparisonChart"`, `id="agentRunTimeChart"`, `id="agentFollowupsChart"`},
 		"models":      {`id="modelScorecard"`, `Model comparison`},
 		"automations": {`id="automationComparisonChart"`, `id="automationFunnelChart"`, `id="automationDurationChart"`, `id="automationFailureChart"`, `id="automationBottleneckChart"`},
 		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeChart"`, `id="skillEffectivenessChart"`},
