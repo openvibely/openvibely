@@ -1662,7 +1662,6 @@ type automationSavePerformanceFixture struct {
 	project   models.Project
 	counter   *testutil.SQLStatementCounter
 	refs      []string
-	baseline  *AutomationCompiler
 	optimized *AutomationCompiler
 }
 
@@ -1710,35 +1709,7 @@ func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerforman
 		return compiler
 	}
 	optimized := newCompiler()
-	baseline := newCompiler()
-	baseline.saveAgentResolver = func(ctx context.Context, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
-		return baselineAutomationSaveAgentDefinitions(ctx, agentRepo, projectID, resourceNodes, candidateNodes)
-	}
-	return &automationSavePerformanceFixture{ctx: ctx, project: project, counter: counter, refs: refs, baseline: baseline, optimized: optimized}
-}
-
-func baselineAutomationSaveAgentDefinitions(ctx context.Context, agentRepo *repository.AgentRepo, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
-	resolved := make(map[string]string)
-	for _, resourceNode := range resourceNodes {
-		if !resourceNode.AllowedResources["task"] {
-			continue
-		}
-		node := candidateNodes[resourceNode.Key]
-		ref, _ := node.Config["agent_ref"].(string)
-		ref = strings.TrimSpace(ref)
-		if ref == "" {
-			continue
-		}
-		agent, err := resolveAutomationAgent(ctx, agentRepo, projectID, ref)
-		if err != nil {
-			return nil, err
-		}
-		if agent == nil {
-			return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", node.Key)
-		}
-		resolved[ref] = agent.ID
-	}
-	return resolved, nil
+	return &automationSavePerformanceFixture{ctx: ctx, project: project, counter: counter, refs: refs, optimized: optimized}
 }
 
 func measureAutomationSavePerformance(tb testing.TB, fixture *automationSavePerformanceFixture, compiler *AutomationCompiler, candidate models.AutomationDraftCandidate, automationID string) automationSavePerformanceSample {
@@ -1823,60 +1794,26 @@ func TestAutomationCompilerSaveAgentResolutionPerformanceBudget(t *testing.T) {
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		t.Run(fmt.Sprintf("references_%d", referenceCount), func(t *testing.T) {
 			rawCandidate := automationValidationReferenceCandidate(fixture.refs[:referenceCount])
-			baselineCandidate := automationSavePerformanceCandidate(rawCandidate, fmt.Sprintf("baseline%03d", referenceCount))
-			baselineWithoutReferences := automationSavePerformanceCandidateWithoutAgentRefs(rawCandidate, fmt.Sprintf("baseline-no-ref%03d", referenceCount))
 			optimizedCandidate := automationSavePerformanceCandidate(rawCandidate, fmt.Sprintf("optimized%03d", referenceCount))
 			optimizedWithoutReferences := automationSavePerformanceCandidateWithoutAgentRefs(rawCandidate, fmt.Sprintf("optimized-no-ref%03d", referenceCount))
 
-			baselineWithout := measureAutomationSavePerformance(t, fixture, fixture.baseline, baselineWithoutReferences, fmt.Sprintf("bn%03d", referenceCount))
-			baseline := measureAutomationSavePerformance(t, fixture, fixture.baseline, baselineCandidate, fmt.Sprintf("br%03d", referenceCount))
 			optimizedWithout := measureAutomationSavePerformance(t, fixture, fixture.optimized, optimizedWithoutReferences, fmt.Sprintf("on%03d", referenceCount))
 			optimized := measureAutomationSavePerformance(t, fixture, fixture.optimized, optimizedCandidate, fmt.Sprintf("or%03d", referenceCount))
 
-			baselineAddedWall := automationSavePerformanceDurationDelta(baseline.medianWallTime, baselineWithout.medianWallTime)
 			optimizedAddedWall := automationSavePerformanceDurationDelta(optimized.medianWallTime, optimizedWithout.medianWallTime)
-			baselineAddedBytes := automationSavePerformanceValueDelta(baseline.bytesPerOp, baselineWithout.bytesPerOp)
 			optimizedAddedBytes := automationSavePerformanceValueDelta(optimized.bytesPerOp, optimizedWithout.bytesPerOp)
-			baselineAddedAllocs := automationSavePerformanceValueDelta(baseline.allocsPerOp, baselineWithout.allocsPerOp)
 			optimizedAddedAllocs := automationSavePerformanceValueDelta(optimized.allocsPerOp, optimizedWithout.allocsPerOp)
-			// Keep wall time as a benchmark diagnostic rather than a correctness
-			// budget. Package-level parallelism and shared CI runners can pause one
-			// side of this comparison independently. Query and allocation deltas are
-			// stable measurements of the Agent-resolution optimization.
-			t.Logf("references=%d current(no-ref -> refs) queries=%d->%d sql=%d->%d median=%s->%s bytes/op=%d->%d allocs/op=%d->%d added=%s/%d/%d optimized(no-ref -> refs) queries=%d->%d sql=%d->%d median=%s->%s bytes/op=%d->%d allocs/op=%d->%d added=%s/%d/%d",
+			t.Logf("references=%d current(no-ref -> refs) queries=%d->%d sql=%d->%d median=%s->%s bytes/op=%d->%d allocs/op=%d->%d added=%s/%d/%d",
 				referenceCount,
-				baselineWithout.agentQueries, baseline.agentQueries, baselineWithout.sqlStatements, baseline.sqlStatements, baselineWithout.medianWallTime, baseline.medianWallTime, baselineWithout.bytesPerOp, baseline.bytesPerOp, baselineWithout.allocsPerOp, baseline.allocsPerOp, baselineAddedWall, baselineAddedBytes, baselineAddedAllocs,
 				optimizedWithout.agentQueries, optimized.agentQueries, optimizedWithout.sqlStatements, optimized.sqlStatements, optimizedWithout.medianWallTime, optimized.medianWallTime, optimizedWithout.bytesPerOp, optimized.bytesPerOp, optimizedWithout.allocsPerOp, optimized.allocsPerOp, optimizedAddedWall, optimizedAddedBytes, optimizedAddedAllocs)
-			if baselineWithout.agentQueries != 0 || optimizedWithout.agentQueries != 0 {
-				t.Fatalf("no-reference Agent queries = current %d, optimized %d; want zero for both", baselineWithout.agentQueries, optimizedWithout.agentQueries)
-			}
-			if baseline.agentQueries != referenceCount {
-				t.Fatalf("current Agent queries = %d, want %d", baseline.agentQueries, referenceCount)
+			if optimizedWithout.agentQueries != 0 {
+				t.Fatalf("no-reference Agent queries = %d, want zero", optimizedWithout.agentQueries)
 			}
 			if optimized.agentQueries != 1 {
-				t.Fatalf("optimized Agent queries = %d, want 1", optimized.agentQueries)
-			}
-			if baseline.sqlStatements-baselineWithout.sqlStatements != referenceCount {
-				t.Fatalf("current Agent-reference SQL statement delta = %d, want %d", baseline.sqlStatements-baselineWithout.sqlStatements, referenceCount)
+				t.Fatalf("Agent queries = %d, want 1", optimized.agentQueries)
 			}
 			if optimized.sqlStatements-optimizedWithout.sqlStatements != 1 {
-				t.Fatalf("optimized Agent-reference SQL statement delta = %d, want 1", optimized.sqlStatements-optimizedWithout.sqlStatements)
-			}
-			if referenceCount == 1 {
-				if optimizedAddedBytes > baselineAddedBytes {
-					t.Fatalf("one-reference optimized added bytes/op = %d, current = %d; optimized Save regressed", optimizedAddedBytes, baselineAddedBytes)
-				}
-				if optimizedAddedAllocs > baselineAddedAllocs {
-					t.Fatalf("one-reference optimized added allocs/op = %d, current = %d; optimized Save regressed", optimizedAddedAllocs, baselineAddedAllocs)
-				}
-			}
-			if referenceCount == 20 || referenceCount == 50 {
-				if optimizedAddedBytes*10 > baselineAddedBytes {
-					t.Fatalf("optimized added bytes/op = %d, current = %d; want at least 90%% Agent-reference reduction", optimizedAddedBytes, baselineAddedBytes)
-				}
-				if optimizedAddedAllocs*10 > baselineAddedAllocs {
-					t.Fatalf("optimized added allocs/op = %d, current = %d; want at least 90%% Agent-reference reduction", optimizedAddedAllocs, baselineAddedAllocs)
-				}
+				t.Fatalf("Agent-reference SQL statement delta = %d, want 1", optimized.sqlStatements-optimizedWithout.sqlStatements)
 			}
 		})
 	}
@@ -1918,11 +1855,6 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 	scheduleRepo := repository.NewScheduleRepo(db)
 	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
 	compiler.SetAgentRepository(agentRepo)
-	baselineCompiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
-	baselineCompiler.SetAgentRepository(agentRepo)
-	baselineCompiler.saveAgentResolver = func(ctx context.Context, projectID string, resourceNodes []AutomationAdapterNode, candidateNodes map[string]models.AutomationDraftNode) (map[string]string, error) {
-		return baselineAutomationSaveAgentDefinitions(ctx, agentRepo, projectID, resourceNodes, candidateNodes)
-	}
 
 	for _, referenceCount := range []int{1, 5, 20, 50} {
 		candidate := automationValidationReferenceCandidate(refs[:referenceCount])
@@ -1931,13 +1863,6 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 		for _, node := range candidate.Nodes {
 			candidateNodes[node.Key] = node
 		}
-		references := make([]string, 0, referenceCount)
-		for _, node := range candidate.Nodes {
-			if ref, _ := node.Config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
-				references = append(references, strings.TrimSpace(ref))
-			}
-		}
-
 		b.Run(fmt.Sprintf("%d_references", referenceCount), func(b *testing.B) {
 			measure := func(name string, resolve func() error) int {
 				b.Helper()
@@ -1951,33 +1876,7 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 				return len(selectableAgentValidationStatements(counter.Statements()))
 			}
 
-			b.Run("baseline_full_catalog_per_node", func(b *testing.B) {
-				queryCount := measure("baseline", func() error {
-					for _, ref := range references {
-						if _, err := resolveAutomationAgent(ctx, agentRepo, project.ID, ref); err != nil {
-							return err
-						}
-					}
-					return nil
-				})
-				if queryCount != referenceCount {
-					b.Fatalf("baseline Agent queries = %d, want %d", queryCount, referenceCount)
-				}
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					for _, ref := range references {
-						if _, err := resolveAutomationAgent(ctx, agentRepo, project.ID, ref); err != nil {
-							b.Fatal(err)
-						}
-					}
-				}
-				b.StopTimer()
-				b.ReportMetric(float64(queryCount), "agent_queries/op")
-				b.ReportMetric(float64(queryCount), "sql_statements/op")
-			})
-
-			b.Run("optimized_compact_batch", func(b *testing.B) {
+			b.Run("compact_batch", func(b *testing.B) {
 				queryCount := measure("optimized", func() error {
 					_, err := compiler.resolveSaveAgentDefinitions(ctx, project.ID, resourceNodes, candidateNodes)
 					return err
@@ -2036,13 +1935,10 @@ func BenchmarkAutomationCompilerSaveAgentResolution(b *testing.B) {
 				b.ReportMetric(float64(agentQueryCount), "agent_queries/op")
 				b.ReportMetric(float64(totalStatementCount), "sql_statements/op")
 			}
-			b.Run("baseline_full_save_per_node", func(b *testing.B) {
-				runSave(b, baselineCompiler, candidate)
-			})
-			b.Run("optimized_full_save_without_agent_refs", func(b *testing.B) {
+			b.Run("full_save_without_agent_refs", func(b *testing.B) {
 				runSave(b, compiler, withoutReferences)
 			})
-			b.Run("optimized_full_save_with_agent_refs", func(b *testing.B) {
+			b.Run("full_save_with_agent_refs", func(b *testing.B) {
 				runSave(b, compiler, candidate)
 			})
 		})

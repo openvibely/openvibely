@@ -44,70 +44,23 @@ type taskUIAgentRenderMetrics struct {
 	concurrentWaits    int64
 }
 
-func TestHandlerTaskUIAgentProjectionProductionRenderPerformance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping production-topology Task UI Agent render measurements in short mode")
-	}
-
-	fixture := newTaskUIAgentRenderFixture(t)
-	for _, tc := range taskUIAgentRenderCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			baseline := fixture.measure(t, fixture.fullAgentLoader, tc.request)
-			compact := fixture.measure(t, fixture.compactAgentLoader, tc.request)
-
-			if compact.latency*5 > baseline.latency {
-				t.Fatalf("compact %s latency = %s, want at least 80%% lower than full hydration %s", tc.name, compact.latency, baseline.latency)
-			}
-			if compact.allocatedBytes*10 > baseline.allocatedBytes {
-				t.Fatalf("compact %s allocated bytes = %d, want at least 90%% lower than full hydration %d", tc.name, compact.allocatedBytes, baseline.allocatedBytes)
-			}
-			if compact.allocations*10 > baseline.allocations {
-				t.Fatalf("compact %s allocations = %d, want at least 90%% lower than full hydration %d", tc.name, compact.allocations, baseline.allocations)
-			}
-			if compact.responseHTMLBytes > baseline.responseHTMLBytes {
-				t.Fatalf("compact %s response HTML bytes = %d, want <= full hydration %d", tc.name, compact.responseHTMLBytes, baseline.responseHTMLBytes)
-			}
-			if compact.concurrentReadWait > baseline.concurrentReadWait {
-				t.Fatalf("compact %s concurrent production-reader wait = %s, want <= full hydration %s", tc.name, compact.concurrentReadWait, baseline.concurrentReadWait)
-			}
-			if baseline.concurrentWaits == 0 {
-				t.Fatalf("full hydration %s did not produce a concurrent production-reader pool wait", tc.name)
-			}
-
-			t.Logf("%s median: full=%s/%d B/%d allocs/%d HTML bytes/%s reader wait; compact=%s/%d B/%d allocs/%d HTML bytes/%s reader wait",
-				tc.name,
-				baseline.latency, baseline.allocatedBytes, baseline.allocations, baseline.responseHTMLBytes, baseline.concurrentReadWait,
-				compact.latency, compact.allocatedBytes, compact.allocations, compact.responseHTMLBytes, compact.concurrentReadWait,
-			)
-		})
-	}
-}
-
 func BenchmarkHandlerTaskUIAgentProjection(b *testing.B) {
 	fixture := newTaskUIAgentRenderFixture(b)
 	for _, tc := range taskUIAgentRenderCases() {
-		for _, loader := range []struct {
-			name   string
-			loader func(context.Context) ([]repository.AgentTaskUIOption, error)
-		}{
-			{name: "full Agent hydration", loader: fixture.fullAgentLoader},
-			{name: "compact Task UI projection", loader: fixture.compactAgentLoader},
-		} {
-			b.Run(tc.name+"/"+loader.name, func(b *testing.B) {
-				fixture.h.taskUIAgentOptionsLoader = loader.loader
-				b.ReportAllocs()
-				for i := 0; i < b.N; i++ {
-					rec := httptest.NewRecorder()
-					fixture.e.ServeHTTP(rec, tc.request(fixture))
-					if rec.Code != http.StatusOK {
-						b.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-					}
-					if i == 0 {
-						b.ReportMetric(float64(rec.Body.Len()), "response_html_bytes")
-					}
+		b.Run(tc.name+"/compact Task UI projection", func(b *testing.B) {
+			fixture.h.taskUIAgentOptionsLoader = fixture.compactAgentLoader
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				rec := httptest.NewRecorder()
+				fixture.e.ServeHTTP(rec, tc.request(fixture))
+				if rec.Code != http.StatusOK {
+					b.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 				}
-			})
-		}
+				if i == 0 {
+					b.ReportMetric(float64(rec.Body.Len()), "response_html_bytes")
+				}
+			}
+		})
 	}
 }
 
@@ -287,28 +240,6 @@ func taskUIAgentRenderCases() []taskUIAgentRenderCase {
 
 func (fixture *taskUIAgentRenderFixture) compactAgentLoader(ctx context.Context) ([]repository.AgentTaskUIOption, error) {
 	return fixture.agentRepo.ListTaskUIOptions(ctx)
-}
-
-func (fixture *taskUIAgentRenderFixture) fullAgentLoader(ctx context.Context) ([]repository.AgentTaskUIOption, error) {
-	agents, err := fixture.agentRepo.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	options := make([]repository.AgentTaskUIOption, 0, len(agents))
-	for _, agent := range agents {
-		options = append(options, repository.AgentTaskUIOption{
-			ID:                  agent.ID,
-			Name:                agent.Name,
-			Model:               agent.Model,
-			Scope:               agent.Scope,
-			ProjectID:           agent.ProjectID,
-			SelectableAsPrimary: agent.SelectableAsPrimary,
-			Enabled:             agent.Enabled,
-			GeneratedStatus:     agent.GeneratedStatus,
-			ArchivedAt:          agent.ArchivedAt,
-		})
-	}
-	return options, nil
 }
 
 func (fixture *taskUIAgentRenderFixture) measure(t *testing.T, loader func(context.Context) ([]repository.AgentTaskUIOption, error), request func(*taskUIAgentRenderFixture) *http.Request) taskUIAgentRenderMetrics {

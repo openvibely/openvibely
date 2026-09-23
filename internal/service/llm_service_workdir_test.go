@@ -7,11 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
@@ -263,53 +260,6 @@ func setupDirectAttributionFixture(tb testing.TB, projectCount int) (*LLMService
 	return svc, repo, counter, workDir, targetID
 }
 
-func legacyDirectAttribution(ctx context.Context, repo *repository.ProjectRepo, workDir string) error {
-	projects, err := repo.List(ctx)
-	if err != nil {
-		return err
-	}
-	bestID := ""
-	bestLen := -1
-	for _, project := range projects {
-		if legacyProjectWorkDirMatches(project.RepoPath, workDir) {
-			if length := len(filepath.Clean(project.RepoPath)); length > bestLen {
-				bestID, bestLen = project.ID, length
-			}
-		}
-	}
-	directAttributionBenchmarkSink = bestID
-	return nil
-}
-
-func legacyProjectWorkDirMatches(repoPath string, workDir string) bool {
-	repo := strings.TrimSpace(repoPath)
-	if repo == "" || strings.TrimSpace(workDir) == "" {
-		return false
-	}
-	repo = filepath.Clean(repo)
-	want := filepath.Clean(workDir)
-	if repo == want {
-		return true
-	}
-	if rel, err := filepath.Rel(repo, want); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
-		return true
-	}
-	worktreesDir := filepath.Join(repo, ".worktrees")
-	if rel, err := filepath.Rel(worktreesDir, want); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
-		return true
-	}
-	return false
-}
-
-func legacyDirectModelUsageCall(ctx context.Context, svc *LLMService, repo *repository.ProjectRepo, workDir string) error {
-	// The explicit context prevents the current fallback from running before the
-	// benchmark applies the former full-list attribution after provider return.
-	if err := callDirectAttributionPath(WithDirectUsageProject(ctx, "legacy-baseline"), svc, workDir); err != nil {
-		return err
-	}
-	return legacyDirectAttribution(ctx, repo, workDir)
-}
-
 func BenchmarkDirectModelUsageAttribution(b *testing.B) {
 	originalLogOutput := log.Writer()
 	log.SetOutput(io.Discard)
@@ -317,7 +267,7 @@ func BenchmarkDirectModelUsageAttribution(b *testing.B) {
 
 	for _, projectCount := range []int{1, 50, 500} {
 		b.Run(fmt.Sprintf("projects=%d", projectCount), func(b *testing.B) {
-			svc, repo, counter, workDir, projectID := setupDirectAttributionFixture(b, projectCount)
+			svc, _, counter, workDir, projectID := setupDirectAttributionFixture(b, projectCount)
 			ctx := context.Background()
 			explicitCtx := WithDirectUsageProject(ctx, projectID)
 			cases := []struct {
@@ -325,9 +275,6 @@ func BenchmarkDirectModelUsageAttribution(b *testing.B) {
 				wantProjectReads int
 				call             func() error
 			}{
-				{name: "legacy-full-list", wantProjectReads: 1, call: func() error {
-					return legacyDirectModelUsageCall(ctx, svc, repo, workDir)
-				}},
 				{name: "fallback-repo-roots", wantProjectReads: 1, call: func() error {
 					return callDirectAttributionPath(ctx, svc, workDir)
 				}},
@@ -361,58 +308,13 @@ func BenchmarkDirectModelUsageAttribution(b *testing.B) {
 	}
 }
 
-func medianDuration(durations []time.Duration) time.Duration {
-	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-	return durations[len(durations)/2]
-}
-
-func pairedDirectAttributionMedians(t *testing.T, samples, runs int, baseline, candidate func() error) (time.Duration, time.Duration) {
-	t.Helper()
-	baselineDurations := make([]time.Duration, samples)
-	candidateDurations := make([]time.Duration, samples)
-	measure := func(call func() error) time.Duration {
-		start := time.Now()
-		for i := 0; i < runs; i++ {
-			if err := call(); err != nil {
-				t.Fatalf("attribution sample: %v", err)
-			}
-		}
-		return time.Since(start) / time.Duration(runs)
-	}
-	for i := 0; i < samples; i++ {
-		if i%2 == 0 {
-			baselineDurations[i] = measure(baseline)
-			candidateDurations[i] = measure(candidate)
-		} else {
-			candidateDurations[i] = measure(candidate)
-			baselineDurations[i] = measure(baseline)
-		}
-	}
-	return medianDuration(baselineDurations), medianDuration(candidateDurations)
-}
-
-func allocatedBytesPerDirectAttribution(t *testing.T, runs int, call func() error) uint64 {
-	t.Helper()
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for i := 0; i < runs; i++ {
-		if err := call(); err != nil {
-			t.Fatalf("attribution allocation sample: %v", err)
-		}
-	}
-	runtime.ReadMemStats(&after)
-	return (after.TotalAlloc - before.TotalAlloc) / uint64(runs)
-}
-
 func TestDirectModelUsageFallbackPerformanceReductionAt500Projects(t *testing.T) {
 	originalLogOutput := log.Writer()
 	log.SetOutput(io.Discard)
 	t.Cleanup(func() { log.SetOutput(originalLogOutput) })
 
-	svc, repo, counter, workDir, projectID := setupDirectAttributionFixture(t, 500)
+	svc, _, counter, workDir, projectID := setupDirectAttributionFixture(t, 500)
 	ctx := context.Background()
-	baseline := func() error { return legacyDirectModelUsageCall(ctx, svc, repo, workDir) }
 	candidate := func() error { return callDirectAttributionPath(ctx, svc, workDir) }
 	explicit := func() error {
 		return callDirectAttributionPath(WithDirectUsageProject(ctx, projectID), svc, workDir)
@@ -430,29 +332,8 @@ func TestDirectModelUsageFallbackPerformanceReductionAt500Projects(t *testing.T)
 			t.Fatalf("%s project lookup statements = %d, want %d: %v", name, len(statements), want, statements)
 		}
 	}
-	assertProjectStatements("legacy baseline", baseline, 1)
 	assertProjectStatements("fallback", candidate, 1)
 	assertProjectStatements("explicit project", explicit, 0)
-
-	if err := baseline(); err != nil {
-		t.Fatalf("warm baseline: %v", err)
-	}
-	if err := candidate(); err != nil {
-		t.Fatalf("warm candidate: %v", err)
-	}
-
-	baselineMedian, candidateMedian := pairedDirectAttributionMedians(t, 11, 5, baseline, candidate)
-	if candidateMedian*5 > baselineMedian {
-		t.Fatalf("fallback median %s must be at least 80%% below full-list baseline %s", candidateMedian, baselineMedian)
-	}
-	baselineBytes := allocatedBytesPerDirectAttribution(t, 5, baseline)
-	candidateBytes := allocatedBytesPerDirectAttribution(t, 20, candidate)
-	if candidateBytes*20 > baselineBytes {
-		t.Fatalf("fallback allocated bytes/op %d must be at least 95%% below full-list baseline %d", candidateBytes, baselineBytes)
-	}
-	t.Logf("500 projects real direct calls: median baseline=%s fallback=%s reduction=%.1f%%; bytes/op baseline=%d fallback=%d reduction=%.1f%%",
-		baselineMedian, candidateMedian, 100*(1-float64(candidateMedian)/float64(baselineMedian)),
-		baselineBytes, candidateBytes, 100*(1-float64(candidateBytes)/float64(baselineBytes)))
 }
 
 func TestLLMService_projectIDForWorkDir_DeletedAndEmptyRepositoriesDoNotMatch(t *testing.T) {

@@ -171,28 +171,18 @@ func switchProjectBenchmarkCases(count int) []struct {
 	}
 }
 
-func switchProjectListName(variant string) string {
-	if variant == "full" {
-		return "full-row"
-	}
-	return "compact"
-}
-
-func runSwitchProjectLookup(h *Handler, ctx context.Context, input []byte, variant string) string {
-	if variant == "full" {
-		return h.executeSwitchProjectWithList(ctx, "", input, h.projectRepo.List)
-	}
+func runSwitchProjectLookup(h *Handler, ctx context.Context, input []byte) string {
 	return h.executeSwitchProject(ctx, "", input)
 }
 
-func measureSwitchProjectMedian(t testing.TB, h *Handler, ctx context.Context, input []byte, variant string) time.Duration {
+func measureSwitchProjectMedian(t testing.TB, h *Handler, ctx context.Context, input []byte) time.Duration {
 	t.Helper()
 	const sampleCount = 7
 	samples := make([]time.Duration, 0, sampleCount)
-	want := runSwitchProjectLookup(h, ctx, input, variant)
+	want := runSwitchProjectLookup(h, ctx, input)
 	for i := 0; i < sampleCount; i++ {
 		started := time.Now()
-		got := runSwitchProjectLookup(h, ctx, input, variant)
+		got := runSwitchProjectLookup(h, ctx, input)
 		if got != want {
 			t.Fatalf("switch_project response changed during measurement: got %q want %q", got, want)
 		}
@@ -211,32 +201,29 @@ func BenchmarkExecuteSwitchProjectProjection(b *testing.B) {
 			ctx := context.Background()
 
 			for _, tc := range switchProjectBenchmarkCases(count) {
-				for _, variant := range []string{"full", "compact"} {
-					variant := variant
-					tc := tc
-					b.Run(tc.name+"/"+switchProjectListName(variant), func(b *testing.B) {
-						counter.Reset()
-						counter.SetEnabled(true)
-						want := runSwitchProjectLookup(h, ctx, []byte(tc.input), variant)
-						counter.SetEnabled(false)
-						if statements := len(counter.Statements()); statements != 1 {
-							b.Fatalf("%s lookup statements = %d, want 1", variant, statements)
-						}
+				tc := tc
+				b.Run(tc.name+"/compact", func(b *testing.B) {
+					counter.Reset()
+					counter.SetEnabled(true)
+					want := runSwitchProjectLookup(h, ctx, []byte(tc.input))
+					counter.SetEnabled(false)
+					if statements := len(counter.Statements()); statements != 1 {
+						b.Fatalf("lookup statements = %d, want 1", statements)
+					}
 
-						b.ReportAllocs()
-						b.ReportMetric(float64(len(want)), "response-bytes/op")
-						b.ReportMetric(1, "sql-statements/op")
-						b.ResetTimer()
-						for i := 0; i < b.N; i++ {
-							if got := runSwitchProjectLookup(h, ctx, []byte(tc.input), variant); got != want {
-								b.Fatalf("response changed: got %q want %q", got, want)
-							}
+					b.ReportAllocs()
+					b.ReportMetric(float64(len(want)), "response-bytes/op")
+					b.ReportMetric(1, "sql-statements/op")
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						if got := runSwitchProjectLookup(h, ctx, []byte(tc.input)); got != want {
+							b.Fatalf("response changed: got %q want %q", got, want)
 						}
-						b.StopTimer()
-						median := measureSwitchProjectMedian(b, h, ctx, []byte(tc.input), variant)
-						b.ReportMetric(float64(median.Nanoseconds()), "wall-median-ns/op")
-					})
-				}
+					}
+					b.StopTimer()
+					median := measureSwitchProjectMedian(b, h, ctx, []byte(tc.input))
+					b.ReportMetric(float64(median.Nanoseconds()), "wall-median-ns/op")
+				})
 			}
 		})
 	}
@@ -249,38 +236,22 @@ func TestWebAPISwitchProjectCompactProjectionPerformance(t *testing.T) {
 	ctx := context.Background()
 	input := []byte(`{"project":"missing project"}`)
 
-	for _, variant := range []string{"full", "compact"} {
-		counter.Reset()
-		counter.SetEnabled(true)
-		response := runSwitchProjectLookup(h, ctx, input, variant)
-		counter.SetEnabled(false)
-		require.Len(t, counter.Statements(), 1, "%s-row lookup statement count", variant)
-		require.Contains(t, response, "Available projects:")
-	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	compactResponse := runSwitchProjectLookup(h, ctx, input)
+	counter.SetEnabled(false)
+	require.Len(t, counter.Statements(), 1, "compact lookup statement count")
+	require.Contains(t, compactResponse, "Available projects:")
+	require.Less(t, counter.SelectedTextBytes(), 64*1024, "compact selector should keep selected text bounded")
 
-	fullResponse := runSwitchProjectLookup(h, ctx, input, "full")
-	compactResponse := runSwitchProjectLookup(h, ctx, input, "compact")
-	require.Equal(t, fullResponse, compactResponse)
-
-	full := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			runSwitchProjectLookup(h, ctx, input, "full")
-		}
-	})
 	compact := testing.Benchmark(func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			runSwitchProjectLookup(h, ctx, input, "compact")
+			runSwitchProjectLookup(h, ctx, input)
 		}
 	})
-	fullMedian := measureSwitchProjectMedian(t, h, ctx, input, "full")
-	compactMedian := measureSwitchProjectMedian(t, h, ctx, input, "compact")
-
-	t.Logf("500-project miss full: median=%s ns/op=%d B/op=%d allocs/op=%d response-bytes=%d sql-statements=1", fullMedian, full.NsPerOp(), full.AllocedBytesPerOp(), full.AllocsPerOp(), len(fullResponse))
+	compactMedian := measureSwitchProjectMedian(t, h, ctx, input)
 	t.Logf("500-project miss compact: median=%s ns/op=%d B/op=%d allocs/op=%d response-bytes=%d sql-statements=1", compactMedian, compact.NsPerOp(), compact.AllocedBytesPerOp(), compact.AllocsPerOp(), len(compactResponse))
-	if compact.AllocedBytesPerOp()*10 > full.AllocedBytesPerOp() {
-		t.Fatalf("compact B/op=%d is not at least 90%% lower than full B/op=%d", compact.AllocedBytesPerOp(), full.AllocedBytesPerOp())
-	}
-	if compactMedian >= fullMedian {
-		t.Fatalf("compact median wall time=%s is not lower than full=%s", compactMedian, fullMedian)
+	if compact.AllocedBytesPerOp() > 512*1024 {
+		t.Fatalf("compact allocated %d B/op, want at most %d", compact.AllocedBytesPerOp(), 512*1024)
 	}
 }

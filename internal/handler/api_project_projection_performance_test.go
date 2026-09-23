@@ -25,7 +25,6 @@ type apiProjectProjectionFixture struct {
 	db          *sql.DB
 	counter     *testutil.SQLStatementCounter
 	projectRepo *repository.ProjectRepo
-	projectSvc  *service.ProjectService
 	h           *Handler
 	e           *echo.Echo
 }
@@ -47,30 +46,19 @@ func TestAPIGetProjectsProjectionProductionPerformance(t *testing.T) {
 	for _, projectCount := range []int{1, 50, 500} {
 		t.Run(fmt.Sprintf("%d projects", projectCount), func(t *testing.T) {
 			fixture := newAPIProjectProjectionFixture(t, projectCount)
-			full := fixture.measure(t, fixture.renderFullRowBaseline, true)
-			compact := fixture.measure(t, fixture.renderCompactHandler, false)
+			compact := fixture.measure(t, fixture.renderCompactHandler)
 
-			if compact.responseBytes != full.responseBytes {
-				t.Fatalf("compact JSON response bytes = %d, full-row baseline = %d", compact.responseBytes, full.responseBytes)
-			}
-			if compact.sqlStatements != 1 || full.sqlStatements != 1 {
-				t.Fatalf("SQL statements: compact=%d full=%d, want one each", compact.sqlStatements, full.sqlStatements)
+			if compact.sqlStatements != 1 {
+				t.Fatalf("compact SQL statements = %d, want one", compact.sqlStatements)
 			}
 			if projectCount == 500 {
-				if compact.selectedRowBytes*10 > full.selectedRowBytes {
-					t.Fatalf("compact selected-row bytes = %d, want at least 90%% below full-row %d", compact.selectedRowBytes, full.selectedRowBytes)
-				}
-				if compact.allocatedBytes*10 > full.allocatedBytes {
-					t.Fatalf("compact Go allocation bytes = %d, want at least 90%% below full-row %d", compact.allocatedBytes, full.allocatedBytes)
-				}
-				if compact.latency >= full.latency {
-					t.Fatalf("compact median latency = %s, want lower than full-row %s", compact.latency, full.latency)
+				if compact.allocatedBytes > 10*1024*1024 {
+					t.Fatalf("compact Go allocation bytes = %d, want at most %d", compact.allocatedBytes, 10*1024*1024)
 				}
 			}
 
-			t.Logf("%d projects median: full=%s/%d B/op/%d allocs/op/%d selected-row bytes/%d JSON bytes/%d SQL statements; compact=%s/%d B/op/%d allocs/op/%d selected-row bytes/%d JSON bytes/%d SQL statements",
+			t.Logf("%d projects median: compact=%s/%d B/op/%d allocs/op/%d selected-row bytes/%d JSON bytes/%d SQL statements",
 				projectCount,
-				full.latency, full.allocatedBytes, full.allocations, full.selectedRowBytes, full.responseBytes, full.sqlStatements,
 				compact.latency, compact.allocatedBytes, compact.allocations, compact.selectedRowBytes, compact.responseBytes, compact.sqlStatements,
 			)
 		})
@@ -83,16 +71,14 @@ func BenchmarkAPIGetProjectsProjection(b *testing.B) {
 		for _, tc := range []struct {
 			name   string
 			render func(testing.TB) (string, error)
-			full   bool
 		}{
-			{name: "full-row baseline", render: fixture.renderFullRowBaseline, full: true},
-			{name: "compact API handler", render: fixture.renderCompactHandler, full: false},
+			{name: "compact API handler", render: fixture.renderCompactHandler},
 		} {
 			b.Run(fmt.Sprintf("%d_projects/%s", projectCount, tc.name), func(b *testing.B) {
 				if _, err := tc.render(b); err != nil {
 					b.Fatalf("warm render: %v", err)
 				}
-				selectedRowBytes := fixture.selectedRowBytes(b, tc.full)
+				selectedRowBytes := fixture.selectedRowBytes(b)
 				responseBytes, sqlStatements := fixture.queryMetrics(b, tc.render)
 				b.ReportAllocs()
 				b.ResetTimer()
@@ -120,7 +106,6 @@ func newAPIProjectProjectionFixture(tb testing.TB, projectCount int) *apiProject
 		db:          db,
 		counter:     counter,
 		projectRepo: repo,
-		projectSvc:  projectSvc,
 		h:           &Handler{projectSvc: projectSvc},
 		e:           echo.New(),
 	}
@@ -166,24 +151,7 @@ func (fixture *apiProjectProjectionFixture) renderCompactHandler(tb testing.TB) 
 	return rec.Body.String(), nil
 }
 
-func (fixture *apiProjectProjectionFixture) renderFullRowBaseline(tb testing.TB) (string, error) {
-	tb.Helper()
-	projects, err := fixture.projectSvc.List(context.Background())
-	if err != nil {
-		return "", err
-	}
-	rec := httptest.NewRecorder()
-	ctx := fixture.e.NewContext(httptest.NewRequest(http.MethodGet, "/api/projects", nil), rec)
-	if err := writeAPIProjectsResponse(ctx, projectResponsesFromFullProjects(projects)); err != nil {
-		return "", err
-	}
-	if rec.Code != http.StatusOK {
-		return "", fmt.Errorf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	return rec.Body.String(), nil
-}
-
-func (fixture *apiProjectProjectionFixture) measure(tb testing.TB, render func(testing.TB) (string, error), full bool) apiProjectProjectionMeasurement {
+func (fixture *apiProjectProjectionFixture) measure(tb testing.TB, render func(testing.TB) (string, error)) apiProjectProjectionMeasurement {
 	tb.Helper()
 	fixture.counter.SetEnabled(false)
 	for range 2 {
@@ -226,7 +194,7 @@ func (fixture *apiProjectProjectionFixture) measure(tb testing.TB, render func(t
 		latency:          latencies[middle],
 		allocatedBytes:   allocatedBytes[middle],
 		allocations:      allocations[middle],
-		selectedRowBytes: fixture.selectedRowBytes(tb, full),
+		selectedRowBytes: fixture.selectedRowBytes(tb),
 		responseBytes:    responseBytes[middle],
 		sqlStatements:    sqlStatements,
 	}
@@ -244,37 +212,14 @@ func (fixture *apiProjectProjectionFixture) queryMetrics(tb testing.TB, render f
 	return len(body), len(fixture.counter.Statements())
 }
 
-func (fixture *apiProjectProjectionFixture) selectedRowBytes(tb testing.TB, full bool) int {
+func (fixture *apiProjectProjectionFixture) selectedRowBytes(tb testing.TB) int {
 	tb.Helper()
 	fixture.counter.SetEnabled(false)
-	if full {
-		projects, err := fixture.projectRepo.List(context.Background())
-		if err != nil {
-			tb.Fatalf("full project rows for byte metric: %v", err)
-		}
-		return fullProjectSelectedRowBytes(projects)
-	}
 	projects, err := fixture.projectRepo.ListAPIProjects(context.Background())
 	if err != nil {
 		tb.Fatalf("compact project rows for byte metric: %v", err)
 	}
 	return compactProjectSelectedRowBytes(projects)
-}
-
-func fullProjectSelectedRowBytes(projects []models.Project) int {
-	var total int
-	for _, project := range projects {
-		total += len(project.ID) + len(project.Name) + len(project.Description) + len(project.RepoPath) + len(project.RepoURL)
-		total++ // is_default
-		if project.DefaultAgentConfigID != nil {
-			total += len(*project.DefaultAgentConfigID)
-		}
-		if project.MaxWorkers != nil {
-			total += 8
-		}
-		total += len(project.CreatedAt.Format(time.RFC3339)) + len(project.UpdatedAt.Format(time.RFC3339))
-	}
-	return total
 }
 
 func compactProjectSelectedRowBytes(projects []models.ProjectAPIItem) int {

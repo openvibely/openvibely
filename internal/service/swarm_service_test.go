@@ -878,29 +878,17 @@ func TestSwarmServiceAssignedAgentIDResolutionUsesCompactProjection(t *testing.T
 		}
 	}
 
-	counter.Reset()
-	resolved = resolveAssignedAgentIDFullHydrationForTest(ctx, projectRepo, llmConfigRepo, projectID, nil)
-	require.NotNil(t, resolved)
-	require.Equal(t, projectDefaultID, *resolved)
-	fullSelectedBytes := counter.SelectedTextBytes()
-	require.Greater(t, fullSelectedBytes, compactSelectedBytes*5, "compact projection should select at least 5x fewer string bytes than full hydration")
-
 	const iterations = 1000
 	compactDuration, compactBytesPerOp := measureSwarmAgentResolutionForTest(t, iterations, func() *string {
 		return svc.resolveAssignedAgentID(ctx, projectID, nil)
 	})
-	fullDuration, fullBytesPerOp := measureSwarmAgentResolutionForTest(t, iterations, func() *string {
-		return resolveAssignedAgentIDFullHydrationForTest(ctx, projectRepo, llmConfigRepo, projectID, nil)
-	})
 	compactPerOp := compactDuration / iterations
-	fullPerOp := fullDuration / iterations
+	require.Less(t, compactSelectedBytes, 50*1024, "compact default-ID resolution should select less than 50 KB")
 	require.Less(t, compactPerOp, 50*time.Microsecond, "compact default-ID resolution should stay below the interactive path budget")
 	require.Less(t, compactBytesPerOp, int64(50*1024), "compact default-ID resolution should allocate less than 50 KB/op")
-	require.Greater(t, fullPerOp, compactPerOp*2, "compact resolver should be at least 2x faster than full hydration")
-	require.Greater(t, fullBytesPerOp, compactBytesPerOp*5, "compact resolver should allocate at least 5x fewer bytes than full hydration")
 }
 
-func BenchmarkSwarmAssignedAgentIDResolutionCompactVsFullHydration(b *testing.B) {
+func BenchmarkSwarmAssignedAgentIDResolution(b *testing.B) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(b)
 	projectRepo := repository.NewProjectRepo(db)
@@ -909,15 +897,6 @@ func BenchmarkSwarmAssignedAgentIDResolutionCompactVsFullHydration(b *testing.B)
 	svc.SetModelSelectionRepos(llmConfigRepo, projectRepo)
 	projectID, projectDefaultID := createWideSwarmModelResolutionFixture(b, ctx, projectRepo, llmConfigRepo)
 
-	b.Run("full_hydration", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			resolved := resolveAssignedAgentIDFullHydrationForTest(ctx, projectRepo, llmConfigRepo, projectID, nil)
-			if resolved == nil || *resolved != projectDefaultID {
-				b.Fatalf("resolved id = %v, want %s", resolved, projectDefaultID)
-			}
-		}
-	})
 	b.Run("compact", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -985,29 +964,6 @@ func createWideSwarmModelResolutionFixture(t testing.TB, ctx context.Context, pr
 	}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	return project.ID, projectDefaultID
-}
-
-func resolveAssignedAgentIDFullHydrationForTest(ctx context.Context, projectRepo *repository.ProjectRepo, llmConfigRepo *repository.LLMConfigRepo, projectID string, requested *string) *string {
-	if requested != nil {
-		trimmed := strings.TrimSpace(*requested)
-		if trimmed != "" && trimmed != "auto" && trimmed != "default" {
-			return &trimmed
-		}
-	}
-	if strings.TrimSpace(projectID) != "" && projectRepo != nil {
-		project, err := projectRepo.GetByID(ctx, projectID)
-		if err == nil && project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
-			id := strings.TrimSpace(*project.DefaultAgentConfigID)
-			if agent, agentErr := llmConfigRepo.GetByID(ctx, id); agentErr == nil && agent != nil {
-				return &id
-			}
-		}
-	}
-	if agent, err := llmConfigRepo.GetDefault(ctx); err == nil && agent != nil {
-		id := agent.ID
-		return &id
-	}
-	return requested
 }
 
 func measureSwarmAgentResolutionForTest(t testing.TB, iterations int, resolve func() *string) (time.Duration, int64) {

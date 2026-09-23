@@ -1017,94 +1017,6 @@ func measureCurrentAutomationHealthPath(tb testing.TB, _ *sql.DB, repo *reposito
 	return repo.RecomputeAutomationHealthForAll(context.Background(), now, 100)
 }
 
-func measureLegacyAutomationHealthPath(tb testing.TB, db *sql.DB, repo *repository.AutomationRepo, now time.Time) error {
-	tb.Helper()
-	return legacyRecomputeAutomationHealthForAll(context.Background(), db, repo, now, 100)
-}
-
-func legacyRecomputeAutomationHealthForAll(ctx context.Context, db *sql.DB, repo *repository.AutomationRepo, now time.Time, limit int) error {
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
-	var afterAutomationID string
-	for {
-		rows, err := db.QueryContext(ctx, `SELECT project_id, id FROM automations
-			WHERE published_version_id IS NOT NULL AND id > ?
-			ORDER BY id LIMIT ?`, afterAutomationID, limit)
-		if err != nil {
-			return err
-		}
-		var ids [][2]string
-		for rows.Next() {
-			var value [2]string
-			if err := rows.Scan(&value[0], &value[1]); err != nil {
-				rows.Close()
-				return err
-			}
-			ids = append(ids, value)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		for _, value := range ids {
-			if err := legacyRecomputeAutomationHealth(ctx, db, repo, value[0], value[1], now); err != nil {
-				return err
-			}
-		}
-		if len(ids) < limit {
-			return nil
-		}
-		afterAutomationID = ids[len(ids)-1][1]
-	}
-}
-
-func legacyRecomputeAutomationHealth(ctx context.Context, db *sql.DB, repo *repository.AutomationRepo, projectID, automationID string, now time.Time) error {
-	health := models.AutomationHealth{State: models.AutomationHealthUnknown, Reason: "No terminal invocation yet", EvaluatedAt: now.UTC()}
-	var blocked int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_item_positions
-		WHERE project_id = ? AND automation_id = ? AND state IN ('blocked','failed')`, projectID, automationID).Scan(&blocked); err != nil {
-		return err
-	}
-	var recentCount, recentFailures int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) FROM (
-		SELECT status FROM automation_invocations WHERE project_id = ? AND automation_id = ?
-			AND status IN ('completed','failed')
-		ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC LIMIT 3)`, projectID, automationID).Scan(&recentCount, &recentFailures); err != nil {
-		return err
-	}
-	externalState, err := repo.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-repository.AutomationExternalStaleAfter))
-	if err != nil {
-		return err
-	}
-	switch {
-	case recentCount == 3 && recentFailures == 3:
-		health.State = models.AutomationHealthUnhealthy
-		health.Reason = "Three consecutive trigger or dispatch failures"
-	case recentFailures > 0 || blocked > 0 || externalState.Stale:
-		health.State = models.AutomationHealthDegraded
-		health.Reason = fmt.Sprintf("%d recent failed invocation(s), %d blocked or failed position(s)", recentFailures, blocked)
-		if externalState.Stale {
-			health.Reason += ", external GitHub state is stale"
-		}
-	case recentCount > 0:
-		health.State = models.AutomationHealthHealthy
-		health.Reason = "Recent triggers and dispatches completed without systemic errors"
-	}
-	result, err := db.ExecContext(ctx, `UPDATE automations SET health_state = ?, health_reason = ?,
-		health_evaluated_at = ? WHERE project_id = ? AND id = ?`, health.State, health.Reason, health.EvaluatedAt, projectID, automationID)
-	if err != nil {
-		return err
-	}
-	if changed, _ := result.RowsAffected(); changed == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
-}
-
 func medianAndP95(durations []time.Duration) (time.Duration, time.Duration) {
 	if len(durations) == 0 {
 		return 0, 0
@@ -1120,7 +1032,6 @@ func medianAndP95(durations []time.Duration) (time.Duration, time.Duration) {
 
 func BenchmarkAutomationHealthReconciliation(b *testing.B) {
 	paths := []automationHealthBenchmarkPath{
-		{name: "legacy", measure: measureLegacyAutomationHealthPath},
 		{name: "current", measure: measureCurrentAutomationHealthPath},
 	}
 	for _, count := range []int{1, 10, 100, 500} {

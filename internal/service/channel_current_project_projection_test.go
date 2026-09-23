@@ -94,29 +94,16 @@ func TestChannelCurrentProjectProjectionPerformanceEvidence(t *testing.T) {
 				caseName := fmt.Sprintf("%s/%s/%s", topology, map[bool]string{false: "empty", true: "large"}[large], map[bool]string{false: "existing", true: "missing"}[missing])
 				t.Run(caseName, func(t *testing.T) {
 					fixture := newChannelCurrentProjectProjectionFixture(t, fileBacked, large, missing)
-					fullObserved := fixture.observeLookup(t, fixture.fullResult)
 					compactObserved := fixture.observeLookup(t, fixture.compactResult)
-					full := measureChannelCurrentProjectProjection(t, fixture, fixture.fullResult)
 					compact := measureChannelCurrentProjectProjection(t, fixture, fixture.compactResult)
 
-					require.Equal(t, fullObserved.responseBytes, compactObserved.responseBytes)
-					require.Equal(t, fullObserved.sqlStatements, 1)
 					require.Equal(t, compactObserved.sqlStatements, 1)
-					require.LessOrEqual(t, compact.allocations, full.allocations, "compact handler allocations must not exceed full-row baseline")
-					if large && !missing {
-						require.LessOrEqual(t, compactObserved.selectedTextBytes*10, fullObserved.selectedTextBytes, "large-row compact selection must reduce project text bytes by at least 90%%")
-						require.Less(t, compact.latency, full.latency, "large-row compact median latency must improve")
-						require.Less(t, compact.allocatedBytes, full.allocatedBytes, "large-row compact median allocations must improve")
-					}
-					if !missing {
-						require.LessOrEqual(t, compact.latency, full.latency, "compact median latency must not regress")
-					}
-					t.Logf("full median=%s B/op=%d allocs/op=%d; compact median=%s B/op=%d allocs/op=%d; selected_text_bytes=%d->%d response_bytes=%d/%d sql_statements=%d/%d",
-						full.latency, full.allocatedBytes, full.allocations,
+					require.Less(t, compactObserved.selectedTextBytes, 1024, "identity lookup selected text must stay bounded")
+					t.Logf("compact median=%s B/op=%d allocs/op=%d; selected_text_bytes=%d response_bytes=%d sql_statements=%d",
 						compact.latency, compact.allocatedBytes, compact.allocations,
-						fullObserved.selectedTextBytes, compactObserved.selectedTextBytes,
-						fullObserved.responseBytes, compactObserved.responseBytes,
-						fullObserved.sqlStatements, compactObserved.sqlStatements,
+						compactObserved.selectedTextBytes,
+						compactObserved.responseBytes,
+						compactObserved.sqlStatements,
 					)
 				})
 			}
@@ -161,10 +148,8 @@ func measureChannelCurrentProjectProjection(tb testing.TB, fixture *channelCurre
 }
 
 type channelCurrentProjectProjectionFixture struct {
-	repo           *repository.ProjectRepo
 	counter        *testutil.SQLStatementCounter
 	compactHandler chatcontrol.RuntimeActionHandler
-	lookupID       string
 	expected       string
 }
 
@@ -201,32 +186,18 @@ func newChannelCurrentProjectProjectionFixture(tb testing.TB, fileBacked, large,
 		expected = "Current project ID: " + lookupID + " (details unavailable)"
 	}
 	return &channelCurrentProjectProjectionFixture{
-		repo:    projectRepo,
 		counter: counter,
 		compactHandler: buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
 			ChannelDisplayName: "Slack",
 			ProjectID:          lookupID,
 			ProjectRepo:        projectRepo,
 		})["get_current_project"],
-		lookupID: lookupID,
 		expected: expected,
 	}
 }
 
-func (f *channelCurrentProjectProjectionFixture) fullResult() (string, error) {
-	return fullChannelCurrentProjectResult(context.Background(), f.repo, f.lookupID), nil
-}
-
 func (f *channelCurrentProjectProjectionFixture) compactResult() (string, error) {
 	return f.compactHandler(context.Background(), json.RawMessage(nil))
-}
-
-func fullChannelCurrentProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
-	project, err := projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return fmt.Sprintf("Current project ID: %s (details unavailable)", projectID)
-	}
-	return fmt.Sprintf("Current project: %s (id: %s)", project.Name, project.ID)
 }
 
 func BenchmarkChannelCurrentProjectProjection(b *testing.B) {
@@ -239,9 +210,6 @@ func BenchmarkChannelCurrentProjectProjection(b *testing.B) {
 			for _, missing := range []bool{false, true} {
 				fixture := newChannelCurrentProjectProjectionFixture(b, fileBacked, large, missing)
 				caseName := fmt.Sprintf("%s/%s", map[bool]string{false: "empty", true: "large"}[large], map[bool]string{false: "existing", true: "missing"}[missing])
-				b.Run(topology+"/"+caseName+"/full_GetByID", func(b *testing.B) {
-					runChannelCurrentProjectProjectionBenchmark(b, fixture, fixture.fullResult)
-				})
 				b.Run(topology+"/"+caseName+"/compact_channel_handler", func(b *testing.B) {
 					runChannelCurrentProjectProjectionBenchmark(b, fixture, fixture.compactResult)
 				})

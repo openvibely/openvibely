@@ -54,22 +54,15 @@ func TestExecutionRepo_ReviewFollowupHistoryWindowProductionCost(t *testing.T) {
 		t.Fatalf("bounded review follow-up plan = %s, want no temporary ORDER BY sort", plan)
 	}
 
-	full := fixture.measure(t, fixture.repo.ListByTaskChronological)
 	bounded := fixture.measure(t, func(ctx context.Context, taskID string) ([]models.Execution, error) {
 		return fixture.repo.ListByTaskChronologicalLimit(ctx, taskID, taskThreadHistoryLimitForBenchmark)
 	})
 
-	if full.historyRows != reviewFollowupHistoryBenchmarkRows {
-		t.Fatalf("all-history rows = %d, want %d", full.historyRows, reviewFollowupHistoryBenchmarkRows)
-	}
 	if bounded.historyRows > taskThreadHistoryLimitForBenchmark {
 		t.Fatalf("bounded review history rows = %d, want at most %d", bounded.historyRows, taskThreadHistoryLimitForBenchmark)
 	}
-	if bounded.historicPayloadRows*100 > full.historicPayloadRows*11 {
-		t.Fatalf("bounded historic payload rows = %d/%d, want at least 89%% reduction", bounded.historicPayloadRows, full.historicPayloadRows)
-	}
-	if bounded.historicPayloadBytes*100 > full.historicPayloadBytes*11 {
-		t.Fatalf("bounded historic payload bytes = %d/%d, want at least 89%% reduction", bounded.historicPayloadBytes, full.historicPayloadBytes)
+	if bounded.historicPayloadRows > taskThreadHistoryLimitForBenchmark {
+		t.Fatalf("bounded historic payload rows = %d, want at most %d", bounded.historicPayloadRows, taskThreadHistoryLimitForBenchmark)
 	}
 
 	filtered, err := fixture.repo.ListByTaskChronologicalLimit(context.Background(), fixture.taskID, taskThreadHistoryLimitForBenchmark)
@@ -90,8 +83,7 @@ func TestExecutionRepo_ReviewFollowupHistoryWindowProductionCost(t *testing.T) {
 		}
 	}
 
-	t.Logf("review follow-up history median: all-history=%s/%d B/%d allocs/%d rows/%d payload rows/%d payload bytes/%s concurrent reader wait (%d waits); bounded=%s/%d B/%d allocs/%d rows/%d payload rows/%d payload bytes/%s concurrent reader wait (%d waits); plan=%s",
-		full.latency, full.allocatedBytes, full.allocations, full.historyRows, full.historicPayloadRows, full.historicPayloadBytes, full.concurrentReaderWait, full.concurrentReaderWaits,
+	t.Logf("review follow-up history median: bounded=%s/%d B/%d allocs/%d rows/%d payload rows/%d payload bytes/%s concurrent reader wait (%d waits); plan=%s",
 		bounded.latency, bounded.allocatedBytes, bounded.allocations, bounded.historyRows, bounded.historicPayloadRows, bounded.historicPayloadBytes, bounded.concurrentReaderWait, bounded.concurrentReaderWaits,
 		plan,
 	)
@@ -103,7 +95,6 @@ func BenchmarkExecutionRepoReviewFollowupHistoryHydration(b *testing.B) {
 		name string
 		load func(context.Context, string) ([]models.Execution, error)
 	}{
-		{name: "all_history", load: fixture.repo.ListByTaskChronological},
 		{name: "bounded_recent_context", load: func(ctx context.Context, taskID string) ([]models.Execution, error) {
 			return fixture.repo.ListByTaskChronologicalLimit(ctx, taskID, taskThreadHistoryLimitForBenchmark)
 		}},

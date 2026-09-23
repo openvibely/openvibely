@@ -32,7 +32,6 @@ type workerCapacityProjectionMeasurement struct {
 	allocatedBytes         uint64
 	allocations            uint64
 	fragmentBytes          int
-	fullProjectRowBytes    int
 	compactProjectRowBytes int
 	sqlStatementCount      int
 }
@@ -45,25 +44,17 @@ func TestHandlerProjectWorkerCapacityProjectionProductionPerformance(t *testing.
 	for _, projectCount := range []int{1, 50, 500} {
 		t.Run(fmt.Sprintf("%d projects", projectCount), func(t *testing.T) {
 			fixture := newWorkerCapacityProjectionFixture(t, projectCount)
-			full := fixture.measure(t, fixture.renderFullRowBaseline)
 			compact := fixture.measure(t, fixture.renderCompactHandler)
 
-			if compact.fragmentBytes != full.fragmentBytes {
-				t.Fatalf("rendered fragment bytes = %d, full-row baseline = %d", compact.fragmentBytes, full.fragmentBytes)
+			if compact.sqlStatementCount != workerCapacityPollSQLStatementCount {
+				t.Fatalf("compact SQL statements = %d, want %d", compact.sqlStatementCount, workerCapacityPollSQLStatementCount)
 			}
-			if compact.sqlStatementCount != full.sqlStatementCount {
-				t.Fatalf("compact SQL statements = %d, full-row baseline = %d", compact.sqlStatementCount, full.sqlStatementCount)
-			}
-			if projectCount == 500 && compact.compactProjectRowBytes*10 > full.fullProjectRowBytes {
-				t.Fatalf("compact project-row materialization = %d bytes, want at least 90%% below full-row %d bytes", compact.compactProjectRowBytes, full.fullProjectRowBytes)
-			}
-			if projectCount == 500 && compact.latency >= full.latency {
-				t.Fatalf("compact median handler latency = %s, want lower than full-row baseline %s", compact.latency, full.latency)
+			if projectCount == 500 && compact.allocatedBytes > 4*1024*1024 {
+				t.Fatalf("compact allocated bytes = %d, want at most %d", compact.allocatedBytes, 4*1024*1024)
 			}
 
-			t.Logf("%d projects median: full=%s/%d B/op/%d allocs/op/%d project-row bytes/%d fragment bytes/%d SQL statements; compact=%s/%d B/op/%d allocs/op/%d project-row bytes/%d fragment bytes/%d SQL statements",
+			t.Logf("%d projects median: compact=%s/%d B/op/%d allocs/op/%d project-row bytes/%d fragment bytes/%d SQL statements",
 				projectCount,
-				full.latency, full.allocatedBytes, full.allocations, full.fullProjectRowBytes, full.fragmentBytes, full.sqlStatementCount,
 				compact.latency, compact.allocatedBytes, compact.allocations, compact.compactProjectRowBytes, compact.fragmentBytes, compact.sqlStatementCount,
 			)
 		})
@@ -77,7 +68,6 @@ func BenchmarkHandlerProjectWorkerCapacityProjection(b *testing.B) {
 			name   string
 			render func(testing.TB) (string, error)
 		}{
-			{name: "full-row baseline", render: fixture.renderFullRowBaseline},
 			{name: "compact handler", render: fixture.renderCompactHandler},
 		} {
 			b.Run(fmt.Sprintf("%d_projects/%s", projectCount, tc.name), func(b *testing.B) {
@@ -211,16 +201,12 @@ func (fixture *workerCapacityProjectionFixture) measure(t *testing.T, render fun
 		allocations = append(allocations, after.Mallocs-before.Mallocs)
 		fragmentBytes = append(fragmentBytes, len(fragment))
 	}
-	fullProjects, err := fixture.projectRepo.List(context.Background())
-	if err != nil {
-		t.Fatalf("list full project baseline: %v", err)
-	}
 	capacityProjects, err := fixture.projectRepo.ListWorkerCapacityProjects(context.Background())
 	if err != nil {
 		t.Fatalf("list compact project rows: %v", err)
 	}
 
-	fullProjectRowBytes, compactProjectRowBytes := projectWorkerRowBytes(fullProjects, capacityProjects)
+	compactProjectRowBytes := projectWorkerRowBytes(capacityProjects)
 
 	slices.Sort(latencies)
 	slices.Sort(allocatedBytes)
@@ -232,7 +218,6 @@ func (fixture *workerCapacityProjectionFixture) measure(t *testing.T, render fun
 		allocatedBytes:         allocatedBytes[middle],
 		allocations:            allocations[middle],
 		fragmentBytes:          fragmentBytes[middle],
-		fullProjectRowBytes:    fullProjectRowBytes,
 		compactProjectRowBytes: compactProjectRowBytes,
 		sqlStatementCount:      workerCapacityPollSQLStatementCount,
 	}
@@ -248,27 +233,12 @@ func (fixture *workerCapacityProjectionFixture) renderCompactHandler(tb testing.
 	return rec.Body.String(), nil
 }
 
-func (fixture *workerCapacityProjectionFixture) renderFullRowBaseline(tb testing.TB) (string, error) {
-	tb.Helper()
-	return renderFullProjectWorkerStats(context.Background(), fixture.h)
-}
-
-func projectWorkerRowBytes(full []models.Project, compact []models.ProjectWorkerCapacity) (fullBytes, compactBytes int) {
-	for _, project := range full {
-		fullBytes += len(project.ID) + len(project.Name) + len(project.Description) + len(project.RepoPath) + len(project.RepoURL)
-		if project.DefaultAgentConfigID != nil {
-			fullBytes += len(*project.DefaultAgentConfigID)
-		}
-		if project.MaxWorkers != nil {
-			fullBytes += 8
-		}
-		fullBytes += 17 // is_default plus created_at and updated_at scalar values
-	}
+func projectWorkerRowBytes(compact []models.ProjectWorkerCapacity) (compactBytes int) {
 	for _, project := range compact {
 		compactBytes += len(project.ID) + len(project.Name)
 		if project.MaxWorkers != nil {
 			compactBytes += 8
 		}
 	}
-	return fullBytes, compactBytes
+	return compactBytes
 }

@@ -1806,10 +1806,8 @@ func TestContextDecisionObservabilityIncludesRequiredFields(t *testing.T) {
 	}
 }
 
-// BenchmarkProviderContextBudgetPreflight compares the historical repeated-budget
-// preflight with the optimized production path without involving a provider or
-// network. Both paths receive the same request fixture; history_bytes_traversed
-// reports the bytes visited by the budget scans rather than the fixture size.
+// BenchmarkProviderContextBudgetPreflight measures the production preflight
+// without involving a provider or network.
 func BenchmarkProviderContextBudgetPreflight(b *testing.B) {
 	previousLogWriter := log.Writer()
 	log.SetOutput(io.Discard)
@@ -1817,20 +1815,7 @@ func BenchmarkProviderContextBudgetPreflight(b *testing.B) {
 
 	for _, historySize := range []int{0, 20, 100} {
 		fixture := newProviderContextBudgetBenchmarkFixture(historySize)
-		b.Run(fmt.Sprintf("%d_history/baseline", historySize), func(b *testing.B) {
-			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-				return llmcontracts.AgentResult{Output: "ok"}, nil
-			})
-			svc := &LLMService{}
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				benchmarkProviderContextBudgetBaseline(svc, adapter, fixture.req)
-			}
-			b.StopTimer()
-			b.ReportMetric(float64(fixture.historyBytes*5), "history_bytes_traversed/op")
-		})
-		b.Run(fmt.Sprintf("%d_history/optimized", historySize), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d_history/current", historySize), func(b *testing.B) {
 			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 				return llmcontracts.AgentResult{Output: "ok"}, nil
 			})
@@ -1907,31 +1892,6 @@ func newProviderContextBudgetBenchmarkFixture(historySize int) providerContextBu
 		},
 		historyBytes: historyBytes,
 	}
-}
-
-func benchmarkProviderContextBudgetBaseline(svc *LLMService, adapter ProviderAdapter, req llmcontracts.AgentRequest) {
-	req = resolveProviderRequestForBudget(req)
-	originalHistory := append([]models.Execution(nil), req.ChatHistory...)
-	budget := calculateRequestBudget(req)
-	if req.ContextTokenEstimate > 0 {
-		reportedHistory := req.ContextTokenEstimate - budget.FixedTokens - budget.PendingTokens - budget.AttachmentTokens
-		if reportedHistory > budget.HistoryTokens {
-			budget.HistoryTokens = reportedHistory
-		}
-	}
-	_ = historyNeedsCompaction(budget, compactionLimitsForAgent(req.Agent).TriggerLimit)
-	prepared, _, cleanup, err := svc.preparePendingInput(req)
-	if err != nil {
-		return
-	}
-	cleanup()
-	req = prepared
-	_ = calculateRequestBudget(req)
-	if err := ensureRequestFits(req, "provider request"); err != nil {
-		return
-	}
-	logContextDecision(originalHistory, req, "none", false, nil)
-	_, _ = adapter.Call(req)
 }
 
 // BenchmarkProviderContextBudgetRecoveryPaths keeps the request mutations that
