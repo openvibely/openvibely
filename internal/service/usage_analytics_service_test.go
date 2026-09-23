@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +65,73 @@ func TestUsageAnalyticsService_AccountInventoryAndScopedLimits(t *testing.T) {
 	}
 	if calls != before {
 		t.Fatal("stale key refreshed unrelated accounts")
+	}
+}
+
+func TestUsageAnalyticsService_UsageRequestRetries(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		persistent bool
+		wantCalls  int
+	}{
+		{"server recovers", http.StatusServiceUnavailable, false, 2},
+		{"server retry budget", http.StatusBadGateway, true, 3},
+		{"unauthorized stays with OAuth recovery", http.StatusUnauthorized, true, 1},
+		{"rate limit stays with cooldown", http.StatusTooManyRequests, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Header.Get("Authorization") != "Bearer test" {
+					t.Error("retry lost authorization header")
+				}
+				if calls == 1 || tc.persistent {
+					w.WriteHeader(tc.status)
+					return
+				}
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer server.Close()
+			svc := NewUsageAnalyticsService(nil, nil)
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+			req.Header.Set("Authorization", "Bearer test")
+			raw, err := svc.doAccountUsageRequest(req)
+			if calls != tc.wantCalls {
+				t.Fatalf("calls = %d, want %d", calls, tc.wantCalls)
+			}
+			if tc.persistent {
+				if !isAccountUsageHTTPStatus(err, tc.status) {
+					t.Fatalf("status lost: %v", err)
+				}
+			} else if err != nil || raw["ok"] != true {
+				t.Fatalf("recovery = %v, %v", raw, err)
+			}
+		})
+	}
+}
+
+type usageRetryTransport func(*http.Request) (*http.Response, error)
+
+func (f usageRetryTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestUsageAnalyticsService_UsageRequestNetworkRetryAndCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	svc := NewUsageAnalyticsService(nil, nil)
+	svc.httpClient = &http.Client{Transport: usageRetryTransport(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 2 {
+			cancel()
+		}
+		return nil, io.ErrUnexpectedEOF
+	})}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.test/usage", nil)
+	_, err := svc.doAccountUsageRequest(req)
+	if !errors.Is(err, context.Canceled) || calls != 2 {
+		t.Fatalf("calls = %d, error = %v", calls, err)
 	}
 }
 
