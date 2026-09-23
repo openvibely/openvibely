@@ -1396,6 +1396,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							previous.textContent = 'Previous';
 							var position = document.createElement('span');
 							position.setAttribute('data-chat-input-position', 'true');
+							var recommended = document.createElement('button');
+							recommended.type = 'button';
+							recommended.className = 'btn btn-secondary btn-sm';
+							recommended.style.setProperty('--btn-focus-scale', '1');
+							recommended.setAttribute('data-chat-input-nav', 'recommended');
+							recommended.setAttribute('aria-label', 'Use recommended answers and continue');
+							recommended.textContent = 'Recommended and move forward';
 							var next = document.createElement('button');
 							next.type = 'button';
 							next.className = 'btn btn-primary btn-sm';
@@ -1403,6 +1410,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							next.setAttribute('aria-label', 'Next question');
 							navigation.appendChild(previous);
 							navigation.appendChild(position);
+							navigation.appendChild(recommended);
 							navigation.appendChild(next);
 							body.appendChild(navigation);
 							body.appendChild(status);
@@ -1425,20 +1433,20 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							card.setAttribute('data-current-question-index', String(nextIndex));
 							var position = card.querySelector('[data-chat-input-position]');
 							if (position) position.textContent = (nextIndex + 1) + ' of ' + groups.length;
-								var previous = card.querySelector('[data-chat-input-nav="previous"]');
-								var next = card.querySelector('[data-chat-input-nav="next"], [data-chat-input-nav="submit"]');
-								if (previous) {
-									previous.disabled = nextIndex === 0;
-									previous.classList.toggle('invisible', groups.length === 1);
-								}
-								if (next) {
-									var isLast = nextIndex === groups.length - 1;
-									next.textContent = isLast ? 'Submit' : 'Next';
-									next.setAttribute('data-chat-input-nav', isLast ? 'submit' : 'next');
-									next.setAttribute('aria-label', isLast ? 'Submit answers' : 'Next question');
-									next.disabled = isLast ? !chatInputRequestIsComplete(card) : !chatInputQuestionAnswer(groups[nextIndex]);
-								}
-								var legend = groups[nextIndex].querySelector('legend');
+							var previous = card.querySelector('[data-chat-input-nav="previous"]');
+							var next = card.querySelector('[data-chat-input-nav="next"], [data-chat-input-nav="submit"]');
+							if (previous) {
+								previous.disabled = nextIndex === 0;
+								previous.classList.toggle('invisible', groups.length === 1);
+							}
+							if (next) {
+								var isLast = nextIndex === groups.length - 1;
+								next.textContent = isLast ? 'Submit' : 'Next';
+								next.setAttribute('data-chat-input-nav', isLast ? 'submit' : 'next');
+								next.setAttribute('aria-label', isLast ? 'Submit answers' : 'Next question');
+								next.disabled = isLast ? !chatInputRequestIsComplete(card) : !chatInputQuestionAnswer(groups[nextIndex]);
+							}
+							var legend = groups[nextIndex].querySelector('legend');
 							if (legend) legend.focus && legend.focus();
 						}
 
@@ -1447,10 +1455,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (!card || card.getAttribute('data-completed') === 'true') return;
 							var action = button.getAttribute('data-chat-input-nav') || '';
 							if (action === 'submit') {
-								submitChatInputRequest(button);
-								return;
+							submitChatInputRequest(button);
+							return;
 							}
 							var current = Number(card.getAttribute('data-current-question-index') || 0);
+							if (action === 'recommended') {
+								submitChatInputRequest(button, chatInputRequestRecommendedAnswers(card));
+								return;
+							}
 							showChatInputQuestion(card, current + (action === 'previous' ? -1 : 1));
 						}
 
@@ -1475,6 +1487,22 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							});
 							return answers;
 						}
+
+							function chatInputRequestRecommendedAnswers(card) {
+							var answers = [];
+							var complete = true;
+							card.querySelectorAll('[data-chat-input-question-id]').forEach(function(group) {
+								var questionID = group.getAttribute('data-chat-input-question-id') || '';
+								var recommended = group.querySelector('button[data-chat-input-option]:not([data-chat-input-custom-option])');
+								var label = recommended ? (recommended.getAttribute('data-option-label') || '') : '';
+								if (!questionID || !label) {
+									complete = false;
+									return;
+								}
+								answers.push({question_id: questionID, label: label});
+							});
+							return complete ? answers : [];
+							}
 
 						function chatInputRequestIsComplete(card) {
 							return chatInputRequestAnswers(card).length === card.querySelectorAll('[data-chat-input-question-id]').length;
@@ -1574,18 +1602,19 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 						window.refreshChatInputRequests = refreshChatInputRequests;
 
-						function submitChatInputRequest(button) {
+							function submitChatInputRequest(button, overrideAnswers) {
 							if (!button || button.disabled) return;
 							var card = button.closest('[data-chat-input-request-id]');
 							if (!card || card.getAttribute('data-submitted') === 'true') return;
 							var status = card.querySelector('[role="status"]');
-							var answers = chatInputRequestAnswers(card);
-							if (!chatInputRequestIsComplete(card)) {
+							var answers = Array.isArray(overrideAnswers) ? overrideAnswers : chatInputRequestAnswers(card);
+							var usingRecommended = Array.isArray(overrideAnswers);
+							var groups = Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-question-index]'));
+							if ((!usingRecommended && !chatInputRequestIsComplete(card)) || (usingRecommended && answers.length !== groups.length)) {
 								if (status) {
 									status.classList.remove('hidden', 'text-error');
 									status.textContent = 'Answer every question before submitting.';
 								}
-								var groups = Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-question-index]'));
 								var nextUnanswered = groups.findIndex(function(group) { return !chatInputQuestionAnswer(group); });
 								if (nextUnanswered >= 0) showChatInputQuestion(card, nextUnanswered);
 								return;
@@ -1597,7 +1626,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							card.querySelectorAll('button, textarea').forEach(function(control) { control.disabled = true; });
 							if (status) {
 								status.classList.remove('hidden', 'text-error');
-								status.textContent = 'Submitting answers…';
+								status.textContent = usingRecommended ? 'Submitting recommended answers…' : 'Submitting answers…';
 							}
 							fetch('/chat/input-requests/' + encodeURIComponent(requestId) + '/answer', {
 								method: 'POST',
