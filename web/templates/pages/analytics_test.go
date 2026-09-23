@@ -101,7 +101,8 @@ func TestBrowserFunctional_AnalyticsContent_SkillOutcomeMetricSelectorInChrome(t
   var result=document.getElementById('reconnect-result');
   function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
   history.replaceState({},'',location.pathname+'?project_id=project-1&view=learning');
-  window.Chart=function(){this.destroy=function(){};};
+  var skillChartConfig;
+  window.Chart=function(ctx,config){if(ctx.canvas.id==='skillOutcomeChart')skillChartConfig=config;this.destroy=function(){};};
   var rows=[
     {skill_handle:'alpha',skill_scope:'project',tasks_evaluated:10,goal_achievement:{percent:50,numerator:5,denominator:10},technical_completion:{percent:100,numerator:10,denominator:10},follow_up:{percent:0,numerator:0,denominator:10}},
     {skill_handle:'beta',skill_scope:'project',tasks_evaluated:5,goal_achievement:{percent:100,numerator:5,denominator:5},technical_completion:{percent:80,numerator:4,denominator:5},follow_up:{percent:20,numerator:1,denominator:5}},
@@ -114,6 +115,8 @@ func TestBrowserFunctional_AnalyticsContent_SkillOutcomeMetricSelectorInChrome(t
       var bars=document.getElementById('skillOutcomeChart'),selector=document.getElementById('skillOutcomeMetric');
       if(!bars.getAttribute('aria-label')?.includes('beta:')){if(++attempts>100)fail('skill bars did not load');setTimeout(check,20);return;}
       if(selector.value!=='goal_achievement')fail('default metric');
+      if(!bars.parentElement.classList.contains('h-64')||bars.parentElement.style.height)fail('skill outcomes must use the same fixed chart height as Agent/Skill Pairs');
+      if(skillChartConfig.data.datasets[0].maxBarThickness!==undefined||skillChartConfig.data.datasets[0].barThickness!==undefined)fail('skill outcomes must use standard bar spacing');
       if(!bars.getAttribute('aria-label').startsWith('beta:')||!bars.getAttribute('aria-label').includes('100.0% · 5/5'))fail('goal order or visible values');
       if(!bars.getAttribute('aria-label').includes('Unavailable'))fail('missing evidence must not be zero');
       selector.value='technical_completion';selector.dispatchEvent(new Event('change'));
