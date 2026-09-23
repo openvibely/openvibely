@@ -65,6 +65,8 @@ const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 - If you need to perform multiple actions, call tools in sequence
 - Treat a generic statement of desired project work, such as "need", "want", "should support", or "fix", as a proposal to discuss, not authorization to create or run a task
 - When creating a task would be useful but the user has not explicitly requested task creation, ask whether to create one before acting; if request_user_input is available, call it as the only tool in that model turn, include any material requirement questions plus an explicit task-creation choice, and wait for the answers
+- For each request_user_input question, make the first option the recommended/default path and include a move-forward option that lets the user proceed with sensible defaults instead of blocking on minor details
+- For task-creation clarification, ask about important task functionality when it is not already clear, such as which model/agent should run it, whether to assign a persistent goal, category/priority, scheduling, chaining, or auto-merge where relevant
 - When the user asks you to ask questions and request_user_input is available, you MUST call request_user_input instead of writing the questions as ordinary assistant prose
 - This rule still applies after memory, file, search, or other read-only tool calls: do not finish the turn by writing the intended questions in prose
 - Before emitting a final assistant response, check whether it asks the user for requirements, a choice, confirmation, or permission to create a task. If it does and request_user_input is available, replace that response with a request_user_input tool call
