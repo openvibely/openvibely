@@ -340,6 +340,9 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	require.Contains(t, content, "move-forward option")
 	require.Contains(t, content, "which model/agent should run it")
 	require.Contains(t, content, "whether to assign a persistent goal")
+	require.Contains(t, content, "whether/how to create the task with sensible defaults")
+	require.Contains(t, content, "Each of those questions MUST put the recommended/default option first")
+	require.Contains(t, content, "include a move-forward option that proceeds with sensible defaults")
 	require.NotContains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
 	tools := gotBody["tools"]
 	require.Contains(t, strings.ToLower(fmt.Sprint(tools)), "request_user_input")
