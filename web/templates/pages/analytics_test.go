@@ -67,16 +67,16 @@ func TestBrowserFunctional_AnalyticsContent_SkillOutcomeMetricSelectorInChrome(t
   window.addEventListener('load',function(){
     var attempts=0;
     function check(){
-      var bars=document.getElementById('skillOutcomeBars'),selector=document.getElementById('skillOutcomeMetric');
-      if(bars.hasAttribute('aria-busy')||!bars.querySelector('[data-skill-outcome-row]')){if(++attempts>100)fail('skill bars did not load');setTimeout(check,20);return;}
+      var bars=document.getElementById('skillOutcomeChart'),selector=document.getElementById('skillOutcomeMetric');
+      if(!bars.getAttribute('aria-label')?.includes('beta:')){if(++attempts>100)fail('skill bars did not load');setTimeout(check,20);return;}
       if(selector.value!=='goal_achievement')fail('default metric');
-      if(!bars.firstElementChild.textContent.includes('beta')||!bars.textContent.includes('100.0% · 5/5 tasks'))fail('goal order or visible values');
-      if(!bars.textContent.includes('Unavailable · n=0'))fail('missing evidence must not be zero');
+      if(!bars.getAttribute('aria-label').startsWith('beta:')||!bars.getAttribute('aria-label').includes('100.0% · 5/5'))fail('goal order or visible values');
+      if(!bars.getAttribute('aria-label').includes('Unavailable'))fail('missing evidence must not be zero');
       selector.value='technical_completion';selector.dispatchEvent(new Event('change'));
-      if(!bars.firstElementChild.textContent.includes('alpha')||!bars.textContent.includes('100.0% · 10/10 tasks'))fail('run metric did not replace bars');
+      if(!bars.getAttribute('aria-label').startsWith('alpha:')||!bars.getAttribute('aria-label').includes('100.0% · 10/10'))fail('run metric did not replace bars');
       selector.value='follow_up';selector.dispatchEvent(new Event('change'));
-      if(!bars.firstElementChild.textContent.includes('beta')||!bars.textContent.includes('0.0% · 0/10 tasks'))fail('follow-up metric or zero evidence');
-      if(bars.querySelectorAll('[data-skill-outcome-row]').length!==3)fail('expected one bar per skill');
+      if(!bars.getAttribute('aria-label').startsWith('beta:')||!bars.getAttribute('aria-label').includes('0.0% · 0/10'))fail('follow-up metric or zero evidence');
+      if(bars.getAttribute('aria-label').split('; ').length!==3)fail('expected one bar per skill');
       result.setAttribute('data-test-result','pass');
     }check();
   });
@@ -773,7 +773,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 	if strings.Contains(content, `sticky top-0`) {
 		t.Fatal("Analytics navigation should scroll with the page")
 	}
-	if !strings.Contains(content, `slice(0,12)`) || !strings.Contains(content, `data-skill-outcome-row`) || !strings.Contains(content, `id="skillOutcomeMetric"`) {
+	if !strings.Contains(content, `slice(0,12)`) || !strings.Contains(content, `skillOutcomeValues`) || !strings.Contains(content, `id="skillOutcomeMetric"`) {
 		t.Fatal("Skill outcomes should show bounded, labeled bars with one selected metric")
 	}
 	for _, expected := range []string{`gap-6 items-start`, `type:'scatter'`, `pointRadius:7`, `clip:false`, `layout:{padding:{top:12,right:10}}`, `Farther right means used on more tasks; higher means more goals achieved.`} {
@@ -838,7 +838,7 @@ func TestAnalyticsContent_CanonicalViewsOwnVisualizationsAndHideEvidence(t *test
 		"agents":      {`id="agentComparisonChart"`, `id="agentEfficiencyChart"`, `id="agentCategoryChart"`},
 		"models":      {`id="modelScorecard"`, `Model comparison`},
 		"automations": {`id="automationComparisonChart"`, `id="automationFunnelChart"`, `id="automationDurationChart"`, `id="automationFailureChart"`, `id="automationBottleneckChart"`},
-		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeBars"`, `id="skillEffectivenessChart"`},
+		"learning":    {`id="skillUsageTrendChart"`, `id="skillTopChart"`, `id="skillFollowChart"`, `id="skillAgentChart"`, `id="underusedSkillsTable"`, `id="skillOutcomeChart"`, `id="skillEffectivenessChart"`},
 		"usage":       {`id="accountUsageCards"`, `id="usageRateChart"`, `id="modelTokenBreakdownChart"`, `id="usageBreakdownTable"`, `id="usageSummary"`},
 	} {
 		next := map[string]string{"overview": "outcomes", "outcomes": "agents", "agents": "models", "models": "automations", "automations": "learning", "learning": "usage"}[name]
