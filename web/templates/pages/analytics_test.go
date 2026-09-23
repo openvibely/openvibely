@@ -165,6 +165,44 @@ window.addEventListener('load',function(){
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsContent_AgentOutcomeMetricSelector(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+history.replaceState({},'',location.pathname+'?project_id=p&view=agents');
+var configs={},requests=0;
+window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
+var agents=Array.from({length:15},(_,i)=>({agent_id:'a'+i,agent_name:'Agent '+i,tasks_evaluated:20,goal_achievement:{percent:i*5,numerator:i,denominator:20},first_pass:{percent:(20-i)*5,numerator:20-i,denominator:20},follow_up:{percent:(i%10)*10,numerator:i%10,denominator:10}}));
+window.fetch=async function(){requests++;return {ok:true,json:async function(){return {agents:agents,recent_outcomes:[]};}};};
+window.addEventListener('load',function(){
+ var result=document.getElementById('reconnect-result'),attempts=0;
+ function check(){
+  var c=configs.agentComparisonChart;
+  if(!c){if(++attempts>100){result.dataset.testResult='fail';result.dataset.testError='chart missing';return;}setTimeout(check,20);return;}
+  try{
+   function assert(ok,message){if(!ok)throw new Error(message);}
+   assert(c.data.datasets.length===1&&c.data.labels.length===12,'must show one series and at most 12 agents');
+   assert(c.data.labels[0]==='Agent 14'&&c.options.indexAxis==='y','must rank horizontal bars by selected rate');
+   assert(document.getElementById('agentOutcomeCount').textContent.includes('Showing 12 of 15 agents'),'cap must be visible');
+   assert(c.options.plugins.tooltip.callbacks.label({dataIndex:0}).includes('n=20'),'goal tooltip missing metric sample');
+   var before=requests,select=document.getElementById('agentOutcomeMetric');select.value='first_pass';select.dispatchEvent(new Event('change'));
+   c=configs.agentComparisonChart;assert(c.data.labels[0]==='Agent 0'&&c.data.datasets[0].data[0]===100,'metric switch must update values and ranking');
+   select.value='follow_up';select.dispatchEvent(new Event('change'));c=configs.agentComparisonChart;
+   assert(c.options.plugins.tooltip.callbacks.label({dataIndex:0}).includes('n=10'),'follow-up tooltip must use its own denominator');
+   assert(document.getElementById('agentOutcomeHelp').dataset.modelHelp.includes('changed goals'),'follow-up explanation missing');
+   assert(requests===before,'selector should use loaded data');
+   agents.forEach(r=>r.follow_up={denominator:0});select.dispatchEvent(new Event('change'));c=configs.agentComparisonChart;
+   assert(c.data.datasets[0].data.every(v=>v===null),'missing evidence must not become zero');
+   result.dataset.testResult='pass';
+  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+ }check();
+});
+</script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_KPICardsShareLayout(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
