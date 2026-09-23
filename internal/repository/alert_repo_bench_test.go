@@ -365,7 +365,6 @@ const (
 	alertAutomationInboxBenchTargetOwnedRows  = alertAutomationInboxBenchRows / alertAutomationInboxBenchTargetEvery
 	alertAutomationInboxBenchOtherOwnedRows   = alertAutomationInboxBenchRows / alertAutomationInboxBenchOtherEvery
 	alertAutomationInboxBenchLimit            = 50
-	alertAutomationInboxBenchBaselineProbes   = alertAutomationInboxBenchRows - (alertAutomationInboxBenchRows - ((alertAutomationInboxBenchLimit - 1) * alertAutomationInboxBenchTargetEvery)) + 1
 )
 
 func seedAlertAutomationInboxBenchFixture(tb testing.TB, db *sql.DB) {
@@ -482,8 +481,7 @@ func benchmarkAlertAutomationInboxList(b *testing.B, query string, args []any) i
 	return responseBytes
 }
 
-// BenchmarkAlertAutomationInboxOwnerScopedList compares the pre-optimization
-// alert-driven correlated ownership probe shape against the production optimized
+// BenchmarkAlertAutomationInboxOwnerScopedList measures the production
 // owner-driven scoped summary query on 100k lifecycle-matching notifications.
 // It reports ns/op, B/op, allocs/op, p50_ms, response_B, and approximate touched
 // rows/probes for the sparse first page.
@@ -495,14 +493,8 @@ func BenchmarkAlertAutomationInboxOwnerScopedList(b *testing.B) {
 		AutomationInboxBindings:  []models.AutomationBinding{{AutomationID: alertAutomationInboxBenchTargetAutomation}},
 		Limit:                    alertAutomationInboxBenchLimit,
 	})
-	baselineQuery, baselineArgs := buildAlertListQuery(alertSummarySelectColumns, alertAutomationInboxBenchProjectID, filter)
 	ownerQuery, ownerArgs := buildAlertSummaryListQuery(alertAutomationInboxBenchProjectID, filter)
 
-	b.Run("alert_driven_baseline", func(b *testing.B) {
-		benchmarkAlertAutomationInboxList(b, baselineQuery, baselineArgs)
-		b.ReportMetric(float64(alertAutomationInboxBenchBaselineProbes), "candidate_alert_rows")
-		b.ReportMetric(float64(alertAutomationInboxBenchBaselineProbes), "ownership_probes")
-	})
 	b.Run("owner_driven", func(b *testing.B) {
 		benchmarkAlertAutomationInboxList(b, ownerQuery, ownerArgs)
 		b.ReportMetric(float64(alertAutomationInboxBenchTargetOwnedRows), "owned_rows")

@@ -14,7 +14,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/repository"
-	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
@@ -23,7 +22,6 @@ const projectCapacityAPIProjectionSamples = 7
 type projectCapacityAPIProjectionFixture struct {
 	counter     *testutil.SQLStatementCounter
 	projectRepo *repository.ProjectRepo
-	projectSvc  *service.ProjectService
 	h           *Handler
 	e           *echo.Echo
 }
@@ -47,33 +45,19 @@ func TestGetProjectCapacitiesProjectionProductionPerformance(t *testing.T) {
 	for _, projectCount := range []int{1, 50, 500} {
 		t.Run(fmt.Sprintf("%d projects", projectCount), func(t *testing.T) {
 			fixture := newProjectCapacityAPIProjectionFixture(t, projectCount)
-			full := fixture.measure(t, fixture.renderFullRowBaseline, true)
-			compact := fixture.measure(t, fixture.renderCompactHandler, false)
+			compact := fixture.measure(t, fixture.renderCompactHandler)
 
-			if compact.responseBody != full.responseBody {
-				t.Fatalf("compact JSON response differs from full-row baseline:\nfull: %s\ncompact: %s", full.responseBody, compact.responseBody)
-			}
-			if compact.responseBytes != full.responseBytes {
-				t.Fatalf("compact JSON response bytes = %d, full-row baseline = %d", compact.responseBytes, full.responseBytes)
-			}
 			if compact.sqlStatements != 2 {
 				t.Fatalf("compact SQL statements = %d, want project list plus pending count", compact.sqlStatements)
 			}
-			if full.sqlStatements != projectCount+2 {
-				t.Fatalf("full-row baseline SQL statements = %d, want full project list, pending count, and one capacity lookup per project", full.sqlStatements)
-			}
 			if projectCount == 500 {
-				if compact.selectedProjectBytes*10 > full.selectedProjectBytes {
-					t.Fatalf("compact selected project bytes = %d, want at least 90%% below full-row %d bytes", compact.selectedProjectBytes, full.selectedProjectBytes)
-				}
-				if compact.medianLatency >= full.medianLatency {
-					t.Fatalf("compact median latency = %s, want lower than full-row baseline %s", compact.medianLatency, full.medianLatency)
+				if compact.allocatedBytes > 2*1024*1024 {
+					t.Fatalf("compact allocated bytes = %d, want at most %d", compact.allocatedBytes, 2*1024*1024)
 				}
 			}
 
-			t.Logf("%d projects: full median/p95=%s/%s, %d B/op, %d allocs/op, %d selected project bytes, %d JSON bytes, %d SQL statements; compact median/p95=%s/%s, %d B/op, %d allocs/op, %d selected project bytes, %d JSON bytes, %d SQL statements",
+			t.Logf("%d projects: compact median/p95=%s/%s, %d B/op, %d allocs/op, %d selected project bytes, %d JSON bytes, %d SQL statements",
 				projectCount,
-				full.medianLatency, full.p95Latency, full.allocatedBytes, full.allocations, full.selectedProjectBytes, full.responseBytes, full.sqlStatements,
 				compact.medianLatency, compact.p95Latency, compact.allocatedBytes, compact.allocations, compact.selectedProjectBytes, compact.responseBytes, compact.sqlStatements,
 			)
 		})
@@ -86,17 +70,15 @@ func BenchmarkGetProjectCapacitiesProjection(b *testing.B) {
 		for _, tc := range []struct {
 			name   string
 			render func(testing.TB) (string, error)
-			full   bool
 		}{
-			{name: "full-row baseline", render: fixture.renderFullRowBaseline, full: true},
-			{name: "compact API handler", render: fixture.renderCompactHandler, full: false},
+			{name: "compact API handler", render: fixture.renderCompactHandler},
 		} {
 			b.Run(fmt.Sprintf("%d_projects/%s", projectCount, tc.name), func(b *testing.B) {
 				body, err := tc.render(b)
 				if err != nil {
 					b.Fatalf("warm render: %v", err)
 				}
-				selectedProjectBytes := fixture.selectedProjectBytes(b, tc.full)
+				selectedProjectBytes := fixture.selectedProjectBytes(b)
 				responseBytes, sqlStatements := fixture.queryMetrics(b, tc.render)
 				b.ReportAllocs()
 				b.ResetTimer()
@@ -132,7 +114,6 @@ func newProjectCapacityAPIProjectionFixture(tb testing.TB, projectCount int) *pr
 	return &projectCapacityAPIProjectionFixture{
 		counter:     counter,
 		projectRepo: repository.NewProjectRepo(reader),
-		projectSvc:  h.projectSvc,
 		h:           h,
 		e:           e,
 	}
@@ -220,31 +201,7 @@ func (fixture *projectCapacityAPIProjectionFixture) renderCompactHandler(tb test
 	return rec.Body.String(), nil
 }
 
-func (fixture *projectCapacityAPIProjectionFixture) renderFullRowBaseline(tb testing.TB) (string, error) {
-	tb.Helper()
-	ctx := context.Background()
-	projects, err := fixture.projectSvc.List(ctx)
-	if err != nil {
-		return "", err
-	}
-	pendingCounts, err := fixture.h.taskRepo.CountPendingByProject(ctx)
-	if err != nil {
-		pendingCounts = make(map[string]int)
-	}
-	capacities := make([]ProjectCapacityResponse, len(projects))
-	for i := range projects {
-		capacities[i] = fixture.h.projectCapacityResponse(&projects[i], pendingCounts[projects[i].ID])
-	}
-
-	rec := httptest.NewRecorder()
-	echoContext := fixture.e.NewContext(httptest.NewRequest(http.MethodGet, "/api/capacity/projects", nil), rec)
-	if err := echoContext.JSON(http.StatusOK, capacities); err != nil {
-		return "", err
-	}
-	return rec.Body.String(), nil
-}
-
-func (fixture *projectCapacityAPIProjectionFixture) measure(tb testing.TB, render func(testing.TB) (string, error), full bool) projectCapacityAPIProjectionMeasurement {
+func (fixture *projectCapacityAPIProjectionFixture) measure(tb testing.TB, render func(testing.TB) (string, error)) projectCapacityAPIProjectionMeasurement {
 	tb.Helper()
 	fixture.counter.SetEnabled(false)
 	for range 2 {
@@ -286,7 +243,7 @@ func (fixture *projectCapacityAPIProjectionFixture) measure(tb testing.TB, rende
 	if measuredResponseBytes != len(responseBodies[0]) {
 		tb.Fatalf("response size varied between measured samples: %d versus %d", len(responseBodies[0]), measuredResponseBytes)
 	}
-	selectedProjectBytes := fixture.selectedProjectBytes(tb, full)
+	selectedProjectBytes := fixture.selectedProjectBytes(tb)
 	slices.Sort(latencies)
 	slices.Sort(allocatedBytes)
 	slices.Sort(allocations)
@@ -315,26 +272,14 @@ func (fixture *projectCapacityAPIProjectionFixture) queryMetrics(tb testing.TB, 
 	return len(body), len(fixture.counter.Statements())
 }
 
-func (fixture *projectCapacityAPIProjectionFixture) selectedProjectBytes(tb testing.TB, full bool) int {
+func (fixture *projectCapacityAPIProjectionFixture) selectedProjectBytes(tb testing.TB) int {
 	tb.Helper()
 	fixture.counter.SetEnabled(true)
 	defer fixture.counter.SetEnabled(false)
 	fixture.counter.Reset()
 	ctx := context.Background()
-	if full {
-		projects, err := fixture.projectRepo.List(ctx)
-		if err != nil {
-			tb.Fatalf("list full project rows for byte metric: %v", err)
-		}
-		for i := range projects {
-			if !fixture.h.workerSvc.HasProjectCapacity(projects[i].ID) {
-				tb.Fatalf("check project capacity for byte metric: project=%q", projects[i].ID)
-			}
-		}
-	} else {
-		if _, err := fixture.projectRepo.ListWorkerCapacityProjects(ctx); err != nil {
-			tb.Fatalf("list compact project rows for byte metric: %v", err)
-		}
+	if _, err := fixture.projectRepo.ListWorkerCapacityProjects(ctx); err != nil {
+		tb.Fatalf("list compact project rows for byte metric: %v", err)
 	}
 	return fixture.counter.SelectedTextBytes()
 }

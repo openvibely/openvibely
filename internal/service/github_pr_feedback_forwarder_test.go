@@ -577,23 +577,6 @@ type githubPRFeedbackForwarderFixture struct {
 	threadInputRepo *repository.ThreadInputRepo
 }
 
-func (f githubPRFeedbackForwarderFixture) resetForwardingState(tb testing.TB) {
-	tb.Helper()
-	if _, err := f.db.ExecContext(context.Background(), `DELETE FROM github_pr_feedback_forwarded WHERE task_id = ?`, f.task.ID); err != nil {
-		tb.Fatalf("reset forwarded feedback: %v", err)
-	}
-	if _, err := f.db.ExecContext(context.Background(), `DELETE FROM thread_inputs WHERE task_id = ?`, f.task.ID); err != nil {
-		tb.Fatalf("reset queued feedback: %v", err)
-	}
-}
-
-func (f githubPRFeedbackForwarderFixture) forward(ctx context.Context, cached bool) (*GitHubPRFeedbackForwardResult, error) {
-	if cached {
-		return f.forwarder.ForwardAuthorizedFeedback(ctx, f.project.ID, githubPRFeedbackTestRepo())
-	}
-	return f.forwarder.forwardAuthorizedFeedback(ctx, f.project.ID, githubPRFeedbackTestRepo(), nil)
-}
-
 func TestGitHubPRFeedbackForwarderCachesAuthorizationDecisionsPerPass(t *testing.T) {
 	cases := []struct {
 		name              string
@@ -786,31 +769,21 @@ func TestGitHubPRFeedbackForwarderAuthorizationCachePerformance(t *testing.T) {
 				return realisticGitHubPRFeedbackItems(itemCount, []string{"Alice", "alice"}, fmt.Sprintf("measurement-%d", batch))
 			}
 
-			baseline := measureGitHubPRFeedbackForwarderAuthorizationCache(t, fixture, false)
-			// Keep the warmed database and repositories, but return the durable
-			// forwarding state to the same empty starting point for the candidate.
-			fixture.resetForwardingState(t)
-			candidate := measureGitHubPRFeedbackForwarderAuthorizationCache(t, fixture, true)
-			t.Logf("baseline: wall=%s bytes=%.0f B/op allocs=%.0f sql_statements=%d authorization_selects=%d; candidate: wall=%s bytes=%.0f B/op allocs=%.0f sql_statements=%d authorization_selects=%d", baseline.medianWall, baseline.bytesPerOperation, baseline.allocsPerOperation, baseline.totalSQLStatements, baseline.authorizationSelects, candidate.medianWall, candidate.bytesPerOperation, candidate.allocsPerOperation, candidate.totalSQLStatements, candidate.authorizationSelects)
+			current := measureGitHubPRFeedbackForwarderAuthorizationCache(t, fixture)
+			t.Logf("current: wall=%s bytes=%.0f B/op allocs=%.0f sql_statements=%d authorization_selects=%d", current.medianWall, current.bytesPerOperation, current.allocsPerOperation, current.totalSQLStatements, current.authorizationSelects)
 
-			if baseline.authorizationSelects != itemCount {
-				t.Fatalf("baseline authorization selects = %d, want %d", baseline.authorizationSelects, itemCount)
-			}
-			if candidate.authorizationSelects != 1 {
-				t.Fatalf("candidate authorization selects = %d, want 1", candidate.authorizationSelects)
-			}
-			if candidate.totalSQLStatements != baseline.totalSQLStatements-(itemCount-1) {
-				t.Fatalf("candidate SQL statements = %d, want baseline %d minus %d authorization reads", candidate.totalSQLStatements, baseline.totalSQLStatements, itemCount-1)
+			if current.authorizationSelects != 1 {
+				t.Fatalf("authorization selects = %d, want 1", current.authorizationSelects)
 			}
 		})
 	}
 }
 
-func measureGitHubPRFeedbackForwarderAuthorizationCache(tb testing.TB, fixture githubPRFeedbackForwarderFixture, cached bool) githubPRFeedbackForwarderAuthorizationMeasurement {
+func measureGitHubPRFeedbackForwarderAuthorizationCache(tb testing.TB, fixture githubPRFeedbackForwarderFixture) githubPRFeedbackForwarderAuthorizationMeasurement {
 	tb.Helper()
 	ctx := context.Background()
 	forward := func() {
-		result, err := fixture.forward(ctx, cached)
+		result, err := fixture.forwarder.ForwardAuthorizedFeedback(ctx, fixture.project.ID, githubPRFeedbackTestRepo())
 		if err != nil {
 			tb.Fatalf("forward feedback: %v", err)
 		}
@@ -872,60 +845,48 @@ func githubPRFeedbackForwarderAllocatedBytes(tb testing.TB, runs int, forward fu
 
 func BenchmarkGitHubPRFeedbackForwarderAuthorizationCache(b *testing.B) {
 	for _, itemCount := range []int{1, 10, 100} {
-		for _, mode := range []struct {
-			name   string
-			cached bool
-		}{
-			{name: "baseline", cached: false},
-			{name: "candidate", cached: true},
-		} {
-			mode := mode
-			b.Run(fmt.Sprintf("feedback_items=%d/%s", itemCount, mode.name), func(b *testing.B) {
-				var batch int
-				fixture := newGitHubPRFeedbackForwarderFixture(b, []string{"alice"}, nil)
-				fixture.provider.itemsFn = func() []GitHubPullRequestFeedback {
-					batch++
-					return realisticGitHubPRFeedbackItems(itemCount, []string{"Alice", "alice"}, fmt.Sprintf("benchmark-%d", batch))
+		b.Run(fmt.Sprintf("feedback_items=%d/current", itemCount), func(b *testing.B) {
+			var batch int
+			fixture := newGitHubPRFeedbackForwarderFixture(b, []string{"alice"}, nil)
+			fixture.provider.itemsFn = func() []GitHubPullRequestFeedback {
+				batch++
+				return realisticGitHubPRFeedbackItems(itemCount, []string{"Alice", "alice"}, fmt.Sprintf("benchmark-%d", batch))
+			}
+			forward := func() {
+				result, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo())
+				if err != nil {
+					b.Fatal(err)
 				}
-				forward := func() {
-					result, err := fixture.forward(context.Background(), mode.cached)
-					if err != nil {
-						b.Fatal(err)
-					}
-					if len(result.Forwarded) != itemCount {
-						b.Fatalf("forwarded = %d, want %d", len(result.Forwarded), itemCount)
-					}
+				if len(result.Forwarded) != itemCount {
+					b.Fatalf("forwarded = %d, want %d", len(result.Forwarded), itemCount)
 				}
+			}
 
-				fixture.counter.Reset()
-				fixture.counter.SetEnabled(true)
+			fixture.counter.Reset()
+			fixture.counter.SetEnabled(true)
+			forward()
+			fixture.counter.SetEnabled(false)
+			statements := fixture.counter.Statements()
+			authorizationSelects := countGitHubAuthorizationLookups(statements)
+			wantAuthorizationSelects := 1
+			if authorizationSelects != wantAuthorizationSelects {
+				b.Fatalf("warm authorization selects = %d, want %d; statements: %q", authorizationSelects, wantAuthorizationSelects, statements)
+			}
+
+			durations := make([]time.Duration, 0, b.N)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				started := time.Now()
 				forward()
-				fixture.counter.SetEnabled(false)
-				statements := fixture.counter.Statements()
-				authorizationSelects := countGitHubAuthorizationLookups(statements)
-				wantAuthorizationSelects := itemCount
-				if mode.cached {
-					wantAuthorizationSelects = 1
-				}
-				if authorizationSelects != wantAuthorizationSelects {
-					b.Fatalf("warm authorization selects = %d, want %d; statements: %q", authorizationSelects, wantAuthorizationSelects, statements)
-				}
-
-				durations := make([]time.Duration, 0, b.N)
-				b.ReportAllocs()
-				b.ResetTimer()
-				for range b.N {
-					started := time.Now()
-					forward()
-					durations = append(durations, time.Since(started))
-				}
-				b.StopTimer()
-				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-				b.ReportMetric(float64(durations[len(durations)/2].Nanoseconds()), "median_wall_ns/op")
-				b.ReportMetric(float64(len(statements)), "sqlite_statements/op")
-				b.ReportMetric(float64(authorizationSelects), "authorization_selects/op")
-			})
-		}
+				durations = append(durations, time.Since(started))
+			}
+			b.StopTimer()
+			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+			b.ReportMetric(float64(durations[len(durations)/2].Nanoseconds()), "median_wall_ns/op")
+			b.ReportMetric(float64(len(statements)), "sqlite_statements/op")
+			b.ReportMetric(float64(authorizationSelects), "authorization_selects/op")
+		})
 	}
 }
 

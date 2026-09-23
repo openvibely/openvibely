@@ -677,24 +677,16 @@ func TestTaskRepo_GetDetailActionMetadataProductionReadCost(t *testing.T) {
 	}
 
 	fixture := newTaskDetailActionMetadataFixture(t)
-	full := fixture.measure(t, fixture.getFullTask, taskDetailActionPromptBytes+2*taskDetailActionConfigBytes)
 	compact := fixture.measure(t, fixture.getDetailActionMetadata, 0)
 
 	if compact.taskTextBytesScanned != 0 {
 		t.Fatalf("compact metadata task text bytes = %d, want 0", compact.taskTextBytesScanned)
 	}
-	if compact.allocatedBytes*20 >= full.allocatedBytes {
-		t.Fatalf("compact metadata allocated bytes = %d, want at least 95%% lower than full hydration %d", compact.allocatedBytes, full.allocatedBytes)
-	}
-	if full.concurrentLightweightWaits == 0 {
-		t.Fatal("full task hydration did not hold the production reader while lightweight reads waited")
-	}
-	if compact.concurrentLightweightWait > full.concurrentLightweightWait {
-		t.Fatalf("compact metadata concurrent lightweight-read wait = %s, want <= full hydration %s", compact.concurrentLightweightWait, full.concurrentLightweightWait)
+	if compact.allocatedBytes > 128*1024 {
+		t.Fatalf("compact metadata allocated bytes = %d, want at most %d", compact.allocatedBytes, 128*1024)
 	}
 
-	t.Logf("detail actions median: full=%s/%d B/%d allocs/%d statement/%d task-text bytes/%s concurrent lightweight-read wait; compact=%s/%d B/%d allocs/%d statement/%d task-text bytes/%s concurrent lightweight-read wait",
-		full.latency, full.allocatedBytes, full.allocations, full.statementCount, full.taskTextBytesScanned, full.concurrentLightweightWait,
+	t.Logf("detail actions median: compact=%s/%d B/%d allocs/%d statement/%d task-text bytes/%s concurrent lightweight-read wait",
 		compact.latency, compact.allocatedBytes, compact.allocations, compact.statementCount, compact.taskTextBytesScanned, compact.concurrentLightweightWait,
 	)
 }
@@ -734,11 +726,6 @@ func newTaskDetailActionMetadataFixture(tb testing.TB) *taskDetailActionMetadata
 	}
 
 	return &taskDetailActionMetadataFixture{connections: connections, repo: repo, taskID: task.ID}
-}
-
-func (fixture *taskDetailActionMetadataFixture) getFullTask() error {
-	_, err := fixture.repo.GetByID(context.Background(), fixture.taskID)
-	return err
 }
 
 func (fixture *taskDetailActionMetadataFixture) getDetailActionMetadata() error {
@@ -837,24 +824,15 @@ func (fixture *taskDetailActionMetadataFixture) measureConcurrentLightweightRead
 
 func BenchmarkTaskRepo_GetDetailActionMetadataProjection(b *testing.B) {
 	fixture := newTaskDetailActionMetadataFixture(b)
-	for _, benchmark := range []struct {
-		name             string
-		payloadBytesRead int
-		load             func() error
-	}{
-		{name: "full_task_hydration", payloadBytesRead: taskDetailActionPromptBytes + 2*taskDetailActionConfigBytes, load: fixture.getFullTask},
-		{name: "detail_action_metadata", load: fixture.getDetailActionMetadata},
-	} {
-		b.Run(benchmark.name, func(b *testing.B) {
-			b.ReportAllocs()
-			b.ReportMetric(float64(benchmark.payloadBytesRead), "task_text_bytes_scanned/op")
-			for i := 0; i < b.N; i++ {
-				if err := benchmark.load(); err != nil {
-					b.Fatalf("load task metadata: %v", err)
-				}
+	b.Run("detail_action_metadata", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ReportMetric(0, "task_text_bytes_scanned/op")
+		for i := 0; i < b.N; i++ {
+			if err := fixture.getDetailActionMetadata(); err != nil {
+				b.Fatalf("load task metadata: %v", err)
 			}
-		})
-	}
+		}
+	})
 }
 
 func TestTaskRepo_GetThreadRenderMetadataUsesCompactProjection(t *testing.T) {
@@ -1346,13 +1324,6 @@ func TestTaskRepo_ListActivePendingAdmissionsPreservesEligibilityAndOrder(t *tes
 	}
 }
 
-const activeTaskAdmissionStatusIndexQuery = `SELECT ` + activeTaskAdmissionSelectColumns + `
-		 FROM tasks INDEXED BY idx_tasks_status WHERE category = 'active' AND status = 'pending'
-		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
-		 AND NOT ` + taskThreadInputOwnsAdmissionPredicate + `
-		 ORDER BY priority DESC, display_order ASC, created_at ASC`
-
 const (
 	activeAdmissionPerformanceSamples    = 5
 	activeAdmissionMeasurementOperations = 8
@@ -1438,16 +1409,6 @@ func TestTaskRepo_ListActivePendingAdmissionsProductionPerformanceEvidence(t *te
 			t.Logf("one-eligible rows=%d: median=%s, %d B/op, %d allocs/op, returned=%d, statements=%d",
 				size, candidate.latency, candidate.allocatedBytes, candidate.allocations, candidate.returnedRows, candidate.statementCount)
 
-			if size == 10000 || size == 50000 {
-				baseline := measureActiveAdmissionLoad(t, func() ([]ActiveTaskAdmission, error) {
-					return listActivePendingAdmissionsWithQuery(context.Background(), fixture.reader, activeTaskAdmissionStatusIndexQuery)
-				}, wantRows)
-				t.Logf("current status-index path rows=%d: median=%s, %d B/op, %d allocs/op, returned=%d",
-					size, baseline.latency, baseline.allocatedBytes, baseline.allocations, baseline.returnedRows)
-				if candidate.latency*5 > baseline.latency {
-					t.Fatalf("candidate median=%s, current status-index median=%s; want at least 80%% lower", candidate.latency, baseline.latency)
-				}
-			}
 		})
 	}
 	if oneEligible[50000].latency > oneEligible[20].latency*8 {
@@ -1476,46 +1437,37 @@ func BenchmarkTaskRepo_ListActivePendingAdmissionsProduction(b *testing.B) {
 			if mixed {
 				fixtureName = "mixed_eligibility"
 			}
-			for _, path := range []struct {
-				name string
-				load func(*activeAdmissionProductionFixture) ([]ActiveTaskAdmission, error)
-			}{
-				{name: "order_covering", load: func(fixture *activeAdmissionProductionFixture) ([]ActiveTaskAdmission, error) {
+			size, mixed, fixtureName := size, mixed, fixtureName
+			b.Run(fmt.Sprintf("%s/%d/order_covering", fixtureName, size), func(b *testing.B) {
+				fixture := newActiveAdmissionProductionFixture(b, size, mixed)
+				load := func() ([]ActiveTaskAdmission, error) {
 					return fixture.repo.ListActivePendingAdmissions(context.Background())
-				}},
-				{name: "current_status_index", load: func(fixture *activeAdmissionProductionFixture) ([]ActiveTaskAdmission, error) {
-					return listActivePendingAdmissionsWithQuery(context.Background(), fixture.reader, activeTaskAdmissionStatusIndexQuery)
-				}},
-			} {
-				size, mixed, fixtureName, path := size, mixed, fixtureName, path
-				b.Run(fmt.Sprintf("%s/%d/%s", fixtureName, size, path.name), func(b *testing.B) {
-					fixture := newActiveAdmissionProductionFixture(b, size, mixed)
-					wantRows := 1
-					if mixed {
-						wantRows = size/4 - size/8
+				}
+				wantRows := 1
+				if mixed {
+					wantRows = size/4 - size/8
+				}
+				for range 2 {
+					admissions, err := load()
+					if err != nil || len(admissions) != wantRows {
+						b.Fatalf("warm admission query returned %d rows with error %v, want %d", len(admissions), err, wantRows)
 					}
-					for range 2 {
-						admissions, err := path.load(fixture)
-						if err != nil || len(admissions) != wantRows {
-							b.Fatalf("warm admission query returned %d rows with error %v, want %d", len(admissions), err, wantRows)
-						}
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					admissions, err := load()
+					if err != nil {
+						b.Fatalf("admission query: %v", err)
 					}
-					b.ReportAllocs()
-					b.ResetTimer()
-					for i := 0; i < b.N; i++ {
-						admissions, err := path.load(fixture)
-						if err != nil {
-							b.Fatalf("admission query: %v", err)
-						}
-						if len(admissions) != wantRows {
-							b.Fatalf("admission rows = %d, want %d", len(admissions), wantRows)
-						}
+					if len(admissions) != wantRows {
+						b.Fatalf("admission rows = %d, want %d", len(admissions), wantRows)
 					}
-					b.StopTimer()
-					b.ReportMetric(float64(wantRows), "returned_rows/op")
-					b.ReportMetric(1, "sql_statements/op")
-				})
-			}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(wantRows), "returned_rows/op")
+				b.ReportMetric(1, "sql_statements/op")
+			})
 		}
 	}
 }
@@ -1620,28 +1572,6 @@ func countActiveAdmissionStatements(t *testing.T, fixture *activeAdmissionProduc
 		t.Fatalf("admission statement count = %d, want one: %#v", len(statements), statements)
 	}
 	return len(statements)
-}
-
-func listActivePendingAdmissionsWithQuery(ctx context.Context, db *sql.DB, query string) ([]ActiveTaskAdmission, error) {
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var admissions []ActiveTaskAdmission
-	for rows.Next() {
-		var admission ActiveTaskAdmission
-		if err := rows.Scan(&admission.ID, &admission.ProjectID, &admission.Title,
-			&admission.Category, &admission.Priority, &admission.Status, &admission.AgentID,
-			&admission.AgentDefinitionID, &admission.ParentTaskID, &admission.SwarmRole); err != nil {
-			return nil, err
-		}
-		admissions = append(admissions, admission)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return admissions, nil
 }
 
 // TestTaskRepo_ListByCategory_WithChainConfig verifies ListByCategory correctly

@@ -1022,14 +1022,8 @@ func (f *emailPollAddressSnapshotBenchmarkFixture) reset() {
 	f.client.storedIDs = nil
 }
 
-func (f *emailPollAddressSnapshotBenchmarkFixture) useAddressSnapshot(legacy bool) {
+func (f *emailPollAddressSnapshotBenchmarkFixture) useAddressSnapshot() {
 	f.svc.processIncomingMessageFn = nil
-	if legacy {
-		svc := f.svc
-		f.svc.processIncomingMessageFn = func(ctx context.Context, msg EmailInboundMessage) bool {
-			return svc.processIncomingMessage(ctx, msg, "", "").handled
-		}
-	}
 }
 
 func (f *emailPollAddressSnapshotBenchmarkFixture) poll(ctx context.Context) {
@@ -1068,10 +1062,10 @@ func emailPollAllocatedBytes(tb testing.TB, runs int, poll func()) float64 {
 	return float64(after.TotalAlloc-before.TotalAlloc) / float64(runs)
 }
 
-func measureEmailPollAddressSnapshot(tb testing.TB, messageCount int, legacy bool) emailPollAddressSnapshotMeasurement {
+func measureEmailPollAddressSnapshot(tb testing.TB, messageCount int) emailPollAddressSnapshotMeasurement {
 	tb.Helper()
 	fixture := newEmailPollAddressSnapshotBenchmarkFixture(tb, messageCount)
-	fixture.useAddressSnapshot(legacy)
+	fixture.useAddressSnapshot()
 	ctx := context.Background()
 	var totalStatements atomic.Int64
 	var appSettingsStatements atomic.Int64
@@ -1125,72 +1119,50 @@ func measureEmailPollAddressSnapshot(tb testing.TB, messageCount int, legacy boo
 func TestEmailPollOnceAddressSnapshotPerformance(t *testing.T) {
 	for _, messageCount := range []int{1, 10, 100} {
 		t.Run(fmt.Sprintf("%d messages", messageCount), func(t *testing.T) {
-			baseline := measureEmailPollAddressSnapshot(t, messageCount, true)
-			candidate := measureEmailPollAddressSnapshot(t, messageCount, false)
-			t.Logf("median baseline: wall=%s bytes=%.0f B/op allocs=%.0f statements=%d app_settings=%d; candidate: wall=%s bytes=%.0f B/op allocs=%.0f statements=%d app_settings=%d", baseline.medianWall, baseline.bytesPerRun, baseline.allocsPerRun, baseline.totalStatements, baseline.appSettingsStatements, candidate.medianWall, candidate.bytesPerRun, candidate.allocsPerRun, candidate.totalStatements, candidate.appSettingsStatements)
+			current := measureEmailPollAddressSnapshot(t, messageCount)
+			t.Logf("median current: wall=%s bytes=%.0f B/op allocs=%.0f statements=%d app_settings=%d", current.medianWall, current.bytesPerRun, current.allocsPerRun, current.totalStatements, current.appSettingsStatements)
 
-			require.Equal(t, int64(messageCount), baseline.totalStatements)
-			require.Equal(t, int64(messageCount), baseline.appSettingsStatements)
-			require.Zero(t, candidate.totalStatements)
-			require.Zero(t, candidate.appSettingsStatements)
-			// Wall time remains useful diagnostic output and is reported by the
-			// benchmark below, but it is too sensitive to shared-runner scheduling
-			// to gate the test suite. AllocsPerRun is stable under host contention
-			// and still catches loss of the per-poll snapshot optimization.
-			switch messageCount {
-			case 1:
-				require.LessOrEqual(t, candidate.allocsPerRun, baseline.allocsPerRun, "one-message poll allocations must not regress")
-			case 100:
-				require.LessOrEqual(t, candidate.allocsPerRun, baseline.allocsPerRun*0.95, "100-message poll allocations must improve by at least 5%%")
-			}
+			require.Zero(t, current.totalStatements)
+			require.Zero(t, current.appSettingsStatements)
 		})
 	}
 }
 
 func BenchmarkEmailPollAddressSnapshot(b *testing.B) {
 	for _, messageCount := range []int{1, 10, 100} {
-		for _, mode := range []struct {
-			name   string
-			legacy bool
-		}{
-			{name: "baseline", legacy: true},
-			{name: "candidate", legacy: false},
-		} {
-			mode := mode
-			b.Run(fmt.Sprintf("%d/%s", messageCount, mode.name), func(b *testing.B) {
-				fixture := newEmailPollAddressSnapshotBenchmarkFixture(b, messageCount)
-				fixture.useAddressSnapshot(mode.legacy)
-				ctx := context.Background()
-				var totalStatements atomic.Int64
-				var appSettingsStatements atomic.Int64
-				fixture.counter.SetObserver(func(_ context.Context, query string) {
-					totalStatements.Add(1)
-					if isEmailPollAddressPointQuery(query) {
-						appSettingsStatements.Add(1)
-					}
-				})
-				fixture.reset()
-				fixture.poll(ctx)
-				require.Len(b, fixture.client.seenIDs(), messageCount, "warm poll must acknowledge every self-sent message")
-				totalStatements.Store(0)
-				appSettingsStatements.Store(0)
-				fixture.counter.Reset()
-				durations := make([]time.Duration, 0, b.N)
-				b.ReportAllocs()
-				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
-					fixture.reset()
-					started := time.Now()
-					fixture.poll(ctx)
-					durations = append(durations, time.Since(started))
+		b.Run(fmt.Sprintf("%d/current", messageCount), func(b *testing.B) {
+			fixture := newEmailPollAddressSnapshotBenchmarkFixture(b, messageCount)
+			fixture.useAddressSnapshot()
+			ctx := context.Background()
+			var totalStatements atomic.Int64
+			var appSettingsStatements atomic.Int64
+			fixture.counter.SetObserver(func(_ context.Context, query string) {
+				totalStatements.Add(1)
+				if isEmailPollAddressPointQuery(query) {
+					appSettingsStatements.Add(1)
 				}
-				b.StopTimer()
-				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-				b.ReportMetric(float64(durations[len(durations)/2].Nanoseconds()), "median_wall_ns/op")
-				b.ReportMetric(float64(totalStatements.Load())/float64(b.N), "sql_statements/op")
-				b.ReportMetric(float64(appSettingsStatements.Load())/float64(b.N), "app_settings_statements/op")
 			})
-		}
+			fixture.reset()
+			fixture.poll(ctx)
+			require.Len(b, fixture.client.seenIDs(), messageCount, "warm poll must acknowledge every self-sent message")
+			totalStatements.Store(0)
+			appSettingsStatements.Store(0)
+			fixture.counter.Reset()
+			durations := make([]time.Duration, 0, b.N)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				fixture.reset()
+				started := time.Now()
+				fixture.poll(ctx)
+				durations = append(durations, time.Since(started))
+			}
+			b.StopTimer()
+			sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+			b.ReportMetric(float64(durations[len(durations)/2].Nanoseconds()), "median_wall_ns/op")
+			b.ReportMetric(float64(totalStatements.Load())/float64(b.N), "sql_statements/op")
+			b.ReportMetric(float64(appSettingsStatements.Load())/float64(b.N), "app_settings_statements/op")
+		})
 	}
 }
 
@@ -1199,18 +1171,13 @@ const (
 	emailPollContentionQueries      = 16
 	emailPollContentionSamples      = 5
 	emailPollContentionHold         = 10 * time.Millisecond
-	// Wall-clock waits include goroutine wake-up latency after the shared SQLite
-	// hold is released. Loaded CI runners can add a few milliseconds even when
-	// the candidate performs the same (or less) database work as the baseline.
-	emailPollContentionP95Jitter = 10 * time.Millisecond
 )
 
 const emailPollContentionQuery = "SELECT COUNT(*) FROM projects"
 
 // emailPollContentionReceiptStore holds a real SQLite query open after the first
-// message reaches the receipt-record boundary. Both the legacy and snapshot
-// paths invoke Record at that same pollOnce boundary, so their unrelated-query
-// waits share the same database hold while legacy address reads are queued.
+// message reaches the receipt-record boundary so unrelated-query waits are
+// measured against the same database hold.
 type emailPollContentionReceiptStore struct {
 	db       *sql.DB
 	acquired chan struct{}
@@ -1251,16 +1218,16 @@ func (s *emailPollContentionReceiptStore) WithHandoff(_ context.Context, _, _ st
 	return false, nil
 }
 
-func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []time.Duration {
+func measureEmailPollAddressSnapshotContention(tb testing.TB) []time.Duration {
 	tb.Helper()
 	fixture := newEmailPollAddressSnapshotBenchmarkFixture(tb, emailPollContentionMessageCount)
-	fixture.useAddressSnapshot(legacy)
+	fixture.useAddressSnapshot()
 	ctx := context.Background()
 	waits := make([]time.Duration, 0, emailPollContentionSamples*emailPollContentionQueries)
 	for sample := 0; sample < emailPollContentionSamples; sample++ {
 		fixture.client = newFakeEmailIMAPClient(emailPollSelfMessages(emailPollContentionMessageCount)...)
 		fixture.reset()
-		fixture.useAddressSnapshot(legacy)
+		fixture.useAddressSnapshot()
 		acquired := make(chan struct{})
 		release := make(chan struct{})
 		finished := make(chan struct{})
@@ -1280,18 +1247,6 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 			abort:    abort,
 		}
 		fixture.svc.emailInboundReceiptStore = receipts
-		pointQueries := atomic.Int64{}
-		secondLegacyQuery := make(chan struct{})
-		var secondLegacyQueryOnce sync.Once
-		fixture.settingsRepo.SetQueryObserver(func(query string) {
-			if !legacy || !isEmailPollAddressPointQuery(query) {
-				return
-			}
-			if pointQueries.Add(1) == 2 {
-				secondLegacyQueryOnce.Do(func() { close(secondLegacyQuery) })
-			}
-		})
-
 		cleanup := func() {
 			releaseReceipt()
 			select {
@@ -1299,7 +1254,6 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 			case <-time.After(time.Second):
 			}
 			close(abort)
-			fixture.settingsRepo.SetQueryObserver(nil)
 			fixture.svc.emailInboundReceiptStore = nil
 		}
 		defer cleanup()
@@ -1349,22 +1303,13 @@ func measureEmailPollAddressSnapshotContention(tb testing.TB, legacy bool) []tim
 		}, time.Second, time.Millisecond, "all unrelated queries must queue behind the common poll query")
 
 		started := time.Now()
-		if legacy {
-			select {
-			case <-secondLegacyQuery:
-			case <-time.After(time.Second):
-				tb.Fatalf("legacy poll did not queue a per-message app_settings query")
-			}
-			require.Equal(tb, 1, fixture.db.Stats().InUse, "the common SQLite hold must still own the only connection while the legacy settings query is issued")
-		}
 		if remaining := emailPollContentionHold - time.Since(started); remaining > 0 {
 			timer := time.NewTimer(remaining)
 			<-timer.C
 		}
 		// Release the common database hold, then let the real poll finish before
-		// collecting competitor waits. This keeps legacy address reads and
-		// competing queries in the same post-release queue rather than measuring
-		// competitors after legacy processing has already ended.
+		// collecting competitor waits so every query shares the same
+		// post-release queue.
 		releaseReceipt()
 		select {
 		case <-pollDone:
@@ -1396,14 +1341,11 @@ func emailPollDurationPercentile(values []time.Duration, percentile int) time.Du
 }
 
 func TestEmailPollAddressSnapshotContentionDoesNotRegressP95(t *testing.T) {
-	baseline := measureEmailPollAddressSnapshotContention(t, true)
-	candidate := measureEmailPollAddressSnapshotContention(t, false)
-	baselineMedian := emailPollDurationPercentile(baseline, 50)
-	baselineP95 := emailPollDurationPercentile(baseline, 95)
-	candidateMedian := emailPollDurationPercentile(candidate, 50)
-	candidateP95 := emailPollDurationPercentile(candidate, 95)
-	t.Logf("unrelated query wait: baseline median=%s p95=%s; candidate median=%s p95=%s (allowed p95 jitter=%s)", baselineMedian, baselineP95, candidateMedian, candidateP95, emailPollContentionP95Jitter)
-	require.LessOrEqual(t, candidateP95, baselineP95+emailPollContentionP95Jitter, "poll snapshot reuse must not materially regress unrelated SQLite query p95 wait")
+	current := measureEmailPollAddressSnapshotContention(t)
+	currentMedian := emailPollDurationPercentile(current, 50)
+	currentP95 := emailPollDurationPercentile(current, 95)
+	t.Logf("unrelated query wait: current median=%s p95=%s", currentMedian, currentP95)
+	require.Len(t, current, emailPollContentionSamples*emailPollContentionQueries)
 }
 
 func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {

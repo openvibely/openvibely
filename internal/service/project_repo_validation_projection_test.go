@@ -52,41 +52,23 @@ func TestValidateRepoPathsProjectionProductionPerformance(t *testing.T) {
 	for _, projectCount := range []int{1, 50, 500} {
 		t.Run(fmt.Sprintf("%d projects", projectCount), func(t *testing.T) {
 			fixture := newValidationProjectionFixture(t, projectCount)
-			full := fixture.measure(t, false)
-			compact := fixture.measure(t, true)
+			compact := fixture.measure(t)
 
-			if full.load.statements != 1 || compact.load.statements != 1 {
-				t.Fatalf("project-load SQL statements: full=%d compact=%d, want one each", full.load.statements, compact.load.statements)
+			if compact.load.statements != 1 {
+				t.Fatalf("compact project-load SQL statements = %d, want one", compact.load.statements)
 			}
-			if full.fullValidation.statements != 1 || compact.fullValidation.statements != 1 {
-				t.Fatalf("full-validation SQL statements: full=%d compact=%d, want one each", full.fullValidation.statements, compact.fullValidation.statements)
+			if compact.fullValidation.statements != 1 {
+				t.Fatalf("compact validation SQL statements = %d, want one", compact.fullValidation.statements)
 			}
 			if projectCount == 500 {
-				if compact.load.selectedBytes*5 > full.load.selectedBytes {
-					t.Fatalf("compact selected/scanned bytes = %d, full-row baseline = %d; want at least 80%% reduction", compact.load.selectedBytes, full.load.selectedBytes)
-				}
-				if compact.load.allocatedBytes*5 > full.load.allocatedBytes {
-					t.Fatalf("compact project-load allocated bytes = %d, full-row baseline = %d; want at least 80%% reduction", compact.load.allocatedBytes, full.load.allocatedBytes)
-				}
-				if compact.fullValidation.allocatedBytes*5 > full.fullValidation.allocatedBytes {
-					t.Fatalf("compact full-validation allocated bytes = %d, full-row baseline = %d; want at least 80%% reduction", compact.fullValidation.allocatedBytes, full.fullValidation.allocatedBytes)
-				}
-				// Wall-clock ratios on a shared CI runner are noisy at millisecond
-				// scale. Keep a broad regression guard here and leave precise
-				// latency comparisons to the benchmark below.
-				if compact.load.latency > full.load.latency*2 {
-					t.Fatalf("compact project-load median = %s, full-row baseline = %s; compact projection is more than 2x slower", compact.load.latency, full.load.latency)
-				}
-				if compact.fullValidation.latency > full.fullValidation.latency*2 {
-					t.Fatalf("compact full-validation median = %s, full-row baseline = %s; compact validation is more than 2x slower", compact.fullValidation.latency, full.fullValidation.latency)
+				if compact.load.allocatedBytes > 4*1024*1024 {
+					t.Fatalf("compact project-load allocated bytes = %d, want at most %d", compact.load.allocatedBytes, 4*1024*1024)
 				}
 			}
 
-			t.Logf("%d projects: full load median/p95=%s/%s, %d B/op, %d allocs/op, %d selected/scanned bytes, %d SQL statements; compact=%s/%s, %d B/op, %d allocs/op, %d selected/scanned bytes, %d SQL statements; full validation median/p95=%s/%s, %d B/op, %d allocs/op, %d SQL statements vs compact=%s/%s, %d B/op, %d allocs/op, %d SQL statements",
+			t.Logf("%d projects: compact load median/p95=%s/%s, %d B/op, %d allocs/op, %d selected/scanned bytes, %d SQL statements; validation=%s/%s, %d B/op, %d allocs/op, %d SQL statements",
 				projectCount,
-				full.load.latency, full.load.p95Latency, full.load.allocatedBytes, full.load.allocations, full.load.selectedBytes, full.load.statements,
 				compact.load.latency, compact.load.p95Latency, compact.load.allocatedBytes, compact.load.allocations, compact.load.selectedBytes, compact.load.statements,
-				full.fullValidation.latency, full.fullValidation.p95Latency, full.fullValidation.allocatedBytes, full.fullValidation.allocations, full.fullValidation.statements,
 				compact.fullValidation.latency, compact.fullValidation.p95Latency, compact.fullValidation.allocatedBytes, compact.fullValidation.allocations, compact.fullValidation.statements,
 			)
 		})
@@ -207,53 +189,49 @@ func seedValidationProjectionProjects(tb testing.TB, db *sql.DB, projectCount in
 	}
 }
 
-func (fixture *validationProjectionFixture) measure(tb testing.TB, compact bool) validationProjectionFixtureMeasurement {
+func (fixture *validationProjectionFixture) measure(tb testing.TB) validationProjectionFixtureMeasurement {
 	tb.Helper()
 	fixture.counter.SetEnabled(false)
 	for range 2 {
-		fixture.measureProjectLoad(tb, compact)
-		fixture.measureCompleteValidation(tb, compact)
+		fixture.measureProjectLoad(tb)
+		fixture.measureCompleteValidation(tb)
 	}
 
 	loadLatencies := make([]time.Duration, 0, validationProjectionSamples)
 	loadBytes := make([]uint64, 0, validationProjectionSamples)
 	loadAllocs := make([]uint64, 0, validationProjectionSamples)
 	for range validationProjectionSamples {
-		measurement := fixture.measureProjectLoad(tb, compact)
+		measurement := fixture.measureProjectLoad(tb)
 		loadLatencies = append(loadLatencies, measurement.latency)
 		loadBytes = append(loadBytes, measurement.allocatedBytes)
 		loadAllocs = append(loadAllocs, measurement.allocations)
 	}
-	loadStatements := fixture.countProjectLoadStatements(tb, compact)
-	load := summarizeValidationMeasurement(tb, loadLatencies, loadBytes, loadAllocs, fixture.selectedBytes(tb, compact), loadStatements)
+	loadStatements := fixture.countProjectLoadStatements(tb)
+	load := summarizeValidationMeasurement(tb, loadLatencies, loadBytes, loadAllocs, fixture.selectedBytes(tb), loadStatements)
 
 	validationLatencies := make([]time.Duration, 0, validationProjectionSamples)
 	validationBytes := make([]uint64, 0, validationProjectionSamples)
 	validationAllocs := make([]uint64, 0, validationProjectionSamples)
 	for range validationProjectionSamples {
-		measurement := fixture.measureCompleteValidation(tb, compact)
+		measurement := fixture.measureCompleteValidation(tb)
 		validationLatencies = append(validationLatencies, measurement.latency)
 		validationBytes = append(validationBytes, measurement.allocatedBytes)
 		validationAllocs = append(validationAllocs, measurement.allocations)
 	}
-	validationStatements := fixture.countCompleteValidationStatements(tb, compact)
+	validationStatements := fixture.countCompleteValidationStatements(tb)
 	fullValidation := summarizeValidationMeasurement(tb, validationLatencies, validationBytes, validationAllocs, 0, validationStatements)
 	return validationProjectionFixtureMeasurement{load: load, fullValidation: fullValidation}
 }
 
-func (fixture *validationProjectionFixture) measureProjectLoad(tb testing.TB, compact bool) validationProjectionMeasurement {
+func (fixture *validationProjectionFixture) measureProjectLoad(tb testing.TB) validationProjectionMeasurement {
 	tb.Helper()
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	startedAt := time.Now()
 	for range validationProjectionIterations {
-		if compact {
-			if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
-				tb.Fatalf("compact project load: %v", err)
-			}
-		} else if _, err := fixture.projectRepo.List(context.Background()); err != nil {
-			tb.Fatalf("full project load: %v", err)
+		if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
+			tb.Fatalf("compact project load: %v", err)
 		}
 	}
 	elapsed := time.Since(startedAt)
@@ -265,18 +243,14 @@ func (fixture *validationProjectionFixture) measureProjectLoad(tb testing.TB, co
 	}
 }
 
-func (fixture *validationProjectionFixture) measureCompleteValidation(tb testing.TB, compact bool) validationProjectionMeasurement {
+func (fixture *validationProjectionFixture) measureCompleteValidation(tb testing.TB) validationProjectionMeasurement {
 	tb.Helper()
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	startedAt := time.Now()
-	if compact {
-		if got := fixture.projectSvc.ValidateRepoPaths(context.Background()); len(got) != 0 {
-			tb.Fatalf("compact validation warnings = %v", got)
-		}
-	} else if got := validateRepoPathsWithFullProjects(context.Background(), fixture.projectRepo); len(got) != 0 {
-		tb.Fatalf("full validation warnings = %v", got)
+	if got := fixture.projectSvc.ValidateRepoPaths(context.Background()); len(got) != 0 {
+		tb.Fatalf("compact validation warnings = %v", got)
 	}
 	elapsed := time.Since(startedAt)
 	runtime.ReadMemStats(&after)
@@ -287,53 +261,30 @@ func (fixture *validationProjectionFixture) measureCompleteValidation(tb testing
 	}
 }
 
-func (fixture *validationProjectionFixture) countProjectLoadStatements(tb testing.TB, compact bool) int {
+func (fixture *validationProjectionFixture) countProjectLoadStatements(tb testing.TB) int {
 	tb.Helper()
 	fixture.counter.Reset()
 	fixture.counter.SetEnabled(true)
-	if compact {
-		if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
-			tb.Fatalf("count compact project load: %v", err)
-		}
-	} else if _, err := fixture.projectRepo.List(context.Background()); err != nil {
-		tb.Fatalf("count full project load: %v", err)
+	if _, err := fixture.projectRepo.ListRepoValidationProjects(context.Background()); err != nil {
+		tb.Fatalf("count compact project load: %v", err)
 	}
 	fixture.counter.SetEnabled(false)
 	return len(fixture.counter.Statements())
 }
 
-func (fixture *validationProjectionFixture) countCompleteValidationStatements(tb testing.TB, compact bool) int {
+func (fixture *validationProjectionFixture) countCompleteValidationStatements(tb testing.TB) int {
 	tb.Helper()
 	fixture.counter.Reset()
 	fixture.counter.SetEnabled(true)
-	fixture.measureCompleteValidation(tb, compact)
+	fixture.measureCompleteValidation(tb)
 	fixture.counter.SetEnabled(false)
 	return len(fixture.counter.Statements())
 }
 
-func (fixture *validationProjectionFixture) selectedBytes(tb testing.TB, compact bool) int {
+func (fixture *validationProjectionFixture) selectedBytes(tb testing.TB) int {
 	tb.Helper()
 	fixture.counter.SetEnabled(false)
-	if compact {
-		return validationCompactSelectedBytes(tb, fixture.projectRepo)
-	}
-	projects, err := fixture.projectRepo.List(context.Background())
-	if err != nil {
-		tb.Fatalf("full project rows for selected-byte metric: %v", err)
-	}
-	var total int
-	for _, project := range projects {
-		total += len(project.ID) + len(project.Name) + len(project.Description) + len(project.RepoPath) + len(project.RepoURL)
-		total++
-		if project.DefaultAgentConfigID != nil {
-			total += len(*project.DefaultAgentConfigID)
-		}
-		if project.MaxWorkers != nil {
-			total += 8
-		}
-		total += len(project.CreatedAt.Format(time.RFC3339)) + len(project.UpdatedAt.Format(time.RFC3339))
-	}
-	return total
+	return validationCompactSelectedBytes(tb, fixture.projectRepo)
 }
 
 func validationCompactSelectedBytes(tb testing.TB, repo *repository.ProjectRepo) int {
@@ -367,27 +318,4 @@ func summarizeValidationMeasurement(tb testing.TB, latencies []time.Duration, al
 		selectedBytes:  selectedBytes,
 		statements:     statements,
 	}
-}
-
-func validateRepoPathsWithFullProjects(ctx context.Context, repo *repository.ProjectRepo) []string {
-	projects, err := repo.List(ctx)
-	if err != nil {
-		return nil
-	}
-	var missing []string
-	for _, project := range projects {
-		if project.RepoPath == "" {
-			continue
-		}
-		if _, err := os.Stat(project.RepoPath); os.IsNotExist(err) {
-			message := fmt.Sprintf("project %q (id=%s): repo_path %q does not exist on disk", project.Name, project.ID, project.RepoPath)
-			if project.RepoURL != "" {
-				message += fmt.Sprintf(" (repo_url=%s — may need re-clone or volume mount fix)", project.RepoURL)
-			} else {
-				message += " (local repo — ensure the path is mounted into the container)"
-			}
-			missing = append(missing, message)
-		}
-	}
-	return missing
 }

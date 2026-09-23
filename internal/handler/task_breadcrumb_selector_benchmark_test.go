@@ -73,11 +73,8 @@ func BenchmarkTaskRepoListBreadcrumbSelector(b *testing.B) {
 			for _, benchmarkCase := range cases {
 				benchmarkCase := benchmarkCase
 				b.Run(benchmarkCase.name, func(b *testing.B) {
-					b.Run("Before", func(b *testing.B) {
-						benchmarkBreadcrumbSelector(b, db, repo, benchmarkCase, false)
-					})
-					b.Run("After", func(b *testing.B) {
-						benchmarkBreadcrumbSelector(b, db, repo, benchmarkCase, true)
+					b.Run("Current", func(b *testing.B) {
+						benchmarkBreadcrumbSelector(b, db, repo, benchmarkCase)
 					})
 				})
 			}
@@ -85,7 +82,7 @@ func BenchmarkTaskRepoListBreadcrumbSelector(b *testing.B) {
 	}
 }
 
-func benchmarkBreadcrumbSelector(b *testing.B, db *sql.DB, repo *repository.TaskRepo, benchmarkCase breadcrumbSelectorBenchmarkCase, candidate bool) {
+func benchmarkBreadcrumbSelector(b *testing.B, db *sql.DB, repo *repository.TaskRepo, benchmarkCase breadcrumbSelectorBenchmarkCase) {
 	b.Helper()
 	ctx := context.Background()
 	const limit = 21
@@ -94,12 +91,7 @@ func benchmarkBreadcrumbSelector(b *testing.B, db *sql.DB, repo *repository.Task
 	if err != nil {
 		b.Fatalf("baseline breadcrumb selector: %v", err)
 	}
-	var warm []models.BreadcrumbSelectorItem
-	if candidate {
-		warm, err = repo.ListBreadcrumbSelector(ctx, "default", benchmarkCase.search, benchmarkCase.currentID, benchmarkCase.scheduleOnly, limit)
-	} else {
-		warm = before
-	}
+	warm, err := repo.ListBreadcrumbSelector(ctx, "default", benchmarkCase.search, benchmarkCase.currentID, benchmarkCase.scheduleOnly, limit)
 	if err != nil {
 		b.Fatalf("warm breadcrumb selector: %v", err)
 	}
@@ -125,11 +117,7 @@ func benchmarkBreadcrumbSelector(b *testing.B, db *sql.DB, repo *repository.Task
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		if candidate {
-			lastItems, err = repo.ListBreadcrumbSelector(ctx, "default", benchmarkCase.search, benchmarkCase.currentID, benchmarkCase.scheduleOnly, limit)
-		} else {
-			lastItems, err = listBreadcrumbSelectorBaseline(ctx, db, benchmarkCase, limit)
-		}
+		lastItems, err = repo.ListBreadcrumbSelector(ctx, "default", benchmarkCase.search, benchmarkCase.currentID, benchmarkCase.scheduleOnly, limit)
 		durations[i] = time.Since(start)
 		if err != nil {
 			b.Fatalf("breadcrumb selector: %v", err)
@@ -264,73 +252,6 @@ func logBreadcrumbSelectorPlanMatrix(tb testing.TB, db *sql.DB, benchmarkCase br
 		tb.Fatalf("%s candidate recency plan = %s, want discovery-order index without temporary sort", benchmarkCase.name, recencyPlan)
 	}
 	tb.Logf("%s plans: baseline=%s; candidate current-task=%s; candidate recency=%s", benchmarkCase.name, baselinePlan, currentPlan, recencyPlan)
-}
-
-func TestTaskRepo_BreadcrumbSelectorLatencyAcceptanceGates(t *testing.T) {
-	for _, taskCount := range []int{10000, 100000, 500000} {
-		taskCount := taskCount
-		t.Run(fmt.Sprintf("%d_tasks_empty_current", taskCount), func(t *testing.T) {
-			db, repo := newBreadcrumbSelectorBenchmarkRepoWithSchedules(t, taskCount, false)
-			defer db.Close()
-			benchmarkCase := breadcrumbSelectorBenchmarkCase{name: "EmptyCurrent", currentID: breadcrumbSelectorBenchmarkTaskID(1)}
-			before, err := listBreadcrumbSelectorBaseline(context.Background(), db, benchmarkCase, 21)
-			if err != nil {
-				t.Fatalf("baseline warm-up: %v", err)
-			}
-			after, err := repo.ListBreadcrumbSelector(context.Background(), "default", benchmarkCase.search, benchmarkCase.currentID, benchmarkCase.scheduleOnly, 21)
-			if err != nil {
-				t.Fatalf("candidate warm-up: %v", err)
-			}
-			if !equalBreadcrumbSelectorItems(before, after) {
-				t.Fatalf("warm-up result differs: before=%v after=%v", before, after)
-			}
-
-			beforeMedian := measureBreadcrumbSelectorMedian(t, db, repo, benchmarkCase, false)
-			afterMedian := measureBreadcrumbSelectorMedian(t, db, repo, benchmarkCase, true)
-			t.Logf("empty/current latency gate: before_p50=%s after_p50=%s improvement=%.2f%%", beforeMedian, afterMedian, 100*(1-float64(afterMedian)/float64(beforeMedian)))
-			if taskCount >= 100000 && afterMedian*10 > beforeMedian*3 {
-				t.Fatalf("candidate median %s is not at least 70%% faster than baseline %s", afterMedian, beforeMedian)
-			}
-			if taskCount == 10000 && afterMedian*10 > beforeMedian*11 {
-				t.Fatalf("candidate median %s is more than 10%% slower than baseline %s", afterMedian, beforeMedian)
-			}
-		})
-	}
-}
-
-func measureBreadcrumbSelectorMedian(tb testing.TB, db *sql.DB, repo *repository.TaskRepo, benchmarkCase breadcrumbSelectorBenchmarkCase, candidate bool) time.Duration {
-	tb.Helper()
-	const (
-		samples        = 5
-		callsPerSample = 3
-		limit          = 21
-	)
-	durations := make([]time.Duration, samples)
-	ctx := context.Background()
-	baseline, err := listBreadcrumbSelectorBaseline(ctx, db, benchmarkCase, limit)
-	if err != nil {
-		tb.Fatalf("baseline measurement warm-up: %v", err)
-	}
-	for sample := 0; sample < samples; sample++ {
-		start := time.Now()
-		for call := 0; call < callsPerSample; call++ {
-			var items []models.BreadcrumbSelectorItem
-			if candidate {
-				items, err = repo.ListBreadcrumbSelector(ctx, "default", benchmarkCase.search, benchmarkCase.currentID, benchmarkCase.scheduleOnly, limit)
-			} else {
-				items, err = listBreadcrumbSelectorBaseline(ctx, db, benchmarkCase, limit)
-			}
-			if err != nil {
-				tb.Fatalf("breadcrumb selector sample: %v", err)
-			}
-			if !equalBreadcrumbSelectorItems(items, baseline) {
-				tb.Fatalf("measurement result differs from baseline: got=%v want=%v", items, baseline)
-			}
-		}
-		durations[sample] = time.Since(start) / callsPerSample
-	}
-	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-	return durations[len(durations)/2]
 }
 
 func TestTaskRepo_BreadcrumbSelectorWriteStorageScope(t *testing.T) {

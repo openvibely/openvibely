@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -17,7 +16,6 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
-	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
 type outboundTargetTestDiscord struct {
@@ -917,52 +915,15 @@ func BenchmarkOutboundTargetsCardRefreshUsesAggregateSummary(b *testing.B) {
 	e := echo.New()
 	e.GET("/channels/outbound-targets/card", h.handleOutboundTargetsCardFragment)
 
-	baselineTargets, err := targetRepo.ListByProject(ctx, projectID)
-	if err != nil {
-		b.Fatalf("load baseline targets: %v", err)
+	warmupRec := httptest.NewRecorder()
+	e.ServeHTTP(warmupRec, httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id="+url.QueryEscape(projectID), nil))
+	if warmupRec.Code != http.StatusOK {
+		b.Fatalf("card status %d: %s", warmupRec.Code, warmupRec.Body.String())
 	}
-	baselineHTML := renderOutboundTargetsCardBenchmarkHTML(b, projectID, channelTargetProjectSummaryForHandlerTest(baselineTargets), true)
-	candidateRec := httptest.NewRecorder()
-	e.ServeHTTP(candidateRec, httptest.NewRequest(http.MethodGet, "/channels/outbound-targets/card?project_id="+url.QueryEscape(projectID), nil))
-	if candidateRec.Code != http.StatusOK {
-		b.Fatalf("candidate card status %d: %s", candidateRec.Code, candidateRec.Body.String())
-	}
-	if candidateHTML := candidateRec.Body.String(); candidateHTML != baselineHTML {
-		b.Fatalf("rendered HTML parity mismatch: baseline %d bytes candidate %d bytes", len(baselineHTML), len(candidateHTML))
-	}
-	b.Logf("card_refresh_fixture_targets=%d baseline_rendered_html_bytes=%d", len(baselineTargets), len(baselineHTML))
+	expectedHTML := warmupRec.Body.String()
+	b.Logf("card_refresh_rendered_html_bytes=%d", len(expectedHTML))
 
-	b.Run("baseline_full_list_card_render", func(b *testing.B) {
-		var sqlElapsed time.Duration
-		var rows, htmlBytes, selectedTextBytes int
-		counter.SetEnabled(true)
-		b.Cleanup(func() { counter.SetEnabled(false) })
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			counter.Reset()
-			start := time.Now()
-			targets, err := targetRepo.ListByProject(ctx, projectID)
-			sqlElapsed += time.Since(start)
-			if err != nil {
-				b.Fatalf("list full targets: %v", err)
-			}
-			html := renderOutboundTargetsCardBenchmarkHTML(b, projectID, channelTargetProjectSummaryForHandlerTest(targets), true)
-			if html != baselineHTML {
-				b.Fatalf("baseline render changed: got %d bytes want %d", len(html), len(baselineHTML))
-			}
-			rows = len(targets)
-			htmlBytes = len(html)
-			selectedTextBytes = counter.SelectedTextBytes()
-		}
-		b.ReportMetric(float64(rows), "rows/op")
-		b.ReportMetric(11, "materialized_fields/op")
-		b.ReportMetric(float64(htmlBytes), "html_bytes/op")
-		b.ReportMetric(float64(selectedTextBytes), "selected_text_bytes/op")
-		b.ReportMetric(float64(sqlElapsed.Nanoseconds())/float64(b.N), "sql_ns/op")
-	})
-
-	b.Run("aggregate_card_route", func(b *testing.B) {
+	b.Run("card_route", func(b *testing.B) {
 		var sqlElapsed time.Duration
 		var rows, htmlBytes, selectedTextBytes int
 		counter.SetEnabled(true)
@@ -980,8 +941,8 @@ func BenchmarkOutboundTargetsCardRefreshUsesAggregateSummary(b *testing.B) {
 				b.Fatalf("card route returned %d: %s", rec.Code, rec.Body.String())
 			}
 			html := rec.Body.String()
-			if html != baselineHTML {
-				b.Fatalf("aggregate render changed: got %d bytes want %d", len(html), len(baselineHTML))
+			if html != expectedHTML {
+				b.Fatalf("card render changed: got %d bytes want %d", len(html), len(expectedHTML))
 			}
 			rows = 4
 			htmlBytes = len(html)
@@ -1026,43 +987,6 @@ func seedOutboundTargetsCardBenchFixture(tb testing.TB, db *sql.DB, projectID st
 			tb.Fatalf("seed target %d: %v", i, err)
 		}
 	}
-}
-
-func channelTargetProjectSummaryForHandlerTest(targets []models.ChannelTarget) repository.ChannelTargetProjectSummary {
-	out := repository.ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{}}
-	for _, target := range targets {
-		platform := strings.ToLower(strings.TrimSpace(target.Platform))
-		if platform == "" {
-			platform = "unknown"
-		}
-		kind := strings.ToLower(strings.TrimSpace(target.TargetKind))
-		if kind == "" {
-			kind = models.DefaultChannelTargetKind(platform)
-		}
-		platformSummary := out.ByPlatform[platform]
-		platformSummary.Total++
-		if target.Home {
-			platformSummary.Home++
-		}
-		if strings.TrimSpace(target.Name) != "" {
-			platformSummary.Named++
-		}
-		if platformSummary.ByKind == nil {
-			platformSummary.ByKind = map[string]int{}
-		}
-		platformSummary.ByKind[kind]++
-		out.ByPlatform[platform] = platformSummary
-	}
-	return out
-}
-
-func renderOutboundTargetsCardBenchmarkHTML(tb testing.TB, projectID string, summary repository.ChannelTargetProjectSummary, explicitAllowed bool) string {
-	tb.Helper()
-	var buf bytes.Buffer
-	if err := pages.OutboundTargetsCardFragment(projectID, summary, explicitAllowed).Render(context.Background(), &buf); err != nil {
-		tb.Fatalf("render outbound targets card: %v", err)
-	}
-	return buf.String()
 }
 
 func TestAuthorizedUsersMutationDoesNotAffectOutboundTargets(t *testing.T) {

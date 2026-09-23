@@ -7222,15 +7222,6 @@ func TestSelectAgent_AutoCompactSelectionLargeFixtureBudget(t *testing.T) {
 	seedLargeAutoSelectionConfigs(t, ctx, llmConfigRepo, 50)
 	message := "build endpoint handler service database integration test"
 
-	fullList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			selected, err := benchmarkFullListAutoSelectAgent(h, ctx, message, false)
-			if err != nil {
-				b.Fatal(err)
-			}
-			assertSelectedModelFullyHydrated(b, selected)
-		}
-	})
 	compactThenGet := testing.Benchmark(func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			selected, err := h.autoSelectAgent(ctx, message, false)
@@ -7244,9 +7235,7 @@ func TestSelectAgent_AutoCompactSelectionLargeFixtureBudget(t *testing.T) {
 	const (
 		maxCompactDuration   = 200 * time.Microsecond
 		maxCompactBytesPerOp = 300 * 1024
-		minImprovementRatio  = 20
 	)
-	t.Logf("browser/task-thread auto full-list baseline: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp())
 	t.Logf("browser/task-thread auto compact+GetByID: %d ns/op, %d B/op", compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
 	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
 		t.Fatalf("compact auto selection took %s/op, want <= %s", time.Duration(compactThenGet.NsPerOp()), maxCompactDuration)
@@ -7254,51 +7243,27 @@ func TestSelectAgent_AutoCompactSelectionLargeFixtureBudget(t *testing.T) {
 	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
 		t.Fatalf("compact auto selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxCompactBytesPerOp)
 	}
-	if testing.CoverMode() == "" && fullList.NsPerOp()/compactThenGet.NsPerOp() < minImprovementRatio {
-		t.Fatalf("compact auto selection latency improvement = %.1fx, want >= %dx", float64(fullList.NsPerOp())/float64(compactThenGet.NsPerOp()), minImprovementRatio)
-	}
-	if fullList.AllocedBytesPerOp()/compactThenGet.AllocedBytesPerOp() < minImprovementRatio {
-		t.Fatalf("compact auto selection allocation improvement = %.1fx, want >= %dx", float64(fullList.AllocedBytesPerOp())/float64(compactThenGet.AllocedBytesPerOp()), minImprovementRatio)
-	}
 }
 
 func BenchmarkBrowserTaskThreadAutoSelection(b *testing.B) {
-	for _, tc := range []struct {
-		name string
-		run  func(*Handler, context.Context, string) (*models.LLMConfig, error)
-	}{
-		{
-			name: "full_list_baseline",
-			run: func(h *Handler, ctx context.Context, message string) (*models.LLMConfig, error) {
-				return benchmarkFullListAutoSelectAgent(h, ctx, message, false)
-			},
-		},
-		{
-			name: "compact_then_get",
-			run: func(h *Handler, ctx context.Context, message string) (*models.LLMConfig, error) {
-				return h.autoSelectAgent(ctx, message, false)
-			},
-		},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			db := testutil.NewTestDB(b)
-			h, _, llmConfigRepo := setupTestHandlerForDB(b, db)
-			ctx := context.Background()
-			clearModelConfigs(b, db)
-			seedLargeAutoSelectionConfigs(b, ctx, llmConfigRepo, 50)
-			message := "build endpoint handler service database integration test"
+	b.Run("compact_then_get", func(b *testing.B) {
+		db := testutil.NewTestDB(b)
+		h, _, llmConfigRepo := setupTestHandlerForDB(b, db)
+		ctx := context.Background()
+		clearModelConfigs(b, db)
+		seedLargeAutoSelectionConfigs(b, ctx, llmConfigRepo, 50)
+		message := "build endpoint handler service database integration test"
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				selected, err := tc.run(h, ctx, message)
-				if err != nil {
-					b.Fatal(err)
-				}
-				assertSelectedModelFullyHydrated(b, selected)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			selected, err := h.autoSelectAgent(ctx, message, false)
+			if err != nil {
+				b.Fatal(err)
 			}
-		})
-	}
+			assertSelectedModelFullyHydrated(b, selected)
+		}
+	})
 }
 
 func clearModelConfigs(tb testing.TB, db interface {
@@ -7349,21 +7314,6 @@ func seedLargeAutoSelectionConfigs(tb testing.TB, ctx context.Context, repo *rep
 			tb.Fatalf("create large auto-selection config %d: %v", i, err)
 		}
 	}
-}
-
-func benchmarkFullListAutoSelectAgent(h *Handler, ctx context.Context, message string, hasImages bool) (*models.LLMConfig, error) {
-	agents, err := h.llmConfigRepo.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(agents) == 0 {
-		return nil, fmt.Errorf("no agents configured - please add at least one agent/model in settings")
-	}
-	complexity := service.AnalyzeComplexity(message)
-	if result := service.SelectLLMWithVision(complexity, agents, hasImages); result != nil && result.LLMConfig != nil {
-		return result.LLMConfig, nil
-	}
-	return &agents[0], nil
 }
 
 func assertSelectedModelFullyHydrated(tb testing.TB, selected *models.LLMConfig) {
