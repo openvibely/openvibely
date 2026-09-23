@@ -53,6 +53,7 @@ type Handler struct {
 	workerRepo                 *repository.WorkerRepo
 	attachmentRepo             *repository.AttachmentRepo
 	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	chatInputRequestRepo       *repository.ChatInputRequestRepo
 	projectRepo                *repository.ProjectRepo
 	settingsRepo               *repository.SettingsRepo
 	usageAnalyticsSvc          *service.UsageAnalyticsService
@@ -227,6 +228,7 @@ func New(
 	var usageRepo *repository.UsageRepo
 	var skillAnalyticsRepo *repository.SkillAnalyticsRepo
 	var taskCommitStatRepo *repository.TaskCommitStatRepo
+	var chatInputRequestRepo *repository.ChatInputRequestRepo
 	var usageAnalyticsSvc *service.UsageAnalyticsService
 	if execRepo != nil {
 		if db := execRepo.DB(); db != nil {
@@ -234,6 +236,7 @@ func New(
 			usageRepo = repository.NewUsageRepo(db)
 			skillAnalyticsRepo = repository.NewSkillAnalyticsRepo(db)
 			taskCommitStatRepo = repository.NewTaskCommitStatRepo(db)
+			chatInputRequestRepo = repository.NewChatInputRequestRepo(db)
 			usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
 		}
 	}
@@ -283,29 +286,31 @@ func New(
 	}
 
 	h = &Handler{
-		projectSvc:         projectSvc,
-		taskSvc:            taskSvc,
-		swarmSvc:           swarmSvc,
-		llmSvc:             llmSvc,
-		workerSvc:          workerSvc,
-		schedulerSvc:       schedulerSvc,
-		alertSvc:           alertSvc,
-		upcomingSvc:        upcomingSvc,
-		insightsSvc:        insightsSvc,
-		llmConfigRepo:      llmConfigRepo,
-		taskRepo:           taskRepo,
-		scheduleRepo:       scheduleRepo,
-		execRepo:           execRepo,
-		threadInputRepo:    threadInputRepo,
-		usageRepo:          usageRepo,
-		skillAnalyticsRepo: skillAnalyticsRepo,
-		taskCommitStatRepo: taskCommitStatRepo,
-		usageAnalyticsSvc:  usageAnalyticsSvc,
-		workerRepo:         workerRepo,
-		attachmentRepo:     attachmentRepo,
-		chatAttachmentRepo: chatAttachmentRepo,
-		chatInputRequests:  newChatInputRequestBroker(),
-		projectRepo:        projectRepo, settingsRepo: settingsRepo,
+		projectSvc:             projectSvc,
+		taskSvc:                taskSvc,
+		swarmSvc:               swarmSvc,
+		llmSvc:                 llmSvc,
+		workerSvc:              workerSvc,
+		schedulerSvc:           schedulerSvc,
+		alertSvc:               alertSvc,
+		upcomingSvc:            upcomingSvc,
+		insightsSvc:            insightsSvc,
+		llmConfigRepo:          llmConfigRepo,
+		taskRepo:               taskRepo,
+		scheduleRepo:           scheduleRepo,
+		execRepo:               execRepo,
+		threadInputRepo:        threadInputRepo,
+		usageRepo:              usageRepo,
+		skillAnalyticsRepo:     skillAnalyticsRepo,
+		taskCommitStatRepo:     taskCommitStatRepo,
+		usageAnalyticsSvc:      usageAnalyticsSvc,
+		workerRepo:             workerRepo,
+		attachmentRepo:         attachmentRepo,
+		chatAttachmentRepo:     chatAttachmentRepo,
+		chatInputRequestRepo:   chatInputRequestRepo,
+		chatInputRequests:      newChatInputRequestBroker(),
+		projectRepo:            projectRepo,
+		settingsRepo:           settingsRepo,
 		broadcaster:            broadcaster,
 		telegramService:        telegramSvc,
 		projectFolderPicker:    pickProjectFolderNative,

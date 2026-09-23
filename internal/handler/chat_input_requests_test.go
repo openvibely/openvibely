@@ -16,6 +16,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/stretchr/testify/require"
 )
 
@@ -258,6 +259,48 @@ func TestChatInputRequestsListsPendingAndCompletedRequests(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `"completed":true`)
 	require.Contains(t, rec.Body.String(), `"label":"Yes"`)
+}
+
+func TestChatInputRequestRecoveredAfterRestartRendersAndUnblocksChat(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	agent := createAgent(t, tc.llmConfigRepo)
+	project := tc.CreateProject().WithName("Recovered input request").Build()
+	task := createTask(t, tc.handler, project.ID, "Recovered chat task", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		selected := agent.ID
+		task.AgentID = &selected
+	})
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "ask me"}
+	require.NoError(t, tc.execRepo.Create(ctx, exec))
+	questions := []chatInputRequestQuestion{{
+		ID: "model", Question: "Which model?", Options: []chatInputRequestOption{{Label: "Default", Description: "Use default"}, {Label: "Specialized", Description: "Use specialized"}},
+	}}
+	questionsJSON, err := json.Marshal(questions)
+	require.NoError(t, err)
+	reqID := repository.NewID()
+	repo := repository.NewChatInputRequestRepo(tc.db)
+	require.NoError(t, repo.Create(ctx, repository.ChatInputRequestRecord{ID: reqID, ProjectID: project.ID, ExecutionID: exec.ID, QuestionsJSON: string(questionsJSON), ExpiresAt: time.Now().Add(time.Hour)}))
+	tc.handler.chatInputRequests = newChatInputRequestBroker()
+
+	rec := tc.HTTP().Get("/chat/input-requests?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), reqID)
+	require.Contains(t, rec.Body.String(), "Which model?")
+	require.Contains(t, rec.Body.String(), `"completed":false`)
+
+	postInputRequestJSON(t, tc, "/chat/input-requests/"+reqID+"/answer", `{"project_id":"`+project.ID+`","answers":[{"question_id":"model","label":"Default"}]}`, http.StatusOK)
+	stored, err := repo.Get(ctx, reqID)
+	require.NoError(t, err)
+	require.Equal(t, repository.ChatInputRequestResolved, stored.Status)
+	completedExec, err := tc.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, completedExec.Status)
+	require.Contains(t, completedExec.ErrorMessage, "app restarted")
+	active, err := tc.execRepo.FindLatestActiveChatExecution(ctx, project.ID)
+	require.NoError(t, err)
+	require.Nil(t, active)
 }
 
 func TestChatInputRequestProjectPreflightPreservesBlankAndUnknownResponses(t *testing.T) {

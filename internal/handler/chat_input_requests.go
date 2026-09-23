@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
@@ -200,6 +201,10 @@ func (h *Handler) executeRequestUserInputTool(ctx context.Context, params stream
 	if err != nil {
 		return "", err
 	}
+	if err := h.persistChatInputRequest(ctx, pending); err != nil {
+		h.chatInputRequests.expire(pending.ID)
+		return "", err
+	}
 	if h.chatBroadcaster == nil {
 		h.chatInputRequests.expire(pending.ID)
 		return "", fmt.Errorf("chat live updates unavailable")
@@ -256,8 +261,21 @@ func (h *Handler) ChatInputRequestAnswer(c echo.Context) error {
 		return err
 	}
 	resolved, err := h.chatInputRequests.resolve(id, projectID, payload.Answers)
+	recovered := false
 	if err != nil {
+		if httpErr, ok := err.(*echo.HTTPError); !ok || httpErr.Code != http.StatusGone {
+			return err
+		}
+		var recoveredErr error
+		resolved, recovered, recoveredErr = h.resolvePersistedChatInputRequest(c.Request().Context(), id, projectID, payload.Answers)
+		if recoveredErr != nil {
+			return recoveredErr
+		}
+	} else if err := h.persistChatInputRequestResolution(c.Request().Context(), id, projectID, resolved.Answers); err != nil {
 		return err
+	}
+	if recovered {
+		h.completeRecoveredChatInputExecution(c.Request().Context(), resolved)
 	}
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
@@ -278,12 +296,134 @@ func (h *Handler) ChatInputRequests(c echo.Context) error {
 	if err := h.requireChatInputProject(c.Request().Context(), projectID); err != nil {
 		return err
 	}
-	requests := h.chatInputRequests.listProject(projectID)
+	requests, err := h.listChatInputRequests(c.Request().Context(), projectID)
+	if err != nil {
+		return err
+	}
 	items := make([]*events.ChatInputRequestEvent, 0, len(requests))
 	for _, req := range requests {
 		items = append(items, chatInputRequestForEvent(req))
 	}
 	return c.JSON(http.StatusOK, map[string]any{"input_requests": items})
+}
+
+func (h *Handler) persistChatInputRequest(ctx context.Context, req *chatInputRequest) error {
+	if h == nil || h.chatInputRequestRepo == nil || req == nil {
+		return nil
+	}
+	questionsJSON, err := json.Marshal(req.Questions)
+	if err != nil {
+		return fmt.Errorf("encoding chat input request questions: %w", err)
+	}
+	return h.chatInputRequestRepo.Create(ctx, repository.ChatInputRequestRecord{
+		ID:            req.ID,
+		ProjectID:     req.ProjectID,
+		ExecutionID:   req.ExecID,
+		QuestionsJSON: string(questionsJSON),
+		ExpiresAt:     req.ExpiresAt,
+	})
+}
+
+func (h *Handler) persistChatInputRequestResolution(ctx context.Context, id, projectID string, answers []chatInputRequestAnswer) error {
+	if h == nil || h.chatInputRequestRepo == nil {
+		return nil
+	}
+	answersJSON, err := json.Marshal(cloneChatInputAnswers(answers))
+	if err != nil {
+		return fmt.Errorf("encoding chat input request answers: %w", err)
+	}
+	_, err = h.chatInputRequestRepo.Resolve(ctx, id, projectID, string(answersJSON))
+	return err
+}
+
+func (h *Handler) listChatInputRequests(ctx context.Context, projectID string) ([]*chatInputRequest, error) {
+	live := h.chatInputRequests.listProject(projectID)
+	byID := make(map[string]*chatInputRequest, len(live))
+	for _, req := range live {
+		byID[req.ID] = req
+	}
+	if h == nil || h.chatInputRequestRepo == nil {
+		return live, nil
+	}
+	records, err := h.chatInputRequestRepo.ListActiveByProject(ctx, projectID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		if _, exists := byID[record.ID]; exists {
+			continue
+		}
+		req, err := chatInputRequestFromRecord(record)
+		if err != nil {
+			return nil, err
+		}
+		byID[req.ID] = req
+		live = append(live, req)
+	}
+	sort.Slice(live, func(i, j int) bool { return live[i].CreatedAt.Before(live[j].CreatedAt) })
+	return live, nil
+}
+
+func (h *Handler) resolvePersistedChatInputRequest(ctx context.Context, id, projectID string, answers []chatInputRequestAnswer) (*chatInputRequest, bool, error) {
+	if h == nil || h.chatInputRequestRepo == nil {
+		return nil, false, echo.NewHTTPError(http.StatusGone, "input request is missing, expired, or already resolved")
+	}
+	record, err := h.chatInputRequestRepo.Get(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if record == nil || record.ProjectID != projectID || record.Status != repository.ChatInputRequestPending || !time.Now().Before(record.ExpiresAt) {
+		return nil, false, echo.NewHTTPError(http.StatusGone, "input request is missing, expired, or already resolved")
+	}
+	req, err := chatInputRequestFromRecord(*record)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := validateChatInputAnswers(req.Questions, answers); err != nil {
+		return nil, false, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	req.resolved = true
+	req.Answers = cloneChatInputAnswers(answers)
+	if err := h.persistChatInputRequestResolution(ctx, id, projectID, req.Answers); err != nil {
+		return nil, false, err
+	}
+	return req, true, nil
+}
+
+func (h *Handler) completeRecoveredChatInputExecution(ctx context.Context, req *chatInputRequest) {
+	if h == nil || h.execRepo == nil || req == nil || strings.TrimSpace(req.ExecID) == "" {
+		return
+	}
+	exec, err := h.execRepo.GetByID(ctx, req.ExecID)
+	if err != nil || exec == nil || (exec.Status != models.ExecRunning && exec.Status != models.ExecQueued) {
+		return
+	}
+	_ = h.execRepo.Complete(ctx, req.ExecID, models.ExecFailed, "", "The app restarted while waiting for this input request, so the original response cannot resume. Send a new Chat message to continue.", 0, 0)
+	h.PromoteQueuedChatInput(req.ProjectID)
+}
+
+func chatInputRequestFromRecord(record repository.ChatInputRequestRecord) (*chatInputRequest, error) {
+	var questions []chatInputRequestQuestion
+	if err := json.Unmarshal([]byte(record.QuestionsJSON), &questions); err != nil {
+		return nil, fmt.Errorf("decoding chat input request questions: %w", err)
+	}
+	var answers []chatInputRequestAnswer
+	if strings.TrimSpace(record.AnswersJSON) != "" {
+		if err := json.Unmarshal([]byte(record.AnswersJSON), &answers); err != nil {
+			return nil, fmt.Errorf("decoding chat input request answers: %w", err)
+		}
+	}
+	return &chatInputRequest{
+		ID:        record.ID,
+		ProjectID: record.ProjectID,
+		ExecID:    record.ExecutionID,
+		Questions: cloneChatInputQuestions(questions),
+		Answers:   cloneChatInputAnswers(answers),
+		CreatedAt: record.CreatedAt,
+		ExpiresAt: record.ExpiresAt,
+		answerCh:  make(chan []chatInputRequestAnswer, 1),
+		resolved:  record.Status == repository.ChatInputRequestResolved,
+	}, nil
 }
 
 func chatInputRequestForEvent(req *chatInputRequest) *events.ChatInputRequestEvent {
