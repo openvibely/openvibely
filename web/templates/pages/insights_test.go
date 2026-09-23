@@ -158,8 +158,8 @@ func TestHealthCheckDisplay_ShowsActivePendingMetric(t *testing.T) {
 		TasksPending: 0,
 		CreatedAt:    created,
 	}, nil))
-	if !strings.Contains(zero, `stat-title text-xs">Pending`) {
-		t.Fatalf("expected pending=0 health card to keep the Pending label\n%s", zero)
+	if !strings.Contains(zero, `stat-title text-xs">Pending</div><div class="stat-value text-lg ">0</div>`) {
+		t.Fatalf("expected pending=0 health card to show the Pending metric with value 0\n%s", zero)
 	}
 	if strings.Count(zero, `stat-title text-xs">Pending`) != 1 {
 		t.Fatalf("pending metric should render once\n%s", zero)
