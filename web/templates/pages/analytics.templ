@@ -159,10 +159,13 @@ templ analyticsContent(currentProject *models.Project) {
 						@analyticsChartCard("Run time per task by model", "Median total run time per task for runs started in the selected period. Includes scheduled tasks; excludes waiting between runs and unfinished runs. Mixed models excluded.", "modelTimeChart", "h-80")
 						@analyticsChartCard("Tokens per task by model", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
 					</div>
-					<p class="text-sm opacity-60">Trends show the six busiest single-model configurations, grouped by each task's latest activity date in the selected period. Goal and merge statuses reflect what is known now.</p>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsChartCard("Goal achievement over time", "Are more tasks meeting their goals? Hover for each period's task count. Missing evidence leaves a gap.", "modelGoalsTrendChart", "h-80")
-						@analyticsChartCard("Merged work over time", "Are more eligible tasks getting delivered? This is separate from whether their goals were met.", "modelMergesTrendChart", "h-80")
+						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
+							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Task outcomes over time</h4><select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
+							<p class="text-sm opacity-60">Six busiest models. Current outcomes grouped by each task’s latest activity date—not the date its goal or merge happened. Missing evidence leaves a gap.</p>
+							<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelOutcomesChart"></canvas></div></div>
+						</div></div>
+						@analyticsChartCard("Follow-ups per task by model", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
 					</div>
 				</section>
 
@@ -327,7 +330,7 @@ templ analyticsContent(currentProject *models.Project) {
 								if (!canvas) return null;
 								const chartLabels = { projectOutcomeTrendChart: 'Project outcome trend', cycleDistributionChart: 'Task duration distribution', followupDistributionChart: 'Follow-up run distribution', failedPatternsChart: 'Failed task patterns', agentComparisonChart: 'Agent outcome comparison', agentEfficiencyChart: 'Agent quality versus efficiency', agentCategoryChart: 'Selected Agent performance by task category', automationComparisonChart: 'Automation comparison', automationFunnelChart: 'Automation node funnel', automationDurationChart: 'Automation duration by node', automationFailureChart: 'Automation failures by node', automationBottleneckChart: 'Automation bottlenecks by node', skillUsageTrendChart: 'Skill activity over time', skillTopChart: 'Top skills by activity', skillFollowChart: 'Skill selection follow-through', skillAgentChart: 'Agent and skill activity pairs', skillOutcomeChart: 'Observed skill outcomes', skillEffectivenessChart: 'Skill outcomes versus usage', usageRateChart: 'Token usage over time', modelTokenBreakdownChart: 'Model breakdown by tokens', successFailureChart: 'Run results over time', hourlyTrendsChart: 'Runs by hour', avgTimeTaskChart: 'Average run duration by task', agentOutcomeTrendChart: 'Selected Agent run outcomes over time' };
 								canvas.setAttribute('role', 'img');
-								canvas.setAttribute('aria-label', chartLabels[canvasID] || ({modelTimeChart:'Run time per task by model',modelTokensChart:'Tokens per task by model',modelGoalsTrendChart:'Goal achievement over time',modelMergesTrendChart:'Merged work over time'})[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
+								canvas.setAttribute('aria-label', chartLabels[canvasID] || ({modelTimeChart:'Run time per task by model',modelTokensChart:'Tokens per task by model',modelOutcomesChart:'Task outcomes over time',modelFollowupsChart:'Follow-ups per task by model'})[canvasID] || 'Analytics chart');							const old = canvas.parentElement.querySelector('[data-analytics-chart-state]');
 							if (old) old.remove();
 							if (!rows || rows.length === 0) {
 								canvas.classList.add('hidden');
@@ -374,7 +377,7 @@ templ analyticsContent(currentProject *models.Project) {
 									overview: { projectOutcomeTrend: 'projectOutcomeTrendChart' },
 							outcomes: { cycleDistribution: 'cycleDistributionChart', followupDistribution: 'followupDistributionChart', successFailure: 'successFailureChart', hourlyTrends: 'hourlyTrendsChart', avgTimeTask: 'avgTimeTaskChart', failedPatterns: 'failedPatternsChart' },
 							agents: { agentComparison: 'agentComparisonChart', agentEfficiency: 'agentEfficiencyChart', agentOutcomeTrend: 'agentOutcomeTrendChart', agentCategory: 'agentCategoryChart' },
-							models: { modelTime: 'modelTimeChart', modelTokens: 'modelTokensChart', modelGoalsTrend: 'modelGoalsTrendChart', modelMergesTrend: 'modelMergesTrendChart' },
+							models: { modelTime: 'modelTimeChart', modelTokens: 'modelTokensChart', modelOutcomes: 'modelOutcomesChart', modelFollowups: 'modelFollowupsChart' },
 							automations: { automationComparison: 'automationComparisonChart', automationFunnel: 'automationFunnelChart', automationDuration: 'automationDurationChart', automationFailure: 'automationFailureChart', automationBottleneck: 'automationBottleneckChart' },
 									learning: { skillUsageTrend: 'skillUsageTrendChart', skillTop: 'skillTopChart', skillFollow: 'skillFollowChart', skillAgent: 'skillAgentChart', skillOutcome: 'skillOutcomeChart', skillEffectiveness: 'skillEffectivenessChart' },
 									usage: { usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart' }
@@ -765,15 +768,17 @@ templ analyticsContent(currentProject *models.Project) {
 								function trend(key,id,metric) {
 									const supported=busiest.filter(r=>(r.outcome_trend||[]).some(p=>p[metric]&&p[metric].denominator>0));
 									const canvas=renderChartState(key,id,supported,'No outcome evidence in this period');if(!canvas)return;
+									canvas.parentElement.style.minWidth=Math.max(320,periods.length*Math.max(72,supported.length*20))+'px';
 									const datasets=supported.map(function(r){
 										const points=new Map((r.outcome_trend||[]).map(p=>[p.period,p[metric]]));
-										return {label:modelConfigLabel(r),data:periods.map(p=>{const m=points.get(p);return m&&m.denominator>0?m.percent:null;}),borderColor:modelChartColor(r),backgroundColor:modelChartColor(r),pointRadius:4,pointHoverRadius:6,clip:false,spanGaps:false};
+										return {label:modelConfigLabel(r),data:periods.map(p=>{const m=points.get(p);return m&&m.denominator>0?m.percent:null;}),borderColor:modelChartColor(r),backgroundColor:modelChartColor(r),maxBarThickness:32};
 									});
-									charts[key]=new Chart(canvas.getContext('2d'),{type:'line',data:{labels:periods,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:10,right:10}},plugins:{legend:{position:'bottom',labels:{boxWidth:12}},tooltip:{callbacks:{label:function(item){const r=supported[item.datasetIndex],p=r.outcome_trend.find(p=>p.period===periods[item.dataIndex]),m=p[metric];return modelConfigLabel(r)+': '+Number(m.percent).toFixed(1)+'% · '+m.numerator+'/'+m.denominator+' tasks';}}}},scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}},x:{title:{display:true,text:'Task finish period'},ticks:{maxTicksLimit:8}}}}});
+									charts[key]=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:periods,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:10,right:10}},plugins:{legend:{position:'bottom',labels:{boxWidth:12}},tooltip:{callbacks:{label:function(item){const r=supported[item.datasetIndex],p=r.outcome_trend.find(p=>p.period===periods[item.dataIndex]),m=p[metric];return modelConfigLabel(r)+': '+Number(m.percent).toFixed(1)+'% · '+m.numerator+'/'+m.denominator+' tasks';}}}},scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}},x:{title:{display:true,text:'Latest task activity period'},ticks:{maxTicksLimit:8}}}}});
 								}
-								trend('modelGoalsTrend','modelGoalsTrendChart','goal_achievement');
-								trend('modelMergesTrend','modelMergesTrendChart','merge_completion');
+								trend('modelOutcomes','modelOutcomesChart',document.getElementById('modelOutcomeMetric').value);
+								bar('modelFollowups','modelFollowupsChart',models.filter(r=>r.tasks_used>0),r=>Number(r.average_follow_ups||0),n=>Number(n).toFixed(1),r=>r.tasks_used,'Follow-up runs / task');
 							}
+							document.getElementById('modelOutcomeMetric').addEventListener('change',function(){if(latestDashboard)renderModelCharts(latestDashboard.models||[]);},{signal:eventSignal});
 							function renderModelPerformance(rows) {
 								renderModelCharts(rows);
 								const ordered=rows.slice().sort((a,b)=>Number(!!a.mixed_models)-Number(!!b.mixed_models)||Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
