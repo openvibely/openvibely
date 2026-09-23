@@ -1678,6 +1678,14 @@ templ analyticsContent(currentProject *models.Project) {
 								loadAllData(false);
 							}, { signal: eventSignal });
 							window.addEventListener('popstate', function() { restoreURLState(); loadAllData(false); }, { signal: eventSignal });						restoreURLState();
+						// HTMX settles incoming class attributes after scripts initialize.
+						// Reapply the chosen view once those attributes are finalized.
+						document.addEventListener('htmx:afterSettle', function(event) {
+							const target=(event.detail&&event.detail.target)||event.target;
+							if(!target||!target.closest||!target.closest('#main-content')||analyticsGeneration!==window._analyticsGeneration)return;
+							applyView(selectedView,false);
+							Object.values(charts).forEach(function(chart){if(chart&&typeof chart.resize==='function')chart.resize();});
+						}, {signal:eventSignal});
 						setupModelHelp();
 						loadAllData(false);
 				}
