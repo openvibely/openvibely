@@ -531,6 +531,44 @@ func TestBrowserFunctional_AnalyticsContent_DirectFilteredURLAppliesFirstRequest
 	runReconnectChromeFixture(t, fixture)
 }
 
+func TestBrowserFunctional_AnalyticsContent_ModelAndAgentLoadingInChrome(t *testing.T) {
+	for _, view := range []string{"models", "agents"} {
+		t.Run(view, func(t *testing.T) {
+			var rendered bytes.Buffer
+			if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project"}).Render(context.Background(), &rendered); err != nil {
+				t.Fatal(err)
+			}
+			fixture := `<main id="reconnect-result"></main><script>
+(function(){
+  history.replaceState({},'',location.pathname+'?project_id=project-1&view=__VIEW__');
+  var result=document.getElementById('reconnect-result'),calls=0;
+  var ids='__VIEW__'==='models'?['modelScorecard']:['agentFindings','agentPerformanceTable','agentEvidenceTable','agentCategoryTable','agentFailureTable','agentSkillTable'];
+  function fail(message){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',message);throw new Error(message);}
+  window.Chart=function(){this.destroy=function(){};};
+  window.fetch=function(){
+    calls++;
+    ids.forEach(function(id){var node=document.getElementById(id),p=node.querySelector('[data-panel-loading-text]');if(node.getAttribute('aria-busy')!=='true'||!p||p.textContent!=='Loading analytics…'||p.className!=='text-center opacity-50 py-12')fail('inconsistent loading: '+id);});
+    if(calls===3)return Promise.reject(new Error('test error'));
+    return Promise.resolve({ok:true,json:function(){return Promise.resolve({current:{},definitions:[],agents:[],models:[],recent_outcomes:[],insights:[]});}});
+  };
+  function wait(n){
+    if(result.getAttribute('data-test-result')==='fail')return;
+    var pending=ids.some(function(id){return document.getElementById(id).hasAttribute('aria-busy');});
+    if(calls&&!pending){
+      if(calls<3){document.getElementById('refreshBtn').click();setTimeout(function(){wait(n+1);},20);return;}
+      ids.forEach(function(id){if(document.getElementById(id).textContent.indexOf('Loading analytics')>=0)fail('loading survived error: '+id);});
+      result.setAttribute('data-test-result','pass');return;
+    }
+    if(n>100)fail('loading did not settle');setTimeout(function(){wait(n+1);},20);
+  }
+  window.addEventListener('load',function(){wait(0);});
+})();
+</script>` + rendered.String()
+			runReconnectChromeFixture(t, strings.ReplaceAll(fixture, "__VIEW__", view))
+		})
+	}
+}
+
 func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHoverInChrome(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 	var rendered bytes.Buffer

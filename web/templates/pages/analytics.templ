@@ -83,7 +83,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Agent outcome comparison", "Goal achievement, first-run success, and follow-up runs with sample sizes.", "agentComparisonChart", "h-80") @analyticsChartCard("Quality versus efficiency", "Outcome quality against duration or covered cost.", "agentEfficiencyChart", "h-80")</div>
 					<div id="agentDetail">@analyticsChartCard("Selected Agent outcome trend", "Select an Agent for period detail.", "agentOutcomeTrendChart", "h-64")</div>
 					@analyticsChartCard("Performance by task category", "Run success, goal achievement, and follow-up runs for the selected Agent.", "agentCategoryChart", "h-72")
-					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Agent findings</h4><div id="agentFindings"></div></div></div>
+					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Agent findings</h4><div id="agentFindings" style="min-height:7.5rem"></div></div></div>
 					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact values and category evidence</summary><div class="collapse-content space-y-4"><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th>Agent</th><th>Tasks</th><th>Run success</th><th>Goal</th><th>First-run success</th><th>Follow-up runs</th><th>Task duration</th><th>Cost / goal</th></tr></thead><tbody id="agentPerformanceTable"></tbody></table></div><table class="table table-sm"><tbody id="agentCategoryTable"></tbody></table><table class="table table-sm"><tbody id="agentFailureTable"></tbody></table><table class="table table-sm"><tbody id="agentSkillTable"></tbody></table></div></details>
 					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Supporting Agent tasks</summary><div class="collapse-content"><table class="table table-sm"><tbody id="agentEvidenceTable"></tbody></table></div></details>
 				</section>
@@ -101,7 +101,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="card bg-base-100 border border-base-300"><div class="card-body">
 						<h4 class="card-title">Model comparison</h4>
 						<p class="text-sm opacity-60">Goals met, work delivered, and the effort required. Follow-ups can reflect changed goals—not just corrections.</p>
-						<div id="modelScorecard" class="overflow-x-auto"></div>
+						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						@analyticsChartCard("Task time by model", "Median elapsed task time, including gaps between runs. Lower means faster—not necessarily better outcomes. Mixed models excluded.", "modelTimeChart", "h-80")
@@ -236,6 +236,7 @@ templ analyticsContent(currentProject *models.Project) {
 							delete charts[key];
 						}
 							function showAnalyticsError(error) {
+								finishPanelLoading(true);
 								if (error && error.name === 'AbortError') return;
 								Object.keys(charts).forEach(destroyChart);								const box = document.getElementById('analyticsError');
 								box.textContent = error && error.message ? error.message : 'Analytics request failed';
@@ -274,7 +275,24 @@ templ analyticsContent(currentProject *models.Project) {
 							return canvas;
 						}
 
+							function finishPanelLoading(failed) {
+								document.querySelectorAll('[data-analytics-panel-loading]').forEach(function(target){
+									target.style.minHeight=target.dataset.analyticsPanelLoading;
+									delete target.dataset.analyticsPanelLoading;target.removeAttribute('aria-busy');
+									if(failed){const state=target.querySelector('[data-panel-loading-text]');if(state)state.textContent='Analytics unavailable';}
+								});
+							}
 							function showAnalyticsLoading() {
+								const panels=selectedView==='models'?[['modelScorecard',0]]:selectedView==='agents'?[['agentFindings',0],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5]]:[];
+								panels.forEach(function(entry){
+									const target=document.getElementById(entry[0]);if(!target)return;
+									const height=Math.max(120,target.getBoundingClientRect().height);
+									if(!target.hasAttribute('data-analytics-panel-loading'))target.dataset.analyticsPanelLoading=target.style.minHeight;
+									target.setAttribute('aria-busy','true');
+									const text=document.createElement('p');text.className='text-center opacity-50 py-12';text.dataset.panelLoadingText='';text.textContent='Loading analytics…';
+									if(entry[1]){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=entry[1];cell.style.height=height+'px';cell.appendChild(text);row.appendChild(cell);target.replaceChildren(row);}
+									else {target.style.minHeight=height+'px';target.replaceChildren(text);}
+								});
 								if(selectedView==='usage') {
 									document.querySelectorAll('[data-usage-summary-value]').forEach(node=>{node.textContent='Loading analytics…';node.className='text-center opacity-50 font-normal text-base';});
 									function loadingText(target){const p=document.createElement('p');p.className='text-center opacity-50 py-12';p.textContent='Loading analytics…';target.replaceChildren(p);}
@@ -411,6 +429,7 @@ templ analyticsContent(currentProject *models.Project) {
 							target.innerHTML=lines.join('');
 						}
 						function renderDashboard(data) {
+							finishPanelLoading(false);
 							const current = data.current || {};
 							const previous = data.previous || null;
 							const definitionList = document.getElementById('analyticsMetricDefinitions');
