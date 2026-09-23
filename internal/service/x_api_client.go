@@ -17,9 +17,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
-const xAPIBaseURL = "https://api.x.com"
+const (
+	xAPIBaseURL      = "https://api.x.com"
+	xMaxRetryBackoff = time.Minute
+)
 
 type XCredentials struct{ ConsumerKey, ConsumerSecret, AccessToken, AccessTokenSecret string }
 
@@ -57,14 +62,14 @@ type XAPIClient struct {
 	credentials XCredentials
 	now         func() time.Time
 	nonce       func() string
-	sleep       func(context.Context, time.Duration) error
-	maxAttempts int
+	after       func(time.Duration) <-chan time.Time
+	maxRetries  int
 }
 
 func NewXAPIClient(credentials XCredentials) *XAPIClient {
 	return &XAPIClient{baseURL: xAPIBaseURL, client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
-	}}, credentials: credentials, now: time.Now, nonce: xNonce, sleep: sleepContext, maxAttempts: 3}
+	}}, credentials: credentials, now: time.Now, nonce: xNonce, after: time.After, maxRetries: 2}
 }
 
 func xNonce() string {
@@ -74,17 +79,6 @@ func xNonce() string {
 	}
 	return hex.EncodeToString(b[:])
 }
-func sleepContext(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
-}
-
 func (c *XAPIClient) Me(ctx context.Context) (XUser, error) {
 	var out struct {
 		Data XUser `json:"data"`
@@ -140,92 +134,103 @@ func (c *XAPIClient) doJSON(ctx context.Context, method, path string, query url.
 			return err
 		}
 	}
-	attempts := c.maxAttempts
-	if attempts < 1 {
-		attempts = 1
+	policy := httpretry.DefaultPolicy()
+	policy.MaxRetries = c.maxRetries
+	policy.MaxBackoff = xMaxRetryBackoff
+	policy.After = c.after
+	policy.Now = c.now
+	policy.RetryableResponse = func(resp *http.Response) bool {
+		return resp.StatusCode == http.StatusTooManyRequests
 	}
-	for attempt := 1; attempt <= attempts; attempt++ {
+	policy.WrapNetworkError = func(err error) error {
+		return fmt.Errorf("X API request failed: %w", err)
+	}
+	resp, err := httpretry.Do(ctx, xRetryHeaderDoer{client: c.client, now: c.now}, func() (*http.Request, error) {
 		u, err := url.Parse(strings.TrimRight(c.baseURL, "/") + path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		u.RawQuery = query.Encode()
 		req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(body))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Authorization", c.authorization(method, u))
-		resp, err := c.client.Do(req)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if !xMethodRetryable(method) || attempt == attempts {
-				return fmt.Errorf("X API request failed: %w", err)
-			}
-			if err := c.sleep(ctx, time.Duration(attempt)*time.Second); err != nil {
-				return err
-			}
-			continue
-		}
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
-		resp.Body.Close()
-		if readErr != nil {
-			return fmt.Errorf("read X API response: %w", readErr)
-		}
-		if len(data) > 1<<20 {
-			return fmt.Errorf("X API response exceeded 1 MiB")
-		}
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if len(bytes.TrimSpace(data)) == 0 {
-				return fmt.Errorf("X API returned an empty response")
-			}
-			if err := json.Unmarshal(data, out); err != nil {
-				return fmt.Errorf("decode X API response: %w", err)
-			}
-			return nil
-		}
-		if xMethodRetryable(method) && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500) && attempt < attempts {
-			delay := xRetryDelay(resp, attempt, c.now())
-			if err := c.sleep(ctx, delay); err != nil {
-				return err
-			}
-			continue
-		}
-		return fmt.Errorf("X API returned %s: %s", resp.Status, xProviderError(data))
+		return req, nil
+	}, policy)
+	if err != nil {
+		return err
 	}
-	return fmt.Errorf("X API request failed")
+	defer resp.Body.Close()
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20+1))
+	if readErr != nil {
+		return fmt.Errorf("read X API response: %w", readErr)
+	}
+	if len(data) > 1<<20 {
+		return fmt.Errorf("X API response exceeded 1 MiB")
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if len(bytes.TrimSpace(data)) == 0 {
+			return fmt.Errorf("X API returned an empty response")
+		}
+		if err := json.Unmarshal(data, out); err != nil {
+			return fmt.Errorf("decode X API response: %w", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("X API returned %s: %s", resp.Status, xProviderError(data))
 }
 
-func xMethodRetryable(method string) bool {
-	return method == http.MethodGet || method == http.MethodHead
+type xRetryHeaderDoer struct {
+	client httpretry.Doer
+	now    func() time.Time
 }
 
-func xRetryDelay(resp *http.Response, attempt int, now time.Time) time.Duration {
-	if v := strings.TrimSpace(resp.Header.Get("Retry-After")); v != "" {
-		if seconds, ok := xBoundedDecimal(v, 60); ok {
-			return time.Duration(seconds) * time.Second
-		}
+func (d xRetryHeaderDoer) Do(req *http.Request) (*http.Response, error) {
+	resp, err := d.client.Do(req)
+	if err != nil || resp == nil {
+		return resp, err
 	}
-	if v := strings.TrimSpace(resp.Header.Get("x-rate-limit-reset")); v != "" {
-		if unix, err := strconv.ParseInt(v, 10, 64); err == nil {
-			d := time.Unix(unix, 0).Sub(now)
-			if d > 0 {
-				if d > time.Minute {
-					return time.Minute
-				}
-				return d
-			}
-		}
-	}
-	return time.Duration(attempt) * time.Second
+	xNormalizeRetryHeaders(resp, d.now())
+	return resp, nil
 }
 
-func xBoundedDecimal(value string, maximum uint64) (uint64, bool) {
+func xNormalizeRetryHeaders(resp *http.Response, now time.Time) {
+	if resp == nil {
+		return
+	}
+	maxSeconds := uint64(xMaxRetryBackoff / time.Second)
+	if seconds, ok := xBoundedRetryAfterSeconds(strings.TrimSpace(resp.Header.Get("Retry-After")), maxSeconds); ok {
+		resp.Header.Set("Retry-After", strconv.FormatUint(seconds, 10))
+		return
+	}
+	reset := strings.TrimSpace(resp.Header.Get("x-rate-limit-reset"))
+	if reset == "" {
+		return
+	}
+	unix, err := strconv.ParseInt(reset, 10, 64)
+	if err != nil {
+		return
+	}
+	delay := time.Unix(unix, 0).Sub(now)
+	if delay <= 0 {
+		return
+	}
+	if delay > xMaxRetryBackoff {
+		delay = xMaxRetryBackoff
+	}
+	seconds := uint64((delay + time.Second - 1) / time.Second)
+	if seconds == 0 {
+		seconds = 1
+	}
+	resp.Header.Set("Retry-After", strconv.FormatUint(seconds, 10))
+}
+
+func xBoundedRetryAfterSeconds(value string, maximum uint64) (uint64, bool) {
 	if value == "" {
 		return 0, false
 	}
