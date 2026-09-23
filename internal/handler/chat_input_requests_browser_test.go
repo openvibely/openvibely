@@ -79,6 +79,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 
 	result := make(chan string, 1)
 	var answerAttempts atomic.Int32
+	var firstAnswerBody atomic.Value
 	runner := fmt.Sprintf(`<script>
 	(async function() {
 		function report(status, message) {
@@ -108,47 +109,55 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 			if (!card.textContent.includes('<img src=x onerror=alert(1)> Should I create a task?')) fail('question text was not rendered as inert text');
 			if (card.querySelector('img') || card.querySelector('b')) fail('model-provided markup was rendered as HTML');
 			if (card.querySelectorAll('[data-chat-input-question-index]:not(.hidden)').length !== 1) fail('expected exactly one visible question');
-				if (!/1 of 2/.test(card.textContent)) fail('question position was not shown');
-				var buttons = Array.prototype.slice.call(card.querySelectorAll('button[data-chat-input-option]'));
-				if (buttons.length !== 6) fail('expected options plus a custom-answer choice for each question, saw ' + buttons.length);
+			if (!/1 of 2/.test(card.textContent)) fail('question position was not shown');
+			var buttons = Array.prototype.slice.call(card.querySelectorAll('button[data-chat-input-option]'));
+			if (buttons.length !== 6) fail('expected options plus a custom-answer choice for each question, saw ' + buttons.length);
 				var createButton = buttons.filter(function(button) { return button.textContent.indexOf('Create task') !== -1; })[0];
 				if (!createButton) fail('create option button missing');
 				if (createButton.getAttribute('aria-pressed') !== 'false') fail('recommended option was preselected before user click');
 				if (createButton.textContent.indexOf('Recommended') === -1) fail('recommended option was not visually labeled');
+				if (createButton.classList.contains('btn-outline') || createButton.classList.contains('btn-primary')) fail('question option still uses distracting DaisyUI outline/primary styling');
+				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
 				if (getComputedStyle(createButton).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
+				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
+				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
+				if (getComputedStyle(recommendedShortcut).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('recommended shortcut can still shrink on click');
 				var nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || !nextButton.disabled) fail('Next should stay disabled until the user selects an answer');
+				recommendedShortcut.click();
+				await waitFor(function() { return !recommendedShortcut.disabled && /Unable to submit answer/.test(card.textContent); }, 'failed recommended shortcut did not re-enable controls with retry error');
+				if (card.getAttribute('data-submitted') === 'true') fail('failed recommended shortcut left card marked submitted');
 				createButton.click();
 				await waitFor(function() { return /2 of 2/.test(card.textContent) && card.textContent.indexOf('Which fallback should be used?') !== -1; }, 'clicking recommended option did not show the second question');
 				card.querySelector('button[data-chat-input-nav="previous"]').click();
 				await waitFor(function() { return /1 of 2/.test(card.textContent); }, 'Previous did not return to the first question');
 				nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || nextButton.disabled) fail('Next should be enabled after the user selects the recommended option');
+				if (!createButton.classList.contains('chat-input-option-selected')) fail('selected option did not use the local selected styling');
+				if (createButton.classList.contains('btn-primary')) fail('selected option fell back to distracting primary button styling');
 				nextButton.click();
 				await waitFor(function() { return /2 of 2/.test(card.textContent) && card.textContent.indexOf('Which fallback should be used?') !== -1; }, 'Next did not show the second question');
 				card.querySelector('button[data-chat-input-nav="previous"]').click();
 				var notNowButton = buttons.filter(function(button) { return button.textContent.indexOf('Not now') !== -1; })[0];
-					notNowButton.click();
-					await waitFor(function() { return /2 of 2/.test(card.textContent); }, 'option selection did not automatically advance');			var customButton = card.querySelector('[data-chat-input-question-id="fallback"] [data-chat-input-custom-option]');
-			if (!customButton) fail('custom-answer option missing');
-			customButton.click();
-			var customInput = card.querySelector('[data-chat-input-question-id="fallback"] [data-chat-input-custom-answer]');
-			if (!customInput || customInput.closest('[data-chat-input-custom-wrap]').classList.contains('hidden')) fail('custom-answer input was not shown');
-			customInput.value = 'Use the deployment-configured fallback';
-			customInput.dispatchEvent(new Event('input', {bubbles:true}));
-			var submitButton = card.querySelector('button[data-chat-input-nav="submit"]');
-			if (!submitButton || submitButton.disabled) fail('Submit was not enabled after every question was answered');
-			submitButton.click();
-			await waitFor(function() { return !submitButton.disabled && /Unable to submit answer/.test(card.textContent); }, 'failed submission did not re-enable controls with retry error');
-			if (card.getAttribute('data-submitted') === 'true') fail('failed submission left card marked submitted');
-			submitButton.click();
-			await waitFor(function() { return card.getAttribute('data-completed') === 'true'; }, 'successful submission did not complete card');
-			await nextFrame();
-			buttons = Array.prototype.slice.call(card.querySelectorAll('button[data-chat-input-option]'));
+				notNowButton.click();
+				await waitFor(function() { return /2 of 2/.test(card.textContent); }, 'option selection did not automatically advance');
+				var customButton = card.querySelector('[data-chat-input-question-id="fallback"] [data-chat-input-custom-option]');
+				if (!customButton) fail('custom-answer option missing');
+				customButton.click();
+				var customInput = card.querySelector('[data-chat-input-question-id="fallback"] [data-chat-input-custom-answer]');
+				if (!customInput || customInput.closest('[data-chat-input-custom-wrap]').classList.contains('hidden')) fail('custom-answer input was not shown');
+				customInput.value = 'Use the deployment-configured fallback';
+				customInput.dispatchEvent(new Event('input', {bubbles:true}));
+				var submitButton = card.querySelector('button[data-chat-input-nav="submit"]');
+				if (!submitButton || submitButton.disabled) fail('Submit was not enabled after every question was answered');
+				submitButton.click();
+				await waitFor(function() { return card.getAttribute('data-completed') === 'true'; }, 'successful submission did not complete card');
+				await nextFrame();
+				buttons = Array.prototype.slice.call(card.querySelectorAll('button[data-chat-input-option]'));
 			if (buttons.length !== 0) fail('completed question retained actionable controls');
-			if (!/Asked 2 questions/.test(card.textContent)) fail('completed question summary was not shown');
-			if (!/Not now/.test(card.textContent) || !/Use the deployment-configured fallback/.test(card.textContent)) fail('selected answers were not retained in collapsed details');
-			if (card.querySelector('details').open) fail('completed question details should start collapsed');
+				if (!/Asked 2 questions/.test(card.textContent)) fail('completed question summary was not shown');
+				if (!/Not now/.test(card.textContent) || !/Use the deployment-configured fallback/.test(card.textContent)) fail('selected answers were not retained in collapsed details');
+				if (card.querySelector('details').open) fail('completed question details should start collapsed');
 			await report('pass', 'input request browser interaction passed');
 		} catch (error) {
 			await report('fail', String(error && error.stack || error));
@@ -167,6 +176,8 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/chat/input-requests/") && strings.HasSuffix(r.URL.Path, "/answer") && answerAttempts.Add(1) == 1 {
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+			firstAnswerBody.Store(string(body))
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = io.WriteString(w, "intentional first submit failure")
 			return
@@ -208,6 +219,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 	case <-time.After(45 * time.Second):
 		t.Fatal("input request browser regression timed out")
 	}
+	require.JSONEq(t, `{"project_id":"`+project.ID+`","answers":[{"question_id":"create","label":"Create task"},{"question_id":"fallback","label":"Provider-aware"}]}`, firstAnswerBody.Load().(string))
 	require.Equal(t, int32(2), answerAttempts.Load())
 }
 
