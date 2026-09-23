@@ -425,6 +425,65 @@ func (a staticProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts
 	return a.result, a.err
 }
 
+func TestUsageAnalyticsService_RefreshesProvidersInParallel(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	usageRepo := repository.NewUsageRepo(db)
+	configRepo := repository.NewLLMConfigRepo(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
+		config := &models.LLMConfig{Name: string(provider), Provider: provider, Model: "test", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "test-token", OAuthAccountID: string(provider)}
+		if err := configRepo.Create(ctx, config); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{Provider: "openai", Model: "test", Operation: "task", InputTokens: 10, OutputTokens: 5}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewUsageAnalyticsService(usageRepo, configRepo)
+	started := make(chan models.LLMProvider, 2)
+	release := make(chan struct{})
+	svc.accountFetcher = func(ctx context.Context, cfg models.LLMConfig) (*models.AccountUsageSnapshot, error) {
+		started <- cfg.Provider
+		select {
+		case <-release:
+			return &models.AccountUsageSnapshot{Provider: string(cfg.Provider), AccountID: cfg.OAuthAccountID, AgentConfigID: cfg.ID}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	type result struct {
+		view *models.AnalyticsUsageViewModel
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		view, err := svc.BuildAnalyticsUsage(ctx, repository.UsageFilter{Refresh: true})
+		done <- result{view, err}
+	}()
+	seen := map[models.LLMProvider]bool{}
+	for len(seen) < 2 {
+		select {
+		case provider := <-started:
+			seen[provider] = true
+		case <-ctx.Done():
+			t.Fatal("providers did not start concurrently")
+		}
+	}
+	close(release)
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if len(r.view.AccountLimits) != 2 || r.view.Totals.TotalTokens != 15 {
+			t.Fatalf("missing provider or local results: %+v", r.view)
+		}
+	case <-ctx.Done():
+		t.Fatal("parallel usage request did not finish")
+	}
+}
+
 func TestUsageAnalyticsService_BuildAnalyticsUsageIncludesSnapshotsAndLocalUsage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	usageRepo := repository.NewUsageRepo(db)

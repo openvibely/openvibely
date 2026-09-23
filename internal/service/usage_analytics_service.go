@@ -80,13 +80,35 @@ func (s *UsageAnalyticsService) SetOAuthRefreshers(anthropicRefresh, openAIRefre
 }
 
 func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
-	view, configsByID, refreshErrors, err := s.buildAnalyticsAccountLimitBase(ctx, filter)
-	if err != nil {
-		return nil, err
+	if s == nil || s.usageRepo == nil {
+		return nil, fmt.Errorf("usage analytics service is not configured")
 	}
-	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, refreshErrors); err != nil {
-		return nil, err
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type accountResult struct {
+		view *models.AnalyticsUsageAccountLimitsViewModel
+		err  error
 	}
+	accounts := make(chan accountResult, 1)
+	go func() {
+		view, err := s.BuildAnalyticsAccountLimits(ctx, filter)
+		accounts <- accountResult{view, err}
+	}()
+	view := &models.AnalyticsUsageViewModel{}
+	localErr := s.populateLocalUsageMetrics(ctx, filter, view)
+	if localErr != nil {
+		cancel()
+	}
+	account := <-accounts
+	if localErr != nil {
+		return nil, localErr
+	}
+	if account.err != nil {
+		return nil, account.err
+	}
+	view.AccountLimits = account.view.AccountLimits
+	view.LastUpdatedAt = account.view.LastUpdatedAt
+	view.Errors = account.view.Errors
 	return view, nil
 }
 
@@ -523,7 +545,10 @@ func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, 
 	if err := s.populateAnalyticsAccountLimits(ctx, filter, view, configsByID, refreshErrors); err != nil {
 		return err
 	}
+	return s.populateLocalUsageMetrics(ctx, filter, view)
+}
 
+func (s *UsageAnalyticsService) populateLocalUsageMetrics(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel) error {
 	totals, err := s.usageRepo.GetUsageTotals(ctx, filter)
 	if err != nil {
 		return err
@@ -571,6 +596,37 @@ func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, 
 }
 
 func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
+	if provider != "" {
+		return s.refreshProviderAccountSnapshots(ctx, configs, provider, force)
+	}
+	// Independent providers can refresh concurrently. Keep each provider's
+	// credential fallback and account deduplication sequence intact.
+	type result struct {
+		snapshots []models.AccountUsageSnapshot
+		errors    map[string]string
+	}
+	results := make([]chan result, 0, 2)
+	for _, name := range []string{string(models.ProviderOpenAI), string(models.ProviderAnthropic)} {
+		ch := make(chan result, 1)
+		results = append(results, ch)
+		go func(provider string) {
+			snapshots, errs := s.refreshProviderAccountSnapshots(ctx, configs, provider, force)
+			ch <- result{snapshots, errs}
+		}(name)
+	}
+	var snapshots []models.AccountUsageSnapshot
+	errs := map[string]string{}
+	for _, ch := range results {
+		r := <-ch
+		snapshots = append(snapshots, r.snapshots...)
+		for key, value := range r.errors {
+			errs[key] = value
+		}
+	}
+	return snapshots, errs
+}
+
+func (s *UsageAnalyticsService) refreshProviderAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {
 	if s.accountFetcher == nil {
 		return nil, nil
 	}
