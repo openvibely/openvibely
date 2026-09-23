@@ -385,7 +385,7 @@ func TestSidebar_RoutesTaskBoardUpdatesThroughSharedTaskEvents(t *testing.T) {
 	}
 }
 
-func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
+func TestSidebar_DispatchesMixtureProgressAndChatInputRequestsToLiveListeners(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 
 	var buf bytes.Buffer
@@ -396,6 +396,11 @@ func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
 	html := buf.String()
 	if !strings.Contains(html, `'mixture_progress': handleLiveEvent`) {
 		t.Fatal("shared live SSE listener map must subscribe to mixture_progress")
+	}
+	for _, eventName := range []string{"chat_user_input_requested", "chat_user_input_resolved"} {
+		if !strings.Contains(html, `'`+eventName+`': handleLiveEvent`) {
+			t.Fatalf("shared live SSE listener map must subscribe to %s", eventName)
+		}
 	}
 	chatRouteStart := strings.Index(html, "if (eventType === 'chat_new_message'")
 	if chatRouteStart < 0 {
@@ -408,6 +413,11 @@ func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
 	chatRoute := html[chatRouteStart : chatRouteStart+chatRouteEnd]
 	if !strings.Contains(chatRoute, "eventType === 'mixture_progress'") || !strings.Contains(chatRoute, "window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data)") {
 		t.Fatal("shared live SSE dispatch must route mixture_progress through chat live events")
+	}
+	for _, eventName := range []string{"chat_user_input_requested", "chat_user_input_resolved"} {
+		if !strings.Contains(chatRoute, "eventType === '"+eventName+"'") {
+			t.Fatalf("shared live SSE dispatch must route %s through chat live events", eventName)
+		}
 	}
 	if !strings.Contains(html, "window._tabVisibility.dispatchSSEEvent('sse-task-event', data)") || !strings.Contains(html, "if (eventType === 'mixture_progress')") {
 		t.Fatal("shared live SSE dispatch must also route mixture_progress to task listeners")
