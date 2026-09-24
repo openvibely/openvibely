@@ -272,6 +272,7 @@ type SkillOutcomeSummary struct {
 }
 
 type AnalyticsDashboard struct {
+	ModelEffortTrend     []ModelEffortTrend             `json:"model_effort_trend"`
 	TaskSummary          *AnalyticsTaskSummary          `json:"task_summary,omitempty"`
 	SkillSummary         SkillOutcomeSummary            `json:"skill_summary"`
 	Definitions          []MetricDefinition             `json:"definitions"`

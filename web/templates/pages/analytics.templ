@@ -13,7 +13,7 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 
 templ analyticsModelTrendCard(title, description, key string) {
  <div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
-  <div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">{ title }</h4><select id={ key + "Select" } aria-label={ title + " model" } class="select select-bordered select-xs"><option value="all">Each model</option></select></div>
+  <div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">{ title }</h4><select id={ key + "Select" } aria-label={ title + " model" } class="select select-bordered select-xs"><option value="combined">All models combined</option><option value="all">Each model</option></select></div>
   <p class="text-sm opacity-60">{ description }</p><div class="relative h-80"><canvas id={ key + "Chart" }></canvas></div>
  </div></div>
 }
@@ -876,12 +876,24 @@ templ analyticsContent(currentProject *models.Project) {
 							  if(!spec.run&&!latestDashboard)continue;
 							  const source=spec.run?latestRunActivity.models:rows.filter(r=>!r.mixed_models);
 							  const select=document.getElementById(spec.key+'Select'),previous=select.value;
-							  select.innerHTML='\x3coption value="all">Each model\x3c/option>'+slots.map(r=>'\x3coption value="'+escapeHTML(modelSlotKey(r))+'">'+escapeHTML(modelConfigLabel(r)+' · '+modelDetailLabel(r))+'\x3c/option>').join('');
-							  select.value=slots.some(r=>modelSlotKey(r)===previous)?previous:'all';
+							  select.innerHTML='\x3coption value="combined">All models combined\x3c/option>\x3coption value="all">Each model\x3c/option>'+slots.map(r=>'\x3coption value="'+escapeHTML(modelSlotKey(r))+'">'+escapeHTML(modelConfigLabel(r)+' · '+modelDetailLabel(r))+'\x3c/option>').join('');
+							  select.value=previous==='all'||slots.some(r=>modelSlotKey(r)===previous)?previous:'combined';
 							  select.disabled=!slots.length;
 							  const series=new Map(source.map(r=>[modelSlotKey(r),r[spec.run?'trend':'effort_trend']||[]]));
+							  if(select.value==='combined'){
+							   let combined=(latestDashboard||{}).model_effort_trend||[];
+							   if(spec.run){
+							    const buckets=new Map();
+							    for(const trend of series.values())for(const p of trend){
+							     const b=buckets.get(p.period)||{period:p.period,duration_samples:0,total:0};
+							     b.duration_samples+=Number(p.duration_samples||0);b.total+=Number(p.average_run_ms||0)*Number(p.duration_samples||0);buckets.set(p.period,b);
+							    }
+							    combined=Array.from(buckets.values()).map(p=>({...p,average_run_ms:p.duration_samples?p.total/p.duration_samples:0}));
+							   }
+							   series.clear();series.set('__combined__',combined);
+							  }
 							  const periods=Array.from(new Set(Array.from(series.values()).flat().map(p=>p.period))).sort();
-							  const chosen=slots.filter(r=>select.value==='all'||modelSlotKey(r)===select.value);
+							  const chosen=select.value==='combined'?[{model_config_id:'__combined__',config_name:'All models combined'}]:slots.filter(r=>select.value==='all'||modelSlotKey(r)===select.value);
 							  const points=chosen.map(r=>new Map((series.get(modelSlotKey(r))||[]).map(p=>[p.period,p])));
 							  const hasEvidence=points.some(m=>Array.from(m.values()).some(p=>spec.sample(p)>0));
 							  const canvas=renderChartState(spec.key,spec.key+'Chart',hasEvidence?periods:[],'No recorded samples in this period');if(!canvas)continue;

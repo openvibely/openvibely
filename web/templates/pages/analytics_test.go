@@ -271,6 +271,10 @@ window.addEventListener('load',async function(){
   assert(configs.modelRunTimeChart.data.datasets[0].data[0]===60000,'per-run time incorrect');
   assert(configs.modelTimeChart.data.datasets[0].data[0]===120000,'per-task median lost');
   for(var [key,expected] of [['modelTaskTimeTrend',120000],['modelRunTimeTrend',60000],['modelTokenTrend',50],['modelFollowupTrend',0]]){
+   var select=document.getElementById(key+'Select');
+   assert(select.value==='combined'&&select.options[0].text==='All models combined','combined default missing');
+   if(key==='modelRunTimeTrend')assert(configs[key+'Chart'].data.datasets.length===1&&configs[key+'Chart'].data.datasets[0].data[0]===60000,'combined run time incorrect');
+   select.value='all';select.dispatchEvent(new Event('change'));
    var trend=configs[key+'Chart'];assert(trend.type==='line'&&trend.data.datasets[0].data[0]===expected,'trend metric incorrect: '+key);
    var before={...configs},requestsBefore=calls,select=document.getElementById(key+'Select');
    select.value='m';select.dispatchEvent(new Event('change'));

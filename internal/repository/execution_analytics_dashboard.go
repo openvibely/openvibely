@@ -333,7 +333,7 @@ func (r *ExecutionRepo) GetAnalyticsDashboard(ctx context.Context, filter Analyt
 		}
 	}
 	if sections.models {
-		if dashboard.Models, err = r.queryModelPerformance(ctx, filter); err != nil {
+		if dashboard.Models, err = r.queryModelPerformance(ctx, filter, &dashboard.ModelEffortTrend); err != nil {
 			return dashboard, err
 		}
 		summary := &models.AnalyticsTaskSummary{}
@@ -1249,7 +1249,7 @@ func (r *ExecutionRepo) queryModelCategoryPerformance(ctx context.Context, filte
 	return result, rows.Err()
 }
 
-func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter AnalyticsDashboardFilter) ([]models.ModelPerformance, error) {
+func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter AnalyticsDashboardFilter, combined ...*[]models.ModelEffortTrend) ([]models.ModelPerformance, error) {
 	// Model evaluation includes scheduled and interactive tasks together, even
 	// when an older saved URL or API client still sends a work-type filter.
 	filter.WorkType = ""
@@ -1341,6 +1341,7 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 	}
 	defer rows.Close()
 	result := []models.ModelPerformance{}
+	var effortSamples []string
 	for rows.Next() {
 		var row models.ModelPerformance
 		var completed, terminal, followed, followups, achieved, goalDenom, merged, mergeDenom int
@@ -1353,6 +1354,9 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 			return nil, fmt.Errorf("scanning model performance: %w", err)
 		}
 		row.MixedModels = row.ModelConfigID == "__mixed__"
+		if !row.MixedModels {
+			effortSamples = append(effortSamples, effortJSON)
+		}
 		row.EffortTrend, err = aggregateModelEffortTrend(effortJSON)
 		if err != nil {
 			return nil, err
@@ -1381,6 +1385,12 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 			row.KnownCostUSD = &value
 		}
 		result = append(result, row)
+	}
+	if len(combined) > 0 {
+		*combined[0], err = aggregateModelEffortTrend(effortSamples...)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return result, rows.Err()
 }
