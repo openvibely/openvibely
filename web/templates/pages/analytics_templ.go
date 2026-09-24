@@ -488,11 +488,11 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Task time by model", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Task time", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Individual run time by model", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Individual run time", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -500,15 +500,15 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Follow-ups per task by model", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Follow-ups per task", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Tokens per task by model", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Tokens per task", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</div><div class=\"grid grid-cols-1 xl:grid-cols-2 gap-6\"><div class=\"card bg-base-100 border border-base-300 min-w-0\"><div class=\"card-body\"><div class=\"flex flex-wrap items-center justify-between gap-3\"><h4 class=\"card-title\">Task outcomes by model</h4><select id=\"modelOutcomeMetric\" aria-label=\"Model outcome metric\" class=\"select select-bordered select-xs\"><option value=\"goal_achievement\">Goal achievement</option><option value=\"merge_completion\">Work merged</option></select></div><p class=\"text-sm opacity-60\">Current outcomes for tasks with activity in the selected period. Mixed models excluded; missing evidence is unavailable.</p><div class=\"overflow-x-auto\"><div class=\"relative h-80\"><canvas id=\"modelOutcomesChart\"></canvas></div></div></div></div><div class=\"card bg-base-100 border border-base-300 min-w-0\"><div class=\"card-body\"><h4 class=\"card-title\">Run reliability by model</h4><p class=\"text-sm opacity-60\">Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.</p><div class=\"overflow-x-auto\"><div class=\"relative h-80\"><canvas id=\"modelReliabilityChart\"></canvas></div></div></div></div></div></section><section id=\"analytics-automations\" data-analytics-section=\"automations\" class=\"hidden space-y-6 mb-6\"><div><h3 class=\"text-xl font-bold\">Automations</h3><p class=\"text-sm opacity-60\">Automation graph invocation and node behavior.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</div><div class=\"grid grid-cols-1 xl:grid-cols-2 gap-6\"><div class=\"card bg-base-100 border border-base-300 min-w-0\"><div class=\"card-body\"><div class=\"flex flex-wrap items-center justify-between gap-3\"><h4 class=\"card-title\">Task outcomes</h4><select id=\"modelOutcomeMetric\" aria-label=\"Model outcome metric\" class=\"select select-bordered select-xs\"><option value=\"goal_achievement\">Goal achievement</option><option value=\"merge_completion\">Work merged</option></select></div><p class=\"text-sm opacity-60\">Current outcomes for tasks with activity in the selected period. Mixed models excluded; missing evidence is unavailable.</p><div class=\"overflow-x-auto\"><div class=\"relative h-80\"><canvas id=\"modelOutcomesChart\"></canvas></div></div></div></div><div class=\"card bg-base-100 border border-base-300 min-w-0\"><div class=\"card-body\"><h4 class=\"card-title\">Run reliability</h4><p class=\"text-sm opacity-60\">Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.</p><div class=\"overflow-x-auto\"><div class=\"relative h-80\"><canvas id=\"modelReliabilityChart\"></canvas></div></div></div></div></div></section><section id=\"analytics-automations\" data-analytics-section=\"automations\" class=\"hidden space-y-6 mb-6\"><div><h3 class=\"text-xl font-bold\">Automations</h3><p class=\"text-sm opacity-60\">Automation graph invocation and node behavior.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
