@@ -608,6 +608,9 @@ func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 		t.Fatalf("effort trend: %+v", r.EffortTrend)
 	}
 	p := r.EffortTrend[0]
+	if len(dashboard.ModelEffortTrend) != 1 || dashboard.ModelEffortTrend[0] != p {
+		t.Fatalf("combined trend must include the same measured tasks: %+v", dashboard.ModelEffortTrend)
+	}
 	if p.Tasks != r.TasksUsed || p.Tokens != r.TotalTokens || p.TokenSamples != r.TokenCoveredTasks || p.DurationSamples != r.DurationSampleSize || p.MedianDurationMs != r.MedianDurationMs || float64(p.FollowUps)/float64(p.Tasks) != r.AverageFollowUps {
 		t.Fatalf("effort trend must match comparison: %+v", p)
 	}

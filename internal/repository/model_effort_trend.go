@@ -8,15 +8,20 @@ import (
 )
 
 // Samples come from the same task rows as the full-period comparison metrics.
-func aggregateModelEffortTrend(raw string) ([]models.ModelEffortTrend, error) {
-	var samples []struct {
+func aggregateModelEffortTrend(raw ...string) ([]models.ModelEffortTrend, error) {
+	type sample struct {
 		Period    string
 		Duration  *int64
 		Tokens    *int64
 		Followups int
 	}
-	if err := json.Unmarshal([]byte(raw), &samples); err != nil {
-		return nil, err
+	var samples []sample
+	for _, data := range raw {
+		var batch []sample
+		if err := json.Unmarshal([]byte(data), &batch); err != nil {
+			return nil, err
+		}
+		samples = append(samples, batch...)
 	}
 	groups := map[string]*models.ModelEffortTrend{}
 	durations := map[string][]int64{}
