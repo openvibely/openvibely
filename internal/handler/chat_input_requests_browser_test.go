@@ -129,10 +129,13 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
-				if (!recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut was not styled as an obvious secondary action');
+				if (!recommendedShortcut.classList.contains('btn-secondary') || recommendedShortcut.classList.contains('btn-sm')) fail('recommended shortcut was not styled as an obvious standalone action');
+				var recommendedActions = card.querySelector('[data-chat-input-recommended-actions]');
+				if (!recommendedActions || recommendedShortcut.parentElement !== recommendedActions) fail('recommended shortcut should be separated from paging controls');
 				var navigation = card.querySelector('[data-chat-input-navigation]');
-				if (!navigation || !navigation.classList.contains('justify-end') || navigation.classList.contains('justify-between')) fail('navigation controls were not grouped compactly');
-				if (navigation && navigation.firstElementChild && !navigation.firstElementChild.hasAttribute('data-chat-input-position')) fail('question position should sit next to the grouped controls');
+				if (!navigation || !navigation.classList.contains('justify-between') || navigation.querySelector('[data-chat-input-nav="recommended"]')) fail('navigation should contain only progress and pager controls');
+				var pager = card.querySelector('[data-chat-input-pager]');
+				if (!pager || pager.children.length !== 2 || !pager.children[0].hasAttribute('data-chat-input-nav') || pager.children[0].getAttribute('data-chat-input-nav') !== 'previous' || pager.children[1].getAttribute('data-chat-input-nav') !== 'next') fail('Previous and Next should be adjacent in the pager');
 				if (getComputedStyle(recommendedShortcut).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('recommended shortcut can still shrink on click');
 				var nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || !nextButton.disabled) fail('Next should stay disabled until the user selects an answer');
