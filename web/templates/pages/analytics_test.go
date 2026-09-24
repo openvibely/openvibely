@@ -222,7 +222,7 @@ history.replaceState({},'',location.pathname+'?project_id=p&view=models');
 var configs={},calls=0;
 window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
 var model={model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
-window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',completed:1,failed:1,cancelled:1},{period:'2026-09-02',completed:2,failed:0,cancelled:1}]}]};else if(String(url).includes('/dashboard'))data={models:[model],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[]};return {ok:true,json:async()=>data};};
+window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',completed:1,failed:1,cancelled:1},{period:'2026-09-02',completed:2,failed:0,cancelled:1}]}]};else if(String(url).includes('/dashboard'))data={models:[model],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",total_tokens:100}]};return {ok:true,json:async()=>data};};
 window.addEventListener('load',async function(){
  var result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
@@ -241,7 +241,8 @@ window.addEventListener('load',async function(){
   assert(taskCard.parentElement===runCard.parentElement&&taskCard.nextElementSibling===runCard,'time charts should be side by side');
   assert(taskCard.textContent.includes('combined run time')&&runCard.textContent.includes('one model run'),'time explanations missing');
   assert(!document.getElementById('modelTimeBasis'),'time dropdown should be removed');
-  assert(document.getElementById('modelFollowupsChart').closest('.card').nextElementSibling===document.getElementById('modelOutcomesChart').closest('.card'),'follow-ups should precede outcomes');
+  assert(document.getElementById('modelFollowupsChart').closest('.card').nextElementSibling===document.getElementById('modelTokensChart').closest('.card'),'tokens should follow follow-ups');
+  assert(document.getElementById('modelOutcomesChart').closest('.card').nextElementSibling===document.getElementById('modelReliabilityChart').closest('.card'),'outcomes should precede reliability');
   assert(document.body.textContent.includes('Successful means the run was marked completed'),'run success explanation missing');
   assert(tokenChart.data.datasets[0].backgroundColor[0]==='rgba(239, 68, 68, 0.7)','model bars should use the token breakdown palette');
   assert(configs.modelTimeChart.data.datasets[0].backgroundColor[0]===tokenChart.data.datasets[0].backgroundColor[0],'model colors must match across charts');
@@ -251,6 +252,9 @@ window.addEventListener('load',async function(){
   for(i=0;i<100&&(!configs.usageRunHoursChart||!configs.usageRunModelsChart);i++)await wait();
   assert(configs.usageRunHoursChart.data.labels.length===24&&configs.usageRunHoursChart.data.datasets[0].data[1]===6,'hourly counts incorrect');
   assert(configs.usageRunModelsChart.data.datasets[0].data[0]===6,'model run counts incorrect');
+  assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
+  assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
+  assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===configs.modelTokenBreakdownChart.data.datasets[0].backgroundColor[0],'run and token charts should share the palette');
   result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
 });</script>` + rendered.String()
