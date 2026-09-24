@@ -304,6 +304,14 @@ window.addEventListener('load',async function(){
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
   var usageTable=document.getElementById('usageBreakdownTable'),usageRows=usageTable.querySelectorAll('[data-usage-model]');
+  for(var tab of ['usage','learning']){
+   var sectionTitle=document.querySelector('#analytics-'+tab+' h3'),sectionHelp=sectionTitle.nextElementSibling;
+   assert(sectionHelp.matches('button[data-model-help]')&&sectionHelp.querySelector('svg'),'tab subtitle should use the same help-icon style as Models');
+   assert(!sectionTitle.parentElement.parentElement.querySelector('p.text-sm'),'tab subtitle must not remain visible');
+   sectionHelp.click();
+   assert(document.getElementById('modelMetricHelp').matches(':popover-open')&&document.getElementById('modelMetricHelp').textContent===sectionHelp.dataset.modelHelp,'tab help must open on click');
+   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  }
   assert(document.querySelectorAll('[data-usage-summary-value]').length===4&&document.querySelectorAll('[data-usage-summary-value]')[3].textContent==='2.4M','daily token KPI should show a compact backend average');
   assert(usageRows[0].cells.length===7&&usageRows[0].cells[0].querySelector('strong').textContent==='Primary'&&usageRows[0].cells[0].querySelector('.text-xs').textContent==='openai · model · high reasoning','model and provider should share one identity column');
   assert(usageTable.closest('table').querySelectorAll('thead th').length===7,'usage columns need clear headings');
