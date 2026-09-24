@@ -38,18 +38,20 @@ For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.
 
 ### Anthropic
 
+OpenVibely currently budgets Anthropic requests with a 200k context window. Claude Code's separate `[1m]` model selections are not exposed; provider support for 1M context does not enable that mode in OpenVibely.
+
 | Model | Effort Options | Notes |
 |---|---|---|
-| Claude Opus 5.5 (`claude-opus-5-5`) | low / medium / high / xhigh / max | Latest Opus generation. 128k max output, 1M context; adaptive thinking is always on. |
-| Claude Opus 5 (`claude-opus-5`) | low / medium / high / xhigh / max | Previous Opus generation. 128k max output, 1M context. |
-| Claude Sonnet 5 (`claude-sonnet-5`) | low / medium / high / xhigh / max | Latest Sonnet generation. 128k max output, 1M context. |
-| Claude Fable 5.1 (`claude-fable-5-1`) | low / medium / high / xhigh / max | Latest Fable generation. 128k max output, 1M context; adaptive thinking is always on. |
-| Claude Mythos 5.1 (`claude-mythos-5-1`) | low / medium / high / xhigh / max | Limited-availability Project Glasswing model. 128k max output, 1M context; adaptive thinking is always on. Forced `tool_choice` values `any` and `tool` are unsupported. Requires 30-day data retention unless Anthropic authorizes otherwise. |
-| Claude Fable 5 (`claude-fable-5`) | low / medium / high / xhigh / max | 128k max output, 1M context; adaptive thinking is always on. |
-| Claude Mythos 5 (`claude-mythos-5`) | low / medium / high / xhigh / max | Limited-availability model. 128k max output, 1M context; adaptive thinking is always on. |
-| Claude Opus 4.8 (`claude-opus-4-8`) | low / medium / high / xhigh / max | 128k max output, 1M context. |
-| Claude Opus 4.7 (`claude-opus-4-7`) | low / medium / high / xhigh / max | 128k max output, 1M context. |
-| Claude Sonnet 4.6 (`claude-sonnet-4-6`) | low / medium / high / max | 64k max output, 1M context. |
+| Claude Opus 5.5 (`claude-opus-5-5`) | low / medium / high / xhigh / max | Latest Opus generation. 128k max output; adaptive thinking is always on. |
+| Claude Opus 5 (`claude-opus-5`) | low / medium / high / xhigh / max | Previous Opus generation. 128k max output. |
+| Claude Sonnet 5 (`claude-sonnet-5`) | low / medium / high / xhigh / max | Latest Sonnet generation. 128k max output. |
+| Claude Fable 5.1 (`claude-fable-5-1`) | low / medium / high / xhigh / max | Latest Fable generation. 128k max output; adaptive thinking is always on. |
+| Claude Mythos 5.1 (`claude-mythos-5-1`) | low / medium / high / xhigh / max | Limited-availability Project Glasswing model. 128k max output; adaptive thinking is always on. Forced `tool_choice` values `any` and `tool` are unsupported. Requires 30-day data retention unless Anthropic authorizes otherwise. |
+| Claude Fable 5 (`claude-fable-5`) | low / medium / high / xhigh / max | 128k max output; adaptive thinking is always on. |
+| Claude Mythos 5 (`claude-mythos-5`) | low / medium / high / xhigh / max | Limited-availability model. 128k max output; adaptive thinking is always on. |
+| Claude Opus 4.8 (`claude-opus-4-8`) | low / medium / high / xhigh / max | 128k max output. |
+| Claude Opus 4.7 (`claude-opus-4-7`) | low / medium / high / xhigh / max | 128k max output. |
+| Claude Sonnet 4.6 (`claude-sonnet-4-6`) | low / medium / high / max | 64k max output. |
 | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | none | Supports manual extended thinking, but not the newer effort parameter. Legacy. |
 | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | none | No reasoning effort support. Legacy. |
 | Claude Opus 4.6 (`claude-opus-4-6`) | low / medium / high / max | Legacy. |
