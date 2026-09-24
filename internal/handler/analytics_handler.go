@@ -448,6 +448,20 @@ func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
 	return c.JSON(http.StatusOK, times)
 }
 
+// GetTaskRunActivity returns task-run activity grouped by model configuration.
+// @Summary Get task-run activity
+// @Description Returns non-chat task runs, outcomes, durations, and hourly activity grouped by model configuration for one project.
+// @Tags analytics
+// @Produce json
+// @Param project_id query string true "Project ID"
+// @Param range query string false "Convenience range: 7d, 30d, 90d, 365d, month, or all" default(30d)
+// @Param group_by query string false "Grouping period: day, week, or month" default(day)
+// @Param date_from query string false "Optional start datetime filter"
+// @Param date_to query string false "Optional end datetime filter"
+// @Success 200 {object} repository.TaskRunActivity "Task-run activity"
+// @Failure 400 {object} ErrorResponse "Missing project ID"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/analytics/task-run-activity [get]
 func (h *Handler) GetTaskRunActivity(c echo.Context) error {
 	f := parseUsageFilter(c)
 	if f.ProjectID == "" {

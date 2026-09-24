@@ -6,7 +6,7 @@ import (
 )
 
 templ Analytics(projects []models.Project, currentProject *models.Project) {
-	@layout.Base("Analytics", projects, projectID(currentProject)) {
+	@layout.Base("Analytics Dashboard", projects, projectID(currentProject)) {
 		@analyticsContent(currentProject)
 	}
 }
@@ -94,7 +94,7 @@ templ AnalyticsContent(currentProject *models.Project) {
 
 templ analyticsContent(currentProject *models.Project) {
 	<div class="flex justify-between items-center mb-6">
-		@layout.PageTitle("Analytics")
+		@layout.PageTitle("Analytics Dashboard")
 			<h2 class="text-2xl font-bold">Analytics</h2>
 			if currentProject != nil {
 				<div class="flex gap-2 items-center">
