@@ -471,6 +471,7 @@ func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilt
 }
 
 type usageAggregateEvent struct {
+	AgentConfigID         string
 	CacheCreationTokens   int
 	CacheReadTokens       int
 	Provider              string
@@ -625,7 +626,7 @@ func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter Usage
 	source, where, args := usageAggregateScanSource(filter)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
-		       total_tokens, cost_usd, occurred_at, cache_creation_input_tokens, cache_read_input_tokens
+		       total_tokens, cost_usd, occurred_at, cache_creation_input_tokens, cache_read_input_tokens, COALESCE(agent_config_id,'')
 		FROM `+source+` `+where+`
 		ORDER BY occurred_at ASC`, args...)
 	if err != nil {
@@ -637,7 +638,7 @@ func (r *UsageRepo) forEachUsageAggregateEvent(ctx context.Context, filter Usage
 		var event usageAggregateEvent
 		var cost sql.NullFloat64
 		var occurredRaw string
-		if err := rows.Scan(&event.Provider, &event.Model, &event.InputTokens, &event.OutputTokens, &event.CacheTokens, &event.ReasoningOutputTokens, &event.TotalTokens, &cost, &occurredRaw, &event.CacheCreationTokens, &event.CacheReadTokens); err != nil {
+		if err := rows.Scan(&event.Provider, &event.Model, &event.InputTokens, &event.OutputTokens, &event.CacheTokens, &event.ReasoningOutputTokens, &event.TotalTokens, &cost, &occurredRaw, &event.CacheCreationTokens, &event.CacheReadTokens, &event.AgentConfigID); err != nil {
 			return fmt.Errorf("scanning usage aggregate event: %w", err)
 		}
 		if cost.Valid {
