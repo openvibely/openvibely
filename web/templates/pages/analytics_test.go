@@ -11,6 +11,18 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAnalyticsContent_RemovesExactSkillOutcomeValues(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	for _, removed := range []string{"Exact skill outcome values", "skillOutcomeTable", "agentSkillOutcomeTable"} {
+		if strings.Contains(rendered.String(), removed) {
+			t.Errorf("removed skill outcome section still contains %q", removed)
+		}
+	}
+}
+
 func TestBrowserFunctional_AnalyticsTokenBreakdownConfigurations(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
@@ -816,18 +828,14 @@ func TestBrowserFunctional_AnalyticsContent_ExplicitSupportingLinksPreserveExact
   };
   function waitFor(check,next,attempt){if(check()){next();return;}if((attempt||0)>100)fail('timed out; urls='+urls.join('|'));setTimeout(function(){waitFor(check,next,(attempt||0)+1);},20);}
   window.addEventListener('load',function(){
-    waitFor(function(){return document.querySelector('#skillOutcomeTable a[data-skill-outcome-evidence]')&&document.querySelector('#agentSkillOutcomeTable a[data-skill-outcome-evidence]');},function(){
+    waitFor(function(){return urls.some(url=>url.includes('/api/analytics/skills'));},function(){
       document.querySelector('[data-analytics-view="agents"]').click();
       waitFor(function(){return document.querySelector('#agentSkillTable a[data-skill-outcome-evidence]');},function(){
-        var outcomeLink=document.querySelector('#skillOutcomeTable a[data-skill-outcome-evidence]');
-        var pairLink=document.querySelector('#agentSkillOutcomeTable a[data-skill-outcome-evidence]');
         var agentLink=document.querySelector('#agentSkillTable a[data-skill-outcome-evidence]');
-        var outcomeParams=new URL(outcomeLink.href).searchParams,pairParams=new URL(pairLink.href).searchParams,agentParams=new URL(agentLink.href).searchParams;
-        if(outcomeParams.get('evidence_skill_handle')!==longHandle||outcomeParams.get('evidence_skill_scope')!=='global'||outcomeParams.get('evidence')!=='skill_outcomes')fail('skill outcome link lost scoped identity');
-        if(pairParams.get('evidence_skill_handle')!==longHandle||pairParams.get('evidence_skill_scope')!=='project'||pairParams.get('evidence_skill_agent')!=='agent-1')fail('Agent-skill outcome link lost scoped identity');
+        var agentParams=new URL(agentLink.href).searchParams;
         if(agentParams.get('evidence_skill_scope')!=='agent_owned'||agentParams.get('evidence_skill_agent')!=='agent-1')fail('selected Agent skill link lost scoped identity');
-        pairLink.click();
-        waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard')>=0&&url.indexOf('evidence_skill_handle='+encodeURIComponent(longHandle))>=0&&url.indexOf('evidence_skill_scope=project')>=0&&url.indexOf('evidence_skill_agent=agent-1')>=0;})&&document.getElementById('outcomeEvidenceTable').textContent.indexOf('Scoped skill outcome retry')>=0;},function(){
+        agentLink.click();
+        waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/dashboard')>=0&&url.indexOf('evidence_skill_handle='+encodeURIComponent(longHandle))>=0&&url.indexOf('evidence_skill_scope=agent_owned')>=0&&url.indexOf('evidence_skill_agent=agent-1')>=0;})&&document.getElementById('outcomeEvidenceTable').textContent.indexOf('Scoped skill outcome retry')>=0;},function(){
           var evidence=document.getElementById('outcomeEvidenceTable').textContent,params=new URLSearchParams(location.search);
           if(params.get('view')!=='outcomes'||params.get('evidence')!=='skill_outcomes'||evidence.indexOf('Completed (numerator; 1 completed, 1 failed, 0 cancelled)')<0||evidence.indexOf('Excluded from goal denominator')<0)fail('explicit scoped link did not render exact evidence');
           result.setAttribute('data-test-result','pass');
@@ -868,7 +876,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         var dashboardURL = urls.find(function(url){return url.indexOf('/api/analytics/dashboard') >= 0;});
         if (!dashboardURL || new URL(dashboardURL, location.href).searchParams.get('view') !== 'overview') fail('dashboard request did not preserve the visible view: ' + urls.join('|'));
         if (urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0 || url.indexOf('/api/analytics/skills') >= 0 || url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('overview eagerly loaded unrelated hidden-view analytics: ' + urls.join('|'));
-        if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('skillOutcomeTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelScorecard').innerHTML) fail('overview synchronously rendered hidden-view analytics');
+        if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelScorecard').innerHTML) fail('overview synchronously rendered hidden-view analytics');
         document.querySelector('[data-analytics-view="usage"]').click();
         var usageShells=Array.from(document.querySelectorAll('#usageSummary > .card'));
         if(usageShells.length!==4||!usageShells.every(function(card){return card.textContent.indexOf('Loading analytics')>=0;}))fail('Usage must reserve summary cards while loading');
@@ -887,7 +895,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
           if (document.getElementById('costOutcomeTrendChart') || /achieved goal|failed-run cost|Outcome context|Cost and outcomes/.test(usageText)) fail('Usage still mixes consumption with outcomes');
           if (localStorage.getItem('openvibely.analytics.lastView.project-1') !== 'usage') fail('selected analytics tab was not remembered');
           document.querySelector('[data-analytics-view="learning"]').click();
-          waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && document.getElementById('skillOutcomeTable').textContent.indexOf('project:visible-on-learning') >= 0;}, function() {
+          waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/skills') >= 0;}) && !document.getElementById('skillSummary').textContent.includes('Loading analytics');}, function() {
             if (urls.some(function(url){return url.indexOf('/api/analytics/success-failure-rates') >= 0;})) fail('learning loaded unrelated analytics: ' + urls.join('|'));
             if (!document.getElementById('analytics-usage').classList.contains('hidden')) fail('usage remained visible outside the Usage tab');
             result.setAttribute('data-test-result', 'pass');
@@ -1205,7 +1213,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Run success rate`, `Goal achievement rate`, `First-run success rate`,
 		`Follow-up run rate`, `Median task duration`, `Cost per achieved goal`,
 		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`,
-		`Observed skill outcomes`, `Exact skill outcome values`, `id="accountUsageCards"`,
+		`Observed skill outcomes`, `id="accountUsageCards"`,
 		`Run time per task by agent`, `Follow-ups per task by agent`, `Model comparison`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`,
 		`Run results over time`, `id="skillSummary"`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,
