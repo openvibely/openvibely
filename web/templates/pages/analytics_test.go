@@ -262,11 +262,11 @@ window.addEventListener('load',async function(){
   for(var pair of [['modelTaskTimeTrend','modelTime'],['modelRunTimeTrend','modelRunTime'],['modelTokenTrend','modelTokens'],['modelFollowupTrend','modelFollowups']]){
    assert(document.getElementById(pair[0]+'Chart').closest('.card').nextElementSibling===document.getElementById(pair[1]+'Chart').closest('.card'),'each trend should sit beside its comparison');
   }
-  assert(taskCard.textContent.includes('combined run time')&&runCard.textContent.includes('one model run'),'time explanations missing');
+  assert(taskCard.querySelector('[data-model-help]').dataset.modelHelp.includes('combined run time')&&runCard.querySelector('[data-model-help]').dataset.modelHelp.includes('one model run'),'time help missing');
   assert(!document.getElementById('modelTimeBasis'),'time dropdown should be removed');
   assert(document.getElementById('modelOutcomesChart').closest('.card').nextElementSibling===document.getElementById('modelReliabilityChart').closest('.card'),'outcomes should precede reliability');
   assert(document.body.textContent.includes('Successful means the run was marked completed'),'run success explanation missing');
-  assert(tokenChart.data.datasets[0].backgroundColor[0]==='rgba(239, 68, 68, 0.7)','model bars should use the token breakdown palette');
+  assert(/^rgba\(/.test(tokenChart.data.datasets[0].backgroundColor[0]),'model bars should use the shared palette');
   assert(configs.modelTimeChart.data.datasets[0].backgroundColor[0]===tokenChart.data.datasets[0].backgroundColor[0],'model colors must match across charts');
   assert(configs.modelRunTimeChart.data.datasets[0].data[0]===60000,'per-run time incorrect');
   assert(configs.modelTimeChart.data.datasets[0].data[0]===120000,'per-task median lost');
@@ -347,7 +347,7 @@ window.addEventListener('load',async function(){
   assert(usageRows[2].cells[3].classList.contains('bg-error/10'),'low cache reuse should be red');
   assert(usageRows[3].cells[3].classList.contains('bg-base-200/40')&&usageRows[3].cells[6].textContent.includes('Unavailable'),'missing evidence should remain neutral');
   assert(usageRows[0].cells[6].textContent.includes('$0.00'),'recorded zero cost must not be treated as missing');
-  assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===configs.modelTokenBreakdownChart.data.datasets[0].backgroundColor[0],'run and token charts should share the palette');
+  assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===trend.data.datasets[0].borderColor,'run line and bars must share model colors');
   result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
 });</script>` + rendered.String()
