@@ -44,6 +44,28 @@ func TestTaskRunActivityScopesAndAggregates(t *testing.T) {
 	if total != 4 {
 		t.Fatalf("hours: %+v", data.Hours)
 	}
+	if m.Trend[0].Runs != 4 {
+		t.Fatalf("period run counts must include unfinished runs: %+v", m.Trend)
+	}
+	// Distinct dates at the same hour must not collapse into an hour-of-day bucket.
+	if _, err := db.Exec(`UPDATE executions SET started_at='2026-09-15 10:00:00' WHERE id='4'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range []string{"day", "week", "month"} {
+		f.GroupBy = group
+		grouped, err := r.GetTaskRunActivity(context.Background(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trend := grouped.Models[0].Trend
+		if group == "month" {
+			if len(trend) != 1 || trend[0].Runs != 4 {
+				t.Fatalf("monthly trend: %+v", trend)
+			}
+		} else if len(trend) != 2 || trend[0].Runs != 3 || trend[1].Runs != 1 {
+			t.Fatalf("%s trend: %+v", group, trend)
+		}
+	}
 	f.ProjectID = "missing"
 	empty, err := r.GetTaskRunActivity(context.Background(), f)
 	if err != nil || len(empty.Models) != 0 {
