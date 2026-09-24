@@ -379,6 +379,40 @@ func TestNativeCompactionCapabilityRequiresConcreteSupportedConfiguration(t *tes
 	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodCLI}) {
 		t.Fatal("retired CLI auth must not advertise native compaction")
 	}
+	for _, model := range []string{"claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929", "claude-unknown"} {
+		if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: model, AuthMethod: models.AuthMethodOAuth}) {
+			t.Errorf("unsupported Anthropic model %q advertised native compaction", model)
+		}
+	}
+	for _, model := range []string{"claude-sonnet-5", "claude-sonnet-4-6", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-fable-5-1", "claude-fable-5", "claude-mythos-5-1", "claude-mythos-5"} {
+		if !providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: model, AuthMethod: models.AuthMethodOAuth}) {
+			t.Errorf("supported Anthropic model %q did not advertise native compaction", model)
+		}
+	}
+}
+
+func TestProviderContextCompactionFallbackDisablesUnsupportedAnthropicStrategy(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		if !req.DisableNativeCompaction || !req.Agent.DisableNativeCompaction {
+			t.Fatalf("unsupported Haiku request retained native compaction: %#v", req.Agent)
+		}
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	req := llmcontracts.AgentRequest{
+		Ctx:       context.Background(),
+		Operation: llmcontracts.OperationStreaming,
+		Message:   "first turn",
+		Agent: models.LLMConfig{
+			Provider:   models.ProviderAnthropic,
+			Model:      "claude-haiku-4-5-20251001",
+			AuthMethod: models.AuthMethodOAuth,
+		},
+	}
+	res, err := svc.callProviderWithContextCompactionFallback(adapter, req)
+	if err != nil || res.Output != "ok" {
+		t.Fatalf("unsupported Haiku call = %#v, %v", res, err)
+	}
 }
 
 func TestProviderContextBudget_TestProviderFailsClosedWithoutArtifactReader(t *testing.T) {

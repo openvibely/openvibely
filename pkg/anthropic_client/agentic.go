@@ -36,6 +36,42 @@ const DefaultCompactionThreshold = defaultAnthropicContextWindow - compactionOut
 // server-side compaction API.
 const MinCompactionThreshold = 50000
 
+// CompactionStrategyCompact20260112 is Anthropic's threshold-based context
+// management strategy. Anthropic enables it per model, so callers must use
+// NativeCompactionStrategy instead of assuming every Claude model supports it.
+const CompactionStrategyCompact20260112 = "compact_20260112"
+
+var nativeCompactionStrategies = map[string]string{
+	"claude-fable-5":        CompactionStrategyCompact20260112,
+	"claude-fable-5-1":      CompactionStrategyCompact20260112,
+	"claude-mythos-5":       CompactionStrategyCompact20260112,
+	"claude-mythos-5-1":     CompactionStrategyCompact20260112,
+	"claude-mythos-preview": CompactionStrategyCompact20260112,
+	"claude-opus-4-6":       CompactionStrategyCompact20260112,
+	"claude-opus-4-7":       CompactionStrategyCompact20260112,
+	"claude-opus-4-8":       CompactionStrategyCompact20260112,
+	"claude-opus-5":         CompactionStrategyCompact20260112,
+	"claude-opus-5-5":       CompactionStrategyCompact20260112,
+	"claude-sonnet-4-6":     CompactionStrategyCompact20260112,
+	"claude-sonnet-5":       CompactionStrategyCompact20260112,
+}
+
+// NativeCompactionStrategy returns the provider strategy supported by model.
+// Unknown models fail closed so newly added Claude models do not receive beta
+// request fields until their compatibility is known.
+func NativeCompactionStrategy(model string) (string, bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	model = strings.TrimSuffix(model, "[1m]")
+	strategy, ok := nativeCompactionStrategies[model]
+	return strategy, ok
+}
+
+// SupportsNativeCompaction reports whether model has a known native strategy.
+func SupportsNativeCompaction(model string) bool {
+	_, ok := NativeCompactionStrategy(model)
+	return ok
+}
+
 const (
 	// Prefer the direct-call web tool versions for URL retrieval flows.
 	// Newer web tool versions can route through provider code_execution,
@@ -1153,7 +1189,9 @@ func categorizeAnthropicAPIError(statusCode int, body []byte, nativeCompaction b
 	if typ == "request_too_large" || strings.Contains(msg, "context window") || strings.Contains(msg, "too many tokens") {
 		return llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "Anthropic Messages", providerErr)
 	}
-	if nativeCompaction && (typ == "unsupported_beta" || statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed || statusCode == http.StatusNotImplemented) {
+	unsupportedCompaction := (strings.Contains(msg, "does not support") || strings.Contains(msg, "unsupported") || strings.Contains(msg, "not available")) &&
+		(strings.Contains(msg, "context management") || strings.Contains(msg, "compaction") || strings.Contains(msg, "compact_"))
+	if nativeCompaction && (typ == "unsupported_beta" || unsupportedCompaction || statusCode == http.StatusNotFound || statusCode == http.StatusMethodNotAllowed || statusCode == http.StatusNotImplemented) {
 		return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionUnsupported, "Anthropic context management", providerErr)
 	}
 	if nativeCompaction && (strings.Contains(msg, "context management") || strings.Contains(msg, "compaction")) {
@@ -1190,7 +1228,7 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 		reserved = 8192
 	}
 	safe := window - reserved - max(1024, window/50)
-	if opts.AutoCompaction {
+	if opts.AutoCompaction && SupportsNativeCompaction(opts.Model) {
 		safe = CompactionBlockingLimit(window)
 	}
 	encoded, err := json.Marshal(struct {
@@ -1252,6 +1290,9 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	compactionStrategy, nativeCompactionEnabled := NativeCompactionStrategy(opts.Model)
+	nativeCompactionEnabled = opts.AutoCompaction && nativeCompactionEnabled
+
 	// Build system prompt as content blocks with cache_control for prompt caching.
 	// OAuth tokens require a billing attribution block as the first system entry;
 	// without it the API returns 400 "Error".
@@ -1333,7 +1374,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	}
 
 	// Ask Anthropic to summarize older context when the input reaches the trigger.
-	if opts.AutoCompaction {
+	if nativeCompactionEnabled {
 		threshold := opts.CompactionTokenThreshold
 		if threshold == 0 {
 			threshold = CompactionTriggerLimit(opts.ContextWindow)
@@ -1343,7 +1384,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		}
 		req.ContextManagement = &contextManagementConfig{
 			Edits: []contextManagementEdit{{
-				Type: "compact_20260112",
+				Type: compactionStrategy,
 				Trigger: &inputTokensTrigger{
 					Type:  "input_tokens",
 					Value: threshold,
@@ -1368,7 +1409,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	if isOAuth {
 		betaHeaders = append(betaHeaders, "claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05")
 	}
-	if opts.AutoCompaction {
+	if nativeCompactionEnabled {
 		betaHeaders = append(betaHeaders, CompactionBetaHeader)
 	}
 
@@ -1426,7 +1467,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, httpretry.NewResponseError(resp, categorizeAnthropicAPIError(resp.StatusCode, respBody, opts.AutoCompaction))
+		return nil, httpretry.NewResponseError(resp, categorizeAnthropicAPIError(resp.StatusCode, respBody, nativeCompactionEnabled))
 	}
 
 	result, err := c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
