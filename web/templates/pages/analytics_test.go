@@ -305,6 +305,13 @@ window.addEventListener('load',async function(){
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
   var usageTable=document.getElementById('usageBreakdownTable'),usageRows=usageTable.querySelectorAll('[data-usage-model]');
   assert(usageTable.closest('table').querySelectorAll('thead th').length===8,'usage columns need clear headings');
+  var usageHeaders=usageTable.closest('table').querySelectorAll('thead th');
+  for(var header of usageHeaders)assert(header.querySelector('button.btn.btn-ghost.btn-circle.btn-xs[data-model-help]'),'every usage column should use Model comparison help styling');
+  assert(!usageTable.closest('.card-body').querySelector('.flex button[data-model-help]'),'usage title must not have a floating help icon');
+  assert(usageHeaders[4].querySelector('button').dataset.modelHelp.includes('green 80%'),'cache highlight explanation belongs on its column');
+  var headerHelp=usageHeaders[4].querySelector('button');headerHelp.click();
+  assert(document.getElementById('modelMetricHelp').matches(':popover-open')&&document.getElementById('modelMetricHelp').textContent===headerHelp.dataset.modelHelp,'usage column help should open immediately on click');
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   assert(usageRows[0].cells[2].textContent.includes('1M')&&usageRows[0].cells[2].querySelector('[data-model-help]').dataset.modelHelp.includes('1,000,000'),'compact values must retain exact counts in help');
   assert(usageRows[0].cells[4].classList.contains('bg-success/10')&&usageRows[0].cells[4].textContent.includes('90.0% reuse'),'high cache reuse should be green');
   assert(usageRows[1].cells[4].classList.contains('bg-warning/10'),'moderate cache reuse should match Model comparison caution styling');
