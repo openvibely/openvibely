@@ -646,7 +646,7 @@ templ analyticsContent(currentProject *models.Project) {
 								charts.projectOutcomeTrend=createAnalyticsChart(canvas.getContext('2d'),{
 									type:'line',
 									data:{labels:rows.map(r=>r.period),datasets:[{label:'Run success',data:series('technical_completion'),borderColor:'#22c55e'},{label:'Goal achievement',data:series('goal_achievement'),borderColor:'#3b82f6'},{label:'First-run success',data:series('first_pass'),borderColor:'#8b5cf6'},{label:'Follow-up runs',data:series('follow_up'),borderColor:'#f59e0b'}]},
-									options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,title:{display:true,text:'Percent'}}},plugins:{tooltip:{callbacks:{footer:tooltipFooter}}}}
+									options:{scales:{y:{beginAtZero:true,max:100,title:{display:true,text:'Percent'}}},plugins:{tooltip:{callbacks:{footer:tooltipFooter}}}}
 								});
 							}
 							function renderActionableExceptions(rows) {
@@ -666,7 +666,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const color=r=>{let hash=0;for(const c of r.agent_id||r.agent_name)hash=(hash*31+c.charCodeAt(0))>>>0;return 'hsla('+(hash%360)+',70%,55%,.7)';};
 									charts[key]=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:supported.map(r=>r.agent_name),datasets:[{data:supported.map(value),backgroundColor:supported.map(color),maxBarThickness:48}]},
 										plugins:[{id:'agentEffortValues',afterDatasetsDraw:function(chart){const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';chart.getDatasetMeta(0).data.forEach((b,i)=>ctx.fillText(format(value(supported[i])),b.x,b.y-6));ctx.restore();}}],
-										options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>format(value(supported[item.dataIndex]))+' · n='+sample(supported[item.dataIndex])}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',ticks:{callback:format}}}}});
+										options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>format(value(supported[item.dataIndex]))+' · n='+sample(supported[item.dataIndex])}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',ticks:{callback:format}}}}});
 								}
 								bar('agentRunTime','agentRunTimeChart',agents.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size);
 								bar('agentFollowups','agentFollowupsChart',agents,r=>Number(r.average_follow_ups||0),n=>Number(n).toFixed(1),r=>r.tasks_evaluated);
@@ -688,7 +688,7 @@ templ analyticsContent(currentProject *models.Project) {
 										const ctx=chart.ctx;ctx.save();ctx.fillStyle=Chart.defaults?.color||'#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
 										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
 									}}],
-									options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:85}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?ranked[items[0].dataIndex].agent_name:'',label:function(item){const m=ranked[item.dataIndex][metric]||{};return Number(m.denominator||0)?labels[item.dataIndex]+' · '+Number(m.numerator||0)+' / '+Number(m.denominator)+' tasks (n='+Number(m.denominator)+')':'Unavailable: no eligible tasks';}}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
+									options:{indexAxis:'y',layout:{padding:{right:85}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?ranked[items[0].dataIndex].agent_name:'',label:function(item){const m=ranked[item.dataIndex][metric]||{};return Number(m.denominator||0)?labels[item.dataIndex]+' · '+Number(m.numerator||0)+' / '+Number(m.denominator)+' tasks (n='+Number(m.denominator)+')':'Unavailable: no eligible tasks';}}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
 								});
 							}
 							document.getElementById('agentOutcomeMetric').addEventListener('change',function(){if(latestDashboard)renderAgentOutcomeBars(latestDashboard.agents||[]);},{signal:eventSignal});
@@ -707,14 +707,14 @@ templ analyticsContent(currentProject *models.Project) {
 										const ctx=chart.ctx;ctx.save();ctx.fillStyle=Chart.defaults?.color||'#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
 										labels.forEach((label,i)=>ctx.fillText(label,chart.chartArea.right+8,chart.scales.y.getPixelForValue(i)));ctx.restore();
 									}}],
-									options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,layout:{padding:{right:120}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>labels[item.dataIndex]+' tasks'}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
+									options:{indexAxis:'y',layout:{padding:{right:120}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>labels[item.dataIndex]+' tasks'}}},scales:{x:{beginAtZero:true,max:100,ticks:{callback:value=>value+'%'}},y:{ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
 								});
 							}
 							document.getElementById('skillOutcomeMetric').addEventListener('change',function(){if(latestDashboard&&charts.skillOutcome)renderSkillOutcomeBars(latestDashboard.skill_outcomes||[]);},{signal:eventSignal});
 							function renderSkillOutcomeCharts(rows) {
 								renderSkillOutcomeBars(rows);
 								let canvas;
-								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=2&&Number((r.goal_achievement||{}).denominator||0)>0).sort((a,b)=>Number(b.tasks_evaluated||0)-Number(a.tasks_evaluated||0)).slice(0,20);canvas=renderChartState('skillEffectiveness','skillEffectivenessChart',supported,'At least two task samples with goal evidence per skill are required');if(canvas){const points=supported.map((r,i)=>({x:r.tasks_evaluated,y:Number((r.goal_achievement||{}).percent||0),skill:r.skill_handle,color:'hsla('+(i*61%360)+',70%,55%,.75)'}));charts.skillEffectiveness=createAnalyticsChart(canvas.getContext('2d'),{type:'scatter',data:{datasets:[{label:'Skills',data:points,pointRadius:7,pointHoverRadius:9,pointBackgroundColor:points.map(p=>p.color),clip:false}]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:12,right:10}},plugins:{legend:{display:false},tooltip:{callbacks:{label:function(context){const point=context.raw;return point.skill+': '+point.x+' tasks, '+point.y.toFixed(1)+'% goal achievement';}}}},scales:{x:{beginAtZero:true,grace:'5%',title:{display:true,text:'Tasks using skill'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Observed goal achievement (%)'}}}}});}
+								const supported=rows.filter(r=>Number(r.tasks_evaluated||0)>=2&&Number((r.goal_achievement||{}).denominator||0)>0).sort((a,b)=>Number(b.tasks_evaluated||0)-Number(a.tasks_evaluated||0)).slice(0,20);canvas=renderChartState('skillEffectiveness','skillEffectivenessChart',supported,'At least two task samples with goal evidence per skill are required');if(canvas){const points=supported.map((r,i)=>({x:r.tasks_evaluated,y:Number((r.goal_achievement||{}).percent||0),skill:r.skill_handle,color:'hsla('+(i*61%360)+',70%,55%,.75)'}));charts.skillEffectiveness=createAnalyticsChart(canvas.getContext('2d'),{type:'scatter',data:{datasets:[{label:'Skills',data:points,pointRadius:7,pointHoverRadius:9,pointBackgroundColor:points.map(p=>p.color),clip:false}]},options:{layout:{padding:{top:12,right:10}},plugins:{legend:{display:false},tooltip:{callbacks:{label:function(context){const point=context.raw;return point.skill+': '+point.x+' tasks, '+point.y.toFixed(1)+'% goal achievement';}}}},scales:{x:{beginAtZero:true,grace:'5%',title:{display:true,text:'Tasks using skill'}},y:{beginAtZero:true,max:100,title:{display:true,text:'Observed goal achievement (%)'}}}}});}
 							}
 							function modelConfigLabel(row) {
 								return row.config_name || row.model || 'Unknown configuration';
@@ -771,6 +771,22 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function createAnalyticsChart(context, config) {
 							 const options=config.options||(config.options={});
+							 options.responsive=true;options.maintainAspectRatio=false;
+							 if(config.type==='line'){
+							  options.interaction={mode:'index',intersect:false,...options.interaction};
+							  options.plugins=options.plugins||{};
+							  options.plugins.legend={position:'bottom',...options.plugins.legend};
+							  options.plugins.tooltip={...analyticsLineTooltipOptions(),...options.plugins.tooltip};
+							  config.plugins=[...(config.plugins||[]),analyticsActivePointOnTop];
+							  for(const dataset of config.data.datasets){
+							   Object.assign(dataset,{tension:0.3,cubicInterpolationMode:'monotone',borderWidth:2,pointRadius:3,pointHoverRadius:4,fill:false});
+							  }
+							 }
+							 if(config.type==='bar'&&options.indexAxis==='y'){
+							  for(const dataset of config.data.datasets){
+							   dataset.categoryPercentage=0.8;dataset.barPercentage=0.9;
+							  }
+							 }
 							 if(config.type==='bar'&&options.indexAxis!=='y'){
 							  for(const dataset of config.data.datasets){
 							   delete dataset.barThickness;delete dataset.maxBarThickness;
@@ -819,7 +835,7 @@ templ analyticsContent(currentProject *models.Project) {
 											const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
 											chart.getDatasetMeta(0).data.forEach((bar,i)=>ctx.fillText(textAt(i),bar.x,(available[i]?bar.y:chart.scales.y.getPixelForValue(0))-6));ctx.restore();
 										}}],
-										options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(supported[items[0].dataIndex])+' · '+modelDetailLabel(supported[items[0].dataIndex]):'',label:item=>available[item.dataIndex]?textAt(item.dataIndex)+' · n='+sample(available[item.dataIndex]):'No data'}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',title:{display:true,text:axis},ticks:{callback:format}}}}
+										options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(supported[items[0].dataIndex])+' · '+modelDetailLabel(supported[items[0].dataIndex]):'',label:item=>available[item.dataIndex]?textAt(item.dataIndex)+' · n='+sample(available[item.dataIndex]):'No data'}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',title:{display:true,text:axis},ticks:{callback:format}}}}
 									});
 								}
 								if(!latestRunActivity)renderChartState('modelRunTime','modelRunTimeChart',[],runActivityFailed?'Run activity unavailable':'Loading analytics…');
@@ -843,7 +859,7 @@ templ analyticsContent(currentProject *models.Project) {
 										const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
 										chart.getDatasetMeta(0).data.forEach((bar,i)=>ctx.fillText(labels[i],bar.x,(values[i]===null?chart.scales.y.getPixelForValue(0):bar.y)-6));ctx.restore();
 									}}],
-									options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(models[items[0].dataIndex])+' · '+modelDetailLabel(models[items[0].dataIndex]):'',label:function(item){const m=models[item.dataIndex][metric]||{};return Number(m.denominator)>0?labels[item.dataIndex]+' · '+m.numerator+'/'+m.denominator+' tasks':'Unavailable';}}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}}}
+									options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(models[items[0].dataIndex])+' · '+modelDetailLabel(models[items[0].dataIndex]):'',label:function(item){const m=models[item.dataIndex][metric]||{};return Number(m.denominator)>0?labels[item.dataIndex]+' · '+m.numerator+'/'+m.denominator+' tasks':'Unavailable';}}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}}}
 								});
 							}
 							document.getElementById('modelOutcomeMetric').addEventListener('change',function(){if(latestDashboard)renderModelOutcomeChart(latestDashboard.models||[]);},{signal:eventSignal});
@@ -906,7 +922,7 @@ templ analyticsContent(currentProject *models.Project) {
 						function renderDistributionChart(key, canvasID, rows) {
 							const canvas = renderChartState(key, canvasID, rows, 'No task samples in this period');
 							if (!canvas) return;
-							charts[key] = createAnalyticsChart(canvas.getContext('2d'), { type: 'bar', data: { labels: rows.map(function(row) { return row.label; }), datasets: [{ label: 'Tasks (sample n=' + rows.reduce(function(sum, row) { return sum + row.count; }, 0) + ')', data: rows.map(function(row) { return row.count; }), backgroundColor: 'rgba(59, 130, 246, 0.6)' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } } });
+							charts[key] = createAnalyticsChart(canvas.getContext('2d'), { type: 'bar', data: { labels: rows.map(function(row) { return row.label; }), datasets: [{ label: 'Tasks (sample n=' + rows.reduce(function(sum, row) { return sum + row.count; }, 0) + ')', data: rows.map(function(row) { return row.count; }), backgroundColor: 'rgba(59, 130, 246, 0.6)' }] }, options: {  scales: { y: { beginAtZero: true } } } });
 						}
 								function renderDashboardFilterOptions(agents, workflows) {
 									function updateOptions(select, rows, valueKey, labelKey, allLabel, selected, replaceWhenEmpty) {
@@ -978,7 +994,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
 									const table=document.getElementById('workflowPerformanceTable');if(table)table.innerHTML = visible.length ? visible.map(function(row) { const url='/automations/'+encodeURIComponent(row.workflow_id)+'?project_id='+encodeURIComponent(projectID); return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.workflow_name)+'\x3c/a>\x3c/td>\x3ctd>'+row.invocation_count+'\x3c/td>\x3ctd>'+row.completed_count+' / '+row.invocation_count+' ('+Number(row.completion_rate||0).toFixed(1)+'%)\x3c/td>\x3ctd>'+row.failed_count+'\x3c/td>\x3ctd>'+row.cancelled_count+'\x3c/td>\x3ctd>'+row.skipped_count+'\x3c/td>\x3ctd>'+row.open_count+'\x3c/td>\x3ctd>'+escapeHTML(row.duration_sample_size ? formatDuration(row.average_duration_ms||0)+' · n='+row.duration_sample_size : 'Unavailable · n=0')+'\x3c/td>\x3ctd>'+row.waiting_count+' / '+row.blocked_count+'\x3c/td>\x3ctd>'+escapeHTML(row.health)+'\x3c/td>\x3c/tr>'; }).join('') : '\x3ctr>\x3ctd colspan="10" class="text-center">No automation activity in this period. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Open Automations\x3c/a>\x3c/td>\x3c/tr>';
 									const empty=document.getElementById('automationEmptyState');if(empty){empty.classList.toggle('hidden',rows.length>0);empty.innerHTML=rows.length?'':'No automation activity in this period. Automation analytics appear after this project runs an automation graph. \x3ca class="link" href="/automations?project_id='+encodeURIComponent(projectID)+'">Open Automations\x3c/a>';}
-									const canvas=renderChartState('automationComparison','automationComparisonChart',rows,'No automation activity in this period');if(canvas)charts.automationComparison=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.workflow_name),datasets:[{label:'Completed',data:rows.map(r=>r.completed_count),backgroundColor:'#22c55e'},{label:'Failed',data:rows.map(r=>r.failed_count),backgroundColor:'#ef4444'},{label:'Open',data:rows.map(r=>r.open_count),backgroundColor:'#3b82f6'},{label:'Waiting / blocked',data:rows.map(r=>Number(r.waiting_count||0)+Number(r.blocked_count||0)),backgroundColor:'#f59e0b'}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true}},plugins:{tooltip:{callbacks:{footer:function(items){if(!items.length)return '';const r=rows[items[0].dataIndex];return 'completion '+Number(r.completion_rate||0).toFixed(1)+'% · duration '+formatDuration(r.average_duration_ms||0)+' · n='+r.invocation_count;}}}}}});
+									const canvas=renderChartState('automationComparison','automationComparisonChart',rows,'No automation activity in this period');if(canvas)charts.automationComparison=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.workflow_name),datasets:[{label:'Completed',data:rows.map(r=>r.completed_count),backgroundColor:'#22c55e'},{label:'Failed',data:rows.map(r=>r.failed_count),backgroundColor:'#ef4444'},{label:'Open',data:rows.map(r=>r.open_count),backgroundColor:'#3b82f6'},{label:'Waiting / blocked',data:rows.map(r=>Number(r.waiting_count||0)+Number(r.blocked_count||0)),backgroundColor:'#f59e0b'}]},options:{scales:{y:{beginAtZero:true}},plugins:{tooltip:{callbacks:{footer:function(items){if(!items.length)return '';const r=rows[items[0].dataIndex];return 'completion '+Number(r.completion_rate||0).toFixed(1)+'% · duration '+formatDuration(r.average_duration_ms||0)+' · n='+r.invocation_count;}}}}}});
 								}
 								function renderWorkflowDetail(detail) {
 									function render(id, rows, columns, formatter, empty) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(formatter).join(''):'\x3ctr>\x3ctd colspan="'+columns+'" class="text-center opacity-50">'+(detail?empty:'Select an automation to inspect node metrics')+'\x3c/td>\x3c/tr>'; }
@@ -987,7 +1003,7 @@ templ analyticsContent(currentProject *models.Project) {
 									render('workflowDurationTable',durations,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.sample_count+'\x3c/td>\x3ctd>'+escapeHTML(formatDuration(Number(row.average_seconds||0)*1000))+'\x3c/td>\x3c/tr>';},'No completed node durations in this period');
 									render('workflowFailureTable',failures,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.count+'\x3c/td>\x3ctd>'+escapeHTML(row.last_failure?new Date(row.last_failure).toLocaleString():'Unavailable')+'\x3c/td>\x3c/tr>';},'No node failures in this period');
 									render('workflowBottleneckTable',bottlenecks,3,function(row){return '\x3ctr>\x3ctd>'+escapeHTML(row.node_name)+'\x3c/td>\x3ctd>'+row.waiting+'\x3c/td>\x3ctd>'+row.blocked+'\x3c/td>\x3c/tr>';},'No current bottlenecks');
-									function bar(key,id,rows,label,value,color,empty){const canvas=renderChartState(key,id,rows,empty);if(canvas)charts[key]=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.node_name),datasets:[{label:label,data:rows.map(value),backgroundColor:color}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}}}});}
+									function bar(key,id,rows,label,value,color,empty){const canvas=renderChartState(key,id,rows,empty);if(canvas)charts[key]=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(r=>r.node_name),datasets:[{label:label,data:rows.map(value),backgroundColor:color}]},options:{indexAxis:'y',scales:{x:{beginAtZero:true}}}});}
 									bar('automationFunnel','automationFunnelChart',funnel,'Entered',r=>r.entered_count,'#3b82f6','Select an automation to inspect its node funnel');
 									bar('automationDuration','automationDurationChart',durations,'Average seconds',r=>Number(r.average_seconds||0),'#8b5cf6','No completed node durations');
 									bar('automationFailure','automationFailureChart',failures,'Failures',r=>r.count,'#ef4444','No node failures');
@@ -1252,7 +1268,7 @@ templ analyticsContent(currentProject *models.Project) {
 									}
 
 									function lineDataset(label, data, color) {
-										return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
+										return { label: label, data: data, borderColor: color, backgroundColor: color };
 									}
 							function renderSkillUsageTrend(totals) {
 								const totalRows = totals || [];
@@ -1266,9 +1282,9 @@ templ analyticsContent(currentProject *models.Project) {
 									];
 									charts.skillUsageTrend = createAnalyticsChart(canvas.getContext('2d'), {
 										type: 'line',
-										plugins: [analyticsActivePointOnTop],
+
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: {   plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -1289,7 +1305,7 @@ templ analyticsContent(currentProject *models.Project) {
 												{ label: 'Created', data: chartRows.map(r => r.created_count || 0), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 },
 											{ label: 'Edited', data: chartRows.map(r => r.edited_count || 0), backgroundColor: 'rgba(147, 51, 234, 0.5)', borderColor: 'rgb(147, 51, 234)', borderWidth: 1 }
 										] },
-										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
+										options: { indexAxis: 'y',  scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
 									}
 								}
 
@@ -1303,7 +1319,7 @@ templ analyticsContent(currentProject *models.Project) {
 												{ label: 'Used', data: chartRows.map(r => r.loaded_or_viewed_count || 0), backgroundColor: 'rgba(34, 197, 94, 0.5)', borderColor: 'rgb(34, 197, 94)', borderWidth: 1 },
 											{ label: 'Ignored', data: chartRows.map(r => r.ignored_count || 0), backgroundColor: 'rgba(239, 68, 68, 0.5)', borderColor: 'rgb(239, 68, 68)', borderWidth: 1 }
 										] },
-										options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
+										options: { indexAxis: 'y',  scales: { x: { beginAtZero: true, stacked: true }, y: { stacked: true } }, plugins: { legend: { position: 'bottom' } } }										});
 									}
 								}
 
@@ -1323,7 +1339,7 @@ templ analyticsContent(currentProject *models.Project) {
 											data: {
 													labels: rows.map(row => scopedSkillLabel(row.agent_name + ' · ' + row.skill_handle, row.skill_scope)),												datasets: [{ label: 'Activity', data: rows.map(row => row.activity), backgroundColor: 'rgba(20, 184, 166, 0.5)', borderColor: 'rgb(20, 184, 166)', borderWidth: 1 }]
 											},
-											options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
+											options: { indexAxis: 'y',  scales: { x: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
 										});
 									}
 								}
@@ -1480,21 +1496,21 @@ templ analyticsContent(currentProject *models.Project) {
 									let datasets = [];
 									if (choice === 'combined' || rateByModel.length === 0) {
 										labels = rate.map(d => d.period);
-										datasets = [{ label: 'All models', data: rate.map(d => d.total_tokens || 0), borderColor: 'rgb(147, 51, 234)', backgroundColor: 'rgba(147, 51, 234, 0.12)', tension: 0.25 }];
+										datasets = [{ label: 'All models', data: rate.map(d => d.total_tokens || 0), borderColor: 'rgb(147, 51, 234)', backgroundColor: 'rgba(147, 51, 234, 0.12)' }];
 									} else {
 										const rows = choice === 'all' ? rateByModel : rateByModel.filter(row => usageModelKey(row) === choice);
 										labels = uniquePeriods(rows);
 										const keys = choice === 'all' ? rateKeys : (choice ? [choice] : []);
 										datasets = keys.map((key, index) => {
 											const totalsByPeriod = new Map(rows.filter(row => usageModelKey(row) === key).map(row => [row.period, row.total_tokens || 0]));
-											return { label: usageModelLabel(key), data: labels.map(period => totalsByPeriod.get(period) || 0), borderColor: usageSeriesColors[index % usageSeriesColors.length], backgroundColor: colorForIndex(index, 0.12), tension: 0.25 };
+											return { label: usageModelLabel(key), data: labels.map(period => totalsByPeriod.get(period) || 0), borderColor: usageSeriesColors[index % usageSeriesColors.length], backgroundColor: colorForIndex(index, 0.12) };
 										});
 									}
 									charts.usageRate = createAnalyticsChart(rateCtx.getContext('2d'), {
 										type: 'line',
-										plugins: [analyticsActivePointOnTop],
+
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
+										options: {   plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -1544,8 +1560,7 @@ templ analyticsContent(currentProject *models.Project) {
 												}]
 											},
 												options: {
-													responsive: true,
-													maintainAspectRatio: false,
+
 														plugins: { legend: { display: false } }
 												}
 											});
@@ -1604,7 +1619,7 @@ templ analyticsContent(currentProject *models.Project) {
 										{label:'Successful',data:rows.map(r=>100*r.completed/r.n),backgroundColor:'rgba(34, 197, 94, 0.5)',borderColor:'rgb(34, 197, 94)',borderWidth:1,maxBarThickness:32},
 										{label:'Failed',data:rows.map(r=>100*r.failed/r.n),backgroundColor:'rgba(239, 68, 68, 0.5)',borderColor:'rgb(239, 68, 68)',borderWidth:1,maxBarThickness:32}
 									]},
-									options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'},tooltip:{callbacks:{
+									options:{indexAxis:'y',plugins:{legend:{position:'bottom'},tooltip:{callbacks:{
 										title:items=>items.length?modelConfigLabel(rows[items[0].dataIndex])+' · '+modelDetailLabel(rows[items[0].dataIndex]):'',
 										label:item=>{const r=rows[item.dataIndex],count=item.datasetIndex===0?r.completed:r.failed;return item.dataset.label+': '+Number(item.raw).toFixed(1)+'% · '+count+'/'+r.n+' runs';}
 									}}},scales:{x:{stacked:true,beginAtZero:true,max:100,ticks:{callback:n=>n+'%'}},y:{stacked:true,ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
@@ -1626,9 +1641,9 @@ templ analyticsContent(currentProject *models.Project) {
 							 const datasets=selected.map(key=>{
 							  const values=key==='combined'?totals:perModel.get(key);
 							  const color=key==='combined'?'rgb(147, 51, 234)':usageSeriesColors[keys.indexOf(key)%usageSeriesColors.length];
-							  return {label:key==='combined'?'All models':usageModelLabel(key),data:periods.map(period=>values.get(period)||0),borderColor:color,backgroundColor:color,borderWidth:2,pointRadius:3,tension:0.3,cubicInterpolationMode:'monotone',fill:false};
+							  return {label:key==='combined'?'All models':usageModelLabel(key),data:periods.map(period=>values.get(period)||0),borderColor:color,backgroundColor:color};
 							 });
-							 charts.usageRunHours=createAnalyticsChart(canvas.getContext('2d'),{type:'line',plugins: [analyticsActivePointOnTop],data:{labels:periods,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom'},tooltip:analyticsLineTooltipOptions()},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+							 charts.usageRunHours=createAnalyticsChart(canvas.getContext('2d'),{type:'line',data:{labels:periods,datasets:datasets},options:{plugins:{legend:{position:'bottom'},},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
 							}
 
 							async function loadTaskRunActivity() {
@@ -1648,7 +1663,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if(canvas){
 										canvas.parentElement.style.minWidth=Math.max(320,rows.length*64+64)+'px';
 										if(!canvas.parentElement.parentElement.hasAttribute('data-run-scroll')){const scroll=document.createElement('div');scroll.className='overflow-x-auto';scroll.setAttribute('data-run-scroll','');const plot=canvas.parentElement;plot.parentElement.insertBefore(scroll,plot);scroll.appendChild(plot);}
-										charts.usageRunModels=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[{data:rows.map(r=>r.runs),backgroundColor:rows.map(modelChartColor)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>rows[item.dataIndex].runs+' task runs'}}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}}});
+										charts.usageRunModels=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[{data:rows.map(r=>r.runs),backgroundColor:rows.map(modelChartColor)}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>rows[item.dataIndex].runs+' task runs'}}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}}});
 									}
 								}catch(e){
 									if(e.name==='AbortError')return;
@@ -1725,7 +1740,7 @@ templ analyticsContent(currentProject *models.Project) {
 
 							charts.successFailure = createAnalyticsChart(ctx.getContext('2d'), {
 							type: 'line',
-							plugins: [analyticsActivePointOnTop],
+
 							data: {
 								labels: data.map(d => d.Period || 'N/A'),
 								datasets: [
@@ -1767,10 +1782,9 @@ templ analyticsContent(currentProject *models.Project) {
 								]
 							},
 							options: {
-								responsive: true,
-								maintainAspectRatio: false,
-									interaction: { mode: 'index', intersect: false },
-									plugins: { tooltip: analyticsLineTooltipOptions() },								scales: {
+
+
+									plugins: {  },								scales: {
 									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Run success rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total runs' }, grid: { drawOnChartArea: false } }
 								}
@@ -1807,8 +1821,7 @@ templ analyticsContent(currentProject *models.Project) {
 								}]
 							},
 							options: {
-								responsive: true,
-									maintainAspectRatio: false,
+
 									scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' } } }							}
 						});
 						} catch (e) { console.error('loadHourlyTrends:', e); showAnalyticsError(e); }
@@ -1837,8 +1850,7 @@ templ analyticsContent(currentProject *models.Project) {
 								}]
 							},
 							options: {
-								responsive: true,
-								maintainAspectRatio: false,
+
 								indexAxis: 'y',
 								scales: { x: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },
 								plugins: {
@@ -1892,7 +1904,7 @@ templ analyticsContent(currentProject *models.Project) {
 							const data = await fetchJSON('/api/analytics/failed-task-patterns?' + params.toString());
 
 							const canvas = renderChartState('failedPatterns', 'failedPatternsChart', data, 'No failed task patterns in this period');
-							if (canvas) charts.failedPatterns = createAnalyticsChart(canvas.getContext('2d'), {type:'bar',data:{labels:data.map(pattern=>pattern.TaskTitle||'Unknown'),datasets:[{label:'Failed runs',data:data.map(pattern=>Number(pattern.FailureCount||0)),backgroundColor:'#ef4444'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}}}});
+							if (canvas) charts.failedPatterns = createAnalyticsChart(canvas.getContext('2d'), {type:'bar',data:{labels:data.map(pattern=>pattern.TaskTitle||'Unknown'),datasets:[{label:'Failed runs',data:data.map(pattern=>Number(pattern.FailureCount||0)),backgroundColor:'#ef4444'}]},options:{indexAxis:'y',scales:{x:{beginAtZero:true}}}});
 
 							const tbody = document.querySelector('#failedPatternsTable tbody');
 						if (!tbody) return;
