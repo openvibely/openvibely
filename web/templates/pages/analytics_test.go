@@ -277,6 +277,17 @@ window.addEventListener('load',async function(){
   assert(configs.usageRunHoursChart.data.labels.join('|')==='2026-09-01|2026-09-02'&&configs.usageRunHoursChart.data.datasets[0].data.join('|')==='3|3','task runs should use date buckets rather than hours of day');
   assert(configs.usageRunHoursChart.type==='line'&&configs.usageRunHoursChart.data.datasets[0].cubicInterpolationMode==='monotone','task run trend should retain smooth curves');
   assert(document.getElementById('usageRunHoursChart').closest('.card').textContent.includes('Task runs over time'),'run trend title should describe date-based activity');
+  var runSelect=document.getElementById('usageRunModelSelect'),runBars=configs.usageRunModelsChart,tokenBreakdown=configs.modelTokenBreakdownChart,requestCount=calls;
+  runSelect.value='all';runSelect.dispatchEvent(new Event('change'));
+  assert(configs.usageRunHoursChart.data.datasets.length===2,'each model should have its own line');
+  var modelKey=JSON.stringify(['unknown','model']);
+  runSelect.value=modelKey;runSelect.dispatchEvent(new Event('change'));
+  assert(configs.usageRunHoursChart.data.datasets.length===1&&configs.usageRunHoursChart.data.datasets[0].data.join('|')==='3|3','selected model counts incorrect');
+  runSelect.value=JSON.stringify(['unknown','other']);runSelect.dispatchEvent(new Event('change'));
+  assert(configs.usageRunHoursChart.data.datasets[0].data.join('|')==='0|0','selected model should retain date buckets with zero runs');
+  runSelect.value='combined';runSelect.dispatchEvent(new Event('change'));
+  assert(configs.usageRunHoursChart.data.datasets[0].data.join('|')==='3|3','combined totals lost');
+  assert(calls===requestCount&&configs.usageRunModelsChart===runBars&&configs.modelTokenBreakdownChart===tokenBreakdown,'run selector should redraw only its chart without refetching');
   assert(configs.usageRunModelsChart.data.datasets[0].data[0]===6,'model run counts incorrect');
   for(var id of ['usageRunModelsChart','modelTokenBreakdownChart'])assert(configs[id].data.datasets[0].barThickness===undefined&&configs[id].data.datasets[0].categoryPercentage===0.8&&configs[id].data.datasets[0].barPercentage===0.9,'usage bars must share the model chart style');
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
