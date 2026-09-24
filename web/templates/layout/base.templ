@@ -825,9 +825,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					opacity: 0.55;
 				}
 				.chat-input-option-btn.chat-input-option-selected {
-					border-color: hsl(var(--p) / 0.45);
 					background: hsl(var(--b2));
-					box-shadow: 0 4px 14px hsl(var(--p) / 0.12), inset 0 0 0 1px hsl(var(--p) / 0.32);
+					box-shadow: inset 0 0 0 2px hsl(var(--p) / 0.35), 0 1px 2px hsl(var(--bc) / 0.08);
 				}
 				.chat-input-recommended-badge {
 					display: inline-flex;
@@ -842,7 +841,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					line-height: 1.2;
 				}
 				.chat-input-recommended-shortcut {
+					color: hsl(var(--pc));
 					font-weight: 700;
+				}
+				.chat-input-recommended-shortcut:hover:where(:not(:disabled)) {
+					background: hsl(var(--p));
 				}
 				#pending-thread-inputs:has([data-thread-input-id]) {
 					padding-bottom: 1rem;
