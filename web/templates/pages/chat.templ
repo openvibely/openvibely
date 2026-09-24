@@ -1334,7 +1334,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (!label) return;
 									var button = document.createElement('button');
 									button.type = 'button';
-									button.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+									button.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 									button.style.setProperty('--btn-focus-scale', '1');
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
@@ -1364,7 +1364,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								});
 								var customButton = document.createElement('button');
 								customButton.type = 'button';
-								customButton.className = 'chat-input-option-btn justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+								customButton.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 								customButton.style.setProperty('--btn-focus-scale', '1');
 								customButton.setAttribute('data-chat-input-option', 'true');
 								customButton.setAttribute('data-chat-input-custom-option', 'true');
@@ -1386,7 +1386,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								body.appendChild(fieldset);
 							});
 							var navigation = document.createElement('div');
-							navigation.className = 'flex items-center justify-between gap-3 text-sm text-base-content/60';
+							navigation.className = 'flex flex-wrap items-center justify-end gap-2 text-sm text-base-content/60';
 							navigation.setAttribute('data-chat-input-navigation', 'true');
 							var previous = document.createElement('button');
 							previous.type = 'button';
@@ -1398,7 +1398,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							position.setAttribute('data-chat-input-position', 'true');
 							var recommended = document.createElement('button');
 							recommended.type = 'button';
-							recommended.className = 'btn btn-ghost btn-sm chat-input-recommended-shortcut';
+							recommended.className = 'btn btn-secondary btn-sm chat-input-recommended-shortcut';
 							recommended.style.setProperty('--btn-focus-scale', '1');
 							recommended.setAttribute('data-chat-input-nav', 'recommended');
 							recommended.setAttribute('aria-label', 'Use recommended answers and continue');
@@ -1408,8 +1408,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							next.className = 'btn btn-primary btn-sm';
 							next.setAttribute('data-chat-input-nav', 'next');
 							next.setAttribute('aria-label', 'Next question');
-							navigation.appendChild(previous);
 							navigation.appendChild(position);
+							navigation.appendChild(previous);
 							navigation.appendChild(recommended);
 							navigation.appendChild(next);
 							body.appendChild(navigation);

@@ -117,6 +117,9 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createButton.getAttribute('aria-pressed') !== 'false') fail('recommended option was preselected before user click');
 				if (createButton.textContent.indexOf('Recommended') === -1) fail('recommended option was not visually labeled');
 				if (createButton.classList.contains('btn-outline') || createButton.classList.contains('btn-primary')) fail('question option still uses distracting DaisyUI outline/primary styling');
+				['card','bg-base-100','shadow-sm','border','border-base-300','hover:border-primary/40','hover:shadow-md','transition-all'].forEach(function(className) {
+					if (!createButton.classList.contains(className)) fail('question option did not reuse shared page-card styling: ' + className);
+				});
 				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
 				var createStyle = getComputedStyle(createButton);
 				if (createStyle.cursor !== 'pointer') fail('question option does not look clickable');
@@ -126,6 +129,10 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
+				if (!recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut was not styled as an obvious secondary action');
+				var navigation = card.querySelector('[data-chat-input-navigation]');
+				if (!navigation || !navigation.classList.contains('justify-end') || navigation.classList.contains('justify-between')) fail('navigation controls were not grouped compactly');
+				if (navigation && navigation.firstElementChild && !navigation.firstElementChild.hasAttribute('data-chat-input-position')) fail('question position should sit next to the grouped controls');
 				if (getComputedStyle(recommendedShortcut).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('recommended shortcut can still shrink on click');
 				var nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || !nextButton.disabled) fail('Next should stay disabled until the user selects an answer');
