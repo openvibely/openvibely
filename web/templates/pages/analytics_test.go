@@ -313,6 +313,9 @@ window.addEventListener('load',async function(){
   assert(document.getElementById('modelMetricHelp').matches(':popover-open')&&document.getElementById('modelMetricHelp').textContent===headerHelp.dataset.modelHelp,'usage column help should open immediately on click');
   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   assert(usageRows[0].cells[2].textContent.includes('1M')&&usageRows[0].cells[2].querySelector('[data-model-help]').dataset.modelHelp.includes('1,000,000'),'compact values must retain exact counts in help');
+  assert(usageRows[0].cells[2].querySelector('[data-model-help]').dataset.modelHelp==='1,000,000','cell help must contain only the exact value');
+  assert(usageRows[0].cells[4].querySelector('[data-model-help]').dataset.modelHelp==='900,000','cache explanation belongs only in the column help');
+  assert(!document.getElementById('usageLastUpdated'),'usage timestamp should be removed');
   assert(usageRows[0].cells[4].classList.contains('bg-success/10')&&usageRows[0].cells[4].textContent.includes('90.0% reuse'),'high cache reuse should be green');
   assert(usageRows[1].cells[4].classList.contains('bg-warning/10'),'moderate cache reuse should match Model comparison caution styling');
   assert(usageRows[2].cells[4].classList.contains('bg-error/10'),'low cache reuse should be red');
