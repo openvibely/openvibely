@@ -219,7 +219,7 @@ templ analyticsContent(currentProject *models.Project) {
 						<p class="text-center opacity-50 py-12 lg:col-span-2">Loading analytics…</p>
 					</div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
-					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
+					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><button type="button" class="btn btn-ghost btn-circle btn-xs" data-model-help="Cache reuse: green 80% or more, yellow/brown 50–79%, red below 50%. These are display bands, not model quality grades. Token amounts and cost are neutral. Hover or click a value for exact numbers." aria-label="Explain usage highlights">ⓘ</button><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><div class="overflow-x-auto"><table class="table table-sm"><thead><tr><th scope="col">Provider</th><th scope="col">Model</th><th scope="col">Input tokens</th><th scope="col">Output tokens</th><th scope="col">Cached input</th><th scope="col">Reasoning tokens</th><th scope="col">Total tokens</th><th scope="col">Known cost</th></tr></thead><tbody id="usageBreakdownTable"></tbody></table></div></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Task runs over time</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRunModelSelect" aria-label="Task run model" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"><option value="combined">All models combined</option></select></div></div><p class="text-sm opacity-60">Task run starts across the selected date range. Chat activity excluded.</p><div class="relative h-64"><canvas id="usageRunHoursChart"></canvas></div></div></div> @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
 				</section>
@@ -1488,10 +1488,28 @@ templ analyticsContent(currentProject *models.Project) {
 										if (breakdown.length === 0 && (totals.call_count || 0) === 0) {
 											table.innerHTML = '\x3ctr>\x3ctd colspan="8" class="text-center opacity-50">No usage recorded yet\x3c/td>\x3c/tr>';
 										} else {
-											const rows = breakdown.map(row => '\x3ctr data-usage-model="' + escapeHTML(usageModelKey(row)) + '">\x3ctd>' + escapeHTML(row.provider || 'unknown') + '\x3c/td>\x3ctd>' + escapeHTML(row.model || 'unknown') + '\x3c/td>\x3ctd>' + formatNumber(row.input_tokens) + '\x3c/td>\x3ctd>' + formatNumber(row.output_tokens) + '\x3c/td>\x3ctd>' + formatNumber(row.cached_input_tokens) + '\x3c/td>\x3ctd>' + formatNumber(row.reasoning_output_tokens) + '\x3c/td>\x3ctd>' + formatNumber(row.total_tokens) + '\x3c/td>\x3ctd>' + formatCost(row.cost_usd) + '\x3c/td>\x3c/tr>');
-											const totalCost = totals.cost_available ? formatCost(totals.cost_usd) : 'cost unavailable';
-											rows.push('\x3ctr class="font-semibold border-t border-base-300">\x3ctd>Total\x3c/td>\x3ctd>All models\x3c/td>\x3ctd>' + formatNumber(totals.input_tokens) + '\x3c/td>\x3ctd>' + formatNumber(totals.output_tokens) + '\x3c/td>\x3ctd>' + formatNumber(totals.cached_input_tokens) + '\x3c/td>\x3ctd>' + formatNumber(totals.reasoning_output_tokens) + '\x3c/td>\x3ctd>' + formatNumber(totals.total_tokens) + '\x3c/td>\x3ctd>' + totalCost + '\x3c/td>\x3c/tr>');
-											table.innerHTML = rows.join('');
+											const compactTokens=n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(Number(n||0));
+											function usageCell(main,subtext,tone,help){
+											 return '\x3ctd class="'+tone+'">\x3cbutton type="button" class="text-left" data-model-help="'+escapeHTML(help)+'" aria-label="'+escapeHTML(help)+'">\x3cstrong class="text-lg tabular-nums whitespace-nowrap">'+escapeHTML(main)+'\x3c/strong>\x3c/button>\x3cdiv class="text-xs opacity-60">'+escapeHTML(subtext)+'\x3c/div>\x3c/td>';
+											}
+											function tokenCell(n,label,subtext){
+											 return usageCell(compactTokens(n),subtext||'Recorded','bg-primary/10',label+': '+formatNumber(n||0)+' tokens.');
+											}
+											function usageCells(row,costAvailable){
+											 const input=Number(row.input_tokens||0),cached=Number(row.cached_input_tokens||0);
+											 const ratio=input>0?cached/input*100:null;
+											 const valid=ratio!==null&&ratio>=0&&ratio<=100;
+											 const tone=!valid?'bg-base-200/40':ratio>=80?'bg-success/10':ratio>=50?'bg-warning/10':'bg-error/10';
+											 const reuse=!valid?'Reuse unavailable':ratio.toFixed(1)+'% reuse · '+(ratio>=80?'High':ratio>=50?'Moderate':'Low');
+											 const share=Number(totals.total_tokens||0)>0?(Number(row.total_tokens||0)*100/totals.total_tokens).toFixed(1)+'% of total':'Recorded';
+											 return tokenCell(row.input_tokens,'Input tokens')+tokenCell(row.output_tokens,'Output tokens')+
+											 usageCell(compactTokens(cached),reuse,tone,'Cached input: '+formatNumber(cached)+' tokens. '+reuse+'. Cache reuse depends on the workload, not just the model.')+
+											 tokenCell(row.reasoning_output_tokens,'Reasoning tokens')+tokenCell(row.total_tokens,'Total tokens',share)+
+											 usageCell(costAvailable?formatCost(row.cost_usd):'Unavailable',costAvailable?'Recorded cost':'No recorded cost',costAvailable?'bg-primary/10':'bg-base-200/40',costAvailable?'Recorded cost: $'+Number(row.cost_usd).toFixed(6)+'. May exclude unpriced usage.':'No recorded cost. Subscription usage is not zero-cost usage.');
+											}
+											const rows=breakdown.map(row=>'\x3ctr data-usage-model="'+escapeHTML(usageModelKey(row))+'">\x3ctd>'+escapeHTML(row.provider||'unknown')+'\x3c/td>\x3cth scope="row" class="font-normal whitespace-normal">\x3cstrong>'+escapeHTML(row.model||'unknown')+'\x3c/strong>\x3c/th>'+usageCells(row,row.cost_usd!=null)+'\x3c/tr>');
+											rows.push('\x3ctr class="font-semibold border-t border-base-300">\x3cth scope="row">Total\x3c/th>\x3ctd>All models\x3c/td>'+usageCells(totals,!!totals.cost_available&&totals.cost_usd!=null)+'\x3c/tr>');
+											table.innerHTML=rows.join('');
 										}
 									}
 								const modelCtx = renderChartState('modelTokenBreakdown', 'modelTokenBreakdownChart', breakdown, 'No model token usage in this period');

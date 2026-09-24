@@ -237,7 +237,7 @@ history.replaceState({},'',location.pathname+'?project_id=p&view=models');
 var configs={},calls=0;
 window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
 var model={model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
-window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',runs:3,completed:1,failed:1,cancelled:1},{period:'2026-09-02',runs:3,completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",total_tokens:100}]};return {ok:true,json:async()=>data};};
+window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',runs:3,completed:1,failed:1,cancelled:1},{period:'2026-09-02',runs:3,completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",input_tokens:1000000,cached_input_tokens:900000,total_tokens:1010000,cost_usd:0},{provider:"openai",model:"moderate",input_tokens:100,cached_input_tokens:60},{provider:"openai",model:"low",input_tokens:100,cached_input_tokens:10},{provider:"openai",model:"missing",input_tokens:0}]};return {ok:true,json:async()=>data};};
 window.addEventListener('load',async function(){
  var result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
@@ -303,6 +303,14 @@ window.addEventListener('load',async function(){
   for(var id of ['usageRunModelsChart','modelTokenBreakdownChart'])assert(configs[id].data.datasets[0].barThickness===undefined&&configs[id].data.datasets[0].categoryPercentage===0.8&&configs[id].data.datasets[0].barPercentage===0.9,'usage bars must share the model chart style');
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
+  var usageTable=document.getElementById('usageBreakdownTable'),usageRows=usageTable.querySelectorAll('[data-usage-model]');
+  assert(usageTable.closest('table').querySelectorAll('thead th').length===8,'usage columns need clear headings');
+  assert(usageRows[0].cells[2].textContent.includes('1M')&&usageRows[0].cells[2].querySelector('[data-model-help]').dataset.modelHelp.includes('1,000,000'),'compact values must retain exact counts in help');
+  assert(usageRows[0].cells[4].classList.contains('bg-success/10')&&usageRows[0].cells[4].textContent.includes('90.0% reuse'),'high cache reuse should be green');
+  assert(usageRows[1].cells[4].classList.contains('bg-warning/10'),'moderate cache reuse should match Model comparison caution styling');
+  assert(usageRows[2].cells[4].classList.contains('bg-error/10'),'low cache reuse should be red');
+  assert(usageRows[3].cells[4].classList.contains('bg-base-200/40')&&usageRows[3].cells[7].textContent.includes('Unavailable'),'missing evidence should remain neutral');
+  assert(usageRows[0].cells[7].textContent.includes('$0.00'),'recorded zero cost must not be treated as missing');
   assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===configs.modelTokenBreakdownChart.data.datasets[0].backgroundColor[0],'run and token charts should share the palette');
   result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
