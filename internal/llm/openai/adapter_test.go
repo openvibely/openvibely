@@ -352,12 +352,14 @@ func TestToolSecondaryInfo_WebSearchFindInPageDetail(t *testing.T) {
 }
 
 func TestReasoningEffortUsesModelDefaults(t *testing.T) {
-	for _, tc := range []struct {
+	cases := []struct {
 		model string
 		value string
 		want  string
 	}{
 		{model: "gpt-6-astra", want: "medium"},
+		{model: "gpt-6-sol", want: "medium"},
+		{model: "gpt-6-luna", want: "medium"},
 		{model: "gpt-5.6-sol", want: "medium"},
 		{model: "gpt-5.6-terra", want: "medium"},
 		{model: "gpt-5.6-luna", want: "medium"},
@@ -365,11 +367,23 @@ func TestReasoningEffortUsesModelDefaults(t *testing.T) {
 		{model: "gpt-5.5-pro", want: "medium"},
 		{model: "gpt-6-astra", value: "none", want: "medium"},
 		{model: "gpt-6-astra", value: "max", want: "max"},
+		{model: "gpt-6-sol", value: "invalid", want: "medium"},
+		{model: "gpt-6-luna", value: "invalid", want: "medium"},
 		{model: "gpt-5.6-sol", value: "max", want: "max"},
 		{model: "gpt-5.4-mini", value: "max", want: "medium"},
 		{model: "gpt-5.4-mini", value: "xhigh", want: "xhigh"},
 		{model: "gpt-5.3-codex-spark", value: "xhigh", want: "xhigh"},
-	} {
+	}
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		for _, effort := range []string{"none", "low", "medium", "high", "xhigh", "max"} {
+			cases = append(cases, struct {
+				model string
+				value string
+				want  string
+			}{model: model, value: effort, want: effort})
+		}
+	}
+	for _, tc := range cases {
 		if got := reasoningEffort(tc.model, tc.value); got != tc.want {
 			t.Errorf("reasoningEffort(%q, %q) = %q, want %q", tc.model, tc.value, got, tc.want)
 		}
