@@ -1450,6 +1450,20 @@ func TestSendAgentic_OAuthSetsXAppHeader(t *testing.T) {
 		if !strings.Contains(betaHeader, "claude-code-20250219") || !strings.Contains(betaHeader, OAuthBetaHeader) {
 			t.Fatalf("anthropic-beta header missing oauth betas: %q", betaHeader)
 		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read OAuth request body: %v", err)
+		}
+		var reqBody struct {
+			System []systemBlock `json:"system"`
+		}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("decode OAuth request body: %v", err)
+		}
+		wantBilling := "x-anthropic-billing-header: cc_version=" + ClaudeCodeVersion + "; cc_entrypoint=cli; cch=00000;"
+		if len(reqBody.System) == 0 || reqBody.System[0].Text != wantBilling {
+			t.Fatalf("first OAuth system block = %#v, want billing attribution %q", reqBody.System, wantBilling)
+		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -2075,7 +2089,7 @@ func TestContextManagementEdit_WithThinking(t *testing.T) {
 }
 
 func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T) {
-	models := []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"}
+	models := []string{"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"}
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2147,6 +2161,7 @@ func TestNormalizeEffortRejectsUnsupportedModelCombinations(t *testing.T) {
 		effort string
 		want   string
 	}{
+		{"claude-opus-5-5", "max", "max"},
 		{"claude-opus-5", " LOW ", "low"},
 		{"claude-opus-5", "xhigh", "xhigh"},
 		{"claude-sonnet-5", "xhigh", "xhigh"},

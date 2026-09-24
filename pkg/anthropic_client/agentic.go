@@ -1259,7 +1259,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 	if c.auth.APIKey == "" && c.auth.Token != "" {
 		sysBlocks = append(sysBlocks, systemBlock{
 			Type: "text",
-			Text: "x-anthropic-billing-header: cc_version=2.1.78; cc_entrypoint=cli; cch=00000;",
+			Text: fmt.Sprintf("x-anthropic-billing-header: cc_version=%s; cc_entrypoint=cli; cch=00000;", ClaudeCodeVersion),
 		})
 	}
 	if opts.System != "" {

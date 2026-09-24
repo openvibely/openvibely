@@ -35,6 +35,8 @@ type claudeCodeOutputBudget struct {
 func claudeCodeOutputBudgetForModel(model string) claudeCodeOutputBudget {
 	m := strings.ToLower(strings.TrimSpace(model))
 	switch {
+	case strings.Contains(m, "claude-opus-5-5"):
+		return claudeCodeOutputBudget{Default: 128000, UpperLimit: 128000}
 	case strings.Contains(m, "claude-opus-5"), strings.Contains(m, "claude-sonnet-5"):
 		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
 	case strings.Contains(m, "claude-fable-5"), strings.Contains(m, "claude-mythos-5"):
