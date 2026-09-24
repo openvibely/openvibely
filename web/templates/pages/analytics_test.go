@@ -267,6 +267,7 @@ window.addEventListener('load',async function(){
   for(i=0;i<100&&(!configs.usageRunHoursChart||!configs.usageRunModelsChart);i++)await wait();
   assert(configs.usageRunHoursChart.data.labels.length===24&&configs.usageRunHoursChart.data.datasets[0].data[1]===6,'hourly counts incorrect');
   assert(configs.usageRunHoursChart.type==='line'&&configs.usageRunHoursChart.data.datasets[0].data[0]===0,'hourly activity should be a line chart including zero hours');
+  assert(configs.usageRunHoursChart.data.datasets[0].cubicInterpolationMode==='monotone','hourly line should have smooth curves without overshooting counts');
   assert(configs.usageRunModelsChart.data.datasets[0].data[0]===6,'model run counts incorrect');
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');

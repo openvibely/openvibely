@@ -1558,7 +1558,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const rows=(data.models||[]).slice().sort((a,b)=>b.runs-a.runs||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
 									const hours=Array.from({length:24},(_,i)=>Number((data.hours||[])[i]||0));
 									let canvas=renderChartState('usageRunHours','usageRunHoursChart',hours.some(n=>n>0)?hours:[],'No task runs in this period');
-									if(canvas)charts.usageRunHours=new Chart(canvas.getContext('2d'),{type:'line',data:{labels:hours.map((_,i)=>String(i).padStart(2,'0')+':00'),datasets:[{label:'Task runs',data:hours,borderColor:'rgb(59,130,246)',backgroundColor:'rgba(59,130,246,.6)',borderWidth:2,pointRadius:3,tension:0,fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+									if(canvas)charts.usageRunHours=new Chart(canvas.getContext('2d'),{type:'line',data:{labels:hours.map((_,i)=>String(i).padStart(2,'0')+':00'),datasets:[{label:'Task runs',data:hours,borderColor:'rgb(59,130,246)',backgroundColor:'rgba(59,130,246,.6)',borderWidth:2,pointRadius:3,tension:0.3,cubicInterpolationMode:'monotone',fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
 									canvas=renderChartState('usageRunModels','usageRunModelsChart',rows,'No task runs in this period');
 									if(canvas){
 										canvas.parentElement.style.minWidth=Math.max(320,rows.length*85)+'px';
