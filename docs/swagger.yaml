@@ -268,6 +268,8 @@ definitions:
         type: string
       agent_name:
         type: string
+      average_follow_ups:
+        type: number
       duration_sample_size:
         type: integer
       first_pass:
@@ -280,6 +282,8 @@ definitions:
         $ref: '#/definitions/models.CostCoverage'
       median_duration_ms:
         type: integer
+      merge_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
       most_used_model:
         type: string
       tasks_evaluated:
@@ -363,6 +367,18 @@ definitions:
         items:
           $ref: '#/definitions/models.ModelCategoryPerformance'
         type: array
+      model_effort_trend:
+        items:
+          $ref: '#/definitions/models.ModelEffortTrend'
+        type: array
+      models:
+        items:
+          $ref: '#/definitions/models.ModelPerformance'
+        type: array
+      outcome_trend:
+        items:
+          $ref: '#/definitions/models.OutcomeTrendPoint'
+        type: array
       previous:
         $ref: '#/definitions/models.OutcomeMetrics'
       recent_outcomes:
@@ -373,6 +389,10 @@ definitions:
         items:
           $ref: '#/definitions/models.SkillOutcomePerformance'
         type: array
+      skill_summary:
+        $ref: '#/definitions/models.SkillOutcomeSummary'
+      task_summary:
+        $ref: '#/definitions/models.AnalyticsTaskSummary'
       workflow_detail:
         $ref: '#/definitions/models.WorkflowAnalyticsDetail'
       workflows:
@@ -441,6 +461,15 @@ definitions:
       model_config_id:
         type: string
     type: object
+  models.AnalyticsTaskSummary:
+    properties:
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      merge_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      tasks_worked_on:
+        type: integer
+    type: object
   models.AnalyticsTrendPoint:
     properties:
       cancelled:
@@ -459,6 +488,12 @@ definitions:
       account_limits:
         items:
           $ref: '#/definitions/models.AccountUsageView'
+        type: array
+      average_tokens_per_day:
+        type: number
+      configuration_breakdown:
+        items:
+          $ref: '#/definitions/models.ConfigurationUsagePoint'
         type: array
       daily_usage:
         items:
@@ -486,6 +521,8 @@ definitions:
         type: array
       totals:
         $ref: '#/definitions/models.UsageTotals'
+      usage_calendar_days:
+        type: integer
       usage_rate:
         items:
           $ref: '#/definitions/models.UsageRatePoint'
@@ -538,6 +575,35 @@ definitions:
         type: string
       node_name:
         type: string
+    type: object
+  models.ConfigurationUsagePoint:
+    properties:
+      cached_input_tokens:
+        type: integer
+      call_count:
+        type: integer
+      config_name:
+        type: string
+      cost_usd:
+        type: number
+      input_tokens:
+        type: integer
+      model:
+        type: string
+      model_config_id:
+        type: string
+      output_tokens:
+        type: integer
+      percent:
+        type: number
+      provider:
+        type: string
+      reasoning_effort:
+        type: string
+      reasoning_output_tokens:
+        type: integer
+      total_tokens:
+        type: integer
     type: object
   models.CostCoverage:
     properties:
@@ -684,6 +750,85 @@ definitions:
       technical_completion:
         $ref: '#/definitions/models.AnalyticsMetric'
     type: object
+  models.ModelEffortTrend:
+    properties:
+      duration_samples:
+        type: integer
+      follow_ups:
+        type: integer
+      median_duration_ms:
+        type: integer
+      period:
+        type: string
+      tasks:
+        type: integer
+      token_samples:
+        type: integer
+      tokens:
+        type: integer
+    type: object
+  models.ModelOutcomeTrend:
+    properties:
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      merge_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      period:
+        type: string
+    type: object
+  models.ModelPerformance:
+    properties:
+      average_follow_ups:
+        type: number
+      average_runs:
+        type: number
+      config_name:
+        type: string
+      cost_covered_tasks:
+        type: integer
+      duration_sample_size:
+        type: integer
+      effort_trend:
+        items:
+          $ref: '#/definitions/models.ModelEffortTrend'
+        type: array
+      follow_up:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      known_cost_usd:
+        type: number
+      median_duration_ms:
+        type: integer
+      merge_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      mixed_models:
+        type: boolean
+      model:
+        type: string
+      model_config_id:
+        type: string
+      outcome_trend:
+        items:
+          $ref: '#/definitions/models.ModelOutcomeTrend'
+        type: array
+      p90_duration_ms:
+        type: integer
+      provider:
+        type: string
+      reasoning_effort:
+        type: string
+      run_count:
+        type: integer
+      tasks_used:
+        type: integer
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      token_covered_tasks:
+        type: integer
+      total_tokens:
+        type: integer
+    type: object
   models.ModelUsagePoint:
     properties:
       cached_input_tokens:
@@ -746,6 +891,19 @@ definitions:
         $ref: '#/definitions/models.AnalyticsMetric'
       tokens_per_achieved_goal:
         $ref: '#/definitions/models.CostCoverage'
+    type: object
+  models.OutcomeTrendPoint:
+    properties:
+      first_pass:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      follow_up:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      goal_achievement:
+        $ref: '#/definitions/models.AnalyticsMetric'
+      period:
+        type: string
+      technical_completion:
+        $ref: '#/definitions/models.AnalyticsMetric'
     type: object
   models.RepeatType:
     enum:
@@ -950,6 +1108,15 @@ definitions:
         type: integer
       technical_completion:
         $ref: '#/definitions/models.AnalyticsMetric'
+    type: object
+  models.SkillOutcomeSummary:
+    properties:
+      skills_used:
+        type: integer
+      tasks_using_skills:
+        type: integer
+      tasks_with_goal_evidence:
+        type: integer
     type: object
   models.SkillUsagePeriodMetric:
     properties:
@@ -1354,6 +1521,57 @@ definitions:
       taskTitle:
         type: string
     type: object
+  repository.TaskRunActivity:
+    properties:
+      hours:
+        items:
+          type: integer
+        type: array
+      models:
+        items:
+          $ref: '#/definitions/repository.TaskRunModel'
+        type: array
+    type: object
+  repository.TaskRunModel:
+    properties:
+      average_run_ms:
+        type: number
+      config_name:
+        type: string
+      duration_samples:
+        type: integer
+      model:
+        type: string
+      model_config_id:
+        type: string
+      provider:
+        type: string
+      reasoning_effort:
+        type: string
+      runs:
+        type: integer
+      trend:
+        items:
+          $ref: '#/definitions/repository.TaskRunPeriod'
+        type: array
+    type: object
+  repository.TaskRunPeriod:
+    properties:
+      average_run_ms:
+        type: number
+      cancelled:
+        type: integer
+      completed:
+        type: integer
+      duration_samples:
+        type: integer
+      failed:
+        type: integer
+      period:
+        type: string
+      runs:
+        type: integer
+    type: object
   update.ActiveWork:
     properties:
       automation_activities:
@@ -1690,8 +1908,8 @@ paths:
         in: query
         name: group_by
         type: string
-      - description: 'Active Analytics view: overview, outcomes, agents, learning,
-          usage, workflows, or all'
+      - description: 'Active Analytics view: overview, outcomes, agents, models, automations,
+          learning, or usage'
         in: query
         name: view
         type: string
@@ -1702,6 +1920,10 @@ paths:
       - description: Automation workflow ID
         in: query
         name: workflow
+        type: string
+      - description: 'Model work type: interactive or recurring'
+        in: query
+        name: work_type
         type: string
       - default: 20
         description: Evidence rows per page, 1-100
@@ -1950,6 +2172,52 @@ paths:
       summary: Get success/failure rates
       tags:
       - analytics
+  /api/analytics/task-run-activity:
+    get:
+      description: Returns non-chat task runs, outcomes, durations, and hourly activity
+        grouped by model configuration for one project.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - default: 30d
+        description: 'Convenience range: 7d, 30d, 90d, 365d, month, or all'
+        in: query
+        name: range
+        type: string
+      - default: day
+        description: 'Grouping period: day, week, or month'
+        in: query
+        name: group_by
+        type: string
+      - description: Optional start datetime filter
+        in: query
+        name: date_from
+        type: string
+      - description: Optional end datetime filter
+        in: query
+        name: date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Task-run activity
+          schema:
+            $ref: '#/definitions/repository.TaskRunActivity'
+        "400":
+          description: Missing project ID
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get task-run activity
+      tags:
+      - analytics
   /api/analytics/usage:
     get:
       description: Returns token/cache/reasoning/cost totals, daily usage, usage rate,
@@ -1995,10 +2263,14 @@ paths:
         in: query
         name: usage_model_name
         type: string
-      - description: Optional compact projection; account_limits returns only provider/account-limit
-          rows
+      - description: local skips provider requests; accounts lists local account keys;
+          account_limits returns provider/account-limit rows
         in: query
         name: projection
+        type: string
+      - description: Opaque account inventory key to fetch independently
+        in: query
+        name: account_key
         type: string
       produces:
       - application/json

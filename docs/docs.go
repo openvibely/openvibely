@@ -237,7 +237,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Active Analytics view: overview, outcomes, agents, learning, usage, workflows, or all",
+                        "description": "Active Analytics view: overview, outcomes, agents, models, automations, learning, or usage",
                         "name": "view",
                         "in": "query"
                     },
@@ -251,6 +251,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Automation workflow ID",
                         "name": "workflow",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Model work type: interactive or recurring",
+                        "name": "work_type",
                         "in": "query"
                     },
                     {
@@ -609,6 +615,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/analytics/task-run-activity": {
+            "get": {
+                "description": "Returns non-chat task runs, outcomes, durations, and hourly activity grouped by model configuration for one project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Get task-run activity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "30d",
+                        "description": "Convenience range: 7d, 30d, 90d, 365d, month, or all",
+                        "name": "range",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "day",
+                        "description": "Grouping period: day, week, or month",
+                        "name": "group_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional start datetime filter",
+                        "name": "date_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional end datetime filter",
+                        "name": "date_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Task-run activity",
+                        "schema": {
+                            "$ref": "#/definitions/repository.TaskRunActivity"
+                        }
+                    },
+                    "400": {
+                        "description": "Missing project ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/analytics/usage": {
             "get": {
                 "description": "Returns token/cache/reasoning/cost totals, daily usage, usage rate, model breakdowns, account limit snapshots, and bounded supporting usage events for an exact chart selection.",
@@ -678,8 +751,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional compact projection; account_limits returns only provider/account-limit rows",
+                        "description": "local skips provider requests; accounts lists local account keys; account_limits returns provider/account-limit rows",
                         "name": "projection",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque account inventory key to fetch independently",
+                        "name": "account_key",
                         "in": "query"
                     }
                 ],
@@ -2057,6 +2136,9 @@ const docTemplate = `{
                 "agent_name": {
                     "type": "string"
                 },
+                "average_follow_ups": {
+                    "type": "number"
+                },
                 "duration_sample_size": {
                     "type": "integer"
                 },
@@ -2074,6 +2156,9 @@ const docTemplate = `{
                 },
                 "median_duration_ms": {
                     "type": "integer"
+                },
+                "merge_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
                 },
                 "most_used_model": {
                     "type": "string"
@@ -2201,6 +2286,24 @@ const docTemplate = `{
                         "$ref": "#/definitions/models.ModelCategoryPerformance"
                     }
                 },
+                "model_effort_trend": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelEffortTrend"
+                    }
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelPerformance"
+                    }
+                },
+                "outcome_trend": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.OutcomeTrendPoint"
+                    }
+                },
                 "previous": {
                     "$ref": "#/definitions/models.OutcomeMetrics"
                 },
@@ -2215,6 +2318,12 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/models.SkillOutcomePerformance"
                     }
+                },
+                "skill_summary": {
+                    "$ref": "#/definitions/models.SkillOutcomeSummary"
+                },
+                "task_summary": {
+                    "$ref": "#/definitions/models.AnalyticsTaskSummary"
                 },
                 "workflow_detail": {
                     "$ref": "#/definitions/models.WorkflowAnalyticsDetail"
@@ -2321,6 +2430,20 @@ const docTemplate = `{
                 }
             }
         },
+        "models.AnalyticsTaskSummary": {
+            "type": "object",
+            "properties": {
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "merge_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "tasks_worked_on": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.AnalyticsTrendPoint": {
             "type": "object",
             "properties": {
@@ -2348,6 +2471,15 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/models.AccountUsageView"
+                    }
+                },
+                "average_tokens_per_day": {
+                    "type": "number"
+                },
+                "configuration_breakdown": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ConfigurationUsagePoint"
                     }
                 },
                 "daily_usage": {
@@ -2388,6 +2520,9 @@ const docTemplate = `{
                 },
                 "totals": {
                     "$ref": "#/definitions/models.UsageTotals"
+                },
+                "usage_calendar_days": {
+                    "type": "integer"
                 },
                 "usage_rate": {
                     "type": "array",
@@ -2468,6 +2603,50 @@ const docTemplate = `{
                 },
                 "node_name": {
                     "type": "string"
+                }
+            }
+        },
+        "models.ConfigurationUsagePoint": {
+            "type": "object",
+            "properties": {
+                "cached_input_tokens": {
+                    "type": "integer"
+                },
+                "call_count": {
+                    "type": "integer"
+                },
+                "config_name": {
+                    "type": "string"
+                },
+                "cost_usd": {
+                    "type": "number"
+                },
+                "input_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "model_config_id": {
+                    "type": "string"
+                },
+                "output_tokens": {
+                    "type": "integer"
+                },
+                "percent": {
+                    "type": "number"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
+                },
+                "reasoning_output_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
                 }
             }
         },
@@ -2687,6 +2866,126 @@ const docTemplate = `{
                 }
             }
         },
+        "models.ModelEffortTrend": {
+            "type": "object",
+            "properties": {
+                "duration_samples": {
+                    "type": "integer"
+                },
+                "follow_ups": {
+                    "type": "integer"
+                },
+                "median_duration_ms": {
+                    "type": "integer"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "tasks": {
+                    "type": "integer"
+                },
+                "token_samples": {
+                    "type": "integer"
+                },
+                "tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.ModelOutcomeTrend": {
+            "type": "object",
+            "properties": {
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "merge_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "period": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ModelPerformance": {
+            "type": "object",
+            "properties": {
+                "average_follow_ups": {
+                    "type": "number"
+                },
+                "average_runs": {
+                    "type": "number"
+                },
+                "config_name": {
+                    "type": "string"
+                },
+                "cost_covered_tasks": {
+                    "type": "integer"
+                },
+                "duration_sample_size": {
+                    "type": "integer"
+                },
+                "effort_trend": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelEffortTrend"
+                    }
+                },
+                "follow_up": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "known_cost_usd": {
+                    "type": "number"
+                },
+                "median_duration_ms": {
+                    "type": "integer"
+                },
+                "merge_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "mixed_models": {
+                    "type": "boolean"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "model_config_id": {
+                    "type": "string"
+                },
+                "outcome_trend": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ModelOutcomeTrend"
+                    }
+                },
+                "p90_duration_ms": {
+                    "type": "integer"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
+                },
+                "run_count": {
+                    "type": "integer"
+                },
+                "tasks_used": {
+                    "type": "integer"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "token_covered_tasks": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.ModelUsagePoint": {
             "type": "object",
             "properties": {
@@ -2780,6 +3079,26 @@ const docTemplate = `{
                 },
                 "tokens_per_achieved_goal": {
                     "$ref": "#/definitions/models.CostCoverage"
+                }
+            }
+        },
+        "models.OutcomeTrendPoint": {
+            "type": "object",
+            "properties": {
+                "first_pass": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "follow_up": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "goal_achievement": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "technical_completion": {
+                    "$ref": "#/definitions/models.AnalyticsMetric"
                 }
             }
         },
@@ -3085,6 +3404,20 @@ const docTemplate = `{
                 },
                 "technical_completion": {
                     "$ref": "#/definitions/models.AnalyticsMetric"
+                }
+            }
+        },
+        "models.SkillOutcomeSummary": {
+            "type": "object",
+            "properties": {
+                "skills_used": {
+                    "type": "integer"
+                },
+                "tasks_using_skills": {
+                    "type": "integer"
+                },
+                "tasks_with_goal_evidence": {
+                    "type": "integer"
                 }
             }
         },
@@ -3662,6 +3995,84 @@ const docTemplate = `{
                 },
                 "taskTitle": {
                     "type": "string"
+                }
+            }
+        },
+        "repository.TaskRunActivity": {
+            "type": "object",
+            "properties": {
+                "hours": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/repository.TaskRunModel"
+                    }
+                }
+            }
+        },
+        "repository.TaskRunModel": {
+            "type": "object",
+            "properties": {
+                "average_run_ms": {
+                    "type": "number"
+                },
+                "config_name": {
+                    "type": "string"
+                },
+                "duration_samples": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "model_config_id": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "reasoning_effort": {
+                    "type": "string"
+                },
+                "runs": {
+                    "type": "integer"
+                },
+                "trend": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/repository.TaskRunPeriod"
+                    }
+                }
+            }
+        },
+        "repository.TaskRunPeriod": {
+            "type": "object",
+            "properties": {
+                "average_run_ms": {
+                    "type": "number"
+                },
+                "cancelled": {
+                    "type": "integer"
+                },
+                "completed": {
+                    "type": "integer"
+                },
+                "duration_samples": {
+                    "type": "integer"
+                },
+                "failed": {
+                    "type": "integer"
+                },
+                "period": {
+                    "type": "string"
+                },
+                "runs": {
+                    "type": "integer"
                 }
             }
         },
