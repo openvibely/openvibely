@@ -63,6 +63,7 @@ history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
 window.Chart=function(){this.destroy=function(){};};
 var rejectAccounts,localCalls=0;
 window.fetch=function(url){
+ if(String(url).includes('/task-run-activity'))return Promise.resolve({ok:true,json:async function(){return {hours:[],models:[]};}});
  var params=new URL(url,location.href).searchParams;
  if(params.get('projection')==='accounts')return Promise.resolve({ok:true,json:async function(){return {accounts:[{key:'a',provider:'openai'}]};}});
  if(params.get('projection')==='account_limits')return new Promise(function(resolve,reject){rejectAccounts=reject;});
@@ -208,6 +209,44 @@ window.addEventListener('load',function(){
  }check();
 });
 </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
+
+func TestBrowserFunctional_AnalyticsContent_RestoredRunCharts(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><script>
+history.replaceState({},'',location.pathname+'?project_id=p&view=models');
+var configs={},calls=0;
+window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
+var model={model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
+window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',completed:1,failed:1,cancelled:1},{period:'2026-09-02',completed:2,failed:0,cancelled:1}]}]};else if(String(url).includes('/dashboard'))data={models:[model],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[]};return {ok:true,json:async()=>data};};
+window.addEventListener('load',async function(){
+ var result=document.getElementById('reconnect-result');
+ const wait=()=>new Promise(r=>setTimeout(r,20));
+ function assert(ok,msg){if(!ok)throw new Error(msg);}
+ try{
+  for(var i=0;i<100&&(!configs.modelReliabilityChart||!configs.modelTimeChart);i++)await wait();
+  assert(document.querySelector('[data-analytics-view="agents"]').hidden,'Agents tab must be hidden');
+  var rel=configs.modelReliabilityChart;
+  assert(rel.type==='bar'&&rel.data.labels.join('|')==='Model'&&rel.data.datasets[0].data[0]===75&&rel.data.datasets[1].data[0]===25,'reliability must aggregate counts across dates, excluding cancellations');
+  assert(rel.options.scales.x.stacked&&rel.options.scales.y.stacked&&rel.options.scales.y.max===100,'success and failure must stack to 100%');
+  assert(rel.options.plugins.tooltip.callbacks.label({dataIndex:0,datasetIndex:0,raw:75,dataset:{label:'Successful'}}).includes('3/4 runs'),'tooltip must show eligible run counts');
+  assert(!document.getElementById('modelReliabilityMetric'),'redundant reliability dropdown remains');
+  var tokenChart=configs.modelTokensChart,before=calls;
+  var select=document.getElementById('modelTimeBasis');select.value='run';select.dispatchEvent(new Event('change'));
+  assert(configs.modelTimeChart.data.datasets[0].data[0]===60000,'per-run time incorrect');
+  assert(configs.modelTokensChart===tokenChart&&configs.modelReliabilityChart===rel&&calls===before,'time selector must update only its chart');
+  select.value='task';select.dispatchEvent(new Event('change'));assert(configs.modelTimeChart.data.datasets[0].data[0]===120000,'per-task median lost');
+  document.querySelector('[data-analytics-view="usage"]').click();
+  for(i=0;i<100&&(!configs.usageRunHoursChart||!configs.usageRunModelsChart);i++)await wait();
+  assert(configs.usageRunHoursChart.data.labels.length===24&&configs.usageRunHoursChart.data.datasets[0].data[1]===6,'hourly counts incorrect');
+  assert(configs.usageRunModelsChart.data.datasets[0].data[0]===6,'model run counts incorrect');
+  result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+});</script>` + rendered.String()
 	runReconnectChromeFixture(t, fixture)
 }
 

@@ -91,7 +91,7 @@ templ analyticsContent(currentProject *models.Project) {
 							<div class="form-control" data-automation-filter><label class="label" for="analyticsWorkflowFilter"><span class="label-text">Automation</span></label><select id="analyticsWorkflowFilter" class="select select-bordered select-sm"><option value="">All Automations</option></select></div>
 							<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
 						</div>
-						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="usage">Usage</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm" data-analytics-view="agents">Agents</button></nav>
+						<nav class="flex gap-2 overflow-x-auto mt-4" aria-label="Analytics views"><button class="btn btn-sm" data-analytics-view="usage">Usage</button><button class="btn btn-sm" data-analytics-view="models">Models</button><button class="btn btn-sm" data-analytics-view="learning">Learning</button><button class="btn btn-sm hidden" hidden data-analytics-view="agents">Agents</button></nav>
 					</div></div>
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
@@ -154,7 +154,7 @@ templ analyticsContent(currentProject *models.Project) {
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsChartCard("Run time per task by model", "Median total run time per task for runs started in the selected period. Includes scheduled tasks; excludes waiting between runs and unfinished runs. Mixed models excluded.", "modelTimeChart", "h-80")
+						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div class="flex flex-wrap items-center justify-between gap-3"><h4 id="modelTimeTitle" class="card-title">Run time per task by model</h4><select id="modelTimeBasis" aria-label="Run time basis" class="select select-bordered select-xs"><option value="task">Per task (median)</option><option value="run">Per run (average)</option></select></div><p id="modelTimeDescription" class="text-sm opacity-60">Finished run time; excludes waiting. Per-task comparisons exclude mixed models.</p><div class="relative h-80"><canvas id="modelTimeChart"></canvas></div></div></div>
 						@analyticsChartCard("Tokens per task by model", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -165,6 +165,7 @@ templ analyticsContent(currentProject *models.Project) {
 						</div></div>
 						@analyticsChartCard("Follow-ups per task by model", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
 					</div>
+					<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><h4 class="card-title">Run reliability by model</h4><p class="text-sm opacity-60">Successful versus failed task runs in the selected period. Cancelled and unfinished runs excluded. Not goal achievement.</p><div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelReliabilityChart"></canvas></div></div></div></div>
 				</section>
 
 				<section id="analytics-automations" data-analytics-section="automations" class="hidden space-y-6 mb-6">
@@ -217,6 +218,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Task runs by hour", "Run starts by local hour in the selected period.", "usageRunHoursChart", "h-64") @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
 				</section>
 			<!-- Chart.js and Custom Script -->
 			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
@@ -244,6 +246,8 @@ templ analyticsContent(currentProject *models.Project) {
 						var eventSignal = window._analyticsAbortController.signal;
 								var latestUsageAnalytics = null;
 								var latestDashboard = null;
+								var latestRunActivity = null;
+								var runActivityFailed = false;
 								var evidencePageLoading = false;
 								var preserveActiveCharts = false;
 								var evidenceRequestGeneration = 0;
@@ -263,6 +267,8 @@ templ analyticsContent(currentProject *models.Project) {
 										dataAbortController = new AbortController();
 									window._analyticsDataAbortController = dataAbortController;
 									latestDashboard = null;
+									latestRunActivity = null;
+									runActivityFailed = false;
 									evidencePageLoading = false;
 									showAnalyticsLoading();
 									const loadMore = document.getElementById('loadMoreEvidence');
@@ -375,16 +381,16 @@ templ analyticsContent(currentProject *models.Project) {
 									overview: { projectOutcomeTrend: 'projectOutcomeTrendChart' },
 							outcomes: { cycleDistribution: 'cycleDistributionChart', followupDistribution: 'followupDistributionChart', successFailure: 'successFailureChart', hourlyTrends: 'hourlyTrendsChart', avgTimeTask: 'avgTimeTaskChart', failedPatterns: 'failedPatternsChart' },
 							agents: { agentComparison: 'agentComparisonChart', agentRunTime: 'agentRunTimeChart', agentFollowups: 'agentFollowupsChart' },
-							models: { modelTime: 'modelTimeChart', modelTokens: 'modelTokensChart', modelOutcomes: 'modelOutcomesChart', modelFollowups: 'modelFollowupsChart' },
+							models: { modelReliability: 'modelReliabilityChart', modelTime: 'modelTimeChart', modelTokens: 'modelTokensChart', modelOutcomes: 'modelOutcomesChart', modelFollowups: 'modelFollowupsChart' },
 							automations: { automationComparison: 'automationComparisonChart', automationFunnel: 'automationFunnelChart', automationDuration: 'automationDurationChart', automationFailure: 'automationFailureChart', automationBottleneck: 'automationBottleneckChart' },
 									learning: { skillUsageTrend: 'skillUsageTrendChart', skillTop: 'skillTopChart', skillFollow: 'skillFollowChart', skillAgent: 'skillAgentChart', skillOutcome: 'skillOutcomeChart', skillEffectiveness: 'skillEffectivenessChart' },
-									usage: { usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart' }
+									usage: { usageRunHours: 'usageRunHoursChart', usageRunModels: 'usageRunModelsChart', usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart' }
 								};
 								Object.entries(loadingCharts[selectedView] || {}).forEach(function(entry) { renderChartState(entry[0], entry[1], [], 'Loading analytics…'); });
 							}
 
 							const validViews = ['overview', 'outcomes', 'agents', 'models', 'automations', 'learning', 'usage'];
-							const visibleViews = ['usage', 'models', 'learning', 'agents'];						const initialURLParams = new URLSearchParams(window.location.search);
+							const visibleViews = ['usage', 'models', 'learning'];						const initialURLParams = new URLSearchParams(window.location.search);
 						const savedViewKey = 'openvibely.analytics.lastView.' + projectID;
 						let selectedView = 'usage';
 								let selectedAgent = initialURLParams.get('agent') || '';
@@ -748,7 +754,7 @@ templ analyticsContent(currentProject *models.Project) {
 									node.parentElement.querySelector('[data-task-summary-sample]').textContent=i&&summary?(m.numerator+' / '+m.denominator+(i===1?' evaluated':' eligible')):'';
 								});
 							}
-							function renderModelCharts(rows) {
+							function renderModelCharts(rows, timeOnly) {
 								const models=rows.filter(r=>!r.mixed_models).sort((a,b)=>Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
 								models.forEach(modelChartColor);
 								const compact=n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(n);
@@ -771,11 +777,17 @@ templ analyticsContent(currentProject *models.Project) {
 										options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(supported[items[0].dataIndex])+' · '+modelDetailLabel(supported[items[0].dataIndex]):'',label:item=>format(number(supported[item.dataIndex]))+' · n='+sample(supported[item.dataIndex])}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',title:{display:true,text:axis},ticks:{callback:format}}}}
 									});
 								}
-								bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Run time per task');
+								const perRun=document.getElementById('modelTimeBasis').value==='run';
+								document.getElementById('modelTimeTitle').textContent=perRun?'Run time per run by model':'Run time per task by model';
+								if(perRun&&!latestRunActivity)renderChartState('modelTime','modelTimeChart',[],runActivityFailed?'Run activity unavailable':'Loading analytics…');
+								else if(perRun)bar('modelTime','modelTimeChart',((latestRunActivity||{}).models||[]).filter(r=>r.duration_samples>0),r=>Number(r.average_run_ms||0),formatDuration,r=>r.duration_samples,'Average run time');
+								else bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Run time per task');
+								if(timeOnly)return;
 								bar('modelTokens','modelTokensChart',models.filter(r=>r.token_covered_tasks>0),r=>Number(r.total_tokens||0)/r.token_covered_tasks,compact,r=>r.token_covered_tasks,'Recorded tokens / task');
 								renderModelOutcomeChart(rows);
 								bar('modelFollowups','modelFollowupsChart',models.filter(r=>r.tasks_used>0),r=>Number(r.average_follow_ups||0),n=>Number(n).toFixed(1),r=>r.tasks_used,'Follow-up runs / task');
 							}
+							document.getElementById('modelTimeBasis').addEventListener('change',function(){renderModelCharts((latestDashboard||{}).models||[],true);},{signal:eventSignal});
 							function renderModelOutcomeChart(rows) {
 								const metric=document.getElementById('modelOutcomeMetric').value;
 								const models=rows.filter(r=>!r.mixed_models).sort((a,b)=>Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
@@ -1517,6 +1529,54 @@ templ analyticsContent(currentProject *models.Project) {
 										accountContainers.forEach(function(container){container.removeAttribute('aria-busy');container.innerHTML=accountHTML;});
 									}
 
+							function renderRunReliability() {
+								const rows=((latestRunActivity||{}).models||[]).map(r=>{
+									const totals=(r.trend||[]).reduce((a,p)=>({completed:a.completed+Number(p.completed||0),failed:a.failed+Number(p.failed||0)}),{completed:0,failed:0});
+									return {...r,...totals,n:totals.completed+totals.failed};
+								}).filter(r=>r.n>0).sort((a,b)=>b.n-a.n||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
+								const canvas=renderChartState('modelReliability','modelReliabilityChart',rows,'No successful or failed task runs in this period');if(!canvas)return;
+								canvas.parentElement.style.minWidth=Math.max(320,rows.length*100)+'px';
+								canvas.setAttribute('aria-label','Run reliability by model: '+rows.map(r=>modelConfigLabel(r)+': '+r.completed+' successful, '+r.failed+' failed runs').join('; '));
+								charts.modelReliability=new Chart(canvas.getContext('2d'),{
+									type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[
+										{label:'Successful',data:rows.map(r=>100*r.completed/r.n),backgroundColor:'#22c55e',maxBarThickness:48},
+										{label:'Failed',data:rows.map(r=>100*r.failed/r.n),backgroundColor:'#ef4444',maxBarThickness:48}
+									]},
+									options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'},tooltip:{callbacks:{
+										title:items=>items.length?modelConfigLabel(rows[items[0].dataIndex])+' · '+modelDetailLabel(rows[items[0].dataIndex]):'',
+										label:item=>{const r=rows[item.dataIndex],count=item.datasetIndex===0?r.completed:r.failed;return item.dataset.label+': '+Number(item.raw).toFixed(1)+'% · '+count+'/'+r.n+' runs';}
+									}}},scales:{x:{stacked:true,ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{stacked:true,beginAtZero:true,max:100,ticks:{callback:n=>n+'%'}}}}
+								});
+							}
+							async function loadTaskRunActivity() {
+								try {
+									const params=usageEvidenceParams();
+									const data=await fetchJSON('/api/analytics/task-run-activity?'+params.toString());
+									latestRunActivity=data;
+									if(selectedView==='models'){
+										renderRunReliability();
+										if(document.getElementById('modelTimeBasis').value==='run')renderModelCharts((latestDashboard||{}).models||[],true);
+										return;
+									}
+									if(selectedView!=='usage')return;
+									const rows=(data.models||[]).slice().sort((a,b)=>b.runs-a.runs||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
+									const hours=Array.from({length:24},(_,i)=>Number((data.hours||[])[i]||0));
+									let canvas=renderChartState('usageRunHours','usageRunHoursChart',hours.some(n=>n>0)?hours:[],'No task runs in this period');
+									if(canvas)charts.usageRunHours=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:hours.map((_,i)=>String(i).padStart(2,'0')+':00'),datasets:[{data:hours,backgroundColor:'rgba(59,130,246,.6)'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+									canvas=renderChartState('usageRunModels','usageRunModelsChart',rows,'No task runs in this period');
+									if(canvas){
+										canvas.parentElement.style.minWidth=Math.max(320,rows.length*85)+'px';
+										if(!canvas.parentElement.parentElement.hasAttribute('data-run-scroll')){const scroll=document.createElement('div');scroll.className='overflow-x-auto';scroll.setAttribute('data-run-scroll','');const plot=canvas.parentElement;plot.parentElement.insertBefore(scroll,plot);scroll.appendChild(plot);}
+										charts.usageRunModels=new Chart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[{data:rows.map(r=>r.runs),backgroundColor:rows.map(modelChartColor),maxBarThickness:48}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>rows[item.dataIndex].runs+' task runs'}}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}}});
+									}
+								}catch(e){
+									if(e.name==='AbortError')return;
+									const targets=selectedView==='models'?[['modelReliability','modelReliabilityChart']]:[['usageRunHours','usageRunHoursChart'],['usageRunModels','usageRunModelsChart']];
+									runActivityFailed=true;
+									if(selectedView==='models'&&document.getElementById('modelTimeBasis').value==='run')targets.push(['modelTime','modelTimeChart']);
+									targets.forEach(([key,id])=>renderChartState(key,id,[],'Run activity unavailable'));
+								}
+							}
 									async function loadUsageAnalytics(refreshUsage) {
 										try {
 											const params = usageEvidenceParams();
@@ -1528,7 +1588,7 @@ templ analyticsContent(currentProject *models.Project) {
 											document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
 											renderChartState('usageRate','usageRateChart',[],'Analytics unavailable');
 											renderChartState('modelTokenBreakdown','modelTokenBreakdownChart',[],'Analytics unavailable');
-											document.getElementById('usageBreakdownTable').innerHTML='<tr><td colspan="8" class="text-center opacity-50">Analytics unavailable</td></tr>';
+											document.getElementById('usageBreakdownTable').innerHTML='\x3ctr>\x3ctd colspan="8" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 										}
 									}
 									async function loadUsageAccounts(refreshUsage) {
@@ -1784,9 +1844,10 @@ templ analyticsContent(currentProject *models.Project) {
 							const loaders = selectedView === 'usage' ? [] : [loadDashboard];
 								if (selectedView === 'outcomes') loaders.push(loadSuccessFailureRates, loadHourlyTrends, loadAvgTimeByTask, loadMostFrequentTasks, loadFailedTaskPatterns);
 								if (selectedView === 'learning') loaders.push(loadSkillAnalytics);
-								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); }, function() { return loadUsageAccounts(refreshUsage); });							for (let index = 0; index < loaders.length; index += 2) {
+								if (selectedView === 'usage') loaders.push(function() { return loadUsageAnalytics(refreshUsage); }, function() { return loadUsageAccounts(refreshUsage); }, loadTaskRunActivity);
+								if(selectedView==='models')loaders.push(loadTaskRunActivity);							for (let index = 0; index < loaders.length; index += 3) {
 								if (loadGeneration !== dataGeneration) return;
-								await Promise.allSettled(loaders.slice(index, index + 2).map(function(load) { return load(); }));
+								await Promise.allSettled(loaders.slice(index, index + 3).map(function(load) { return load(); }));
 								if (loadGeneration !== dataGeneration) return;
 									await new Promise(function(resolve) { setTimeout(resolve, 0); });							}
 						}
