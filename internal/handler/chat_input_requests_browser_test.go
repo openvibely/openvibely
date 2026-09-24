@@ -108,6 +108,9 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 			if (card.parentElement !== executionPair) fail('input request was not attached to its assistant turn');
 			if (!card.textContent.includes('<img src=x onerror=alert(1)> Should I create a task?')) fail('question text was not rendered as inert text');
 			if (card.querySelector('img') || card.querySelector('b')) fail('model-provided markup was rendered as HTML');
+			if (card.textContent.indexOf('Input requested') !== -1 || card.textContent.indexOf('Answer each question') !== -1) fail('extra input request heading or instructions were shown above the question');
+			var visibleQuestion = card.querySelector('[data-chat-input-question-index]:not(.hidden)');
+			if (!visibleQuestion || visibleQuestion.querySelector('legend').classList.contains('text-sm')) fail('visible question was not promoted to the main heading');
 			if (card.querySelectorAll('[data-chat-input-question-index]:not(.hidden)').length !== 1) fail('expected exactly one visible question');
 			if (!/1 of 2/.test(card.textContent)) fail('question position was not shown');
 			var buttons = Array.prototype.slice.call(card.querySelectorAll('button[data-chat-input-option]'));
@@ -122,6 +125,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				});
 				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
 				var createStyle = getComputedStyle(createButton);
+				var initialBorderColor = createStyle.borderColor;
 				if (createStyle.cursor !== 'pointer') fail('question option does not look clickable');
 				if (!createStyle.boxShadow || createStyle.boxShadow === 'none') fail('question option regressed to flat text styling');
 				if (createStyle.backgroundColor === 'rgb(0, 0, 0)' || createStyle.backgroundColor === 'rgba(0, 0, 0, 0)') fail('question option rendered with an unreadable black or transparent background');
@@ -129,13 +133,14 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
-				if (!recommendedShortcut.classList.contains('btn-secondary') || recommendedShortcut.classList.contains('btn-sm')) fail('recommended shortcut was not styled as an obvious standalone action');
+				if (!recommendedShortcut.classList.contains('chat-input-option-btn') || !recommendedShortcut.classList.contains('bg-primary') || !recommendedShortcut.classList.contains('text-primary-content') || recommendedShortcut.classList.contains('btn') || recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut should be a distinct primary-colored answer card, not a standalone button');
 				var recommendedActions = card.querySelector('[data-chat-input-recommended-actions]');
-				if (!recommendedActions || recommendedShortcut.parentElement !== recommendedActions) fail('recommended shortcut should be separated from paging controls');
+				if (!recommendedActions || recommendedShortcut.parentElement !== recommendedActions) fail('recommended shortcut should be grouped with the answer choices');
 				var navigation = card.querySelector('[data-chat-input-navigation]');
-				if (!navigation || !navigation.classList.contains('justify-between') || navigation.querySelector('[data-chat-input-nav="recommended"]')) fail('navigation should contain only progress and pager controls');
+				if (!navigation || !navigation.classList.contains('justify-end') || navigation.querySelector('[data-chat-input-nav="recommended"]')) fail('navigation should contain only pager controls');
 				var pager = card.querySelector('[data-chat-input-pager]');
-				if (!pager || pager.children.length !== 2 || !pager.children[0].hasAttribute('data-chat-input-nav') || pager.children[0].getAttribute('data-chat-input-nav') !== 'previous' || pager.children[1].getAttribute('data-chat-input-nav') !== 'next') fail('Previous and Next should be adjacent in the pager');
+				var position = card.querySelector('[data-chat-input-position]');
+				if (!pager || !position || position.parentElement !== pager || pager.children.length !== 3 || pager.children[0].getAttribute('data-chat-input-nav') !== 'previous' || pager.children[1] !== position || pager.children[2].getAttribute('data-chat-input-nav') !== 'next') fail('question position should sit between adjacent Previous and Next controls');
 				if (getComputedStyle(recommendedShortcut).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('recommended shortcut can still shrink on click');
 				var nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || !nextButton.disabled) fail('Next should stay disabled until the user selects an answer');
@@ -149,6 +154,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || nextButton.disabled) fail('Next should be enabled after the user selects the recommended option');
 				if (!createButton.classList.contains('chat-input-option-selected')) fail('selected option did not use the local selected styling');
+				if (getComputedStyle(createButton).borderColor !== initialBorderColor) fail('selected option changed border color and can flash like page cards');
 				if (createButton.classList.contains('btn-primary')) fail('selected option fell back to distracting primary button styling');
 				nextButton.click();
 				await waitFor(function() { return /2 of 2/.test(card.textContent) && card.textContent.indexOf('Which fallback should be used?') !== -1; }, 'Next did not show the second question');
