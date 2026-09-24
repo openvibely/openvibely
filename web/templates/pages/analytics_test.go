@@ -237,7 +237,7 @@ history.replaceState({},'',location.pathname+'?project_id=p&view=models');
 var configs={},calls=0;
 window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
 var model={model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
-window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',completed:1,failed:1,cancelled:1},{period:'2026-09-02',completed:2,failed:0,cancelled:1}]}]};else if(String(url).includes('/dashboard'))data={models:[model],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",total_tokens:100}]};return {ok:true,json:async()=>data};};
+window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',completed:1,failed:1,cancelled:1},{period:'2026-09-02',completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",total_tokens:100}]};return {ok:true,json:async()=>data};};
 window.addEventListener('load',async function(){
  var result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
@@ -252,6 +252,12 @@ window.addEventListener('load',async function(){
   assert(rel.options.plugins.tooltip.callbacks.label({dataIndex:0,datasetIndex:0,raw:75,dataset:{label:'Successful'}}).includes('3/4 runs'),'tooltip must show eligible run counts');
   assert(!document.getElementById('modelReliabilityMetric'),'redundant reliability dropdown remains');
   var tokenChart=configs.modelTokensChart;
+  for(var id of ['modelTimeChart','modelRunTimeChart','modelTokensChart','modelFollowupsChart']){
+   var bars=configs[id].data.datasets[0];
+   assert(bars.barThickness===undefined&&bars.categoryPercentage===0.8&&bars.barPercentage===0.9,'vertical bars must share proportional sizing');
+   assert(configs[id].data.labels.join('|')===configs.modelOutcomesChart.data.labels.join('|'),'model slots must match across metrics');
+   assert(document.getElementById(id).parentElement.style.minWidth===Math.max(320,configs[id].data.labels.length*64+64)+'px','model chart spacing should be compact');
+  }
   var taskCard=document.getElementById('modelTimeChart').closest('.card'),runCard=document.getElementById('modelRunTimeChart').closest('.card');
   assert(taskCard.parentElement===runCard.parentElement&&taskCard.nextElementSibling===runCard,'time charts should be side by side');
   assert(taskCard.textContent.includes('combined run time')&&runCard.textContent.includes('one model run'),'time explanations missing');
@@ -263,12 +269,16 @@ window.addEventListener('load',async function(){
   assert(configs.modelTimeChart.data.datasets[0].backgroundColor[0]===tokenChart.data.datasets[0].backgroundColor[0],'model colors must match across charts');
   assert(configs.modelRunTimeChart.data.datasets[0].data[0]===60000,'per-run time incorrect');
   assert(configs.modelTimeChart.data.datasets[0].data[0]===120000,'per-task median lost');
+  assert(configs.modelTimeChart.data.labels.join('|')==='Model|Run only|Unmeasured','shared roster must include models from both data sources');
+  assert(configs.modelTimeChart.data.datasets[0].data[1]===null&&configs.modelTokensChart.data.datasets[0].data[1]===null,'run-only models must not fabricate task measurements');
+  assert(configs.modelRunTimeChart.data.datasets[0].data[1]===30000&&configs.modelRunTimeChart.data.datasets[0].data[2]===null,'run time must retain missing model slots');
   document.querySelector('[data-analytics-view="usage"]').click();
   for(i=0;i<100&&(!configs.usageRunHoursChart||!configs.usageRunModelsChart);i++)await wait();
   assert(configs.usageRunHoursChart.data.labels.length===24&&configs.usageRunHoursChart.data.datasets[0].data[1]===6,'hourly counts incorrect');
   assert(configs.usageRunHoursChart.type==='line'&&configs.usageRunHoursChart.data.datasets[0].data[0]===0,'hourly activity should be a line chart including zero hours');
   assert(configs.usageRunHoursChart.data.datasets[0].cubicInterpolationMode==='monotone','hourly line should have smooth curves without overshooting counts');
   assert(configs.usageRunModelsChart.data.datasets[0].data[0]===6,'model run counts incorrect');
+  for(var id of ['usageRunModelsChart','modelTokenBreakdownChart'])assert(configs[id].data.datasets[0].barThickness===undefined&&configs[id].data.datasets[0].categoryPercentage===0.8&&configs[id].data.datasets[0].barPercentage===0.9,'usage bars must share the model chart style');
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
   assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===configs.modelTokenBreakdownChart.data.datasets[0].backgroundColor[0],'run and token charts should share the palette');
