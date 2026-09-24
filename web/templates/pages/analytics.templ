@@ -319,7 +319,7 @@ templ analyticsContent(currentProject *models.Project) {
 								Object.keys(charts).forEach(destroyChart);								const box = document.getElementById('analyticsError');
 								box.textContent = error && error.message ? error.message : 'Analytics request failed';
 								box.classList.remove('hidden');
-								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',10],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillOutcomeTable',5],['agentSkillOutcomeTable',6],['skillEventEvidenceTable',7],['usageBreakdownTable',8],['usageEventEvidenceTable',8],['underusedSkillsTable',4]].forEach(function(item) {
+								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',10],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillOutcomeTable',5],['agentSkillOutcomeTable',6],['skillEventEvidenceTable',7],['usageBreakdownTable',7],['usageEventEvidenceTable',8],['underusedSkillsTable',4]].forEach(function(item) {
 									const table = document.getElementById(item[0]);
 									if (table) table.innerHTML = '\x3ctr>\x3ctd colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 								});
@@ -842,6 +842,9 @@ templ analyticsContent(currentProject *models.Project) {
 							function analyticsTableHead(headings){
 							 return '\x3ctr>'+headings.map(h=>'\x3cth scope="col">'+escapeHTML(h[0])+' '+analyticsHelpButton(h[1])+'\x3c/th>').join('')+'\x3c/tr>';
 							}
+							function analyticsIdentityCell(name,details){
+							 return '\x3cth scope="row" class="font-normal whitespace-normal">\x3cstrong>'+escapeHTML(name)+'\x3c/strong>'+details.map(detail=>'\x3cdiv class="text-xs opacity-60">'+escapeHTML(detail)+'\x3c/div>').join('')+'\x3c/th>';
+							}
 							function analyticsMetricCell(main,subtext,tone,exact){
 							 const color=main==='Unavailable'?'bg-base-200/40':(tone||'bg-primary/10');
 							 let content='\x3cstrong class="text-lg tabular-nums whitespace-nowrap">'+escapeHTML(main)+'\x3c/strong>';
@@ -871,7 +874,7 @@ templ analyticsContent(currentProject *models.Project) {
 								target.innerHTML=ordered.length?'\x3ctable class="table table-sm">\x3cthead>'+analyticsTableHead(headings)+'\x3c/thead>\x3ctbody>'+ordered.map(function(r){
 									const tokens=Number(r.token_covered_tasks||0),costs=Number(r.cost_covered_tasks||0),tasks=Number(r.tasks_used||0);
 									const label=r.mixed_models?'Multiple configurations':modelDetailLabel(r);
-									return '\x3ctr'+(r.mixed_models?' class="border-t-2 border-base-300"':'')+'>\x3cth scope="row" class="font-normal whitespace-normal">\x3cstrong>'+escapeHTML(modelConfigLabel(r))+'\x3c/strong>\x3cdiv class="text-xs opacity-60">'+escapeHTML(label)+'\x3c/div>\x3cdiv class="text-xs opacity-60">'+tasks+' tasks\x3c/div>\x3c/th>'+
+									return '\x3ctr'+(r.mixed_models?' class="border-t-2 border-base-300"':'')+'>'+analyticsIdentityCell(modelConfigLabel(r),[label,tasks+' tasks'])+
 										outcome(r.goal_achievement)+outcome(r.merge_completion)+
 										(Number(r.duration_sample_size||0)>0?value(formatDuration(r.median_duration_ms||0),'Median · n='+r.duration_sample_size):value('Unavailable','n=0'))+
 										(tokens?value(formatNumber(Math.round(Number(r.total_tokens||0)/tokens)),'Recorded · n='+tokens):value('Unavailable','n=0'))+
@@ -1493,7 +1496,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const table = document.getElementById('usageBreakdownTable');
 									if (table) {
 										if (breakdown.length === 0 && (totals.call_count || 0) === 0) {
-											table.innerHTML = '\x3ctr>\x3ctd colspan="8" class="text-center opacity-50">No usage recorded yet\x3c/td>\x3c/tr>';
+											table.innerHTML = '\x3ctr>\x3ctd colspan="7" class="text-center opacity-50">No usage recorded yet\x3c/td>\x3c/tr>';
 										} else {
 											const compactTokens=n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(Number(n||0));
 											const usageCell=analyticsMetricCell;
@@ -1512,8 +1515,8 @@ templ analyticsContent(currentProject *models.Project) {
 											 tokenCell(row.reasoning_output_tokens,'Reasoning tokens')+tokenCell(row.total_tokens,'Total tokens',share)+
 											 usageCell(costAvailable?formatCost(row.cost_usd):'Unavailable',costAvailable?'Recorded cost':'No recorded cost',costAvailable?'bg-primary/10':'bg-base-200/40',costAvailable?'$'+Number(row.cost_usd).toFixed(6):null);
 											}
-											const rows=breakdown.map(row=>'\x3ctr data-usage-model="'+escapeHTML(usageModelKey(row))+'">\x3ctd>'+escapeHTML(row.provider||'unknown')+'\x3c/td>\x3cth scope="row" class="font-normal whitespace-normal">\x3cstrong>'+escapeHTML(row.model||'unknown')+'\x3c/strong>\x3c/th>'+usageCells(row,row.cost_usd!=null)+'\x3c/tr>');
-											rows.push('\x3ctr class="font-semibold border-t border-base-300">\x3cth scope="row">Total\x3c/th>\x3ctd>All models\x3c/td>'+usageCells(totals,!!totals.cost_available&&totals.cost_usd!=null)+'\x3c/tr>');
+											const rows=breakdown.map(row=>'\x3ctr data-usage-model="'+escapeHTML(usageModelKey(row))+'">'+analyticsIdentityCell(row.model||'unknown',[row.provider||'unknown'])+usageCells(row,row.cost_usd!=null)+'\x3c/tr>');
+											rows.push('\x3ctr class="font-semibold border-t border-base-300">'+analyticsIdentityCell('Total',['All models'])+usageCells(totals,!!totals.cost_available&&totals.cost_usd!=null)+'\x3c/tr>');
 											table.innerHTML=rows.join('');
 										}
 									}
@@ -1655,7 +1658,7 @@ templ analyticsContent(currentProject *models.Project) {
 											document.querySelectorAll('[data-usage-summary-value]').forEach(node=>node.textContent='Analytics unavailable');
 											renderChartState('usageRate','usageRateChart',[],'Analytics unavailable');
 											renderChartState('modelTokenBreakdown','modelTokenBreakdownChart',[],'Analytics unavailable');
-											document.getElementById('usageBreakdownTable').innerHTML='\x3ctr>\x3ctd colspan="8" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
+											document.getElementById('usageBreakdownTable').innerHTML='\x3ctr>\x3ctd colspan="7" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 										}
 									}
 									async function loadUsageAccounts(refreshUsage) {
@@ -1961,7 +1964,7 @@ templ analyticsContent(currentProject *models.Project) {
 							applyView(selectedView,false);
 							Object.values(charts).forEach(function(chart){if(chart&&typeof chart.resize==='function')chart.resize();});
 						}, {signal:eventSignal});
-						document.getElementById('usageBreakdownHead').innerHTML=analyticsTableHead([["Provider","Service that reported the usage."],["Model","Model recorded on the usage event. Configurations of the same model are combined."],["Input tokens","Recorded tokens sent to the model. Hover or click a value for the exact count."],["Output tokens","Recorded tokens generated by the model. Hover or click a value for the exact count."],["Cached input","Recorded cached input tokens. Reuse is cached input divided by input: green 80% or more, caution 50–79%, red below 50%. These bands describe reuse, not model quality."],["Reasoning tokens","Reasoning output tokens reported by the provider. May already be included in output tokens."],["Total tokens","Total recorded tokens. The percentage shows this model’s share of the selected period. More usage is not inherently bad."],["Known cost","Recorded cost only; unpriced usage is excluded. Unavailable does not mean free."]]);
+						document.getElementById('usageBreakdownHead').innerHTML=analyticsTableHead([["Model","Model and provider recorded on the usage event. Configurations of the same model are combined."],["Input tokens","Recorded tokens sent to the model. Hover or click a value for the exact count."],["Output tokens","Recorded tokens generated by the model. Hover or click a value for the exact count."],["Cached input","Recorded cached input tokens. Reuse is cached input divided by input: green 80% or more, caution 50–79%, red below 50%. These bands describe reuse, not model quality."],["Reasoning tokens","Reasoning output tokens reported by the provider. May already be included in output tokens."],["Total tokens","Total recorded tokens. The percentage shows this model’s share of the selected period. More usage is not inherently bad."],["Known cost","Recorded cost only; unpriced usage is excluded. Unavailable does not mean free."]]);
 						setupModelHelp();
 						loadAllData(false);
 				}
