@@ -339,6 +339,13 @@ window.addEventListener('load',async function(){
   assert(configs.modelTimeChart.data.labels.join('|')==='Model|Run only|Unmeasured','shared roster must include models from both data sources');
   assert(configs.modelTimeChart.data.datasets[0].data[1]===null&&configs.modelTokensChart.data.datasets[0].data[1]===null,'run-only models must not fabricate task measurements');
   assert(configs.modelRunTimeChart.data.datasets[0].data[1]===30000&&configs.modelRunTimeChart.data.datasets[0].data[2]===null,'run time must retain missing model slots');
+  for(const key of ['modelTimeChart','modelTokensChart','modelOutcomesChart']){
+   const config=configs[key],texts=[],dashes=[];
+   const chart={ctx:{save(){},restore(){},fillText(t){texts.push(t);},fillRect(...args){dashes.push(args);}},scales:{x:{getPixelForValue:i=>i*50},y:{getPixelForValue:()=>200}},getDatasetMeta:()=>({data:config.data.labels.map((_,i)=>({x:i*50,y:100}))})};
+   config.plugins.find(p=>p.id==='modelValues'||p.id==='modelOutcomeValues').afterDatasetsDraw(chart);
+   assert(!texts.includes('Unavailable')&&dashes.length>0,'missing bars should use baseline dashes, not text');
+   assert(dashes.every(d=>d[1]===198&&d[2]===16&&d[3]===2),'missing marker should be a flat baseline line');
+  }
   document.querySelector('[data-analytics-view="usage"]').click();
   for(i=0;i<100&&(!configs.usageRunHoursChart||!configs.usageRunModelsChart);i++)await wait();
   assert(configs.usageRunHoursChart.data.labels.join('|')==='2026-09-01|2026-09-02'&&configs.usageRunHoursChart.data.datasets[0].data.join('|')==='3|3','task runs should use date buckets rather than hours of day');
