@@ -5246,7 +5246,7 @@ func TestHandler_Analytics_FullPage(t *testing.T) {
 	assertContains(t, rec, "renderUsageRateChart(latestUsageAnalytics)")
 	assertContains(t, rec, "Model Breakdown by Tokens")
 	assertContains(t, rec, "modelTokenBreakdownChart")
-	assertContains(t, rec, "Provider Account Limits")
+	assertNotContains(t, rec, "Provider Account Limits")
 	assertContains(t, rec, "Known total cost")
 	assertContains(t, rec, "Total tokens")
 	assertContains(t, rec, "Cache utilization")
