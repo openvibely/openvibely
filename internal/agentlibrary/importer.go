@@ -558,7 +558,8 @@ func firstMarkdownParagraph(content string) string {
 	return "Imported skill package."
 }
 
-func slugifySkillName(name string) string {
+// SlugifySkillName derives a stable, filesystem-safe skill key from a user-visible skill name.
+func SlugifySkillName(name string) string {
 	var b strings.Builder
 	lastSep := false
 	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
@@ -583,6 +584,10 @@ func slugifySkillName(name string) string {
 		return "skill"
 	}
 	return out
+}
+
+func slugifySkillName(name string) string {
+	return SlugifySkillName(name)
 }
 
 // Applier is the backend authority for agent/skill changes. The importer

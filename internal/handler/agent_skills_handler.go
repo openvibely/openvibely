@@ -481,7 +481,7 @@ func (h *Handler) materializeAgentToDiskWithUsedKeys(c echo.Context, agent *mode
 	}
 	key := strings.TrimSpace(agent.Key)
 	if key == "" || !validDialogSkillKey(key) {
-		base := slugifyLegacyAgentSkillName(firstDialogNonEmpty(agent.Name, agent.ID, "agent"))
+		base := agentlibrary.SlugifySkillName(firstDialogNonEmpty(agent.Name, agent.ID, "agent"))
 		key = uniqueAgentSkillKey(base, usedKeys)
 		agent.Key = key
 		usedKeys[key] = true
@@ -665,7 +665,7 @@ func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, 
 			remaining = append(remaining, legacy)
 			continue
 		}
-		handle := uniqueAgentSkillKey(slugifyLegacyAgentSkillName(name), used)
+		handle := uniqueAgentSkillKey(agentlibrary.SlugifySkillName(name), used)
 		used[handle] = true
 		enabled := true
 		decl := &agentlibrary.SkillDeclaration{
@@ -712,33 +712,6 @@ func (h *Handler) existingAgentSkillKeys(root, agentKey string) map[string]bool 
 		}
 	}
 	return used
-}
-
-func slugifyLegacyAgentSkillName(name string) string {
-	var b strings.Builder
-	lastSep := false
-	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			lastSep = false
-		case r == '_' || r == '-' || r == '.':
-			if b.Len() > 0 && !lastSep {
-				b.WriteRune('_')
-				lastSep = true
-			}
-		default:
-			if b.Len() > 0 && !lastSep {
-				b.WriteRune('_')
-				lastSep = true
-			}
-		}
-	}
-	out := strings.Trim(b.String(), "_")
-	if out == "" {
-		return "skill"
-	}
-	return out
 }
 
 func uniqueAgentSkillKey(base string, used map[string]bool) string {
