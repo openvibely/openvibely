@@ -234,7 +234,6 @@ templ analyticsContent(currentProject *models.Project) {
 						</div></div>
 						@analyticsChartCard("Skill outcomes versus usage", "Farther right means used on more tasks; higher means more goals achieved. Association only.", "skillEffectivenessChart", "h-72")
 					</div>
-					<details class="collapse collapse-arrow bg-base-100 border border-base-300"><summary class="collapse-title font-semibold">Exact skill outcome values</summary><div class="collapse-content"><table class="table table-sm"><tbody id="skillOutcomeTable"></tbody></table><table class="table table-sm"><tbody id="agentSkillOutcomeTable"></tbody></table></div></details>
 					<details id="skillEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting skill events</summary><div class="collapse-content"><p id="skillEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="skillEventEvidenceTable"></tbody></table></div></details>
 				</section>
 
@@ -349,7 +348,7 @@ templ analyticsContent(currentProject *models.Project) {
 								Object.keys(charts).forEach(destroyChart);								const box = document.getElementById('analyticsError');
 								box.textContent = error && error.message ? error.message : 'Analytics request failed';
 								box.classList.remove('hidden');
-								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',10],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillOutcomeTable',5],['agentSkillOutcomeTable',6],['skillEventEvidenceTable',7],['usageBreakdownTable',7],['usageEventEvidenceTable',8],['underusedSkillsTable',4]].forEach(function(item) {
+								[['recentOutcomesTable',10],['outcomeEvidenceTable',9],['agentPerformanceTable',8],['agentEvidenceTable',6],['agentCategoryTable',5],['agentFailureTable',3],['agentSkillTable',5],['workflowPerformanceTable',10],['workflowFunnelTable',3],['workflowDurationTable',3],['workflowFailureTable',3],['workflowBottleneckTable',3],['skillEventEvidenceTable',7],['usageBreakdownTable',7],['usageEventEvidenceTable',8],['underusedSkillsTable',4]].forEach(function(item) {
 									const table = document.getElementById(item[0]);
 									if (table) table.innerHTML = '\x3ctr>\x3ctd colspan="' + item[1] + '" class="text-center opacity-50">Analytics unavailable\x3c/td>\x3c/tr>';
 								});
@@ -641,9 +640,7 @@ templ analyticsContent(currentProject *models.Project) {
 										const summary=data.skill_summary;
 										const values=summary?[formatNumber(summary.skills_used),formatNumber(summary.tasks_using_skills),formatNumber(summary.tasks_with_goal_evidence)+' of '+formatNumber(summary.tasks_using_skills)]:['Unavailable','Unavailable','Unavailable'];
 										document.querySelectorAll('[data-skill-summary-value]').forEach((node,i)=>{node.textContent=values[i];node.className='text-lg tabular-nums';});
-										renderSkillOutcomes(data.skill_outcomes || []);
 										renderSkillOutcomeCharts(data.skill_outcomes || []);
-										renderAgentSkillOutcomes(data.agent_skill_outcomes || []);
 									}
 									if (selectedView === 'usage') {
 										// Usage cards are populated only by the usage response, not the dashboard response.
@@ -1048,19 +1045,6 @@ templ analyticsContent(currentProject *models.Project) {
 									function rowsOrEmpty(id, rows, columns, render) { const table=document.getElementById(id); if(table)table.innerHTML=rows.length?rows.map(render).join(''):'\x3ctr>\x3ctd colspan="'+columns+'" class="text-center opacity-50">'+(detail?'No evidence in this period':'Select an Agent to inspect evidence')+'\x3c/td>\x3c/tr>'; }
 								rowsOrEmpty('agentFailureTable',detail?(detail.failures||[]):[],3,function(row){const url='/tasks/'+encodeURIComponent(row.task_id)+'?project_id='+encodeURIComponent(projectID);return '\x3ctr>\x3ctd>\x3ca class="link" href="'+url+'">'+escapeHTML(row.task_title)+'\x3c/a>\x3c/td>\x3ctd>'+row.failure_count+'\x3c/td>\x3ctd>'+escapeHTML(row.last_error||'Unavailable')+'\x3c/td>\x3c/tr>';});
 									rowsOrEmpty('agentSkillTable',detail?(detail.skills||[]):[],5,function(row){const url=skillOutcomeEvidenceURL(row,selectedAgent);return '\x3ctr>\x3ctd>\x3ca class="link" data-skill-outcome-evidence href="'+escapeHTML(url)+'">\x3ccode>'+escapeHTML(row.skill_handle)+'\x3c/code>\x3c/a> \x3cspan class="badge badge-ghost badge-xs">'+escapeHTML(row.skill_scope||'unknown')+'\x3c/span>\x3c/td>\x3ctd>'+row.tasks_evaluated+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.technical_completion))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.goal_achievement))+'\x3c/td>\x3ctd>'+escapeHTML(ratioText(row.follow_up))+'\x3c/td>\x3c/tr>';});							}
-							function renderSkillOutcomes(rows) {
-								const table = document.getElementById('skillOutcomeTable');
-								if (!table) return;
-								table.innerHTML = rows.length ? rows.map(function(row) {
-									return '\x3ctr>\x3ctd>\x3ca class="link" data-skill-outcome-evidence href="' + escapeHTML(skillOutcomeEvidenceURL(row, '')) + '">\x3ccode>' + escapeHTML(row.skill_handle) + '\x3c/code>\x3c/a> \x3cspan class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '\x3c/span>\x3c/td>\x3ctd>' + row.tasks_evaluated + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.technical_completion)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.goal_achievement)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.follow_up)) + '\x3c/td>\x3c/tr>';								}).join('') : '\x3ctr>\x3ctd colspan="5" class="text-center opacity-50">No selected or loaded skills have task outcome evidence in this period\x3c/td>\x3c/tr>';
-							}
-								function renderAgentSkillOutcomes(rows) {
-									const table = document.getElementById('agentSkillOutcomeTable');
-									if (!table) return;
-									table.innerHTML = rows.length ? rows.map(function(row) {
-										const agent = row.agent_id ? '\x3ca class="link" href="/agents?project_id=' + encodeURIComponent(projectID) + '&agent_id=' + encodeURIComponent(row.agent_id) + '">' + escapeHTML(row.agent_name) + '\x3c/a>' : escapeHTML(row.agent_name);
-										return '\x3ctr>\x3ctd>' + agent + '\x3c/td>\x3ctd>\x3ca class="link" data-skill-outcome-evidence href="' + escapeHTML(skillOutcomeEvidenceURL(row, row.agent_id || '__unassigned__')) + '">\x3ccode>' + escapeHTML(row.skill_handle) + '\x3c/code>\x3c/a> \x3cspan class="badge badge-ghost badge-xs">' + escapeHTML(row.skill_scope || 'unknown') + '\x3c/span>\x3c/td>\x3ctd>' + row.tasks_evaluated + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.technical_completion)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.goal_achievement)) + '\x3c/td>\x3ctd>' + escapeHTML(ratioText(row.follow_up)) + '\x3c/td>\x3c/tr>';									}).join('') : '\x3ctr>\x3ctd colspan="6" class="text-center opacity-50">No Agent and skill combinations have outcome evidence in this period\x3c/td>\x3c/tr>';
-								}
 								function renderWorkflowPerformance(rows) {
 									const selected = selectedWorkflow;
 									const visible = rows.filter(function(row) { return !selected || row.workflow_id === selected; });
