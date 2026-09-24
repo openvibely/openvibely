@@ -347,6 +347,8 @@ window.addEventListener('load',async function(){
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
   var usageTable=document.getElementById('usageBreakdownTable'),usageRows=usageTable.querySelectorAll('[data-usage-model]');
+  assert(Array.from(usageRows,r=>JSON.parse(r.dataset.usageModel)[1]).join('|')==='low|missing|model|moderate','usage table must use provider/model order, not token volume');
+  assert(usageTable.lastElementChild.textContent.includes('Total'),'total must remain last');
   for(var tab of ['usage','learning']){
    var sectionTitle=document.querySelector('#analytics-'+tab+' h3'),sectionHelp=sectionTitle.nextElementSibling;
    assert(sectionHelp.matches('button[data-model-help]')&&sectionHelp.querySelector('svg'),'tab subtitle should use the same help-icon style as Models');
@@ -356,7 +358,7 @@ window.addEventListener('load',async function(){
    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
   }
   assert(document.querySelectorAll('[data-usage-summary-value]').length===4&&document.querySelectorAll('[data-usage-summary-value]')[3].textContent==='2.4M','daily token KPI should show a compact backend average');
-  assert(usageRows[0].cells.length===7&&usageRows[0].cells[0].querySelector('strong').textContent==='Primary'&&usageRows[0].cells[0].querySelector('.text-xs').textContent==='openai · model · high reasoning','model and provider should share one identity column');
+  assert(usageRows[2].cells.length===7&&usageRows[2].cells[0].querySelector('strong').textContent==='Primary'&&usageRows[2].cells[0].querySelector('.text-xs').textContent==='openai · model · high reasoning','model and provider should share one identity column');
   assert(usageTable.closest('table').querySelectorAll('thead th').length===7,'usage columns need clear headings');
   var usageHeaders=usageTable.closest('table').querySelectorAll('thead th');
   for(var header of usageHeaders)assert(header.querySelector('button.btn.btn-ghost.btn-circle.btn-xs[data-model-help]'),'every usage column should use Model comparison help styling');
@@ -365,14 +367,14 @@ window.addEventListener('load',async function(){
   var headerHelp=usageHeaders[3].querySelector('button');headerHelp.click();
   assert(document.getElementById('modelMetricHelp').matches(':popover-open')&&document.getElementById('modelMetricHelp').textContent===headerHelp.dataset.modelHelp,'usage column help should open immediately on click');
   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-  assert(usageRows[0].cells[1].textContent.includes('1M'),'compact values should remain');
+  assert(usageRows[2].cells[1].textContent.includes('1M'),'compact values should remain');
   assert(!usageTable.querySelector('button,[data-model-help],[title]'),'usage values must not have tooltip triggers');
   assert(!document.getElementById('usageLastUpdated'),'usage timestamp should be removed');
-  assert(usageRows[0].cells[3].classList.contains('bg-success/10')&&usageRows[0].cells[3].textContent.includes('90.0% reuse'),'high cache reuse should be green');
-  assert(usageRows[1].cells[3].classList.contains('bg-warning/10'),'moderate cache reuse should match Model comparison caution styling');
-  assert(usageRows[2].cells[3].classList.contains('bg-error/10'),'low cache reuse should be red');
-  assert(usageRows[3].cells[3].classList.contains('bg-base-200/40')&&usageRows[3].cells[6].textContent.includes('Unavailable'),'missing evidence should remain neutral');
-  assert(usageRows[0].cells[6].textContent.includes('$0.00'),'recorded zero cost must not be treated as missing');
+  assert(usageRows[2].cells[3].classList.contains('bg-success/10')&&usageRows[2].cells[3].textContent.includes('90.0% reuse'),'high cache reuse should be green');
+  assert(usageRows[3].cells[3].classList.contains('bg-warning/10'),'moderate cache reuse should match Model comparison caution styling');
+  assert(usageRows[0].cells[3].classList.contains('bg-error/10'),'low cache reuse should be red');
+  assert(usageRows[1].cells[3].classList.contains('bg-base-200/40')&&usageRows[1].cells[6].textContent.includes('Unavailable'),'missing evidence should remain neutral');
+  assert(usageRows[2].cells[6].textContent.includes('$0.00'),'recorded zero cost must not be treated as missing');
   assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===configs.modelTimeChart.data.datasets[0].backgroundColor[0],'configuration color must remain consistent across tabs');
   result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}

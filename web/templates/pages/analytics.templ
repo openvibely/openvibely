@@ -1607,7 +1607,7 @@ templ analyticsContent(currentProject *models.Project) {
 											 tokenCell(row.reasoning_output_tokens,'Reasoning tokens')+tokenCell(row.total_tokens,'Total tokens',share)+
 											 usageCell(costAvailable?formatCost(row.cost_usd):'Unavailable',costAvailable?'Recorded cost':'No recorded cost',costAvailable?'bg-primary/10':'bg-base-200/40');
 											}
-											const rows=(data.configuration_breakdown||breakdown).map(row=>'\x3ctr data-usage-model="'+escapeHTML(usageModelKey(row))+'">'+analyticsIdentityCell(modelConfigLabel(row),[modelDetailLabel(row)+(row.config_name?'':' · Configuration unavailable')])+usageCells(row,row.cost_usd!=null)+'\x3c/tr>');
+											const rows=(data.configuration_breakdown||breakdown).slice().sort(compareChartModels).map(row=>'\x3ctr data-usage-model="'+escapeHTML(usageModelKey(row))+'">'+analyticsIdentityCell(modelConfigLabel(row),[modelDetailLabel(row)+(row.config_name?'':' · Configuration unavailable')])+usageCells(row,row.cost_usd!=null)+'\x3c/tr>');
 											rows.push('\x3ctr class="font-semibold border-t border-base-300">'+analyticsIdentityCell('Total',['All models'])+usageCells(totals,!!totals.cost_available&&totals.cost_usd!=null)+'\x3c/tr>');
 											table.innerHTML=rows.join('');
 										}
