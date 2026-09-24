@@ -1106,7 +1106,7 @@ func TestAnalyticsContent_HasPersistentViewsDefinitionsAndSafeRendering(t *testi
 		`Run success rate`, `Goal achievement rate`, `First-run success rate`,
 		`Follow-up run rate`, `Median task duration`, `Cost per achieved goal`,
 		`Outcome funnel`, `Supporting task evidence`, `Agent outcome comparison`, `Automation comparison`, `id="outcomeReadout"`,
-		`Observed skill outcomes`, `Exact skill outcome values`, `Provider Account Limits`,
+		`Observed skill outcomes`, `Exact skill outcome values`, `id="accountUsageCards"`,
 		`Run time per task by agent`, `Follow-ups per task by agent`, `Model comparison`,
 		`Visual node funnel`, `Duration by node`, `Failures by node`, `Current bottlenecks`,
 		`Run results over time`, `id="skillSummary"`, `id="loadMoreEvidence"`, `loaded ' + recent.length + ' of '`, `row.cycle_eligible ? formatDuration`, `row.duration_sample_size`, `focusUsageEvidence`, `id="skillEvidenceSelection"`, `id="usageEvidenceSelection"`, `loadSkillEvidence()`, `showUsageModelEvidence`, `history.replaceState`, `history.pushState`, `params.set('view'`, `params.set('agent'`, `params.set('workflow'`, `params.set('evidence', key)`, `window.addEventListener('popstate'`, `renderChartState`, `destroyChart`, `escapeHTML(task.TaskTitle`, `canvas.setAttribute('aria-label'`,

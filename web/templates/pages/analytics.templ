@@ -215,7 +215,7 @@ templ analyticsContent(currentProject *models.Project) {
 							@analyticsKPICard(label, "usage")
 						}
 					</div>
-					<div><h4 class="font-semibold mb-2">Provider Account Limits</h4><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
+					<div><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
 						<p class="text-center opacity-50 py-12 lg:col-span-2">Loading analytics…</p>
 					</div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
