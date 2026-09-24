@@ -52,7 +52,7 @@ func Analytics(projects []models.Project, currentProject *models.Project) templ.
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Base("Analytics Dashboard", projects, projectID(currentProject)).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Base("Analytics", projects, projectID(currentProject)).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -442,11 +442,11 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = layout.PageTitle("Analytics Dashboard").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.PageTitle("Analytics").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<h2 class=\"text-2xl font-bold\">Analytics Dashboard</h2>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<h2 class=\"text-2xl font-bold\">Analytics</h2>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
