@@ -831,6 +831,13 @@ templ analyticsContent(currentProject *models.Project) {
 									chart.ctx.fillRect(x-8,y-2,16,2);
 								}else chart.ctx.fillText(label,bar.x,bar.y-6);
 							}
+							function compactChartNumber(value){return new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(value);}
+							function analyticsBarValues(id,label,missing=()=>false){
+								return {id,afterDatasetsDraw:function(chart){
+									const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+									chart.getDatasetMeta(0).data.forEach((bar,i)=>drawModelBarValue(chart,bar,i,label(i),missing(i)));ctx.restore();
+								}};
+							}
 							function modelSlots(rows){
 							 const slots=new Map();
 							 for(const row of ((latestRunActivity||{}).models||[]))slots.set(modelSlotKey(row),row);
@@ -859,10 +866,7 @@ templ analyticsContent(currentProject *models.Project) {
 									plot.style.minWidth=Math.max(320,supported.length*64+64)+'px';
 									charts[key]=createAnalyticsChart(canvas.getContext('2d'),{
 										type:'bar',data:{labels:supported.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:supported.map((_,i)=>valueAt(i)),backgroundColor:supported.map(modelChartColor)}]},
-										plugins:[{id:'modelValues',afterDatasetsDraw:function(chart){
-											const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
-											chart.getDatasetMeta(0).data.forEach((bar,i)=>drawModelBarValue(chart,bar,i,textAt(i),!available[i]));ctx.restore();
-										}}],
+										plugins:[analyticsBarValues('modelValues',textAt,i=>!available[i])],
 										options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(supported[items[0].dataIndex])+' · '+modelDetailLabel(supported[items[0].dataIndex]):'',label:item=>available[item.dataIndex]?textAt(item.dataIndex)+' · n='+sample(available[item.dataIndex]):'No data'}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',title:{display:true,text:axis},ticks:{callback:format}}}}
 									});
 								}
@@ -926,10 +930,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const labels=values.map(v=>v===null?'Unavailable':v.toFixed(1)+'%');
 								charts.modelOutcomes=createAnalyticsChart(canvas.getContext('2d'),{
 									type:'bar',data:{labels:models.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:values,backgroundColor:models.map(modelChartColor)}]},
-									plugins:[{id:'modelOutcomeValues',afterDatasetsDraw:function(chart){
-										const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
-										chart.getDatasetMeta(0).data.forEach((bar,i)=>drawModelBarValue(chart,bar,i,labels[i],values[i]===null));ctx.restore();
-									}}],
+									plugins:[analyticsBarValues('modelOutcomeValues',i=>labels[i],i=>values[i]===null)],
 									options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(models[items[0].dataIndex])+' · '+modelDetailLabel(models[items[0].dataIndex]):'',label:function(item){const m=models[item.dataIndex][metric]||{};return Number(m.denominator)>0?labels[item.dataIndex]+' · '+m.numerator+'/'+m.denominator+' tasks':'Unavailable';}}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}}}
 								});
 							}
@@ -1621,6 +1622,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const modelCtx = renderChartState('modelTokenBreakdown', 'modelTokenBreakdownChart', breakdown, 'No model token usage in this period');
 								if (modelCtx) {
 									charts.modelTokenBreakdown = createAnalyticsChart(modelCtx.getContext('2d'), {
+										plugins:[analyticsBarValues('usageTokenValues',i=>compactChartNumber(breakdown[i].total_tokens||0))],
 										type: 'bar',
 											data: {
 												labels: breakdown.map(modelConfigLabel),
@@ -1631,11 +1633,11 @@ templ analyticsContent(currentProject *models.Project) {
 												}]
 											},
 												options: {
-
+														layout:{padding:{top:24}},
 														plugins: { legend: { display: false }, tooltip: { callbacks: {
 															title:items=>items.length?modelConfigLabel(breakdown[items[0].dataIndex])+' · '+modelDetailLabel(breakdown[items[0].dataIndex]):'',
 															label:item=>formatNumber(item.raw)+' tokens'
-														} } },scales:{y:{beginAtZero:true},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}
+														} } },scales:{y:{beginAtZero:true,grace:'15%',ticks:{callback:compactChartNumber}},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}
 												}
 											});
 											}
@@ -1737,7 +1739,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if(canvas){
 										canvas.parentElement.style.minWidth=Math.max(320,rows.length*64+64)+'px';
 										if(!canvas.parentElement.parentElement.hasAttribute('data-run-scroll')){const scroll=document.createElement('div');scroll.className='overflow-x-auto';scroll.setAttribute('data-run-scroll','');const plot=canvas.parentElement;plot.parentElement.insertBefore(scroll,plot);scroll.appendChild(plot);}
-										charts.usageRunModels=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[{data:rows.map(r=>r.runs),backgroundColor:rows.map(modelChartColor)}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>rows[item.dataIndex].runs+' task runs'}}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}}});
+										charts.usageRunModels=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[{data:rows.map(r=>r.runs),backgroundColor:rows.map(modelChartColor)}]},plugins:[analyticsBarValues('usageRunValues',i=>compactChartNumber(rows[i].runs))],options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>rows[item.dataIndex].runs+' task runs'}}},scales:{y:{beginAtZero:true,grace:'15%',ticks:{precision:0,callback:compactChartNumber}},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}}});
 									}
 								}catch(e){
 									if(e.name==='AbortError')return;

@@ -411,6 +411,14 @@ window.addEventListener('load',async function(){
   assert(usageRows[1].cells[3].classList.contains('bg-base-200/40')&&usageRows[1].cells[6].textContent.includes('Unavailable'),'missing evidence should remain neutral');
   assert(usageRows[2].cells[6].textContent.includes('$0.00'),'recorded zero cost must not be treated as missing');
   assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===configs.modelTimeChart.data.datasets[0].backgroundColor[0],'configuration color must remain consistent across tabs');
+  for(const [key,id] of [['modelTokenBreakdownChart','usageTokenValues'],['usageRunModelsChart','usageRunValues']]){
+   const config=configs[key],labels=[];
+   config.plugins.find(p=>p.id===id).afterDatasetsDraw({ctx:{save(){},restore(){},fillText(text){labels.push(text);}},getDatasetMeta:()=>({data:config.data.labels.map(()=>({x:50,y:100}))})});
+   assert(labels.length===config.data.labels.length,'every usage bar needs a value label');
+   assert(config.options.layout.padding.top===24&&config.options.scales.y.grace==='15%','usage bar labels need headroom');
+   assert(config.options.scales.y.ticks.callback(17132)==='17.1K'&&config.options.scales.y.ticks.callback(2400000000)==='2.4B','large usage numbers must be compact');
+   if(id==='usageTokenValues')assert(labels.includes('1M'),'token bar labels must be compact');
+  }
   result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
 });</script>` + rendered.String()
