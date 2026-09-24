@@ -5218,7 +5218,8 @@ func TestHandler_Analytics_FullPage(t *testing.T) {
 
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "OpenVibely")
-	assertContains(t, rec, "Analytics Dashboard")
+	assertContains(t, rec, `<h2 class="text-2xl font-bold">Analytics</h2>`)
+	assertNotContains(t, rec, "Analytics Dashboard")
 	assertContains(t, rec, `data-project-id="`+project.ID+`"`)
 	assertContains(t, rec, "dataset.projectId")
 	assertNotContains(t, rec, "templ.JSONString")
@@ -5288,7 +5289,8 @@ func TestHandler_Analytics_HTMX(t *testing.T) {
 
 	rec := htmxGet(e, "/analytics?project_id="+project.ID)
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, "Analytics Dashboard")
+	assertContains(t, rec, `<h2 class="text-2xl font-bold">Analytics</h2>`)
+	assertNotContains(t, rec, "Analytics Dashboard")
 	assertNotContains(t, rec, "<!DOCTYPE html>")
 	assertContains(t, rec, `data-project-id="`+project.ID+`"`)
 }
