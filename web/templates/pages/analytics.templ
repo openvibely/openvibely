@@ -11,6 +11,15 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 	}
 }
 
+templ analyticsSectionHeading(label, help string) {
+	<div class="flex items-center gap-2">
+		<h3 class="text-xl font-bold">{ label }</h3>
+		<button type="button" class="btn btn-ghost btn-circle btn-xs" data-model-help={ help } aria-label={ help }>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path stroke-linecap="round" d="M12 11v6"></path><path stroke-linecap="round" d="M12 7h.01"></path></svg>
+		</button>
+	</div>
+}
+
 templ analyticsKPICard(label, kind string) {
 	<div class="card bg-base-100 border border-base-300" data-analytics-kpi>
 		<div class="card-body p-4 gap-2">
@@ -182,7 +191,7 @@ templ analyticsContent(currentProject *models.Project) {
 				</section>
 
 				<section id="analytics-learning" data-analytics-section="learning" class="hidden space-y-6 mb-6">
-					<div><h3 class="text-xl font-bold">Learning</h3><p class="text-sm opacity-60">Observed skill activity and outcomes. Association only; not causation.</p><p id="skillEvidenceSelection" class="hidden"></p></div>
+					<div>@analyticsSectionHeading("Learning", "Observed skill activity and outcomes. Association only; not causation.")<p id="skillEvidenceSelection" class="hidden"></p></div>
 					<div id="skillSummary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
 						for _, label := range []string{"Skills used", "Tasks using skills", "Tasks with goal evidence"} {
 							@analyticsKPICard(label, "skill")
@@ -211,7 +220,7 @@ templ analyticsContent(currentProject *models.Project) {
 				</section>
 
 				<section id="analytics-usage" data-analytics-section="usage" class="hidden space-y-6 mb-6">
-					<div><h3 class="text-xl font-bold">Usage</h3><p class="text-sm opacity-60">Provider limits, token usage, cache utilization, and recorded cost.</p><p id="usageEvidenceSelection" class="hidden"></p></div>
+					<div>@analyticsSectionHeading("Usage", "Provider limits, token usage, cache utilization, and recorded cost.")<p id="usageEvidenceSelection" class="hidden"></p></div>
 					<div id="usageSummary" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
 						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization", "Avg. tokens / day"} {
 							@analyticsKPICard(label, "usage")
