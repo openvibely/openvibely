@@ -121,6 +121,8 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				var createStyle = getComputedStyle(createButton);
 				if (createStyle.cursor !== 'pointer') fail('question option does not look clickable');
 				if (!createStyle.boxShadow || createStyle.boxShadow === 'none') fail('question option regressed to flat text styling');
+				if (createStyle.backgroundColor === 'rgb(0, 0, 0)' || createStyle.backgroundColor === 'rgba(0, 0, 0, 0)') fail('question option rendered with an unreadable black or transparent background');
+				if (createStyle.color === createStyle.backgroundColor) fail('question option text color matched its background');
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
