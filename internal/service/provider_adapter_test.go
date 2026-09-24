@@ -391,6 +391,18 @@ func TestNativeCompactionCapabilityRequiresConcreteSupportedConfiguration(t *tes
 	}
 }
 
+func TestGPT6SolLunaUseResponsesWebsocketAndCodexEffectiveContext(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: model}}
+		if got := providerTransport(req); got != "responses_websocket_http_fallback" {
+			t.Errorf("providerTransport(%q) = %q", model, got)
+		}
+		if got := openAIContextWindow(model); got != 272000 {
+			t.Errorf("openAIContextWindow(%q) = %d, want 272000", model, got)
+		}
+	}
+}
+
 func TestProviderContextCompactionFallbackDisablesUnsupportedAnthropicStrategy(t *testing.T) {
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {

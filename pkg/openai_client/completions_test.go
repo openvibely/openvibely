@@ -192,6 +192,85 @@ func TestSendCompletionsDistinguishesZeroFromOmittedTemperature(t *testing.T) {
 	}
 }
 
+func TestSendCompletionsGPT6SolLunaReasoningCompatibility(t *testing.T) {
+	tests := []struct {
+		name            string
+		model           string
+		effort          string
+		disableTools    bool
+		wantEffort      string
+		wantTemperature bool
+	}{
+		{name: "sol reasoning omits sampling", model: "gpt-6-sol", effort: "high", disableTools: true, wantEffort: "high"},
+		{name: "luna none permits sampling", model: "gpt-6-luna", effort: "none", disableTools: true, wantEffort: "none", wantTemperature: true},
+		{name: "sol tools constrain chat completions", model: "gpt-6-sol", effort: "max", wantEffort: "none", wantTemperature: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n\ndata: [DONE]\n\n"))
+			}))
+			defer srv.Close()
+
+			client := NewWithCompatibleAPIKey("sk-test", srv.URL+"/", "", "")
+			_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+				Model:            tt.model,
+				ReasoningEffort:  tt.effort,
+				FirstPartyOpenAI: true,
+				Temperature:      0.7,
+				DisableTools:     tt.disableTools,
+			})
+			if err != nil {
+				t.Fatalf("SendCompletions: %v", err)
+			}
+			if got := body["reasoning_effort"]; got != tt.wantEffort {
+				t.Fatalf("reasoning_effort = %#v, want %q", got, tt.wantEffort)
+			}
+			_, hasTemperature := body["temperature"]
+			if hasTemperature != tt.wantTemperature {
+				t.Fatalf("temperature present = %v, want %v; body=%#v", hasTemperature, tt.wantTemperature, body)
+			}
+		})
+	}
+}
+
+func TestSendCompletionsGPT6CompatibilityDoesNotAffectCustomProviders(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"finish_reason\":\"stop\",\"delta\":{}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	client := NewWithCompatibleAPIKey("sk-test", srv.URL+"/", "", "")
+	_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+		Model:           "gpt-6-sol",
+		ReasoningEffort: "high",
+		Temperature:     0.7,
+		DisableTools:    true,
+	})
+	if err != nil {
+		t.Fatalf("SendCompletions: %v", err)
+	}
+	if _, ok := body["reasoning_effort"]; ok {
+		t.Fatalf("custom provider unexpectedly received first-party reasoning behavior: %#v", body)
+	}
+	if _, ok := body["temperature"]; !ok {
+		t.Fatalf("custom provider temperature was unexpectedly removed: %#v", body)
+	}
+}
+
 func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {
 	var gotPath string
 	var gotAuth string

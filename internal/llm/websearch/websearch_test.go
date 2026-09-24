@@ -9,6 +9,8 @@ func TestOpenAIModelSupportsSearch(t *testing.T) {
 	}{
 		{"gpt-6-astra", true},
 		{"GPT-6-ASTRA", true},
+		{"gpt-6-sol", true},
+		{"GPT-6-LUNA", true},
 		{"gpt-5.6-sol", false},
 		{"gpt-5.6-terra", false},
 		{"gpt-5.6-luna", false},

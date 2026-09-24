@@ -120,7 +120,7 @@ const (
 
 func isResponsesLiteWebsocketModel(model string) bool {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra":
+	case "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
 		return true
 	default:
 		return false

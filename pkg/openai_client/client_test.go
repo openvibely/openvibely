@@ -433,7 +433,7 @@ func TestSend_OAuthLunaUsesResponsesLiteWebSocket(t *testing.T) {
 }
 
 func TestResponsesLiteWebSocketModels(t *testing.T) {
-	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", " GPT-5.6-SOL "} {
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", " GPT-6-SOL "} {
 		if !isResponsesLiteWebsocketModel(model) {
 			t.Errorf("isResponsesLiteWebsocketModel(%q) = false, want true", model)
 		}
@@ -442,6 +442,55 @@ func TestResponsesLiteWebSocketModels(t *testing.T) {
 		if isResponsesLiteWebsocketModel(model) {
 			t.Errorf("isResponsesLiteWebsocketModel(%q) = true, want false", model)
 		}
+	}
+}
+
+func TestSend_GPT6SolLunaUseResponsesLiteWebSocket(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("OpenAI-Beta"); got != openAIResponsesWebsocketBeta {
+					t.Errorf("OpenAI-Beta = %q", got)
+				}
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					t.Errorf("accept websocket: %v", err)
+					return
+				}
+				defer conn.Close(websocket.StatusNormalClosure, "")
+				_, data, err := conn.Read(r.Context())
+				if err != nil {
+					t.Errorf("read request: %v", err)
+					return
+				}
+				var request map[string]any
+				if err := json.Unmarshal(data, &request); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				if request["model"] != model || request["type"] != "response.create" {
+					t.Errorf("request type/model = %v/%v", request["type"], request["model"])
+				}
+				completed := fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","model":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`, model)
+				if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
+					t.Errorf("write response: %v", err)
+				}
+			}))
+			defer srv.Close()
+
+			original := OpenAIAPIBaseURL
+			OpenAIAPIBaseURL = srv.URL + "/v1/"
+			defer func() { OpenAIAPIBaseURL = original }()
+
+			client := NewWithAPIKey("sk-test")
+			resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: model, ReasoningEffort: "medium"})
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			if resp.Text != "ok" || resp.Model != model {
+				t.Fatalf("response = %#v", resp)
+			}
+		})
 	}
 }
 
