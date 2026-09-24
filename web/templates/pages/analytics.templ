@@ -13,8 +13,8 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 
 templ analyticsModelTrendCard(title, description, key string) {
  <div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
-  <div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">{ title }</h4><select id={ key + "Select" } aria-label={ title + " model" } class="select select-bordered select-xs"><option value="combined">All models combined</option><option value="all">Each model</option></select></div>
-  <p class="text-sm opacity-60">{ description }</p><div class="relative h-80"><canvas id={ key + "Chart" }></canvas></div>
+  <div class="flex flex-wrap items-center justify-between gap-3">@analyticsChartHeading(title, description)<select id={ key + "Select" } aria-label={ title + " model" } class="select select-bordered select-xs"><option value="combined">All models combined</option><option value="all">Each model</option></select></div>
+  <div class="relative h-80"><canvas id={ key + "Chart" }></canvas></div>
  </div></div>
 }
 
@@ -71,12 +71,18 @@ templ analyticsTaskSummary(view string) {
 	</div>
 }
 
-templ analyticsChartCard(title, description, canvasID, heightClass string) {
-	<div class="card bg-base-100 border border-base-300"><div class="card-body">
+templ analyticsChartHeading(title, description string) {
+	<div class="flex items-center gap-2">
 		<h4 class="card-title">{ title }</h4>
 		if description != "" {
-			<p class="text-sm opacity-60">{ description }</p>
+			<button type="button" class="btn btn-ghost btn-circle btn-xs shrink-0" data-model-help={ description } aria-label={ "About " + title } aria-expanded="false">ⓘ</button>
 		}
+	</div>
+}
+
+templ analyticsChartCard(title, description, canvasID, heightClass string) {
+	<div class="card bg-base-100 border border-base-300"><div class="card-body">
+		@analyticsChartHeading(title, description)
 		<div class={ "relative "+heightClass }><canvas id={ canvasID }></canvas></div>
 	</div></div>
 }
@@ -167,8 +173,7 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 					@analyticsTaskSummary("models")
 					<div class="card bg-base-100 border border-base-300"><div class="card-body">
-						<h4 class="card-title">Model comparison</h4>
-						<p class="text-sm opacity-60">Goals met, work delivered, and the effort required. Follow-ups can reflect changed goals—not just corrections.</p>
+						@analyticsChartHeading("Model comparison", "Current goals and merges, plus effort during the selected period. Follow-ups can reflect changed goals, not just corrections. Colors identify the underlying provider/model; configurations remain separate.")
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -189,11 +194,10 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
-							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Task outcomes</h4><select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
-							<p class="text-sm opacity-60">Current outcomes for tasks with activity in the selected period. Mixed models excluded; missing evidence is unavailable.</p>
+							<div class="flex flex-wrap items-center justify-between gap-3">@analyticsChartHeading("Task outcomes", "Current goal or merge status for tasks active in the selected period. Goals: achieved / tasks with non-cleared goals. Merges: merged / tasks with worktrees or merge status. Mixed configurations excluded; n is the eligible task count.")<select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
 							<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelOutcomesChart"></canvas></div></div>
 						</div></div>
-					<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><h4 class="card-title">Run reliability</h4><p class="text-sm opacity-60">Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.</p><div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelReliabilityChart"></canvas></div></div></div></div>
+					<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">@analyticsChartHeading("Run reliability", "Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.")<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelReliabilityChart"></canvas></div></div></div></div>
 					</div>
 				</section>
 
@@ -244,10 +248,10 @@ templ analyticsContent(currentProject *models.Project) {
 					<div><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
 						<p class="text-center opacity-50 py-12 lg:col-span-2">Loading analytics…</p>
 					</div></div>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">@analyticsChartHeading("Token Usage", "Recorded tokens by usage date. Includes task and other project activity. Colors identify the same provider/model across charts.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Token Usage Breakdown</h4><div class="overflow-x-auto"><table class="table table-sm"><thead id="usageBreakdownHead"></thead><tbody id="usageBreakdownTable"></tbody></table></div></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Task runs over time</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRunModelSelect" aria-label="Task run model" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"><option value="combined">All models combined</option></select></div></div><p class="text-sm opacity-60">Task run starts across the selected date range. Chat activity excluded.</p><div class="relative h-64"><canvas id="usageRunHoursChart"></canvas></div></div></div> @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">@analyticsChartHeading("Task runs over time", "Task run starts across the selected date range. Includes unfinished runs; excludes chat activity.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRunModelSelect" aria-label="Task run model" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"><option value="combined">All models combined</option></select></div></div><div class="relative h-64"><canvas id="usageRunHoursChart"></canvas></div></div></div> @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
 				</section>
 			<!-- Chart.js and Custom Script -->
 			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
@@ -766,16 +770,13 @@ templ analyticsContent(currentProject *models.Project) {
 								eventSignal.addEventListener('abort',close,{once:true});
 							}
 							const modelBarPalette=['rgba(239, 68, 68, 0.7)','rgba(34, 197, 94, 0.7)','rgba(59, 130, 246, 0.7)','rgba(251, 146, 60, 0.7)','rgba(147, 51, 234, 0.7)','rgba(20, 184, 166, 0.7)'];
-							const modelChartColors=new Map();
 							function modelChartColor(row) {
-								const key=row.model_config_id||JSON.stringify([row.provider,row.model,row.reasoning_effort,row.config_name]);
-								if(!modelChartColors.has(key)) {
-
-									const index=modelChartColors.size;
-									modelChartColors.set(key,modelBarPalette[index%modelBarPalette.length]);
-								}
-								return modelChartColors.get(key);
+								if(row.model_config_id==='__combined__')return 'rgba(147, 51, 234, 0.7)';
+								const key=typeof row==='string'?row:usageModelKey(row);
+								let hash=0;for(let i=0;i<key.length;i++)hash=(Math.imul(hash,31)+key.charCodeAt(i))>>>0;
+								return modelBarPalette[hash%modelBarPalette.length];
 							}
+							function compareChartModels(a,b){return usageModelLabel(a).localeCompare(usageModelLabel(b))||modelConfigLabel(a).localeCompare(modelConfigLabel(b))||modelSlotKey(a).localeCompare(modelSlotKey(b));}
 							function renderTaskSummary(summary) {
 								const metrics=summary?[null,summary.goal_achievement,summary.merge_completion]:[];
 								document.querySelectorAll('[data-task-summary="'+selectedView+'"] [data-task-summary-value]').forEach((node,i)=>{
@@ -822,7 +823,7 @@ templ analyticsContent(currentProject *models.Project) {
 							 const slots=new Map();
 							 for(const row of ((latestRunActivity||{}).models||[]))slots.set(modelSlotKey(row),row);
 							 for(const row of rows.filter(r=>!r.mixed_models))slots.set(modelSlotKey(row),row);
-							 return Array.from(slots.values()).sort((a,b)=>Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
+							 return Array.from(slots.values()).sort(compareChartModels);
 							}
 
 							function renderModelCharts(rows, runTimeOnly) {
@@ -834,7 +835,7 @@ templ analyticsContent(currentProject *models.Project) {
 									const available=slots.map(r=>byKey.get(modelSlotKey(r))||null);
 									supported=slots;
 									const valueAt=i=>available[i]?number(available[i]):null;
-									const textAt=i=>available[i]?format(valueAt(i)):'No data';
+									const textAt=i=>available[i]?format(valueAt(i)):'Unavailable';
 									const existing=document.getElementById(id);if(existing)existing.parentElement.style.minWidth='';
 									const canvas=renderChartState(key,id,supported,'No recorded task samples in this period');if(!canvas)return;
 									canvas.closest('.card').style.minWidth='0';
@@ -910,7 +911,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const canvas=renderChartState('modelOutcomes','modelOutcomesChart',models,'No outcome evidence in this period');if(!canvas)return;
 								canvas.parentElement.style.minWidth=Math.max(320,models.length*64+64)+'px';
 								const values=models.map(r=>Number((r[metric]||{}).denominator)>0?Number(r[metric].percent||0):null);
-								const labels=values.map(v=>v===null?'No data':v.toFixed(1)+'%');
+								const labels=values.map(v=>v===null?'Unavailable':v.toFixed(1)+'%');
 								charts.modelOutcomes=createAnalyticsChart(canvas.getContext('2d'),{
 									type:'bar',data:{labels:models.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:values,backgroundColor:models.map(modelChartColor)}]},
 									plugins:[{id:'modelOutcomeValues',afterDatasetsDraw:function(chart){
@@ -937,7 +938,7 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function renderModelPerformance(rows) {
 								renderModelCharts(rows);
-								const ordered=rows.slice().sort((a,b)=>Number(!!a.mixed_models)-Number(!!b.mixed_models)||Number(b.tasks_used||0)-Number(a.tasks_used||0)||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
+								const ordered=rows.slice().sort((a,b)=>Number(!!a.mixed_models)-Number(!!b.mixed_models)||compareChartModels(a,b));
 								const value=analyticsMetricCell;
 								function outcome(metric) {
 									metric=metric||{};
@@ -1561,7 +1562,7 @@ templ analyticsContent(currentProject *models.Project) {
 										const keys = choice === 'all' ? rateKeys : (choice ? [choice] : []);
 										datasets = keys.map((key, index) => {
 											const totalsByPeriod = new Map(rows.filter(row => usageModelKey(row) === key).map(row => [row.period, row.total_tokens || 0]));
-											return { label: usageModelLabel(key), data: labels.map(period => totalsByPeriod.get(period) || 0), borderColor: usageSeriesColors[index % usageSeriesColors.length], backgroundColor: colorForIndex(index, 0.12) };
+										return { label: usageModelLabel(key), data: labels.map(period => totalsByPeriod.get(period) || 0), borderColor: modelChartColor(key), backgroundColor: modelChartColor(key) };
 										});
 									}
 									charts.usageRate = createAnalyticsChart(rateCtx.getContext('2d'), {
@@ -1577,7 +1578,7 @@ templ analyticsContent(currentProject *models.Project) {
 									renderUsageEventEvidence(data.evidence || [], data.evidence_total || 0);									renderUsageSummary(totals,data);
 										renderUsageRateChart(data);
 
-									const breakdown = data.model_breakdown || [];
+								const breakdown = (data.model_breakdown || []).slice().sort(compareChartModels);
 									const table = document.getElementById('usageBreakdownTable');
 									if (table) {
 										if (breakdown.length === 0 && (totals.call_count || 0) === 0) {
@@ -1614,7 +1615,7 @@ templ analyticsContent(currentProject *models.Project) {
 												datasets: [{
 													data: breakdown.map(row => row.total_tokens || 0),
 													label: 'Recorded tokens',
-													backgroundColor: breakdown.map((row,index) => modelBarPalette[index % modelBarPalette.length])
+													backgroundColor: breakdown.map(modelChartColor)
 												}]
 											},
 												options: {
@@ -1667,7 +1668,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const rows=((latestRunActivity||{}).models||[]).map(r=>{
 									const totals=(r.trend||[]).reduce((a,p)=>({completed:a.completed+Number(p.completed||0),failed:a.failed+Number(p.failed||0)}),{completed:0,failed:0});
 									return {...r,...totals,n:totals.completed+totals.failed};
-								}).filter(r=>r.n>0).sort((a,b)=>b.n-a.n||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
+								}).filter(r=>r.n>0).sort(compareChartModels);
 								const canvas=renderChartState('modelReliability','modelReliabilityChart',rows,'No successful or failed task runs in this period');if(!canvas)return;
 								canvas.parentElement.style.minWidth='420px';
 								canvas.parentElement.style.height=Math.max(320,rows.length*32+80)+'px';
@@ -1698,7 +1699,7 @@ templ analyticsContent(currentProject *models.Project) {
 							 const selected=choice==='combined'?['combined']:choice==='all'?keys:[choice];
 							 const datasets=selected.map(key=>{
 							  const values=key==='combined'?totals:perModel.get(key);
-							  const color=key==='combined'?'rgb(147, 51, 234)':usageSeriesColors[keys.indexOf(key)%usageSeriesColors.length];
+							  const color=key==='combined'?'rgb(147, 51, 234)':modelChartColor(key);
 							  return {label:key==='combined'?'All models':usageModelLabel(key),data:periods.map(period=>values.get(period)||0),borderColor:color,backgroundColor:color};
 							 });
 							 charts.usageRunHours=createAnalyticsChart(canvas.getContext('2d'),{type:'line',data:{labels:periods,datasets:datasets},options:{plugins:{legend:{position:'bottom'},},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
@@ -1715,7 +1716,7 @@ templ analyticsContent(currentProject *models.Project) {
 										return;
 									}
 									if(selectedView!=='usage')return;
-									const rows=(data.models||[]).slice().sort((a,b)=>b.runs-a.runs||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
+									const rows=(data.models||[]).slice().sort(compareChartModels);
 									renderTaskRunTrend(data);
 									const canvas=renderChartState('usageRunModels','usageRunModelsChart',rows,'No task runs in this period');
 									if(canvas){
