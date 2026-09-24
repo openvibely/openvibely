@@ -663,3 +663,28 @@ func TestReadSkillPackageFromPath_ReadsDirectorySupportFiles(t *testing.T) {
 		t.Fatalf("unexpected package read: packageName=%q files=%+v content=%q", packageName, files, skillMD)
 	}
 }
+
+func TestSlugifySkillName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "Legacy Debug", want: "legacy_debug"},
+		{input: "Review---Migrations...Now", want: "review_migrations_now"},
+		{input: "  Spaced   Skill   ", want: "spaced_skill"},
+		{input: "___Punctuation_Wrap___", want: "punctuation_wrap"},
+		{input: "mix.dot_dash-sep", want: "mix_dot_dash_sep"},
+		{input: "...", want: "skill"},
+		{input: "---", want: "skill"},
+		{input: "", want: "skill"},
+		{input: "Skill123", want: "skill123"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			got := SlugifySkillName(tc.input)
+			if got != tc.want {
+				t.Errorf("SlugifySkillName(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
