@@ -604,6 +604,13 @@ func TestAnalyticsDashboardModelsPeriodActivity(t *testing.T) {
 		t.Fatalf("goal and delivery must remain independent: %+v", r)
 	}
 	// Each task has 30 minutes of finished run time in this period.
+	if len(r.EffortTrend) != 1 {
+		t.Fatalf("effort trend: %+v", r.EffortTrend)
+	}
+	p := r.EffortTrend[0]
+	if p.Tasks != r.TasksUsed || p.Tokens != r.TotalTokens || p.TokenSamples != r.TokenCoveredTasks || p.DurationSamples != r.DurationSampleSize || p.MedianDurationMs != r.MedianDurationMs || float64(p.FollowUps)/float64(p.Tasks) != r.AverageFollowUps {
+		t.Fatalf("effort trend must match comparison: %+v", p)
+	}
 	if r.DurationSampleSize != 3 || r.MedianDurationMs < 1799000 || r.MedianDurationMs > 1801000 {
 		t.Fatalf("selected-period run time: %+v", r)
 	}

@@ -47,6 +47,9 @@ func TestTaskRunActivityScopesAndAggregates(t *testing.T) {
 	if m.Trend[0].Runs != 4 {
 		t.Fatalf("period run counts must include unfinished runs: %+v", m.Trend)
 	}
+	if m.Trend[0].DurationSamples != m.DurationSamples || math.Abs(m.Trend[0].AverageRunMs-m.AverageRunMs) > 1 {
+		t.Fatalf("run trend must match comparison: %+v", m)
+	}
 	// Distinct dates at the same hour must not collapse into an hour-of-day bucket.
 	if _, err := db.Exec(`UPDATE executions SET started_at='2026-09-15 10:00:00' WHERE id='4'`); err != nil {
 		t.Fatal(err)

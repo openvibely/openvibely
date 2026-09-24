@@ -1324,7 +1324,8 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 		SUM(CASE WHEN t.merge_status='merged' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN t.worktree_path<>'' OR t.merge_status<>'' THEN 1 ELSE 0 END),
 		COALESCE(d.median_ms,0),COALESCE(d.p90_ms,0),COALESCE(d.n,0),
-		COALESCE(SUM(u.tokens),0),COUNT(u.tokens),SUM(u.cost),COUNT(u.cost),COALESCE(trends.points,'[]')
+		COALESCE(SUM(u.tokens),0),COUNT(u.tokens),SUM(u.cost),COUNT(u.cost),COALESCE(trends.points,'[]'),
+		json_group_array(json_object('period',` + analyticsPeriodExpression(filter.GroupBy, "t.completed_at") + `,'duration',tr.duration_ms,'tokens',u.tokens,'followups',tr.followups))
 	FROM task_runs tr JOIN selected_tasks t ON t.id=tr.id
 	LEFT JOIN task_goals g ON g.task_id=t.id LEFT JOIN task_usage u ON u.task_id=t.id
 	LEFT JOIN durations d ON d.model_config_id=tr.model_config_id
@@ -1344,14 +1345,18 @@ func (r *ExecutionRepo) queryModelPerformance(ctx context.Context, filter Analyt
 		var row models.ModelPerformance
 		var completed, terminal, followed, followups, achieved, goalDenom, merged, mergeDenom int
 		var knownCost sql.NullFloat64
-		var trendJSON string
+		var trendJSON, effortJSON string
 		if err := rows.Scan(&row.ModelConfigID, &row.ConfigName, &row.Provider, &row.Model, &row.ReasoningEffort,
 			&row.TasksUsed, &row.RunCount, &completed, &terminal, &followed, &followups,
 			&achieved, &goalDenom, &merged, &mergeDenom, &row.MedianDurationMs, &row.P90DurationMs, &row.DurationSampleSize,
-			&row.TotalTokens, &row.TokenCoveredTasks, &knownCost, &row.CostCoveredTasks, &trendJSON); err != nil {
+			&row.TotalTokens, &row.TokenCoveredTasks, &knownCost, &row.CostCoveredTasks, &trendJSON, &effortJSON); err != nil {
 			return nil, fmt.Errorf("scanning model performance: %w", err)
 		}
 		row.MixedModels = row.ModelConfigID == "__mixed__"
+		row.EffortTrend, err = aggregateModelEffortTrend(effortJSON)
+		if err != nil {
+			return nil, err
+		}
 		if err := json.Unmarshal([]byte(trendJSON), &row.OutcomeTrend); err != nil {
 			return nil, fmt.Errorf("decoding model outcome trend: %w", err)
 		}

@@ -236,8 +236,8 @@ func TestBrowserFunctional_AnalyticsContent_RestoredRunCharts(t *testing.T) {
 history.replaceState({},'',location.pathname+'?project_id=p&view=models');
 var configs={},calls=0;
 window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
-var model={model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
-window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',runs:3,completed:1,failed:1,cancelled:1},{period:'2026-09-02',runs:3,completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[{period:"2026-09-01",total_tokens:100}],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",input_tokens:1000000,cached_input_tokens:900000,total_tokens:1010000,cost_usd:0},{provider:"openai",model:"moderate",input_tokens:100,cached_input_tokens:60},{provider:"openai",model:"low",input_tokens:100,cached_input_tokens:10},{provider:"openai",model:"missing",input_tokens:0}]};data.average_tokens_per_day=2400000;if(data.model_breakdown)data.configuration_breakdown=data.model_breakdown.map((r,i)=>({...r,config_name:i===0?"Primary":"",reasoning_effort:i===0?"high":""}));return {ok:true,json:async()=>data};};
+var model={effort_trend:[{period:'2026-09-01',tasks:2,follow_ups:0,tokens:100,token_samples:2,median_duration_ms:120000,duration_samples:2}],model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
+window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',duration_samples:2,average_run_ms:60000,runs:3,completed:1,failed:1,cancelled:1},{period:'2026-09-02',duration_samples:1,average_run_ms:60000,runs:3,completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[{period:"2026-09-01",total_tokens:100}],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",input_tokens:1000000,cached_input_tokens:900000,total_tokens:1010000,cost_usd:0},{provider:"openai",model:"moderate",input_tokens:100,cached_input_tokens:60},{provider:"openai",model:"low",input_tokens:100,cached_input_tokens:10},{provider:"openai",model:"missing",input_tokens:0}]};data.average_tokens_per_day=2400000;if(data.model_breakdown)data.configuration_breakdown=data.model_breakdown.map((r,i)=>({...r,config_name:i===0?"Primary":"",reasoning_effort:i===0?"high":""}));return {ok:true,json:async()=>data};};
 window.addEventListener('load',async function(){
  var result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
@@ -259,16 +259,25 @@ window.addEventListener('load',async function(){
    assert(document.getElementById(id).parentElement.style.minWidth===Math.max(320,configs[id].data.labels.length*64+64)+'px','model chart spacing should be compact');
   }
   var taskCard=document.getElementById('modelTimeChart').closest('.card'),runCard=document.getElementById('modelRunTimeChart').closest('.card');
-  assert(taskCard.parentElement===runCard.parentElement&&taskCard.nextElementSibling===runCard,'time charts should be side by side');
+  for(var pair of [['modelTaskTimeTrend','modelTime'],['modelRunTimeTrend','modelRunTime'],['modelTokenTrend','modelTokens'],['modelFollowupTrend','modelFollowups']]){
+   assert(document.getElementById(pair[0]+'Chart').closest('.card').nextElementSibling===document.getElementById(pair[1]+'Chart').closest('.card'),'each trend should sit beside its comparison');
+  }
   assert(taskCard.textContent.includes('combined run time')&&runCard.textContent.includes('one model run'),'time explanations missing');
   assert(!document.getElementById('modelTimeBasis'),'time dropdown should be removed');
-  assert(document.getElementById('modelFollowupsChart').closest('.card').nextElementSibling===document.getElementById('modelTokensChart').closest('.card'),'tokens should follow follow-ups');
   assert(document.getElementById('modelOutcomesChart').closest('.card').nextElementSibling===document.getElementById('modelReliabilityChart').closest('.card'),'outcomes should precede reliability');
   assert(document.body.textContent.includes('Successful means the run was marked completed'),'run success explanation missing');
   assert(tokenChart.data.datasets[0].backgroundColor[0]==='rgba(239, 68, 68, 0.7)','model bars should use the token breakdown palette');
   assert(configs.modelTimeChart.data.datasets[0].backgroundColor[0]===tokenChart.data.datasets[0].backgroundColor[0],'model colors must match across charts');
   assert(configs.modelRunTimeChart.data.datasets[0].data[0]===60000,'per-run time incorrect');
   assert(configs.modelTimeChart.data.datasets[0].data[0]===120000,'per-task median lost');
+  for(var [key,expected] of [['modelTaskTimeTrend',120000],['modelRunTimeTrend',60000],['modelTokenTrend',50],['modelFollowupTrend',0]]){
+   var trend=configs[key+'Chart'];assert(trend.type==='line'&&trend.data.datasets[0].data[0]===expected,'trend metric incorrect: '+key);
+   var before={...configs},requestsBefore=calls,select=document.getElementById(key+'Select');
+   select.value='m';select.dispatchEvent(new Event('change'));
+   assert(configs[key+'Chart'].data.datasets.length===1&&calls===requestsBefore,'trend selector should filter locally');
+   for(var other in before)if(other!==key+'Chart')assert(configs[other]===before[other],'selector redrew unrelated chart: '+other);
+   select.value='all';select.dispatchEvent(new Event('change'));
+  }
   assert(configs.modelTimeChart.data.labels.join('|')==='Model|Run only|Unmeasured','shared roster must include models from both data sources');
   assert(configs.modelTimeChart.data.datasets[0].data[1]===null&&configs.modelTokensChart.data.datasets[0].data[1]===null,'run-only models must not fabricate task measurements');
   assert(configs.modelRunTimeChart.data.datasets[0].data[1]===30000&&configs.modelRunTimeChart.data.datasets[0].data[2]===null,'run time must retain missing model slots');
