@@ -240,7 +240,7 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 	})
 	adapter := New(nil, nil, nil)
 	_, _, _, err := adapter.CallCompletionsStreaming(ctx, "Investigate the issue", nil, models.LLMConfig{
-		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-sol", APIKey: "test-key", Temperature: 0.7,
 	}, "", ".", "", nil)
 	if err != nil {
 		t.Fatalf("CallCompletionsStreaming: %v", err)
@@ -260,6 +260,9 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 	}
 	if strings.Contains(content, "This is the ONLY way to create a task") || strings.Contains(content, "To create a task, output this format") {
 		t.Fatalf("task prompt retains marker-only guidance: %q", content)
+	}
+	if gotBody["temperature"] != 0.7 {
+		t.Fatalf("temperature = %#v, want 0.7", gotBody["temperature"])
 	}
 }
 
@@ -958,7 +961,7 @@ func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
 	})
 	adapter := New(nil, nil, nil)
 	output, usage, err := adapter.CallCompletionsChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
-		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-luna", APIKey: "test-key", Temperature: 0.7,
 	}, "exec-completions-chat", []models.Execution{{PromptSent: "Earlier prompt", Output: "Earlier answer", Status: models.ExecCompleted}}, "CHAT_CONTEXT_SENTINEL", true, models.ChatModeOrchestrate, "/repo/worktree", nil)
 	if err != nil {
 		t.Fatalf("CallCompletionsChatStreaming: %v", err)
@@ -977,5 +980,8 @@ func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
 	}
 	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
 		t.Fatalf("chat completions prompt missing runtime action guidance: %#v", gotBody)
+	}
+	if gotBody["temperature"] != 0.7 {
+		t.Fatalf("temperature = %#v, want 0.7", gotBody["temperature"])
 	}
 }

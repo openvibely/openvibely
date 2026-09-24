@@ -494,6 +494,55 @@ func TestSend_GPT6SolLunaUseResponsesLiteWebSocket(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_GPT6SolLunaNativeWebSearchUsesStandardResponses(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			var request map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
+					t.Fatalf("request = %s %s, want POST /v1/responses", r.Method, r.URL.Path)
+				}
+				if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
+					t.Fatalf("Responses Lite header = %q, want empty", got)
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":%q,\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n", model)
+			}))
+			defer srv.Close()
+
+			original := OpenAIAPIBaseURL
+			OpenAIAPIBaseURL = srv.URL + "/v1/"
+			defer func() { OpenAIAPIBaseURL = original }()
+
+			client := NewWithAPIKey("sk-test")
+			resp, err := client.SendAgentic(context.Background(), "Search", &AgenticOptions{
+				Model: model, ReasoningEffort: "medium", DisableTools: true,
+				WebSearchEnabled: true, MaxTurns: 1,
+			})
+			if err != nil {
+				t.Fatalf("SendAgentic: %v", err)
+			}
+			if resp.Text != "ok" {
+				t.Fatalf("response text = %q, want ok", resp.Text)
+			}
+			tools, _ := request["tools"].([]any)
+			if !responsesToolsContainHostedTool(tools) {
+				t.Fatalf("request tools = %#v, want native web_search", tools)
+			}
+			input, _ := request["input"].([]any)
+			if len(input) > 0 {
+				first, _ := input[0].(map[string]any)
+				if first["type"] == "additional_tools" {
+					t.Fatalf("standard Responses request unexpectedly used additional_tools: %#v", first)
+				}
+			}
+		})
+	}
+}
+
 func TestSetResponsesTransportStateSharesSessionID(t *testing.T) {
 	state := NewResponsesTransportState()
 	first := NewWithAPIKey("first")
