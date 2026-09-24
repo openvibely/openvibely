@@ -16,7 +16,7 @@ func TestAnalyticsContent_CompactModelChartTitles(t *testing.T) {
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	for _, title := range []string{"Task time", "Individual run time", "Follow-ups per task", "Tokens per task", "Task outcomes", "Run reliability"} {
+	for _, title := range []string{"Task Run Time", "Task Time Breakdown", "Individual Run Time", "Run Time Breakdown", "Tokens per Task", "Token Breakdown", "Follow-ups per Task", "Follow-up Breakdown", "Task outcomes", "Run reliability"} {
 		if !strings.Contains(rendered.String(), ">"+title+"</h4>") {
 			t.Errorf("missing compact chart title %q", title)
 		}

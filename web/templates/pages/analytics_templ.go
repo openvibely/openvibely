@@ -652,11 +652,11 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsModelTrendCard("Task time over time", "Median combined run time per task, grouped by latest task activity in this range. Waiting and mixed configurations excluded.", "modelTaskTimeTrend").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsModelTrendCard("Task Run Time", "Median combined run time per task, grouped by latest task activity in this range. Waiting and mixed configurations excluded.", "modelTaskTimeTrend").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Task time", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Task Time Breakdown", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -664,11 +664,11 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsModelTrendCard("Individual run time over time", "Average individual run time, grouped by run start date. Includes ended failed and cancelled runs.", "modelRunTimeTrend").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsModelTrendCard("Individual Run Time", "Average individual run time, grouped by run start date. Includes ended failed and cancelled runs.", "modelRunTimeTrend").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Individual run time", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Run Time Breakdown", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -676,11 +676,11 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsModelTrendCard("Tokens per task over time", "Average recorded tokens per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelTokenTrend").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsModelTrendCard("Tokens per Task", "Average recorded tokens per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelTokenTrend").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Tokens per task", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Token Breakdown", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -688,11 +688,11 @@ func analyticsContent(currentProject *models.Project) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsModelTrendCard("Follow-ups per task over time", "Average follow-up runs per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelFollowupTrend").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsModelTrendCard("Follow-ups per Task", "Average follow-up runs per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelFollowupTrend").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = analyticsChartCard("Follow-ups per task", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = analyticsChartCard("Follow-up Breakdown", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
