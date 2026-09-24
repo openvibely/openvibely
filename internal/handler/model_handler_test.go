@@ -3946,6 +3946,44 @@ func TestCreateModel_OpenAI_GPT54(t *testing.T) {
 	}
 }
 
+func TestCreateModel_OpenAI_GPT6SolLunaPreservesExactModel(t *testing.T) {
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			_, e, llmConfigRepo := setupTestHandler(t)
+			form := url.Values{}
+			form.Set("name", "OpenAI "+model)
+			form.Set("provider", "openai")
+			form.Set("openai_auth_type", "api_key")
+			form.Set("model", model)
+			form.Set("api_key", "sk-openai-test")
+			form.Set("reasoning_effort", "medium")
+
+			req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+			}
+
+			configs, err := llmConfigRepo.List(context.Background())
+			if err != nil {
+				t.Fatalf("list error: %v", err)
+			}
+			var saved *models.LLMConfig
+			for i := range configs {
+				if configs[i].Name == "OpenAI "+model {
+					saved = &configs[i]
+					break
+				}
+			}
+			if saved == nil || saved.Model != model {
+				t.Fatalf("saved config = %#v, want exact model %q", saved, model)
+			}
+		})
+	}
+}
+
 func TestCreateModel_OpenAI_AstraClearsTemperature(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
@@ -3987,6 +4025,8 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		want  string
 	}{
 		{"gpt-6-astra", "gpt-6-astra"},
+		{"gpt-6-sol", "gpt-6-sol"},
+		{"gpt-6-luna", "gpt-6-luna"},
 		{"gpt-5.6-sol", "gpt-5.6-sol"},
 		{"gpt-5.6-terra", "gpt-5.6-terra"},
 		{"gpt-5.6-luna", "gpt-5.6-luna"},
@@ -4027,6 +4067,8 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 	}{
 		{"openai astra max", models.ProviderOpenAI, "gpt-6-astra", "max", "max"},
 		{"openai astra rejects none", models.ProviderOpenAI, "gpt-6-astra", "none", ""},
+		{"openai gpt-6 sol none", models.ProviderOpenAI, "gpt-6-sol", "none", "none"},
+		{"openai gpt-6 luna max", models.ProviderOpenAI, "gpt-6-luna", "max", "max"},
 		{"openai none", models.ProviderOpenAI, "gpt-5.6-sol", "none", "none"},
 		{"openai xhigh", models.ProviderOpenAI, "gpt-5.6-sol", "xhigh", "xhigh"},
 		{"openai max", models.ProviderOpenAI, "gpt-5.6-sol", "max", "max"},

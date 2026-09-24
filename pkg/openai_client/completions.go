@@ -29,11 +29,15 @@ type CompletionsOptions struct {
 	// Temperature preserves explicit zero, which many providers treat
 	// differently from their default. Use OmittedTemperature for models that
 	// do not accept the parameter.
-	Temperature  float64
-	System       string
-	WorkDir      string
-	MaxTurns     int
-	DisableTools bool
+	Temperature float64
+	// ReasoningEffort is sent for first-party GPT-6 Sol/Luna requests. When
+	// function tools are present those models require none on Chat Completions.
+	ReasoningEffort  string
+	FirstPartyOpenAI bool
+	System           string
+	WorkDir          string
+	MaxTurns         int
+	DisableTools     bool
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
@@ -441,13 +445,42 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 	return result, err
 }
 
+func isGPT6SolOrLuna(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-6-sol", "gpt-6-luna":
+		return true
+	default:
+		return false
+	}
+}
+
+func completionsReasoningEffort(model, value string, hasTools bool) string {
+	if !isGPT6SolOrLuna(model) {
+		return ""
+	}
+	if hasTools {
+		return "none"
+	}
+	if effort := normalizeReasoningEffort(value); effort != "" {
+		return effort
+	}
+	return "medium"
+}
+
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
 	payload := map[string]interface{}{
 		"model":    opts.Model,
 		"messages": messages,
 		"stream":   true,
 	}
-	if !math.IsNaN(opts.Temperature) {
+	effort := ""
+	if opts.FirstPartyOpenAI {
+		effort = completionsReasoningEffort(opts.Model, opts.ReasoningEffort, len(tools) > 0)
+	}
+	if effort != "" {
+		payload["reasoning_effort"] = effort
+	}
+	if !math.IsNaN(opts.Temperature) && (!opts.FirstPartyOpenAI || !isGPT6SolOrLuna(opts.Model) || effort == "none") {
 		payload["temperature"] = opts.Temperature
 	}
 

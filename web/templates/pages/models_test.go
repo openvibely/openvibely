@@ -73,6 +73,8 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	// JS modelOptionsByProvider entries
 	for _, model := range []string{
 		"gpt-6-astra",
+		"gpt-6-sol",
+		"gpt-6-luna",
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -201,6 +203,11 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 	if !strings.Contains(out, "{ value: 'gpt-6-astra', label: 'gpt-6-astra', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected GPT-6 Astra effort options without unsupported none")
+	}
+	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		if !strings.Contains(out, "{ value: '"+model+"', label: '"+model+"', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {
+			t.Errorf("expected %s effort options", model)
+		}
 	}
 	for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"} {
 		if !strings.Contains(out, "{ value: '"+model+"'") {

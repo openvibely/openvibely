@@ -358,6 +358,8 @@ func TestReasoningEffortUsesModelDefaults(t *testing.T) {
 		want  string
 	}{
 		{model: "gpt-6-astra", want: "medium"},
+		{model: "gpt-6-sol", want: "medium"},
+		{model: "gpt-6-luna", want: "medium"},
 		{model: "gpt-5.6-sol", want: "medium"},
 		{model: "gpt-5.6-terra", want: "medium"},
 		{model: "gpt-5.6-luna", want: "medium"},
@@ -365,6 +367,9 @@ func TestReasoningEffortUsesModelDefaults(t *testing.T) {
 		{model: "gpt-5.5-pro", want: "medium"},
 		{model: "gpt-6-astra", value: "none", want: "medium"},
 		{model: "gpt-6-astra", value: "max", want: "max"},
+		{model: "gpt-6-sol", value: "none", want: "none"},
+		{model: "gpt-6-luna", value: "max", want: "max"},
+		{model: "gpt-6-sol", value: "invalid", want: "medium"},
 		{model: "gpt-5.6-sol", value: "max", want: "max"},
 		{model: "gpt-5.4-mini", value: "max", want: "medium"},
 		{model: "gpt-5.4-mini", value: "xhigh", want: "xhigh"},
