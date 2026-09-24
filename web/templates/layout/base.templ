@@ -814,74 +814,35 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.chat-input-request-card {
 					background: transparent;
 					border: none;
-					color: rgb(226 232 240);
-				}
-				[data-theme="light"] .chat-input-request-card {
-					color: rgb(31 41 55);
 				}
 				.chat-input-option-btn {
-					display: flex;
-					align-items: flex-start;
-					gap: 0.5rem;
-					border: 0;
-					border-radius: 0.85rem;
-					background: rgb(31 41 55 / 0.42);
-					box-shadow: inset 0 0 0 1px rgb(148 163 184 / 0.22), 0 1px 2px rgb(0 0 0 / 0.16);
-					color: rgb(226 232 240);
-					cursor: pointer;
-					transition: background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
-				}
-				[data-theme="light"] .chat-input-option-btn {
-					background: rgb(248 250 252);
-					box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.12), 0 1px 2px rgb(15 23 42 / 0.06);
-					color: rgb(31 41 55);
-				}
-				.chat-input-option-btn:hover:where(:not(:disabled)) {
-					background: rgb(51 65 85 / 0.58);
-					box-shadow: inset 0 0 0 1px rgb(148 163 184 / 0.32), 0 3px 8px rgb(0 0 0 / 0.18);
-					transform: translateY(-1px);
-				}
-				[data-theme="light"] .chat-input-option-btn:hover:where(:not(:disabled)) {
-					background: rgb(241 245 249);
-					box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.18), 0 3px 8px rgb(15 23 42 / 0.08);
-				}
-				.chat-input-option-btn:focus-visible {
-					outline: 2px solid rgb(129 140 248 / 0.72);
-					outline-offset: 3px;
-				}
-				.chat-input-option-btn.chat-input-option-selected {
-					background: rgb(49 46 129 / 0.38);
-					box-shadow: inset 0 0 0 1px rgb(129 140 248 / 0.56), 0 3px 8px rgb(0 0 0 / 0.16);
-				}
-				[data-theme="light"] .chat-input-option-btn.chat-input-option-selected {
-					background: rgb(238 242 255);
-					box-shadow: inset 0 0 0 1px rgb(99 102 241 / 0.38), 0 3px 8px rgb(15 23 42 / 0.06);
+					appearance: none;
+					font: inherit;
+					color: hsl(var(--bc));
 				}
 				.chat-input-option-btn:disabled {
 					cursor: not-allowed;
 					opacity: 0.55;
-					transform: none;
+				}
+				.chat-input-option-btn.chat-input-option-selected {
+					border-color: hsl(var(--p) / 0.45);
+					background: hsl(var(--b2));
+					box-shadow: 0 4px 14px hsl(var(--p) / 0.12), inset 0 0 0 1px hsl(var(--p) / 0.32);
 				}
 				.chat-input-recommended-badge {
 					display: inline-flex;
 					align-items: center;
 					border-radius: 9999px;
-					background: rgb(99 102 241 / 0.18);
-					box-shadow: inset 0 0 0 1px rgb(129 140 248 / 0.28);
-					color: rgb(199 210 254);
+					background: hsl(var(--p) / 0.12);
+					box-shadow: inset 0 0 0 1px hsl(var(--p) / 0.22);
+					color: hsl(var(--p));
 					padding: 0.125rem 0.5rem;
 					font-size: 0.6875rem;
 					font-weight: 700;
 					line-height: 1.2;
 				}
-				[data-theme="light"] .chat-input-recommended-badge {
-					background: rgb(238 242 255);
-					box-shadow: inset 0 0 0 1px rgb(99 102 241 / 0.24);
-					color: rgb(67 56 202);
-				}
-				.chat-input-recommended-shortcut:hover:where(:not(:disabled):not(.btn-disabled)) {
-					background: rgb(148 163 184 / 0.12) !important;
-					border-color: transparent !important;
+				.chat-input-recommended-shortcut {
+					font-weight: 700;
 				}
 				#pending-thread-inputs:has([data-thread-input-id]) {
 					padding-bottom: 1rem;
