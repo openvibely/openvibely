@@ -40,7 +40,8 @@ For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.
 
 | Model | Effort Options | Notes |
 |---|---|---|
-| Claude Opus 5 (`claude-opus-5`) | low / medium / high / xhigh / max | Latest Opus generation. 128k max output, 1M context. |
+| Claude Opus 5.5 (`claude-opus-5-5`) | low / medium / high / xhigh / max | Latest Opus generation. 128k max output, 1M context; adaptive thinking is always on. |
+| Claude Opus 5 (`claude-opus-5`) | low / medium / high / xhigh / max | Previous Opus generation. 128k max output, 1M context. |
 | Claude Sonnet 5 (`claude-sonnet-5`) | low / medium / high / xhigh / max | Latest Sonnet generation. 128k max output, 1M context. |
 | Claude Fable 5.1 (`claude-fable-5-1`) | low / medium / high / xhigh / max | Latest Fable generation. 128k max output, 1M context; adaptive thinking is always on. |
 | Claude Mythos 5.1 (`claude-mythos-5-1`) | low / medium / high / xhigh / max | Limited-availability Project Glasswing model. 128k max output, 1M context; adaptive thinking is always on. Forced `tool_choice` values `any` and `tool` are unsupported. Requires 30-day data retention unless Anthropic authorizes otherwise. |

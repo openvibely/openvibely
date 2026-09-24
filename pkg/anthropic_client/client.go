@@ -46,7 +46,10 @@ var OAuthTokenURL = "https://platform.claude.com/v1/oauth/token"
 const (
 	AnthropicAPIVersion = "2023-06-01"
 	OAuthBetaHeader     = "oauth-2025-04-20"
-	DefaultModel        = "claude-sonnet-4-20250514"
+	// ClaudeCodeVersion identifies the compatible Claude Code request shape used
+	// for Anthropic subscription OAuth billing attribution.
+	ClaudeCodeVersion = "2.1.280"
+	DefaultModel      = "claude-sonnet-4-20250514"
 
 	defaultModelRequestTimeout = 10 * time.Minute
 

@@ -54,6 +54,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 
 	// HTML <option> elements
 	for _, model := range []string{
+		"claude-opus-5-5",
 		"claude-sonnet-5",
 		"claude-opus-5",
 		"claude-fable-5-1",
@@ -79,6 +80,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		"gpt-5.5-pro",
 		"gpt-5.4-mini",
 		"gpt-5.3-codex-spark",
+		"claude-opus-5-5",
 		"claude-sonnet-5",
 		"claude-opus-5",
 		"claude-fable-5-1",
@@ -150,6 +152,9 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 	if !strings.Contains(out, "{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Sonnet 5 effort options")
+	}
+	if !strings.Contains(out, "{ value: 'claude-opus-5-5', label: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
+		t.Error("expected Claude Opus 5.5 effort options")
 	}
 	if !strings.Contains(out, "{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected Claude Opus 5 effort options")

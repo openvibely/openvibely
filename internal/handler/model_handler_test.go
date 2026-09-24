@@ -4034,6 +4034,7 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 		{"openai rejects ultra", models.ProviderOpenAI, "gpt-5.6-sol", "ultra", ""},
 		{"anthropic max", models.ProviderAnthropic, "claude-opus-4-6", "max", "max"},
 		{"anthropic rejects xhigh", models.ProviderAnthropic, "claude-opus-4-6", "xhigh", ""},
+		{"anthropic opus 5.5 max", models.ProviderAnthropic, "claude-opus-5-5", "max", "max"},
 		{"anthropic opus 5 low", models.ProviderAnthropic, "claude-opus-5", "low", "low"},
 		{"anthropic opus 5 xhigh", models.ProviderAnthropic, "claude-opus-5", "xhigh", "xhigh"},
 		{"anthropic sonnet 5 xhigh", models.ProviderAnthropic, "claude-sonnet-5", "xhigh", "xhigh"},
