@@ -7,6 +7,7 @@ import (
 
 type TaskRunPeriod struct {
 	Period    string `json:"period"`
+	Runs      int    `json:"runs"`
 	Completed int    `json:"completed"`
 	Failed    int    `json:"failed"`
 	Cancelled int    `json:"cancelled"`
@@ -62,6 +63,7 @@ func (r *ExecutionRepo) GetTaskRunActivity(ctx context.Context, f AnalyticsDashb
 			out.Models = append(out.Models, m)
 		}
 		target := &out.Models[idx]
+		p.Runs = runs
 		target.Runs += runs
 		target.AverageRunMs += duration
 		target.DurationSamples += n
@@ -70,6 +72,7 @@ func (r *ExecutionRepo) GetTaskRunActivity(ctx context.Context, f AnalyticsDashb
 		}
 		last := len(target.Trend) - 1
 		if last >= 0 && target.Trend[last].Period == p.Period {
+			target.Trend[last].Runs += p.Runs
 			target.Trend[last].Completed += p.Completed
 			target.Trend[last].Failed += p.Failed
 			target.Trend[last].Cancelled += p.Cancelled

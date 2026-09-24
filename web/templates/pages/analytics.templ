@@ -221,7 +221,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0"><h4 class="card-title">Token Usage</h4><div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex justify-between"><h4 class="card-title">Token Usage Breakdown</h4><span id="usageLastUpdated" class="text-xs opacity-60"></span></div><table class="table table-sm"><tbody id="usageBreakdownTable"></tbody></table></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Task runs by hour", "Run starts by local hour in the selected period.", "usageRunHoursChart", "h-64") @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">@analyticsChartCard("Task runs over time", "Task run starts across the selected date range, grouped like Token Usage. Chat activity excluded.", "usageRunHoursChart", "h-64") @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
 				</section>
 			<!-- Chart.js and Custom Script -->
 			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
@@ -1585,9 +1585,12 @@ templ analyticsContent(currentProject *models.Project) {
 									}
 									if(selectedView!=='usage')return;
 									const rows=(data.models||[]).slice().sort((a,b)=>b.runs-a.runs||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
-									const hours=Array.from({length:24},(_,i)=>Number((data.hours||[])[i]||0));
-									let canvas=renderChartState('usageRunHours','usageRunHoursChart',hours.some(n=>n>0)?hours:[],'No task runs in this period');
-									if(canvas)charts.usageRunHours=createAnalyticsChart(canvas.getContext('2d'),{type:'line',data:{labels:hours.map((_,i)=>String(i).padStart(2,'0')+':00'),datasets:[{label:'Task runs',data:hours,borderColor:'rgb(59,130,246)',backgroundColor:'rgba(59,130,246,.6)',borderWidth:2,pointRadius:3,tension:0.3,cubicInterpolationMode:'monotone',fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+									const totals=new Map();
+									for(const model of rows)for(const period of model.trend||[])totals.set(period.period,(totals.get(period.period)||0)+Number(period.runs||0));
+									const periods=Array.from(totals.keys()).sort();
+									const counts=periods.map(period=>totals.get(period));
+									let canvas=renderChartState('usageRunHours','usageRunHoursChart',periods,'No task runs in this period');
+									if(canvas)charts.usageRunHours=createAnalyticsChart(canvas.getContext('2d'),{type:'line',data:{labels:periods,datasets:[{label:'Task runs',data:counts,borderColor:'rgb(59,130,246)',backgroundColor:'rgba(59,130,246,.6)',borderWidth:2,pointRadius:3,tension:0.3,cubicInterpolationMode:'monotone',fill:false}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
 									canvas=renderChartState('usageRunModels','usageRunModelsChart',rows,'No task runs in this period');
 									if(canvas){
 										canvas.parentElement.style.minWidth=Math.max(320,rows.length*64+64)+'px';

@@ -237,7 +237,7 @@ history.replaceState({},'',location.pathname+'?project_id=p&view=models');
 var configs={},calls=0;
 window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
 var model={model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
-window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',completed:1,failed:1,cancelled:1},{period:'2026-09-02',completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",total_tokens:100}]};return {ok:true,json:async()=>data};};
+window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',runs:3,completed:1,failed:1,cancelled:1},{period:'2026-09-02',runs:3,completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",total_tokens:100}]};return {ok:true,json:async()=>data};};
 window.addEventListener('load',async function(){
  var result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
@@ -274,9 +274,9 @@ window.addEventListener('load',async function(){
   assert(configs.modelRunTimeChart.data.datasets[0].data[1]===30000&&configs.modelRunTimeChart.data.datasets[0].data[2]===null,'run time must retain missing model slots');
   document.querySelector('[data-analytics-view="usage"]').click();
   for(i=0;i<100&&(!configs.usageRunHoursChart||!configs.usageRunModelsChart);i++)await wait();
-  assert(configs.usageRunHoursChart.data.labels.length===24&&configs.usageRunHoursChart.data.datasets[0].data[1]===6,'hourly counts incorrect');
-  assert(configs.usageRunHoursChart.type==='line'&&configs.usageRunHoursChart.data.datasets[0].data[0]===0,'hourly activity should be a line chart including zero hours');
-  assert(configs.usageRunHoursChart.data.datasets[0].cubicInterpolationMode==='monotone','hourly line should have smooth curves without overshooting counts');
+  assert(configs.usageRunHoursChart.data.labels.join('|')==='2026-09-01|2026-09-02'&&configs.usageRunHoursChart.data.datasets[0].data.join('|')==='3|3','task runs should use date buckets rather than hours of day');
+  assert(configs.usageRunHoursChart.type==='line'&&configs.usageRunHoursChart.data.datasets[0].cubicInterpolationMode==='monotone','task run trend should retain smooth curves');
+  assert(document.getElementById('usageRunHoursChart').closest('.card').textContent.includes('Task runs over time'),'run trend title should describe date-based activity');
   assert(configs.usageRunModelsChart.data.datasets[0].data[0]===6,'model run counts incorrect');
   for(var id of ['usageRunModelsChart','modelTokenBreakdownChart'])assert(configs[id].data.datasets[0].barThickness===undefined&&configs[id].data.datasets[0].categoryPercentage===0.8&&configs[id].data.datasets[0].barPercentage===0.9,'usage bars must share the model chart style');
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
