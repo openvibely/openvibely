@@ -1535,17 +1535,18 @@ templ analyticsContent(currentProject *models.Project) {
 									return {...r,...totals,n:totals.completed+totals.failed};
 								}).filter(r=>r.n>0).sort((a,b)=>b.n-a.n||modelConfigLabel(a).localeCompare(modelConfigLabel(b)));
 								const canvas=renderChartState('modelReliability','modelReliabilityChart',rows,'No successful or failed task runs in this period');if(!canvas)return;
-								canvas.parentElement.style.minWidth=Math.max(320,rows.length*100)+'px';
+								canvas.parentElement.style.minWidth='420px';
+								canvas.parentElement.style.height=Math.max(320,rows.length*32+80)+'px';
 								canvas.setAttribute('aria-label','Run reliability by model: '+rows.map(r=>modelConfigLabel(r)+': '+r.completed+' successful, '+r.failed+' failed runs').join('; '));
 								charts.modelReliability=new Chart(canvas.getContext('2d'),{
 									type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[
-										{label:'Successful',data:rows.map(r=>100*r.completed/r.n),backgroundColor:'#22c55e',maxBarThickness:48},
-										{label:'Failed',data:rows.map(r=>100*r.failed/r.n),backgroundColor:'#ef4444',maxBarThickness:48}
+										{label:'Successful',data:rows.map(r=>100*r.completed/r.n),backgroundColor:'rgba(34, 197, 94, 0.5)',borderColor:'rgb(34, 197, 94)',borderWidth:1,maxBarThickness:32},
+										{label:'Failed',data:rows.map(r=>100*r.failed/r.n),backgroundColor:'rgba(239, 68, 68, 0.5)',borderColor:'rgb(239, 68, 68)',borderWidth:1,maxBarThickness:32}
 									]},
-									options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'},tooltip:{callbacks:{
+									options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'},tooltip:{callbacks:{
 										title:items=>items.length?modelConfigLabel(rows[items[0].dataIndex])+' · '+modelDetailLabel(rows[items[0].dataIndex]):'',
 										label:item=>{const r=rows[item.dataIndex],count=item.datasetIndex===0?r.completed:r.failed;return item.dataset.label+': '+Number(item.raw).toFixed(1)+'% · '+count+'/'+r.n+' runs';}
-									}}},scales:{x:{stacked:true,ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{stacked:true,beginAtZero:true,max:100,ticks:{callback:n=>n+'%'}}}}
+									}}},scales:{x:{stacked:true,beginAtZero:true,max:100,ticks:{callback:n=>n+'%'}},y:{stacked:true,ticks:{autoSkip:false,callback:function(value){const label=this.getLabelForValue(value);return label.length>26?label.slice(0,23)+'…':label;}}}}}
 								});
 							}
 							async function loadTaskRunActivity() {
