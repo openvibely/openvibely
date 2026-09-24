@@ -11,6 +11,32 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBrowserFunctional_AnalyticsDistinctConfigurationColors(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	content := rendered.String()
+	start, end := strings.Index(content, "const modelBarPalette="), strings.Index(content, "function compareChartModels")
+	if start < 0 || end <= start {
+		t.Fatal("shared model color helper missing")
+	}
+	fixture := `<!doctype html><html><body><main id="reconnect-result"></main><script>
+function usageModelKey(r){return JSON.stringify([r.provider||'unknown',r.model||'unknown']);}
+` + content[start:end] + `
+try {
+ const rows=Array.from({length:30},(_,i)=>({model_config_id:'config-'+i,provider:'openai',model:'same-model'}));
+ const colors=rows.map(modelChartColor);
+ if(new Set(colors).size!==rows.length)throw new Error('configuration colors repeat');
+ for(const row of rows.slice().reverse())if(modelChartColor(row)!==colors[rows.indexOf(row)])throw new Error('colors changed with ordering');
+ const raw={provider:'openai',model:'same-model'};
+ if(modelChartColor(raw)!==modelChartColor(usageModelKey(raw)))throw new Error('aggregate line/bar colors differ');
+ document.getElementById('reconnect-result').dataset.testResult='pass';
+}catch(e){const r=document.getElementById('reconnect-result');r.dataset.testResult='fail';r.dataset.testError=e.message;}
+</script></body></html>`
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestAnalyticsContent_CompactModelChartTitles(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
@@ -347,7 +373,7 @@ window.addEventListener('load',async function(){
   assert(usageRows[2].cells[3].classList.contains('bg-error/10'),'low cache reuse should be red');
   assert(usageRows[3].cells[3].classList.contains('bg-base-200/40')&&usageRows[3].cells[6].textContent.includes('Unavailable'),'missing evidence should remain neutral');
   assert(usageRows[0].cells[6].textContent.includes('$0.00'),'recorded zero cost must not be treated as missing');
-  assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===trend.data.datasets[0].borderColor,'run line and bars must share model colors');
+  assert(configs.usageRunModelsChart.data.datasets[0].backgroundColor[0]===configs.modelTimeChart.data.datasets[0].backgroundColor[0],'configuration color must remain consistent across tabs');
   result.dataset.testResult='pass';
  }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
 });</script>` + rendered.String()
