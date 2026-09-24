@@ -35,6 +35,47 @@ func TestCategorizeAnthropicAPIErrorUsesStructuredEnvelope(t *testing.T) {
 	if got := categorizeAnthropicAPIError(http.StatusBadRequest, unsupportedBody, true); !llmcontracts.ErrorIs(got, llmcontracts.ErrorNativeCompactionUnsupported) {
 		t.Fatalf("native category = %v", got)
 	}
+	doesNotSupportBody := []byte(`{"error":{"type":"invalid_request_error","message":"'claude-haiku-4-5-20251001' does not support the 'compact_20260112' context management strategy."}}`)
+	if got := categorizeAnthropicAPIError(http.StatusBadRequest, doesNotSupportBody, true); !llmcontracts.ErrorIs(got, llmcontracts.ErrorNativeCompactionUnsupported) {
+		t.Fatalf("does-not-support category = %v", got)
+	}
+}
+
+func TestNativeCompactionStrategy(t *testing.T) {
+	supported := []string{
+		"claude-sonnet-5",
+		"claude-sonnet-4-6",
+		"claude-opus-5-5",
+		"claude-opus-5",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
+		"claude-opus-4-6",
+		"claude-fable-5-1",
+		"claude-fable-5",
+		"claude-mythos-5-1",
+		"claude-mythos-5",
+		"claude-mythos-preview",
+		"claude-opus-5-5[1m]",
+	}
+	for _, model := range supported {
+		strategy, ok := NativeCompactionStrategy(model)
+		if !ok || strategy != CompactionStrategyCompact20260112 {
+			t.Errorf("NativeCompactionStrategy(%q) = %q, %t", model, strategy, ok)
+		}
+	}
+
+	unsupported := []string{
+		"claude-haiku-4-5-20251001",
+		"claude-sonnet-4-5-20250929",
+		"claude-opus-4-5-20251101",
+		"claude-future-model",
+		"",
+	}
+	for _, model := range unsupported {
+		if strategy, ok := NativeCompactionStrategy(model); ok || strategy != "" {
+			t.Errorf("NativeCompactionStrategy(%q) = %q, %t; want unsupported", model, strategy, ok)
+		}
+	}
 }
 
 func TestAnthropicContinuationPreflightUsesByteEstimate(t *testing.T) {
@@ -51,7 +92,7 @@ func TestAnthropicContinuationPreflightUsesByteEstimate(t *testing.T) {
 
 func TestAnthropicContinuationPreflightLeavesRoomForNativeCompaction(t *testing.T) {
 	messages := []agenticMessage{{Role: "assistant", Content: strings.Repeat("a", 680000)}}
-	opts := &AgenticOptions{ContextWindow: 200000, MaxTokens: 64000, AutoCompaction: true}
+	opts := &AgenticOptions{Model: "claude-sonnet-4-6", ContextWindow: 200000, MaxTokens: 64000, AutoCompaction: true}
 	if err := ensureAnthropicAgenticRequestFits(messages, nil, opts); err != nil {
 		t.Fatalf("170k-token request should reach native compaction: %v", err)
 	}
@@ -1226,7 +1267,7 @@ func TestSendAgentic_CompactionRoundTrip(t *testing.T) {
 
 	var compactionCalled bool
 	resp, err := client.SendAgentic(context.Background(), "test prompt", &AgenticOptions{
-		Model:          "claude-sonnet-4-20250514",
+		Model:          "claude-sonnet-4-6",
 		MaxTokens:      8192,
 		MaxTurns:       5,
 		DisableTools:   true, // We handle tool results manually in the mock
@@ -1335,7 +1376,7 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 
 	firstClient := NewWithAPIKey("test-key")
 	first, err := firstClient.SendAgentic(context.Background(), "first prompt", &AgenticOptions{
-		Model: "claude-sonnet-4-20250514", MaxTokens: 1024, AutoCompaction: true,
+		Model: "claude-sonnet-4-6", MaxTokens: 1024, AutoCompaction: true,
 		SkipDefaultTools: true,
 		ExtraTools:       []ToolDefinition{{Name: "fixture_tool", Description: "Return fixture output", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 		ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
@@ -1350,7 +1391,7 @@ func TestSendAgentic_CompactionStateReplaysAcrossExecutions(t *testing.T) {
 	}
 
 	secondClient := NewWithAPIKey("test-key")
-	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-20250514", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
+	if _, err := secondClient.SendAgentic(context.Background(), "second prompt", &AgenticOptions{Model: "claude-sonnet-4-6", MaxTokens: 1024, DisableTools: true, AutoCompaction: true, NativeCompactionStateJSON: first.NativeCompactionStateJSON}); err != nil {
 		t.Fatal(err)
 	}
 	if len(replayedMessages) != 4 {
@@ -2021,7 +2062,7 @@ func TestCompactionThreshold_CustomValue(t *testing.T) {
 	client := NewWithAPIKey("test-key")
 
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
-		Model:                    "claude-sonnet-4-20250514",
+		Model:                    "claude-sonnet-4-6",
 		MaxTokens:                8192,
 		DisableTools:             true,
 		AutoCompaction:           true,
@@ -2077,7 +2118,7 @@ func TestContextManagementEdit_WithThinking(t *testing.T) {
 	client := NewWithAPIKey("test-key")
 
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
-		Model:          "claude-sonnet-4-20250514",
+		Model:          "claude-sonnet-4-6",
 		MaxTokens:      8192,
 		EnableThinking: true,
 		DisableTools:   true,
@@ -2272,7 +2313,7 @@ func TestContextManagementEdit_WithoutThinking(t *testing.T) {
 	client := NewWithAPIKey("test-key")
 
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
-		Model:          "claude-sonnet-4-20250514",
+		Model:          "claude-sonnet-4-6",
 		MaxTokens:      8192,
 		DisableTools:   true,
 		AutoCompaction: true,

@@ -119,7 +119,7 @@ func categorizeProviderError(err error) error {
 	if strings.Contains(msg, "max output tokens") || strings.Contains(msg, "max_tokens limit") || strings.Contains(msg, "output budget") {
 		return llmcontracts.NewCategorizedError(llmcontracts.ErrorOutputTokenLimitReached, "provider response", err)
 	}
-	if strings.Contains(msg, "compaction") && (strings.Contains(msg, "unsupported") || strings.Contains(msg, "not available") || strings.Contains(msg, "unknown beta")) {
+	if strings.Contains(msg, "compaction") && (strings.Contains(msg, "unsupported") || strings.Contains(msg, "does not support") || strings.Contains(msg, "not available") || strings.Contains(msg, "unknown beta")) {
 		return llmcontracts.NewCategorizedError(llmcontracts.ErrorNativeCompactionUnsupported, "native compaction", err)
 	}
 	for _, needle := range []string{"context length", "context_length", "context window", "maximum context", "too many tokens", "input is too long", "prompt is too long"} {
@@ -284,7 +284,7 @@ func nativeCompactionUnsupportedError(err error) bool {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unsupported") || strings.Contains(msg, "unknown beta") || strings.Contains(msg, "beta feature") || strings.Contains(msg, "not available")
+	return strings.Contains(msg, "unsupported") || strings.Contains(msg, "does not support") || strings.Contains(msg, "unknown beta") || strings.Contains(msg, "beta feature") || strings.Contains(msg, "not available")
 }
 
 func providerSupportsNativeCompaction(agent models.LLMConfig) bool {
@@ -300,7 +300,7 @@ func providerSupportsNativeCompaction(agent models.LLMConfig) bool {
 	case models.ProviderAnthropic:
 		// Anthropic context management is a Messages capability. A transport
 		// override denotes a different concrete protocol and must not inherit it.
-		return strings.TrimSpace(agent.Transport) == "" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "claude-")
+		return strings.TrimSpace(agent.Transport) == "" && anthropicclient.SupportsNativeCompaction(agent.Model)
 	default:
 		return false
 	}
@@ -880,7 +880,10 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.NativeCompactionTokenThreshold = limits.TriggerLimit
 		req.Agent.CompactionThreshold = limits.TriggerLimit
 	}
-	if providerSupportsNativeCompaction(req.Agent) && knownNativeCompactionUnsupported(req.Agent) {
+	if !providerSupportsNativeCompaction(req.Agent) {
+		req.DisableNativeCompaction = true
+		req.Agent.DisableNativeCompaction = true
+	} else if knownNativeCompactionUnsupported(req.Agent) {
 		req.DisableNativeCompaction = true
 		req.Agent.DisableNativeCompaction = true
 	}
