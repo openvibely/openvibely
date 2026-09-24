@@ -11,6 +11,34 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBrowserFunctional_AnalyticsTokenBreakdownConfigurations(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<!doctype html><html><body><main id="reconnect-result"></main><script>
+history.replaceState({},'',location.pathname+'?project_id=p&view=usage');
+var configs={};window.Chart=function(ctx,c){configs[ctx.canvas.id]=c;this.destroy=function(){};};
+const rows=[{model_config_id:'b',config_name:'Codex Sol',provider:'openai',model:'sol',reasoning_effort:'high',total_tokens:200},{model_config_id:'a',config_name:'BackupSol',provider:'openai',model:'sol',reasoning_effort:'medium',total_tokens:100}];
+window.fetch=async function(url){let data={};if(String(url).includes('/usage'))data={totals:{total_tokens:300,call_count:2},accounts:[],configuration_breakdown:rows,model_breakdown:[{provider:'openai',model:'sol',total_tokens:300}],usage_rate:[],usage_rate_by_model:[]};else if(String(url).includes('/task-run-activity'))data={models:[]};return {ok:true,json:async()=>data};};
+window.addEventListener('load',async()=>{
+ const result=document.getElementById('reconnect-result');
+ try{
+  for(let i=0;i<100&&!configs.modelTokenBreakdownChart;i++)await new Promise(r=>setTimeout(r,20));
+  const c=configs.modelTokenBreakdownChart;
+  if(!c||c.data.labels.join('|')!=='BackupSol|Codex Sol')throw new Error('aliases must have separate sorted bars');
+  if(c.data.datasets[0].data.join('|')!=='100|200')throw new Error('configuration totals must not be merged');
+  if(new Set(c.data.datasets[0].backgroundColor).size!==2)throw new Error('aliases need distinct colors');
+  const title=c.options.plugins.tooltip.callbacks.title([{dataIndex:0}]);
+  if(title!=='BackupSol · openai · sol · medium reasoning')throw new Error('configuration tooltip incomplete');
+  const labels=Array.from(document.querySelectorAll('#usageBreakdownTable [data-usage-model] th strong'),n=>n.textContent);
+  if(labels.join('|')!==c.data.labels.join('|'))throw new Error('chart and table identities differ');
+  result.dataset.testResult='pass';
+ }catch(e){result.dataset.testResult='fail';result.dataset.testError=e.message;}
+});</script>` + rendered.String() + `</body></html>`
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestBrowserFunctional_AnalyticsDistinctConfigurationColors(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
