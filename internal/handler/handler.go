@@ -752,6 +752,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/api/analytics/avg-execution-time-by-task", h.GetAvgExecutionTimeByTask)
 	e.GET("/api/analytics/avg-execution-time-by-agent", h.GetAvgExecutionTimeByAgent)
 	e.GET("/api/analytics/execution-trends-by-hour", h.GetExecutionTrendsByHour)
+	e.GET("/api/analytics/task-run-activity", h.GetTaskRunActivity)
 	e.GET("/api/analytics/agent-usage-by-project", h.GetAgentUsageByProject)
 	e.GET("/api/analytics/most-frequent-tasks", h.GetMostFrequentTasks)
 	e.GET("/api/analytics/failed-task-patterns", h.GetFailedTaskPatterns)

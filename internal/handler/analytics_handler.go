@@ -448,6 +448,18 @@ func (h *Handler) GetAvgExecutionTimeByAgent(c echo.Context) error {
 	return c.JSON(http.StatusOK, times)
 }
 
+func (h *Handler) GetTaskRunActivity(c echo.Context) error {
+	f := parseUsageFilter(c)
+	if f.ProjectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+	data, err := h.execRepo.GetTaskRunActivity(c.Request().Context(), repository.AnalyticsDashboardFilter{ProjectID: f.ProjectID, DateFrom: f.DateFrom, DateTo: f.DateTo, GroupBy: f.GroupBy})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, data)
+}
+
 // GetExecutionTrendsByHour returns execution counts by hour
 // @Summary Get execution trends by hour
 // @Description Returns execution counts grouped by hour-of-day.

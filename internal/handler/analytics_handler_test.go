@@ -627,6 +627,20 @@ func TestGetAnalyticsDashboardFiltersScopedSkillOutcomeEvidence(t *testing.T) {
 	}
 }
 
+func TestAnalyticsTaskRunActivity(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.Assert(tc.HTTP().Get("/api/analytics/task-run-activity").Execute()).StatusCode(http.StatusBadRequest)
+	rec := tc.HTTP().Get("/api/analytics/task-run-activity?project_id=missing&range=all").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	var data repository.TaskRunActivity
+	if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Models) != 0 {
+		t.Fatalf("unexpected runs: %+v", data)
+	}
+}
+
 func TestGetSuccessFailureRates(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/success-failure-rates").Execute()
