@@ -38,6 +38,8 @@ func analyticsKPIHelp(label string) string {
 		return "Recorded usage cost. Subscription fees and unpriced usage are not included."
 	case "Total tokens":
 		return "Recorded input and output tokens in the selected period."
+	case "Avg. tokens / day":
+		return "Recorded tokens divided by calendar days in the selected range, including zero-usage days. All time starts at the first recorded usage and ends today."
 	case "Cache utilization":
 		return "Percentage of input tokens served from cache."
 	default:
@@ -210,8 +212,8 @@ templ analyticsContent(currentProject *models.Project) {
 
 				<section id="analytics-usage" data-analytics-section="usage" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Usage</h3><p class="text-sm opacity-60">Provider limits, token usage, cache utilization, and recorded cost.</p><p id="usageEvidenceSelection" class="hidden"></p></div>
-					<div id="usageSummary" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization"} {
+					<div id="usageSummary" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+						for _, label := range []string{"Known total cost", "Total tokens", "Cache utilization", "Avg. tokens / day"} {
 							@analyticsKPICard(label, "usage")
 						}
 					</div>
@@ -883,13 +885,14 @@ templ analyticsContent(currentProject *models.Project) {
 								}).join('')+'\x3c/tbody>\x3c/table>':'\x3cp class="opacity-50">No finished tasks in this period.\x3c/p>';
 							}
 
-							function renderUsageSummary(totals) {
+							function renderUsageSummary(totals, data) {
 								const usageContext = document.getElementById('usageSummary');
 								if (!usageContext) return;
 								const inputTokens = totals && totals.input_tokens ? Number(totals.input_tokens) : 0;
 								const cachedTokens = totals && totals.cached_input_tokens ? Number(totals.cached_input_tokens) : 0;
 								const cacheText = inputTokens > 0 ? (cachedTokens * 100 / inputTokens).toFixed(1) + '%' : 'Unavailable';
 								const values=[totals && totals.cost_available ? formatCost(Number(totals.cost_usd || 0)) : 'Unavailable',totals ? formatNumber(Number(totals.total_tokens || 0)) : 'Unavailable',cacheText];
+								values.push(data&&data.average_tokens_per_day!=null?new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(data.average_tokens_per_day):'Unavailable');
 								usageContext.querySelectorAll('[data-usage-summary-value]').forEach((node,index)=>{node.textContent=values[index];node.className='text-lg tabular-nums';});
 							}
 						function renderDistributionChart(key, canvasID, rows) {
@@ -1489,7 +1492,7 @@ templ analyticsContent(currentProject *models.Project) {
 
 								function renderUsageAnalytics(data) {
 									const totals = data.totals || {};
-									renderUsageEventEvidence(data.evidence || [], data.evidence_total || 0);									renderUsageSummary(totals);
+									renderUsageEventEvidence(data.evidence || [], data.evidence_total || 0);									renderUsageSummary(totals,data);
 										renderUsageRateChart(data);
 
 									const breakdown = data.model_breakdown || [];

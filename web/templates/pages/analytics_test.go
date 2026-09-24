@@ -237,7 +237,7 @@ history.replaceState({},'',location.pathname+'?project_id=p&view=models');
 var configs={},calls=0;
 window.Chart=function(ctx,config){configs[ctx.canvas.id]=config;this.destroy=function(){};};
 var model={model_config_id:'m',config_name:'Model',model:'model',tasks_used:2,median_duration_ms:120000,duration_sample_size:2,total_tokens:100,token_covered_tasks:2,goal_achievement:{},merge_completion:{}};
-window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',runs:3,completed:1,failed:1,cancelled:1},{period:'2026-09-02',runs:3,completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",input_tokens:1000000,cached_input_tokens:900000,total_tokens:1010000,cost_usd:0},{provider:"openai",model:"moderate",input_tokens:100,cached_input_tokens:60},{provider:"openai",model:"low",input_tokens:100,cached_input_tokens:10},{provider:"openai",model:"missing",input_tokens:0}]};if(data.model_breakdown)data.configuration_breakdown=data.model_breakdown.map((r,i)=>({...r,config_name:i===0?"Primary":"",reasoning_effort:i===0?"high":""}));return {ok:true,json:async()=>data};};
+window.fetch=async function(url){calls++;var data={};if(String(url).includes('/task-run-activity'))data={hours:[0,6],models:[{model_config_id:'m',config_name:'Model',model:'model',runs:6,average_run_ms:60000,duration_samples:3,trend:[{period:'2026-09-01',runs:3,completed:1,failed:1,cancelled:1},{period:'2026-09-02',runs:3,completed:2,failed:0,cancelled:1}]},{model_config_id:'run-only',config_name:'Run only',model:'other',runs:0,average_run_ms:30000,duration_samples:1,trend:[]}]};else if(String(url).includes('/dashboard'))data={models:[model,{model_config_id:'unmeasured',config_name:'Unmeasured',model:'other',tasks_used:0}],agents:[],recent_outcomes:[]};else data={accounts:[],totals:{},usage_rate:[],usage_rate_by_model:[],model_breakdown:[{provider:"openai",model:"model",input_tokens:1000000,cached_input_tokens:900000,total_tokens:1010000,cost_usd:0},{provider:"openai",model:"moderate",input_tokens:100,cached_input_tokens:60},{provider:"openai",model:"low",input_tokens:100,cached_input_tokens:10},{provider:"openai",model:"missing",input_tokens:0}]};data.average_tokens_per_day=2400000;if(data.model_breakdown)data.configuration_breakdown=data.model_breakdown.map((r,i)=>({...r,config_name:i===0?"Primary":"",reasoning_effort:i===0?"high":""}));return {ok:true,json:async()=>data};};
 window.addEventListener('load',async function(){
  var result=document.getElementById('reconnect-result');
  const wait=()=>new Promise(r=>setTimeout(r,20));
@@ -304,6 +304,7 @@ window.addEventListener('load',async function(){
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
   var usageTable=document.getElementById('usageBreakdownTable'),usageRows=usageTable.querySelectorAll('[data-usage-model]');
+  assert(document.querySelectorAll('[data-usage-summary-value]').length===4&&document.querySelectorAll('[data-usage-summary-value]')[3].textContent==='2.4M','daily token KPI should show a compact backend average');
   assert(usageRows[0].cells.length===7&&usageRows[0].cells[0].querySelector('strong').textContent==='Primary'&&usageRows[0].cells[0].querySelector('.text-xs').textContent==='openai · model · high reasoning','model and provider should share one identity column');
   assert(usageTable.closest('table').querySelectorAll('thead th').length===7,'usage columns need clear headings');
   var usageHeaders=usageTable.closest('table').querySelectorAll('thead th');
@@ -336,8 +337,8 @@ func TestAnalyticsContent_KPICardsShareLayout(t *testing.T) {
 	}
 	content := rendered.String()
 	// Four visible tabs, three compact cards each, without reserved sample rows.
-	if got := strings.Count(content, `data-analytics-kpi`); got != 12 {
-		t.Fatalf("KPI cards = %d, want 12", got)
+	if got := strings.Count(content, `data-analytics-kpi`); got != 13 {
+		t.Fatalf("KPI cards = %d, want 13", got)
 	}
 	if strings.Contains(content, `grid-template-rows:2.5rem 1.75rem 1rem`) {
 		t.Fatal("KPI cards must not reserve empty rows")
@@ -772,7 +773,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
         if (renderedCharts.length || document.getElementById('agentPerformanceTable').innerHTML || document.getElementById('skillOutcomeTable').innerHTML || document.getElementById('workflowPerformanceTable').innerHTML || document.getElementById('modelScorecard').innerHTML) fail('overview synchronously rendered hidden-view analytics');
         document.querySelector('[data-analytics-view="usage"]').click();
         var usageShells=Array.from(document.querySelectorAll('#usageSummary > .card'));
-        if(usageShells.length!==3||!usageShells.every(function(card){return card.textContent.indexOf('Loading analytics')>=0;}))fail('Usage must reserve summary cards while loading');
+        if(usageShells.length!==4||!usageShells.every(function(card){return card.textContent.indexOf('Loading analytics')>=0;}))fail('Usage must reserve summary cards while loading');
         document.querySelectorAll('#usageSummary [data-usage-summary-value], #accountUsageCards p').forEach(function(node){if(!node.classList.contains('text-center')||!node.classList.contains('opacity-50'))fail('Usage loading text must match Learning alignment and color');});
         if(document.getElementById('accountUsageCards').getAttribute('aria-busy')!=='true')fail('Usage must mark provider inventory loading');
         waitFor(function(){return urls.some(function(url){return url.indexOf('/api/analytics/usage') >= 0;}) && document.getElementById('accountUsageCards').textContent.indexOf('OpenAI') >= 0 && document.getElementById('accountUsageCards').textContent.indexOf('Anthropic') >= 0;}, function() {
@@ -783,7 +784,7 @@ func TestBrowserFunctional_AnalyticsContent_LoadsOnlyVisibleViewDataInChrome(t *
           if (accountCards.length !== 3 || accountCards[0].classList.contains('lg:col-span-2') || accountCards[1].classList.contains('lg:col-span-2') || !accountCards[2].classList.contains('lg:col-span-2')) fail('odd final provider account card did not span both desktop columns');
 	          var usageContext = document.getElementById('usageSummary').textContent;
           if (document.querySelectorAll('#usageSummary [data-usage-summary-value]')[2].textContent !== '75.0%' || usageContext.indexOf('150 / 200 input tokens') >= 0) fail('cache utilization did not render as a percentage only');
-          if (document.querySelectorAll('#usageSummary > .card').length !== 3 || usageContext.indexOf('Known total cost') < 0 || usageContext.indexOf('Total tokens') < 0) fail('consumption summary cards missing');
+          if (document.querySelectorAll('#usageSummary > .card').length !== 4 || usageContext.indexOf('Known total cost') < 0 || usageContext.indexOf('Total tokens') < 0 || usageContext.indexOf('Avg. tokens / day') < 0) fail('consumption summary cards missing');
           var usageText=document.getElementById('analytics-usage').textContent;
           if (document.getElementById('costOutcomeTrendChart') || /achieved goal|failed-run cost|Outcome context|Cost and outcomes/.test(usageText)) fail('Usage still mixes consumption with outcomes');
           if (localStorage.getItem('openvibely.analytics.lastView.project-1') !== 'usage') fail('selected analytics tab was not remembered');

@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"github.com/openvibely/openvibely/internal/models"
+	"math"
 	"sort"
+	"time"
 )
 
 // GetUsagePage computes only the displayed local metrics, reading events once.
@@ -14,7 +16,11 @@ func (r *UsageRepo) GetUsagePage(ctx context.Context, filter UsageFilter) (*mode
 	configurations := map[[3]string]*models.ConfigurationUsagePoint{}
 	view.ConfigurationBreakdown = []models.ConfigurationUsagePoint{}
 	group := normalizedUsageGroupBy(filter.GroupBy)
+	var firstEvent time.Time
 	err := r.forEachUsageAggregateEvent(ctx, filter, func(e usageAggregateEvent) {
+		if firstEvent.IsZero() || e.OccurredAt.Before(firstEvent) {
+			firstEvent = e.OccurredAt
+		}
 		t := &view.Totals
 		t.InputTokens += e.InputTokens
 		t.OutputTokens += e.OutputTokens
@@ -85,6 +91,23 @@ func (r *UsageRepo) GetUsagePage(ctx context.Context, filter UsageFilter) (*mode
 		return nil, err
 	}
 	combined := map[string]*models.UsageRatePoint{}
+	from, to := filter.DateFrom, filter.DateTo
+	if from.IsZero() {
+		from = firstEvent
+		if !from.IsZero() {
+			d := from.In(time.Local)
+			from = time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, time.Local)
+		}
+	}
+	if to.IsZero() {
+		d := time.Now().In(time.Local)
+		to = time.Date(d.Year(), d.Month(), d.Day()+1, 0, 0, 0, 0, time.Local)
+	}
+	view.UsageCalendarDays = usageCalendarDays(from, to)
+	if view.UsageCalendarDays > 0 {
+		average := float64(view.Totals.TotalTokens) / float64(view.UsageCalendarDays)
+		view.AverageTokensPerDay = &average
+	}
 	// Resolve saved configuration labels once, after the event cursor is closed.
 	configRows, err := r.db.QueryContext(ctx, `SELECT id, name, COALESCE(reasoning_effort,'') FROM agent_configs`)
 	if err != nil {
@@ -161,4 +184,15 @@ func (r *UsageRepo) GetUsagePage(ctx context.Context, filter UsageFilter) (*mode
 	})
 	view.Evidence, view.EvidenceTotal, err = r.GetEvidence(ctx, filter)
 	return view, err
+}
+
+// Measure local calendar-day spans, rounding partial days up and ignoring DST shifts.
+func usageCalendarDays(from, to time.Time) int {
+	if from.IsZero() || !to.After(from) {
+		return 0
+	}
+	a, b := from.In(time.Local), to.In(time.Local)
+	start := time.Date(a.Year(), a.Month(), a.Day(), a.Hour(), a.Minute(), a.Second(), a.Nanosecond(), time.UTC)
+	end := time.Date(b.Year(), b.Month(), b.Day(), b.Hour(), b.Minute(), b.Second(), b.Nanosecond(), time.UTC)
+	return int(math.Ceil(end.Sub(start).Hours() / 24))
 }

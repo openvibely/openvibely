@@ -48,6 +48,48 @@ func TestUsagePageConfigurationBreakdown(t *testing.T) {
 	}
 }
 
+func TestUsagePageDailyAverageIncludesIdleDays(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	if _, err := db.Exec(`INSERT INTO projects(id,name) VALUES ('p','P')`); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewUsageRepo(db)
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.Local)
+	filter := UsageFilter{ProjectID: "p", DateFrom: from, DateTo: from.AddDate(0, 0, 7), GroupBy: "week"}
+	view, err := repo.GetUsagePage(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.UsageCalendarDays != 7 || view.AverageTokensPerDay == nil || *view.AverageTokensPerDay != 0 {
+		t.Fatalf("empty selected range: %+v", view)
+	}
+	if err := repo.RecordUsageEvent(context.Background(), &models.LLMUsageEvent{ProjectID: "p", Provider: "openai", Model: "model", Operation: "task", InputTokens: 700, OccurredAt: from.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	view, err = repo.GetUsagePage(context.Background(), filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.UsageCalendarDays != 7 || view.AverageTokensPerDay == nil || *view.AverageTokensPerDay != 100 {
+		t.Fatalf("idle days must count: %+v", view)
+	}
+	view, err = repo.GetUsagePage(context.Background(), UsageFilter{ProjectID: "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().In(time.Local)
+	if view.UsageCalendarDays != usageCalendarDays(from, time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.Local)) {
+		t.Fatal("all time must include days since first usage")
+	}
+}
+
+func TestUsageCalendarDaysRollingRange(t *testing.T) {
+	from := time.Date(2026, 9, 1, 15, 30, 0, 0, time.Local)
+	if got := usageCalendarDays(from, from.AddDate(0, 0, 30)); got != 30 {
+		t.Fatalf("30-day range counted %d days", got)
+	}
+}
+
 func TestUsagePageMatchesExistingMetrics(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewUsageRepo(db)

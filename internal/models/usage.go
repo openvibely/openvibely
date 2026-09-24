@@ -173,6 +173,8 @@ type AnalyticsUsageAccountLimitsViewModel struct {
 }
 
 type AnalyticsUsageViewModel struct {
+	AverageTokensPerDay    *float64                  `json:"average_tokens_per_day"`
+	UsageCalendarDays      int                       `json:"usage_calendar_days"`
 	AccountLimits          []AccountUsageView        `json:"account_limits"`
 	Totals                 UsageTotals               `json:"totals"`
 	DailyUsage             []DailyUsagePoint         `json:"daily_usage"`
