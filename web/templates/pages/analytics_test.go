@@ -232,7 +232,8 @@ window.addEventListener('load',async function(){
   assert(document.querySelector('[data-analytics-view="agents"]').hidden,'Agents tab must be hidden');
   var rel=configs.modelReliabilityChart;
   assert(rel.type==='bar'&&rel.data.labels.join('|')==='Model'&&rel.data.datasets[0].data[0]===75&&rel.data.datasets[1].data[0]===25,'reliability must aggregate counts across dates, excluding cancellations');
-  assert(rel.options.scales.x.stacked&&rel.options.scales.y.stacked&&rel.options.scales.y.max===100,'success and failure must stack to 100%');
+  assert(rel.options.indexAxis==='y'&&rel.options.scales.x.stacked&&rel.options.scales.y.stacked&&rel.options.scales.x.max===100,'success and failure must stack horizontally to 100%');
+  assert(rel.data.datasets[0].backgroundColor==='rgba(34, 197, 94, 0.5)'&&rel.data.datasets[0].borderWidth===1,'reliability bars should match skill follow-through styling');
   assert(rel.options.plugins.tooltip.callbacks.label({dataIndex:0,datasetIndex:0,raw:75,dataset:{label:'Successful'}}).includes('3/4 runs'),'tooltip must show eligible run counts');
   assert(!document.getElementById('modelReliabilityMetric'),'redundant reliability dropdown remains');
   var tokenChart=configs.modelTokensChart,before=calls;
