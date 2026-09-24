@@ -159,14 +159,14 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						@analyticsChartCard("Follow-ups per task by model", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
+						@analyticsChartCard("Tokens per task by model", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
+					</div>
+					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
 							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Task outcomes by model</h4><select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
 							<p class="text-sm opacity-60">Current outcomes for tasks with activity in the selected period. Mixed models excluded; missing evidence is unavailable.</p>
 							<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelOutcomesChart"></canvas></div></div>
 						</div></div>
-					</div>
-					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsChartCard("Tokens per task by model", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
 					<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><h4 class="card-title">Run reliability by model</h4><p class="text-sm opacity-60">Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.</p><div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelReliabilityChart"></canvas></div></div></div></div>
 					</div>
 				</section>
@@ -739,13 +739,14 @@ templ analyticsContent(currentProject *models.Project) {
 								document.addEventListener('scroll',function(e){if(e.target!==tip)close();},{capture:true,signal:eventSignal});
 								eventSignal.addEventListener('abort',close,{once:true});
 							}
+							const modelBarPalette=['rgba(239, 68, 68, 0.7)','rgba(34, 197, 94, 0.7)','rgba(59, 130, 246, 0.7)','rgba(251, 146, 60, 0.7)','rgba(147, 51, 234, 0.7)','rgba(20, 184, 166, 0.7)'];
 							const modelChartColors=new Map();
 							function modelChartColor(row) {
 								const key=row.model_config_id||JSON.stringify([row.provider,row.model,row.reasoning_effort,row.config_name]);
 								if(!modelChartColors.has(key)) {
-									const palette=['rgba(239, 68, 68, 0.7)','rgba(34, 197, 94, 0.7)','rgba(59, 130, 246, 0.7)','rgba(251, 146, 60, 0.7)','rgba(147, 51, 234, 0.7)','rgba(20, 184, 166, 0.7)'];
+
 									const index=modelChartColors.size;
-									modelChartColors.set(key,palette[index%palette.length]);
+									modelChartColors.set(key,modelBarPalette[index%modelBarPalette.length]);
 								}
 								return modelChartColors.get(key);
 							}
@@ -1472,20 +1473,14 @@ templ analyticsContent(currentProject *models.Project) {
 												labels: breakdown.map(row => `${row.provider}/${row.model}`),
 												datasets: [{
 													data: breakdown.map(row => row.total_tokens || 0),
-													backgroundColor: [
-														'rgba(239, 68, 68, 0.7)',
-														'rgba(34, 197, 94, 0.7)',
-														'rgba(59, 130, 246, 0.7)',
-														'rgba(251, 146, 60, 0.7)',
-														'rgba(147, 51, 234, 0.7)',
-														'rgba(20, 184, 166, 0.7)'
-													]
+													label: 'Recorded tokens',
+													backgroundColor: breakdown.map((row,index) => modelBarPalette[index % modelBarPalette.length])
 												}]
 											},
 												options: {
 													responsive: true,
 													maintainAspectRatio: false,
-														plugins: { legend: { position: 'bottom' } }
+														plugins: { legend: { display: false } }
 												}
 											});
 											}
