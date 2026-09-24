@@ -11,6 +11,43 @@ import (
 	"time"
 )
 
+func TestUsagePageConfigurationBreakdown(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	_, err := db.Exec(`INSERT INTO projects(id,name) VALUES ('p','P');
+	INSERT INTO agent_configs(id,name,provider,model,reasoning_effort) VALUES
+	('a','Primary','openai','same','high'),('b','Backup','openai','same','medium');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewUsageRepo(db)
+	for _, id := range []string{"a", "b", ""} {
+		e := &models.LLMUsageEvent{Provider: "openai", Model: "same", AgentConfigID: id, ProjectID: "p", Operation: "task", InputTokens: 100, OutputTokens: 20, OccurredAt: time.Now()}
+		if err := repo.RecordUsageEvent(context.Background(), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view, err := repo.GetUsagePage(context.Background(), UsageFilter{ProjectID: "p", GroupBy: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.ModelBreakdown) != 1 || len(view.ConfigurationBreakdown) != 3 {
+		t.Fatalf("unexpected breakdowns: %+v", view)
+	}
+	got := map[string]models.ConfigurationUsagePoint{}
+	for _, c := range view.ConfigurationBreakdown {
+		got[c.ModelConfigID] = c
+		if c.TotalTokens != 120 {
+			t.Fatalf("wrong configuration tokens: %+v", c)
+		}
+	}
+	if got["a"].ConfigName != "Primary" || got["a"].ReasoningEffort != "high" || got["b"].ConfigName != "Backup" || got["b"].ReasoningEffort != "medium" || got[""].ConfigName != "" {
+		t.Fatalf("incorrect attribution: %+v", got)
+	}
+	if view.ModelBreakdown[0].TotalTokens != 360 || view.Totals.TotalTokens != 360 {
+		t.Fatal("model totals changed")
+	}
+}
+
 func TestUsagePageMatchesExistingMetrics(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewUsageRepo(db)

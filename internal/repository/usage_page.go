@@ -11,6 +11,8 @@ func (r *UsageRepo) GetUsagePage(ctx context.Context, filter UsageFilter) (*mode
 	view := &models.AnalyticsUsageViewModel{UsageRate: []models.UsageRatePoint{}, UsageRateByModel: []models.UsageRatePoint{}, ModelBreakdown: []models.ModelUsagePoint{}}
 	rates := map[usageModelKey]*models.UsageRatePoint{}
 	breakdown := map[usageModelKey]*models.ModelUsagePoint{}
+	configurations := map[[3]string]*models.ConfigurationUsagePoint{}
+	view.ConfigurationBreakdown = []models.ConfigurationUsagePoint{}
 	group := normalizedUsageGroupBy(filter.GroupBy)
 	err := r.forEachUsageAggregateEvent(ctx, filter, func(e usageAggregateEvent) {
 		t := &view.Totals
@@ -34,6 +36,24 @@ func (r *UsageRepo) GetUsagePage(ctx context.Context, filter UsageFilter) (*mode
 			view.LastUpdatedAt = &date
 		}
 		period := usageLocalPeriod(e.OccurredAt, group)
+		configKey := [3]string{e.AgentConfigID, e.Provider, e.Model}
+		c := configurations[configKey]
+		if c == nil {
+			c = &models.ConfigurationUsagePoint{ModelConfigID: e.AgentConfigID, ModelUsagePoint: models.ModelUsagePoint{Provider: e.Provider, Model: e.Model}}
+			configurations[configKey] = c
+		}
+		c.InputTokens += e.InputTokens
+		c.OutputTokens += e.OutputTokens
+		c.CacheTokens += e.CacheTokens
+		c.ReasoningOutputTokens += e.ReasoningOutputTokens
+		c.TotalTokens += e.TotalTokens
+		c.CallCount++
+		if e.CostValid {
+			if c.CostUSD == nil {
+				c.CostUSD = new(float64)
+			}
+			*c.CostUSD += e.CostUSD
+		}
 		key := usageModelKey{Provider: e.Provider, Model: e.Model}
 		m := breakdown[key]
 		if m == nil {
@@ -65,6 +85,49 @@ func (r *UsageRepo) GetUsagePage(ctx context.Context, filter UsageFilter) (*mode
 		return nil, err
 	}
 	combined := map[string]*models.UsageRatePoint{}
+	// Resolve saved configuration labels once, after the event cursor is closed.
+	configRows, err := r.db.QueryContext(ctx, `SELECT id, name, COALESCE(reasoning_effort,'') FROM agent_configs`)
+	if err != nil {
+		return nil, err
+	}
+	labels := map[string][2]string{}
+	for configRows.Next() {
+		var id, name, effort string
+		if err := configRows.Scan(&id, &name, &effort); err != nil {
+			configRows.Close()
+			return nil, err
+		}
+		labels[id] = [2]string{name, effort}
+	}
+	err = configRows.Err()
+	configRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range configurations {
+		label := labels[c.ModelConfigID]
+		c.ConfigName, c.ReasoningEffort = label[0], label[1]
+		if view.Totals.TotalTokens > 0 {
+			c.Percent = float64(c.TotalTokens) * 100 / float64(view.Totals.TotalTokens)
+		}
+		view.ConfigurationBreakdown = append(view.ConfigurationBreakdown, *c)
+	}
+	sort.Slice(view.ConfigurationBreakdown, func(i, j int) bool {
+		a, b := view.ConfigurationBreakdown[i], view.ConfigurationBreakdown[j]
+		if a.TotalTokens != b.TotalTokens {
+			return a.TotalTokens > b.TotalTokens
+		}
+		if a.ConfigName != b.ConfigName {
+			return a.ConfigName < b.ConfigName
+		}
+		if a.Provider != b.Provider {
+			return a.Provider < b.Provider
+		}
+		if a.Model != b.Model {
+			return a.Model < b.Model
+		}
+		return a.ModelConfigID < b.ModelConfigID
+	})
 	for _, key := range sortedUsageModelKeys(rates) {
 		p := rates[key]
 		view.UsageRateByModel = append(view.UsageRateByModel, *p)

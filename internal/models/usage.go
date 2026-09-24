@@ -118,6 +118,13 @@ type UsageRatePoint struct {
 	CallCount   int    `json:"call_count"`
 }
 
+type ConfigurationUsagePoint struct {
+	ModelUsagePoint
+	ModelConfigID   string `json:"model_config_id"`
+	ConfigName      string `json:"config_name"`
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
 type ModelUsagePoint struct {
 	Provider              string   `json:"provider"`
 	Model                 string   `json:"model"`
@@ -166,17 +173,18 @@ type AnalyticsUsageAccountLimitsViewModel struct {
 }
 
 type AnalyticsUsageViewModel struct {
-	AccountLimits     []AccountUsageView `json:"account_limits"`
-	Totals            UsageTotals        `json:"totals"`
-	DailyUsage        []DailyUsagePoint  `json:"daily_usage"`
-	DailyUsageByModel []DailyUsagePoint  `json:"daily_usage_by_model,omitempty"`
-	UsageRate         []UsageRatePoint   `json:"usage_rate"`
-	UsageRateByModel  []UsageRatePoint   `json:"usage_rate_by_model,omitempty"`
-	ModelBreakdown    []ModelUsagePoint  `json:"model_breakdown"`
-	Evidence          []UsageEvidenceRow `json:"evidence"`
-	EvidenceTotal     int                `json:"evidence_total"`
-	LastUpdatedAt     *time.Time         `json:"last_updated_at,omitempty"`
-	Errors            []string           `json:"errors,omitempty"`
+	AccountLimits          []AccountUsageView        `json:"account_limits"`
+	Totals                 UsageTotals               `json:"totals"`
+	DailyUsage             []DailyUsagePoint         `json:"daily_usage"`
+	DailyUsageByModel      []DailyUsagePoint         `json:"daily_usage_by_model,omitempty"`
+	UsageRate              []UsageRatePoint          `json:"usage_rate"`
+	UsageRateByModel       []UsageRatePoint          `json:"usage_rate_by_model,omitempty"`
+	ModelBreakdown         []ModelUsagePoint         `json:"model_breakdown"`
+	ConfigurationBreakdown []ConfigurationUsagePoint `json:"configuration_breakdown"`
+	Evidence               []UsageEvidenceRow        `json:"evidence"`
+	EvidenceTotal          int                       `json:"evidence_total"`
+	LastUpdatedAt          *time.Time                `json:"last_updated_at,omitempty"`
+	Errors                 []string                  `json:"errors,omitempty"`
 }
 
 type UsageEvidenceRow struct {
