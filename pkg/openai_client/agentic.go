@@ -2111,7 +2111,11 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		payload["truncation"] = "auto"
 	}
 
-	if isResponsesLiteWebsocketModel(opts.Model) {
+	// Responses Lite accepts client-executed tools through additional_tools but
+	// does not accept provider-hosted tools there. Use the standard Responses
+	// request shape whenever native web search is present so the tool remains in
+	// the top-level tools array and can actually execute.
+	if isResponsesLiteWebsocketModel(opts.Model) && !responsesToolsContainHostedTool(payload["tools"]) {
 		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
 			if useWebsocket {

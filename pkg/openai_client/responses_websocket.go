@@ -363,6 +363,25 @@ func responsesLiteTools(tools any) []any {
 	return filtered
 }
 
+func responsesToolsContainHostedTool(tools any) bool {
+	encoded, err := json.Marshal(tools)
+	if err != nil {
+		return false
+	}
+	var decoded []any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		return false
+	}
+	for _, raw := range decoded {
+		tool, _ := raw.(map[string]any)
+		switch strings.ToLower(strings.TrimSpace(stringFromAny(tool["type"]))) {
+		case "web_search", "web_search_preview", "image_generation":
+			return true
+		}
+	}
+	return false
+}
+
 func filterResponsesLiteImageDetails(value any, model string) {
 	supportsAutoDetail := isResponsesLiteWebsocketModel(model)
 	switch current := value.(type) {
