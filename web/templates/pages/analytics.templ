@@ -248,7 +248,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
 						<p class="text-center opacity-50 py-12 lg:col-span-2">Loading analytics…</p>
 					</div></div>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">@analyticsChartHeading("Token Usage", "Recorded tokens by usage date. Includes task and other project activity. Colors identify the same provider/model across charts.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Recorded token share by model.", "modelTokenBreakdownChart", "h-64")</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">@analyticsChartHeading("Token Usage", "Recorded tokens by usage date. Includes task and other project activity. Colors identify the same provider/model across charts.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Total recorded tokens per configuration. Aliases stay separate; usage without a linked configuration remains included.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Token Usage Breakdown</h4><div class="overflow-x-auto"><table class="table table-sm"><thead id="usageBreakdownHead"></thead><tbody id="usageBreakdownTable"></tbody></table></div></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">@analyticsChartHeading("Task runs over time", "Task run starts across the selected date range. Includes unfinished runs; excludes chat activity.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRunModelSelect" aria-label="Task run model" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"><option value="combined">All models combined</option></select></div></div><div class="relative h-64"><canvas id="usageRunHoursChart"></canvas></div></div></div> @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
@@ -1584,7 +1584,7 @@ templ analyticsContent(currentProject *models.Project) {
 									renderUsageEventEvidence(data.evidence || [], data.evidence_total || 0);									renderUsageSummary(totals,data);
 										renderUsageRateChart(data);
 
-								const breakdown = (data.model_breakdown || []).slice().sort(compareChartModels);
+								const breakdown = (data.configuration_breakdown || data.model_breakdown || []).slice().sort(compareChartModels);
 									const table = document.getElementById('usageBreakdownTable');
 									if (table) {
 										if (breakdown.length === 0 && (totals.call_count || 0) === 0) {
@@ -1607,7 +1607,7 @@ templ analyticsContent(currentProject *models.Project) {
 											 tokenCell(row.reasoning_output_tokens,'Reasoning tokens')+tokenCell(row.total_tokens,'Total tokens',share)+
 											 usageCell(costAvailable?formatCost(row.cost_usd):'Unavailable',costAvailable?'Recorded cost':'No recorded cost',costAvailable?'bg-primary/10':'bg-base-200/40');
 											}
-											const rows=(data.configuration_breakdown||breakdown).slice().sort(compareChartModels).map(row=>'\x3ctr data-usage-model="'+escapeHTML(usageModelKey(row))+'">'+analyticsIdentityCell(modelConfigLabel(row),[modelDetailLabel(row)+(row.config_name?'':' · Configuration unavailable')])+usageCells(row,row.cost_usd!=null)+'\x3c/tr>');
+											const rows=breakdown.map(row=>'\x3ctr data-usage-model="'+escapeHTML(usageModelKey(row))+'">'+analyticsIdentityCell(modelConfigLabel(row),[modelDetailLabel(row)+(row.config_name?'':' · Configuration unavailable')])+usageCells(row,row.cost_usd!=null)+'\x3c/tr>');
 											rows.push('\x3ctr class="font-semibold border-t border-base-300">'+analyticsIdentityCell('Total',['All models'])+usageCells(totals,!!totals.cost_available&&totals.cost_usd!=null)+'\x3c/tr>');
 											table.innerHTML=rows.join('');
 										}
@@ -1617,7 +1617,7 @@ templ analyticsContent(currentProject *models.Project) {
 									charts.modelTokenBreakdown = createAnalyticsChart(modelCtx.getContext('2d'), {
 										type: 'bar',
 											data: {
-												labels: breakdown.map(row => `${row.provider}/${row.model}`),
+												labels: breakdown.map(modelConfigLabel),
 												datasets: [{
 													data: breakdown.map(row => row.total_tokens || 0),
 													label: 'Recorded tokens',
@@ -1626,7 +1626,10 @@ templ analyticsContent(currentProject *models.Project) {
 											},
 												options: {
 
-														plugins: { legend: { display: false } }
+														plugins: { legend: { display: false }, tooltip: { callbacks: {
+															title:items=>items.length?modelConfigLabel(breakdown[items[0].dataIndex])+' · '+modelDetailLabel(breakdown[items[0].dataIndex]):'',
+															label:item=>formatNumber(item.raw)+' tokens'
+														} } },scales:{y:{beginAtZero:true},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}
 												}
 											});
 											}
