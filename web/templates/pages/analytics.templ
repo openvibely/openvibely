@@ -1591,7 +1591,7 @@ templ analyticsContent(currentProject *models.Project) {
 							  const color=key==='combined'?'rgb(147, 51, 234)':usageSeriesColors[keys.indexOf(key)%usageSeriesColors.length];
 							  return {label:key==='combined'?'All models':usageModelLabel(key),data:periods.map(period=>values.get(period)||0),borderColor:color,backgroundColor:color,borderWidth:2,pointRadius:3,tension:0.3,cubicInterpolationMode:'monotone',fill:false};
 							 });
-							 charts.usageRunHours=createAnalyticsChart(canvas.getContext('2d'),{type:'line',data:{labels:periods,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom'}},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
+							 charts.usageRunHours=createAnalyticsChart(canvas.getContext('2d'),{type:'line',plugins: [analyticsActivePointOnTop],data:{labels:periods,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom'},tooltip:analyticsLineTooltipOptions()},scales:{y:{beginAtZero:true,ticks:{precision:0}}}}});
 							}
 
 							async function loadTaskRunActivity() {

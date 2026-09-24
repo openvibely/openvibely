@@ -280,6 +280,17 @@ window.addEventListener('load',async function(){
   var runSelect=document.getElementById('usageRunModelSelect'),runBars=configs.usageRunModelsChart,tokenBreakdown=configs.modelTokenBreakdownChart,requestCount=calls;
   runSelect.value='all';runSelect.dispatchEvent(new Event('change'));
   assert(configs.usageRunHoursChart.data.datasets.length===2,'each model should have its own line');
+  var trend=configs.usageRunHoursChart,hoverPlugin=trend.plugins.find(p=>p.id==='analyticsActivePointOnTop');
+  assert(hoverPlugin,'task run trend must use the shared hover plugin');
+  var hoverChart={getElementsAtEventForMode:()=>[{datasetIndex:1,index:0}]};
+  hoverPlugin.beforeEvent(hoverChart,{event:{type:'mousemove'},inChartArea:true});
+  var tooltipRows=[{datasetIndex:0,chart:hoverChart},{datasetIndex:1,chart:hoverChart}];
+  tooltipRows.sort(trend.options.plugins.tooltip.itemSort);
+  assert(tooltipRows[0].datasetIndex===1,'hovered model should appear first in the tooltip');
+  hoverChart.getElementsAtEventForMode=()=>[{datasetIndex:0,index:0}];
+  hoverPlugin.beforeEvent(hoverChart,{event:{type:'mousemove'},inChartArea:true});
+  tooltipRows.sort(trend.options.plugins.tooltip.itemSort);
+  assert(tooltipRows[0].datasetIndex===0,'tooltip ordering must follow the hovered model');
   var modelKey=JSON.stringify(['unknown','model']);
   runSelect.value=modelKey;runSelect.dispatchEvent(new Event('change'));
   assert(configs.usageRunHoursChart.data.datasets.length===1&&configs.usageRunHoursChart.data.datasets[0].data.join('|')==='3|3','selected model counts incorrect');
@@ -368,8 +379,8 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 			t.Fatalf("Analytics line-chart hover marker should paint after the tooltip; missing %q", expected)
 		}
 	}
-	if got := strings.Count(content, `plugins: [analyticsActivePointOnTop]`); got != 3 {
-		t.Fatalf("expected all 3 Analytics line charts to use the hover layering plugin, got %d", got)
+	if got := strings.Count(content, `plugins: [analyticsActivePointOnTop]`); got != 4 {
+		t.Fatalf("expected all 4 Analytics line charts to use the hover layering plugin, got %d", got)
 	}
 	for canvasID, height := range map[string]string{"usageRateChart": "h-64", "successFailureChart": "h-72", "skillUsageTrendChart": "h-64"} {
 		expected := `<div class="relative ` + height + `"><canvas id="` + canvasID + `"` // templ generation compacts adjacent markup.
