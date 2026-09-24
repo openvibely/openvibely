@@ -147,6 +147,7 @@ type ModelCategoryPerformance struct {
 // Each row contains whole-task history for one configuration, or the separate
 // mixed-configuration group. Outcome and usage metrics disclose their coverage.
 type ModelPerformance struct {
+	EffortTrend         []ModelEffortTrend  `json:"effort_trend"`
 	OutcomeTrend        []ModelOutcomeTrend `json:"outcome_trend"`
 	ModelConfigID       string              `json:"model_config_id"`
 	ConfigName          string              `json:"config_name"`
@@ -169,6 +170,16 @@ type ModelPerformance struct {
 	TokenCoveredTasks   int                 `json:"token_covered_tasks"`
 	KnownCostUSD        *float64            `json:"known_cost_usd,omitempty"`
 	CostCoveredTasks    int                 `json:"cost_covered_tasks"`
+}
+
+type ModelEffortTrend struct {
+	Period           string `json:"period"`
+	Tasks            int    `json:"tasks"`
+	FollowUps        int    `json:"follow_ups"`
+	Tokens           int64  `json:"tokens"`
+	TokenSamples     int    `json:"token_samples"`
+	MedianDurationMs int64  `json:"median_duration_ms"`
+	DurationSamples  int    `json:"duration_samples"`
 }
 
 // ModelOutcomeTrend groups current task outcomes by latest run finish date.

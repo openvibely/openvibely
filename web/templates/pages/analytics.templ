@@ -11,6 +11,13 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 	}
 }
 
+templ analyticsModelTrendCard(title, description, key string) {
+ <div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
+  <div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">{ title }</h4><select id={ key + "Select" } aria-label={ title + " model" } class="select select-bordered select-xs"><option value="all">Each model</option></select></div>
+  <p class="text-sm opacity-60">{ description }</p><div class="relative h-80"><canvas id={ key + "Chart" }></canvas></div>
+ </div></div>
+}
+
 templ analyticsSectionHeading(label, help string) {
 	<div class="flex items-center gap-2">
 		<h3 class="text-xl font-bold">{ label }</h3>
@@ -165,12 +172,20 @@ templ analyticsContent(currentProject *models.Project) {
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+						@analyticsModelTrendCard("Task time over time", "Median combined run time per task, grouped by latest task activity in this range. Waiting and mixed configurations excluded.", "modelTaskTimeTrend")
 						@analyticsChartCard("Task time", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80")
+					</div>
+					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+						@analyticsModelTrendCard("Individual run time over time", "Average individual run time, grouped by run start date. Includes ended failed and cancelled runs.", "modelRunTimeTrend")
 						@analyticsChartCard("Individual run time", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsChartCard("Follow-ups per task", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
+						@analyticsModelTrendCard("Tokens per task over time", "Average recorded tokens per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelTokenTrend")
 						@analyticsChartCard("Tokens per task", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
+					</div>
+					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+						@analyticsModelTrendCard("Follow-ups per task over time", "Average follow-up runs per task, grouped by latest task activity in this range. Mixed configurations excluded.", "modelFollowupTrend")
+						@analyticsChartCard("Follow-ups per task", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
@@ -395,7 +410,7 @@ templ analyticsContent(currentProject *models.Project) {
 									overview: { projectOutcomeTrend: 'projectOutcomeTrendChart' },
 							outcomes: { cycleDistribution: 'cycleDistributionChart', followupDistribution: 'followupDistributionChart', successFailure: 'successFailureChart', hourlyTrends: 'hourlyTrendsChart', avgTimeTask: 'avgTimeTaskChart', failedPatterns: 'failedPatternsChart' },
 							agents: { agentComparison: 'agentComparisonChart', agentRunTime: 'agentRunTimeChart', agentFollowups: 'agentFollowupsChart' },
-							models: { modelReliability: 'modelReliabilityChart', modelTime: 'modelTimeChart', modelRunTime: 'modelRunTimeChart', modelTokens: 'modelTokensChart', modelOutcomes: 'modelOutcomesChart', modelFollowups: 'modelFollowupsChart' },
+							models: { modelReliability: 'modelReliabilityChart', modelTaskTimeTrend:'modelTaskTimeTrendChart',modelRunTimeTrend:'modelRunTimeTrendChart',modelTokenTrend:'modelTokenTrendChart',modelFollowupTrend:'modelFollowupTrendChart', modelTime: 'modelTimeChart', modelRunTime: 'modelRunTimeChart', modelTokens: 'modelTokensChart', modelOutcomes: 'modelOutcomesChart', modelFollowups: 'modelFollowupsChart' },
 							automations: { automationComparison: 'automationComparisonChart', automationFunnel: 'automationFunnelChart', automationDuration: 'automationDurationChart', automationFailure: 'automationFailureChart', automationBottleneck: 'automationBottleneckChart' },
 									learning: { skillUsageTrend: 'skillUsageTrendChart', skillTop: 'skillTopChart', skillFollow: 'skillFollowChart', skillAgent: 'skillAgentChart', skillOutcome: 'skillOutcomeChart', skillEffectiveness: 'skillEffectivenessChart' },
 									usage: { usageRunHours: 'usageRunHoursChart', usageRunModels: 'usageRunModelsChart', usageRate: 'usageRateChart', modelTokenBreakdown: 'modelTokenBreakdownChart' }
@@ -840,11 +855,42 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 								if(!latestRunActivity)renderChartState('modelRunTime','modelRunTimeChart',[],runActivityFailed?'Run activity unavailable':'Loading analytics…');
 								else bar('modelRunTime','modelRunTimeChart',latestRunActivity.models.filter(r=>r.duration_samples>0),r=>Number(r.average_run_ms||0),formatDuration,r=>r.duration_samples,'Average time per run');
+								renderModelEffortTrends(rows);
 								if(runTimeOnly&&!latestDashboard)return;
 								bar('modelTime','modelTimeChart',models.filter(r=>r.duration_sample_size>0),r=>Number(r.median_duration_ms||0),formatDuration,r=>r.duration_sample_size,'Median combined run time per task');
 								bar('modelTokens','modelTokensChart',models.filter(r=>r.token_covered_tasks>0),r=>Number(r.total_tokens||0)/r.token_covered_tasks,compact,r=>r.token_covered_tasks,'Recorded tokens / task');
 								renderModelOutcomeChart(rows);
 								bar('modelFollowups','modelFollowupsChart',models.filter(r=>r.tasks_used>0),r=>Number(r.average_follow_ups||0),n=>Number(n).toFixed(1),r=>r.tasks_used,'Follow-up runs / task');
+							}
+							function renderModelEffortTrends(rows,onlyKey){
+							 const specs=[
+							  {key:'modelTaskTimeTrend',sample:p=>p.duration_samples,value:p=>p.median_duration_ms,format:formatDuration},
+							  {key:'modelRunTimeTrend',sample:p=>p.duration_samples,value:p=>p.average_run_ms,format:formatDuration,run:true},
+							  {key:'modelTokenTrend',sample:p=>p.token_samples,value:p=>p.tokens/p.token_samples,format:n=>new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1}).format(n)},
+							  {key:'modelFollowupTrend',sample:p=>p.tasks,value:p=>p.follow_ups/p.tasks,format:n=>Number(n).toFixed(1)}
+							 ];
+							 const slots=modelSlots(rows);
+							 for(const spec of specs){
+							  if(onlyKey&&onlyKey!==spec.key)continue;
+							  if(spec.run&&!latestRunActivity){renderChartState(spec.key,spec.key+'Chart',[],runActivityFailed?'Run activity unavailable':'Loading analytics…');continue;}
+							  if(!spec.run&&!latestDashboard)continue;
+							  const source=spec.run?latestRunActivity.models:rows.filter(r=>!r.mixed_models);
+							  const select=document.getElementById(spec.key+'Select'),previous=select.value;
+							  select.innerHTML='\x3coption value="all">Each model\x3c/option>'+slots.map(r=>'\x3coption value="'+escapeHTML(modelSlotKey(r))+'">'+escapeHTML(modelConfigLabel(r)+' · '+modelDetailLabel(r))+'\x3c/option>').join('');
+							  select.value=slots.some(r=>modelSlotKey(r)===previous)?previous:'all';
+							  select.disabled=!slots.length;
+							  const series=new Map(source.map(r=>[modelSlotKey(r),r[spec.run?'trend':'effort_trend']||[]]));
+							  const periods=Array.from(new Set(Array.from(series.values()).flat().map(p=>p.period))).sort();
+							  const chosen=slots.filter(r=>select.value==='all'||modelSlotKey(r)===select.value);
+							  const points=chosen.map(r=>new Map((series.get(modelSlotKey(r))||[]).map(p=>[p.period,p])));
+							  const hasEvidence=points.some(m=>Array.from(m.values()).some(p=>spec.sample(p)>0));
+							  const canvas=renderChartState(spec.key,spec.key+'Chart',hasEvidence?periods:[],'No recorded samples in this period');if(!canvas)continue;
+							  const datasets=chosen.map((r,i)=>({label:modelConfigLabel(r),borderColor:modelChartColor(r),backgroundColor:modelChartColor(r),spanGaps:false,data:periods.map(period=>{const p=points[i].get(period);return p&&spec.sample(p)>0?spec.value(p):null;})}));
+							  charts[spec.key]=createAnalyticsChart(canvas.getContext('2d'),{type:'line',data:{labels:periods,datasets},options:{scales:{y:{beginAtZero:true,ticks:{callback:spec.format}}},plugins:{tooltip:{callbacks:{label:item=>{const p=points[item.datasetIndex].get(periods[item.dataIndex]);return item.dataset.label+': '+spec.format(item.raw)+' · n='+spec.sample(p);}}}}}});
+							 }
+							}
+							for(const key of ['modelTaskTimeTrend','modelRunTimeTrend','modelTokenTrend','modelFollowupTrend']){
+							 document.getElementById(key+'Select').addEventListener('change',function(){renderModelEffortTrends((latestDashboard||{}).models||[],key);},{signal:eventSignal});
 							}
 							function renderModelOutcomeChart(rows) {
 								const metric=document.getElementById('modelOutcomeMetric').value;
@@ -1669,7 +1715,7 @@ templ analyticsContent(currentProject *models.Project) {
 									if(e.name==='AbortError')return;
 									const targets=selectedView==='models'?[['modelReliability','modelReliabilityChart']]:[['usageRunHours','usageRunHoursChart'],['usageRunModels','usageRunModelsChart']];
 									runActivityFailed=true;
-									if(selectedView==='models')targets.push(['modelRunTime','modelRunTimeChart']);
+									if(selectedView==='models')targets.push(['modelRunTime','modelRunTimeChart'],['modelRunTimeTrend','modelRunTimeTrendChart']);
 									targets.forEach(([key,id])=>renderChartState(key,id,[],'Run activity unavailable'));
 								}
 							}
