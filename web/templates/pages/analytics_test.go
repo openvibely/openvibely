@@ -11,6 +11,21 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAnalyticsContent_CompactModelChartTitles(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	for _, title := range []string{"Task time", "Individual run time", "Follow-ups per task", "Tokens per task", "Task outcomes", "Run reliability"} {
+		if !strings.Contains(rendered.String(), ">"+title+"</h4>") {
+			t.Errorf("missing compact chart title %q", title)
+		}
+		if strings.Contains(rendered.String(), ">"+title+" by model</h4>") {
+			t.Errorf("redundant model suffix on chart %q", title)
+		}
+	}
+}
+
 func TestBrowserFunctional_AnalyticsContent_ProjectSwapKeepsSelectedTabInChrome(t *testing.T) {
 	htmx, err := os.ReadFile("../components/testdata/htmx-2.0.4.min.js")
 	if err != nil {

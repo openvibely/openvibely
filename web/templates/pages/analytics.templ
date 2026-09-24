@@ -154,20 +154,20 @@ templ analyticsContent(currentProject *models.Project) {
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsChartCard("Task time by model", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80")
-						@analyticsChartCard("Individual run time by model", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80")
+						@analyticsChartCard("Task time", "Median of each task’s combined run time in this period. Excludes waiting, unfinished runs, and tasks using multiple models.", "modelTimeChart", "h-80")
+						@analyticsChartCard("Individual run time", "Average time for one model run on a task. A task can have several runs, including retries and follow-ups. Includes failed and cancelled runs with recorded end times.", "modelRunTimeChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-						@analyticsChartCard("Follow-ups per task by model", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
-						@analyticsChartCard("Tokens per task by model", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
+						@analyticsChartCard("Follow-ups per task", "Average follow-up runs in the selected period. They can reflect corrections, clarification, or changed goals. Mixed models excluded.", "modelFollowupsChart", "h-80")
+						@analyticsChartCard("Tokens per task", "Average recorded tokens, including unsuccessful work. Lower means less usage. Mixed models excluded.", "modelTokensChart", "h-80")
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
-							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Task outcomes by model</h4><select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
+							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Task outcomes</h4><select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
 							<p class="text-sm opacity-60">Current outcomes for tasks with activity in the selected period. Mixed models excluded; missing evidence is unavailable.</p>
 							<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelOutcomesChart"></canvas></div></div>
 						</div></div>
-					<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><h4 class="card-title">Run reliability by model</h4><p class="text-sm opacity-60">Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.</p><div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelReliabilityChart"></canvas></div></div></div></div>
+					<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><h4 class="card-title">Run reliability</h4><p class="text-sm opacity-60">Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.</p><div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelReliabilityChart"></canvas></div></div></div></div>
 					</div>
 				</section>
 
