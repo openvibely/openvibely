@@ -96,6 +96,40 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		}
 	}
 
+	anthropicOrder := []string{
+		"claude-sonnet-5",
+		"claude-sonnet-4-6",
+		"claude-sonnet-4-5-20250929",
+		"claude-opus-5-5",
+		"claude-opus-5",
+		"claude-opus-4-8",
+		"claude-opus-4-7",
+		"claude-opus-4-6",
+		"claude-haiku-4-5-20251001",
+		"claude-fable-5-1",
+		"claude-fable-5",
+		"claude-mythos-5-1",
+		"claude-mythos-5",
+	}
+	assertModelOrder := func(name, markerFormat string) {
+		t.Helper()
+		last := -1
+		for _, model := range anthropicOrder {
+			marker := fmt.Sprintf(markerFormat, model)
+			position := strings.Index(out, marker)
+			if position < 0 {
+				t.Errorf("%s missing model %s", name, model)
+				continue
+			}
+			if position <= last {
+				t.Errorf("%s model %s is out of order", name, model)
+			}
+			last = position
+		}
+	}
+	assertModelOrder("HTML selector", `value="%s"`)
+	assertModelOrder("JavaScript catalog", `{ value: '%s'`)
+
 	if strings.Contains(out, "defaultMaxTokens") {
 		t.Error("expected browser catalog not to expose internal output-token defaults")
 	}
