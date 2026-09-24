@@ -825,6 +825,12 @@ templ analyticsContent(currentProject *models.Project) {
 							 return new Chart(context,config);
 							}
 							function modelSlotKey(row){return row.model_config_id||JSON.stringify([row.provider,row.model,row.reasoning_effort,row.config_name]);}
+							function drawModelBarValue(chart,bar,index,label,missing){
+								if(missing){
+									const x=chart.scales.x.getPixelForValue(index),y=chart.scales.y.getPixelForValue(0);
+									chart.ctx.fillRect(x-8,y-2,16,2);
+								}else chart.ctx.fillText(label,bar.x,bar.y-6);
+							}
 							function modelSlots(rows){
 							 const slots=new Map();
 							 for(const row of ((latestRunActivity||{}).models||[]))slots.set(modelSlotKey(row),row);
@@ -855,7 +861,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type:'bar',data:{labels:supported.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:supported.map((_,i)=>valueAt(i)),backgroundColor:supported.map(modelChartColor)}]},
 										plugins:[{id:'modelValues',afterDatasetsDraw:function(chart){
 											const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
-											chart.getDatasetMeta(0).data.forEach((bar,i)=>ctx.fillText(textAt(i),bar.x,(available[i]?bar.y:chart.scales.y.getPixelForValue(0))-6));ctx.restore();
+											chart.getDatasetMeta(0).data.forEach((bar,i)=>drawModelBarValue(chart,bar,i,textAt(i),!available[i]));ctx.restore();
 										}}],
 										options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(supported[items[0].dataIndex])+' · '+modelDetailLabel(supported[items[0].dataIndex]):'',label:item=>available[item.dataIndex]?textAt(item.dataIndex)+' · n='+sample(available[item.dataIndex]):'No data'}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,grace:'15%',title:{display:true,text:axis},ticks:{callback:format}}}}
 									});
@@ -922,7 +928,7 @@ templ analyticsContent(currentProject *models.Project) {
 									type:'bar',data:{labels:models.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:values,backgroundColor:models.map(modelChartColor)}]},
 									plugins:[{id:'modelOutcomeValues',afterDatasetsDraw:function(chart){
 										const ctx=chart.ctx;ctx.save();ctx.fillStyle='#9ca3af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
-										chart.getDatasetMeta(0).data.forEach((bar,i)=>ctx.fillText(labels[i],bar.x,(values[i]===null?chart.scales.y.getPixelForValue(0):bar.y)-6));ctx.restore();
+										chart.getDatasetMeta(0).data.forEach((bar,i)=>drawModelBarValue(chart,bar,i,labels[i],values[i]===null));ctx.restore();
 									}}],
 									options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?modelConfigLabel(models[items[0].dataIndex])+' · '+modelDetailLabel(models[items[0].dataIndex]):'',label:function(item){const m=models[item.dataIndex][metric]||{};return Number(m.denominator)>0?labels[item.dataIndex]+' · '+m.numerator+'/'+m.denominator+' tasks':'Unavailable';}}}},scales:{x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}},y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}}}
 								});
