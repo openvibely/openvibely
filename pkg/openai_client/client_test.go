@@ -1106,10 +1106,10 @@ func TestSend_ResponsesLitePartialOutputFallsBackFromTurnState(t *testing.T) {
 	}
 	// The provider response is rebuilt from retry state, while the live stream
 	// intentionally preserves text already emitted by the failed attempt.
-	if output.String() != "partialrecovered" {
-		t.Fatalf("streamed output = %q, want partialrecovered", output.String())
+	if output.String() != strings.Repeat("partial", httpretry.StreamTurnMaxRetries+1)+"recovered" {
+		t.Fatalf("unexpected streamed output = %q", output.String())
 	}
-	if websocketAttempts.Load() != 1 || httpRequests.Load() != 1 {
+	if websocketAttempts.Load() != int32(httpretry.StreamTurnMaxRetries+1) || httpRequests.Load() != 1 {
 		t.Fatalf("attempts websocket=%d HTTP=%d", websocketAttempts.Load(), httpRequests.Load())
 	}
 }

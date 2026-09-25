@@ -109,7 +109,24 @@ func (s *ResponsesTransportState) resetConnectionLocked() {
 }
 
 func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
-	return err != nil && ctx.Err() == nil && errors.Is(err, errResponsesWebsocketTransport)
+	// An explicitly unsupported upgrade can fall back immediately. Transient
+	// connection and stream failures must exhaust WebSocket retries first.
+	var responseErr *httpretry.ResponseError
+	return err != nil && ctx.Err() == nil && errors.Is(err, errResponsesWebsocketTransport) &&
+		errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusUpgradeRequired
+}
+
+// doResponsesStreamTurn gives WebSocket its full retry budget before switching
+// the session to HTTP, which then gets its own retry budget (as in Codex).
+func doResponsesStreamTurn[T any](ctx context.Context, c *Client, model string, policy httpretry.StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
+	result, err := httpretry.DoStreamTurn(ctx, policy, fn)
+	state := c.responsesTransportState
+	if err == nil || ctx.Err() != nil || !isResponsesLiteWebsocketModel(model) || state.websocketDisabled.Load() || state.hasAstraSteeringAmbiguous() ||
+		!(isRetryableResponsesTransportError(err) || httpretry.IsRetryableError(err)) {
+		return result, err
+	}
+	state.disableWebsocket()
+	return httpretry.DoStreamTurn(ctx, policy, fn)
 }
 
 const (
