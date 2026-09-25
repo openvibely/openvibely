@@ -1938,17 +1938,30 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 						if (!window._chatInputRequestClickBound) {
 							window._chatInputRequestClickBound = true;
-								document.body.addEventListener('click', function(event) {
-									var navigationButton = event.target && event.target.closest ? event.target.closest('[data-chat-input-nav]') : null;
-									if (navigationButton) {
-										event.preventDefault();
-										navigateChatInputRequest(navigationButton);
-										return;
-									}
-									var button = event.target && event.target.closest ? event.target.closest('[data-chat-input-option]') : null;
-									if (!button) return;
+							document.body.addEventListener('pointerdown', function(event) {
+								var control = event.target && event.target.closest ? event.target.closest('[data-chat-input-option], [data-chat-input-nav="recommended"]') : null;
+								if (!control || control.getAttribute('aria-disabled') === 'true') return;
+								control.classList.add('chat-input-option-pressed');
+							});
+							function clearChatInputPressedControls() {
+								document.querySelectorAll('.chat-input-option-pressed').forEach(function(control) {
+									control.classList.remove('chat-input-option-pressed');
+								});
+							}
+							['pointerup', 'pointercancel', 'pointerleave', 'blur'].forEach(function(type) {
+								document.body.addEventListener(type, clearChatInputPressedControls, true);
+							});
+							document.body.addEventListener('click', function(event) {
+								var navigationButton = event.target && event.target.closest ? event.target.closest('[data-chat-input-nav]') : null;
+								if (navigationButton) {
 									event.preventDefault();
-									selectChatInputOption(button);
+									navigateChatInputRequest(navigationButton);
+									return;
+								}
+								var button = event.target && event.target.closest ? event.target.closest('[data-chat-input-option]') : null;
+								if (!button) return;
+								event.preventDefault();
+								selectChatInputOption(button);
 							});
 							document.body.addEventListener('keydown', function(event) {
 								var control = event.target && event.target.closest ? event.target.closest('[role="button"][data-chat-input-option], [role="button"][data-chat-input-nav]') : null;
