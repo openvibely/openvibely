@@ -3396,12 +3396,10 @@ func TestCollectGitHubBranchChangesLargeFixtureUsesBatchedModeLookup(t *testing.
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
 
-	started := time.Now()
 	changes, err := collectGitHubBranchChangesWithGit(ctx, repoDir, "main", runGit)
 	if err != nil {
 		t.Fatalf("collectGitHubBranchChangesWithGit returned error: %v", err)
 	}
-	t.Logf("collected %d changes with %d git subprocesses and %d mode lookup subprocesses in %s", len(changes), gitCalls, modeLookupCalls, time.Since(started))
 	if len(changes) != 2000 {
 		t.Fatalf("expected 2000 modified/untracked file changes, got %d", len(changes))
 	}

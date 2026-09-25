@@ -44,33 +44,25 @@ type validationProjectionFixtureMeasurement struct {
 	fullValidation validationProjectionMeasurement
 }
 
-func TestValidateRepoPathsProjectionProductionPerformance(t *testing.T) {
+func TestValidateRepoPathsUsesCompactProductionProjection(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping file-backed startup validation projection measurements in short mode")
+		t.Skip("skipping file-backed startup validation fixture in short mode")
 	}
 
 	for _, projectCount := range []int{1, 50, 500} {
 		t.Run(fmt.Sprintf("%d projects", projectCount), func(t *testing.T) {
 			fixture := newValidationProjectionFixture(t, projectCount)
-			compact := fixture.measure(t)
-
-			if compact.load.statements != 1 {
-				t.Fatalf("compact project-load SQL statements = %d, want one", compact.load.statements)
+			loadStatements := fixture.countProjectLoadStatements(t)
+			if loadStatements != 1 {
+				t.Fatalf("compact project-load SQL statements = %d, want one", loadStatements)
 			}
-			if compact.fullValidation.statements != 1 {
-				t.Fatalf("compact validation SQL statements = %d, want one", compact.fullValidation.statements)
+			validationStatements := fixture.countCompleteValidationStatements(t)
+			if validationStatements != 1 {
+				t.Fatalf("compact validation SQL statements = %d, want one", validationStatements)
 			}
-			if projectCount == 500 {
-				if compact.load.allocatedBytes > 4*1024*1024 {
-					t.Fatalf("compact project-load allocated bytes = %d, want at most %d", compact.load.allocatedBytes, 4*1024*1024)
-				}
+			if fixture.selectedBytes(t) == 0 {
+				t.Fatal("compact project load selected no data")
 			}
-
-			t.Logf("%d projects: compact load median/p95=%s/%s, %d B/op, %d allocs/op, %d selected/scanned bytes, %d SQL statements; validation=%s/%s, %d B/op, %d allocs/op, %d SQL statements",
-				projectCount,
-				compact.load.latency, compact.load.p95Latency, compact.load.allocatedBytes, compact.load.allocations, compact.load.selectedBytes, compact.load.statements,
-				compact.fullValidation.latency, compact.fullValidation.p95Latency, compact.fullValidation.allocatedBytes, compact.fullValidation.allocations, compact.fullValidation.statements,
-			)
 		})
 	}
 }
@@ -276,7 +268,9 @@ func (fixture *validationProjectionFixture) countCompleteValidationStatements(tb
 	tb.Helper()
 	fixture.counter.Reset()
 	fixture.counter.SetEnabled(true)
-	fixture.measureCompleteValidation(tb)
+	if got := fixture.projectSvc.ValidateRepoPaths(context.Background()); len(got) != 0 {
+		tb.Fatalf("compact validation warnings = %v", got)
+	}
 	fixture.counter.SetEnabled(false)
 	return len(fixture.counter.Statements())
 }

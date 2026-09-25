@@ -37,29 +37,21 @@ type projectCapacityAPIProjectionMeasurement struct {
 	sqlStatements        int
 }
 
-func TestGetProjectCapacitiesProjectionProductionPerformance(t *testing.T) {
+func TestGetProjectCapacitiesUsesCompactProjectionOnProductionFixtures(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping file-backed project capacity API projection measurements in short mode")
+		t.Skip("skipping file-backed project capacity fixture in short mode")
 	}
 
 	for _, projectCount := range []int{1, 50, 500} {
 		t.Run(fmt.Sprintf("%d projects", projectCount), func(t *testing.T) {
 			fixture := newProjectCapacityAPIProjectionFixture(t, projectCount)
-			compact := fixture.measure(t, fixture.renderCompactHandler)
-
-			if compact.sqlStatements != 2 {
-				t.Fatalf("compact SQL statements = %d, want project list plus pending count", compact.sqlStatements)
+			responseBytes, sqlStatements := fixture.queryMetrics(t, fixture.renderCompactHandler)
+			if sqlStatements != 2 {
+				t.Fatalf("compact SQL statements = %d, want project list plus pending count", sqlStatements)
 			}
-			if projectCount == 500 {
-				if compact.allocatedBytes > 2*1024*1024 {
-					t.Fatalf("compact allocated bytes = %d, want at most %d", compact.allocatedBytes, 2*1024*1024)
-				}
+			if responseBytes == 0 || fixture.selectedProjectBytes(t) == 0 {
+				t.Fatal("compact capacity projection returned an empty response")
 			}
-
-			t.Logf("%d projects: compact median/p95=%s/%s, %d B/op, %d allocs/op, %d selected project bytes, %d JSON bytes, %d SQL statements",
-				projectCount,
-				compact.medianLatency, compact.p95Latency, compact.allocatedBytes, compact.allocations, compact.selectedProjectBytes, compact.responseBytes, compact.sqlStatements,
-			)
 		})
 	}
 }

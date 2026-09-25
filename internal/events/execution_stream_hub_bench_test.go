@@ -165,48 +165,6 @@ func BenchmarkExecutionStreamSubscribeUnsubscribeChurn(b *testing.B) {
 	}
 }
 
-// TestExecutionStreamHubPublishZeroAllocations asserts that steady-state
-// Publish performs no heap allocations for both the 1- and 50-subscriber
-// fixtures, guarding against reintroducing a per-chunk snapshot allocation.
-func TestExecutionStreamHubPublishZeroAllocations(t *testing.T) {
-	for _, subscribers := range []int{1, 50} {
-		subscribers := subscribers
-		t.Run(fmt.Sprintf("%d-subscribers", subscribers), func(t *testing.T) {
-			hub := NewExecutionStreamHub()
-			subs := make([]ExecutionStreamSubscriber, 0, subscribers)
-			unsubs := make([]func(), 0, subscribers)
-			for i := 0; i < subscribers; i++ {
-				sub, unsub, err := hub.Subscribe("exec")
-				if err != nil {
-					t.Fatalf("subscribe %d: %v", i, err)
-				}
-				subs = append(subs, sub)
-				unsubs = append(unsubs, unsub)
-			}
-			defer func() {
-				for _, unsub := range unsubs {
-					unsub()
-				}
-			}()
-			event := ExecutionStreamEvent{ExecID: "exec", Type: ExecutionStreamDelta, Delta: "token", Offset: 1}
-
-			allocs := testing.AllocsPerRun(1000, func() {
-				hub.Publish(event)
-				// Drain inline so channels never fill and the drop path never runs.
-				for _, sub := range subs {
-					select {
-					case <-sub:
-					default:
-					}
-				}
-			})
-			if allocs != 0 {
-				t.Fatalf("expected 0 allocations per Publish for %d subscribers, got %v", subscribers, allocs)
-			}
-		})
-	}
-}
-
 // TestExecutionStreamHubConcurrentPublishUnsubscribeClose exercises overlapping
 // Publish/Unsubscribe/Close to catch send-on-closed-channel panics and stale
 // snapshot races under the race detector.

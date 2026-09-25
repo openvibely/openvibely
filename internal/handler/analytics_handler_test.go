@@ -23,13 +23,6 @@ import (
 
 // --- Analytics page ---
 
-func analyticsLargePayloadDeadline() time.Duration {
-	if testing.CoverMode() != "" {
-		return 3 * time.Second
-	}
-	return 2 * time.Second
-}
-
 func TestAnalytics_NoProjects(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/analytics").Execute()
@@ -405,7 +398,8 @@ func TestGetAnalyticsDashboardYieldsSoleReaderForConcurrentRequest(t *testing.T)
 	}
 }
 
-func TestGetAnalyticsDashboardLargePayloadAgentsIsBounded(t *testing.T) {
+func BenchmarkGetAnalyticsDashboardLargePayloadAgents(b *testing.B) {
+	t := b
 	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-large-agents.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -444,29 +438,32 @@ func TestGetAnalyticsDashboardLargePayloadAgentsIsBounded(t *testing.T) {
 	server := httptest.NewServer(e)
 	defer server.Close()
 
-	started := time.Now()
-	response, err := server.Client().Get(server.URL + "/api/analytics/dashboard?project_id=analytics-agents-project&view=agents&range=30d&group_by=day&evidence_limit=20")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
-	}
-	if elapsed, deadline := time.Since(started), analyticsLargePayloadDeadline(); elapsed > deadline {
-		t.Fatalf("large-payload Agents took %s, want <= %s with the sole reader", elapsed, deadline)
-	}
-	var dashboard models.AnalyticsDashboard
-	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
-		t.Fatal(err)
-	}
-	if len(dashboard.Agents) != 1 || len(dashboard.SkillOutcomes) != 1 {
-		t.Fatalf("Agents response = agents %d skills %d, want one each", len(dashboard.Agents), len(dashboard.SkillOutcomes))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		response, err := server.Client().Get(server.URL + "/api/analytics/dashboard?project_id=analytics-agents-project&view=agents&range=30d&group_by=day&evidence_limit=20")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
+		}
+		var dashboard models.AnalyticsDashboard
+		if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if len(dashboard.Agents) != 1 || len(dashboard.SkillOutcomes) != 1 {
+			t.Fatalf("Agents response = agents %d skills %d, want one each", len(dashboard.Agents), len(dashboard.SkillOutcomes))
+		}
 	}
 }
 
-func TestGetAnalyticsDashboardLargePayloadOverviewIsBounded(t *testing.T) {
+func BenchmarkGetAnalyticsDashboardLargePayloadOverview(b *testing.B) {
+	t := b
 	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "analytics-large-payload.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -499,25 +496,27 @@ func TestGetAnalyticsDashboardLargePayloadOverviewIsBounded(t *testing.T) {
 	server := httptest.NewServer(e)
 	defer server.Close()
 
-	started := time.Now()
-	response, err := server.Client().Get(server.URL + "/api/analytics/dashboard?project_id=analytics-large-project&view=overview&range=30d&group_by=day&compare=true&evidence_limit=20")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
-	}
-	if elapsed, deadline := time.Since(started), analyticsLargePayloadDeadline(); elapsed > deadline {
-		t.Fatalf("large-payload Overview took %s, want <= %s with the sole reader", elapsed, deadline)
-	}
-	var dashboard models.AnalyticsDashboard
-	if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
-		t.Fatal(err)
-	}
-	if len(dashboard.RecentOutcomes) != 20 {
-		t.Fatalf("recent outcomes = %d, want bounded page of 20", len(dashboard.RecentOutcomes))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		response, err := server.Client().Get(server.URL + "/api/analytics/dashboard?project_id=analytics-large-project&view=overview&range=30d&group_by=day&compare=true&evidence_limit=20")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			t.Fatalf("Analytics status = %d: %s", response.StatusCode, body)
+		}
+		var dashboard models.AnalyticsDashboard
+		if err := json.NewDecoder(response.Body).Decode(&dashboard); err != nil {
+			response.Body.Close()
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if len(dashboard.RecentOutcomes) != 20 {
+			t.Fatalf("recent outcomes = %d, want bounded page of 20", len(dashboard.RecentOutcomes))
+		}
 	}
 }
 

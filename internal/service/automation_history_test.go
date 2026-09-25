@@ -688,11 +688,7 @@ func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQ
 			require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, now, 100))
 			counter.Reset()
 			counter.SetEnabled(true)
-			before := db.Stats()
-			start := time.Now()
 			require.NoError(t, repo.RecomputeAutomationHealthForAll(ctx, now.Add(time.Minute), 100))
-			duration := time.Since(start)
-			after := db.Stats()
 			counter.SetEnabled(false)
 
 			statements := counter.Statements()
@@ -702,7 +698,6 @@ func TestAutomationHistoryHealthStableNoChangeSkipsAutomationUpdatesAndReducesSQ
 			require.LessOrEqual(t, len(statements), baselineStatements/10, "stable health SQL should drop by at least 90%% versus the former per-Automation path")
 			requireAutomationHealthEvaluatedCount(t, db, fixture.projectID, count)
 			requireAutomationHealthUnevaluated(t, db, fixture.unpublishedAutomationID)
-			t.Logf("stable count=%d duration=%s sql=%d baseline_sql=%d update_automations=%d db_wait_count=%d db_wait=%s", count, duration, len(statements), baselineStatements, updates, after.WaitCount-before.WaitCount, after.WaitDuration-before.WaitDuration)
 		})
 	}
 }

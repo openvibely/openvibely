@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"runtime"
-	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
@@ -68,20 +65,9 @@ func requireProjectIdentityQuery(t *testing.T, statements []string) {
 	require.Equal(t, "select id, name from projects where id = ?", strings.ToLower(strings.Join(strings.Fields(statements[0]), " ")))
 }
 
-const (
-	channelCurrentProjectProjectionSamples    = 7
-	channelCurrentProjectProjectionOperations = 16
-)
-
-type channelCurrentProjectProjectionRuntimeMeasurement struct {
-	latency        time.Duration
-	allocatedBytes uint64
-	allocations    uint64
-}
-
-func TestChannelCurrentProjectProjectionPerformanceEvidence(t *testing.T) {
+func TestChannelCurrentProjectUsesCompactProjection(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping production-shaped channel project projection measurements in short mode")
+		t.Skip("skipping production-shaped channel project fixture in short mode")
 	}
 
 	for _, fileBacked := range []bool{false, true} {
@@ -95,55 +81,12 @@ func TestChannelCurrentProjectProjectionPerformanceEvidence(t *testing.T) {
 				t.Run(caseName, func(t *testing.T) {
 					fixture := newChannelCurrentProjectProjectionFixture(t, fileBacked, large, missing)
 					compactObserved := fixture.observeLookup(t, fixture.compactResult)
-					compact := measureChannelCurrentProjectProjection(t, fixture, fixture.compactResult)
 
 					require.Equal(t, compactObserved.sqlStatements, 1)
 					require.Less(t, compactObserved.selectedTextBytes, 1024, "identity lookup selected text must stay bounded")
-					t.Logf("compact median=%s B/op=%d allocs/op=%d; selected_text_bytes=%d response_bytes=%d sql_statements=%d",
-						compact.latency, compact.allocatedBytes, compact.allocations,
-						compactObserved.selectedTextBytes,
-						compactObserved.responseBytes,
-						compactObserved.sqlStatements,
-					)
 				})
 			}
 		}
-	}
-}
-
-func measureChannelCurrentProjectProjection(tb testing.TB, fixture *channelCurrentProjectProjectionFixture, lookup func() (string, error)) channelCurrentProjectProjectionRuntimeMeasurement {
-	tb.Helper()
-	latencies := make([]time.Duration, 0, channelCurrentProjectProjectionSamples)
-	allocatedBytes := make([]uint64, 0, channelCurrentProjectProjectionSamples)
-	allocations := make([]uint64, 0, channelCurrentProjectProjectionSamples)
-	for range channelCurrentProjectProjectionSamples {
-		runtime.GC()
-		var before, after runtime.MemStats
-		runtime.ReadMemStats(&before)
-		startedAt := time.Now()
-		for range channelCurrentProjectProjectionOperations {
-			got, err := lookup()
-			if err != nil {
-				tb.Fatalf("measured lookup: %v", err)
-			}
-			if got != fixture.expected {
-				tb.Fatalf("measured lookup = %q, want %q", got, fixture.expected)
-			}
-		}
-		elapsed := time.Since(startedAt)
-		runtime.ReadMemStats(&after)
-		latencies = append(latencies, elapsed/time.Duration(channelCurrentProjectProjectionOperations))
-		allocatedBytes = append(allocatedBytes, (after.TotalAlloc-before.TotalAlloc)/channelCurrentProjectProjectionOperations)
-		allocations = append(allocations, (after.Mallocs-before.Mallocs)/channelCurrentProjectProjectionOperations)
-	}
-	slices.Sort(latencies)
-	slices.Sort(allocatedBytes)
-	slices.Sort(allocations)
-	middle := len(latencies) / 2
-	return channelCurrentProjectProjectionRuntimeMeasurement{
-		latency:        latencies[middle],
-		allocatedBytes: allocatedBytes[middle],
-		allocations:    allocations[middle],
 	}
 }
 

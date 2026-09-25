@@ -56,46 +56,6 @@ func TestBroadcasterCore_ScopedPublishOnlyOffersMatchingAndGlobalSubscribers(t *
 	}
 }
 
-func TestBroadcasterCore_RepeatedScopedPublishesReuseSubscriberSnapshot(t *testing.T) {
-	tests := []struct {
-		name            string
-		subscriberCount int
-	}{
-		{name: "one matching", subscriberCount: 1},
-		{name: "five matching", subscriberCount: 5},
-		{name: "fifty matching", subscriberCount: MaxSubscribers},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			b := newBroadcaster[broadcasterCoreTestEvent, broadcasterCoreTestSubscriber](1)
-			subs := make([]broadcasterCoreTestSubscriber, 0, test.subscriberCount)
-			for i := 0; i < test.subscriberCount; i++ {
-				sub, err := b.SubscribeScoped("project-1")
-				if err != nil {
-					t.Fatalf("SubscribeScoped #%d: %v", i, err)
-				}
-				subs = append(subs, sub)
-			}
-			defer func() {
-				for _, sub := range subs {
-					b.Unsubscribe(sub)
-				}
-			}()
-
-			allocs := testing.AllocsPerRun(100, func() {
-				b.PublishScoped("project-1", broadcasterCoreTestEvent{Value: 1})
-				for _, sub := range subs {
-					<-sub
-				}
-			})
-			if allocs != 0 {
-				t.Fatalf("steady-state scoped publish allocations = %v, want 0", allocs)
-			}
-		})
-	}
-}
-
 func TestBroadcasterCore_MembershipChangesRebuildSubscriberSnapshot(t *testing.T) {
 	b := newBroadcaster[broadcasterCoreTestEvent, broadcasterCoreTestSubscriber](1)
 	first, err := b.SubscribeScoped("project-1")

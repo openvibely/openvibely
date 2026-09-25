@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"runtime"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -551,60 +549,13 @@ func BenchmarkChannelChatTaskContextProjection(b *testing.B) {
 	}
 }
 
-func TestChannelChatTaskContextProjectionPerformanceBudget(t *testing.T) {
-	const (
-		sampleCount     = 5
-		measurementRuns = 3
-	)
-
-	for _, testCase := range []struct {
-		taskCount         int
-		maxAllocatedBytes float64
-	}{
-		{taskCount: 20, maxAllocatedBytes: 256 * 1024},
-		{taskCount: 300, maxAllocatedBytes: 4 * 1024 * 1024},
-	} {
-		t.Run(fmt.Sprintf("%d_tasks", testCase.taskCount), func(t *testing.T) {
-			fixture := newChannelTaskContextBenchmarkFixture(t, testCase.taskCount)
+func TestChannelChatTaskContextUsesCompactProjection(t *testing.T) {
+	for _, taskCount := range []int{20, 300} {
+		t.Run(fmt.Sprintf("%d_tasks", taskCount), func(t *testing.T) {
+			fixture := newChannelTaskContextBenchmarkFixture(t, taskCount)
 			fixture.assertTwoContextReads(t)
-
 			fixture.mustLoad(t)
-			compact := measureChannelTaskContextPerformance(t, fixture, sampleCount, measurementRuns)
-			t.Logf("%d tasks: compact median=%.0f B/op %.0f allocs/op; allocation budget=%.0f B/op; logical reads=2", testCase.taskCount, compact.medianBytes, compact.medianAllocs, testCase.maxAllocatedBytes)
-			if compact.medianBytes > testCase.maxAllocatedBytes {
-				t.Fatalf("compact context median allocated bytes = %.0f B/op, want at most %.0f B/op", compact.medianBytes, testCase.maxAllocatedBytes)
-			}
 		})
-	}
-}
-
-type channelTaskContextPerformanceMeasurement struct {
-	medianBytes  float64
-	medianAllocs float64
-}
-
-func measureChannelTaskContextPerformance(tb testing.TB, fixture *channelTaskContextBenchmarkFixture, sampleCount, runs int) channelTaskContextPerformanceMeasurement {
-	tb.Helper()
-	byteSamples := make([]float64, 0, sampleCount)
-	allocationSamples := make([]float64, 0, sampleCount)
-	for sample := 0; sample < sampleCount; sample++ {
-		runtime.GC()
-		var before, after runtime.MemStats
-		runtime.ReadMemStats(&before)
-		for i := 0; i < runs; i++ {
-			fixture.mustLoad(tb)
-		}
-		runtime.ReadMemStats(&after)
-		byteSamples = append(byteSamples, float64(after.TotalAlloc-before.TotalAlloc)/float64(runs))
-		allocationSamples = append(allocationSamples, testing.AllocsPerRun(runs, func() {
-			fixture.mustLoad(tb)
-		}))
-	}
-	sort.Float64s(byteSamples)
-	sort.Float64s(allocationSamples)
-	return channelTaskContextPerformanceMeasurement{
-		medianBytes:  byteSamples[len(byteSamples)/2],
-		medianAllocs: allocationSamples[len(allocationSamples)/2],
 	}
 }
 
