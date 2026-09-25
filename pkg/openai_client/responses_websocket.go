@@ -33,6 +33,7 @@ func isRetryableResponsesTransportError(err error) bool {
 // by short-lived clients for the same configured model.
 type ResponsesTransportState struct {
 	websocketDisabled      atomic.Bool
+	steeringUncertain      atomic.Bool
 	sessionID              string
 	mu                     sync.Mutex
 	conn                   *websocket.Conn
@@ -119,14 +120,39 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 // doResponsesStreamTurn gives WebSocket its full retry budget before switching
 // the session to HTTP, which then gets its own retry budget (as in Codex).
 func doResponsesStreamTurn[T any](ctx context.Context, c *Client, model string, policy httpretry.StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
-	result, err := httpretry.DoStreamTurn(ctx, policy, fn)
 	state := c.responsesTransportState
+	// Recover runs before generic EOF/network retry classification. A negative
+	// RetryableError result alone cannot veto those retries.
+	recoverTurn := policy.Recover
+	policy.Recover = func(err error) (bool, error) {
+		if state.hasAstraSteeringAmbiguous() {
+			return false, fmt.Errorf("cannot resume while steering delivery is unresolved: %w", err)
+		}
+		if recoverTurn != nil {
+			return recoverTurn(err)
+		}
+		return false, nil
+	}
+	guardedAttempt := func(attemptCtx context.Context) (T, error) {
+		if state.hasAstraSteeringAmbiguous() {
+			var zero T
+			return zero, errors.New("steering delivery is unresolved")
+		}
+		result, err := fn(attemptCtx)
+		// A stream can complete after a steering acknowledgement is lost. Do
+		// not allow its returned tool calls to execute in that case either.
+		if err == nil && state.hasAstraSteeringAmbiguous() {
+			err = errors.New("steering delivery is unresolved")
+		}
+		return result, err
+	}
+	result, err := httpretry.DoStreamTurn(ctx, policy, guardedAttempt)
 	if err == nil || ctx.Err() != nil || !isResponsesLiteWebsocketModel(model) || state.websocketDisabled.Load() || state.hasAstraSteeringAmbiguous() ||
 		!(isRetryableResponsesTransportError(err) || httpretry.IsRetryableError(err)) {
 		return result, err
 	}
 	state.disableWebsocket()
-	return httpretry.DoStreamTurn(ctx, policy, fn)
+	return httpretry.DoStreamTurn(ctx, policy, guardedAttempt)
 }
 
 const (
@@ -319,6 +345,7 @@ func (s *ResponsesTransportState) takeAstraSteeringAmbiguous() []ResponsesSteeri
 	defer s.mu.Unlock()
 	ambiguous := append([]ResponsesSteeringDelivery(nil), s.astraSteeringAmbiguous...)
 	s.astraSteeringAmbiguous = nil
+	s.steeringUncertain.Store(false)
 	return ambiguous
 }
 
@@ -328,7 +355,7 @@ func (s *ResponsesTransportState) hasAstraSteeringAmbiguous() bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.astraSteeringAmbiguous) > 0
+	return s.steeringUncertain.Load() || len(s.astraSteeringAmbiguous) > 0
 }
 
 func (s *ResponsesTransportState) clearAstraSteeringCommits() {
@@ -343,6 +370,11 @@ func (s *ResponsesTransportState) clearAstraSteeringCommits() {
 func (s *ResponsesTransportState) recordSteeringDelivery(record ResponsesSteeringDelivery) {
 	if s == nil {
 		return
+	}
+	if record.Status == AstraSteeringAmbiguous {
+		// Lost acknowledgements may not have a server-assigned steering ID.
+		// They still prohibit replay, even though the ID-based list is empty.
+		s.steeringUncertain.Store(true)
 	}
 	s.steeringRecordsMu.Lock()
 	defer s.steeringRecordsMu.Unlock()
