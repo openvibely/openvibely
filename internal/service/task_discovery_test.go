@@ -266,6 +266,56 @@ func TestExecuteListSchedulesToolTreatsLikeWildcardsAsLiteralTaskTitleText(t *te
 	require.Equal(t, "literal_under_schedule", underscoreResult.Schedules[0].TaskTitle)
 }
 
+func TestExecuteListTasksToolReportsAndFiltersMergeStatus(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	mk := func(title, branch string, merge models.MergeStatus) *models.Task {
+		task := &models.Task{ProjectID: "default", Title: title, Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"}
+		require.NoError(t, taskRepo.Create(ctx, task))
+		if branch != "" {
+			require.NoError(t, taskRepo.UpdateWorktreeInfo(ctx, task.ID, "/tmp/wt-"+task.ID, branch))
+		}
+		if merge != models.MergeStatusNone {
+			require.NoError(t, taskRepo.UpdateMergeStatus(ctx, task.ID, merge))
+		}
+		return task
+	}
+	merged := mk("merged task", "task/merged", models.MergeStatusMerged)
+	conflict := mk("conflict task", "task/conflict", models.MergeStatusConflict)
+	unrecorded := mk("branch without status", "task/unrecorded", models.MergeStatusNone)
+	noBranch := mk("no branch task", "", models.MergeStatusNone)
+
+	out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"category":"completed"}`))
+	require.NoError(t, err)
+	byID := map[string]string{}
+	for _, task := range decodeListTasksResult(t, out).Tasks {
+		byID[task.TaskID] = task.MergeStatus
+	}
+	require.Equal(t, "merged", byID[merged.ID])
+	require.Equal(t, "conflict", byID[conflict.ID])
+	require.Equal(t, "pending", byID[unrecorded.ID])
+	require.Equal(t, "", byID[noBranch.ID])
+
+	out, err = ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"merge_status":"unmerged"}`))
+	require.NoError(t, err)
+	result := decodeListTasksResult(t, out)
+	require.Equal(t, 2, result.Total)
+	require.Equal(t, "unmerged", result.Filter.MergeStatus)
+	ids := []string{result.Tasks[0].TaskID, result.Tasks[1].TaskID}
+	require.ElementsMatch(t, []string{conflict.ID, unrecorded.ID}, ids)
+
+	out, err = ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"merge_status":"conflict"}`))
+	require.NoError(t, err)
+	result = decodeListTasksResult(t, out)
+	require.Equal(t, 1, result.Total)
+	require.Equal(t, conflict.ID, result.Tasks[0].TaskID)
+
+	_, err = ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"merge_status":"bogus"}`))
+	require.Error(t, err)
+}
+
 func TestExecuteListTasksToolSupportsEveryCategoryAndStatusFilter(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
