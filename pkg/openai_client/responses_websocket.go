@@ -127,8 +127,13 @@ func isResponsesLiteWebsocketModel(model string) bool {
 	}
 }
 
-func isGPT6AstraModel(model string) bool {
-	return strings.EqualFold(strings.TrimSpace(model), "gpt-6-astra")
+func isGPT6WorkflowModel(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-6-astra", "gpt-6-sol", "gpt-6-luna":
+		return true
+	default:
+		return false
+	}
 }
 
 func responsesLiteDefaultReasoningEffort(model string) string {
@@ -141,7 +146,7 @@ func (s *ResponsesTransportState) lastAstraReasoningEffort(model string) string 
 }
 
 func (s *ResponsesTransportState) astraReasoningState(model string) (string, string, []astraConfigurationUpdate) {
-	if s == nil || !isGPT6AstraModel(model) {
+	if s == nil || !isGPT6WorkflowModel(model) {
 		return "", "", nil
 	}
 	s.mu.Lock()
@@ -166,7 +171,7 @@ func (s *ResponsesTransportState) astraReasoningStateJSON(model string) string {
 }
 
 func (s *ResponsesTransportState) restoreAstraReasoningStateJSON(model, raw string) error {
-	if s == nil || !isGPT6AstraModel(model) || strings.TrimSpace(raw) == "" {
+	if s == nil || !isGPT6WorkflowModel(model) || strings.TrimSpace(raw) == "" {
 		return nil
 	}
 	var restored astraReasoningSessionState
@@ -203,7 +208,7 @@ func (s *ResponsesTransportState) restoreAstraReasoningStateJSON(model, raw stri
 }
 
 func (s *ResponsesTransportState) setAstraReasoningEffort(model, effort string) {
-	if s == nil || !isGPT6AstraModel(model) {
+	if s == nil || !isGPT6WorkflowModel(model) {
 		return
 	}
 	s.mu.Lock()
@@ -216,7 +221,7 @@ func (s *ResponsesTransportState) setAstraReasoningEffort(model, effort string) 
 }
 
 func (s *ResponsesTransportState) commitAstraReasoningEffort(model, effort string, userHistoryIndex int, changed, compacted bool) {
-	if s == nil || !isGPT6AstraModel(model) {
+	if s == nil || !isGPT6WorkflowModel(model) {
 		return
 	}
 	s.mu.Lock()
@@ -608,7 +613,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		return conn.Write(writeCtx, websocket.MessageText, body)
 	}
 	deliverSteering := func(deliverCtx context.Context, text string) (AstraSteeringDelivery, error) {
-		if !isGPT6AstraModel(opts.Model) || opts.OnMidTurnSteering == nil {
+		if !isGPT6WorkflowModel(opts.Model) || opts.OnMidTurnSteering == nil {
 			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
 		}
 		text = strings.TrimSpace(text)
@@ -709,7 +714,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			return delivery, nil
 		}
 	}
-	if isGPT6AstraModel(opts.Model) && opts.OnMidTurnSteering != nil {
+	if isGPT6WorkflowModel(opts.Model) && opts.OnMidTurnSteering != nil {
 		steeringCallbackCtx, cancelCallback := context.WithCancel(ctx)
 		cancelSteeringCallback = cancelCallback
 		done := make(chan struct{})
