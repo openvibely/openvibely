@@ -2,13 +2,41 @@ package openaiclient
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestStandaloneWebSearchReservedSchema(t *testing.T) {
+	// Pin the normalized schema derived from Codex SearchCommands and accepted
+	// by the live provider for all six Lite models on 2026-09-24. web.run is a
+	// reserved name: even seemingly harmless schema edits can reject the turn.
+	tool := standaloneWebSearchTool()
+	if tool.Type != "namespace" || tool.Name != "web" || len(tool.Tools) != 1 {
+		t.Fatalf("unexpected web namespace: %#v", tool)
+	}
+	run := tool.Tools[0]
+	if run.Name != "run" || run.Type != "function" || run.Strict == nil || *run.Strict {
+		t.Fatalf("web.run must explicitly use strict=false: %#v", run)
+	}
+	var schema any
+	if err := json.Unmarshal(run.Parameters, &schema); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const acceptedSchemaHash = "de3be87e7abfe9b67ba757f27804d4206b51c2a8de9e9799fa7db9ef4abe3539"
+	if got := fmt.Sprintf("%x", sha256.Sum256(canonical)); got != acceptedSchemaHash {
+		t.Fatalf("reserved web.run schema changed (%s); verify Codex and provider compatibility before updating", got)
+	}
+}
 
 func TestStandaloneWebSearchDescriptionMatchesCodexPolicySections(t *testing.T) {
 	for _, required := range []string{

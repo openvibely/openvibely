@@ -793,6 +793,16 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		deferredPrimaryCompletedID := ""
 		receivedFrame := false
 		forwardEventData := func(data []byte) bool {
+			// A WebSocket frame is a complete JSON event and may contain line
+			// breaks (notably provider error envelopes). Our downstream SSE
+			// parsers consume one data line, so compact before framing it.
+			var compact bytes.Buffer
+			if err := json.Compact(&compact, data); err != nil {
+				state.resetConnectionLocked()
+				writer.CloseWithError(fmt.Errorf("invalid Responses websocket JSON event: %w", err))
+				return false
+			}
+			data = compact.Bytes()
 			if _, writeErr := fmt.Fprintf(writer, "data: %s\n\n", data); writeErr != nil {
 				state.resetConnectionLocked()
 				return false

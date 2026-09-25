@@ -19,6 +19,9 @@ const standaloneWebSearchStructuredOutputPrefix = "web-search-json:"
 //go:embed web_run_description.md
 var standaloneWebSearchDescription string
 
+//go:embed web_run_parameters.json
+var standaloneWebSearchParameters []byte
+
 // WebSearchResult preserves both the model-facing search output and the
 // structured result metadata returned by alpha/search.
 type WebSearchResult struct {
@@ -55,9 +58,12 @@ func (r WebSearchResult) StructuredOutput() string {
 	return standaloneWebSearchStructuredOutputPrefix + base64.RawURLEncoding.EncodeToString(encoded)
 }
 
-// standaloneWebSearchTool mirrors the Codex Responses Lite web namespace. The
-// model calls web.run and the client forwards those commands to alpha/search.
+// standaloneWebSearchTool uses Codex's reserved web.run schema. Preserve field
+// descriptions and permissiveness: the provider validates this definition.
+// Parameters follow codex-api/src/search.rs through the non-compacting schema
+// conversion in ext/web-search/src/schema.rs and tools/src/json_schema/types.rs.
 func standaloneWebSearchTool() ToolDefinition {
+	strict := false
 	return ToolDefinition{
 		Type:        "namespace",
 		Name:        "web",
@@ -66,23 +72,8 @@ func standaloneWebSearchTool() ToolDefinition {
 			Type:        "function",
 			Name:        "run",
 			Description: standaloneWebSearchDescription,
-			Parameters: json.RawMessage(`{
-				"type":"object",
-				"properties":{
-					"search_query":{"type":"array","items":{"type":"object","properties":{"q":{"type":"string"},"recency":{"type":"integer","minimum":0},"domains":{"type":"array","items":{"type":"string"}}},"required":["q"]}},
-					"image_query":{"type":"array","items":{"type":"object","properties":{"q":{"type":"string"},"recency":{"type":"integer","minimum":0},"domains":{"type":"array","items":{"type":"string"}}},"required":["q"]}},
-					"open":{"type":"array","items":{"type":"object","properties":{"ref_id":{"type":"string"},"lineno":{"type":"integer","minimum":0}},"required":["ref_id"]}},
-					"click":{"type":"array","items":{"type":"object","properties":{"ref_id":{"type":"string"},"id":{"type":"integer","minimum":0}},"required":["ref_id","id"]}},
-					"find":{"type":"array","items":{"type":"object","properties":{"ref_id":{"type":"string"},"pattern":{"type":"string"}},"required":["ref_id","pattern"]}},
-					"screenshot":{"type":"array","items":{"type":"object","properties":{"ref_id":{"type":"string"},"pageno":{"type":"integer","minimum":0}},"required":["ref_id","pageno"]}},
-					"finance":{"type":"array","items":{"type":"object","properties":{"ticker":{"type":"string"},"type":{"type":"string","enum":["equity","fund","crypto","index"]},"market":{"type":"string"}},"required":["ticker","type"]}},
-					"weather":{"type":"array","items":{"type":"object","properties":{"location":{"type":"string"},"start":{"type":"string"},"duration":{"type":"integer","minimum":0}},"required":["location"]}},
-					"sports":{"type":"array","items":{"type":"object","properties":{"tool":{"type":"string","enum":["sports"]},"fn":{"type":"string","enum":["schedule","standings"]},"league":{"type":"string","enum":["nba","wnba","nfl","nhl","mlb","epl","ncaamb","ncaawb","ipl"]},"team":{"type":"string"},"opponent":{"type":"string"},"date_from":{"type":"string"},"date_to":{"type":"string"},"num_games":{"type":"integer","minimum":0},"locale":{"type":"string"}},"required":["fn","league"]}},
-					"time":{"type":"array","items":{"type":"object","properties":{"utc_offset":{"type":"string"}},"required":["utc_offset"]}},
-					"response_length":{"type":"string","enum":["short","medium","long"]}
-				},
-				"additionalProperties":false
-			}`),
+			Strict:      &strict,
+			Parameters:  append(json.RawMessage(nil), standaloneWebSearchParameters...),
 		}},
 	}
 }
