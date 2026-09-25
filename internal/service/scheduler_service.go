@@ -179,8 +179,20 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			continue
 		}
 
-		// Skip if task is already running
+		// Skip if task is already running. Reconcile missed recurring occurrences
+		// so the schedule does not immediately re-run when the current execution ends.
 		if task.Status == "running" {
+			if sched.RepeatType != models.RepeatOnce {
+				nextRun := sched.ComputeNextRun(now)
+				if nextRun != nil {
+					updated, err := s.scheduleRepo.UpdateNextRunIfCurrent(ctx, sched.ID, sched.TaskID, sched.NextRun, nextRun)
+					if err != nil {
+						applog.Infof("[scheduler] checkDueTasks error advancing running recurring schedule %s: %v", sched.ID, err)
+					} else if updated {
+						applog.Infof("[scheduler] checkDueTasks advanced running recurring schedule %s next_run=%s", sched.ID, nextRun.Format("2006-01-02 15:04:05"))
+					}
+				}
+			}
 			applog.Infof("[scheduler] checkDueTasks skipping task %s (already running)", task.ID)
 			continue
 		}
