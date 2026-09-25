@@ -1323,10 +1323,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								options.forEach(function(option, optionIndex) {
 									var label = option && option.label ? String(option.label) : '';
 									if (!label) return;
-									var button = document.createElement('button');
-									button.type = 'button';
+									var button = document.createElement('div');
 									button.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 									button.style.setProperty('--btn-focus-scale', '1');
+									button.setAttribute('role', 'button');
+									button.setAttribute('tabindex', '0');
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
 									button.setAttribute('data-option-label', label);
@@ -1353,10 +1354,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									button.appendChild(wrap);
 									fieldset.appendChild(button);
 								});
-								var customButton = document.createElement('button');
-								customButton.type = 'button';
+								var customButton = document.createElement('div');
 								customButton.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 								customButton.style.setProperty('--btn-focus-scale', '1');
+								customButton.setAttribute('role', 'button');
+								customButton.setAttribute('tabindex', '0');
 								customButton.setAttribute('data-chat-input-option', 'true');
 								customButton.setAttribute('data-chat-input-custom-option', 'true');
 								customButton.setAttribute('data-question-id', qid);
@@ -1379,10 +1381,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var recommendedActions = document.createElement('div');
 							recommendedActions.className = 'pt-1';
 							recommendedActions.setAttribute('data-chat-input-recommended-actions', 'true');
-							var recommended = document.createElement('button');
-							recommended.type = 'button';
+							var recommended = document.createElement('div');
 							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md active:border-primary hover:border-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 							recommended.style.setProperty('--btn-focus-scale', '1');
+							recommended.setAttribute('role', 'button');
+							recommended.setAttribute('tabindex', '0');
 							recommended.setAttribute('data-chat-input-nav', 'recommended');
 							recommended.setAttribute('aria-label', 'Use recommended answers and continue');
 							recommended.textContent = 'Recommended and move forward';
@@ -1493,7 +1496,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var complete = true;
 							card.querySelectorAll('[data-chat-input-question-id]').forEach(function(group) {
 								var questionID = group.getAttribute('data-chat-input-question-id') || '';
-								var recommended = group.querySelector('button[data-chat-input-option]:not([data-chat-input-custom-option])');
+								var recommended = group.querySelector('[data-chat-input-option]:not([data-chat-input-custom-option])');
 								var label = recommended ? (recommended.getAttribute('data-option-label') || '') : '';
 								if (!questionID || !label) {
 									complete = false;
@@ -1509,14 +1512,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 
 						function selectChatInputOption(button) {
-							if (!button || button.disabled) return;
+							if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return;
 							var card = button.closest('[data-chat-input-request-id]');
 							var fieldset = button.closest('[data-chat-input-question-id]');
-							if (!card || !fieldset || card.getAttribute('data-completed') === 'true') return;
+							if (!card || !fieldset || card.getAttribute('data-completed') === 'true' || card.getAttribute('data-submitted') === 'true') return;
 							var isCustom = button.hasAttribute('data-chat-input-custom-option');
 							fieldset.setAttribute('data-selected-kind', isCustom ? 'custom' : 'option');
 							fieldset.setAttribute('data-selected-label', isCustom ? '' : (button.getAttribute('data-option-label') || ''));
-							fieldset.querySelectorAll('button[data-chat-input-option]').forEach(function(btn) {
+							fieldset.querySelectorAll('[data-chat-input-option]').forEach(function(btn) {
 								var selected = btn === button;
 								btn.classList.toggle('chat-input-option-selected', selected);
 								btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
@@ -1602,7 +1605,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						window.refreshChatInputRequests = refreshChatInputRequests;
 
 							function submitChatInputRequest(button, overrideAnswers) {
-							if (!button || button.disabled) return;
+							if (!button || button.disabled || button.getAttribute('aria-disabled') === 'true') return;
 							var card = button.closest('[data-chat-input-request-id]');
 							if (!card || card.getAttribute('data-submitted') === 'true') return;
 							var status = card.querySelector('[role="status"]');
@@ -1623,6 +1626,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var projectID = root ? root.getAttribute('data-project-id') : projectId;
 							card.setAttribute('data-submitted', 'true');
 							card.querySelectorAll('button, textarea').forEach(function(control) { control.disabled = true; });
+							card.querySelectorAll('[role="button"][data-chat-input-option], [role="button"][data-chat-input-nav]').forEach(function(control) { control.setAttribute('aria-disabled', 'true'); control.classList.add('pointer-events-none'); });
 							if (status) {
 								status.classList.remove('hidden', 'text-error');
 								status.textContent = usingRecommended ? 'Submitting recommended answers…' : 'Submitting answers…';
@@ -1639,6 +1643,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							}).catch(function(err) {
 								card.removeAttribute('data-submitted');
 								card.querySelectorAll('button, textarea').forEach(function(control) { control.disabled = false; });
+								card.querySelectorAll('[role="button"][data-chat-input-option], [role="button"][data-chat-input-nav]').forEach(function(control) { control.removeAttribute('aria-disabled'); control.classList.remove('pointer-events-none'); });
 								showChatInputQuestion(card, Number(card.getAttribute('data-current-question-index') || 0));
 								if (status) {
 									status.classList.remove('hidden');
@@ -1934,16 +1939,22 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (!window._chatInputRequestClickBound) {
 							window._chatInputRequestClickBound = true;
 								document.body.addEventListener('click', function(event) {
-									var navigationButton = event.target && event.target.closest ? event.target.closest('button[data-chat-input-nav]') : null;
+									var navigationButton = event.target && event.target.closest ? event.target.closest('[data-chat-input-nav]') : null;
 									if (navigationButton) {
 										event.preventDefault();
 										navigateChatInputRequest(navigationButton);
 										return;
 									}
-									var button = event.target && event.target.closest ? event.target.closest('button[data-chat-input-option]') : null;
+									var button = event.target && event.target.closest ? event.target.closest('[data-chat-input-option]') : null;
 									if (!button) return;
 									event.preventDefault();
 									selectChatInputOption(button);
+							});
+							document.body.addEventListener('keydown', function(event) {
+								var control = event.target && event.target.closest ? event.target.closest('[role="button"][data-chat-input-option], [role="button"][data-chat-input-nav]') : null;
+								if (!control || control.getAttribute('aria-disabled') === 'true' || (event.key !== 'Enter' && event.key !== ' ')) return;
+								event.preventDefault();
+								control.click();
 							});
 							document.body.addEventListener('input', function(event) {
 								var input = event.target && event.target.closest ? event.target.closest('[data-chat-input-custom-answer]') : null;

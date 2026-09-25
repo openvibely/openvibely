@@ -366,7 +366,7 @@ func TestChatPageRendersInputRequestClientControls(t *testing.T) {
 	body := tc.HTTP().Get("/chat?project_id=" + project.ID).Execute().Body.String()
 	require.Contains(t, body, "chat_user_input_requested")
 	require.Contains(t, body, "renderChatInputRequest")
-	require.Contains(t, body, "button[data-chat-input-option]")
+	require.Contains(t, body, "[data-chat-input-option]")
 	require.Contains(t, body, "chat-input-option-btn")
 	require.Contains(t, body, "--btn-focus-scale', '1'")
 	require.Contains(t, body, "textContent = option.description")
