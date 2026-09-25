@@ -121,7 +121,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createButton.getAttribute('aria-pressed') !== 'false') fail('recommended option was preselected before user click');
 				if (createButton.textContent.indexOf('Recommended') === -1) fail('recommended option was not visually labeled');
 				if (createButton.classList.contains('btn-outline') || createButton.classList.contains('btn-primary')) fail('question option still uses distracting DaisyUI outline/primary styling');
-				['card','bg-base-100','shadow-sm','border','border-base-300','hover:border-primary/40','active:border-primary/40','hover:shadow-md','transition-all'].forEach(function(className) {
+				['card','bg-base-100','shadow-sm','border','border-base-300','hover:border-primary/40','hover:shadow-md','transition-all'].forEach(function(className) {
 					if (!createButton.classList.contains(className)) fail('question option did not reuse shared page-card styling: ' + className);
 				});
 				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
@@ -133,21 +133,15 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createStyle.color === createStyle.backgroundColor) fail('question option text color matched its background');
 				createButton.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:1, pointerType:'mouse'}));
 				await nextFrame();
-				if (!createButton.classList.contains('chat-input-option-pressed')) fail('question option did not enter the stable pressed border state');
-				if (!createButton.getAttribute('style').includes('border-color')) fail('question option press state did not install the inline border guard');
-				var pressedStyle = getComputedStyle(createButton);
-				var pressedBorderColor = pressedStyle.borderColor;
-				if (pressedBorderColor === 'rgb(255, 255, 255)' || pressedBorderColor === initialBorderColor) fail('question option press state did not use the stable primary border color');
-				if (pressedStyle.outlineStyle !== 'none' && pressedStyle.outlineWidth !== '0px') fail('question option press state can still paint an outline: style=' + pressedStyle.outlineStyle + ' width=' + pressedStyle.outlineWidth + ' color=' + pressedStyle.outlineColor + ' inline=' + createButton.getAttribute('style'));
-				if (pressedStyle.boxShadow.indexOf('255, 255, 255') !== -1) fail('question option press state can still paint a white ring or shadow');
+				if (createButton.classList.contains('chat-input-option-pressed')) fail('question option should not install a custom mousedown pressed state');
+				if ((createButton.getAttribute('style') || '').indexOf('border-color') !== -1 || (createButton.getAttribute('style') || '').indexOf('box-shadow') !== -1) fail('question option should not install inline mousedown visual effects');
 				createButton.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, pointerId:1, pointerType:'mouse'}));
 				await nextFrame();
-				if (createButton.classList.contains('chat-input-option-pressed')) fail('question option stayed in pressed border state after pointer up');
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
 				if (recommendedShortcut.tagName !== 'DIV' || recommendedShortcut.getAttribute('role') !== 'button' || recommendedShortcut.getAttribute('tabindex') !== '0') fail('recommended shortcut should render as an app card control, not a native button');
-				if (!recommendedShortcut.classList.contains('chat-input-option-btn') || !recommendedShortcut.classList.contains('bg-primary') || !recommendedShortcut.classList.contains('hover:border-primary') || !recommendedShortcut.classList.contains('active:border-primary') || !recommendedShortcut.classList.contains('inline-flex') || !recommendedShortcut.classList.contains('w-fit') || !recommendedShortcut.classList.contains('font-normal') || !recommendedShortcut.classList.contains('py-2') || recommendedShortcut.classList.contains('py-3') || recommendedShortcut.classList.contains('font-bold') || recommendedShortcut.classList.contains('w-full') || recommendedShortcut.classList.contains('text-primary-content') || recommendedShortcut.classList.contains('btn') || recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut should be a distinct content-sized primary answer card with normal text weight and compact height, not a full-width standalone button');
+				if (!recommendedShortcut.classList.contains('chat-input-option-btn') || !recommendedShortcut.classList.contains('bg-primary') || !recommendedShortcut.classList.contains('hover:border-primary') || !recommendedShortcut.classList.contains('inline-flex') || !recommendedShortcut.classList.contains('w-fit') || !recommendedShortcut.classList.contains('font-normal') || !recommendedShortcut.classList.contains('py-2') || recommendedShortcut.classList.contains('py-3') || recommendedShortcut.classList.contains('font-bold') || recommendedShortcut.classList.contains('w-full') || recommendedShortcut.classList.contains('text-primary-content') || recommendedShortcut.classList.contains('btn') || recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut should be a distinct content-sized primary answer card with normal text weight and compact height, not a full-width standalone button');
 				var recommendedActions = card.querySelector('[data-chat-input-recommended-actions]');
 				if (!recommendedActions || recommendedShortcut.parentElement !== recommendedActions) fail('recommended shortcut should be grouped with the answer choices');
 				var navigation = card.querySelector('[data-chat-input-navigation]');
@@ -157,6 +151,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (!pager || !position || position.parentElement !== pager || pager.children.length !== 3 || pager.children[0] !== position || pager.children[1].getAttribute('data-chat-input-nav') !== 'previous' || pager.children[2].getAttribute('data-chat-input-nav') !== 'next') fail('question position should sit before adjacent Previous and Next controls');
 				var recommendedStyle = getComputedStyle(recommendedShortcut);
 				if (recommendedStyle.color !== 'rgb(17, 24, 39)') fail('recommended shortcut text should be black on the purple answer card');
+				if (recommendedStyle.fontWeight === '700' || Number(recommendedStyle.fontWeight) >= 600) fail('recommended shortcut text should not be bold');
 				if (getComputedStyle(recommendedShortcut).getPropertyValue('--btn-focus-scale').trim() !== '1') fail('recommended shortcut can still shrink on click');
 				var previousTheme = document.documentElement.getAttribute('data-theme') || '';
 				var previousColorTheme = document.documentElement.getAttribute('data-color-theme') || '';
@@ -183,7 +178,9 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				nextButton = card.querySelector('button[data-chat-input-nav="next"]');
 				if (!nextButton || nextButton.disabled) fail('Next should be enabled after the user selects the recommended option');
 				if (!createButton.classList.contains('chat-input-option-selected')) fail('selected option did not use the local selected styling');
-				if (getComputedStyle(createButton).borderColor !== initialBorderColor) fail('selected option changed border color and can flash like page cards');
+				var selectedStyle = getComputedStyle(createButton);
+				if (selectedStyle.borderColor !== initialBorderColor) fail('selected option changed border color and can flash like page cards');
+				if (selectedStyle.boxShadow.indexOf('inset') !== -1) fail('selected option should not add an inset ring that looks like a wider border');
 				if (createButton.classList.contains('btn-primary')) fail('selected option fell back to distracting primary button styling');
 				nextButton.click();
 				await waitFor(function() { return /2 of 2/.test(card.textContent) && card.textContent.indexOf('Which fallback should be used?') !== -1; }, 'Next did not show the second question');
