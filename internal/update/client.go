@@ -507,7 +507,7 @@ func (c *Client) ValidateForInstall(release VerifiedRelease, current CurrentBuil
 		return errors.New("release version is not an authorized upgrade")
 	}
 	requiresCompleteTarget := release.ApplySupported || release.Action == "download" || release.Action == "container"
-	requiresTargetBinding := requiresCompleteTarget || release.Target.ID != "" || len(release.Metadata.Targets) > 0
+	requiresTargetBinding := requiresCompleteTarget || release.Target != (Target{}) || len(release.Metadata.Targets) > 0
 	if requiresTargetBinding && !releaseTargetMatchesMetadata(release) {
 		return errors.New("release target does not match signed metadata")
 	}
