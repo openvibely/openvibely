@@ -634,9 +634,10 @@ func TestBinaryInstallerStagePersistsExactOutcomeIdentity(t *testing.T) {
 	digest := sha256.Sum256(artifact)
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
 	installer := &BinaryInstaller{Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: runtime.GOOS}, Distribution: buildinfo.DistributionBinary}, Executable: current}
+	target := Target{ID: "binary-test-target", Kind: "binary", OS: runtime.GOOS, URL: server.URL, Filename: filename, Filetype: format, Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])}
 	value, err := installer.Stage(context.Background(), VerifiedRelease{
-		Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)},
-		Target:   Target{Kind: "binary", OS: runtime.GOOS, URL: server.URL, Filename: filename, Filetype: format, Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])},
+		Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}},
+		Target:   target,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -686,9 +687,10 @@ func TestBinaryInstallerStagesBesideResolvedExecutableSymlink(t *testing.T) {
 	digest := sha256.Sum256(artifact)
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
 	installer := &BinaryInstaller{Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: runtime.GOOS}, Distribution: buildinfo.DistributionBinary}, Executable: commandPath}
+	target := Target{ID: "binary-test-target", Kind: "binary", OS: runtime.GOOS, URL: server.URL, Filename: filename, Filetype: format, Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])}
 	value, err := installer.Stage(context.Background(), VerifiedRelease{
-		Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)},
-		Target:   Target{Kind: "binary", OS: runtime.GOOS, URL: server.URL, Filename: filename, Filetype: format, Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])},
+		Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}},
+		Target:   target,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -732,10 +734,11 @@ func TestBinaryInstallerStagesOfficialPackagedArtifacts(t *testing.T) {
 			digest := sha256.Sum256(archive)
 			client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
 			installer := &BinaryInstaller{Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: tc.goos}, Distribution: buildinfo.DistributionBinary}, Executable: current}
+			target := Target{ID: "binary-test-target", Kind: "binary", OS: tc.goos, URL: server.URL, Filename: tc.filename, Filetype: tc.filetype,
+				Size: int64(len(archive)), SHA256: hex.EncodeToString(digest[:])}
 			value, err := installer.Stage(context.Background(), VerifiedRelease{
-				Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)},
-				Target: Target{Kind: "binary", OS: tc.goos, URL: server.URL, Filename: tc.filename, Filetype: tc.filetype,
-					Size: int64(len(archive)), SHA256: hex.EncodeToString(digest[:])},
+				Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}},
+				Target:   target,
 			})
 			if err != nil {
 				t.Fatal(err)

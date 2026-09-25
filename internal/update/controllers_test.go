@@ -554,7 +554,8 @@ func TestDockerAgentRequestContainsOnlyReadinessMetadataAndPersistsStatus(t *tes
 	_, _ = drain.BeginDrain(DrainRequest{Lease: time.Minute})
 	_ = drain.Status()
 	installer := &DockerAgentInstaller{API: api, Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, Drain: drain, StatePath: filepath.Join(t.TempDir(), "docker.json"), PollInterval: time.Millisecond}
-	release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}, Target: Target{Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}}
+	target := Target{ID: "docker-test-target", Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}
+	release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}}, Target: target}
 	staged, err := installer.Stage(context.Background(), release)
 	if err != nil {
 		t.Fatal(err)
@@ -635,7 +636,8 @@ func TestDockerAgentVersionMismatchRemainsOwnedForReconciliation(t *testing.T) {
 	drain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
 	installer := &DockerAgentInstaller{API: api, Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, Drain: drain, StatePath: filepath.Join(t.TempDir(), "docker.json"), PollInterval: time.Millisecond}
-	release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}, Target: Target{Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}}
+	target := Target{ID: "docker-test-target", Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}
+	release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}}, Target: target}
 	coordinator := NewCoordinator(client, installer.Current, "stable", drain, installer, false, "", nil)
 	coordinator.recoveryRetryInterval = time.Millisecond
 	coordinator.release = &release
@@ -1592,7 +1594,8 @@ func TestDockerAgentReplaysDurableCreateIdempotencyAfterAcceptedResponseCrash(t 
 		}
 		return atomicWriteState(path, data)
 	}
-	release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}, Target: Target{Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}}
+	target := Target{ID: "docker-test-target", Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}
+	release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}}, Target: target}
 	if err := installer.Apply(context.Background(), release); !errors.Is(err, ErrUpdateRecoveryPending) {
 		t.Fatalf("accepted request save error=%v", err)
 	}
@@ -1653,7 +1656,8 @@ func TestDockerAgentAmbiguousCreateAndStatusFailuresRemainRecoveryPending(t *tes
 		}
 		_ = drain.Status()
 		installer := &DockerAgentInstaller{API: api, Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, Drain: drain, StatePath: filepath.Join(root, "docker.json"), PollInterval: time.Millisecond}
-		release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}, Target: Target{Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}}
+		target := Target{ID: "docker-test-target", Kind: "oci", ImageRef: "ghcr.io/openvibely/openvibely@sha256:" + strings.Repeat("a", 64)}
+		release := VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{target}}, Target: target}
 		if err := installer.Apply(context.Background(), release); !errors.Is(err, ErrUpdateRecoveryPending) {
 			t.Fatalf("ambiguous create error=%v", err)
 		}
