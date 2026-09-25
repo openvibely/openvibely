@@ -205,6 +205,16 @@ func (c *Coordinator) SetPersistence(path string) error {
 			return nil
 		}
 	}
+	if c.release != nil && !isTransitionState(c.state) && !c.releaseIsNewerThanCurrent(c.release) {
+		c.release, c.staged = nil, nil
+		c.clearAcceptanceLocked()
+		if c.state == StateAvailable || c.state == StateFailed || c.state == StateChecking {
+			c.state, c.lastError = StateIdle, ""
+		}
+		if err := c.persistLocked(); err != nil {
+			return err
+		}
+	}
 	if c.accepted {
 		if c.release == nil || c.acceptanceLease <= 0 {
 			return errors.New("persisted update acceptance is incomplete")
@@ -511,7 +521,16 @@ func (c *Coordinator) releaseIsNewerThanCurrent(release *VerifiedRelease) bool {
 	if release.Metadata.Channel != "" && release.Metadata.Channel != c.channel {
 		return false
 	}
-	return compareVersions(release.Metadata.Version, c.current.Version) > 0
+	if compareVersions(release.Metadata.Version, c.current.Version) <= 0 {
+		return false
+	}
+	if release.Action == "manual" {
+		return !release.ApplySupported && release.Target == (Target{})
+	}
+	if !release.ApplySupported {
+		return release.Action == "" && release.Target == (Target{}) && len(release.Metadata.Targets) == 0
+	}
+	return releaseTargetMatchesMetadata(*release) && validateReleaseTargetForCurrent(*release, c.current, true) == nil
 }
 func (c *Coordinator) Stage(ctx context.Context) error {
 	c.mu.Lock()
