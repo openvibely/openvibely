@@ -445,6 +445,19 @@ func TestResponsesLiteWebSocketModels(t *testing.T) {
 	}
 }
 
+func TestGPT6WorkflowModels(t *testing.T) {
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", " GPT-6-SOL "} {
+		if !isGPT6WorkflowModel(model) {
+			t.Errorf("isGPT6WorkflowModel(%q) = false, want true", model)
+		}
+	}
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.5", "gpt-6", ""} {
+		if isGPT6WorkflowModel(model) {
+			t.Errorf("isGPT6WorkflowModel(%q) = true, want false", model)
+		}
+	}
+}
+
 func TestSend_GPT6SolLunaAPIKeyUsesResponsesLiteWebSocket(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
@@ -2361,7 +2374,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseCance
 	}
 }
 
-func TestOpenResponsesWebsocketStream_NonAstraSuppressesMidTurnSteeringCallback(t *testing.T) {
+func TestOpenResponsesWebsocketStream_NonGPT6SuppressesMidTurnSteeringCallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -2540,7 +2553,7 @@ func TestOpenResponsesWebsocketStream_AstraMissingAcknowledgementIsAmbiguous(t *
 	}
 }
 
-func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringAccepted(t *testing.T) {
+func TestOpenResponsesWebsocketStream_GPT6SolMidTurnSteeringAccepted(t *testing.T) {
 	steerSeen := make(chan map[string]any, 1)
 	steeringWakeup := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2586,7 +2599,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringAccepted(t *testing.T)
 			t.Errorf("write delta: %v", err)
 			return
 		}
-		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_continued","status":"completed","model":"gpt-6-astra"}}`)); err != nil {
+		if err := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"resp_continued","status":"completed","model":"gpt-6-sol"}}`)); err != nil {
 			t.Errorf("write completed: %v", err)
 			return
 		}
@@ -2602,10 +2615,10 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringAccepted(t *testing.T)
 	accepted := make(chan AstraSteeringDelivery, 1)
 	body, err := client.openResponsesWebsocketStream(context.Background(), map[string]any{
 		"type":  "response.create",
-		"model": "gpt-6-astra",
+		"model": "gpt-6-sol",
 		"input": []any{},
 	}, false, responsesWebsocketStreamOptions{
-		Model:                 "gpt-6-astra",
+		Model:                 "gpt-6-sol",
 		MidTurnSteeringWakeup: steeringWakeup,
 		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
 			if !callbackCalls.CompareAndSwap(0, 1) {

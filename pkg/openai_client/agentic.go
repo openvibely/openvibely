@@ -355,7 +355,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	astraConfigurationUpdateEffort := ""
 	astraPostCompactionEffort := ""
 	var astraConfigurationHistory []astraConfigurationUpdate
-	if opts.EnableAstraConfigurationUpdate && isGPT6AstraModel(opts.Model) && (len(c.History) > 0 || len(opts.InitialInputItems) > 0) && c.responsesTransportState != nil {
+	if opts.EnableAstraConfigurationUpdate && isGPT6WorkflowModel(opts.Model) && (len(c.History) > 0 || len(opts.InitialInputItems) > 0) && c.responsesTransportState != nil {
 		requestBaseline, configuredEffort, configurationHistory := c.responsesTransportState.astraReasoningState(opts.Model)
 		if requestBaseline != "" && configuredEffort != "" && finalReasoningEffort != "" {
 			// Keep the request-level effort pinned to the original prefix baseline.
@@ -707,7 +707,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	// Update client history
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
-	if c.responsesTransportState != nil && isGPT6AstraModel(opts.Model) && finalReasoningEffort != "" {
+	if c.responsesTransportState != nil && isGPT6WorkflowModel(opts.Model) && finalReasoningEffort != "" {
 		c.responsesTransportState.commitAstraReasoningEffort(
 			opts.Model,
 			finalReasoningEffort,
@@ -1985,7 +1985,7 @@ func (l *agenticSessionTokenLedger) reset() {
 }
 
 func normalizedAstraReasoningEffort(model, value string) string {
-	if !isGPT6AstraModel(model) {
+	if !isGPT6WorkflowModel(model) {
 		return ""
 	}
 	if effort := normalizeReasoningEffort(value); effort != "" {

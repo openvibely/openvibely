@@ -139,7 +139,9 @@ func openAIRuntimeToolAsyncAllowed(def llmcontracts.RuntimeToolDefinition) bool 
 }
 
 func openAIAsyncRuntimeToolsEnabled(agent models.LLMConfig) bool {
-	return strings.EqualFold(strings.TrimSpace(agent.Model), "gpt-6-astra") && (agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth())
+	model := strings.ToLower(strings.TrimSpace(agent.Model))
+	return (model == "gpt-6-astra" || model == "gpt-6-sol" || model == "gpt-6-luna") &&
+		(agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth())
 }
 
 func openAIAsyncRuntimeToolsEnabledForRequest(ctx context.Context, agent models.LLMConfig) bool {

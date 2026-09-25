@@ -130,7 +130,7 @@ func TestAsyncRuntimeToolCallbacksRecoverAndTerminalizeDurableRows(t *testing.T)
 	}
 }
 
-func TestOpenAIAsyncRuntimeToolsEnabledRequiresAstraFirstPartyAuth(t *testing.T) {
+func TestOpenAIAsyncRuntimeToolsEnabledRequiresGPT6FirstPartyAuth(t *testing.T) {
 	tests := []struct {
 		name  string
 		agent models.LLMConfig
@@ -138,7 +138,9 @@ func TestOpenAIAsyncRuntimeToolsEnabledRequiresAstraFirstPartyAuth(t *testing.T)
 	}{
 		{name: "astra api key", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-astra", APIKey: "sk"}, want: true},
 		{name: "astra oauth", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, Model: " GPT-6-ASTRA ", OAuthAccessToken: "tok"}, want: true},
-		{name: "non astra", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.6-sol", APIKey: "sk"}},
+		{name: "sol api key", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-sol", APIKey: "sk"}, want: true},
+		{name: "luna oauth", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, Model: " GPT-6-LUNA ", OAuthAccessToken: "tok"}, want: true},
+		{name: "non gpt6", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.6-sol", APIKey: "sk"}},
 		{name: "openai compatible", agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-astra", APIKey: "sk"}},
 		{name: "legacy cli", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodCLI, Model: "gpt-6-astra"}},
 	}
