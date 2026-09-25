@@ -225,6 +225,37 @@ func TestCoordinatorHiddenPackagedOfferStillChecksMetricsWithoutStaging(t *testi
 	}
 }
 
+func TestCoordinatorDoesNotStageCachedReleaseForDifferentArchitecture(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	root := t.TempDir()
+	client := NewClient(ClientConfig{
+		ServiceURL: mockCheckServiceURL(t),
+		Channel:    "stable",
+		StatePath:  filepath.Join(root, "client.json"),
+		Now:        func() time.Time { return now },
+	})
+	amd64 := Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64", URL: "https://updates.example.test/app.tar.gz", Filetype: "tar.gz", Size: 3, SHA256: "0000000000000000000000000000000000000000000000000000000000000000"}
+	if err := client.saveState(persistedClientState{
+		LastSuccessfulCheck: now.Add(-time.Hour),
+		Cached:              cachedReleaseFixture(now, amd64, "download"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	installer := &countingInstaller{}
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary}, "stable", NewDrainManager(nil, nil, 0, nil), installer, false, "", nil)
+	coordinator.SetUpdateNotificationsEnabled(true)
+
+	if err := coordinator.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.State != StateIdle || snapshot.Release != nil {
+		t.Fatalf("stale cached update surfaced: %#v", snapshot)
+	}
+	if installer.stages.Load() != 0 {
+		t.Fatalf("wrong-architecture cached update staged %d times", installer.stages.Load())
+	}
+}
+
 func TestCoordinatorDefaultOffHidesIdleNotificationButKeepsActiveRecoveryVisible(t *testing.T) {
 	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
 	coordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0"}}
