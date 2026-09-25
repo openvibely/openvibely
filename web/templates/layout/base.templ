@@ -822,11 +822,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 				}
 				.chat-input-option-btn:active:where(:not(:disabled)),
-				.chat-input-option-btn.chat-input-option-pressed {
-					border-color: oklch(var(--p) / 0.4) !important;
+				.chat-input-option-btn.chat-input-option-pressed,
+				.chat-input-option-btn.chat-input-option-pressed:hover,
+				.chat-input-option-btn.chat-input-option-pressed:active,
+				.chat-input-option-btn.chat-input-option-pressed:focus,
+				.chat-input-option-btn.chat-input-option-pressed:focus-visible {
+					border-color: rgb(116 128 255 / 0.55) !important;
+					outline-color: transparent !important;
+					outline-style: none !important;
+					outline-width: 0 !important;
+					--tw-ring-color: transparent !important;
+					--tw-ring-offset-color: transparent !important;
+					--tw-ring-shadow: 0 0 #0000 !important;
+					box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
 				}
-				.chat-input-option-btn:focus:where(:not(:focus-visible)) {
-					outline: none;
+				.chat-input-option-btn:focus:where(:not(:focus-visible)),
+				.chat-input-option-btn.chat-input-option-pressed:focus,
+				.chat-input-option-btn.chat-input-option-pressed:focus-visible {
+					outline: none !important;
+				}
+				.chat-input-option-btn:focus-visible:where(:not(.chat-input-option-pressed)) {
+					outline: 2px solid rgb(116 128 255 / 0.75);
+					outline-offset: 2px;
 				}
 				[data-theme="light"] .chat-input-option-btn {
 					color: var(--ov-l-text-strong);
