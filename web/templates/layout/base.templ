@@ -821,27 +821,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: oklch(var(--bc) / 1);
 					box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 				}
-				.chat-input-option-btn:active:where(:not(:disabled)),
-				.chat-input-option-btn.chat-input-option-pressed,
-				.chat-input-option-btn.chat-input-option-pressed:hover,
-				.chat-input-option-btn.chat-input-option-pressed:active,
-				.chat-input-option-btn.chat-input-option-pressed:focus,
-				.chat-input-option-btn.chat-input-option-pressed:focus-visible {
-					border-color: rgb(116 128 255 / 0.55) !important;
-					outline-color: transparent !important;
-					outline-style: none !important;
-					outline-width: 0 !important;
-					--tw-ring-color: transparent !important;
-					--tw-ring-offset-color: transparent !important;
-					--tw-ring-shadow: 0 0 #0000 !important;
-					box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05) !important;
-				}
-				.chat-input-option-btn:focus:where(:not(:focus-visible)),
-				.chat-input-option-btn.chat-input-option-pressed:focus,
-				.chat-input-option-btn.chat-input-option-pressed:focus-visible {
+				.chat-input-option-btn:focus:where(:not(:focus-visible)) {
 					outline: none !important;
 				}
-				.chat-input-option-btn:focus-visible:where(:not(.chat-input-option-pressed)) {
+				.chat-input-option-btn:focus-visible {
 					outline: 2px solid rgb(116 128 255 / 0.75);
 					outline-offset: 2px;
 				}
@@ -854,7 +837,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				.chat-input-option-btn.chat-input-option-selected {
 					background: oklch(var(--b2) / 1);
-					box-shadow: inset 0 0 0 2px oklch(var(--p) / 0.35), 0 1px 2px oklch(var(--bc) / 0.08);
+					box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 				}
 				.chat-input-recommended-badge {
 					display: inline-flex;
@@ -871,7 +854,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.chat-input-recommended-shortcut {
 					background: var(--ov-primary-action-color, #7480ff) !important;
 					color: #111827 !important;
-					font-weight: 700;
+					font-weight: 400;
 				}
 				.chat-input-recommended-shortcut:hover:where(:not(:disabled)),
 				.chat-input-recommended-shortcut:active:where(:not(:disabled)) {
