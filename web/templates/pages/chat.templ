@@ -1324,7 +1324,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									var label = option && option.label ? String(option.label) : '';
 									if (!label) return;
 									var button = document.createElement('div');
-									button.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+									button.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 									button.style.setProperty('--btn-focus-scale', '1');
 									button.setAttribute('role', 'button');
 									button.setAttribute('tabindex', '0');
@@ -1355,7 +1355,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									fieldset.appendChild(button);
 								});
 								var customButton = document.createElement('div');
-								customButton.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+								customButton.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 								customButton.style.setProperty('--btn-focus-scale', '1');
 								customButton.setAttribute('role', 'button');
 								customButton.setAttribute('tabindex', '0');
@@ -1382,7 +1382,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							recommendedActions.className = 'pt-1';
 							recommendedActions.setAttribute('data-chat-input-recommended-actions', 'true');
 							var recommended = document.createElement('div');
-							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md active:border-primary hover:border-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md active:border-primary hover:border-primary transition-all flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 							recommended.style.setProperty('--btn-focus-scale', '1');
 							recommended.setAttribute('role', 'button');
 							recommended.setAttribute('tabindex', '0');
@@ -1942,10 +1942,28 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var control = event.target && event.target.closest ? event.target.closest('[data-chat-input-option], [data-chat-input-nav="recommended"]') : null;
 								if (!control || control.getAttribute('aria-disabled') === 'true') return;
 								control.classList.add('chat-input-option-pressed');
-							});
+								control.style.setProperty('background-color', getComputedStyle(control).backgroundColor, 'important');
+								control.style.setProperty('border-color', 'rgb(116 128 255 / 0.55)', 'important');
+								control.style.setProperty('outline-color', 'transparent', 'important');
+								control.style.setProperty('outline-style', 'none', 'important');
+								control.style.setProperty('outline-width', '0', 'important');
+								control.style.setProperty('--tw-ring-color', 'transparent', 'important');
+								control.style.setProperty('--tw-ring-offset-color', 'transparent', 'important');
+								control.style.setProperty('--tw-ring-shadow', '0 0 #0000', 'important');
+								control.style.setProperty('box-shadow', '0 1px 2px 0 rgb(0 0 0 / 0.05)', 'important');
+							}, true);
 							function clearChatInputPressedControls() {
 								document.querySelectorAll('.chat-input-option-pressed').forEach(function(control) {
 									control.classList.remove('chat-input-option-pressed');
+									control.style.removeProperty('background-color');
+									control.style.removeProperty('border-color');
+									control.style.removeProperty('outline-color');
+									control.style.removeProperty('outline-style');
+									control.style.removeProperty('outline-width');
+									control.style.removeProperty('--tw-ring-color');
+									control.style.removeProperty('--tw-ring-offset-color');
+									control.style.removeProperty('--tw-ring-shadow');
+									control.style.removeProperty('box-shadow');
 								});
 							}
 							['pointerup', 'pointercancel', 'pointerleave', 'blur'].forEach(function(type) {

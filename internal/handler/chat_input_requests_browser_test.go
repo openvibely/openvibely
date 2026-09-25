@@ -134,8 +134,12 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				createButton.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:1, pointerType:'mouse'}));
 				await nextFrame();
 				if (!createButton.classList.contains('chat-input-option-pressed')) fail('question option did not enter the stable pressed border state');
-				var pressedBorderColor = getComputedStyle(createButton).borderColor;
+				if (!createButton.getAttribute('style').includes('border-color')) fail('question option press state did not install the inline border guard');
+				var pressedStyle = getComputedStyle(createButton);
+				var pressedBorderColor = pressedStyle.borderColor;
 				if (pressedBorderColor === 'rgb(255, 255, 255)' || pressedBorderColor === initialBorderColor) fail('question option press state did not use the stable primary border color');
+				if (pressedStyle.outlineStyle !== 'none' && pressedStyle.outlineWidth !== '0px') fail('question option press state can still paint an outline: style=' + pressedStyle.outlineStyle + ' width=' + pressedStyle.outlineWidth + ' color=' + pressedStyle.outlineColor + ' inline=' + createButton.getAttribute('style'));
+				if (pressedStyle.boxShadow.indexOf('255, 255, 255') !== -1) fail('question option press state can still paint a white ring or shadow');
 				createButton.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, pointerId:1, pointerType:'mouse'}));
 				await nextFrame();
 				if (createButton.classList.contains('chat-input-option-pressed')) fail('question option stayed in pressed border state after pointer up');
