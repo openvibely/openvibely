@@ -112,6 +112,13 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 	return err != nil && ctx.Err() == nil && errors.Is(err, errResponsesWebsocketTransport)
 }
 
+func classifyResponsesWebsocketStreamError(err error) error {
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("%w: response stream ended before response.completed: %w", errResponsesWebsocketTransport, err)
+	}
+	return err
+}
+
 const (
 	openAIResponsesWebsocketBeta = "responses_websockets=2026-02-06"
 	responsesLiteMetadataKey     = "ws_request_header_x_openai_internal_codex_responses_lite"

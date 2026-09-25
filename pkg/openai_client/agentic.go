@@ -2191,6 +2191,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		}
 		result, wsErr := c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
 		body.Close()
+		if useWebsocket {
+			wsErr = classifyResponsesWebsocketStreamError(wsErr)
+		}
 		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
 			c.responsesTransportState.disableWebsocket()
 		}

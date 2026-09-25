@@ -1216,6 +1216,59 @@ func TestSendAgentic_ResponsesLiteStreamFailureFallsBackBeforeOutput(t *testing.
 	}
 }
 
+func TestSendAgentic_ResponsesLiteUnexpectedEOFFallsBackToHTTP(t *testing.T) {
+	var websocketAttempts atomic.Int32
+	var httpRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			websocketAttempts.Add(1)
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Errorf("accept websocket: %v", err)
+				return
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "")
+			if _, _, err := conn.Read(r.Context()); err != nil {
+				t.Errorf("read websocket request: %v", err)
+				return
+			}
+			// A terminal event without its response payload makes the SSE parser
+			// report io.ErrUnexpectedEOF after the websocket adapter closes its pipe.
+			_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed"}`))
+			return
+		}
+		httpRequests.Add(1)
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "true" {
+			t.Fatalf("Responses Lite header = %q", got)
+		}
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"recovered"}`,
+			`{"type":"response.completed","response":{"status":"completed","model":"gpt-6-luna"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
+
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
+	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:        "gpt-6-luna",
+		DisableTools: true,
+		MaxTurns:     1,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "recovered" {
+		t.Fatalf("Text = %q, want recovered", resp.Text)
+	}
+	if websocketAttempts.Load() != 1 || httpRequests.Load() != 1 {
+		t.Fatalf("attempts websocket=%d HTTP=%d", websocketAttempts.Load(), httpRequests.Load())
+	}
+}
+
 func TestSendAgentic_ResponsesLiteReusesConnectionAndSendsIncrementalTurn(t *testing.T) {
 	var handshakes atomic.Int32
 	requests := make(chan map[string]any, 2)
