@@ -131,10 +131,14 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (!createStyle.boxShadow || createStyle.boxShadow === 'none') fail('question option regressed to flat text styling');
 				if (createStyle.backgroundColor === 'rgb(0, 0, 0)' || createStyle.backgroundColor === 'rgba(0, 0, 0, 0)') fail('question option rendered with an unreadable black or transparent background');
 				if (createStyle.color === createStyle.backgroundColor) fail('question option text color matched its background');
-				createButton.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+				createButton.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:1, pointerType:'mouse'}));
 				await nextFrame();
-				if (getComputedStyle(createButton).borderColor !== initialBorderColor) fail('question option border changed on mouse down');
-				createButton.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
+				if (!createButton.classList.contains('chat-input-option-pressed')) fail('question option did not enter the stable pressed border state');
+				var pressedBorderColor = getComputedStyle(createButton).borderColor;
+				if (pressedBorderColor === 'rgb(255, 255, 255)' || pressedBorderColor === initialBorderColor) fail('question option press state did not use the stable primary border color');
+				createButton.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, pointerId:1, pointerType:'mouse'}));
+				await nextFrame();
+				if (createButton.classList.contains('chat-input-option-pressed')) fail('question option stayed in pressed border state after pointer up');
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
