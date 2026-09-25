@@ -1382,7 +1382,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							recommendedActions.className = 'pt-1';
 							recommendedActions.setAttribute('data-chat-input-recommended-actions', 'true');
 							var recommended = document.createElement('div');
-							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md active:border-primary hover:border-primary transition-all inline-flex items-start justify-start h-auto min-h-0 w-fit max-w-full px-4 py-3 text-left normal-case';
+							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md active:border-primary hover:border-primary transition-all inline-flex items-center justify-start h-auto min-h-0 w-fit max-w-full px-4 py-2 text-left font-normal normal-case';
 							recommended.style.setProperty('--btn-focus-scale', '1');
 							recommended.setAttribute('role', 'button');
 							recommended.setAttribute('tabindex', '0');
