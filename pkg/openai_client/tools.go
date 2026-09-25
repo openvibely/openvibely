@@ -9,11 +9,12 @@ import (
 )
 
 type ToolDefinition struct {
-	Type        string          `json:"type"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	Parameters  json.RawMessage `json:"parameters"`
-	Async       bool            `json:"async,omitempty"`
+	Type        string           `json:"type"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Parameters  json.RawMessage  `json:"parameters,omitempty"`
+	Tools       []ToolDefinition `json:"tools,omitempty"`
+	Async       bool             `json:"async,omitempty"`
 }
 
 // ToolCall records a single tool invocation and its result.

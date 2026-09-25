@@ -82,7 +82,7 @@ func mapBuiltInToolName(name string) string {
 		return "Glob"
 	case "grep_search":
 		return "Grep"
-	case "web_search", "web_search_preview":
+	case "web_search", "web_search_preview", "web.run":
 		return "WebSearch"
 	default:
 		return ""
@@ -1258,7 +1258,7 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		if p, ok := m["pattern"].(string); ok {
 			return p
 		}
-	case "web_search", "web_search_preview":
+	case "web_search", "web_search_preview", "web.run":
 		if detail := webSearchSecondaryFromInput(m); detail != "" {
 			return truncateToolSecondary(detail, 140)
 		}
@@ -1275,6 +1275,33 @@ func webSearchSecondaryFromInput(m map[string]interface{}) string {
 	query := getString("query")
 	if query != "" {
 		return query
+	}
+	firstOperation := func(key string) map[string]interface{} {
+		items, _ := m[key].([]interface{})
+		if len(items) == 0 {
+			return nil
+		}
+		item, _ := items[0].(map[string]interface{})
+		return item
+	}
+	for _, key := range []string{"search_query", "image_query"} {
+		if item := firstOperation(key); item != nil {
+			if value, _ := item["q"].(string); strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	if item := firstOperation("find"); item != nil {
+		refID, _ := item["ref_id"].(string)
+		findPattern, _ := item["pattern"].(string)
+		if strings.TrimSpace(findPattern) != "" {
+			return "'" + strings.TrimSpace(findPattern) + "' in " + strings.TrimSpace(refID)
+		}
+	}
+	if item := firstOperation("open"); item != nil {
+		if refID, _ := item["ref_id"].(string); strings.TrimSpace(refID) != "" {
+			return strings.TrimSpace(refID)
+		}
 	}
 
 	url := getString("url")

@@ -108,10 +108,11 @@ type AgenticOptions struct {
 	OnAsyncToolDelivered    func(context.Context, AsyncToolCallRecord) error
 	OnAsyncToolRejected     func(context.Context, AsyncToolCallRecord, error) error
 
-	// WebSearchEnabled adds the provider-native web search tool to the request
-	// when the model supports it. The search is executed server-side by OpenAI;
-	// no local tool execution is needed.
-	WebSearchEnabled bool
+	// WebSearchEnabled enables web search when the model supports it.
+	// API-key requests use hosted web_search;
+	// Responses Lite OAuth requests use the client-executed web.run tool.
+	WebSearchEnabled    bool
+	standaloneWebSearch func(ctx context.Context, input json.RawMessage) (string, bool, error)
 
 	// Callbacks for real-time output
 	OnText       func(text string)                              // called for each text delta
@@ -318,6 +319,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	isChatGPTOAuth := strings.TrimSpace(c.auth.APIKey) == ""
+	useStandaloneWebSearch := isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) && opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model)
+	var standaloneSearchInput []any
+	if useStandaloneWebSearch {
+		optsCopy := *opts
+		optsCopy.standaloneWebSearch = func(searchCtx context.Context, commands json.RawMessage) (string, bool, error) {
+			return c.runStandaloneWebSearch(searchCtx, optsCopy.Model, standaloneSearchInput, commands, normalizedToolOutputTokenLimit(optsCopy.ToolOutputTokenLimit))
+		}
+		opts = &optsCopy
+	}
 
 	if err := c.ensureValidToken(); err != nil {
 		return nil, err
@@ -332,6 +342,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			tools = append(tools, opts.ExtraTools...)
 		}
 		tools = filterToolDefinitions(tools, opts.ToolFilter)
+	}
+	if useStandaloneWebSearch {
+		tools = append(tools, standaloneWebSearchTool())
 	}
 
 	finalReasoningEffort := normalizedAstraReasoningEffort(opts.Model, opts.ReasoningEffort)
@@ -574,6 +587,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			outputItems = statelessOAuthOutputItems(outputItems)
 		}
 		inputItems = append(inputItems, outputItems...)
+		if useStandaloneWebSearch {
+			standaloneSearchInput = append([]any(nil), inputItems...)
+		}
 
 		// If no tool calls, we're done
 		if len(turnResult.toolCalls) == 0 {
@@ -782,6 +798,15 @@ func completedOpenAIFunctionCallArguments(raw any, streamedArgs string) string {
 	return normalizeOpenAIFunctionCallArguments(streamedArgs)
 }
 
+func openAIToolCallName(namespace, name string) string {
+	namespace = strings.TrimSpace(namespace)
+	name = strings.TrimSpace(name)
+	if namespace == "" || name == "" {
+		return name
+	}
+	return namespace + "." + name
+}
+
 func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []openAIToolExecutionTask) []openAIToolExecutionResult {
 	if len(tasks) == 0 {
 		return nil
@@ -849,7 +874,13 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 	output := ""
 	isError := false
 	var err error
-	if opts.ToolFilter != nil && !opts.ToolFilter(name) {
+	if name == standaloneWebSearchToolName && opts.standaloneWebSearch != nil {
+		output, isError, err = opts.standaloneWebSearch(ctx, input)
+		if err != nil {
+			isError = true
+			output = err.Error()
+		}
+	} else if opts.ToolFilter != nil && !opts.ToolFilter(name) {
 		isError = true
 		output = fmt.Sprintf("tool %s is not allowed by this agent", name)
 	} else if opts.ToolExecutor != nil {
@@ -871,7 +902,7 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 func allOpenAIToolsReadOnly(tasks []openAIToolExecutionTask) bool {
 	for _, task := range tasks {
 		switch task.call.Name {
-		case "read_file", "list_files", "grep_search":
+		case "read_file", "list_files", "grep_search", standaloneWebSearchToolName:
 			continue
 		default:
 			return false
@@ -2089,9 +2120,10 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		payload["tools"] = tools
 	}
 
-	// Add provider-native web search tool when enabled and model supports it.
-	// This is a native provider tool (not a function tool) executed server-side.
-	if opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model) {
+	// API-key and standard Responses requests use OpenAI's hosted web_search.
+	// Responses Lite OAuth requests already carry the client-executed web.run
+	// namespace in tools.
+	if opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model) && !(isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model)) {
 		existing, _ := payload["tools"].([]ToolDefinition)
 		rawTools := make([]any, 0, len(existing)+1)
 		for _, t := range existing {
@@ -2111,12 +2143,12 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		payload["truncation"] = "auto"
 	}
 
-	// Responses Lite accepts client-executed tools through additional_tools but
-	// does not accept provider-hosted tools there. Use the standard Responses
-	// request shape whenever native web search is present so the tool remains in
-	// the top-level tools array and can actually execute.
-	if isResponsesLiteWebsocketModel(opts.Model) && !responsesToolsContainHostedTool(payload["tools"]) {
-		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+	if isResponsesLiteWebsocketModel(opts.Model) {
+		useResponsesLite := isChatGPTOAuth
+		wsPayload := buildStandardResponsesWebsocketPayload(payload)
+		if useResponsesLite {
+			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		}
 		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
 			if useWebsocket {
 				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
@@ -2126,7 +2158,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 				}
 				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth, wsOptions)
 			}
-			return c.openResponsesLiteHTTPStream(ctx, wsPayload, isChatGPTOAuth)
+			return c.openResponsesHTTPStream(ctx, wsPayload, isChatGPTOAuth, useResponsesLite)
 		}
 		useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
 		body, wsErr := openStream(useWebsocket)
@@ -2235,9 +2267,10 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 
 	// Track function calls being built incrementally
 	type fnCallState struct {
-		callID string
-		name   string
-		args   strings.Builder
+		callID    string
+		namespace string
+		name      string
+		args      strings.Builder
 	}
 	fnCalls := make(map[int]*fnCallState)
 	// bool value indicates whether the emitted tool-use had display detail.
@@ -2312,8 +2345,9 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				if itemType == "function_call" {
 					emitter.FlushBoundary()
 					fnCalls[idx] = &fnCallState{
-						callID: stringFromAny(item["call_id"]),
-						name:   stringFromAny(item["name"]),
+						callID:    stringFromAny(item["call_id"]),
+						namespace: stringFromAny(item["namespace"]),
+						name:      stringFromAny(item["name"]),
 					}
 				} else if isProviderNativeOutputItem(itemType) {
 					emitter.FlushBoundary()
@@ -2344,6 +2378,7 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 				case "function_call":
 					emitter.FlushBoundary()
 					callID := stringFromAny(item["call_id"])
+					namespace := stringFromAny(item["namespace"])
 					name := stringFromAny(item["name"])
 					fc := fnCalls[intFromAny(ev["output_index"])]
 					if fc == nil && callID != "" {
@@ -2363,7 +2398,11 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 						if name == "" {
 							name = fc.name
 						}
+						if namespace == "" {
+							namespace = fc.namespace
+						}
 					}
+					name = openAIToolCallName(namespace, name)
 					args := completedOpenAIFunctionCallArguments(item["arguments"], streamedArgs)
 					if name != "" {
 						result.toolCalls = append(result.toolCalls, toolCallInfo{
@@ -2562,6 +2601,9 @@ func openAIModelSupportsWebSearch(model string) bool {
 	return strings.HasPrefix(m, "gpt-6-astra") ||
 		strings.HasPrefix(m, "gpt-6-sol") ||
 		strings.HasPrefix(m, "gpt-6-luna") ||
+		strings.HasPrefix(m, "gpt-5.6-sol") ||
+		strings.HasPrefix(m, "gpt-5.6-terra") ||
+		strings.HasPrefix(m, "gpt-5.6-luna") ||
 		strings.HasPrefix(m, "gpt-5.5") ||
 		strings.HasPrefix(m, "gpt-5.4") ||
 		strings.HasPrefix(m, "gpt-5.3") ||

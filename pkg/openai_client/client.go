@@ -551,16 +551,20 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 
 	if isResponsesLiteWebsocketModel(opts.Model) {
 		payload["stream"] = true
-		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		useResponsesLite := isChatGPTOAuth
+		wsPayload := buildStandardResponsesWebsocketPayload(payload)
+		if useResponsesLite {
+			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		}
 		result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			RetryableError:                       isRetryableResponsesTransportError,
 			RetryConnectionFailuresWithoutBudget: true,
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
-					applog.Infof("[openai-client] reconnecting responses-lite stream in %v: %v", event.Delay, event.Err)
+					applog.Infof("[openai-client] reconnecting responses websocket stream in %v: %v", event.Delay, event.Err)
 					return
 				}
-				applog.Infof("[openai-client] retrying responses-lite stream, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+				applog.Infof("[openai-client] retrying responses websocket stream, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
 			},
 		}, func(attemptCtx context.Context) (*Response, error) {
 			policy := httpretry.DefaultPolicy()
@@ -572,7 +576,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 					if useWebsocket {
 						return c.openResponsesWebsocketStream(streamCtx, wsPayload, isChatGPTOAuth, responsesWebsocketStreamOptions{Model: opts.Model})
 					}
-					return c.openResponsesLiteHTTPStream(streamCtx, wsPayload, isChatGPTOAuth)
+					return c.openResponsesHTTPStream(streamCtx, wsPayload, isChatGPTOAuth, useResponsesLite)
 				}
 				useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
 				body, wsErr := openStream(useWebsocket)

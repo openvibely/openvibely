@@ -475,6 +475,20 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	return request
 }
 
+// buildStandardResponsesWebsocketPayload preserves the public Responses API
+// request shape and adds only the WebSocket event envelope. OpenAI WebSocket
+// mode does not use HTTP transport fields such as stream or background.
+func buildStandardResponsesWebsocketPayload(payload map[string]any) map[string]any {
+	request := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		request[key] = value
+	}
+	request["type"] = "response.create"
+	delete(request, "stream")
+	delete(request, "background")
+	return request
+}
+
 type responsesWebsocketStreamOptions struct {
 	Model                 string
 	OnMidTurnSteering     AstraMidTurnSteeringCallback
@@ -1230,16 +1244,17 @@ func hasInputPrefix(input, prefix []any) bool {
 	return true
 }
 
-func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPayload map[string]any, isChatGPTOAuth bool) (io.ReadCloser, error) {
+func (c *Client) openResponsesHTTPStream(ctx context.Context, websocketPayload map[string]any, isChatGPTOAuth, responsesLite bool) (io.ReadCloser, error) {
 	payload := make(map[string]any, len(websocketPayload))
 	for key, value := range websocketPayload {
 		payload[key] = value
 	}
 	delete(payload, "type")
 	delete(payload, "client_metadata")
+	payload["stream"] = true
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal Responses Lite HTTP request: %w", err)
+		return nil, fmt.Errorf("marshal Responses HTTP request: %w", err)
 	}
 	endpoint, err := c.responsesEndpoint(isChatGPTOAuth)
 	if err != nil {
@@ -1253,7 +1268,9 @@ func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPaylo
 		c.applyAuthHeaders(req, isChatGPTOAuth)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "text/event-stream")
-		req.Header.Set("x-openai-internal-codex-responses-lite", "true")
+		if responsesLite {
+			req.Header.Set("x-openai-internal-codex-responses-lite", "true")
+		}
 		return req, nil
 	}
 	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
@@ -1266,6 +1283,10 @@ func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPaylo
 		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %w", endpoint, parseAPIError(resp.StatusCode, errBody)))
 	}
 	return resp.Body, nil
+}
+
+func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPayload map[string]any, isChatGPTOAuth bool) (io.ReadCloser, error) {
+	return c.openResponsesHTTPStream(ctx, websocketPayload, isChatGPTOAuth, true)
 }
 
 func isTerminalResponsesWebsocketEvent(eventType string) bool {
