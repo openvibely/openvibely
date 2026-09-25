@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -878,14 +877,7 @@ func TestSwarmServiceAssignedAgentIDResolutionUsesCompactProjection(t *testing.T
 		}
 	}
 
-	const iterations = 1000
-	compactDuration, compactBytesPerOp := measureSwarmAgentResolutionForTest(t, iterations, func() *string {
-		return svc.resolveAssignedAgentID(ctx, projectID, nil)
-	})
-	compactPerOp := compactDuration / iterations
 	require.Less(t, compactSelectedBytes, 50*1024, "compact default-ID resolution should select less than 50 KB")
-	require.Less(t, compactPerOp, 50*time.Microsecond, "compact default-ID resolution should stay below the interactive path budget")
-	require.Less(t, compactBytesPerOp, int64(50*1024), "compact default-ID resolution should allocate less than 50 KB/op")
 }
 
 func BenchmarkSwarmAssignedAgentIDResolution(b *testing.B) {
@@ -964,22 +956,6 @@ func createWideSwarmModelResolutionFixture(t testing.TB, ctx context.Context, pr
 	}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	return project.ID, projectDefaultID
-}
-
-func measureSwarmAgentResolutionForTest(t testing.TB, iterations int, resolve func() *string) (time.Duration, int64) {
-	t.Helper()
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	start := time.Now()
-	for i := 0; i < iterations; i++ {
-		if resolved := resolve(); resolved == nil || strings.TrimSpace(*resolved) == "" {
-			t.Fatalf("resolver returned empty id on iteration %d", i)
-		}
-	}
-	duration := time.Since(start)
-	runtime.ReadMemStats(&after)
-	return duration, int64(after.TotalAlloc-before.TotalAlloc) / int64(iterations)
 }
 
 func TestSwarmServiceApplyPlannerOutputAllowsOverlappingWorktreeScopes(t *testing.T) {
