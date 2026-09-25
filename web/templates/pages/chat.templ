@@ -1325,7 +1325,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (!label) return;
 									var button = document.createElement('button');
 									button.type = 'button';
-									button.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+									button.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 									button.style.setProperty('--btn-focus-scale', '1');
 									button.setAttribute('data-chat-input-option', 'true');
 									button.setAttribute('data-question-id', qid);
@@ -1355,7 +1355,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								});
 								var customButton = document.createElement('button');
 								customButton.type = 'button';
-								customButton.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+								customButton.className = 'chat-input-option-btn card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 active:border-primary/40 hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 								customButton.style.setProperty('--btn-focus-scale', '1');
 								customButton.setAttribute('data-chat-input-option', 'true');
 								customButton.setAttribute('data-chat-input-custom-option', 'true');
@@ -1381,7 +1381,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							recommendedActions.setAttribute('data-chat-input-recommended-actions', 'true');
 							var recommended = document.createElement('button');
 							recommended.type = 'button';
-							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
+							recommended.className = 'chat-input-option-btn chat-input-recommended-shortcut card bg-primary shadow-sm border border-primary cursor-pointer hover:shadow-md active:border-primary hover:border-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset flex items-start justify-start h-auto min-h-0 w-full px-4 py-3 text-left normal-case';
 							recommended.style.setProperty('--btn-focus-scale', '1');
 							recommended.setAttribute('data-chat-input-nav', 'recommended');
 							recommended.setAttribute('aria-label', 'Use recommended answers and continue');
