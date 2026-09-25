@@ -3,6 +3,8 @@ package openaiclient
 import (
 	"bytes"
 	"context"
+	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,16 +14,10 @@ import (
 )
 
 const standaloneWebSearchToolName = "web.run"
+const standaloneWebSearchStructuredOutputPrefix = "web-search-json:"
 
-const standaloneWebSearchDescription = `Access the internet using one or more commands in a single call.
-
-Use search_query to search, open to read a result or URL, click to follow a page link, find to locate text in a page, and screenshot for PDF pages. Finance, weather, sports, time, and image_query are also available.
-
-Batch independent commands when practical. Send at most four search_query entries per call; when sending four, set response_length to medium or long. Omit empty fields.
-
-Browse whenever the user asks for current, recent, verified, quoted, linked, or precisely sourced information, and whenever facts may have changed. For news, distinguish publication time from when the event occurred. Use primary or authoritative sources for technical and high-stakes claims.
-
-Search results return reference IDs such as turn0search0. Use open/click/find with those IDs when more detail is needed. In the final answer, cite sources with descriptive Markdown links to their actual URLs; never expose internal reference IDs or link to a search-results page. Keep quotations short and summarize copyrighted material.`
+//go:embed web_run_description.md
+var standaloneWebSearchDescription string
 
 // WebSearchResult preserves both the model-facing search output and the
 // structured result metadata returned by alpha/search.
@@ -47,6 +43,16 @@ func (r WebSearchResult) DisplayOutput() string {
 		return "Search results:\n" + pretty.String()
 	}
 	return output + "\n\nSearch results:\n" + pretty.String()
+}
+
+// StructuredOutput preserves the alpha/search response fields across the
+// provider-neutral text stream so the web client can render source metadata.
+func (r WebSearchResult) StructuredOutput() string {
+	encoded, err := json.Marshal(r)
+	if err != nil {
+		return r.DisplayOutput()
+	}
+	return standaloneWebSearchStructuredOutputPrefix + base64.RawURLEncoding.EncodeToString(encoded)
 }
 
 // standaloneWebSearchTool mirrors the Codex Responses Lite web namespace. The

@@ -2154,6 +2154,43 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					overflow: hidden;
 					margin: 0 0 0.35rem;
 				}
+				.stream-web-search-sources {
+					display: grid;
+					gap: 0.45rem;
+					padding: 0.65rem;
+				}
+				.stream-web-search-sources-heading {
+					font-size: 0.7rem;
+					font-weight: 700;
+					letter-spacing: 0.06em;
+					text-transform: uppercase;
+					opacity: 0.65;
+				}
+				.stream-web-search-source {
+					display: grid;
+					gap: 0.15rem;
+					padding: 0.55rem 0.65rem;
+					border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+					border-radius: 0.5rem;
+					color: inherit;
+					text-decoration: none;
+				}
+				.stream-web-search-source:hover {
+					border-color: color-mix(in srgb, currentColor 32%, transparent);
+					background: color-mix(in srgb, currentColor 5%, transparent);
+				}
+				.stream-web-search-source-title {
+					font-weight: 600;
+				}
+				.stream-web-search-source-domain {
+					font-size: 0.72rem;
+					opacity: 0.65;
+				}
+				.stream-web-search-source-snippet {
+					font-size: 0.78rem;
+					line-height: 1.35;
+					opacity: 0.82;
+				}
 				/* Tool status icons (check / error) */
 				.tool-status-icon {
 					width: 14px; height: 14px;

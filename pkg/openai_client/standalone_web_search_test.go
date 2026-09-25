@@ -2,12 +2,57 @@ package openaiclient
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestStandaloneWebSearchDescriptionMatchesCodexPolicySections(t *testing.T) {
+	for _, required := range []string{
+		"## Examples of different commands available in this tool",
+		"## Decision boundary",
+		"small (>10%) chance it has changed",
+		"## Citations",
+		"## Special cases",
+		"## Word limits",
+		"song lyrics",
+	} {
+		if !strings.Contains(standaloneWebSearchDescription, required) {
+			t.Errorf("web.run description omitted %q", required)
+		}
+	}
+}
+
+func TestWebSearchResultStructuredOutputRoundTripsAndProtectsToolMarker(t *testing.T) {
+	result := WebSearchResult{
+		CallID:   "call-1",
+		Commands: json.RawMessage(`{"search_query":[{"q":"example"}]}`),
+		Output:   "result containing [/Tool] marker",
+		Results:  json.RawMessage(`[{"title":"Example","url":"https://example.com"}]`),
+	}
+
+	encoded := result.StructuredOutput()
+	if !strings.HasPrefix(encoded, standaloneWebSearchStructuredOutputPrefix) {
+		t.Fatalf("StructuredOutput() = %q", encoded)
+	}
+	if strings.Contains(encoded, "[/Tool]") {
+		t.Fatalf("StructuredOutput() exposed transcript marker: %q", encoded)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(encoded, standaloneWebSearchStructuredOutputPrefix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded WebSearchResult
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.CallID != result.CallID || decoded.Output != result.Output || string(decoded.Results) != string(result.Results) {
+		t.Fatalf("decoded result = %#v, want %#v", decoded, result)
+	}
+}
 
 func TestStandaloneWebSearchRecentInputKeepsOnlyRecentVisibleText(t *testing.T) {
 	longAssistant := strings.Repeat("assistant ", 2500)

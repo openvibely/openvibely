@@ -623,7 +623,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnWebSearchResult: func(result openaiclient.WebSearchResult) {
-			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: "web.run", Output: result.DisplayOutput()}, false)
+			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: "web.run", Output: result.StructuredOutput()}, false)
 		},
 		OnCompaction: func(summary string) {
 			applog.Infof("[openai-adapter] CallStreaming context compacted, summary_len=%d", len(summary))
@@ -756,7 +756,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: name, Output: output, IsError: isError}, false)
 		},
 		OnWebSearchResult: func(result openaiclient.WebSearchResult) {
-			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: "web.run", Output: result.DisplayOutput()}, false)
+			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventToolResult, ToolName: "web.run", Output: result.StructuredOutput()}, false)
 		},
 		OnCompaction: func(summary string) {
 			applog.Infof("[openai-adapter] CallChatStreaming context compacted, summary_len=%d", len(summary))
