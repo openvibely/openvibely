@@ -18,6 +18,19 @@ import (
 )
 
 func TestHandler_GetAgentSkills_MigratesLegacyEmbeddedSkills(t *testing.T) {
+	const sharedSkillName = "Legacy Debug"
+	standaloneDecl, _, err := agentlibrary.NormalizeStandaloneSkillPackage(
+		"# "+sharedSkillName+"\n\nUse logs\n",
+		sharedSkillName,
+		"global",
+	)
+	if err != nil {
+		t.Fatalf("normalize standalone skill package: %v", err)
+	}
+	if standaloneDecl.Skill.Key != "legacy_debug" {
+		t.Fatalf("standalone skill key = %q, want legacy_debug", standaloneDecl.Skill.Key)
+	}
+
 	db := testutil.NewTestDB(t)
 	repo := repository.NewAgentRepo(db)
 	agent := &models.Agent{
@@ -26,7 +39,7 @@ func TestHandler_GetAgentSkills_MigratesLegacyEmbeddedSkills(t *testing.T) {
 		Scope:   models.AgentScopeGlobal,
 		Enabled: true,
 		Skills: []models.SkillConfig{{
-			Name:        "Legacy Debug",
+			Name:        sharedSkillName,
 			Description: "Legacy debug things",
 			Tools:       "Read,Grep",
 			Content:     "Use logs",
@@ -66,7 +79,7 @@ func TestHandler_GetAgentSkills_MigratesLegacyEmbeddedSkills(t *testing.T) {
 	if !containsAll(rec.Body.String(), "review_migrations", "legacy_debug", "Legacy Debug", "router_index") {
 		t.Fatalf("unexpected body: %s", rec.Body.String())
 	}
-	data, err := os.ReadFile(filepath.Join(root, "agents", "skill_agent", "skills", "legacy_debug", "SKILL.md"))
+	data, err := os.ReadFile(filepath.Join(root, "agents", "skill_agent", "skills", standaloneDecl.Skill.Key, "SKILL.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
