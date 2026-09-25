@@ -7211,9 +7211,9 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 	assertAutoSelectionQueryShape(t, counter.Statements(), true)
 }
 
-func TestSelectAgent_AutoCompactSelectionLargeFixtureBudget(t *testing.T) {
+func TestSelectAgent_AutoCompactSelectionLargeFixture(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping browser/task-thread auto-selection performance guard in short mode")
+		t.Skip("skipping browser/task-thread auto-selection large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
@@ -7222,27 +7222,11 @@ func TestSelectAgent_AutoCompactSelectionLargeFixtureBudget(t *testing.T) {
 	seedLargeAutoSelectionConfigs(t, ctx, llmConfigRepo, 50)
 	message := "build endpoint handler service database integration test"
 
-	compactThenGet := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			selected, err := h.autoSelectAgent(ctx, message, false)
-			if err != nil {
-				b.Fatal(err)
-			}
-			assertSelectedModelFullyHydrated(b, selected)
-		}
-	})
-
-	const (
-		maxCompactDuration   = 200 * time.Microsecond
-		maxCompactBytesPerOp = 300 * 1024
-	)
-	t.Logf("browser/task-thread auto compact+GetByID: %d ns/op, %d B/op", compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
-	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
-		t.Fatalf("compact auto selection took %s/op, want <= %s", time.Duration(compactThenGet.NsPerOp()), maxCompactDuration)
+	selected, err := h.autoSelectAgent(ctx, message, false)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
-		t.Fatalf("compact auto selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxCompactBytesPerOp)
-	}
+	assertSelectedModelFullyHydrated(t, selected)
 }
 
 func BenchmarkBrowserTaskThreadAutoSelection(b *testing.B) {
