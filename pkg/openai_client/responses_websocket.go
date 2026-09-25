@@ -128,6 +128,13 @@ func doResponsesStreamTurn[T any](ctx context.Context, c *Client, model string, 
 		if state.hasAstraSteeringAmbiguous() {
 			return false, fmt.Errorf("cannot resume while steering delivery is unresolved: %w", err)
 		}
+		// Committed steering lives in the server-side successor, not in the
+		// original input captured by fn. Replaying that input would silently
+		// lose the user's update. Leave commits intact for the caller's durable
+		// recovery handling, and stop before retry or overflow compaction.
+		if state.hasAstraSteeringCommits() {
+			return false, fmt.Errorf("cannot retry after committed steering without restoring its input: %w", err)
+		}
 		if recoverTurn != nil {
 			return recoverTurn(err)
 		}
@@ -147,7 +154,7 @@ func doResponsesStreamTurn[T any](ctx context.Context, c *Client, model string, 
 		return result, err
 	}
 	result, err := httpretry.DoStreamTurn(ctx, policy, guardedAttempt)
-	if err == nil || ctx.Err() != nil || !isResponsesLiteWebsocketModel(model) || state.websocketDisabled.Load() || state.hasAstraSteeringAmbiguous() ||
+	if err == nil || ctx.Err() != nil || !isResponsesLiteWebsocketModel(model) || state.websocketDisabled.Load() || state.hasAstraSteeringAmbiguous() || state.hasAstraSteeringCommits() ||
 		!(isRetryableResponsesTransportError(err) || httpretry.IsRetryableError(err)) {
 		return result, err
 	}
@@ -335,6 +342,15 @@ func (s *ResponsesTransportState) takeAstraSteeringCommits() []ResponsesSteering
 	commits := append([]ResponsesSteeringDelivery(nil), s.astraSteeringCommits...)
 	s.astraSteeringCommits = nil
 	return commits
+}
+
+func (s *ResponsesTransportState) hasAstraSteeringCommits() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.astraSteeringCommits) > 0
 }
 
 func (s *ResponsesTransportState) takeAstraSteeringAmbiguous() []ResponsesSteeringDelivery {
