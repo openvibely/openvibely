@@ -214,9 +214,9 @@ func TestCompactionConnectionFailuresHaveBoundedRetries(t *testing.T) {
 	}
 }
 
-func TestUncertainSteeringStopsBeforeRetryOrTools(t *testing.T) {
+func TestSteeringStopsUnsafeRetryOrTools(t *testing.T) {
 	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"} {
-		for _, scenario := range []string{"accepted_disconnect", "unacknowledged_disconnect", "unacknowledged_completion"} {
+		for _, scenario := range []string{"accepted_disconnect", "unacknowledged_disconnect", "unacknowledged_completion", "committed_disconnect", "committed_completion"} {
 			t.Run(model+"/"+scenario, func(t *testing.T) {
 				var attempts, executions atomic.Int32
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,10 +242,14 @@ func TestUncertainSteeringStopsBeforeRetryOrTools(t *testing.T) {
 							t.Error(err)
 							return
 						}
-						if scenario == "accepted_disconnect" {
+						if scenario == "accepted_disconnect" || strings.HasPrefix(scenario, "committed_") {
 							_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.steer.accepted","steer":{"id":"steer1","previous_response_id":"original"}}`))
 						}
-						if scenario != "unacknowledged_completion" {
+						if strings.HasPrefix(scenario, "committed_") {
+							_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.incomplete","response":{"id":"original","incomplete_details":{"reason":"steered"}}}`))
+							_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"successor"}}`))
+						}
+						if scenario != "unacknowledged_completion" && scenario != "committed_completion" {
 							return
 						}
 					}
@@ -276,7 +280,21 @@ func TestUncertainSteeringStopsBeforeRetryOrTools(t *testing.T) {
 						return "mock only", false, nil
 					},
 				})
-				if err == nil || !strings.Contains(err.Error(), "steering delivery is unresolved") {
+				if scenario == "committed_completion" {
+					if err != nil || attempts.Load() != 1 || executions.Load() != 1 {
+						t.Fatalf("successful successor blocked: attempts=%d executions=%d err=%v", attempts.Load(), executions.Load(), err)
+					}
+					return
+				}
+				if scenario == "committed_disconnect" {
+					var committed *astraSteeringCommittedError
+					if !errors.As(err, &committed) || len(committed.ids) != 1 || committed.ids[0] != "steer1" {
+						t.Fatalf("lost committed steering identity: %v", err)
+					}
+					if !strings.Contains(err.Error(), "cannot retry after committed steering") {
+						t.Fatalf("expected committed steering retry veto, got %v", err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), "steering delivery is unresolved") {
 					t.Fatalf("expected unresolved steering error, got %v", err)
 				}
 				if attempts.Load() != 1 || executions.Load() != 0 {
@@ -307,5 +325,27 @@ func TestUncertainSteeringVetoesOverflowRecovery(t *testing.T) {
 	})
 	if err == nil || calledRecovery {
 		t.Fatalf("err=%v recovery=%v", err, calledRecovery)
+	}
+}
+
+func TestCommittedSteeringVetoesOverflowRecovery(t *testing.T) {
+	client := NewWithAPIKey("test")
+	calledRecovery := false
+	attempts := 0
+	_, err := doResponsesStreamTurn(context.Background(), client, "gpt-6-sol", httpretry.StreamTurnPolicy{
+		Recover: func(error) (bool, error) { calledRecovery = true; return false, nil },
+	}, func(context.Context) (int, error) {
+		attempts++
+		state := client.responsesTransportState
+		state.mu.Lock()
+		state.appendAstraSteeringCommitLocked(ResponsesSteeringDelivery{SteeringID: "steer1", ResponseID: "successor"})
+		state.mu.Unlock()
+		return 0, &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "too much input"}
+	})
+	if err == nil || calledRecovery || attempts != 1 {
+		t.Fatalf("err=%v recovery=%v attempts=%d", err, calledRecovery, attempts)
+	}
+	if !client.responsesTransportState.hasAstraSteeringCommits() {
+		t.Fatal("retry guard consumed durable steering commits")
 	}
 }
