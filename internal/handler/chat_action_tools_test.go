@@ -595,12 +595,12 @@ func TestViewSystemUpdateRuntimeTool_NotApplicableWithoutVisibleCoordinator(t *t
 
 func TestViewSystemUpdateRuntimeTool_AvailableUpdateReportsReleaseMetadata(t *testing.T) {
 	h := &Handler{}
-	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "binary"}, "stable", nil, nil, true, "", nil)
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0", OS: "linux", Arch: "amd64"}, Distribution: "binary"}, "stable", nil, nil, true, "", nil)
 	statePath := filepath.Join(t.TempDir(), "update-state.json")
 	persisted := `{
 		"state":"available",
-		"release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3"},"target":{"kind":"binary","os":"darwin","arch":"arm64","url":"https://secret.example.test/artifact","sha256":"secret-sha"},"apply_supported":true,"action":"restart"},
-		"staged_release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3"},"target":{"kind":"binary"},"apply_supported":true,"action":"restart"}
+		"release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3","targets":[{"id":"binary-linux-amd64","kind":"binary","os":"linux","arch":"amd64","url":"https://secret.example.test/artifact","sha256":"secret-sha"}]},"target":{"id":"binary-linux-amd64","kind":"binary","os":"linux","arch":"amd64","url":"https://secret.example.test/artifact","sha256":"secret-sha"},"apply_supported":true,"action":"download"},
+		"staged_release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3"},"target":{"kind":"binary"},"apply_supported":true,"action":"download"}
 	}`
 	require.NoError(t, os.WriteFile(statePath, []byte(persisted), 0o600))
 	require.NoError(t, coordinator.SetPersistence(statePath))
@@ -623,7 +623,7 @@ func TestViewSystemUpdateRuntimeTool_AvailableUpdateReportsReleaseMetadata(t *te
 	require.True(t, got.Manual)
 	require.True(t, got.Staged)
 	require.True(t, got.ApplySupported)
-	require.Equal(t, "restart", got.UpdateAction)
+	require.Equal(t, "download", got.UpdateAction)
 	require.NotContains(t, out, "secret.example.test")
 	require.NotContains(t, out, "secret-sha")
 }
