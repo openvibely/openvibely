@@ -133,6 +133,8 @@ type AgenticOptions struct {
 	EnableAstraConfigurationUpdate bool
 	RequestLevelReasoningEffort    string
 	OnCompaction                   func(summary string) // called when history is compacted
+	// onCompactionUsage records billing usage separately from active context size.
+	onCompactionUsage func(*agenticTurnResult)
 }
 
 // AgenticResponse is the result of an agentic send.
@@ -322,6 +324,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	isChatGPTOAuth := strings.TrimSpace(c.auth.APIKey) == ""
 	useStandaloneWebSearch := isResponsesLiteWebsocketModel(opts.Model) && opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model)
+	if opts.ToolFilter != nil && !opts.ToolFilter(standaloneWebSearchToolName) {
+		useStandaloneWebSearch = false
+	}
 	var standaloneSearchInput []any
 	var webSearchResults []WebSearchResult
 	if useStandaloneWebSearch {
@@ -406,6 +411,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	result := &AgenticResponse{Model: opts.Model}
+	optsCopy := *opts
+	optsCopy.onCompactionUsage = func(usage *agenticTurnResult) {
+		result.InputTokens += usage.inputTokens
+		result.OutputTokens += usage.outputTokens
+		result.CachedInputTokens += usage.cachedInputTokens
+		result.ReasoningTokens += usage.reasoningTokens
+	}
+	opts = &optsCopy
 	compactionThreshold := normalizedCompactionThresholdForModel(opts.CompactionTokenThreshold, opts.Model)
 	tokenLedger := &agenticSessionTokenLedger{}
 	toolOutputTokenLimit := normalizedToolOutputTokenLimit(opts.ToolOutputTokenLimit)
@@ -893,7 +906,10 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 	isError := false
 	var err error
 	var webSearchResult *WebSearchResult
-	if name == standaloneWebSearchToolName && opts.standaloneWebSearch != nil {
+	if opts.ToolFilter != nil && !opts.ToolFilter(name) {
+		isError = true
+		output = fmt.Sprintf("tool %s is not allowed by this agent", name)
+	} else if name == standaloneWebSearchToolName && opts.standaloneWebSearch != nil {
 		searchResult, searchIsError, searchErr := opts.standaloneWebSearch(ctx, input)
 		output, isError, err = searchResult.Output, searchIsError, searchErr
 		if err == nil && !isError {
@@ -903,9 +919,6 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 			isError = true
 			output = err.Error()
 		}
-	} else if opts.ToolFilter != nil && !opts.ToolFilter(name) {
-		isError = true
-		output = fmt.Sprintf("tool %s is not allowed by this agent", name)
 	} else if opts.ToolExecutor != nil {
 		output, isError, err = opts.ToolExecutor(ctx, name, input)
 		if err != nil {
@@ -1350,6 +1363,10 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	compactionOpts.OnThinking = nil
 	compactionOpts.OnToolUse = nil
 	compactionOpts.OnToolResult = nil
+	// Compaction must not consume user steering intended for the next model turn.
+	compactionOpts.EnableAstraMidTurnSteering = false
+	compactionOpts.OnAstraMidTurnSteering = nil
+	compactionOpts.AstraMidTurnSteeringWakeup = nil
 	isOAuth := strings.TrimSpace(c.auth.APIKey) == ""
 	result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 		MaxRetries:                           2, // Codex remote compaction v2 stream retry cap.
@@ -1370,6 +1387,9 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	}
 	if len(compactionItems) != 1 {
 		return nil, "", fmt.Errorf("compaction response returned %d compaction items, want 1", len(compactionItems))
+	}
+	if opts.onCompactionUsage != nil {
+		opts.onCompactionUsage(result)
 	}
 	return buildAgenticRemoteCompactionV2History(inputItems, compactionItems[0]), extractCompactionSummaryFromOutputItems(compactionItems), nil
 }
