@@ -1,0 +1,289 @@
+{
+  "type": "object",
+  "properties": {
+    "search_query": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Search query."
+          },
+          "recency": {
+            "type": "integer",
+            "description": "Whether to filter by recency, as a number of recent days."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Whether to filter by a specific list of domains."
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "description": "Query the internet search engine for a given list of queries."
+    },
+    "image_query": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Search query."
+          },
+          "recency": {
+            "type": "integer",
+            "description": "Whether to filter by recency, as a number of recent days."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Whether to filter by a specific list of domains."
+          }
+        },
+        "required": [
+          "q"
+        ]
+      },
+      "description": "Query the image search engine for a given list of queries."
+    },
+    "open": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref_id": {
+            "type": "string",
+            "description": "Reference id or URL to open."
+          },
+          "lineno": {
+            "type": "integer",
+            "description": "Line number to position the page at."
+          }
+        },
+        "required": [
+          "ref_id"
+        ]
+      },
+      "description": "Open pages by reference id or URL."
+    },
+    "click": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref_id": {
+            "type": "string",
+            "description": "Reference id containing the numbered link."
+          },
+          "id": {
+            "type": "integer",
+            "description": "Numbered link id to open."
+          }
+        },
+        "required": [
+          "id",
+          "ref_id"
+        ]
+      },
+      "description": "Open links from previously opened pages."
+    },
+    "find": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref_id": {
+            "type": "string",
+            "description": "Reference id or URL to search within."
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Text pattern to find."
+          }
+        },
+        "required": [
+          "pattern",
+          "ref_id"
+        ]
+      },
+      "description": "Find text patterns in pages."
+    },
+    "screenshot": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref_id": {
+            "type": "string",
+            "description": "Reference id or URL to screenshot."
+          },
+          "pageno": {
+            "type": "integer",
+            "description": "Zero-indexed PDF page number."
+          }
+        },
+        "required": [
+          "pageno",
+          "ref_id"
+        ]
+      },
+      "description": "Take screenshots of PDF pages."
+    },
+    "finance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "description": "Ticker symbol to look up."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "equity",
+              "fund",
+              "crypto",
+              "index"
+            ],
+            "description": "Asset type to look up."
+          },
+          "market": {
+            "type": "string",
+            "description": "ISO 3166-1 alpha-3 country code, \"OTC\", or \"\" for cryptocurrency."
+          }
+        },
+        "required": [
+          "ticker",
+          "type"
+        ]
+      },
+      "description": "Look up prices for the given stock symbols."
+    },
+    "weather": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "Location in \"Country, Area, City\" format."
+          },
+          "start": {
+            "type": "string",
+            "description": "Start date in YYYY-MM-DD format. Defaults to today."
+          },
+          "duration": {
+            "type": "integer",
+            "description": "Number of days to return. Defaults to 7."
+          }
+        },
+        "required": [
+          "location"
+        ]
+      },
+      "description": "Look up weather forecasts."
+    },
+    "sports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "sports"
+            ],
+            "description": "Tool name for sports requests."
+          },
+          "fn": {
+            "type": "string",
+            "enum": [
+              "schedule",
+              "standings"
+            ],
+            "description": "Sports function to call."
+          },
+          "league": {
+            "type": "string",
+            "enum": [
+              "nba",
+              "wnba",
+              "nfl",
+              "nhl",
+              "mlb",
+              "epl",
+              "ncaamb",
+              "ncaawb",
+              "ipl"
+            ],
+            "description": "League to look up."
+          },
+          "team": {
+            "type": "string",
+            "description": "Team to look up, using the common 3 or 4 letter alias used in broadcasts."
+          },
+          "opponent": {
+            "type": "string",
+            "description": "Opponent to use with `team` when narrowing the lookup."
+          },
+          "date_from": {
+            "type": "string",
+            "description": "Start date in YYYY-MM-DD format."
+          },
+          "date_to": {
+            "type": "string",
+            "description": "End date in YYYY-MM-DD format."
+          },
+          "num_games": {
+            "type": "integer",
+            "description": "Number of games to return."
+          },
+          "locale": {
+            "type": "string",
+            "description": "Locale for the lookup."
+          }
+        },
+        "required": [
+          "fn",
+          "league"
+        ]
+      },
+      "description": "Look up sports schedules and standings."
+    },
+    "time": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "utc_offset": {
+            "type": "string",
+            "description": "UTC offset formatted like \"+03:00\"."
+          }
+        },
+        "required": [
+          "utc_offset"
+        ]
+      },
+      "description": "Get time for the given UTC offsets."
+    },
+    "response_length": {
+      "type": "string",
+      "enum": [
+        "short",
+        "medium",
+        "long"
+      ],
+      "description": "Set the length of the response to be returned."
+    }
+  }
+}

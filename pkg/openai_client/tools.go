@@ -15,6 +15,7 @@ type ToolDefinition struct {
 	Parameters  json.RawMessage  `json:"parameters,omitempty"`
 	Tools       []ToolDefinition `json:"tools,omitempty"`
 	Async       bool             `json:"async,omitempty"`
+	Strict      *bool            `json:"strict,omitempty"`
 }
 
 // ToolCall records a single tool invocation and its result.
