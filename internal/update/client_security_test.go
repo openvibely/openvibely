@@ -153,6 +153,33 @@ func TestVerifyReleaseAcceptsLinuxDesktopExecutableTarget(t *testing.T) {
 	}
 }
 
+func TestValidateForInstallRejectsInapplicableTargets(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	validTarget := Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64"}
+	validCurrent := CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionBinary}
+	cases := []struct {
+		name    string
+		target  Target
+		action  string
+		current CurrentBuild
+	}{
+		{name: "architecture mismatch", target: Target{ID: "linux-arm64", Kind: "executable", OS: "linux", Arch: "arm64"}, action: "download", current: validCurrent},
+		{name: "OS mismatch", target: Target{ID: "darwin-arm64", Kind: "executable", OS: "darwin", Arch: "arm64"}, action: "download", current: validCurrent},
+		{name: "action mismatch", target: validTarget, action: "container", current: validCurrent},
+		{name: "binary rejects app bundle", target: Target{ID: "linux-app", Kind: "app_bundle", OS: "linux", Arch: "amd64"}, action: "download", current: validCurrent},
+		{name: "macOS desktop requires app bundle", target: Target{ID: "darwin-executable", Kind: "executable", OS: "darwin", Arch: "arm64"}, action: "download", current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionDesktop}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "state.json"), Now: func() time.Time { return now }})
+			release := cachedReleaseFixture(now, tc.target, tc.action)
+			if err := client.ValidateForInstall(*release, tc.current); err == nil {
+				t.Fatal("inapplicable release target accepted")
+			}
+		})
+	}
+}
+
 func TestVerifyReleaseDowngradesNewerUpdaterRequirementToManual(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

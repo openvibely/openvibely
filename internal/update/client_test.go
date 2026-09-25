@@ -74,6 +74,79 @@ func TestClientRejectsUnsupportedSchema(t *testing.T) {
 	}
 }
 
+func cachedReleaseFixture(now time.Time, target Target, action string) *VerifiedRelease {
+	return &VerifiedRelease{
+		Metadata: ReleaseMetadata{
+			Version:   "0.6.0",
+			Channel:   "stable",
+			ExpiresAt: now.Add(time.Hour),
+			Targets:   []Target{target},
+		},
+		Target:         target,
+		ApplySupported: true,
+		Action:         action,
+	}
+}
+
+func TestCheckIfDueRejectsCachedReleaseForDifferentBuild(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	target := Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64", URL: "https://updates.example.test/app.tar.gz", Filetype: "tar.gz", Size: 3, SHA256: "0000000000000000000000000000000000000000000000000000000000000000"}
+	cases := []struct {
+		name    string
+		current CurrentBuild
+		release *VerifiedRelease
+	}{
+		{
+			name:    "wrong architecture",
+			current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary},
+			release: cachedReleaseFixture(now, target, "download"),
+		},
+		{
+			name:    "binary build rejects desktop app bundle",
+			current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary},
+			release: cachedReleaseFixture(now, Target{ID: "mac-app", Kind: "app_bundle", OS: "darwin", Arch: "arm64"}, "download"),
+		},
+		{
+			name:    "desktop bundle build rejects executable",
+			current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionDesktop},
+			release: cachedReleaseFixture(now, Target{ID: "mac-executable", Kind: "executable", OS: "darwin", Arch: "arm64"}, "download"),
+		},
+		{
+			name:    "action mismatch",
+			current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionBinary},
+			release: cachedReleaseFixture(now, target, "container"),
+		},
+		{
+			name:    "cached target differs from metadata",
+			current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionBinary},
+			release: func() *VerifiedRelease {
+				release := cachedReleaseFixture(now, target, "download")
+				release.Target.Arch = "arm64"
+				return release
+			}(),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient(ClientConfig{
+				Channel:   "stable",
+				StatePath: filepath.Join(t.TempDir(), "state.json"),
+				Now:       func() time.Time { return now },
+			})
+			if err := client.saveState(persistedClientState{LastSuccessfulCheck: now.Add(-time.Hour), Cached: tc.release}); err != nil {
+				t.Fatal(err)
+			}
+			release, checked, err := client.CheckIfDue(context.Background(), tc.current)
+			if err != nil || checked {
+				t.Fatalf("release=%#v checked=%v err=%v, want throttled check without error", release, checked, err)
+			}
+			if release != nil {
+				t.Fatalf("inapplicable cached release exposed: %#v", release)
+			}
+		})
+	}
+}
+
 func TestCheckIfDueHidesCachedReleaseThatIsNotNewerThanCurrent(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	statePath := filepath.Join(t.TempDir(), "state.json")

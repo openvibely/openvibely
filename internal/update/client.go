@@ -335,7 +335,63 @@ func (c *Client) cachedReleaseForCurrent(state persistedClientState, current Cur
 	if state.HighestAcceptedVersion != "" && compareVersions(metadata.Version, state.HighestAcceptedVersion) < 0 {
 		return nil
 	}
+	if !state.Cached.ApplySupported || !releaseTargetMatchesMetadata(*state.Cached) || validateReleaseTargetForCurrent(*state.Cached, current, true) != nil {
+		return nil
+	}
 	return state.Cached
+}
+
+func releaseTargetMatchesMetadata(release VerifiedRelease) bool {
+	if release.Target.ID == "" {
+		return false
+	}
+	for _, target := range release.Metadata.Targets {
+		if target.ID == release.Target.ID && target == release.Target {
+			return true
+		}
+	}
+	return false
+}
+
+func expectedUpdateAction(distribution string) string {
+	if distribution == buildinfo.DistributionDocker || distribution == buildinfo.DistributionHosted {
+		return "container"
+	}
+	return "download"
+}
+
+func validateReleaseTargetForCurrent(release VerifiedRelease, current CurrentBuild, requireCompleteTarget bool) error {
+	if requireCompleteTarget && !release.ApplySupported {
+		return errors.New("automatic update response must set apply_supported")
+	}
+	if current.Distribution != "" && (requireCompleteTarget || release.Action != "") && release.Action != expectedUpdateAction(current.Distribution) {
+		return errors.New("automatic update action does not match the verified distribution")
+	}
+	if (requireCompleteTarget || release.Target.OS != "") && release.Target.OS != current.OS || (requireCompleteTarget || release.Target.Arch != "") && release.Target.Arch != current.Arch && release.Target.Arch != "multi" {
+		return errors.New("selected release target platform mismatch")
+	}
+	if release.Target.Purpose != "" || release.Target.Variant != "" || release.Target.InstallLayout != "" {
+		return errors.New("selected release target is not an updater download target")
+	}
+	switch current.Distribution {
+	case buildinfo.DistributionDesktop:
+		if current.OS == "darwin" {
+			if (requireCompleteTarget || release.Target.Kind != "") && release.Target.Kind != "app_bundle" {
+				return errors.New("macOS desktop release target must be an app bundle")
+			}
+		} else if (requireCompleteTarget || release.Target.Kind != "") && release.Target.Kind != "executable" {
+			return errors.New("desktop release target must be an executable")
+		}
+	case buildinfo.DistributionBinary:
+		if (requireCompleteTarget || release.Target.Kind != "") && release.Target.Kind != "binary" && release.Target.Kind != "executable" {
+			return errors.New("binary release target must be an executable")
+		}
+	case buildinfo.DistributionDocker, buildinfo.DistributionHosted:
+		if (requireCompleteTarget || release.Target.Kind != "") && release.Target.Kind != "oci" {
+			return errors.New("container release target must be OCI")
+		}
+	}
+	return nil
 }
 
 func (c *Client) verifyRelease(response CheckResponse, current CurrentBuild, highest string, now time.Time) (*VerifiedRelease, error) {
@@ -393,10 +449,7 @@ func (c *Client) verifyRelease(response CheckResponse, current CurrentBuild, hig
 	if !response.ApplySupported {
 		return nil, errors.New("automatic update response must set apply_supported")
 	}
-	expectedAction := "download"
-	if current.Distribution == buildinfo.DistributionDocker || current.Distribution == buildinfo.DistributionHosted {
-		expectedAction = "container"
-	}
+	expectedAction := expectedUpdateAction(current.Distribution)
 	if response.Action != expectedAction {
 		return nil, errors.New("automatic update action does not match the verified distribution")
 	}
@@ -410,29 +463,9 @@ func (c *Client) verifyRelease(response CheckResponse, current CurrentBuild, hig
 	if response.SelectedTargetID == "" || selected == nil {
 		return nil, errors.New("selected release target mismatch")
 	}
-	if selected.OS != current.OS || selected.Arch != current.Arch && selected.Arch != "multi" {
-		return nil, errors.New("selected release target platform mismatch")
-	}
-	if selected.Purpose != "" || selected.Variant != "" || selected.InstallLayout != "" {
-		return nil, errors.New("selected release target is not an updater download target")
-	}
-	switch current.Distribution {
-	case buildinfo.DistributionDesktop:
-		if current.OS == "darwin" {
-			if selected.Kind != "app_bundle" {
-				return nil, errors.New("macOS desktop release target must be an app bundle")
-			}
-		} else if selected.Kind != "executable" {
-			return nil, errors.New("desktop release target must be an executable")
-		}
-	case buildinfo.DistributionBinary:
-		if selected.Kind != "binary" && selected.Kind != "executable" {
-			return nil, errors.New("binary release target must be an executable")
-		}
-	case buildinfo.DistributionDocker, buildinfo.DistributionHosted:
-		if selected.Kind != "oci" {
-			return nil, errors.New("container release target must be OCI")
-		}
+	verified := VerifiedRelease{Metadata: metadata, Target: *selected, ApplySupported: true, Action: expectedAction}
+	if err := validateReleaseTargetForCurrent(verified, current, true); err != nil {
+		return nil, err
 	}
 	if selected.Kind == "oci" {
 		if !validOCIImageRef(selected.ImageRef) {
@@ -472,6 +505,9 @@ func (c *Client) ValidateForInstall(release VerifiedRelease, current CurrentBuil
 	}
 	if compareVersions(release.Metadata.Version, current.Version) <= 0 {
 		return errors.New("release version is not an authorized upgrade")
+	}
+	if err := validateReleaseTargetForCurrent(release, current, false); err != nil {
+		return err
 	}
 	state, err := c.loadState()
 	if err != nil {
