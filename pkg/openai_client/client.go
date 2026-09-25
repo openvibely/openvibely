@@ -593,6 +593,9 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 				}
 				result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
 				body.Close()
+				if useWebsocket {
+					wsErr = classifyResponsesWebsocketStreamError(wsErr)
+				}
 				if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(streamCtx, wsErr) {
 					c.responsesTransportState.disableWebsocket()
 				}
