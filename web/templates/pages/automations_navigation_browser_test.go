@@ -437,6 +437,8 @@ func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcro
 			browser.waitFor("native action target "+selector, fmt.Sprintf(`(function() {
 					var el = document.querySelector(%q);
 					if (!el) return 'missing';
+					// elementFromPoint returns null off-viewport; an opened menu can extend below the fold.
+					el.scrollIntoView({block: 'nearest', inline: 'nearest'});
 					var rect = el.getBoundingClientRect();
 					var hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
 					return rect.width > 0 && rect.height > 0 && hit && (hit === el || el.contains(hit)) ? 'ready' : 'waiting';
