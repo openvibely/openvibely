@@ -288,6 +288,18 @@ var registry = []ActionDef{
 		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"message":{"type":"string"},"origin":{"type":"string"},"origin_agent":{"type":"string"}},"required":["message"],"additionalProperties":false}`),
 	},
 	{
+		Name:               "merge_task",
+		Description:        "Merge or rebase one current-project task's worktree branch into/onto its target branch, using the same eligibility checks as the task board. action: merge (default, merge commit), squash, fast_forward, or rebase (updates the task branch onto the target without merging). A merge that hits conflicts is aborted automatically, leaving the target branch unchanged, and the task is marked conflict; the result lists conflict_files so you can ask the task via send_to_task to rebase and resolve them. Returns result: merged, rebased, up_to_date, already_merged, conflict, not_eligible, busy, or failed. Handles one task per call; use list_tasks with merge_status='unmerged' to find candidates and call this once per task, sequentially.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityDestructive,
+		NeedsConfirmation:  true,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           webAPISurfaces(),
+		IncludeThreadTools: false,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID to merge, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact current-project task title when task_id is not known."},"action":{"type":"string","enum":["merge","squash","fast_forward","rebase"],"description":"Merge mode, or rebase to update the task branch onto its target without merging. Defaults to merge."}},"additionalProperties":false}`),
+	},
+	{
 		Name:               "set_task_goal",
 		Description:        "Set or replace the stored goal for a task.",
 		Domain:             DomainTasks,

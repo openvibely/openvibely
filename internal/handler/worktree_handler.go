@@ -304,30 +304,8 @@ func (h *Handler) revalidateTaskBranchMutation(ctx context.Context, preflight *t
 	return nil
 }
 
-// MergeTaskBranch manually merges a task's worktree branch to target.
-func (h *Handler) MergeTaskBranch(c echo.Context) error {
-	taskID := c.Param("taskId")
-	fromTaskCard := c.FormValue("merge_source") == "task_card"
-	projectID := strings.TrimSpace(c.FormValue("project_id"))
-	preflight, err := h.loadTaskBranchMutation(c.Request().Context(), taskID, projectID, fromTaskCard)
-	if err != nil {
-		return err
-	}
-	task := preflight.task
-	project := preflight.project
-
-	mergeType := c.FormValue("merge_type")
-	if mergeType == "" {
-		mergeType = "merge"
-	}
-	if mergeType != "merge" && mergeType != "ff" && mergeType != "squash" {
-		if fromTaskCard {
-			return rejectTaskCardMutation(c, "Unsupported merge mode.")
-		}
-		return c.String(http.StatusBadRequest, "unsupported merge type")
-	}
-
-	options := taskBranchMutationOptions{
+func (h *Handler) mergeTaskBranchOptions(taskID, projectID string, fromTaskCard bool, mergeType string) taskBranchMutationOptions {
+	return taskBranchMutationOptions{
 		taskID:       taskID,
 		projectID:    projectID,
 		fromTaskCard: fromTaskCard,
@@ -358,6 +336,65 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 			return "task branch is no longer eligible to merge"
 		},
 	}
+}
+
+func (h *Handler) rebaseTaskBranchOptions(taskID, projectID string, fromTaskCard bool) taskBranchMutationOptions {
+	return taskBranchMutationOptions{
+		taskID:       taskID,
+		projectID:    projectID,
+		fromTaskCard: fromTaskCard,
+		operationCheck: func(task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
+			if h.taskRebaseAvailable(task, project, branchAlreadyMerged) {
+				return true, ""
+			}
+			if fromTaskCard {
+				return false, "Rebase is not available for the current branch state."
+			}
+			return false, "Task branch is not currently eligible to rebase onto its target"
+		},
+		leaseReason: func(preflight *taskBranchMutationPreflight) string {
+			if !preflight.eligibility.MergeAvailable {
+				reason := preflight.eligibility.Reason
+				if preflight.eligibility.ConflictRecovery {
+					reason = "a merge conflict is now active"
+				}
+				if reason == "" {
+					reason = "task branch is no longer eligible to rebase"
+				}
+				return reason
+			}
+			if !preflight.operationEligible && fromTaskCard && preflight.operationReason != "" {
+				return preflight.operationReason
+			}
+			return "task branch is no longer eligible to rebase onto its target"
+		},
+	}
+}
+
+// MergeTaskBranch manually merges a task's worktree branch to target.
+func (h *Handler) MergeTaskBranch(c echo.Context) error {
+	taskID := c.Param("taskId")
+	fromTaskCard := c.FormValue("merge_source") == "task_card"
+	projectID := strings.TrimSpace(c.FormValue("project_id"))
+	preflight, err := h.loadTaskBranchMutation(c.Request().Context(), taskID, projectID, fromTaskCard)
+	if err != nil {
+		return err
+	}
+	task := preflight.task
+	project := preflight.project
+
+	mergeType := c.FormValue("merge_type")
+	if mergeType == "" {
+		mergeType = "merge"
+	}
+	if mergeType != "merge" && mergeType != "ff" && mergeType != "squash" {
+		if fromTaskCard {
+			return rejectTaskCardMutation(c, "Unsupported merge mode.")
+		}
+		return c.String(http.StatusBadRequest, "unsupported merge type")
+	}
+
+	options := h.mergeTaskBranchOptions(taskID, projectID, fromTaskCard, mergeType)
 	h.refreshTaskBranchMutation(c.Request().Context(), preflight, options)
 	if fromTaskCard {
 		if preflight.cardReason != "" {
@@ -479,36 +516,7 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	taskID := c.Param("taskId")
 	fromTaskCard := c.FormValue("merge_source") == "task_card"
 	projectID := strings.TrimSpace(c.FormValue("project_id"))
-	options := taskBranchMutationOptions{
-		taskID:       taskID,
-		projectID:    projectID,
-		fromTaskCard: fromTaskCard,
-		operationCheck: func(task *models.Task, project *models.Project, branchAlreadyMerged bool) (bool, string) {
-			if h.taskRebaseAvailable(task, project, branchAlreadyMerged) {
-				return true, ""
-			}
-			if fromTaskCard {
-				return false, "Rebase is not available for the current branch state."
-			}
-			return false, "Task branch is not currently eligible to rebase onto its target"
-		},
-		leaseReason: func(preflight *taskBranchMutationPreflight) string {
-			if !preflight.eligibility.MergeAvailable {
-				reason := preflight.eligibility.Reason
-				if preflight.eligibility.ConflictRecovery {
-					reason = "a merge conflict is now active"
-				}
-				if reason == "" {
-					reason = "task branch is no longer eligible to rebase"
-				}
-				return reason
-			}
-			if !preflight.operationEligible && fromTaskCard && preflight.operationReason != "" {
-				return preflight.operationReason
-			}
-			return "task branch is no longer eligible to rebase onto its target"
-		},
-	}
+	options := h.rebaseTaskBranchOptions(taskID, projectID, fromTaskCard)
 	preflight, err := h.loadTaskBranchMutation(c.Request().Context(), taskID, projectID, fromTaskCard)
 	if err != nil {
 		return err
