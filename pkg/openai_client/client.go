@@ -551,11 +551,8 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 
 	if isResponsesLiteWebsocketModel(opts.Model) {
 		payload["stream"] = true
-		useResponsesLite := isChatGPTOAuth
-		wsPayload := buildStandardResponsesWebsocketPayload(payload)
-		if useResponsesLite {
-			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
-		}
+		useResponsesLite := true
+		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
 			RetryableError:                       isRetryableResponsesTransportError,
 			RetryConnectionFailuresWithoutBudget: true,

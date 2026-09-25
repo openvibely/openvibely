@@ -52,9 +52,9 @@ type AgenticOptions struct {
 	MaxOutputTokens int
 	ContextWindow   int
 	System          string
-	// CompactionPrompt overrides the instruction text used for API-key /responses/compact.
-	// ChatGPT OAuth compaction mirrors Codex v2 and uses the base system instructions.
-	// When empty, openAICompactionInstructions is used.
+	// CompactionPrompt overrides the instruction text used by standalone
+	// /responses/compact. When empty, supported providers/models follow Codex
+	// remote V2 compaction through a compaction_trigger.
 	CompactionPrompt string
 	WorkDir          string // working directory for tool execution
 	MaxTurns         int    // max agentic loop iterations (0 means no limit)
@@ -109,10 +109,11 @@ type AgenticOptions struct {
 	OnAsyncToolRejected     func(context.Context, AsyncToolCallRecord, error) error
 
 	// WebSearchEnabled enables web search when the model supports it.
-	// API-key requests use hosted web_search;
-	// Responses Lite OAuth requests use the client-executed web.run tool.
+	// Responses Lite requests use the client-executed web.run tool for both
+	// OAuth and API-key authentication.
 	WebSearchEnabled    bool
-	standaloneWebSearch func(ctx context.Context, input json.RawMessage) (string, bool, error)
+	standaloneWebSearch func(ctx context.Context, input json.RawMessage) (WebSearchResult, bool, error)
+	OnWebSearchResult   func(WebSearchResult)
 
 	// Callbacks for real-time output
 	OnText       func(text string)                              // called for each text delta
@@ -146,8 +147,9 @@ type AgenticResponse struct {
 	ReasoningTokens     int
 	StopReason          string
 	ToolCalls           []ToolCall // log of all tool calls made
-	Compacted           bool       // true if history was compacted during this call
-	CompactedInputItems []any      // provider-native continuation state after compaction
+	WebSearchResults    []WebSearchResult
+	Compacted           bool  // true if history was compacted during this call
+	CompactedInputItems []any // provider-native continuation state after compaction
 	// AstraReasoningStateJSON is durable provider session state for preserving
 	// request-level effort and configuration-update history across cold starts.
 	AstraReasoningStateJSON string
@@ -319,12 +321,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	isChatGPTOAuth := strings.TrimSpace(c.auth.APIKey) == ""
-	useStandaloneWebSearch := isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model) && opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model)
+	useStandaloneWebSearch := isResponsesLiteWebsocketModel(opts.Model) && opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model)
 	var standaloneSearchInput []any
+	var webSearchResults []WebSearchResult
 	if useStandaloneWebSearch {
 		optsCopy := *opts
-		optsCopy.standaloneWebSearch = func(searchCtx context.Context, commands json.RawMessage) (string, bool, error) {
-			return c.runStandaloneWebSearch(searchCtx, optsCopy.Model, standaloneSearchInput, commands, normalizedToolOutputTokenLimit(optsCopy.ToolOutputTokenLimit))
+		optsCopy.standaloneWebSearch = func(searchCtx context.Context, commands json.RawMessage) (WebSearchResult, bool, error) {
+			return c.runStandaloneWebSearch(searchCtx, optsCopy.Model, standaloneSearchInput, commands, normalizedToolOutputTokenLimit(optsCopy.ToolOutputTokenLimit), isChatGPTOAuth)
 		}
 		opts = &optsCopy
 	}
@@ -634,7 +637,15 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		localItemsAfterResponse := make([]any, 0, len(executed))
 		deliveryRecords := make([]AsyncToolCallRecord, 0, len(asyncExecuted))
 		for _, exec := range executed {
-			if opts.OnToolResult != nil {
+			if exec.webSearchResult != nil {
+				searchResult := *exec.webSearchResult
+				searchResult.CallID = exec.call.CallID
+				webSearchResults = append(webSearchResults, searchResult)
+				if opts.OnWebSearchResult != nil {
+					opts.OnWebSearchResult(searchResult)
+				}
+			}
+			if opts.OnToolResult != nil && !(exec.webSearchResult != nil && opts.OnWebSearchResult != nil) {
 				opts.OnToolResult(exec.call.Name, exec.output, exec.isError)
 			}
 
@@ -706,6 +717,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		)
 		result.AstraReasoningStateJSON = c.responsesTransportState.astraReasoningStateJSON(opts.Model)
 	}
+	result.WebSearchResults = append([]WebSearchResult(nil), webSearchResults...)
 
 	return result, nil
 }
@@ -727,11 +739,12 @@ type openAIToolExecutionTask struct {
 }
 
 type openAIToolExecutionResult struct {
-	call     toolCallInfo
-	inputMap map[string]interface{}
-	output   string
-	isError  bool
-	record   AsyncToolCallRecord
+	call            toolCallInfo
+	inputMap        map[string]interface{}
+	output          string
+	isError         bool
+	record          AsyncToolCallRecord
+	webSearchResult *WebSearchResult
 }
 
 func normalizeOpenAIFunctionCallArguments(raw any) string {
@@ -815,13 +828,18 @@ func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []o
 	results := make([]openAIToolExecutionResult, len(tasks))
 	runOne := func(i int) {
 		task := tasks[i]
-		output, isError := runOpenAIToolTask(ctx, opts, task.call.Name, task.input)
+		output, isError, webSearchResult := runOpenAIToolTask(ctx, opts, task.call.Name, task.input)
+		if webSearchResult != nil {
+			webSearchResult.CallID = task.call.CallID
+			webSearchResult.Commands = append(json.RawMessage(nil), task.input...)
+		}
 		results[i] = openAIToolExecutionResult{
-			call:     task.call,
-			inputMap: task.inputMap,
-			output:   output,
-			isError:  isError,
-			record:   task.record,
+			call:            task.call,
+			inputMap:        task.inputMap,
+			output:          output,
+			isError:         isError,
+			record:          task.record,
+			webSearchResult: webSearchResult,
 		}
 	}
 	if requestIndex := exclusiveRequestUserInputTask(tasks); requestIndex >= 0 {
@@ -869,13 +887,18 @@ func exclusiveRequestUserInputTask(tasks []openAIToolExecutionTask) int {
 	return -1
 }
 
-func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
+func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool, *WebSearchResult) {
 	applog.Infof("[openai-client] executing tool %s", name)
 	output := ""
 	isError := false
 	var err error
+	var webSearchResult *WebSearchResult
 	if name == standaloneWebSearchToolName && opts.standaloneWebSearch != nil {
-		output, isError, err = opts.standaloneWebSearch(ctx, input)
+		searchResult, searchIsError, searchErr := opts.standaloneWebSearch(ctx, input)
+		output, isError, err = searchResult.Output, searchIsError, searchErr
+		if err == nil && !isError {
+			webSearchResult = &searchResult
+		}
 		if err != nil {
 			isError = true
 			output = err.Error()
@@ -896,7 +919,7 @@ func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, i
 			output = err.Error()
 		}
 	}
-	return output, isError
+	return output, isError, webSearchResult
 }
 
 func allOpenAIToolsReadOnly(tasks []openAIToolExecutionTask) bool {
@@ -1238,8 +1261,10 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		return nil, "", fmt.Errorf("cannot compact empty conversation transcript")
 	}
 
+	useRemoteV2 := strings.TrimSpace(opts.CompactionPrompt) == "" &&
+		(isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) || strings.HasPrefix(strings.ToLower(strings.TrimSpace(opts.Model)), "gpt-5.5"))
 	instructions := compactionInstructions(opts)
-	if isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) {
+	if useRemoteV2 {
 		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
 	}
 
@@ -1251,7 +1276,7 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		return nil, "", fmt.Errorf("compaction input is empty after trimming")
 	}
 
-	if isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) {
+	if useRemoteV2 {
 		return c.compactAgenticInputItemsViaResponsesV2(ctx, trimmedInput, tools, opts)
 	}
 
@@ -1262,7 +1287,6 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		"tools":               tools,
 		"parallel_tool_calls": len(tools) > 0,
 	}
-
 	reasoningPayload := map[string]any{}
 	if effort := normalizeReasoningEffort(opts.ReasoningEffort); effort != "" {
 		reasoningPayload["effort"] = effort
@@ -1273,25 +1297,14 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 	if len(reasoningPayload) > 0 {
 		payload["reasoning"] = reasoningPayload
 	}
-	if isResponsesLiteWebsocketModel(opts.Model) {
-		if len(reasoningPayload) == 0 {
-			reasoningPayload["effort"] = responsesLiteDefaultReasoningEffort(opts.Model)
-		}
-		reasoningPayload["context"] = "all_turns"
-		payload["reasoning"] = reasoningPayload
-		payload["parallel_tool_calls"] = false
-	}
-
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, "", fmt.Errorf("marshal compaction request: %w", err)
 	}
-
 	endpoint, err := c.responsesCompactEndpoint(isChatGPTOAuth)
 	if err != nil {
 		return nil, "", err
 	}
-
 	buildReq := func() (*http.Request, error) {
 		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 		if err != nil {
@@ -1300,37 +1313,28 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		c.applyAuthHeaders(httpReq, isChatGPTOAuth)
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "application/json")
-		if isResponsesLiteWebsocketModel(opts.Model) {
-			httpReq.Header.Set("x-openai-internal-codex-responses-lite", "true")
-		}
 		return httpReq, nil
 	}
-
 	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
 	if err != nil {
 		return nil, "", CategorizeCompactionError(err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(resp.Body)
 		apiErr := parseAPIError(resp.StatusCode, errBody)
 		return nil, "", CategorizeCompactionError(fmt.Errorf("POST %q (compaction): %w", endpoint, apiErr))
 	}
-
 	var compacted struct {
 		Output []any `json:"output"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&compacted); err != nil {
 		return nil, "", fmt.Errorf("decode compaction response: %w", err)
 	}
-
 	if len(compacted.Output) == 0 {
 		return nil, "", fmt.Errorf("compaction returned empty history")
 	}
-
-	summary := extractCompactionSummaryFromOutputItems(compacted.Output)
-	return append([]any(nil), compacted.Output...), summary, nil
+	return append([]any(nil), compacted.Output...), extractCompactionSummaryFromOutputItems(compacted.Output), nil
 }
 
 func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions) ([]any, string, error) {
@@ -2120,10 +2124,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		payload["tools"] = tools
 	}
 
-	// API-key and standard Responses requests use OpenAI's hosted web_search.
-	// Responses Lite OAuth requests already carry the client-executed web.run
-	// namespace in tools.
-	if opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model) && !(isChatGPTOAuth && isResponsesLiteWebsocketModel(opts.Model)) {
+	// Standard Responses requests use OpenAI's hosted web_search. Responses Lite
+	// requests already carry the client-executed web.run namespace in tools.
+	if opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model) && !isResponsesLiteWebsocketModel(opts.Model) {
 		existing, _ := payload["tools"].([]ToolDefinition)
 		rawTools := make([]any, 0, len(existing)+1)
 		for _, t := range existing {
@@ -2144,11 +2147,8 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 	}
 
 	if isResponsesLiteWebsocketModel(opts.Model) {
-		useResponsesLite := isChatGPTOAuth
-		wsPayload := buildStandardResponsesWebsocketPayload(payload)
-		if useResponsesLite {
-			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
-		}
+		useResponsesLite := true
+		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
 			if useWebsocket {
 				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
