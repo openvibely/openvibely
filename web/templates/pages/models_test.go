@@ -25,6 +25,19 @@ func TestOAuthStatusTextShowsPermanentReauthenticationState(t *testing.T) {
 	}
 }
 
+func TestModelSearchTextIncludesOAuthAccountName(t *testing.T) {
+	agent := models.LLMConfig{
+		Name:                "Fast model",
+		Provider:            models.ProviderOpenAI,
+		Model:               "gpt-test",
+		AuthMethod:          models.AuthMethodOAuth,
+		OAuthConnectionName: "alice@example.com",
+	}
+	if got := modelSearchText(agent); !strings.Contains(got, "alice@example.com") {
+		t.Fatalf("modelSearchText = %q, want OAuth account name", got)
+	}
+}
+
 func TestCardPaginationCompletionIsSilent(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ModelsContentPageWithPagination(nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
