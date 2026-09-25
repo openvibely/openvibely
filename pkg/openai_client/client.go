@@ -593,9 +593,6 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 				}
 				result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
 				body.Close()
-				if useWebsocket {
-					wsErr = classifyResponsesWebsocketStreamError(wsErr)
-				}
 				if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(streamCtx, wsErr) {
 					c.responsesTransportState.disableWebsocket()
 				}
@@ -1468,6 +1465,10 @@ func extractErrorMessage(ev map[string]any) string {
 }
 
 func responsesStreamTerminalError(eventType string, ev map[string]any) error {
+	statusCode := intFromAny(ev["status"])
+	if statusCode == 0 {
+		statusCode = intFromAny(ev["status_code"])
+	}
 	if response, ok := ev["response"].(map[string]any); ok {
 		if errObj, ok := response["error"].(map[string]any); ok {
 			code := stringFromAny(errObj["code"])
@@ -1495,13 +1496,13 @@ func responsesStreamTerminalError(eventType string, ev map[string]any) error {
 		code := stringFromAny(errObj["code"])
 		message := stringFromAny(errObj["message"])
 		if code != "" || message != "" {
-			return &APIError{Type: stringFromAny(errObj["type"]), Code: code, Message: firstNonEmpty(message, code, strings.TrimSpace(eventType)), Param: stringFromAny(errObj["param"])}
+			return &APIError{StatusCode: statusCode, Type: stringFromAny(errObj["type"]), Code: code, Message: firstNonEmpty(message, code, strings.TrimSpace(eventType)), Param: stringFromAny(errObj["param"])}
 		}
 	}
 	if msg := extractErrorMessage(ev); msg != "" {
-		return &APIError{Message: msg}
+		return &APIError{StatusCode: statusCode, Message: msg}
 	}
-	return &APIError{Message: strings.TrimSpace(eventType)}
+	return &APIError{StatusCode: statusCode, Message: strings.TrimSpace(eventType)}
 }
 
 func stringFromAny(v any) string {

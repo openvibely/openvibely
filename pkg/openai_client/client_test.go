@@ -918,6 +918,27 @@ func TestResponsesLiteOAuthRecoveryErrorUnlocksTransportState(t *testing.T) {
 	client.responsesTransportState.mu.Unlock()
 }
 
+func TestResponsesLitePayloadRemovesAsyncToolMetadata(t *testing.T) {
+	payload := buildResponsesLiteWebsocketPayload(map[string]any{
+		"model": "gpt-6-astra",
+		"input": []any{},
+		"tools": []ToolDefinition{{
+			Type:       "function",
+			Name:       "memory_view",
+			Parameters: json.RawMessage(`{"type":"object"}`),
+			Async:      true,
+		}},
+	}, "", "session-test")
+
+	input, _ := payload["input"].([]any)
+	additionalTools, _ := input[0].(map[string]any)
+	tools, _ := additionalTools["tools"].([]any)
+	tool, _ := tools[0].(map[string]any)
+	if _, exists := tool["async"]; exists {
+		t.Fatalf("Responses Lite tool contains unsupported async metadata: %#v", tool)
+	}
+}
+
 func TestResponsesLiteClosingStreamBeforeTerminalResetsConnection(t *testing.T) {
 	continueServer := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
