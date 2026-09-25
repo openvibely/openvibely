@@ -180,6 +180,25 @@ func TestValidateForInstallRejectsInapplicableTargets(t *testing.T) {
 	}
 }
 
+func TestValidateForInstallRejectsTargetThatDiffersFromMetadata(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	signedTarget := Target{ID: "linux-target", Kind: "executable", OS: "linux", Arch: "amd64", URL: "https://updates.example.test/openvibely-amd64.tar.gz", Filetype: "tar.gz", Size: 3, SHA256: hex.EncodeToString(make([]byte, 32))}
+	persistedTarget := signedTarget
+	persistedTarget.Arch = "arm64"
+	release := VerifiedRelease{
+		Metadata:       ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{signedTarget}},
+		Target:         persistedTarget,
+		ApplySupported: true,
+		Action:         "download",
+	}
+	current := CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary}
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "state.json"), Now: func() time.Time { return now }})
+
+	if err := client.ValidateForInstall(release, current); err == nil {
+		t.Fatal("persisted target differing from signed metadata was accepted")
+	}
+}
+
 func TestVerifyReleaseDowngradesNewerUpdaterRequirementToManual(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
