@@ -496,6 +496,62 @@ func TestSchedulerService_CheckDueTasks_SubmitsMemoryConsolidationTask(t *testin
 	}
 }
 
+func TestSchedulerService_CheckDueTasks_SkipsRunningRecurringTaskAndAdvancesNextRun(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Running recurring task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusRunning,
+		Prompt:    "test",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	now := time.Now().UTC()
+	dueAt := now.Add(-2 * time.Hour)
+	sched := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          dueAt,
+		RepeatType:     models.RepeatHours,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, sched))
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("running recurring task should not be submitted again: %s", submitted.ID)
+	default:
+	}
+
+	updatedSchedule, err := scheduleRepo.GetByID(ctx, sched.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedSchedule.NextRun)
+	require.True(t, updatedSchedule.NextRun.After(time.Now().UTC()), "running occurrence must advance to a future run")
+	advancedNextRun := *updatedSchedule.NextRun
+
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("completed task was immediately resubmitted before next run: %s", submitted.ID)
+	default:
+	}
+	updatedSchedule, err = scheduleRepo.GetByID(ctx, sched.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedSchedule.NextRun)
+	require.Equal(t, advancedNextRun, *updatedSchedule.NextRun, "future run should not change after task completion")
+}
+
 func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
