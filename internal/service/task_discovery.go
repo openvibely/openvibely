@@ -37,13 +37,24 @@ var listTasksAllowedStatuses = map[string]bool{
 	string(models.StatusBlocked):   true,
 }
 
+// listTasksAllowedMergeStatuses bounds the merge_status filter; "unmerged" matches
+// any task with a worktree branch whose stored merge status is not merged.
+var listTasksAllowedMergeStatuses = map[string]bool{
+	"unmerged":                         true,
+	string(models.MergeStatusPending):  true,
+	string(models.MergeStatusMerged):   true,
+	string(models.MergeStatusFailed):   true,
+	string(models.MergeStatusConflict): true,
+}
+
 // ListTasksRequest is the decoded input for the read-only list_tasks discovery tool.
 type ListTasksRequest struct {
-	Query    string `json:"query"`
-	Category string `json:"category"`
-	Status   string `json:"status"`
-	Limit    int    `json:"limit"`
-	Offset   int    `json:"offset"`
+	Query       string `json:"query"`
+	Category    string `json:"category"`
+	Status      string `json:"status"`
+	MergeStatus string `json:"merge_status"`
+	Limit       int    `json:"limit"`
+	Offset      int    `json:"offset"`
 }
 
 // ViewSwarmRequest is the decoded input for the read-only view_swarm tool.
@@ -64,12 +75,14 @@ type taskDiscoverySummary struct {
 	UpdatedAt    string `json:"updated_at"`
 	ParentTaskID string `json:"parent_task_id,omitempty"`
 	SwarmRole    string `json:"swarm_role,omitempty"`
+	MergeStatus  string `json:"merge_status,omitempty"`
 }
 
 type taskDiscoveryFilterSummary struct {
-	Query    string `json:"query"`
-	Category string `json:"category"`
-	Status   string `json:"status"`
+	Query       string `json:"query"`
+	Category    string `json:"category"`
+	Status      string `json:"status"`
+	MergeStatus string `json:"merge_status,omitempty"`
 }
 
 type taskDiscoveryResult struct {
@@ -137,6 +150,10 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 	if status != "" && !listTasksAllowedStatuses[status] {
 		return "", fmt.Errorf("list_tasks: unsupported status %q", req.Status)
 	}
+	mergeStatus := strings.ToLower(strings.TrimSpace(req.MergeStatus))
+	if mergeStatus != "" && !listTasksAllowedMergeStatuses[mergeStatus] {
+		return "", fmt.Errorf("list_tasks: unsupported merge_status %q", req.MergeStatus)
+	}
 
 	limit := req.Limit
 	if limit <= 0 {
@@ -151,11 +168,12 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 	}
 
 	tasks, total, err := taskRepo.ListTasksForDiscovery(ctx, projectID, repository.TaskDiscoveryFilter{
-		Query:    query,
-		Category: category,
-		Status:   status,
-		Limit:    limit,
-		Offset:   offset,
+		Query:       query,
+		Category:    category,
+		Status:      status,
+		MergeStatus: mergeStatus,
+		Limit:       limit,
+		Offset:      offset,
 	})
 	if err != nil {
 		return "", err
@@ -175,9 +193,10 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 		Offset:  offset,
 		HasMore: offset+len(summaries) < total,
 		Filter: taskDiscoveryFilterSummary{
-			Query:    query,
-			Category: category,
-			Status:   status,
+			Query:       query,
+			Category:    category,
+			Status:      status,
+			MergeStatus: mergeStatus,
 		},
 	}
 	if result.Total == 0 && !result.HasMore {
@@ -303,6 +322,11 @@ func buildTaskDiscoverySummary(t models.Task) taskDiscoverySummary {
 	}
 	if role := strings.TrimSpace(string(t.SwarmRole)); role != "" {
 		summary.SwarmRole = role
+	}
+	if t.MergeStatus != models.MergeStatusNone {
+		summary.MergeStatus = string(t.MergeStatus)
+	} else if strings.TrimSpace(t.WorktreeBranch) != "" {
+		summary.MergeStatus = string(models.MergeStatusPending)
 	}
 	return summary
 }

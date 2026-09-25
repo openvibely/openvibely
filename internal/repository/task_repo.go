@@ -1974,6 +1974,9 @@ type TaskDiscoveryFilter struct {
 	Category string
 	// Status optionally restricts results to a single task status.
 	Status string
+	// MergeStatus optionally restricts results by stored merge status. The value
+	// "unmerged" matches tasks with a worktree branch that is not yet merged.
+	MergeStatus string
 	// Limit caps the number of returned rows. Callers should clamp before use.
 	Limit int
 	// Offset skips the first N rows for pagination.
@@ -1983,17 +1986,19 @@ type TaskDiscoveryFilter struct {
 // taskDiscoveryRow is the private compact projection used by list_tasks. Keep it
 // aligned with the response fields in service.taskDiscoverySummary.
 type taskDiscoveryRow struct {
-	ID           string
-	Title        string
-	Category     models.TaskCategory
-	Status       models.TaskStatus
-	Priority     int
-	UpdatedAt    time.Time
-	ParentTaskID sql.NullString
-	SwarmRole    models.SwarmRole
+	ID             string
+	Title          string
+	Category       models.TaskCategory
+	Status         models.TaskStatus
+	Priority       int
+	UpdatedAt      time.Time
+	ParentTaskID   sql.NullString
+	SwarmRole      models.SwarmRole
+	WorktreeBranch string
+	MergeStatus    models.MergeStatus
 }
 
-const taskDiscoverySelectColumns = `id, title, category, status, priority, updated_at, parent_task_id, swarm_role`
+const taskDiscoverySelectColumns = `id, title, category, status, priority, updated_at, parent_task_id, swarm_role, worktree_branch, merge_status`
 
 // swarmInspectionSelectColumns is the compact projection used by read-only Chat
 // swarm inspection. It intentionally omits prompt, execution output, chain_config,
@@ -2028,6 +2033,14 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 	if status := strings.TrimSpace(filter.Status); status != "" {
 		where += ` AND status = ?`
 		args = append(args, status)
+	}
+	switch mergeStatus := strings.TrimSpace(filter.MergeStatus); mergeStatus {
+	case "":
+	case "unmerged":
+		where += ` AND worktree_branch != '' AND merge_status != 'merged'`
+	default:
+		where += ` AND merge_status = ?`
+		args = append(args, mergeStatus)
 	}
 
 	var total int
@@ -2070,17 +2083,19 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 	var tasks []models.Task
 	for rows.Next() {
 		var row taskDiscoveryRow
-		if err := rows.Scan(&row.ID, &row.Title, &row.Category, &row.Status, &row.Priority, &row.UpdatedAt, &row.ParentTaskID, &row.SwarmRole); err != nil {
+		if err := rows.Scan(&row.ID, &row.Title, &row.Category, &row.Status, &row.Priority, &row.UpdatedAt, &row.ParentTaskID, &row.SwarmRole, &row.WorktreeBranch, &row.MergeStatus); err != nil {
 			return nil, 0, fmt.Errorf("scanning task discovery row: %w", err)
 		}
 		task := models.Task{
-			ID:        row.ID,
-			Title:     row.Title,
-			Category:  row.Category,
-			Status:    row.Status,
-			Priority:  row.Priority,
-			UpdatedAt: row.UpdatedAt,
-			SwarmRole: row.SwarmRole,
+			ID:             row.ID,
+			Title:          row.Title,
+			Category:       row.Category,
+			Status:         row.Status,
+			Priority:       row.Priority,
+			UpdatedAt:      row.UpdatedAt,
+			SwarmRole:      row.SwarmRole,
+			WorktreeBranch: row.WorktreeBranch,
+			MergeStatus:    row.MergeStatus,
 		}
 		if row.ParentTaskID.Valid {
 			parentTaskID := row.ParentTaskID.String

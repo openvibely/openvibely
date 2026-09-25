@@ -117,11 +117,12 @@ func canonicalListTasksRuntimeInput(input json.RawMessage) string {
 		payload = "{}"
 	}
 	var request struct {
-		Query    string `json:"query"`
-		Category string `json:"category"`
-		Status   string `json:"status"`
-		Limit    int    `json:"limit"`
-		Offset   int    `json:"offset"`
+		Query       string `json:"query"`
+		Category    string `json:"category"`
+		Status      string `json:"status"`
+		MergeStatus string `json:"merge_status"`
+		Limit       int    `json:"limit"`
+		Offset      int    `json:"offset"`
 	}
 	if err := json.Unmarshal([]byte(payload), &request); err != nil {
 		return payload
@@ -138,17 +139,19 @@ func canonicalListTasksRuntimeInput(input json.RawMessage) string {
 		offset = 0
 	}
 	encoded, err := json.Marshal(struct {
-		Query    string `json:"query"`
-		Category string `json:"category"`
-		Status   string `json:"status"`
-		Limit    int    `json:"limit"`
-		Offset   int    `json:"offset"`
+		Query       string `json:"query"`
+		Category    string `json:"category"`
+		Status      string `json:"status"`
+		MergeStatus string `json:"merge_status"`
+		Limit       int    `json:"limit"`
+		Offset      int    `json:"offset"`
 	}{
-		Query:    strings.TrimSpace(request.Query),
-		Category: strings.ToLower(strings.TrimSpace(request.Category)),
-		Status:   strings.ToLower(strings.TrimSpace(request.Status)),
-		Limit:    limit,
-		Offset:   offset,
+		Query:       strings.TrimSpace(request.Query),
+		Category:    strings.ToLower(strings.TrimSpace(request.Category)),
+		Status:      strings.ToLower(strings.TrimSpace(request.Status)),
+		MergeStatus: strings.ToLower(strings.TrimSpace(request.MergeStatus)),
+		Limit:       limit,
+		Offset:      offset,
 	})
 	if err != nil {
 		return payload
