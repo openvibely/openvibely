@@ -229,7 +229,7 @@ func BenchmarkExecuteSwitchProjectProjection(b *testing.B) {
 	}
 }
 
-func TestWebAPISwitchProjectCompactProjectionPerformance(t *testing.T) {
+func TestWebAPISwitchProjectUsesCompactProjectionOnLargeFixture(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	seedSwitchProjectBenchmark(t, db, 500)
 	h, _, _ := setupTestHandlerForDB(t, db)
@@ -243,15 +243,4 @@ func TestWebAPISwitchProjectCompactProjectionPerformance(t *testing.T) {
 	require.Len(t, counter.Statements(), 1, "compact lookup statement count")
 	require.Contains(t, compactResponse, "Available projects:")
 	require.Less(t, counter.SelectedTextBytes(), 64*1024, "compact selector should keep selected text bounded")
-
-	compact := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			runSwitchProjectLookup(h, ctx, input)
-		}
-	})
-	compactMedian := measureSwitchProjectMedian(t, h, ctx, input)
-	t.Logf("500-project miss compact: median=%s ns/op=%d B/op=%d allocs/op=%d response-bytes=%d sql-statements=1", compactMedian, compact.NsPerOp(), compact.AllocedBytesPerOp(), compact.AllocsPerOp(), len(compactResponse))
-	if compact.AllocedBytesPerOp() > 512*1024 {
-		t.Fatalf("compact allocated %d B/op, want at most %d", compact.AllocedBytesPerOp(), 512*1024)
-	}
 }

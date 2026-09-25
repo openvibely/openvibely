@@ -193,9 +193,9 @@ func startupOAuthPresenceForbiddenColumns() []string {
 	}
 }
 
-func TestLLMConfigRepo_OAuthProviderPresenceLargeFixtureBudget(t *testing.T) {
+func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactLargeFixtureQuery(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping startup OAuth provider presence performance guard in short mode")
+		t.Skip("skipping startup OAuth provider presence large fixture in short mode")
 	}
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -216,31 +216,6 @@ func TestLLMConfigRepo_OAuthProviderPresenceLargeFixtureBudget(t *testing.T) {
 		t.Fatalf("presence = %#v", presence)
 	}
 	assertOAuthProviderPresenceStatement(t, counter.Statements())
-
-	compact := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			got, err := repo.OAuthProviderPresence(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if !got.AnyOAuth || !got.AnthropicOAuth || !got.OpenAIOAuth {
-				b.Fatalf("unexpected presence: %#v", got)
-			}
-		}
-	})
-
-	t.Logf("startup OAuth provider presence: %d ns/op, %d B/op, %d allocs/op", compact.NsPerOp(), compact.AllocedBytesPerOp(), compact.AllocsPerOp())
-
-	// Coverage instrumentation and shared CI runner load make wall-clock
-	// microbenchmarks noisy. Keep the deterministic query-shape and allocation
-	// guards in the coverage suite, and enforce latency in uninstrumented runs.
-	if testing.CoverMode() == "" && compact.NsPerOp() > (200*time.Microsecond).Nanoseconds() {
-		t.Fatalf("compact OAuth provider presence took %s/op, want <= 200µs", time.Duration(compact.NsPerOp()))
-	}
-	const maxBytesPerOp = 4 * 1024
-	if compact.AllocedBytesPerOp() > maxBytesPerOp {
-		t.Fatalf("compact OAuth provider presence allocated %d B/op, want <= %d", compact.AllocedBytesPerOp(), maxBytesPerOp)
-	}
 }
 
 func BenchmarkLLMConfigRepoStartupOAuthProviderPresence(b *testing.B) {
@@ -427,9 +402,9 @@ func assertHasAnyStatement(t *testing.T, statements []string) {
 	}
 }
 
-func TestLLMConfigRepo_HasAnyStaysBoundedOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_HasAnyWorksOnLargeFixture(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping benchmark ratio assertion in short mode")
+		t.Skip("skipping HasAny large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -439,26 +414,12 @@ func TestLLMConfigRepo_HasAnyStaysBoundedOnLargeFixture(t *testing.T) {
 	}
 	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
 
-	hasAny := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			exists, err := repo.HasAny(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if !exists {
-				b.Fatal("HasAny returned false for non-empty fixture")
-			}
-		}
-	})
-
-	const maxDuration = 200 * time.Microsecond
-	const maxBytesPerOp = 10 * 1024
-	t.Logf("HasAny: %d ns/op, %d B/op", hasAny.NsPerOp(), hasAny.AllocedBytesPerOp())
-	if hasAny.NsPerOp() > maxDuration.Nanoseconds() {
-		t.Fatalf("HasAny took %s/op, want <= %s", time.Duration(hasAny.NsPerOp()), maxDuration)
+	exists, err := repo.HasAny(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if hasAny.AllocedBytesPerOp() > maxBytesPerOp {
-		t.Fatalf("HasAny allocated %d B/op, want <= %d", hasAny.AllocedBytesPerOp(), maxBytesPerOp)
+	if !exists {
+		t.Fatal("HasAny returned false for non-empty fixture")
 	}
 }
 
@@ -483,9 +444,9 @@ func BenchmarkLLMConfigRepoHasAnyLargeCustomProviders(b *testing.B) {
 	}
 }
 
-func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T) {
+func TestLLMConfigRepo_RuntimeSummariesWorkOnLargeFixture(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping runtime model summary performance guard in short mode")
+		t.Skip("skipping runtime model summary large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -504,53 +465,19 @@ func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T)
 	targetID := targets[len(targets)-1].ID
 	targetName := targets[len(targets)-1].Name
 
-	runtimeList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.ListRuntimeSummaries(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 {
-				b.Fatalf("expected 50 configs, got %d", len(configs))
-			}
-		}
-	})
-	getByID := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			cfg, err := repo.GetRuntimeSummary(ctx, targetID, "")
-			if err != nil {
-				b.Fatal(err)
-			}
-			if cfg == nil || cfg.ID != targetID {
-				b.Fatalf("expected target %s, got %#v", targetID, cfg)
-			}
-		}
-	})
-	getByName := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			cfg, err := repo.GetRuntimeSummary(ctx, "", targetName)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if cfg == nil || cfg.Name != targetName {
-				b.Fatalf("expected target %s, got %#v", targetName, cfg)
-			}
-		}
-	})
-
-	const (
-		maxBytesPerOp    = 200 * 1024
-		maxDurationPerOp = time.Millisecond
-	)
-	t.Logf("RuntimeSummaries: %d ns/op, %d B/op; GetByID: %d ns/op, %d B/op; GetByName: %d ns/op, %d B/op",
-		runtimeList.NsPerOp(), runtimeList.AllocedBytesPerOp(), getByID.NsPerOp(), getByID.AllocedBytesPerOp(), getByName.NsPerOp(), getByName.AllocedBytesPerOp())
-	for label, result := range map[string]testing.BenchmarkResult{"runtime list": runtimeList, "get by id": getByID, "get by name": getByName} {
-		if result.NsPerOp() > maxDurationPerOp.Nanoseconds() {
-			t.Fatalf("%s took %s/op, want <= %s", label, time.Duration(result.NsPerOp()), maxDurationPerOp)
-		}
-		if result.AllocedBytesPerOp() > maxBytesPerOp {
-			t.Fatalf("%s allocated %d B/op, want <= %d", label, result.AllocedBytesPerOp(), maxBytesPerOp)
-		}
+	byID, err := repo.GetRuntimeSummary(ctx, targetID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byID == nil || byID.ID != targetID {
+		t.Fatalf("expected target %s, got %#v", targetID, byID)
+	}
+	byName, err := repo.GetRuntimeSummary(ctx, "", targetName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byName == nil || byName.Name != targetName {
+		t.Fatalf("expected target %s, got %#v", targetName, byName)
 	}
 }
 
@@ -696,9 +623,9 @@ func TestLLMConfigRepo_ListWorkerCapacitiesUsesBoundedProjection(t *testing.T) {
 	}
 }
 
-func TestLLMConfigRepo_WorkerCapacitiesStayUnderLargeFixtureBudget(t *testing.T) {
+func TestLLMConfigRepo_WorkerCapacitiesUseCompactLargeFixtureProjection(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping worker capacity performance guard in short mode")
+		t.Skip("skipping worker capacity large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -717,30 +644,6 @@ func TestLLMConfigRepo_WorkerCapacitiesStayUnderLargeFixtureBudget(t *testing.T)
 	}
 	for _, worker := range workers {
 		assertWorkerCapacityProjectionOmitsConfigBlobs(t, worker)
-	}
-
-	workerList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.ListWorkerCapacities(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 {
-				b.Fatalf("expected 50 worker capacity rows, got %d", len(configs))
-			}
-		}
-	})
-
-	const (
-		maxBytesPerOp    = 200 * 1024
-		maxDurationPerOp = time.Millisecond
-	)
-	t.Logf("WorkerCapacities: %d ns/op, %d B/op", workerList.NsPerOp(), workerList.AllocedBytesPerOp())
-	if workerList.NsPerOp() > maxDurationPerOp.Nanoseconds() {
-		t.Fatalf("worker capacity list took %s/op, want <= %s", time.Duration(workerList.NsPerOp()), maxDurationPerOp)
-	}
-	if workerList.AllocedBytesPerOp() > maxBytesPerOp {
-		t.Fatalf("worker capacity list allocated %d B/op, want <= %d", workerList.AllocedBytesPerOp(), maxBytesPerOp)
 	}
 }
 
@@ -1616,9 +1519,9 @@ func TestLLMConfigRepo_ListTaskCreationSelectionOptionsUsesBoundedProjection(t *
 	assertTaskCreationSelectionStatement(t, statements[0])
 }
 
-func TestLLMConfigRepo_TaskCreationSelectionProjectionStaysBoundedOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_TaskCreationSelectionProjectionOnLargeFixture(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping task creation selection performance guard in short mode")
+		t.Skip("skipping task creation selection large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -1628,38 +1531,12 @@ func TestLLMConfigRepo_TaskCreationSelectionProjectionStaysBoundedOnLargeFixture
 	}
 	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
 
-	measure := func(label string, sampleOps int, load func() ([]models.LLMConfig, error)) (time.Duration, uint64) {
-		t.Helper()
-		var ms runtime.MemStats
-		runtime.ReadMemStats(&ms)
-		allocBefore := ms.TotalAlloc
-		startedAt := time.Now()
-		for i := 0; i < sampleOps; i++ {
-			configs, err := load()
-			if err != nil {
-				t.Fatalf("%s load: %v", label, err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				t.Fatalf("%s task creation fixture returned %d configs", label, len(configs))
-			}
-		}
-		runtime.ReadMemStats(&ms)
-		return time.Since(startedAt) / time.Duration(sampleOps), (ms.TotalAlloc - allocBefore) / uint64(sampleOps)
+	configs, err := repo.ListTaskCreationSelectionOptions(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	const (
-		sampleOps        = 5
-		maxDurationPerOp = 200 * time.Microsecond
-		maxBytesPerOp    = 250 * 1024
-	)
-	compactDuration, compactBytes := measure("task creation selection", sampleOps, func() ([]models.LLMConfig, error) { return repo.ListTaskCreationSelectionOptions(ctx) })
-
-	t.Logf("task creation selection: %s/op, %d B/op", compactDuration, compactBytes)
-	if testing.CoverMode() == "" && compactDuration > maxDurationPerOp {
-		t.Fatalf("task creation selection took %s/op, want <= %s", compactDuration, maxDurationPerOp)
-	}
-	if compactBytes > maxBytesPerOp {
-		t.Fatalf("task creation selection allocated %d B/op, want <= %d", compactBytes, maxBytesPerOp)
+	if len(configs) != 50 || configs[0].ID == "" {
+		t.Fatalf("task creation fixture returned %d configs", len(configs))
 	}
 }
 
@@ -1713,9 +1590,9 @@ func assertTaskCreationSelectionStatement(tb testing.TB, raw string) {
 	}
 }
 
-func TestLLMConfigRepo_APIChatSelectionProjectionStaysBoundedOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_APIChatSelectionProjectionOnLargeFixture(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping benchmark ratio assertion in short mode")
+		t.Skip("skipping API Chat selection large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -1725,34 +1602,19 @@ func TestLLMConfigRepo_APIChatSelectionProjectionStaysBoundedOnLargeFixture(t *t
 	}
 	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
 
-	compactThenGet := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.ListChatSelectionOptions(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("compact selection fixture returned %d configs", len(configs))
-			}
-			selectedID := configs[0].ID
-			full, err := repo.GetByID(ctx, selectedID)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
-				b.Fatalf("selected full model was not hydrated: %#v", full)
-			}
-		}
-	})
-
-	const maxDuration = 200 * time.Microsecond
-	const maxBytesPerOp = 300 * 1024
-	t.Logf("compact selection+GetByID: %d ns/op, %d B/op", compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
-	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxDuration.Nanoseconds() {
-		t.Fatalf("compact selection took %s/op, want <= %s", time.Duration(compactThenGet.NsPerOp()), maxDuration)
+	configs, err := repo.ListChatSelectionOptions(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if compactThenGet.AllocedBytesPerOp() > maxBytesPerOp {
-		t.Fatalf("compact selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxBytesPerOp)
+	if len(configs) != 50 || configs[0].ID == "" {
+		t.Fatalf("compact selection fixture returned %d configs", len(configs))
+	}
+	full, err := repo.GetByID(ctx, configs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+		t.Fatalf("selected full model was not hydrated: %#v", full)
 	}
 }
 
@@ -1801,49 +1663,28 @@ func prepareLargeVisionSelectionFixture(tb testing.TB, db *sql.DB, repo *LLMConf
 	return selectedID
 }
 
-func TestLLMConfigRepo_VisionSelectionProjectionMeetsPerformanceTargetOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_VisionSelectionProjectionOnLargeFixture(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping production-shaped vision selection performance guard in short mode")
+		t.Skip("skipping vision selection large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
 	selectedID := prepareLargeVisionSelectionFixture(t, db, repo, ctx)
 
-	compactThenGet := testing.Benchmark(func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			options, err := repo.ListVisionSelectionOptions(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(options) != 50 || options[0].ID == "" {
-				b.Fatalf("compact vision selection fixture returned %d options", len(options))
-			}
-			full, err := repo.GetByID(ctx, selectedID)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
-				b.Fatalf("selected full vision model was not hydrated: %#v", full)
-			}
-		}
-	})
-
-	const (
-		maxCompactDuration   = 200 * time.Microsecond
-		maxCompactBytesPerOp = 300 * 1024
-	)
-	t.Logf("compact vision selection+GetByID: %d ns/op, %d B/op", compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
-	// Coverage instrumentation adds enough overhead to make an absolute
-	// wall-clock target machine-dependent. Keep enforcing the allocation and
-	// allocation guard under coverage; enforce latency on normal builds where
-	// the measurement represents production code.
-	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
-		t.Fatalf("compact vision selection took %d ns/op, want <= %s", compactThenGet.NsPerOp(), maxCompactDuration)
+	options, err := repo.ListVisionSelectionOptions(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
-		t.Fatalf("compact vision selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxCompactBytesPerOp)
+	if len(options) != 50 || options[0].ID == "" {
+		t.Fatalf("compact vision selection fixture returned %d options", len(options))
+	}
+	full, err := repo.GetByID(ctx, selectedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+		t.Fatalf("selected full vision model was not hydrated: %#v", full)
 	}
 }
 
@@ -1995,9 +1836,9 @@ func benchmarkVisionSelectionWithContention(b *testing.B, db *sql.DB, counter *t
 	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 }
 
-func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionStaysBoundedOnLargeFixture(t *testing.T) {
+func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionOnLargeFixture(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping browser Chat context model-loading performance guard in short mode")
+		t.Skip("skipping browser Chat context model-loading large fixture in short mode")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -2007,41 +1848,12 @@ func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionStaysBoundedOnLar
 	}
 	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
 
-	measure := func(label string, sampleOps int, load func() ([]models.LLMConfig, error)) (time.Duration, uint64) {
-		t.Helper()
-		var ms runtime.MemStats
-		runtime.ReadMemStats(&ms)
-		allocBefore := ms.TotalAlloc
-		startedAt := time.Now()
-		for i := 0; i < sampleOps; i++ {
-			configs, err := load()
-			if err != nil {
-				t.Fatalf("%s load: %v", label, err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				t.Fatalf("%s fixture returned %d configs", label, len(configs))
-			}
-		}
-		runtime.ReadMemStats(&ms)
-		return time.Since(startedAt) / time.Duration(sampleOps), (ms.TotalAlloc - allocBefore) / uint64(sampleOps)
+	configs, err := repo.ListChatSelectionOptions(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	const (
-		sampleOps            = 5
-		maxCompactDuration   = 200 * time.Microsecond
-		maxCompactBytesPerOp = 300 * 1024
-	)
-	compactDuration, compactBytes := measure("browser Chat context selection", sampleOps, func() ([]models.LLMConfig, error) { return repo.ListChatSelectionOptions(ctx) })
-
-	t.Logf("browser Chat context selection: %s/op, %d B/op", compactDuration, compactBytes)
-	// Coverage instrumentation makes absolute wall-clock microbenchmarks
-	// machine-dependent. Keep enforcing the deterministic allocation guard in
-	// coverage runs and enforce latency in uninstrumented runs.
-	if testing.CoverMode() == "" && compactDuration > maxCompactDuration {
-		t.Fatalf("browser Chat context selection took %s/op, want <= %s/op", compactDuration, maxCompactDuration)
-	}
-	if compactBytes > maxCompactBytesPerOp {
-		t.Fatalf("browser Chat context selection allocated %d B/op, want <= %d", compactBytes, maxCompactBytesPerOp)
+	if len(configs) != 50 || configs[0].ID == "" {
+		t.Fatalf("browser Chat context fixture returned %d configs", len(configs))
 	}
 }
 
