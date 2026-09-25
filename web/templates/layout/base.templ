@@ -816,20 +816,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					border: none;
 				}
 				.chat-input-option-btn {
-					--chat-input-option-border: oklch(var(--b3) / 1);
 					appearance: none;
 					font: inherit;
 					color: oklch(var(--bc) / 1);
-					border-color: var(--chat-input-option-border) !important;
 					box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 				}
-				.chat-input-option-btn:hover:where(:not(:disabled)),
-				.chat-input-option-btn:active:where(:not(:disabled)),
+				.chat-input-option-btn:active:where(:not(:disabled)) {
+					border-color: oklch(var(--p) / 0.4) !important;
+				}
 				.chat-input-option-btn:focus:where(:not(:focus-visible)) {
-					border-color: var(--chat-input-option-border) !important;
+					outline: none;
 				}
 				[data-theme="light"] .chat-input-option-btn {
-					--chat-input-option-border: var(--ov-l-border);
 					color: var(--ov-l-text-strong);
 				}
 				.chat-input-option-btn:disabled {
@@ -853,7 +851,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					line-height: 1.2;
 				}
 				.chat-input-recommended-shortcut {
-					--chat-input-option-border: var(--ov-primary-action-color, #7480ff);
 					background: var(--ov-primary-action-color, #7480ff) !important;
 					color: #111827 !important;
 					font-weight: 700;
