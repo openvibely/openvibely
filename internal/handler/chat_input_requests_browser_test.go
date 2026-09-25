@@ -113,10 +113,11 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 			if (!visibleQuestion || visibleQuestion.querySelector('legend').classList.contains('text-sm')) fail('visible question was not promoted to the main heading');
 			if (card.querySelectorAll('[data-chat-input-question-index]:not(.hidden)').length !== 1) fail('expected exactly one visible question');
 			if (!/1 of 2/.test(card.textContent)) fail('question position was not shown');
-			var buttons = Array.prototype.slice.call(card.querySelectorAll('button[data-chat-input-option]'));
+			var buttons = Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-option]'));
 			if (buttons.length !== 6) fail('expected options plus a custom-answer choice for each question, saw ' + buttons.length);
 				var createButton = buttons.filter(function(button) { return button.textContent.indexOf('Create task') !== -1; })[0];
 				if (!createButton) fail('create option button missing');
+				if (createButton.tagName !== 'DIV' || createButton.getAttribute('role') !== 'button' || createButton.getAttribute('tabindex') !== '0') fail('question response should render as an app card control, not a native button');
 				if (createButton.getAttribute('aria-pressed') !== 'false') fail('recommended option was preselected before user click');
 				if (createButton.textContent.indexOf('Recommended') === -1) fail('recommended option was not visually labeled');
 				if (createButton.classList.contains('btn-outline') || createButton.classList.contains('btn-primary')) fail('question option still uses distracting DaisyUI outline/primary styling');
@@ -135,8 +136,9 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (getComputedStyle(createButton).borderColor !== initialBorderColor) fail('question option border changed on mouse down');
 				createButton.dispatchEvent(new MouseEvent('mouseup', {bubbles:true}));
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
-				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
+				var recommendedShortcut = card.querySelector('[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
+				if (recommendedShortcut.tagName !== 'DIV' || recommendedShortcut.getAttribute('role') !== 'button' || recommendedShortcut.getAttribute('tabindex') !== '0') fail('recommended shortcut should render as an app card control, not a native button');
 				if (!recommendedShortcut.classList.contains('chat-input-option-btn') || !recommendedShortcut.classList.contains('bg-primary') || !recommendedShortcut.classList.contains('hover:border-primary') || !recommendedShortcut.classList.contains('active:border-primary') || recommendedShortcut.classList.contains('text-primary-content') || recommendedShortcut.classList.contains('btn') || recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut should be a distinct primary-colored answer card, not a standalone button');
 				var recommendedActions = card.querySelector('[data-chat-input-recommended-actions]');
 				if (!recommendedActions || recommendedShortcut.parentElement !== recommendedActions) fail('recommended shortcut should be grouped with the answer choices');
@@ -193,7 +195,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				submitButton.click();
 				await waitFor(function() { return card.getAttribute('data-completed') === 'true'; }, 'successful submission did not complete card');
 				await nextFrame();
-				buttons = Array.prototype.slice.call(card.querySelectorAll('button[data-chat-input-option]'));
+				buttons = Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-option]'));
 			if (buttons.length !== 0) fail('completed question retained actionable controls');
 				if (!/Asked 2 questions/.test(card.textContent)) fail('completed question summary was not shown');
 				if (!/Not now/.test(card.textContent) || !/Use the deployment-configured fallback/.test(card.textContent)) fail('selected answers were not retained in collapsed details');
@@ -333,7 +335,7 @@ func TestChatInputRequestBrowserRefreshRestoresPendingControls(t *testing.T) {
 			}
 			try {
 				var card = await waitFor(function() { return document.querySelector('[data-chat-input-request-id="%s"]'); }, 'pending input request was not restored after refresh');
-				if (card.querySelectorAll('button[data-chat-input-option]').length !== 3) throw new Error('restored request did not contain options and a custom-answer control');
+				if (card.querySelectorAll('[data-chat-input-option]').length !== 3) throw new Error('restored request did not contain options and a custom-answer control');
 				await report('pass', 'refresh restored pending input controls');
 			} catch (error) {
 				await report('fail', String(error && error.stack || error));
