@@ -506,6 +506,11 @@ func (c *Client) ValidateForInstall(release VerifiedRelease, current CurrentBuil
 	if compareVersions(release.Metadata.Version, current.Version) <= 0 {
 		return errors.New("release version is not an authorized upgrade")
 	}
+	if release.Target.ID != "" || len(release.Metadata.Targets) > 0 {
+		if !releaseTargetMatchesMetadata(release) {
+			return errors.New("release target does not match signed metadata")
+		}
+	}
 	if err := validateReleaseTargetForCurrent(release, current, false); err != nil {
 		return err
 	}
