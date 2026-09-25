@@ -3,6 +3,7 @@ package openaiclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -143,5 +144,71 @@ func TestResponsesFallbackBudgets(t *testing.T) {
 		if httpAttempts != wantHTTP {
 			t.Fatalf("model=%s HTTP attempts=%d want=%d", model, httpAttempts, wantHTTP)
 		}
+	}
+}
+
+func TestTerminalWebsocketHandshakeDoesNotRetryOrFallback(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 429} {
+		for _, oauth := range []bool{false, true} {
+			for _, agentic := range []bool{false, true} {
+				t.Run(fmt.Sprintf("status=%d/oauth=%v/agentic=%v", status, oauth, agentic), func(t *testing.T) {
+					var attempts atomic.Int32
+					srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						attempts.Add(1)
+						if r.Method != http.MethodGet {
+							t.Error("terminal rejection triggered HTTP fallback")
+						}
+						w.WriteHeader(status)
+						_, _ = w.Write([]byte(`{"error":{"code":"denied","message":"Request denied"}}`))
+					}))
+					defer srv.Close()
+					oldAPI, oldOAuth := OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL
+					OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = srv.URL, srv.URL
+					defer func() { OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = oldAPI, oldOAuth }()
+					client := NewWithAPIKey("test")
+					if oauth {
+						client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+						client.SetOAuthUnauthorizedHandler(func(context.Context, string) (OAuthTokens, bool, error) { return OAuthTokens{}, false, nil })
+					}
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					var err error
+					if agentic {
+						_, err = client.SendAgentic(ctx, "hello", &AgenticOptions{Model: "gpt-6-sol", MaxTurns: 1, DisableTools: true})
+					} else {
+						_, err = client.Send(ctx, "hello", &SendOptions{Model: "gpt-6-sol"})
+					}
+					var apiErr *APIError
+					if !errors.As(err, &apiErr) || apiErr.StatusCode != status || apiErr.Code != "denied" {
+						t.Fatalf("provider error not preserved: %v", err)
+					}
+					if attempts.Load() != 1 || client.responsesTransportState.websocketDisabled.Load() {
+						t.Fatalf("attempts=%d disabled=%v", attempts.Load(), client.responsesTransportState.websocketDisabled.Load())
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestCompactionConnectionFailuresHaveBoundedRetries(t *testing.T) {
+	client := NewWithAPIKey("test")
+	var websocketAttempts, httpAttempts atomic.Int32
+	client.SetHTTPClient(&http.Client{Transport: completionsRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet {
+			websocketAttempts.Add(1)
+		} else {
+			httpAttempts.Add(1)
+		}
+		return nil, fmt.Errorf("connection refused")
+	})})
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	_, _, err := client.compactAgenticInputItemsViaResponsesV2(ctx, []any{map[string]any{"type": "message", "role": "user", "content": "old message"}}, nil, &AgenticOptions{Model: "gpt-6-sol"})
+	if err == nil || ctx.Err() != nil {
+		t.Fatalf("compaction did not fail within retry budget: %v", err)
+	}
+	if websocketAttempts.Load() != 3 || httpAttempts.Load() != 3 {
+		t.Fatalf("attempts WS=%d HTTP=%d, want three each", websocketAttempts.Load(), httpAttempts.Load())
 	}
 }
