@@ -847,6 +847,16 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 			var event map[string]any
 			if json.Unmarshal(data, &event) == nil {
 				eventType := stringFromAny(event["type"])
+				if eventType == "error" {
+					providerErr := responsesStreamTerminalError(eventType, event)
+					var apiErr *APIError
+					if errors.As(providerErr, &apiErr) && (apiErr.Code == "previous_response_not_found" || apiErr.Code == "websocket_connection_limit_reached") {
+						// Reconnect and replay the full transcript, without disabling WebSocket.
+						state.resetConnectionLocked()
+						writer.CloseWithError(fmt.Errorf("%w: %w", errResponsesWebsocketStale, providerErr))
+						return
+					}
+				}
 				if eventType == "response.created" {
 					if response, ok := event["response"].(map[string]any); ok {
 						id := stringFromAny(response["id"])
