@@ -9,6 +9,15 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func findLLMConfigByID(configs []models.LLMConfig, id string) *models.LLMConfig {
+	for i := range configs {
+		if configs[i].ID == id {
+			return &configs[i]
+		}
+	}
+	return nil
+}
+
 func TestLLMConfigRepo_VerifiedPrincipalAdoptionKeepsSnapshotsGenerationSafe(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
@@ -417,6 +426,22 @@ func TestLLMConfigRepo_ListOAuthConnectionsReturnsSafeSummaries(t *testing.T) {
 	}
 	if summary.AccessToken != "present" || summary.RefreshToken != "" || summary.AccountID != "" || summary.Revision != 0 {
 		t.Fatalf("OAuth connection summary exposed private state: %#v", summary)
+	}
+	cards, err := repo.ListCards(ctx)
+	if err != nil {
+		t.Fatalf("ListCards: %v", err)
+	}
+	card := findLLMConfigByID(cards, cfg.ID)
+	if card == nil || card.OAuthConnectionName != "Alice" {
+		t.Fatalf("model card OAuth account = %#v, want Alice", cards)
+	}
+	pagedCards, err := repo.ListCardsPage(ctx, 20, 0, "")
+	if err != nil {
+		t.Fatalf("ListCardsPage: %v", err)
+	}
+	pagedCard := findLLMConfigByID(pagedCards, cfg.ID)
+	if pagedCard == nil || pagedCard.OAuthConnectionName != "Alice" {
+		t.Fatalf("paged model card OAuth account = %#v, want Alice", pagedCards)
 	}
 	options, err := repo.ListModelCardOptions(ctx)
 	if err != nil {

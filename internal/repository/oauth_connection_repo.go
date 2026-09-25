@@ -34,10 +34,13 @@ const oauthConnectionColumns = `c.id, c.provider, c.name,
 	c.created_at, c.updated_at,
 	(SELECT COUNT(*) FROM agent_configs linked WHERE linked.oauth_connection_id = c.id)`
 
-const oauthConnectionSummaryColumns = `c.id, c.provider,
-			COALESCE(
-				NULLIF(TRIM(c.oauth_provider_display_name), ''),
-				(SELECT NULLIF(TRIM(snapshot.account_display_name), '')
+// oauthConnectionAccountLabelSQL resolves the user-facing account identity.
+// The stored connection name may be the model name for connections migrated
+// from the former one-credential-per-model representation, so it is only a
+// fallback for providers without a built-in generic label.
+const oauthConnectionAccountLabelSQL = `COALESCE(
+			NULLIF(TRIM(c.oauth_provider_display_name), ''),
+			(SELECT NULLIF(TRIM(snapshot.account_display_name), '')
 			 FROM account_usage_snapshots snapshot
 			 WHERE snapshot.oauth_connection_id = c.id
 			   AND snapshot.oauth_config_revision = c.oauth_revision
@@ -49,7 +52,9 @@ const oauthConnectionSummaryColumns = `c.id, c.provider,
 				WHEN 'openai' THEN 'OpenAI account'
 				ELSE c.name
 			END
-		),
+		)`
+
+const oauthConnectionSummaryColumns = `c.id, c.provider, ` + oauthConnectionAccountLabelSQL + `,
 			CASE WHEN c.oauth_access_token != '' THEN 'present' ELSE '' END, '', c.oauth_expires_at,
 				'', '', '', 0, c.oauth_needs_reauth, 0,
 		c.created_at, c.updated_at,
