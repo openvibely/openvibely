@@ -120,7 +120,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createButton.getAttribute('aria-pressed') !== 'false') fail('recommended option was preselected before user click');
 				if (createButton.textContent.indexOf('Recommended') === -1) fail('recommended option was not visually labeled');
 				if (createButton.classList.contains('btn-outline') || createButton.classList.contains('btn-primary')) fail('question option still uses distracting DaisyUI outline/primary styling');
-				['card','bg-base-100','shadow-sm','border','border-base-300','hover:border-primary/40','hover:shadow-md','transition-all'].forEach(function(className) {
+				['card','bg-base-100','shadow-sm','border','border-base-300','hover:border-primary/40','active:border-primary/40','hover:shadow-md','transition-all'].forEach(function(className) {
 					if (!createButton.classList.contains(className)) fail('question option did not reuse shared page-card styling: ' + className);
 				});
 				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
@@ -137,7 +137,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (createStyle.getPropertyValue('--btn-focus-scale').trim() !== '1') fail('question option button can still shrink on click');
 				var recommendedShortcut = card.querySelector('button[data-chat-input-nav="recommended"]');
 				if (!recommendedShortcut || recommendedShortcut.textContent.indexOf('Recommended and move forward') === -1) fail('recommended shortcut missing');
-				if (!recommendedShortcut.classList.contains('chat-input-option-btn') || !recommendedShortcut.classList.contains('bg-primary') || recommendedShortcut.classList.contains('text-primary-content') || recommendedShortcut.classList.contains('btn') || recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut should be a distinct primary-colored answer card, not a standalone button');
+				if (!recommendedShortcut.classList.contains('chat-input-option-btn') || !recommendedShortcut.classList.contains('bg-primary') || !recommendedShortcut.classList.contains('hover:border-primary') || !recommendedShortcut.classList.contains('active:border-primary') || recommendedShortcut.classList.contains('text-primary-content') || recommendedShortcut.classList.contains('btn') || recommendedShortcut.classList.contains('btn-secondary')) fail('recommended shortcut should be a distinct primary-colored answer card, not a standalone button');
 				var recommendedActions = card.querySelector('[data-chat-input-recommended-actions]');
 				if (!recommendedActions || recommendedShortcut.parentElement !== recommendedActions) fail('recommended shortcut should be grouped with the answer choices');
 				var navigation = card.querySelector('[data-chat-input-navigation]');
