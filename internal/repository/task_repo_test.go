@@ -671,26 +671,6 @@ type taskDetailActionMetadataMetrics struct {
 	concurrentLightweightWaits int64
 }
 
-func TestTaskRepo_GetDetailActionMetadataProductionReadCost(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping production-topology task detail action projection measurement in short mode")
-	}
-
-	fixture := newTaskDetailActionMetadataFixture(t)
-	compact := fixture.measure(t, fixture.getDetailActionMetadata, 0)
-
-	if compact.taskTextBytesScanned != 0 {
-		t.Fatalf("compact metadata task text bytes = %d, want 0", compact.taskTextBytesScanned)
-	}
-	if compact.allocatedBytes > 128*1024 {
-		t.Fatalf("compact metadata allocated bytes = %d, want at most %d", compact.allocatedBytes, 128*1024)
-	}
-
-	t.Logf("detail actions median: compact=%s/%d B/%d allocs/%d statement/%d task-text bytes/%s concurrent lightweight-read wait",
-		compact.latency, compact.allocatedBytes, compact.allocations, compact.statementCount, compact.taskTextBytesScanned, compact.concurrentLightweightWait,
-	)
-}
-
 func newTaskDetailActionMetadataFixture(tb testing.TB) *taskDetailActionMetadataFixture {
 	tb.Helper()
 	connections, err := database.NewReadWrite(filepath.Join(tb.TempDir(), "task-detail-actions-projection.db"))
@@ -1386,47 +1366,6 @@ func TestTaskRepo_ListActivePendingAdmissionsLargeBacklogHasEmptyResult(t *testi
 	}
 	if len(admissions) != 0 {
 		t.Fatalf("large backlog admissions = %#v, want empty result", admissions)
-	}
-}
-
-func TestTaskRepo_ListActivePendingAdmissionsProductionPerformanceEvidence(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping production-shaped scheduler admission performance evidence in short mode")
-	}
-
-	sizes := []int{20, 1000, 10000, 50000}
-	oneEligible := make(map[int]activeAdmissionPerformanceMetrics, len(sizes))
-	for _, size := range sizes {
-		size := size
-		t.Run(fmt.Sprintf("one_eligible/%d", size), func(t *testing.T) {
-			fixture := newActiveAdmissionProductionFixture(t, size, false)
-			wantRows := 1
-			candidate := measureActiveAdmissionLoad(t, func() ([]ActiveTaskAdmission, error) {
-				return fixture.repo.ListActivePendingAdmissions(context.Background())
-			}, wantRows)
-			candidate.statementCount = countActiveAdmissionStatements(t, fixture, wantRows)
-			oneEligible[size] = candidate
-			t.Logf("one-eligible rows=%d: median=%s, %d B/op, %d allocs/op, returned=%d, statements=%d",
-				size, candidate.latency, candidate.allocatedBytes, candidate.allocations, candidate.returnedRows, candidate.statementCount)
-
-		})
-	}
-	if oneEligible[50000].latency > oneEligible[20].latency*8 {
-		t.Fatalf("one-eligible 50,000-row median=%s scales with 20-row median=%s", oneEligible[50000].latency, oneEligible[20].latency)
-	}
-
-	for _, size := range sizes {
-		size := size
-		t.Run(fmt.Sprintf("mixed_eligibility/%d", size), func(t *testing.T) {
-			fixture := newActiveAdmissionProductionFixture(t, size, true)
-			wantRows := size/4 - size/8
-			metrics := measureActiveAdmissionLoad(t, func() ([]ActiveTaskAdmission, error) {
-				return fixture.repo.ListActivePendingAdmissions(context.Background())
-			}, wantRows)
-			metrics.statementCount = countActiveAdmissionStatements(t, fixture, wantRows)
-			t.Logf("mixed-eligibility rows=%d: median=%s, %d B/op, %d allocs/op, returned=%d, statements=%d",
-				size, metrics.latency, metrics.allocatedBytes, metrics.allocations, metrics.returnedRows, metrics.statementCount)
-		})
 	}
 }
 

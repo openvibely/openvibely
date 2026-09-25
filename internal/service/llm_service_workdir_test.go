@@ -308,7 +308,7 @@ func BenchmarkDirectModelUsageAttribution(b *testing.B) {
 	}
 }
 
-func TestDirectModelUsageFallbackPerformanceReductionAt500Projects(t *testing.T) {
+func TestDirectModelUsageExplicitProjectAvoidsFallbackLookupAt500Projects(t *testing.T) {
 	originalLogOutput := log.Writer()
 	log.SetOutput(io.Discard)
 	t.Cleanup(func() { log.SetOutput(originalLogOutput) })

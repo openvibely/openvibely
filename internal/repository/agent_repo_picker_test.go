@@ -439,12 +439,12 @@ func TestAgentRepoGetTaskDetailAgentLabelUsesCompactProjection(t *testing.T) {
 	}
 }
 
-func TestAgentRepoListTaskUIOptionsProductionShapePerformance(t *testing.T) {
+func TestAgentRepoListTaskUIOptionsProductionShape(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping production-shaped task UI Agent projection measurement in short mode")
+		t.Skip("skipping production-shaped task UI Agent fixture in short mode")
 	}
 
-	db, counter := testutil.NewStatementCountingTestDB(t)
+	db := testutil.NewTestDB(t)
 	repo := NewAgentRepo(db)
 	ctx := context.Background()
 	clearAgentsForRuntimeSummaryTest(t, db)
@@ -464,11 +464,6 @@ func TestAgentRepoListTaskUIOptionsProductionShapePerformance(t *testing.T) {
 		t.Fatalf("compact Task UI selector bytes = %d, want at most %d", got, 256*1024)
 	}
 
-	compactLatency, compactAllocs, compactWait := measureTaskUIAgentLoad(t, db, counter, func() error {
-		_, err := repo.ListTaskUIOptions(ctx)
-		return err
-	})
-	t.Logf("compact Task UI Agent load latency=%s allocations=%.0f concurrent SQLite wait=%s", compactLatency, compactAllocs, compactWait)
 }
 
 func measureTaskUIAgentLoad(t *testing.T, db *sql.DB, counter *testutil.SQLStatementCounter, load func() error) (time.Duration, float64, time.Duration) {

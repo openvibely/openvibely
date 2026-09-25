@@ -39,9 +39,9 @@ type reviewFollowupHistoryMetrics struct {
 	concurrentReaderWaits int64
 }
 
-func TestExecutionRepo_ReviewFollowupHistoryWindowProductionCost(t *testing.T) {
+func TestExecutionRepo_ReviewFollowupHistoryUsesBoundedIndexedWindow(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping production-topology review follow-up history measurements in short mode")
+		t.Skip("skipping production-topology review follow-up history fixture in short mode")
 	}
 
 	fixture := newReviewFollowupHistoryFixture(t)
@@ -54,20 +54,16 @@ func TestExecutionRepo_ReviewFollowupHistoryWindowProductionCost(t *testing.T) {
 		t.Fatalf("bounded review follow-up plan = %s, want no temporary ORDER BY sort", plan)
 	}
 
-	bounded := fixture.measure(t, func(ctx context.Context, taskID string) ([]models.Execution, error) {
-		return fixture.repo.ListByTaskChronologicalLimit(ctx, taskID, taskThreadHistoryLimitForBenchmark)
-	})
-
-	if bounded.historyRows > taskThreadHistoryLimitForBenchmark {
-		t.Fatalf("bounded review history rows = %d, want at most %d", bounded.historyRows, taskThreadHistoryLimitForBenchmark)
-	}
-	if bounded.historicPayloadRows > taskThreadHistoryLimitForBenchmark {
-		t.Fatalf("bounded historic payload rows = %d, want at most %d", bounded.historicPayloadRows, taskThreadHistoryLimitForBenchmark)
-	}
-
 	filtered, err := fixture.repo.ListByTaskChronologicalLimit(context.Background(), fixture.taskID, taskThreadHistoryLimitForBenchmark)
 	if err != nil {
 		t.Fatalf("load bounded review history for semantic check: %v", err)
+	}
+	if len(filtered) > taskThreadHistoryLimitForBenchmark {
+		t.Fatalf("bounded review history rows = %d, want at most %d", len(filtered), taskThreadHistoryLimitForBenchmark)
+	}
+	payloadRows, _ := reviewFollowupHistoryPayload(filtered)
+	if payloadRows > taskThreadHistoryLimitForBenchmark {
+		t.Fatalf("bounded historic payload rows = %d, want at most %d", payloadRows, taskThreadHistoryLimitForBenchmark)
 	}
 	filtered = filterReviewFollowupHistory(filtered, fixture.currentID)
 	if len(filtered) != 14 {
@@ -82,11 +78,6 @@ func TestExecutionRepo_ReviewFollowupHistoryWindowProductionCost(t *testing.T) {
 			t.Fatalf("filtered history retained non-replayable execution %+v", execution)
 		}
 	}
-
-	t.Logf("review follow-up history median: bounded=%s/%d B/%d allocs/%d rows/%d payload rows/%d payload bytes/%s concurrent reader wait (%d waits); plan=%s",
-		bounded.latency, bounded.allocatedBytes, bounded.allocations, bounded.historyRows, bounded.historicPayloadRows, bounded.historicPayloadBytes, bounded.concurrentReaderWait, bounded.concurrentReaderWaits,
-		plan,
-	)
 }
 
 func BenchmarkExecutionRepoReviewFollowupHistoryHydration(b *testing.B) {

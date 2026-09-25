@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1666,14 +1664,9 @@ type automationSavePerformanceFixture struct {
 }
 
 type automationSavePerformanceSample struct {
-	agentQueries   int
-	sqlStatements  int
-	medianWallTime time.Duration
-	bytesPerOp     uint64
-	allocsPerOp    uint64
+	agentQueries  int
+	sqlStatements int
 }
-
-const automationSavePerformanceSamples = 5
 
 func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerformanceFixture {
 	tb.Helper()
@@ -1712,43 +1705,21 @@ func newAutomationSavePerformanceFixture(tb testing.TB) *automationSavePerforman
 	return &automationSavePerformanceFixture{ctx: ctx, project: project, counter: counter, refs: refs, optimized: optimized}
 }
 
-func measureAutomationSavePerformance(tb testing.TB, fixture *automationSavePerformanceFixture, compiler *AutomationCompiler, candidate models.AutomationDraftCandidate, automationID string) automationSavePerformanceSample {
+func countAutomationSaveStatements(tb testing.TB, fixture *automationSavePerformanceFixture, compiler *AutomationCompiler, candidate models.AutomationDraftCandidate, automationID string) automationSavePerformanceSample {
 	tb.Helper()
-	request := AutomationSaveRequest{ProjectID: fixture.project.ID, AutomationID: automationID, Source: "manual", CreatedVia: "benchmark", Candidate: candidate}
-	fixture.counter.SetEnabled(false)
-	if _, err := compiler.SaveValidatedCandidate(fixture.ctx, request); err != nil {
-		tb.Fatalf("warm-up SaveValidatedCandidate: %v", err)
-	}
+	request := AutomationSaveRequest{ProjectID: fixture.project.ID, AutomationID: automationID, Source: "manual", CreatedVia: "test", Candidate: candidate}
 	fixture.counter.Reset()
 	fixture.counter.SetEnabled(true)
 	if _, err := compiler.SaveValidatedCandidate(fixture.ctx, request); err != nil {
 		fixture.counter.SetEnabled(false)
-		tb.Fatalf("counted SaveValidatedCandidate: %v", err)
+		tb.Fatalf("SaveValidatedCandidate: %v", err)
 	}
 	fixture.counter.SetEnabled(false)
 	statements := fixture.counter.Statements()
-	sample := automationSavePerformanceSample{
+	return automationSavePerformanceSample{
 		agentQueries:  len(selectableAgentValidationStatements(statements)),
 		sqlStatements: len(statements),
 	}
-
-	durations := make([]time.Duration, automationSavePerformanceSamples)
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for i := range durations {
-		started := time.Now()
-		if _, err := compiler.SaveValidatedCandidate(fixture.ctx, request); err != nil {
-			tb.Fatalf("measured SaveValidatedCandidate sample %d: %v", i, err)
-		}
-		durations[i] = time.Since(started)
-	}
-	runtime.ReadMemStats(&after)
-	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
-	sample.medianWallTime = durations[len(durations)/2]
-	sample.bytesPerOp = (after.TotalAlloc - before.TotalAlloc) / uint64(len(durations))
-	sample.allocsPerOp = (after.Mallocs - before.Mallocs) / uint64(len(durations))
-	return sample
 }
 
 func automationSavePerformanceCandidate(candidate models.AutomationDraftCandidate, suffix string) models.AutomationDraftCandidate {
@@ -1774,17 +1745,9 @@ func automationSavePerformanceCandidateWithoutAgentRefs(candidate models.Automat
 	return copy
 }
 
-func automationSavePerformanceDurationDelta(withReferences, withoutReferences time.Duration) time.Duration {
-	return withReferences - withoutReferences
-}
-
-func automationSavePerformanceValueDelta(withReferences, withoutReferences uint64) int64 {
-	return int64(withReferences) - int64(withoutReferences)
-}
-
-func TestAutomationCompilerSaveAgentResolutionPerformanceBudget(t *testing.T) {
+func TestAutomationCompilerSaveAgentResolutionUsesOneValidationQuery(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping production-shaped Automation Agent Save performance budget in short mode")
+		t.Skip("skipping production-shaped Automation Agent Save fixture in short mode")
 	}
 	originalLogWriter := log.Writer()
 	log.SetOutput(io.Discard)
@@ -1797,15 +1760,8 @@ func TestAutomationCompilerSaveAgentResolutionPerformanceBudget(t *testing.T) {
 			optimizedCandidate := automationSavePerformanceCandidate(rawCandidate, fmt.Sprintf("optimized%03d", referenceCount))
 			optimizedWithoutReferences := automationSavePerformanceCandidateWithoutAgentRefs(rawCandidate, fmt.Sprintf("optimized-no-ref%03d", referenceCount))
 
-			optimizedWithout := measureAutomationSavePerformance(t, fixture, fixture.optimized, optimizedWithoutReferences, fmt.Sprintf("on%03d", referenceCount))
-			optimized := measureAutomationSavePerformance(t, fixture, fixture.optimized, optimizedCandidate, fmt.Sprintf("or%03d", referenceCount))
-
-			optimizedAddedWall := automationSavePerformanceDurationDelta(optimized.medianWallTime, optimizedWithout.medianWallTime)
-			optimizedAddedBytes := automationSavePerformanceValueDelta(optimized.bytesPerOp, optimizedWithout.bytesPerOp)
-			optimizedAddedAllocs := automationSavePerformanceValueDelta(optimized.allocsPerOp, optimizedWithout.allocsPerOp)
-			t.Logf("references=%d current(no-ref -> refs) queries=%d->%d sql=%d->%d median=%s->%s bytes/op=%d->%d allocs/op=%d->%d added=%s/%d/%d",
-				referenceCount,
-				optimizedWithout.agentQueries, optimized.agentQueries, optimizedWithout.sqlStatements, optimized.sqlStatements, optimizedWithout.medianWallTime, optimized.medianWallTime, optimizedWithout.bytesPerOp, optimized.bytesPerOp, optimizedWithout.allocsPerOp, optimized.allocsPerOp, optimizedAddedWall, optimizedAddedBytes, optimizedAddedAllocs)
+			optimizedWithout := countAutomationSaveStatements(t, fixture, fixture.optimized, optimizedWithoutReferences, fmt.Sprintf("on%03d", referenceCount))
+			optimized := countAutomationSaveStatements(t, fixture, fixture.optimized, optimizedCandidate, fmt.Sprintf("or%03d", referenceCount))
 			if optimizedWithout.agentQueries != 0 {
 				t.Fatalf("no-reference Agent queries = %d, want zero", optimizedWithout.agentQueries)
 			}

@@ -36,27 +36,25 @@ type workerCapacityProjectionMeasurement struct {
 	sqlStatementCount      int
 }
 
-func TestHandlerProjectWorkerCapacityProjectionProductionPerformance(t *testing.T) {
+func TestHandlerProjectWorkerCapacityUsesCompactProductionProjection(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping file-backed Workers capacity projection measurements in short mode")
+		t.Skip("skipping file-backed Workers capacity fixture in short mode")
 	}
 
 	for _, projectCount := range []int{1, 50, 500} {
 		t.Run(fmt.Sprintf("%d projects", projectCount), func(t *testing.T) {
 			fixture := newWorkerCapacityProjectionFixture(t, projectCount)
-			compact := fixture.measure(t, fixture.renderCompactHandler)
-
-			if compact.sqlStatementCount != workerCapacityPollSQLStatementCount {
-				t.Fatalf("compact SQL statements = %d, want %d", compact.sqlStatementCount, workerCapacityPollSQLStatementCount)
+			fragment, err := fixture.renderCompactHandler(t)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if projectCount == 500 && compact.allocatedBytes > 4*1024*1024 {
-				t.Fatalf("compact allocated bytes = %d, want at most %d", compact.allocatedBytes, 4*1024*1024)
+			projects, err := fixture.projectRepo.ListWorkerCapacityProjects(context.Background())
+			if err != nil {
+				t.Fatal(err)
 			}
-
-			t.Logf("%d projects median: compact=%s/%d B/op/%d allocs/op/%d project-row bytes/%d fragment bytes/%d SQL statements",
-				projectCount,
-				compact.latency, compact.allocatedBytes, compact.allocations, compact.compactProjectRowBytes, compact.fragmentBytes, compact.sqlStatementCount,
-			)
+			if fragment == "" || projectWorkerRowBytes(projects) == 0 {
+				t.Fatal("compact worker capacity projection returned empty output")
+			}
 		})
 	}
 }

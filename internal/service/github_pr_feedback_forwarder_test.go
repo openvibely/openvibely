@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -751,96 +750,28 @@ func TestGitHubPRFeedbackForwarderConcurrentPassesKeepCachesIndependentAndQueueO
 	}
 }
 
-type githubPRFeedbackForwarderAuthorizationMeasurement struct {
-	medianWall           time.Duration
-	bytesPerOperation    float64
-	allocsPerOperation   float64
-	totalSQLStatements   int
-	authorizationSelects int
-}
-
-func TestGitHubPRFeedbackForwarderAuthorizationCachePerformance(t *testing.T) {
+func TestGitHubPRFeedbackForwarderUsesOneAuthorizationLookupPerBatch(t *testing.T) {
 	for _, itemCount := range []int{1, 10, 100} {
 		t.Run(fmt.Sprintf("feedback_items=%d", itemCount), func(t *testing.T) {
 			fixture := newGitHubPRFeedbackForwarderFixture(t, []string{"alice"}, nil)
-			var batch int
 			fixture.provider.itemsFn = func() []GitHubPullRequestFeedback {
-				batch++
-				return realisticGitHubPRFeedbackItems(itemCount, []string{"Alice", "alice"}, fmt.Sprintf("measurement-%d", batch))
+				return realisticGitHubPRFeedbackItems(itemCount, []string{"Alice", "alice"}, "query-count")
 			}
-
-			current := measureGitHubPRFeedbackForwarderAuthorizationCache(t, fixture)
-			t.Logf("current: wall=%s bytes=%.0f B/op allocs=%.0f sql_statements=%d authorization_selects=%d", current.medianWall, current.bytesPerOperation, current.allocsPerOperation, current.totalSQLStatements, current.authorizationSelects)
-
-			if current.authorizationSelects != 1 {
-				t.Fatalf("authorization selects = %d, want 1", current.authorizationSelects)
+			fixture.counter.Reset()
+			fixture.counter.SetEnabled(true)
+			result, err := fixture.forwarder.ForwardAuthorizedFeedback(context.Background(), fixture.project.ID, githubPRFeedbackTestRepo())
+			fixture.counter.SetEnabled(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Forwarded) != itemCount {
+				t.Fatalf("forwarded = %d, want %d", len(result.Forwarded), itemCount)
+			}
+			if got := countGitHubAuthorizationLookups(fixture.counter.Statements()); got != 1 {
+				t.Fatalf("authorization selects = %d, want 1", got)
 			}
 		})
 	}
-}
-
-func measureGitHubPRFeedbackForwarderAuthorizationCache(tb testing.TB, fixture githubPRFeedbackForwarderFixture) githubPRFeedbackForwarderAuthorizationMeasurement {
-	tb.Helper()
-	ctx := context.Background()
-	forward := func() {
-		result, err := fixture.forwarder.ForwardAuthorizedFeedback(ctx, fixture.project.ID, githubPRFeedbackTestRepo())
-		if err != nil {
-			tb.Fatalf("forward feedback: %v", err)
-		}
-		if len(result.Forwarded) == 0 {
-			tb.Fatalf("forward feedback did not queue the unique measurement batch: %#v", result)
-		}
-	}
-
-	// Both modes use this same real, already initialized SQLite fixture. The
-	// warm pass is excluded from timing and allocation samples.
-	forward()
-	const (
-		medianSamples = 5
-		timingRuns    = 3
-	)
-	wallSamples := make([]time.Duration, medianSamples)
-	byteSamples := make([]float64, medianSamples)
-	allocationSamples := make([]float64, medianSamples)
-	for sample := range wallSamples {
-		var elapsed time.Duration
-		for range timingRuns {
-			started := time.Now()
-			forward()
-			elapsed += time.Since(started)
-		}
-		wallSamples[sample] = elapsed / timingRuns
-		byteSamples[sample] = githubPRFeedbackForwarderAllocatedBytes(tb, timingRuns, forward)
-		allocationSamples[sample] = testing.AllocsPerRun(timingRuns, forward)
-	}
-
-	fixture.counter.Reset()
-	fixture.counter.SetEnabled(true)
-	forward()
-	fixture.counter.SetEnabled(false)
-	statements := fixture.counter.Statements()
-	sort.Slice(wallSamples, func(i, j int) bool { return wallSamples[i] < wallSamples[j] })
-	sort.Float64s(byteSamples)
-	sort.Float64s(allocationSamples)
-	return githubPRFeedbackForwarderAuthorizationMeasurement{
-		medianWall:           wallSamples[len(wallSamples)/2],
-		bytesPerOperation:    byteSamples[len(byteSamples)/2],
-		allocsPerOperation:   allocationSamples[len(allocationSamples)/2],
-		totalSQLStatements:   len(statements),
-		authorizationSelects: countGitHubAuthorizationLookups(statements),
-	}
-}
-
-func githubPRFeedbackForwarderAllocatedBytes(tb testing.TB, runs int, forward func()) float64 {
-	tb.Helper()
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for range runs {
-		forward()
-	}
-	runtime.ReadMemStats(&after)
-	return float64(after.TotalAlloc-before.TotalAlloc) / float64(runs)
 }
 
 func BenchmarkGitHubPRFeedbackForwarderAuthorizationCache(b *testing.B) {

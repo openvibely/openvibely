@@ -13,7 +13,6 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1036,94 +1035,24 @@ func isEmailPollAddressPointQuery(query string) bool {
 	return strings.EqualFold(strings.TrimSpace(query), emailPollAddressPointQuery)
 }
 
-type emailPollAddressSnapshotMeasurement struct {
-	medianWall            time.Duration
-	bytesPerRun           float64
-	allocsPerRun          float64
-	totalStatements       int64
-	appSettingsStatements int64
-}
-
-func medianEmailPollFloat(values []float64) float64 {
-	ordered := append([]float64(nil), values...)
-	sort.Float64s(ordered)
-	return ordered[len(ordered)/2]
-}
-
-func emailPollAllocatedBytes(tb testing.TB, runs int, poll func()) float64 {
-	tb.Helper()
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for i := 0; i < runs; i++ {
-		poll()
-	}
-	runtime.ReadMemStats(&after)
-	return float64(after.TotalAlloc-before.TotalAlloc) / float64(runs)
-}
-
-func measureEmailPollAddressSnapshot(tb testing.TB, messageCount int) emailPollAddressSnapshotMeasurement {
-	tb.Helper()
-	fixture := newEmailPollAddressSnapshotBenchmarkFixture(tb, messageCount)
-	fixture.useAddressSnapshot()
-	ctx := context.Background()
-	var totalStatements atomic.Int64
-	var appSettingsStatements atomic.Int64
-	fixture.counter.SetObserver(func(_ context.Context, query string) {
-		totalStatements.Add(1)
-		if isEmailPollAddressPointQuery(query) {
-			appSettingsStatements.Add(1)
-		}
-	})
-	defer fixture.counter.SetObserver(nil)
-
-	const (
-		medianSamples = 5
-		timingRuns    = 3
-	)
-	poll := func() {
-		fixture.reset()
-		fixture.poll(ctx)
-	}
-	poll()
-	totalStatements.Store(0)
-	appSettingsStatements.Store(0)
-	wallSamples := make([]float64, medianSamples)
-	bytesSamples := make([]float64, medianSamples)
-	allocSamples := make([]float64, medianSamples)
-	for sample := range wallSamples {
-		var elapsed time.Duration
-		for i := 0; i < timingRuns; i++ {
-			started := time.Now()
-			poll()
-			elapsed += time.Since(started)
-		}
-		wallSamples[sample] = float64(elapsed) / float64(timingRuns)
-		bytesSamples[sample] = emailPollAllocatedBytes(tb, timingRuns, poll)
-		allocSamples[sample] = testing.AllocsPerRun(timingRuns, poll)
-	}
-
-	totalStatements.Store(0)
-	appSettingsStatements.Store(0)
-	poll()
-	require.Len(tb, fixture.client.seenIDs(), messageCount, "measured poll must acknowledge every self-sent message")
-	return emailPollAddressSnapshotMeasurement{
-		medianWall:            time.Duration(medianEmailPollFloat(wallSamples)),
-		bytesPerRun:           medianEmailPollFloat(bytesSamples),
-		allocsPerRun:          medianEmailPollFloat(allocSamples),
-		totalStatements:       totalStatements.Load(),
-		appSettingsStatements: appSettingsStatements.Load(),
-	}
-}
-
-func TestEmailPollOnceAddressSnapshotPerformance(t *testing.T) {
+func TestEmailPollOnceAddressSnapshotAvoidsSettingsQueries(t *testing.T) {
 	for _, messageCount := range []int{1, 10, 100} {
 		t.Run(fmt.Sprintf("%d messages", messageCount), func(t *testing.T) {
-			current := measureEmailPollAddressSnapshot(t, messageCount)
-			t.Logf("median current: wall=%s bytes=%.0f B/op allocs=%.0f statements=%d app_settings=%d", current.medianWall, current.bytesPerRun, current.allocsPerRun, current.totalStatements, current.appSettingsStatements)
-
-			require.Zero(t, current.totalStatements)
-			require.Zero(t, current.appSettingsStatements)
+			fixture := newEmailPollAddressSnapshotBenchmarkFixture(t, messageCount)
+			fixture.useAddressSnapshot()
+			var totalStatements atomic.Int64
+			var appSettingsStatements atomic.Int64
+			fixture.counter.SetObserver(func(_ context.Context, query string) {
+				totalStatements.Add(1)
+				if isEmailPollAddressPointQuery(query) {
+					appSettingsStatements.Add(1)
+				}
+			})
+			fixture.reset()
+			fixture.poll(context.Background())
+			require.Len(t, fixture.client.seenIDs(), messageCount)
+			require.Zero(t, totalStatements.Load())
+			require.Zero(t, appSettingsStatements.Load())
 		})
 	}
 }
