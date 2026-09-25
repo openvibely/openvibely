@@ -127,6 +127,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (!createButton.querySelector('.chat-input-recommended-badge')) fail('recommended option did not use the muted badge styling');
 				var createStyle = getComputedStyle(createButton);
 				var initialBorderColor = createStyle.borderColor;
+				var initialBackgroundColor = createStyle.backgroundColor;
 				if (createStyle.cursor !== 'pointer') fail('question option does not look clickable');
 				if (!createStyle.boxShadow || createStyle.boxShadow === 'none') fail('question option regressed to flat text styling');
 				if (createStyle.backgroundColor === 'rgb(0, 0, 0)' || createStyle.backgroundColor === 'rgba(0, 0, 0, 0)') fail('question option rendered with an unreadable black or transparent background');
@@ -179,8 +180,9 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				if (!nextButton || nextButton.disabled) fail('Next should be enabled after the user selects the recommended option');
 				if (!createButton.classList.contains('chat-input-option-selected')) fail('selected option did not use the local selected styling');
 				var selectedStyle = getComputedStyle(createButton);
+				if (selectedStyle.backgroundColor !== initialBackgroundColor) fail('selected option should not change background color in dark mode');
 				if (selectedStyle.borderColor !== initialBorderColor) fail('selected option changed border color and can flash like page cards');
-				if (selectedStyle.boxShadow.indexOf('inset') !== -1) fail('selected option should not add an inset ring that looks like a wider border');
+				if (selectedStyle.boxShadow.indexOf('inset') === -1) fail('selected option should use the thicker primary inset ring without changing background');
 				if (createButton.classList.contains('btn-primary')) fail('selected option fell back to distracting primary button styling');
 				nextButton.click();
 				await waitFor(function() { return /2 of 2/.test(card.textContent) && card.textContent.indexOf('Which fallback should be used?') !== -1; }, 'Next did not show the second question');
