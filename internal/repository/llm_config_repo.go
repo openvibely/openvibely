@@ -381,6 +381,7 @@ func (r *LLMConfigRepo) ListCardsPageFiltered(ctx context.Context, limit, offset
 		query += ` AND INSTR(LOWER(
 			COALESCE(name, '') || ' ' || COALESCE(provider, '') || ' ' ||
 			COALESCE(model, '') || ' ' ||
+			COALESCE((SELECT ` + oauthConnectionAccountLabelSQL + ` FROM oauth_connections c WHERE c.id = oauth_connection_id), '') || ' ' ||
 			CASE WHEN is_default = 1 THEN 'default' ELSE 'active' END || ' ' ||
 				CASE WHEN auth_method = 'oauth' AND (
 					(provider IN ('anthropic', 'openai') AND EXISTS(

@@ -435,7 +435,7 @@ func TestLLMConfigRepo_ListOAuthConnectionsReturnsSafeSummaries(t *testing.T) {
 	if card == nil || card.OAuthConnectionName != "Alice" {
 		t.Fatalf("model card OAuth account = %#v, want Alice", cards)
 	}
-	pagedCards, err := repo.ListCardsPage(ctx, 20, 0, "")
+	pagedCards, err := repo.ListCardsPage(ctx, 20, 0, "alice")
 	if err != nil {
 		t.Fatalf("ListCardsPage: %v", err)
 	}

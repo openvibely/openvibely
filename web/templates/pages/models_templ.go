@@ -490,7 +490,7 @@ func modelSearchText(agent models.LLMConfig) string {
 			status += " not connected"
 		}
 	}
-	return agent.Name + " " + string(agent.Provider) + " " + agent.Model + " " + status
+	return agent.Name + " " + string(agent.Provider) + " " + agent.Model + " " + agent.OAuthConnectionName + " " + status
 }
 
 func modelWorkerRunning(stats map[string]int, id string) int {
