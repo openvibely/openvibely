@@ -51,7 +51,7 @@ const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
 			CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
 			CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END,
 			COALESCE(oauth_connection_id, ''),
-			COALESCE((SELECT c.name FROM oauth_connections c WHERE c.id = oauth_connection_id), '')`
+			COALESCE((SELECT ` + oauthConnectionAccountLabelSQL + ` FROM oauth_connections c WHERE c.id = oauth_connection_id), '')`
 
 // llmConfigPickerColumns is the render-only model picker projection for Chat
 // and Agent dialogs. It deliberately excludes provider identity, credentials,
