@@ -165,6 +165,7 @@ func TestValidateForInstallRejectsAutomaticReleaseWithoutSignedTarget(t *testing
 		{name: "supported offer with missing target", applySupported: true, action: "download"},
 		{name: "automatic action with missing target", action: "download"},
 		{name: "target fields without signed identity", applySupported: true, action: "download", target: Target{Kind: "executable", OS: "linux", Arch: "arm64", URL: "https://updates.example.test/openvibely-arm64.tar.gz"}},
+		{name: "target-bearing release without automatic markers", target: Target{Kind: "executable", OS: "linux", Arch: "arm64", URL: "https://updates.example.test/openvibely-arm64.tar.gz"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
