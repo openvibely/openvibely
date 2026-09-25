@@ -560,10 +560,10 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		tokenUsed := c.auth.Token
 		conn, resp, connectErr := dial()
 		if connectErr != nil && isChatGPTOAuth && resp != nil && resp.StatusCode == http.StatusUnauthorized && c.oauthUnauthorizedHandler != nil {
-			if resp.Body != nil {
+			tokens, recovered, recoverErr := c.oauthUnauthorizedHandler(ctx, tokenUsed)
+			if (recovered || recoverErr != nil) && resp.Body != nil {
 				resp.Body.Close()
 			}
-			tokens, recovered, recoverErr := c.oauthUnauthorizedHandler(ctx, tokenUsed)
 			if recoverErr != nil {
 				return nil, recoverErr
 			}
@@ -578,7 +578,13 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		if resp != nil && resp.Body != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			return nil, httpretry.NewResponseError(resp, fmt.Errorf("%w: connect %q: %d %s %s", errResponsesWebsocketTransport, endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body))))
+			providerErr := fmt.Errorf("connect %q: %w", endpoint, parseAPIError(resp.StatusCode, body))
+			// A rejected handshake is not necessarily a broken transport. Keep
+			// terminal authentication/request errors out of reconnect and fallback.
+			if httpretry.IsRetryableStatus(resp.StatusCode) || resp.StatusCode == http.StatusUpgradeRequired {
+				providerErr = fmt.Errorf("%w: %w", errResponsesWebsocketTransport, providerErr)
+			}
+			return nil, httpretry.NewResponseError(resp, providerErr)
 		}
 		return nil, fmt.Errorf("%w: connect %q: %w", errResponsesWebsocketTransport, endpoint, connectErr)
 	}
