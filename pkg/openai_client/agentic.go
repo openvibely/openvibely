@@ -526,7 +526,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		}
 		var turnResult *agenticTurnResult
 		overflowRecovered := false
-		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		turnResult, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 			RetryableError: func(err error) bool {
 				return !c.responsesTransportState.hasAstraSteeringAmbiguous() && isRetryableResponsesTransportError(err)
 			},
@@ -1368,7 +1368,7 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	compactionOpts.OnAstraMidTurnSteering = nil
 	compactionOpts.AstraMidTurnSteeringWakeup = nil
 	isOAuth := strings.TrimSpace(c.auth.APIKey) == ""
-	result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+	result, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 		MaxRetries:                           2, // Codex remote compaction v2 stream retry cap.
 		RetryableError:                       isRetryableResponsesTransportError,
 		RetryConnectionFailuresWithoutBudget: true,
@@ -2146,7 +2146,8 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 
 	// Standard Responses requests use OpenAI's hosted web_search. Responses Lite
 	// requests already carry the client-executed web.run namespace in tools.
-	if opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model) && !isResponsesLiteWebsocketModel(opts.Model) {
+	if opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model) && !isResponsesLiteWebsocketModel(opts.Model) &&
+		(opts.ToolFilter == nil || opts.ToolFilter(openAIWebSearchToolType)) {
 		existing, _ := payload["tools"].([]ToolDefinition)
 		rawTools := make([]any, 0, len(existing)+1)
 		for _, t := range existing {

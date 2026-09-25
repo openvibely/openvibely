@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
 	"github.com/stretchr/testify/require"
@@ -1166,7 +1167,7 @@ func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T
 	}
 }
 
-func TestSendAgentic_ResponsesLiteStreamFailureFallsBackBeforeOutput(t *testing.T) {
+func TestSendAgentic_ResponsesLiteStreamFailureFallsBackAfterRetries(t *testing.T) {
 	var websocketAttempts atomic.Int32
 	var httpRequests atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1211,7 +1212,7 @@ func TestSendAgentic_ResponsesLiteStreamFailureFallsBackBeforeOutput(t *testing.
 	if resp.Text != "recovered" {
 		t.Fatalf("Text = %q, want recovered", resp.Text)
 	}
-	if websocketAttempts.Load() != 1 || httpRequests.Load() != 1 {
+	if websocketAttempts.Load() != int32(httpretry.StreamTurnMaxRetries+1) || httpRequests.Load() != 1 {
 		t.Fatalf("attempts websocket=%d HTTP=%d", websocketAttempts.Load(), httpRequests.Load())
 	}
 }
