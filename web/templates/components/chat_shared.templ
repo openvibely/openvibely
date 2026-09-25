@@ -4790,7 +4790,7 @@ templ ChatAutoScrollScript() {
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
 				'bash': 'Bash', 'grep_search': 'Grep', 'list_files': 'List Files',
-				'web_search': 'Web Search', 'web_fetch': 'Web Fetch',
+				'web_search': 'Web Search', 'web.run': 'Web Search', 'web_fetch': 'Web Fetch',
 				'code_execution': 'Code Execution', 'bash_code_execution': 'Bash Code Execution'
 			};
 			// Normalize provider-specific tool aliases to canonical IDs so
@@ -4805,6 +4805,7 @@ templ ChatAutoScrollScript() {
 				'List Files': 'list_files',
 				'Search': 'grep_search',
 				'WebSearch': 'web_search',
+				'web.run': 'web_search',
 				'WebFetch': 'web_fetch',
 				'web_search_20250305': 'web_search',
 				'web_search_20260209': 'web_search',
@@ -5237,6 +5238,71 @@ templ ChatAutoScrollScript() {
 			}
 
 			// Helper: build tool body grid with IN/OUT rows
+			function collectWebSearchSources(value) {
+				var sources = [];
+				var seen = Object.create(null);
+				function visit(item) {
+					if (!item) return;
+					if (Array.isArray(item)) {
+						item.forEach(visit);
+						return;
+					}
+					if (typeof item !== 'object') return;
+					var url = typeof item.url === 'string' ? item.url : (typeof item.link === 'string' ? item.link : '');
+					if (url && /^https?:\/\//i.test(url) && !seen[url]) {
+						seen[url] = true;
+						var title = typeof item.title === 'string' ? item.title : (typeof item.name === 'string' ? item.name : '');
+						var snippet = typeof item.snippet === 'string' ? item.snippet : (typeof item.description === 'string' ? item.description : '');
+						var domain = typeof item.domain === 'string' ? item.domain : '';
+						if (!domain) {
+							try { domain = new URL(url).hostname; } catch (_) {}
+						}
+						sources.push({ url: url, title: title || domain || url, snippet: snippet, domain: domain });
+					}
+					Object.keys(item).forEach(function(key) {
+						var child = item[key];
+						if (child && typeof child === 'object') visit(child);
+					});
+				}
+				visit(value);
+				return sources;
+			}
+
+			function appendWebSearchSources(container, sources) {
+				if (!sources.length) return;
+				var list = document.createElement('div');
+				list.className = 'stream-web-search-sources';
+				var heading = document.createElement('div');
+				heading.className = 'stream-web-search-sources-heading';
+				heading.textContent = 'Sources';
+				list.appendChild(heading);
+				sources.forEach(function(source) {
+					var link = document.createElement('a');
+					link.className = 'stream-web-search-source';
+					link.href = source.url;
+					link.target = '_blank';
+					link.rel = 'noopener noreferrer';
+					var title = document.createElement('span');
+					title.className = 'stream-web-search-source-title';
+					title.textContent = source.title;
+					link.appendChild(title);
+					if (source.domain) {
+						var domain = document.createElement('span');
+						domain.className = 'stream-web-search-source-domain';
+						domain.textContent = source.domain;
+						link.appendChild(domain);
+					}
+					if (source.snippet) {
+						var snippet = document.createElement('span');
+						snippet.className = 'stream-web-search-source-snippet';
+						snippet.textContent = source.snippet;
+						link.appendChild(snippet);
+					}
+					list.appendChild(link);
+				});
+				container.appendChild(list);
+			}
+
 			function buildToolBody(seg) {
 				var hasIn = false;
 				var inLabel = '';
@@ -5269,7 +5335,27 @@ templ ChatAutoScrollScript() {
 				}
 
 				var outputText = seg.resultOutput ? seg.resultOutput.trim() : '';
+				var webSearchSources = [];
+				if (normalizeToolName(seg.name) === 'web_search' && outputText.indexOf('web-search-json:') === 0) {
+					try {
+						var encodedPayload = outputText.substring('web-search-json:'.length).replace(/-/g, '+').replace(/_/g, '/');
+						while (encodedPayload.length % 4) encodedPayload += '=';
+						var binaryPayload = atob(encodedPayload);
+						var payloadBytes = new Uint8Array(binaryPayload.length);
+						for (var payloadIndex = 0; payloadIndex < binaryPayload.length; payloadIndex++) payloadBytes[payloadIndex] = binaryPayload.charCodeAt(payloadIndex);
+						var webSearchPayload = JSON.parse(new TextDecoder().decode(payloadBytes));
+						if (webSearchPayload && typeof webSearchPayload === 'object') {
+							outputText = typeof webSearchPayload.output === 'string' ? webSearchPayload.output.trim() : '';
+							webSearchSources = collectWebSearchSources(webSearchPayload.results);
+							if (webSearchSources.length === 0 && webSearchPayload.results != null) {
+								var rawResults = JSON.stringify(webSearchPayload.results, null, 2);
+								outputText += (outputText ? '\n\n' : '') + 'Search results:\n' + rawResults;
+							}
+						}
+					} catch (_) {}
+				}
 				var hasOut = outputText !== '';
+				if (webSearchSources.length > 0) hasOut = true;
 				if (!hasIn && !hasOut) return null;
 
 				var body = document.createElement('div');
@@ -5400,7 +5486,8 @@ templ ChatAutoScrollScript() {
 						});
 						outVal.appendChild(toggle);
 					}
-					if (expanded) materializeOutput(true);
+					if (expanded && outputText) materializeOutput(true);
+					appendWebSearchSources(outVal, webSearchSources);
 
 					outRow.appendChild(outLbl);
 					outRow.appendChild(outVal);
