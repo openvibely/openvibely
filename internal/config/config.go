@@ -89,8 +89,7 @@ func LoadWithMode(mode RuntimeMode) *Config {
 	defaults := defaultsForMode(mode)
 
 	appDataDir := getEnv("OPENVIBELY_APP_DATA_DIR", defaults.AppDataDir)
-	defaultDBPath := filepath.Join(appDataDir, "openvibely.db")
-	defaultRepoRoot := filepath.Join(appDataDir, "repos")
+	defaultDBPath, defaultRepoRoot := defaultStoragePaths(appDataDir)
 
 	enableLocalRepo := ResolveEnableLocalRepoPath(os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH"))
 	if mode == ModeDesktop && os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH") == "" {
@@ -190,11 +189,12 @@ func (c *Config) NormalizeForMode() *Config {
 	if c.AppDataDir != "" {
 		_ = os.MkdirAll(c.AppDataDir, 0o755)
 	}
+	defaultDBPath, defaultRepoRoot := defaultStoragePaths(c.AppDataDir)
 	if c.DatabasePath == "" {
-		c.DatabasePath = filepath.Join(c.AppDataDir, "openvibely.db")
+		c.DatabasePath = defaultDBPath
 	}
 	if c.ProjectRepoRoot == "" {
-		c.ProjectRepoRoot = filepath.Join(c.AppDataDir, "repos")
+		c.ProjectRepoRoot = defaultRepoRoot
 	}
 	if c.Mode == ModeDesktop && os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH") == "" {
 		c.EnableLocalRepoPath = true
@@ -214,20 +214,21 @@ type modeDefaults struct {
 func defaultsForMode(mode RuntimeMode) modeDefaults {
 	appDataDir := serverDataDir()
 	defaults := modeDefaults{
-		Port:            "3001",
-		AppDataDir:      appDataDir,
-		DatabasePath:    filepath.Join(appDataDir, "openvibely.db"),
-		ProjectRepoRoot: filepath.Join(appDataDir, "repos"),
+		Port:       "3001",
+		AppDataDir: appDataDir,
 	}
 	if mode == ModeDesktop {
 		appDataDir = desktopDataDir()
 		defaults.Port = "0"
-		defaults.AppDataDir = appDataDir
-		defaults.DatabasePath = filepath.Join(appDataDir, "openvibely.db")
-		defaults.ProjectRepoRoot = filepath.Join(appDataDir, "repos")
 		defaults.EnableLocalRepoPath = true
 	}
+	defaults.AppDataDir = appDataDir
+	defaults.DatabasePath, defaults.ProjectRepoRoot = defaultStoragePaths(appDataDir)
 	return defaults
+}
+
+func defaultStoragePaths(appDataDir string) (databasePath, projectRepoRoot string) {
+	return filepath.Join(appDataDir, "openvibely.db"), filepath.Join(appDataDir, "repos")
 }
 
 const (
