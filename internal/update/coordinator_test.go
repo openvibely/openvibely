@@ -39,18 +39,27 @@ func TestCoordinatorDoesNotRestorePersistedReleaseForDifferentBuild(t *testing.T
 		current              CurrentBuild
 		originalDistribution string
 		target               Target
+		metadataTargets      bool
 	}{
 		{
 			name:                 "wrong architecture",
 			current:              CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary},
 			originalDistribution: buildinfo.DistributionBinary,
 			target:               Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64"},
+			metadataTargets:      true,
 		},
 		{
 			name:                 "wrong distribution target kind",
 			current:              CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary},
 			originalDistribution: buildinfo.DistributionDesktop,
 			target:               Target{ID: "darwin-app", Kind: "app_bundle", OS: "darwin", Arch: "arm64"},
+			metadataTargets:      true,
+		},
+		{
+			name:                 "missing signed target metadata",
+			current:              CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary},
+			originalDistribution: buildinfo.DistributionBinary,
+			target:               Target{Kind: "executable", OS: "linux", Arch: "arm64", URL: "https://updates.example.test/openvibely-arm64.tar.gz"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,8 +75,12 @@ func TestCoordinatorDoesNotRestorePersistedReleaseForDifferentBuild(t *testing.T
 				t.Fatal(err)
 			}
 
+			metadata := ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}
+			if tc.metadataTargets {
+				metadata.Targets = []Target{tc.target}
+			}
 			release := VerifiedRelease{
-				Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{tc.target}},
+				Metadata: metadata,
 				Target:   tc.target, ApplySupported: true, Action: "download",
 			}
 			original := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: tc.target.OS, Arch: tc.target.Arch}, Distribution: tc.originalDistribution}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)

@@ -1980,11 +1980,13 @@ func TestWailsProviderCheckAndDownloadContracts(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(ClientConfig{Channel: "stable", Now: func() time.Time { return now }, HTTPClient: server.Client()})
-	current := CurrentBuild{Build: buildinfo.Build{Version: "1.0.0", OS: "linux", Arch: "amd64"}}
+	current := CurrentBuild{Build: buildinfo.Build{Version: "1.0.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionDesktop}
+	target := Target{ID: "desktop-linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64", URL: server.URL + "/artifact.zip", Filename: "openvibely.zip", Filetype: "zip", Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])}
 	release := VerifiedRelease{
-		Metadata: ReleaseMetadata{SchemaVersion: 1, Version: "1.1.0", Channel: "stable", PublishedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), ReleaseNotesURL: "https://example.test/notes"},
-		Target:   Target{Kind: "desktop", OS: "linux", Arch: "amd64", URL: server.URL + "/artifact.zip", Filename: "openvibely.zip", Filetype: "zip", Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])},
-		Action:   "install",
+		Metadata:       ReleaseMetadata{SchemaVersion: 1, Version: "1.1.0", Channel: "stable", PublishedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), ReleaseNotesURL: "https://example.test/notes", Targets: []Target{target}},
+		Target:         target,
+		ApplySupported: true,
+		Action:         "download",
 	}
 	provider := &WailsProvider{Client: client, Current: current, Release: &release}
 	if provider.Name() != "openvibely" {
@@ -2018,6 +2020,7 @@ func TestWailsProviderCheckAndDownloadContracts(t *testing.T) {
 	}
 	badDigest := release
 	badDigest.Target.SHA256 = "not-hex"
+	badDigest.Metadata.Targets = []Target{badDigest.Target}
 	provider.Release = &badDigest
 	if _, err := provider.Check(ctx, wailsupdater.CheckRequest{}); err == nil || !strings.Contains(err.Error(), "invalid byte") {
 		t.Fatalf("expected bad digest Check error, got %v", err)
