@@ -39,6 +39,25 @@ func TestResponsesStreamTerminalErrorPreservesStructuredCategory(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamTerminalErrorPreservesWrappedWebsocketStatus(t *testing.T) {
+	err := responsesStreamTerminalError("error", map[string]any{
+		"type":   "error",
+		"status": float64(400),
+		"error": map[string]any{
+			"type":    "invalid_request_error",
+			"code":    "unsupported_value",
+			"message": "Responses Lite does not support async tools",
+		},
+	})
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("stream error = %#v, want APIError", err)
+	}
+	if apiErr.StatusCode != 400 || apiErr.Code != "unsupported_value" {
+		t.Fatalf("stream error = %#v, want status 400 and unsupported_value", apiErr)
+	}
+}
+
 func TestAPIError(t *testing.T) {
 	t.Run("error string formatting", func(t *testing.T) {
 		tests := []struct {

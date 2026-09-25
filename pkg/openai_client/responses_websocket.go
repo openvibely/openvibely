@@ -112,13 +112,6 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 	return err != nil && ctx.Err() == nil && errors.Is(err, errResponsesWebsocketTransport)
 }
 
-func classifyResponsesWebsocketStreamError(err error) error {
-	if errors.Is(err, io.ErrUnexpectedEOF) {
-		return fmt.Errorf("%w: response stream ended before response.completed: %w", errResponsesWebsocketTransport, err)
-	}
-	return err
-}
-
 const (
 	openAIResponsesWebsocketBeta = "responses_websockets=2026-02-06"
 	responsesLiteMetadataKey     = "ws_request_header_x_openai_internal_codex_responses_lite"
@@ -369,6 +362,9 @@ func responsesLiteTools(tools any) []any {
 		case "web_search", "web_search_preview", "image_generation":
 			continue
 		default:
+			// Responses Lite does not implement the standard Responses async
+			// tool protocol. Never forward async metadata into a Lite request.
+			delete(tool, "async")
 			filtered = append(filtered, raw)
 		}
 	}

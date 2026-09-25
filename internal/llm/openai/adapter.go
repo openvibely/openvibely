@@ -138,10 +138,11 @@ func openAIRuntimeToolAsyncAllowed(def llmcontracts.RuntimeToolDefinition) bool 
 	}
 }
 
-func openAIAsyncRuntimeToolsEnabled(agent models.LLMConfig) bool {
-	model := strings.ToLower(strings.TrimSpace(agent.Model))
-	return (model == "gpt-6-astra" || model == "gpt-6-sol" || model == "gpt-6-luna") &&
-		(agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth())
+func openAIAsyncRuntimeToolsEnabled(models.LLMConfig) bool {
+	// The current first-party GPT-6 models use Responses Lite. Unlike the
+	// standard Responses API, Lite rejects tools marked async because async
+	// execution injects acknowledgement and resume-sampling events.
+	return false
 }
 
 func openAIAsyncRuntimeToolsEnabledForRequest(ctx context.Context, agent models.LLMConfig) bool {
