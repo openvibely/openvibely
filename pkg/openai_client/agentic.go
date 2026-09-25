@@ -1369,9 +1369,8 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	compactionOpts.AstraMidTurnSteeringWakeup = nil
 	isOAuth := strings.TrimSpace(c.auth.APIKey) == ""
 	result, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
-		MaxRetries:                           2, // Codex remote compaction v2 stream retry cap.
-		RetryableError:                       isRetryableResponsesTransportError,
-		RetryConnectionFailuresWithoutBudget: true,
+		MaxRetries:     2, // Includes connection failures; unlimited reconnects are for normal generation only.
+		RetryableError: isRetryableResponsesTransportError,
 	}, func(attemptCtx context.Context) (*agenticTurnResult, error) {
 		return c.sendAgenticTurn(attemptCtx, compactionInput, tools, &compactionOpts, isOAuth)
 	})
