@@ -153,6 +153,35 @@ func TestVerifyReleaseAcceptsLinuxDesktopExecutableTarget(t *testing.T) {
 	}
 }
 
+func TestValidateForInstallRejectsAutomaticReleaseWithoutSignedTarget(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	current := CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary}
+	cases := []struct {
+		name           string
+		applySupported bool
+		action         string
+		target         Target
+	}{
+		{name: "supported offer with missing target", applySupported: true, action: "download"},
+		{name: "automatic action with missing target", action: "download"},
+		{name: "target fields without signed identity", applySupported: true, action: "download", target: Target{Kind: "executable", OS: "linux", Arch: "arm64", URL: "https://updates.example.test/openvibely-arm64.tar.gz"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "state.json"), Now: func() time.Time { return now }})
+			release := VerifiedRelease{
+				Metadata:       ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)},
+				Target:         tc.target,
+				ApplySupported: tc.applySupported,
+				Action:         tc.action,
+			}
+			if err := client.ValidateForInstall(release, current); err == nil {
+				t.Fatal("automatic release without a signed target was accepted")
+			}
+		})
+	}
+}
+
 func TestValidateForInstallRejectsInapplicableTargets(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	validTarget := Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64"}
