@@ -445,7 +445,7 @@ func TestResponsesLiteWebSocketModels(t *testing.T) {
 	}
 }
 
-func TestSend_GPT6SolLunaAPIKeyUsesStandardResponsesWebSocket(t *testing.T) {
+func TestSend_GPT6SolLunaAPIKeyUsesResponsesLiteWebSocket(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -471,11 +471,12 @@ func TestSend_GPT6SolLunaAPIKeyUsesStandardResponsesWebSocket(t *testing.T) {
 				if request["model"] != model || request["type"] != "response.create" {
 					t.Errorf("request type/model = %v/%v", request["type"], request["model"])
 				}
-				if _, ok := request["client_metadata"]; ok {
-					t.Errorf("standard WebSocket request unexpectedly contains Responses Lite metadata")
+				metadata, _ := request["client_metadata"].(map[string]any)
+				if metadata[responsesLiteMetadataKey] != "true" {
+					t.Errorf("Responses Lite metadata = %#v", metadata)
 				}
-				if _, ok := request["max_output_tokens"]; !ok {
-					t.Errorf("standard WebSocket request omitted max_output_tokens")
+				if _, ok := request["max_output_tokens"]; ok {
+					t.Errorf("Responses Lite request retained max_output_tokens")
 				}
 				completed := fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","model":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`, model)
 				if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
@@ -500,7 +501,7 @@ func TestSend_GPT6SolLunaAPIKeyUsesStandardResponsesWebSocket(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_GPT6SolLunaNativeWebSearchUsesStandardResponsesWebSocket(t *testing.T) {
+func TestSendAgentic_GPT6SolLunaAPIKeyWebSearchUsesResponsesLiteNamespace(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			var request map[string]any
@@ -544,16 +545,21 @@ func TestSendAgentic_GPT6SolLunaNativeWebSearchUsesStandardResponsesWebSocket(t 
 			if resp.Text != "ok" {
 				t.Fatalf("response text = %q, want ok", resp.Text)
 			}
-			tools, _ := request["tools"].([]any)
-			if !responsesToolsContainHostedTool(tools) {
-				t.Fatalf("request tools = %#v, want native web_search", tools)
+			if _, ok := request["tools"]; ok {
+				t.Fatalf("Responses Lite request unexpectedly retained top-level tools: %#v", request["tools"])
 			}
 			input, _ := request["input"].([]any)
-			if len(input) > 0 {
-				first, _ := input[0].(map[string]any)
-				if first["type"] == "additional_tools" {
-					t.Fatalf("standard Responses request unexpectedly used additional_tools: %#v", first)
+			additional, _ := input[0].(map[string]any)
+			tools, _ := additional["tools"].([]any)
+			foundWebRun := false
+			for _, raw := range tools {
+				tool, _ := raw.(map[string]any)
+				if tool["type"] == "namespace" && tool["name"] == "web" {
+					foundWebRun = true
 				}
+			}
+			if !foundWebRun {
+				t.Fatalf("Responses Lite tools omitted web.run: %#v", tools)
 			}
 		})
 	}
@@ -647,7 +653,7 @@ func TestBuildResponsesLiteWebsocketPayload_OmitsUnsupportedImageDetails(t *test
 	}
 }
 
-func TestSend_APIKeyTerraUsesStandardResponsesWebSocket(t *testing.T) {
+func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
@@ -701,11 +707,12 @@ func TestSend_APIKeyTerraUsesStandardResponsesWebSocket(t *testing.T) {
 	if resp.Text != "ok" {
 		t.Fatalf("Text = %q, want ok", resp.Text)
 	}
-	if request["max_output_tokens"] != float64(123) {
-		t.Errorf("standard websocket max_output_tokens = %#v, want 123", request["max_output_tokens"])
+	if _, ok := request["max_output_tokens"]; ok {
+		t.Errorf("Responses Lite websocket retained max_output_tokens = %#v", request["max_output_tokens"])
 	}
-	if _, ok := request["client_metadata"]; ok {
-		t.Error("standard websocket request unexpectedly contains Responses Lite metadata")
+	metadata, _ := request["client_metadata"].(map[string]any)
+	if metadata[responsesLiteMetadataKey] != "true" {
+		t.Errorf("Responses Lite metadata = %#v", metadata)
 	}
 }
 
