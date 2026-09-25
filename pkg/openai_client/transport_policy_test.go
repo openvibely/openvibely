@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -210,5 +211,101 @@ func TestCompactionConnectionFailuresHaveBoundedRetries(t *testing.T) {
 	}
 	if websocketAttempts.Load() != 3 || httpAttempts.Load() != 3 {
 		t.Fatalf("attempts WS=%d HTTP=%d, want three each", websocketAttempts.Load(), httpAttempts.Load())
+	}
+}
+
+func TestUncertainSteeringStopsBeforeRetryOrTools(t *testing.T) {
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"} {
+		for _, scenario := range []string{"accepted_disconnect", "unacknowledged_disconnect", "unacknowledged_completion"} {
+			t.Run(model+"/"+scenario, func(t *testing.T) {
+				var attempts, executions atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					attempt := attempts.Add(1)
+					if r.Method != http.MethodGet {
+						t.Error("unexpected HTTP fallback")
+						http.Error(w, "unexpected fallback", 400)
+						return
+					}
+					conn, err := websocket.Accept(w, r, nil)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer conn.CloseNow()
+					if _, _, err = conn.Read(r.Context()); err != nil {
+						t.Error(err)
+						return
+					}
+					if attempt == 1 {
+						_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"original"}}`))
+						if _, _, err = conn.Read(r.Context()); err != nil {
+							t.Error(err)
+							return
+						}
+						if scenario == "accepted_disconnect" {
+							_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.steer.accepted","steer":{"id":"steer1","previous_response_id":"original"}}`))
+						}
+						if scenario != "unacknowledged_completion" {
+							return
+						}
+					}
+					// Also return a tool on an erroneous retry, so the test detects
+					// unsafe execution rather than merely timing out on a disconnect.
+					_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call1","name":"echo","arguments":"{}"}}`))
+					_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"done","status":"completed"}}`))
+				}))
+				defer srv.Close()
+				old := OpenAIAPIBaseURL
+				OpenAIAPIBaseURL = srv.URL
+				defer func() { OpenAIAPIBaseURL = old }()
+				client := NewWithAPIKey("test")
+				var delivered atomic.Bool
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_, err := client.SendAgentic(ctx, "do work", &AgenticOptions{
+					Model: model, MaxTurns: 1, EnableAstraMidTurnSteering: true,
+					OnAstraMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
+						if delivered.Swap(true) {
+							return nil
+						}
+						_, err := deliver(ctx, "stop tool execution")
+						return err
+					},
+					ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+						executions.Add(1)
+						return "mock only", false, nil
+					},
+				})
+				if err == nil || !strings.Contains(err.Error(), "steering delivery is unresolved") {
+					t.Fatalf("expected unresolved steering error, got %v", err)
+				}
+				if attempts.Load() != 1 || executions.Load() != 0 {
+					t.Fatalf("attempts=%d tool executions=%d", attempts.Load(), executions.Load())
+				}
+				if client.responsesTransportState.websocketDisabled.Load() {
+					t.Fatal("uncertain steering disabled WebSocket")
+				}
+				if scenario == "accepted_disconnect" {
+					var ambiguous *astraSteeringAmbiguousError
+					if !errors.As(err, &ambiguous) || len(ambiguous.ids) != 1 || ambiguous.ids[0] != "steer1" {
+						t.Fatalf("lost durable steering identity: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestUncertainSteeringVetoesOverflowRecovery(t *testing.T) {
+	client := NewWithAPIKey("test")
+	calledRecovery := false
+	_, err := doResponsesStreamTurn(context.Background(), client, "gpt-6-sol", httpretry.StreamTurnPolicy{
+		Recover: func(error) (bool, error) { calledRecovery = true; return false, nil },
+	}, func(context.Context) (int, error) {
+		client.responsesTransportState.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringAmbiguous})
+		return 0, &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "too much input"}
+	})
+	if err == nil || calledRecovery {
+		t.Fatalf("err=%v recovery=%v", err, calledRecovery)
 	}
 }
