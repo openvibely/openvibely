@@ -32,6 +32,89 @@ func mockCheckServiceURL(t *testing.T) string {
 	return server.URL
 }
 
+func TestCoordinatorDoesNotRestorePersistedReleaseForDifferentBuild(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	for _, tc := range []struct {
+		name                 string
+		current              CurrentBuild
+		originalDistribution string
+		target               Target
+	}{
+		{
+			name:                 "wrong architecture",
+			current:              CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary},
+			originalDistribution: buildinfo.DistributionBinary,
+			target:               Target{ID: "linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64"},
+		},
+		{
+			name:                 "wrong distribution target kind",
+			current:              CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary},
+			originalDistribution: buildinfo.DistributionDesktop,
+			target:               Target{ID: "darwin-app", Kind: "app_bundle", OS: "darwin", Arch: "arm64"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			coordinatorPath := filepath.Join(root, "coordinator.json")
+			client := NewClient(ClientConfig{
+				ServiceURL: mockCheckServiceURL(t),
+				Channel:    "stable",
+				StatePath:  filepath.Join(root, "client.json"),
+				Now:        func() time.Time { return now },
+			})
+			if err := client.saveState(persistedClientState{LastSuccessfulCheck: now.Add(-time.Hour)}); err != nil {
+				t.Fatal(err)
+			}
+
+			release := VerifiedRelease{
+				Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour), Targets: []Target{tc.target}},
+				Target:   tc.target, ApplySupported: true, Action: "download",
+			}
+			original := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: tc.target.OS, Arch: tc.target.Arch}, Distribution: tc.originalDistribution}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+			if err := original.SetPersistence(coordinatorPath); err != nil {
+				t.Fatal(err)
+			}
+			original.mu.Lock()
+			original.state, original.release, original.staged = StateAvailable, &release, release
+			if err := original.persistLocked(); err != nil {
+				original.mu.Unlock()
+				t.Fatal(err)
+			}
+			original.mu.Unlock()
+
+			installer := &countingInstaller{}
+			restarted := NewCoordinator(client, tc.current, "stable", NewDrainManager(nil, nil, 0, nil), installer, false, "", nil)
+			if err := restarted.SetPersistence(coordinatorPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := restarted.Check(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			snapshot := restarted.Snapshot()
+			if snapshot.Release != nil || snapshot.Staged || snapshot.State != StateIdle {
+				t.Fatalf("restored incompatible offer remained visible or stageable: %#v", snapshot)
+			}
+			if installer.stages.Load() != 0 {
+				t.Fatalf("restored incompatible offer staged %d times", installer.stages.Load())
+			}
+			data, err := os.ReadFile(coordinatorPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var persisted struct {
+				Release *VerifiedRelease `json:"release"`
+				State   string           `json:"state"`
+			}
+			if err := json.Unmarshal(data, &persisted); err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Release != nil || persisted.State != StateIdle {
+				t.Fatalf("incompatible offer was not cleared from persistence: %#v", persisted)
+			}
+		})
+	}
+}
+
 func TestCoordinatorDoesNotExposePersistedReleaseOlderThanCurrent(t *testing.T) {
 	root := t.TempDir()
 	now := time.Unix(1700000000, 0).UTC()
