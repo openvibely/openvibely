@@ -291,7 +291,7 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 	}
 }
 
-func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.T) {
+func TestCompactAgenticInputItems_APIKeySolUsesStandardResponsesTransport(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Errorf("path = %q, want /v1/responses", r.URL.Path)
@@ -301,23 +301,16 @@ func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.
 		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
 			t.Fatalf("Authorization = %q", got)
 		}
-		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "true" {
-			t.Fatalf("Responses Lite header = %q, want true", got)
+		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
+			t.Fatalf("Responses Lite header = %q, want empty", got)
 		}
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		reasoning, _ := body["reasoning"].(map[string]any)
-		if reasoning["context"] != "all_turns" || reasoning["effort"] != "medium" {
-			t.Fatalf("reasoning = %#v", reasoning)
-		}
-		if parallel, ok := body["parallel_tool_calls"].(bool); !ok || parallel {
-			t.Fatalf("parallel_tool_calls = %#v, want false", body["parallel_tool_calls"])
-		}
 		input := body["input"].([]any)
 		if input[len(input)-1].(map[string]any)["type"] != "compaction_trigger" {
-			t.Error("missing compaction trigger")
+			t.Error("standard Responses request omitted compaction_trigger")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"summary\"}}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"compact\",\"status\":\"completed\"}}\n\n"))
@@ -933,7 +926,7 @@ func TestSendAgentic_ReasoningSummaryPayload(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_APIKeyGPT56UsesResponsesLiteWebSocket(t *testing.T) {
+func TestSendAgentic_APIKeyGPT56UsesStandardResponsesWebSocket(t *testing.T) {
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
@@ -986,23 +979,143 @@ func TestSendAgentic_APIKeyGPT56UsesResponsesLiteWebSocket(t *testing.T) {
 	if request["type"] != "response.create" || request["model"] != "gpt-5.6-sol" {
 		t.Fatalf("request type/model = %v/%v", request["type"], request["model"])
 	}
-	for _, field := range []string{"tools", "instructions", "max_output_tokens", "truncation"} {
-		if _, ok := request[field]; ok {
-			t.Errorf("Lite websocket request unexpectedly contains %q", field)
+	for _, field := range []string{"tools", "max_output_tokens", "truncation"} {
+		if _, ok := request[field]; !ok {
+			t.Errorf("standard websocket request omitted %q", field)
 		}
 	}
 	reasoning, _ := request["reasoning"].(map[string]any)
-	if reasoning["effort"] != "max" || reasoning["summary"] != "auto" || reasoning["context"] != "all_turns" {
+	if reasoning["effort"] != "max" || reasoning["summary"] != "auto" || reasoning["context"] != nil {
 		t.Fatalf("reasoning = %#v", reasoning)
 	}
 	input, _ := request["input"].([]any)
-	additionalTools, _ := input[0].(map[string]any)
-	liteTools, _ := additionalTools["tools"].([]any)
-	for _, raw := range liteTools {
-		tool, _ := raw.(map[string]any)
-		if tool["type"] == "web_search" || tool["type"] == "web_search_preview" || tool["type"] == "image_generation" {
-			t.Fatalf("hosted tool leaked into Responses Lite additional_tools: %#v", tool)
+	if len(input) > 0 && input[0].(map[string]any)["type"] == "additional_tools" {
+		t.Fatalf("standard websocket request unexpectedly used additional_tools: %#v", input[0])
+	}
+	if !responsesToolsContainHostedTool(request["tools"]) {
+		t.Fatalf("standard websocket request omitted hosted web_search: %#v", request["tools"])
+	}
+}
+
+func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T) {
+	var searchRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/alpha/search":
+			searchRequests.Add(1)
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode search request: %v", err)
+				return
+			}
+			commands, _ := request["commands"].(map[string]any)
+			queries, _ := commands["search_query"].([]any)
+			if len(queries) != 1 || queries[0].(map[string]any)["q"] != "OpenAI news" {
+				t.Errorf("search commands = %#v", commands)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"output":"turn0search0: OpenAI news result"}`))
+
+		case r.Method == http.MethodGet && r.URL.Path == "/responses":
+			conn, err := websocket.Accept(w, r, nil)
+			if err != nil {
+				t.Errorf("accept websocket: %v", err)
+				return
+			}
+			defer conn.Close(websocket.StatusNormalClosure, "")
+
+			_, firstData, err := conn.Read(r.Context())
+			if err != nil {
+				t.Errorf("read first Responses request: %v", err)
+				return
+			}
+			var first map[string]any
+			if err := json.Unmarshal(firstData, &first); err != nil {
+				t.Errorf("decode first Responses request: %v", err)
+				return
+			}
+			if _, ok := first["tools"]; ok {
+				t.Error("Responses Lite request unexpectedly contains top-level tools")
+			}
+			input, _ := first["input"].([]any)
+			additional, _ := input[0].(map[string]any)
+			liteTools, _ := additional["tools"].([]any)
+			foundWebRun := false
+			for _, raw := range liteTools {
+				tool, _ := raw.(map[string]any)
+				if tool["type"] == "namespace" && tool["name"] == "web" {
+					foundWebRun = true
+				}
+				if tool["type"] == "web_search" {
+					t.Errorf("hosted web_search leaked into Responses Lite tools: %#v", tool)
+				}
+			}
+			if !foundWebRun {
+				t.Fatalf("Responses Lite tools omitted web.run namespace: %#v", liteTools)
+			}
+			for _, event := range []string{
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"web-1","namespace":"web","name":"run","arguments":"{\"search_query\":[{\"q\":\"OpenAI news\"}]}"}}`,
+				`{"type":"response.completed","response":{"id":"resp-1","status":"completed","model":"gpt-5.6-sol"}}`,
+			} {
+				if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+					t.Errorf("write first response event: %v", err)
+					return
+				}
+			}
+
+			_, secondData, err := conn.Read(r.Context())
+			if err != nil {
+				t.Errorf("read second Responses request: %v", err)
+				return
+			}
+			var second map[string]any
+			if err := json.Unmarshal(secondData, &second); err != nil {
+				t.Errorf("decode second Responses request: %v", err)
+				return
+			}
+			secondInput, _ := second["input"].([]any)
+			foundOutput := false
+			for _, raw := range secondInput {
+				item, _ := raw.(map[string]any)
+				if item["type"] == "function_call_output" && item["call_id"] == "web-1" && strings.Contains(stringFromAny(item["output"]), "OpenAI news result") {
+					foundOutput = true
+				}
+			}
+			if !foundOutput {
+				t.Errorf("second Responses request omitted standalone search output: %#v", secondInput)
+			}
+			for _, event := range []string{
+				`{"type":"response.output_text.delta","delta":"done"}`,
+				`{"type":"response.completed","response":{"id":"resp-2","status":"completed","model":"gpt-5.6-sol"}}`,
+			} {
+				if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+					t.Errorf("write second response event: %v", err)
+					return
+				}
+			}
+
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
+
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
+	resp, err := client.SendAgentic(context.Background(), "Search", &AgenticOptions{
+		Model: "gpt-5.6-sol", DisableTools: true, WebSearchEnabled: true, MaxTurns: 2,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "done" || searchRequests.Load() != 1 {
+		t.Fatalf("response/search requests = %q/%d, want done/1", resp.Text, searchRequests.Load())
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Name != standaloneWebSearchToolName {
+		t.Fatalf("tool calls = %#v, want web.run", resp.ToolCalls)
 	}
 }
 
@@ -1035,11 +1148,11 @@ func TestSendAgentic_ResponsesLiteStreamFailureFallsBackBeforeOutput(t *testing.
 	}))
 	defer srv.Close()
 
-	original := OpenAIAPIBaseURL
-	OpenAIAPIBaseURL = srv.URL + "/v1/"
-	defer func() { OpenAIAPIBaseURL = original }()
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.6-sol",
 		DisableTools: true,
@@ -3698,9 +3811,9 @@ func TestOpenAIModelSupportsWebSearch(t *testing.T) {
 		{"gpt-6-astra", true},
 		{"gpt-6-sol", true},
 		{"gpt-6-luna", true},
-		{"gpt-5.6-sol", false},
-		{"gpt-5.6-terra", false},
-		{"gpt-5.6-luna", false},
+		{"gpt-5.6-sol", true},
+		{"gpt-5.6-terra", true},
+		{"gpt-5.6-luna", true},
 		{"gpt-5.4", true},
 		{"gpt-5.4-mini", true},
 		{"GPT-5.4", true},
@@ -4445,8 +4558,8 @@ func TestSendAgentic_AstraConfigurationUpdateReplaysPinnedBaseline(t *testing.T)
 		if updates != 1 {
 			t.Fatalf("request %d configuration updates = %d, want 1 in %#v", requestNumber, updates, input)
 		}
-		if updateIndex != 3 {
-			t.Fatalf("request %d configuration update index = %d, want stable index 3 in %#v", requestNumber, updateIndex, input)
+		if updateIndex != 2 {
+			t.Fatalf("request %d configuration update index = %d, want stable index 2 in %#v", requestNumber, updateIndex, input)
 		}
 	}
 }

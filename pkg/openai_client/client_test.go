@@ -445,7 +445,7 @@ func TestResponsesLiteWebSocketModels(t *testing.T) {
 	}
 }
 
-func TestSend_GPT6SolLunaUseResponsesLiteWebSocket(t *testing.T) {
+func TestSend_GPT6SolLunaAPIKeyUsesStandardResponsesWebSocket(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -471,6 +471,12 @@ func TestSend_GPT6SolLunaUseResponsesLiteWebSocket(t *testing.T) {
 				if request["model"] != model || request["type"] != "response.create" {
 					t.Errorf("request type/model = %v/%v", request["type"], request["model"])
 				}
+				if _, ok := request["client_metadata"]; ok {
+					t.Errorf("standard WebSocket request unexpectedly contains Responses Lite metadata")
+				}
+				if _, ok := request["max_output_tokens"]; !ok {
+					t.Errorf("standard WebSocket request omitted max_output_tokens")
+				}
 				completed := fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","model":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`, model)
 				if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
 					t.Errorf("write response: %v", err)
@@ -494,22 +500,32 @@ func TestSend_GPT6SolLunaUseResponsesLiteWebSocket(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_GPT6SolLunaNativeWebSearchUsesStandardResponses(t *testing.T) {
+func TestSendAgentic_GPT6SolLunaNativeWebSearchUsesStandardResponsesWebSocket(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			var request map[string]any
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost || r.URL.Path != "/v1/responses" {
-					t.Fatalf("request = %s %s, want POST /v1/responses", r.Method, r.URL.Path)
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/responses" {
+					t.Fatalf("request = %s %s, want GET /v1/responses", r.Method, r.URL.Path)
 				}
-				if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "" {
-					t.Fatalf("Responses Lite header = %q, want empty", got)
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					t.Errorf("accept websocket: %v", err)
+					return
 				}
-				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				defer conn.Close(websocket.StatusNormalClosure, "")
+				_, data, err := conn.Read(r.Context())
+				if err != nil {
+					t.Errorf("read request: %v", err)
+					return
+				}
+				if err := json.Unmarshal(data, &request); err != nil {
 					t.Fatalf("decode request: %v", err)
 				}
-				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":%q,\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n", model)
+				completed := fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","model":%q,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`, model)
+				if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
+					t.Errorf("write completed event: %v", err)
+				}
 			}))
 			defer srv.Close()
 
@@ -631,7 +647,7 @@ func TestBuildResponsesLiteWebsocketPayload_OmitsUnsupportedImageDetails(t *test
 	}
 }
 
-func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
+func TestSend_APIKeyTerraUsesStandardResponsesWebSocket(t *testing.T) {
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
@@ -660,7 +676,7 @@ func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
 		content, _ := userMessage["content"].([]any)
 		image, _ := content[1].(map[string]any)
 		if got := image["detail"]; got != "auto" {
-			t.Errorf("API-key Lite image detail = %#v, want auto", got)
+			t.Errorf("API-key standard image detail = %#v, want auto", got)
 		}
 		completed := `{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-terra","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`
 		if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
@@ -685,10 +701,11 @@ func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
 	if resp.Text != "ok" {
 		t.Fatalf("Text = %q, want ok", resp.Text)
 	}
-	for _, field := range []string{"tools", "instructions", "max_output_tokens", "truncation"} {
-		if _, ok := request[field]; ok {
-			t.Errorf("Lite websocket request unexpectedly contains %q", field)
-		}
+	if request["max_output_tokens"] != float64(123) {
+		t.Errorf("standard websocket max_output_tokens = %#v, want 123", request["max_output_tokens"])
+	}
+	if _, ok := request["client_metadata"]; ok {
+		t.Error("standard websocket request unexpectedly contains Responses Lite metadata")
 	}
 }
 
@@ -733,11 +750,11 @@ func TestSend_ResponsesLiteWebSocketAcceptsLargeEvent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	original := OpenAIAPIBaseURL
-	OpenAIAPIBaseURL = srv.URL + "/v1/"
-	defer func() { OpenAIAPIBaseURL = original }()
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-terra"})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -784,11 +801,11 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 	}))
 	defer srv.Close()
 
-	original := OpenAIAPIBaseURL
-	OpenAIAPIBaseURL = srv.URL + "/v1/"
-	defer func() { OpenAIAPIBaseURL = original }()
+	original := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL
+	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	for i := 0; i < 2; i++ {
 		resp, err := client.Send(context.Background(), "Hello", &SendOptions{
 			Model:       "gpt-5.6-terra",
