@@ -2108,8 +2108,8 @@ func TestHandler_MergeTaskBranch_ChangesTabSquashConflictRefreshesRetryWithoutRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.MergeStatus != models.MergeStatusFailed {
-		t.Fatalf("merge status=%q, want failed", updated.MergeStatus)
+	if updated.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("merge status=%q, want conflict", updated.MergeStatus)
 	}
 }
 
