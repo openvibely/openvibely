@@ -125,14 +125,18 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 		defer done()
 	}
 	now := time.Now().UTC()
-	applog.Infof("[scheduler] checkDueTasks now=%s", now.Format("2006-01-02 15:04:05"))
+	applog.Debugf("[scheduler] checkDueTasks now=%s", now.Format("2006-01-02 15:04:05"))
 
 	schedules, err := s.scheduleRepo.ListDue(ctx, now)
 	if err != nil {
 		applog.Infof("[scheduler] checkDueTasks error listing due schedules: %v", err)
 		return
 	}
-	applog.Infof("[scheduler] checkDueTasks found %d due schedules", len(schedules))
+	if len(schedules) == 0 {
+		applog.Debugf("[scheduler] checkDueTasks found 0 due schedules")
+	} else {
+		applog.Infof("[scheduler] checkDueTasks found %d due schedules", len(schedules))
+	}
 
 	for _, sched := range schedules {
 		if err := models.ValidateScheduleRepeatInterval(sched.RepeatInterval); err != nil {

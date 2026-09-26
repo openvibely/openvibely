@@ -182,7 +182,7 @@ func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
 
 	var output bytes.Buffer
 	e := echo.New()
-	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(&output)))
+	e.Use(middleware.RequestLoggerWithConfig(requestLoggerConfig(&output)))
 	for _, path := range []string{"/login", "/auth/sso/start", "/auth/sso/callback"} {
 		e.GET(path, func(c echo.Context) error {
 			c.Response().Header().Set("Location", "https://secret.example/token-value")
