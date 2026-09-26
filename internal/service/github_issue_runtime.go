@@ -345,10 +345,61 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
-		"github_list_assigned_issues_with_prs": core.ExecuteListAssignedIssuesWithPRs,
-		"github_comment_on_issue":              core.ExecuteCommentOnIssue,
-		"github_add_issue_labels":              core.ExecuteAddIssueLabels,
-		"github_close_issue":                   core.ExecuteCloseIssue,
+		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
+			req, err := core.request(input)
+			if err != nil {
+				return "", err
+			}
+			limit, offset, err := assignedIssueListPageForInput(input, req)
+			if err != nil {
+				return "", err
+			}
+			assignee := strings.TrimSpace(req.Assignee)
+			if assignee == "" {
+				return "", fmt.Errorf("assignee is required")
+			}
+			if err := core.requireAuthorizedAssignee(ctx, assignee); err != nil {
+				return "", err
+			}
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
+			if err != nil {
+				return "", err
+			}
+			items, err := opts.GitHub.ListAssignedIssuesWithPullRequests(ctx, repo, assignee)
+			if err != nil {
+				return "", err
+			}
+			issues := make([]GitHubIssue, 0, len(items))
+			for _, item := range items {
+				issues = append(issues, item.Issue)
+			}
+			issues, err = filterAndRecordAssigned(ctx, repo, issues)
+			if err != nil {
+				return "", err
+			}
+			allowed := make(map[int]GitHubIssue, len(issues))
+			for _, issue := range issues {
+				allowed[issue.Number] = issue
+			}
+			filtered := make([]GitHubIssueWithPullRequest, 0, len(items))
+			for _, item := range items {
+				issue, ok := allowed[item.Issue.Number]
+				if !ok {
+					continue
+				}
+				item.Issue = issue
+				filtered = append(filtered, item)
+			}
+			page, nextOffset := pageAssignedGitHubIssuesWithPRs(filtered, limit, offset)
+			return githubIssueRuntimeJSON(map[string]any{
+				"ok": true, "items": page, "returned": len(page), "total": len(filtered), "offset": offset,
+				"next_offset": nextOffset, "truncated": nextOffset > 0,
+				"skipped_without_pr": "Assigned issues without an associated pull request are skipped.",
+			})
+		},
+		"github_comment_on_issue": core.ExecuteCommentOnIssue,
+		"github_add_issue_labels": core.ExecuteAddIssueLabels,
+		"github_close_issue":      core.ExecuteCloseIssue,
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil {
 				return "", fmt.Errorf("task pull request repository unavailable")
