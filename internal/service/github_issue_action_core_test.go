@@ -160,9 +160,9 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 
 func TestGitHubIssueActionCoreListExistingAutomationIssuesPaginatesCallerVisibleResults(t *testing.T) {
 	provider := &fakeGitHubIssueActionProvider{createdIssues: []GitHubIssue{
-		{Number: 1, Title: "Newest issue", State: "open", UserLogin: "Me"},
-		{Number: 2, Title: "Middle issue", State: "closed", UserLogin: "Me"},
-		{Number: 3, Title: "Oldest issue", State: "open", UserLogin: "Me"},
+		{Number: 1, URL: "https://github.com/owner/repo/issues/1", Title: "Newest issue", State: "open", UserLogin: "bot", Labels: []string{"bug"}},
+		{Number: 2, URL: "https://github.com/owner/repo/issues/2", Title: "Middle issue", State: "closed", UserLogin: "bot", Labels: []string{"feature"}},
+		{Number: 3, URL: "https://github.com/owner/repo/issues/3", Title: "Oldest issue", State: "open", UserLogin: "bot", Labels: []string{"bug", "feature"}},
 	}}
 	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
 		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
@@ -175,9 +175,14 @@ func TestGitHubIssueActionCoreListExistingAutomationIssuesPaginatesCallerVisible
 	if err != nil {
 		t.Fatalf("first page err=%v output=%q", err, first)
 	}
-	for _, want := range []string{`"returned":2`, `"total":3`, `"offset":0`, `"next_offset":2`, `"truncated":true`, `"title":"Newest issue"`, `"title":"Middle issue"`} {
+	for _, want := range []string{`"returned":2`, `"total":3`, `"offset":0`, `"next_offset":2`, `"truncated":true`, `"number":1`, `"url":"https://github.com/owner/repo/issues/1"`, `"title":"Newest issue"`, `"state":"open"`, `"labels":["bug"]`, `"created_by":"bot"`, `"title":"Middle issue"`} {
 		if !strings.Contains(first, want) {
 			t.Fatalf("first page missing %s: %q", want, first)
+		}
+	}
+	for _, assignedOnlyKey := range []string{`"assignees"`, `"complete_for_task_creation"`, `"task_creation_completeness_known"`, `"detail_required"`} {
+		if strings.Contains(first, assignedOnlyKey) {
+			t.Fatalf("existing automation issue page included assigned-only key %s: %q", assignedOnlyKey, first)
 		}
 	}
 	if strings.Contains(first, `"title":"Oldest issue"`) {
@@ -188,7 +193,7 @@ func TestGitHubIssueActionCoreListExistingAutomationIssuesPaginatesCallerVisible
 	if err != nil {
 		t.Fatalf("second page err=%v output=%q", err, second)
 	}
-	for _, want := range []string{`"returned":1`, `"total":3`, `"offset":2`, `"next_offset":0`, `"truncated":false`, `"title":"Oldest issue"`} {
+	for _, want := range []string{`"returned":1`, `"total":3`, `"offset":2`, `"next_offset":0`, `"truncated":false`, `"number":3`, `"url":"https://github.com/owner/repo/issues/3"`, `"title":"Oldest issue"`, `"state":"open"`, `"labels":["bug","feature"]`, `"created_by":"bot"`} {
 		if !strings.Contains(second, want) {
 			t.Fatalf("second page missing %s: %q", want, second)
 		}
@@ -372,9 +377,9 @@ func TestGitHubIssueActionCoreAssignedIssuesReturnCompactCompleteCandidateList(t
 
 func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *testing.T) {
 	provider := &fakeGitHubIssueActionProvider{assignedIssues: []GitHubIssue{
-		{Number: 1, Title: "First", Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
-		{Number: 2, Title: "Second", Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
-		{Number: 3, Title: "Third", Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
+		{Number: 1, URL: "https://github.com/owner/repo/issues/1", Title: "First", State: "open", UserLogin: "bot", Assignees: []string{"dev-bot"}, Labels: []string{"bug"}, Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
+		{Number: 2, URL: "https://github.com/owner/repo/issues/2", Title: "Second", State: "closed", UserLogin: "bot", Assignees: []string{"dev-bot", "reviewer"}, Labels: []string{"feature"}, Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
+		{Number: 3, URL: "https://github.com/owner/repo/issues/3", Title: "Third", State: "open", UserLogin: "bot", Assignees: []string{"dev-bot"}, Labels: []string{"bug", "feature"}, Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
 	}}
 	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
 		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
@@ -386,7 +391,7 @@ func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *test
 	if err != nil {
 		t.Fatalf("first page err=%v", err)
 	}
-	for _, want := range []string{`"returned":2`, `"total":3`, `"offset":0`, `"next_offset":2`, `"truncated":true`, `"number":1`, `"number":2`} {
+	for _, want := range []string{`"returned":2`, `"total":3`, `"offset":0`, `"next_offset":2`, `"truncated":true`, `"number":1`, `"url":"https://github.com/owner/repo/issues/1"`, `"title":"First"`, `"state":"open"`, `"labels":["bug"]`, `"created_by":"bot"`, `"assignees":["dev-bot"]`, `"complete_for_task_creation":false`, `"task_creation_completeness_known":false`, `"detail_required":true`, `"number":2`, `"assignees":["dev-bot","reviewer"]`} {
 		if !strings.Contains(first, want) {
 			t.Fatalf("first page missing %s: %s", want, first)
 		}
@@ -398,9 +403,19 @@ func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *test
 	if err != nil {
 		t.Fatalf("second page err=%v", err)
 	}
-	for _, want := range []string{`"returned":1`, `"total":3`, `"offset":2`, `"next_offset":0`, `"truncated":false`, `"number":3`} {
+	for _, want := range []string{`"returned":1`, `"total":3`, `"offset":2`, `"next_offset":0`, `"truncated":false`, `"number":3`, `"url":"https://github.com/owner/repo/issues/3"`, `"title":"Third"`, `"state":"open"`, `"labels":["bug","feature"]`, `"created_by":"bot"`, `"assignees":["dev-bot"]`, `"complete_for_task_creation":false`, `"task_creation_completeness_known":false`, `"detail_required":true`} {
 		if !strings.Contains(second, want) {
 			t.Fatalf("second page missing %s: %s", want, second)
+		}
+	}
+
+	empty, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":2,"offset":4}`))
+	if err != nil {
+		t.Fatalf("out-of-range page err=%v", err)
+	}
+	for _, want := range []string{`"issues":[]`, `"returned":0`, `"total":3`, `"offset":4`, `"next_offset":0`, `"truncated":false`} {
+		if !strings.Contains(empty, want) {
+			t.Fatalf("out-of-range page missing %s: %s", want, empty)
 		}
 	}
 	if _, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":101}`)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
