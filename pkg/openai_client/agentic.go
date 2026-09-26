@@ -2102,9 +2102,10 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	payload := map[string]any{
-		"model":  opts.Model,
-		"input":  inputItems,
-		"stream": true,
+		"prompt_cache_key": c.sessionID,
+		"model":            opts.Model,
+		"input":            inputItems,
+		"stream":           true,
 	}
 
 	if !isChatGPTOAuth {

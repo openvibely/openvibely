@@ -514,8 +514,9 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	}
 
 	payload := map[string]any{
-		"model": opts.Model,
-		"input": inputItems,
+		"prompt_cache_key": c.sessionID,
+		"model":            opts.Model,
+		"input":            inputItems,
 	}
 
 	if !isChatGPTOAuth {
