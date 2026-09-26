@@ -777,10 +777,6 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 		localEligible := taskStatusMayMerge(task.Status) && snapshot.valid && relationsValid && !locked && !ownsConflict &&
 			!snapshot.activeMerge && !snapshot.activeConflicts && !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged &&
 			snapshot.refTip(task.WorktreeBranch) != "" && snapshot.refTip(targetBranch) != ""
-		if task.MergeStatus == models.MergeStatusConflict && !snapshot.activeMerge && !snapshot.activeConflicts && taskStatusMayMerge(task.Status) && relationsValid {
-			task.MergeStatus = models.MergeStatusPending
-			localEligible = snapshot.refTip(task.WorktreeBranch) != "" && snapshot.refTip(targetBranch) != "" && !locked && !branchAlreadyMerged
-		}
 		clean := task.WorktreePath == "" || !snapshot.worktreeDirty(task.WorktreePath)
 		fastForwardEligible := localEligible && clean
 		rebaseEligible := localEligible && task.WorktreePath != "" && clean && snapshot.diverged(task.WorktreeBranch, targetBranch)
@@ -1368,7 +1364,7 @@ func (h *Handler) taskRebaseAvailableWithLocks(task *models.Task, project *model
 	if task == nil || project == nil || project.RepoPath == "" || task.WorktreeBranch == "" || task.WorktreePath == "" {
 		return false
 	}
-	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged || task.MergeStatus == models.MergeStatusConflict {
+	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
 		return false
 	}
 	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || taskCardWorktreeLocked(project, task, worktreeLocks) {
@@ -1499,18 +1495,6 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 	if hasActiveMerge || len(activeConflictFiles) > 0 {
 		result.Reason = "another merge or conflict is active in the project repository"
 		return result
-	}
-
-	if task.MergeStatus == models.MergeStatusConflict {
-		if !taskStatusMayMerge(task.Status) {
-			result.Reason = "task conflict recovery is not ready"
-			return result
-		}
-		if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
-			result.Reason = "merge conflict status could not be refreshed"
-			return result
-		}
-		task.MergeStatus = models.MergeStatusPending
 	}
 
 	if branchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
