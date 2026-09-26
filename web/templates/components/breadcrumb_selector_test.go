@@ -377,12 +377,13 @@ func TestBreadcrumbSelectorResultsMarksCurrentAndUsesAuthoritativeURLs(t *testin
 		{ID: "task-2", Name: "Other", URL: "/tasks/task-2?project_id=project-1&tab=changes", Status: models.StatusRunning, Category: models.CategoryActive},
 		{ID: "task-3", Name: "Merged", URL: "/tasks/task-3?project_id=project-1&tab=changes", Status: models.StatusCompleted, Category: models.CategoryCompleted, MergeStatus: models.MergeStatusMerged},
 		{ID: "task-4", Name: "Merge Failed", URL: "/tasks/task-4?project_id=project-1&tab=changes", Status: models.StatusCompleted, Category: models.CategoryCompleted, MergeStatus: models.MergeStatusFailed},
+		{ID: "task-5", Name: "Merge Conflict", URL: "/tasks/task-5?project_id=project-1&tab=changes", Status: models.StatusCompleted, Category: models.CategoryCompleted, MergeStatus: models.MergeStatusConflict},
 	}, false, false).Render(context.Background(), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := out.String()
-	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-task-state-icon`, `data-task-state="queued"`, `data-task-state="running"`, `data-task-state="merged"`, `data-task-state="merge-failed"`, `Task state: In Progress`, `Task state: Merged`, `Task state: Merge failed`, `overflow-x-hidden`, `w-full max-w-full min-w-0`, `overflow-hidden rounded-btn`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
+	for _, want := range []string{`role="listbox"`, `aria-selected="true"`, `aria-current="true"`, `data-breadcrumb-selector-option`, `data-task-state-icon`, `data-task-state="queued"`, `data-task-state="running"`, `data-task-state="merged"`, `data-task-state="merge-failed"`, `data-task-state="merge-conflict"`, `Task state: In Progress`, `Task state: Merged`, `Task state: Merge failed`, `Task state: Merge conflict`, `overflow-x-hidden`, `w-full max-w-full min-w-0`, `overflow-hidden rounded-btn`, `class="min-w-0 flex-1 truncate"`, `/tasks/task-2?project_id=project-1&amp;tab=changes`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %q in results markup", want)
 		}
