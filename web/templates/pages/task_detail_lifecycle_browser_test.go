@@ -2069,6 +2069,8 @@ window.addEventListener('DOMContentLoaded', function() {
   function row(id) { return list().querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
   async function run() {
     await waitFor(function() { return !!row('event-2'); }, 'initial lifecycle rows');
+    // Let the initial render's next-frame scroll restore run before positioning; a fixed delay races on slow runners.
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     await wait(50);
     var lifecyclePort = port();
     var initialAnchor = row('event-2');
