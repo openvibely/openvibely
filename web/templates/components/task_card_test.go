@@ -579,6 +579,8 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 		{name: "blocked", status: models.StatusBlocked, category: models.CategoryActive, wantState: "blocked", wantLabel: "Waiting for Parent"},
 		{name: "merged overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, wantState: "merged", wantLabel: "Merged"},
 		{name: "merged overrides met goal", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, goalMet: true, wantState: "merged", wantLabel: "Merged"},
+		{name: "failed merge overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusFailed, wantState: "merge-failed", wantLabel: "Merge failed"},
+		{name: "failed merge overrides met goal", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusFailed, goalMet: true, wantState: "merge-failed", wantLabel: "Merge failed"},
 		{name: "stale met goal does not override running", status: models.StatusRunning, category: models.CategoryActive, goalMet: true, wantState: "running", wantLabel: "In Progress"},
 		{name: "stale merged does not override running", status: models.StatusRunning, category: models.CategoryActive, mergeStatus: models.MergeStatusMerged, wantState: "running", wantLabel: "In Progress"},
 		{name: "stale merged does not override failed", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "failed", wantLabel: "Failed"},
@@ -632,13 +634,14 @@ func TestKanbanBoard_RendersStateIconsInEveryCardVariant(t *testing.T) {
 		{ID: "active-queued", ProjectID: "default", Title: "Queued card", Category: models.CategoryActive, Status: models.StatusQueued},
 		{ID: "active-running", ProjectID: "default", Title: "Running card", Category: models.CategoryActive, Status: models.StatusRunning},
 		{ID: "completed-merged", ProjectID: "default", Title: "Merged card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged},
+		{ID: "completed-merge-failed", ProjectID: "default", Title: "Failed merge card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusFailed},
 	}
 	var buf bytes.Buffer
 	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render kanban board: %v", err)
 	}
 	body := buf.String()
-	for _, state := range []string{"failed", "queued", "running", "merged"} {
+	for _, state := range []string{"failed", "queued", "running", "merged", "merge-failed"} {
 		if !strings.Contains(body, `data-task-state-icon data-task-state="`+state+`"`) {
 			t.Fatalf("expected %s icon in rendered board variants, got %s", state, body)
 		}
