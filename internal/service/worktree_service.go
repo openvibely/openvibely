@@ -1532,7 +1532,7 @@ func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.
 			return &RebaseResult{
 				Success:       false,
 				ConflictFiles: conflictFiles,
-				ErrorMessage:  fmt.Sprintf("Rebase onto %s encountered conflicts and was aborted. Resolve the conflicts in the task worktree or ask the agent to reconcile with %s, then try rebase again.", targetBranch, targetBranch),
+				ErrorMessage:  fmt.Sprintf("Rebase onto %s encountered conflicts and was aborted. Rebase manually and resolve the conflicts, or ask the agent to reconcile with %s, then try again.", targetBranch, targetBranch),
 			}, nil
 		}
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
@@ -1595,7 +1595,7 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 				return &MergeResult{
 					Success:       false,
 					ConflictFiles: conflictFiles,
-					ErrorMessage:  fmt.Sprintf("Local fast-forward merge requires updating branch from %s. Auto-rebase encountered conflicts; rebase was aborted. Resolve conflicts in worktree and retry merge.", targetBranch),
+					ErrorMessage:  fmt.Sprintf("Local fast-forward merge requires updating the task branch from %s. Auto-rebase encountered conflicts and was aborted. Rebase manually and resolve the conflicts, or ask the agent to reconcile with %s, then retry the merge.", targetBranch, targetBranch),
 				}, nil
 			}
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)

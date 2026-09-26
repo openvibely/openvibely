@@ -608,7 +608,7 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 	}
 
 	if result != nil && !result.Success && len(result.ConflictFiles) > 0 {
-		msg := fmt.Sprintf("Rebase onto %s had conflicts and was aborted. Resolve the conflicting files in the task worktree, then try rebase again.", targetBranch)
+		msg := fmt.Sprintf("Rebase onto %s had conflicts and was aborted. Rebase manually and resolve the conflicts, or ask the agent to reconcile with %s, then try again.", targetBranch, targetBranch)
 		if result.ErrorMessage != "" {
 			msg = result.ErrorMessage
 		}
