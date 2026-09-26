@@ -6,10 +6,12 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func startBrowserProcess(cmd *exec.Cmd) error {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	testutil.GuardBrowserProcess(cmd)
 	return cmd.Start()
 }
 

@@ -5,10 +5,12 @@ package handler
 import (
 	"os/exec"
 	"syscall"
+
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func startHandlerBrowserProcess(cmd *exec.Cmd) error {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	testutil.GuardBrowserProcess(cmd)
 	return cmd.Start()
 }
 
