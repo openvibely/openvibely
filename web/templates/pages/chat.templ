@@ -1286,9 +1286,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var execId = data.exec_id || request.exec_id || '';
 							var executionPair = execId ? document.getElementById('chat-execution-' + execId) : null;
 							var existing = document.getElementById('chat-input-request-' + requestId);
+							if (request.completed) {
+								if (existing) existing.remove();
+								return;
+							}
 							if (existing) {
 								if (executionPair && existing.parentElement !== executionPair) executionPair.appendChild(existing);
-								if (request.completed) completeChatInputRequest(existing, request);
 								return;
 							}
 							var questions = Array.isArray(request.questions) ? request.questions : [];
@@ -1420,7 +1423,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							card.appendChild(body);
 							(executionPair || chatMessages).appendChild(card);
 							showChatInputQuestion(card, 0);
-							if (request.completed) completeChatInputRequest(card, request);
 							var tracker = window._chatPageTracker;
 							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) window.chatAutoScroll.scrollToBottom(chatMessages, true);
 						}
@@ -1543,41 +1545,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							}
 						}
 
-						function completeChatInputRequest(card, request) {
-							if (!card || card.getAttribute('data-completed') === 'true') return;
-							var questions = Array.isArray(request.questions) ? request.questions : [];
-							var answers = Array.isArray(request.answers) ? request.answers : [];
-							var answerByQuestion = {};
-							answers.forEach(function(answer) {
-								if (answer && answer.question_id) answerByQuestion[String(answer.question_id)] = String(answer.label || answer.custom_answer || '');
-							});
-							var details = document.createElement('details');
-							details.className = 'rounded-lg border border-base-300/70 bg-base-100 px-3 py-2 text-sm';
-							var summary = document.createElement('summary');
-							summary.className = 'cursor-pointer select-none text-base-content/70';
-							summary.textContent = 'Asked ' + questions.length + (questions.length === 1 ? ' question' : ' questions');
-							details.appendChild(summary);
-							var answerList = document.createElement('div');
-							answerList.className = 'mt-3 space-y-3';
-							questions.forEach(function(question) {
-								var item = document.createElement('div');
-								item.className = 'space-y-1';
-								var questionText = document.createElement('div');
-								questionText.className = 'font-medium whitespace-pre-wrap';
-								questionText.textContent = question.question || '';
-								var answerText = document.createElement('div');
-								answerText.className = 'text-base-content/60 whitespace-pre-wrap';
-								answerText.textContent = answerByQuestion[String(question.id || '')] || 'No answer provided';
-								item.appendChild(questionText);
-								item.appendChild(answerText);
-								answerList.appendChild(item);
-							});
-							details.appendChild(answerList);
-							card.className = 'chat-input-request-card';
-							card.setAttribute('data-completed', 'true');
-							card.removeAttribute('data-submitted');
-							card.removeAttribute('aria-labelledby');
-							card.replaceChildren(details);
+						function completeChatInputRequest(card) {
+							if (card) card.remove();
 						}
 
 						function refreshChatInputRequests() {
@@ -1596,7 +1565,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								});
 								document.querySelectorAll('[data-chat-input-request-id]').forEach(function(card) {
 									var id = card.getAttribute('data-chat-input-request-id') || '';
-									if (card.getAttribute('data-completed') !== 'true' && !activeRequestIDs[id]) card.remove();
+									if (!activeRequestIDs[id]) card.remove();
 								});
 							}).catch(function(err) {
 								console.error('[chat] input request reconciliation failed:', err);

@@ -200,13 +200,7 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 				var submitButton = card.querySelector('button[data-chat-input-nav="submit"]');
 				if (!submitButton || submitButton.disabled) fail('Submit was not enabled after every question was answered');
 				submitButton.click();
-				await waitFor(function() { return card.getAttribute('data-completed') === 'true'; }, 'successful submission did not complete card');
-				await nextFrame();
-				buttons = Array.prototype.slice.call(card.querySelectorAll('[data-chat-input-option]'));
-			if (buttons.length !== 0) fail('completed question retained actionable controls');
-				if (!/Asked 2 questions/.test(card.textContent)) fail('completed question summary was not shown');
-				if (!/Not now/.test(card.textContent) || !/Use the deployment-configured fallback/.test(card.textContent)) fail('selected answers were not retained in collapsed details');
-				if (card.querySelector('details').open) fail('completed question details should start collapsed');
+				await waitFor(function() { return !card.isConnected; }, 'successful submission did not remove the completed question card');
 			await report('pass', 'input request browser interaction passed');
 		} catch (error) {
 			await report('fail', String(error && error.stack || error));
