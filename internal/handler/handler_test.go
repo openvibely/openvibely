@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/openvibely/openvibely/internal/update"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -83,10 +84,34 @@ func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *rep
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
 	h.SetLocalRepoPathEnabled(true)
+	// Turns run on background goroutines; wait for them before the test's database closes so
+	// no test leaves work running into the next one.
+	h.SetUpdateWorkTracker(update.NewWorkTracker())
+	t.Cleanup(func() { waitForHandlerBackgroundWork(t, h) })
 
 	e := echo.New()
 	h.RegisterRoutes(e)
 	return h, e, llmConfigRepo
+}
+
+func waitForHandlerBackgroundWork(t testing.TB, h *Handler) {
+	t.Helper()
+	tracker := h.updateWorkTracker
+	if tracker == nil {
+		return
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		active := tracker.Active()
+		if active == (update.ActiveWork{}) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("background work still running after test: %+v", active)
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
@@ -138,6 +163,8 @@ func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLM
 	h.SetDiscordAuthRepo(discordAuthRepo)
 	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
 	h.SetLocalRepoPathEnabled(true)
+	h.SetUpdateWorkTracker(update.NewWorkTracker())
+	t.Cleanup(func() { waitForHandlerBackgroundWork(t, h) })
 
 	e := echo.New()
 	h.RegisterRoutes(e)

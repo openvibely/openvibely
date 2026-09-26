@@ -1404,8 +1404,27 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 		})
 	}
 	if !params.suppressQueuedTurnPromotion {
-		go h.startNextQueuedTurnAfter(context.Background(), params, "")
+		h.goStartNextQueuedTurnAfter(params, "")
 	}
+}
+
+// goStartNextQueuedTurnAfter promotes the next queued turn in the background while holding
+// update-drain accounting, so the promotion is visible as active work until it finishes.
+func (h *Handler) goStartNextQueuedTurnAfter(completed streamingResponseParams, excludeExecID string) {
+	done := func() {}
+	if h.updateWorkTracker != nil {
+		class := update.WorkChat
+		if completed.IsTaskFollowup || completed.TaskID != "" {
+			class = update.WorkTask
+		}
+		if tracked, err := h.updateWorkTracker.Start(class); err == nil {
+			done = tracked
+		}
+	}
+	go func() {
+		defer done()
+		h.startNextQueuedTurnAfter(context.Background(), completed, excludeExecID)
+	}()
 }
 
 func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID string, current *models.Agent) *models.Agent {
