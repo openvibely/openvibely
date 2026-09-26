@@ -42,7 +42,6 @@ func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *rep
 	return env.Handler, env.Echo, env.LLMConfigRepo
 }
 
-
 func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
 	t.Helper()
 	env := newTestHandlerEnv(t, testutil.NewTestDB(t))
