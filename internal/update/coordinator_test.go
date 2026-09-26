@@ -128,6 +128,19 @@ func TestCoordinatorDoesNotRestorePersistedReleaseForDifferentBuild(t *testing.T
 	}
 }
 
+func TestCoordinatorSnapshotSuppressesExpiredRelease(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionDocker}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+	coordinator.state = StateAvailable
+	coordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(-time.Minute)}}
+
+	snapshot := coordinator.Snapshot()
+	if snapshot.Release != nil || snapshot.State != StateIdle {
+		t.Fatalf("snapshot exposed expired release: %#v", snapshot)
+	}
+}
+
 func TestCoordinatorDoesNotExposePersistedReleaseOlderThanCurrent(t *testing.T) {
 	root := t.TempDir()
 	now := time.Unix(1700000000, 0).UTC()
