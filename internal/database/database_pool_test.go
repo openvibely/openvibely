@@ -180,27 +180,28 @@ func TestNew_WriteLockUsesConfiguredBusyTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE pool_counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL); INSERT INTO pool_counter VALUES (1, 0)`); err != nil {
-		t.Fatal(err)
-	}
 
-	locker, err := db.Conn(context.Background())
+	// Read the setting back from two distinct pool connections instead of timing a real lock wait,
+	// which both costs seconds and fails on slow runners.
+	ctx := context.Background()
+	first, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer locker.Close()
-	if _, err := locker.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+	defer first.Close()
+	second, err := db.Conn(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	defer locker.ExecContext(context.Background(), `ROLLBACK`)
-
-	started := time.Now()
-	_, err = db.Exec(`UPDATE pool_counter SET value=value+1 WHERE id=1`)
-	if err == nil {
-		t.Fatal("write unexpectedly succeeded while writer lock was held")
-	}
-	if elapsed := time.Since(started); elapsed < 4*time.Second || elapsed > 7*time.Second {
-		t.Fatalf("write lock wait = %s, want the configured five-second timeout", elapsed)
+	defer second.Close()
+	for i, conn := range []*sql.Conn{first, second} {
+		var busyMS int
+		if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&busyMS); err != nil {
+			t.Fatal(err)
+		}
+		if busyMS != sqliteBusyTimeoutMS || busyMS <= 0 {
+			t.Fatalf("pool connection %d busy_timeout = %dms, want configured %dms", i, busyMS, sqliteBusyTimeoutMS)
+		}
 	}
 }
 

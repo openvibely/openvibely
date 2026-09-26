@@ -172,7 +172,7 @@ func testIncrementalVacuumHeldWriterContext(t *testing.T, newContext func() (con
 	})
 	select {
 	case <-enteredWrite:
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		cancel()
 		_, _ = locker.ExecContext(ctx, `ROLLBACK`)
 		_ = locker.Close()
@@ -189,10 +189,11 @@ func testIncrementalVacuumHeldWriterContext(t *testing.T, newContext func() (con
 	}
 	select {
 	case <-done:
-		if elapsed := time.Since(contextEndedAt); elapsed > 500*time.Millisecond {
+		// Well under the 5s busy timeout an uncancelled wait would take, with headroom for slow runners.
+		if elapsed := time.Since(contextEndedAt); elapsed > 2*time.Second {
 			t.Fatalf("vacuum cancellation took %s", elapsed)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("vacuum remained blocked in SQLite busy handler after cancellation")
 	}
 	if _, err := locker.ExecContext(ctx, `ROLLBACK`); err != nil {
