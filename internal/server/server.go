@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -335,14 +336,26 @@ func copyDir(from, to string) error {
 	})
 }
 
-func requestLoggerConfig(output io.Writer) middleware.LoggerConfig {
-	cfg := middleware.LoggerConfig{
-		Format: "${time_rfc3339} method=${method} path=${path} status=${status} latency=${latency_human} request_id=${id}\n",
+func requestLoggerConfig(output io.Writer) middleware.RequestLoggerConfig {
+	if output == nil {
+		output = os.Stdout
 	}
-	if output != nil {
-		cfg.Output = output
+	return middleware.RequestLoggerConfig{
+		HandleError:  true,
+		LogLatency:   true,
+		LogMethod:    true,
+		LogURIPath:   true,
+		LogStatus:    true,
+		LogRequestID: true,
+		LogValuesFunc: func(_ echo.Context, values middleware.RequestLoggerValues) error {
+			if values.Method == http.MethodGet && values.URIPath == "/api/system/update" && values.Status >= 200 && values.Status < 300 {
+				return nil
+			}
+			_, err := fmt.Fprintf(output, "%s method=%s path=%s status=%d latency=%s request_id=%s\n",
+				time.Now().Format(time.RFC3339), values.Method, values.URIPath, values.Status, values.Latency, values.RequestID)
+			return err
+		},
 	}
-	return cfg
 }
 
 func configureMethodOverride(e *echo.Echo) {
@@ -1071,7 +1084,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	// HTTP Server
 	e := echo.New()
 	e.HideBanner = true
-	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(nil)))
+	e.Use(middleware.RequestLoggerWithConfig(requestLoggerConfig(nil)))
 	e.Use(middleware.Recover())
 
 	// Handle PUT/PATCH/DELETE via form _method field, except on exact
