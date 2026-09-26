@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -696,26 +697,35 @@ func TestListOpenAICompatibleAvailableModelsRacesSlowModelsWithFastV1Fallback(t 
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, _ := setupTestHandler(t)
 	modelsStarted := make(chan struct{})
+	modelsFinished := make(chan struct{})
 	modelsCancelled := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
 	var startOnce, cancelOnce sync.Once
+	var raced atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/models":
+			// Never answers on its own: a discovery path that waited for this probe would hang.
+			defer close(modelsFinished)
 			startOnce.Do(func() { close(modelsStarted) })
 			select {
 			case <-r.Context().Done():
 				cancelOnce.Do(func() { close(modelsCancelled) })
-				return
-			case <-time.After(700 * time.Millisecond):
+			case <-release:
 				http.NotFound(w, r)
-				return
 			}
 		case "/v1/models":
 			select {
 			case <-modelsStarted:
-			case <-time.After(time.Second):
+			case <-time.After(5 * time.Second):
 				http.Error(w, "slow probe did not start", http.StatusGatewayTimeout)
 				return
+			}
+			select {
+			case <-modelsFinished:
+			default:
+				raced.Store(true)
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":[{"id":"fast-fallback-model"}]}`))
@@ -725,24 +735,29 @@ func TestListOpenAICompatibleAvailableModelsRacesSlowModelsWithFastV1Fallback(t 
 	}))
 	defer srv.Close()
 
-	start := time.Now()
 	req := httptest.NewRequest(http.MethodGet, "/models/openai-compatible/available?allow_private=1&base_url="+url.QueryEscape(srv.URL), nil)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	elapsed := time.Since(start)
+	served := make(chan struct{})
+	go func() {
+		e.ServeHTTP(rec, req)
+		close(served)
+	}()
+	select {
+	case <-served:
+	case <-time.After(10 * time.Second):
+		t.Fatal("fallback discovery waited on the unanswered /models probe")
+	}
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d after %s: %s", rec.Code, elapsed, rec.Body.String())
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	// Before #1263, discovery waited for the slow /models probe before trying /v1/models and
-	// took roughly the 700 ms first-probe delay. The racing fallback should return well below
-	// that delay when /v1/models is immediately available.
-	if elapsed >= 350*time.Millisecond {
-		t.Fatalf("fallback discovery took %s; expected fast /v1/models response under 350ms", elapsed)
+	// Before #1263, discovery waited for /models to finish before trying /v1/models.
+	if !raced.Load() {
+		t.Fatal("/v1/models was requested only after /models finished; expected the probes to race")
 	}
 	select {
 	case <-modelsCancelled:
-	case <-time.After(350 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("slow /models fallback request was not cancelled after fast fallback success")
 	}
 	var out openAICompatibleModelsResponse
