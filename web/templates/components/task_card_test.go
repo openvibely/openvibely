@@ -581,8 +581,13 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 		{name: "merged overrides met goal", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, goalMet: true, wantState: "merged", wantLabel: "Merged"},
 		{name: "failed merge overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusFailed, wantState: "merge-failed", wantLabel: "Merge failed"},
 		{name: "failed merge overrides met goal", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusFailed, goalMet: true, wantState: "merge-failed", wantLabel: "Merge failed"},
+		{name: "merge conflict overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusConflict, wantState: "merge-conflict", wantLabel: "Merge conflict"},
+		{name: "merge conflict overrides failed task", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusConflict, wantState: "merge-conflict", wantLabel: "Merge conflict"},
+		{name: "merge conflict overrides cancelled task", status: models.StatusCancelled, category: models.CategoryBacklog, mergeStatus: models.MergeStatusConflict, wantState: "merge-conflict", wantLabel: "Merge conflict"},
+		{name: "failed merge overrides failed task", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusFailed, wantState: "merge-failed", wantLabel: "Merge failed"},
 		{name: "stale met goal does not override running", status: models.StatusRunning, category: models.CategoryActive, goalMet: true, wantState: "running", wantLabel: "In Progress"},
 		{name: "stale merged does not override running", status: models.StatusRunning, category: models.CategoryActive, mergeStatus: models.MergeStatusMerged, wantState: "running", wantLabel: "In Progress"},
+		{name: "stale merge conflict does not override running", status: models.StatusRunning, category: models.CategoryActive, mergeStatus: models.MergeStatusConflict, wantState: "running", wantLabel: "In Progress"},
 		{name: "stale merged does not override failed", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "failed", wantLabel: "Failed"},
 		{name: "stale merged does not override cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "cancelled", wantLabel: "Cancelled"},
 	}
@@ -635,13 +640,14 @@ func TestKanbanBoard_RendersStateIconsInEveryCardVariant(t *testing.T) {
 		{ID: "active-running", ProjectID: "default", Title: "Running card", Category: models.CategoryActive, Status: models.StatusRunning},
 		{ID: "completed-merged", ProjectID: "default", Title: "Merged card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged},
 		{ID: "completed-merge-failed", ProjectID: "default", Title: "Failed merge card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusFailed},
+		{ID: "completed-merge-conflict", ProjectID: "default", Title: "Merge conflict card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusConflict},
 	}
 	var buf bytes.Buffer
 	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render kanban board: %v", err)
 	}
 	body := buf.String()
-	for _, state := range []string{"failed", "queued", "running", "merged", "merge-failed"} {
+	for _, state := range []string{"failed", "queued", "running", "merged", "merge-failed", "merge-conflict"} {
 		if !strings.Contains(body, `data-task-state-icon data-task-state="`+state+`"`) {
 			t.Fatalf("expected %s icon in rendered board variants, got %s", state, body)
 		}
