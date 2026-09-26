@@ -1024,17 +1024,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if !isHTMX(c) {
 			return c.Redirect(http.StatusSeeOther, "/schedule?project_id="+projectID)
 		}
-		project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
-		scheduledTasks, _ := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
-		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
-		agentDefs := h.listScheduleAgentOptions(c.Request().Context(), projectID)
-		weekOffset := 0
-		if weekParam := c.QueryParam("week"); weekParam != "" {
-			if w, err := strconv.Atoi(weekParam); err == nil {
-				weekOffset = w
-			}
-		}
-		return render(c, http.StatusOK, pages.ScheduleContent(project, scheduledTasks, weekOffset, agents, agentDefs))
+		return h.renderScheduleContentForProject(c, projectID)
 	}
 
 	// Return the full kanban board
