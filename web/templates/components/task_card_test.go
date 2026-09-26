@@ -654,6 +654,85 @@ func TestKanbanBoard_RendersStateIconsInEveryCardVariant(t *testing.T) {
 	}
 }
 
+func TestRunningTaskCancelControlRendersForTaskCardAndExecutionHistory(t *testing.T) {
+	task := models.Task{
+		ID:       "running-cancel-task",
+		Title:    "Running task",
+		Category: models.CategoryActive,
+		Status:   models.StatusRunning,
+	}
+
+	var card bytes.Buffer
+	if err := TaskCard(task, "default", "active", nil, nil).Render(context.Background(), &card); err != nil {
+		t.Fatalf("render running task card: %v", err)
+	}
+	for _, want := range []string{
+		`class="text-error"`,
+		`hx-post="/tasks/running-cancel-task/cancel"`,
+		`hx-target="#kanban-board"`,
+		`hx-swap="outerHTML"`,
+		`hx-confirm="Cancel this running task?"`,
+		">Cancel</button></li>",
+	} {
+		if !strings.Contains(card.String(), want) {
+			t.Errorf("running task card cancel control missing %q; body=%s", want, card.String())
+		}
+	}
+
+	var history bytes.Buffer
+	if err := TaskExecutionHistory(&task, nil, false, 10).Render(context.Background(), &history); err != nil {
+		t.Fatalf("render running task execution history: %v", err)
+	}
+	for _, want := range []string{
+		`class="btn btn-sm btn-error"`,
+		`hx-post="/tasks/running-cancel-task/cancel"`,
+		`hx-target="#task-execution-history"`,
+		`hx-swap="morph:outerHTML"`,
+		`hx-confirm="Cancel this running task?"`,
+		">Cancel Task</button>",
+		`<span class="loading loading-spinner loading-sm"></span>`,
+	} {
+		if !strings.Contains(history.String(), want) {
+			t.Errorf("running execution history cancel control missing %q; body=%s", want, history.String())
+		}
+	}
+}
+
+func TestRunningTaskCancelControlIsAbsentForNonRunningStates(t *testing.T) {
+	for _, status := range []models.TaskStatus{
+		models.StatusPending,
+		models.StatusQueued,
+		models.StatusCompleted,
+		models.StatusFailed,
+		models.StatusCancelled,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			task := models.Task{
+				ID:       "non-running-cancel-task",
+				Title:    "Non-running task",
+				Category: models.CategoryActive,
+				Status:   status,
+			}
+
+			var card bytes.Buffer
+			if err := TaskCard(task, "default", "active", nil, nil).Render(context.Background(), &card); err != nil {
+				t.Fatalf("render task card: %v", err)
+			}
+			if strings.Contains(card.String(), `/tasks/non-running-cancel-task/cancel`) {
+				t.Fatalf("non-running task card rendered cancel control: %s", card.String())
+			}
+
+			var history bytes.Buffer
+			if err := TaskExecutionHistory(&task, nil, false, 10).Render(context.Background(), &history); err != nil {
+				t.Fatalf("render execution history: %v", err)
+			}
+			if strings.Contains(history.String(), `/tasks/non-running-cancel-task/cancel`) || strings.Contains(history.String(), `Cancel Task`) {
+				t.Fatalf("non-running execution history rendered cancel control: %s", history.String())
+			}
+		})
+	}
+}
+
 func TestTaskCard_UsesGrabCursorForDrag(t *testing.T) {
 	task := models.Task{
 		ID:        "task-1",
