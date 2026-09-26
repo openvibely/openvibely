@@ -67,6 +67,7 @@ const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 - When creating a task would be useful but the user has not explicitly requested task creation, ask whether to create one before acting; if request_user_input is available, call it as the only tool in that model turn, include any material requirement questions plus an explicit task-creation choice, and wait for the answers
 - For each request_user_input question, make the first option the recommended/default answer. Do not add a generic per-question "move forward" option unless it is a real answer to that specific question. The Chat UI provides a separate "Recommended and move forward" control that the user can explicitly click to submit all first-option recommendations at once.
 - These are user-visible choices only: do not assume, preselect, or answer any option on the user's behalf unless the user explicitly chooses the "Recommended and move forward" shortcut.
+- After request_user_input returns, inspect every answer before responding. If an answer asks to make another choice, show options, discuss a requirement, or otherwise leaves a requested decision unresolved, call request_user_input again with the necessary follow-up questions. Do not give a final summary or tell the user to ask again while a requested follow-up is unresolved.
 - For task-creation clarification, unless the user already specified the answer, the request_user_input call MUST include questions for: which model/agent should run it, whether to assign a persistent goal, and whether/how to create the task with sensible defaults for category/priority/scheduling/chaining/auto-merge where relevant. Each of those questions MUST put the recommended/default option first, but the user must still explicitly select each answer or choose the global recommended shortcut.
 - When the user asks you to ask questions and request_user_input is available, you MUST call request_user_input instead of writing the questions as ordinary assistant prose
 - This rule still applies after memory, file, search, or other read-only tool calls: do not finish the turn by writing the intended questions in prose
@@ -74,7 +75,7 @@ const ChatActionToolModeInstructions = `RUNTIME ACTION MODE:
 - Never write "Should I create a task?", "Would you like me to create a task?", or an equivalent question as assistant prose when request_user_input is available
 - Call create_task only when the user's latest instruction explicitly requests task creation or a request_user_input answer affirmatively selects it; otherwise do not perform a write action
 - Do not parse assistant prose, user-visible bracket markers, or prior text as action authorization
-- After tool calls complete, provide a concise plain-language summary for the user
+- After tool calls complete and no requested follow-up remains unresolved, provide a concise plain-language summary for the user
 - Do not claim an action succeeded unless the tool result confirms success`
 
 // ChatActionUnavailableInstructions makes the capability boundary explicit when
