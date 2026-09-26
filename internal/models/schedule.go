@@ -96,21 +96,29 @@ func (s *Schedule) ComputeNextRun(from time.Time) *time.Time {
 		return &next
 
 	case RepeatDaily:
-		// Convert to local time to preserve time-of-day across DST transitions
-		next := s.RunAt.Local()
+		// Resolve each occurrence from the original local anchor so a DST-gap
+		// adjustment does not shift later occurrences.
+		anchor := s.RunAt.Local()
 		fromLocal := from.Local()
+		days := 0
+		next := anchor
 		for !next.After(fromLocal) {
-			next = next.AddDate(0, 0, s.RepeatInterval)
+			days += s.RepeatInterval
+			next = localCalendarOccurrence(anchor, days)
 		}
 		nextUTC := next.UTC()
 		return &nextUTC
 
 	case RepeatWeekly:
-		// Convert to local time to preserve time-of-day across DST transitions
-		next := s.RunAt.Local()
+		// Resolve each occurrence from the original local anchor so a DST-gap
+		// adjustment does not shift later occurrences.
+		anchor := s.RunAt.Local()
 		fromLocal := from.Local()
+		days := 0
+		next := anchor
 		for !next.After(fromLocal) {
-			next = next.AddDate(0, 0, 7*s.RepeatInterval)
+			days += 7 * s.RepeatInterval
+			next = localCalendarOccurrence(anchor, days)
 		}
 		nextUTC := next.UTC()
 		return &nextUTC
@@ -136,6 +144,31 @@ func (s *Schedule) ComputeNextRun(from time.Time) *time.Time {
 	default:
 		return nil
 	}
+}
+
+// localCalendarOccurrence returns the anchor's local wall-clock time on the
+// calendar date offset by days. If that wall time is skipped by a forward
+// timezone transition, it shifts the occurrence forward by the transition gap.
+func localCalendarOccurrence(anchor time.Time, days int) time.Time {
+	date := time.Date(anchor.Year(), anchor.Month(), anchor.Day()+days, 12, 0, 0, 0, time.UTC)
+	year, month, day := date.Date()
+	occurrence := time.Date(year, month, day, anchor.Hour(), anchor.Minute(), anchor.Second(), anchor.Nanosecond(), anchor.Location())
+	if occurrence.Year() == year && occurrence.Month() == month && occurrence.Day() == day &&
+		occurrence.Hour() == anchor.Hour() && occurrence.Minute() == anchor.Minute() &&
+		occurrence.Second() == anchor.Second() && occurrence.Nanosecond() == anchor.Nanosecond() {
+		return occurrence
+	}
+
+	// time.Date may normalize a missing wall time to either side of a DST gap.
+	// When it picks the earlier side, adding the difference between the requested
+	// and normalized wall times shifts by the gap while retaining the offset into it.
+	requestedWall := time.Date(year, month, day, anchor.Hour(), anchor.Minute(), anchor.Second(), anchor.Nanosecond(), time.UTC)
+	actualWall := time.Date(occurrence.Year(), occurrence.Month(), occurrence.Day(),
+		occurrence.Hour(), occurrence.Minute(), occurrence.Second(), occurrence.Nanosecond(), time.UTC)
+	if actualWall.Before(requestedWall) {
+		occurrence = occurrence.Add(requestedWall.Sub(actualWall))
+	}
+	return occurrence
 }
 
 // AddMonthsClamped adds months to anchor while preserving the anchor's

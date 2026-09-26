@@ -39,6 +39,7 @@ type SchedulerService struct {
 	wg             sync.WaitGroup
 	lastCleanupAt  time.Time
 	updateTracker  *update.WorkTracker
+	now            func() time.Time
 }
 
 func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *SchedulerService {
@@ -47,6 +48,7 @@ func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *reposi
 		taskRepo:     taskRepo,
 		workerSvc:    workerSvc,
 		interval:     5 * time.Second,
+		now:          time.Now,
 	}
 }
 
@@ -125,6 +127,9 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 		defer done()
 	}
 	now := time.Now().UTC()
+	if s.now != nil {
+		now = s.now().UTC()
+	}
 	applog.Debugf("[scheduler] checkDueTasks now=%s", now.Format("2006-01-02 15:04:05"))
 
 	schedules, err := s.scheduleRepo.ListDue(ctx, now)

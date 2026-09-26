@@ -5,6 +5,75 @@ import (
 	"time"
 )
 
+func TestSchedule_ComputeNextRun_DSTGapDailyAndWeekly(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load timezone: %v", err)
+	}
+	originalLocal := time.Local
+	time.Local = location
+	t.Cleanup(func() { time.Local = originalLocal })
+
+	tests := []struct {
+		name     string
+		runAt    time.Time
+		repeat   RepeatType
+		interval int
+		gapFrom  time.Time
+		gapWant  time.Time
+		nextFrom time.Time
+		nextWant time.Time
+	}{
+		{
+			name:     "daily",
+			runAt:    time.Date(2026, time.March, 7, 7, 30, 0, 0, time.UTC),
+			repeat:   RepeatDaily,
+			interval: 1,
+			gapFrom:  time.Date(2026, time.March, 7, 7, 30, 0, 0, time.UTC),
+			gapWant:  time.Date(2026, time.March, 8, 3, 30, 0, 0, location),
+			nextFrom: time.Date(2026, time.March, 8, 3, 30, 0, 0, location),
+			nextWant: time.Date(2026, time.March, 9, 2, 30, 0, 0, location),
+		},
+		{
+			name:     "weekly",
+			runAt:    time.Date(2026, time.March, 1, 7, 30, 0, 0, time.UTC),
+			repeat:   RepeatWeekly,
+			interval: 1,
+			gapFrom:  time.Date(2026, time.March, 1, 7, 30, 0, 0, time.UTC),
+			gapWant:  time.Date(2026, time.March, 8, 3, 30, 0, 0, location),
+			nextFrom: time.Date(2026, time.March, 8, 3, 30, 0, 0, location),
+			nextWant: time.Date(2026, time.March, 15, 2, 30, 0, 0, location),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schedule := &Schedule{RunAt: tt.runAt, RepeatType: tt.repeat, RepeatInterval: tt.interval}
+
+			gapRun := schedule.ComputeNextRun(tt.gapFrom)
+			if gapRun == nil {
+				t.Fatal("expected spring-forward occurrence, got nil")
+			}
+			if !gapRun.Equal(tt.gapWant) {
+				t.Errorf("spring-forward occurrence = %v (%s), want %v (%s)",
+					gapRun.In(location), gapRun.In(location).Format(time.RFC3339),
+					tt.gapWant, tt.gapWant.Format(time.RFC3339))
+			}
+			if got := gapRun.In(location); got.Hour() == 1 && got.Minute() == 30 {
+				t.Errorf("spring-forward occurrence was moved before the configured 02:30 time: %s", got)
+			}
+
+			normalRun := schedule.ComputeNextRun(tt.nextFrom)
+			if normalRun == nil {
+				t.Fatal("expected next normal occurrence, got nil")
+			}
+			if !normalRun.Equal(tt.nextWant) {
+				t.Errorf("next normal occurrence = %v, want %v", normalRun.In(location), tt.nextWant)
+			}
+		})
+	}
+}
+
 // TestSchedule_ComputeNextRun_TimeDrift verifies that recurring schedules
 // preserve the time-of-day from RunAt rather than drifting based on execution time
 func TestSchedule_ComputeNextRun_TimeDrift(t *testing.T) {
