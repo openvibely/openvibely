@@ -1883,8 +1883,8 @@ func TestHandler_StaleTerminalConflictRecoversChangesAndRecoveryPosts(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.MergeStatus != models.MergeStatusPending {
-		t.Fatalf("stale conflict status = %q, want pending", updated.MergeStatus)
+	if updated.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("clean conflict status = %q, want conflict until another merge action replaces it", updated.MergeStatus)
 	}
 
 	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
@@ -2538,6 +2538,16 @@ func TestHandler_MergeTaskBranch_TaskCardFastForwardFailureRefreshesBoardWithToa
 	}
 	if !strings.Contains(rec.Body.String(), `id="kanban-board"`) {
 		t.Fatalf("card fast-forward failure did not return authoritative board: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `data-task-state="merge-conflict"`) {
+		t.Fatalf("card fast-forward conflict did not render merge-conflict state: %s", rec.Body.String())
+	}
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("card fast-forward conflict status = %q, want conflict", updated.MergeStatus)
 	}
 	if got := runGit(t, repoDir, "rev-parse", targetBranch); got != targetTip {
 		t.Fatalf("failed fast-forward mutated target from %s to %s", targetTip, got)

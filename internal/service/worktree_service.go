@@ -240,7 +240,6 @@ func (ws *WorktreeService) setupWorktreeUnlocked(ctx context.Context, task *mode
 	// Check if worktree already exists
 	if !continueFromCurrentTarget {
 		if storedPath, storedBranch, ok := ws.existingStoredWorktree(task); ok {
-			ws.clearStaleConflictStatusIfClean(ctx, task)
 			applog.Infof("[worktree] stored worktree already exists at %s, reusing", storedPath)
 			if updateErr := ws.taskRepo.UpdateWorktreeInfo(ctx, task.ID, storedPath, storedBranch); updateErr != nil {
 				applog.Infof("[worktree] error updating worktree info: %v", updateErr)
