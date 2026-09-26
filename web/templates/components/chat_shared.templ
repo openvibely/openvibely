@@ -3464,8 +3464,11 @@ templ ChatAutoScrollScript() {
 					var self = this;
 					if (!this.element) return;
 
-					function markInteracting() {
+					// up is the direction of the user's input when it is known (wheel, touch,
+					// navigation keys) and null otherwise (scrollbar drags).
+					function markInteracting(event, up) {
 						self._userInteracting = true;
+						self._interactionUp = up === undefined ? null : up;
 						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
 						self._userInteractTimeout = setTimeout(function() {
 							if (!self._pointerInteracting) self._userInteracting = false;
@@ -3480,8 +3483,21 @@ templ ChatAutoScrollScript() {
 					}, 250);
 				}
 
-					this._handlers.wheel = function(event) { markInteracting(event); };
-					this._handlers.touchmove = function(event) { markInteracting(event); };
+					this._handlers.wheel = function(event) {
+						markInteracting(event, event.deltaY < 0 ? true : (event.deltaY > 0 ? false : null));
+					};
+					this._handlers.touchstart = function(event) {
+						var touch = event.touches && event.touches[0];
+						self._touchY = touch ? touch.clientY : null;
+					};
+					this._handlers.touchmove = function(event) {
+						var touch = event.touches && event.touches[0];
+						var up = null;
+						// A finger moving down the screen scrolls the content up.
+						if (touch && self._touchY !== null && self._touchY !== undefined && touch.clientY !== self._touchY) up = touch.clientY > self._touchY;
+						if (touch) self._touchY = touch.clientY;
+						markInteracting(event, up);
+					};
 					this._handlers.pointerdown = function(event) {
 						self._pointerInteracting = true;
 						markInteracting(event);
@@ -3498,17 +3514,22 @@ templ ChatAutoScrollScript() {
 						k === 'ArrowUp' || k === 'ArrowDown' || k === ' ' || k === 'Spacebar') {
 						var t = e.target;
 						if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-						markInteracting(e);
+						markInteracting(e, k === 'PageUp' || k === 'Home' || k === 'ArrowUp' || (k === ' ' || k === 'Spacebar') && e.shiftKey);
 					}
 				};
 
 					this._handlers.scroll = function() {
 						if (!self.element || !self.element.isConnected) return;
 						var isNear = window.chatAutoScroll.isNearBottom(self.element);
+						var el = self.element;
+						var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
 						if (self._userInteracting) {
 							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
 							if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(self.element);
-							self.userScrolledUp = !isNear;
+							// Scrolling up in any amount parks the reader; the near-bottom threshold
+							// only decides when scrolling back down re-pins. Otherwise small trackpad
+							// steps stay "near bottom" and the next streamed chunk undoes them.
+							self.userScrolledUp = self._interactionUp === true ? !atBottom : !isNear;
 							self.intentRevision = window._chatScrollIntentRevision;
 							if (typeof self.onIntentChange === 'function') self.onIntentChange();
 						}
@@ -3518,6 +3539,7 @@ templ ChatAutoScrollScript() {
 				};
 
 				this.element.addEventListener('wheel', this._handlers.wheel, { passive: true });
+				this.element.addEventListener('touchstart', this._handlers.touchstart, { passive: true });
 				this.element.addEventListener('touchmove', this._handlers.touchmove, { passive: true });
 				this.element.addEventListener('pointerdown', this._handlers.pointerdown, { passive: true });
 				this.element.addEventListener('scroll', this._handlers.scroll, { passive: true });
@@ -3538,7 +3560,10 @@ templ ChatAutoScrollScript() {
 			// user scrolls up they stay parked there until they themselves scroll back.
 				shouldAutoScroll: function() {
 					if (!this.element) return true;
-					return !this.userScrolledUp;
+					// While the user is scrolling up, their scroll event may not have been
+					// processed yet; pinning now would undo it. Downward or undirected input
+					// still follows new output so a reader returning to the bottom stays pinned.
+					return !this.userScrolledUp && !(this._userInteracting && this._interactionUp === true);
 				},
 
 				// Re-bind to a new element (e.g. after morph swap replaced #task-thread-messages
@@ -3606,6 +3631,7 @@ templ ChatAutoScrollScript() {
 				if (!this.element) return;
 				if (this._handlers.scroll) this.element.removeEventListener('scroll', this._handlers.scroll);
 				if (this._handlers.wheel) this.element.removeEventListener('wheel', this._handlers.wheel);
+				if (this._handlers.touchstart) this.element.removeEventListener('touchstart', this._handlers.touchstart);
 				if (this._handlers.touchmove) this.element.removeEventListener('touchmove', this._handlers.touchmove);
 				if (this._handlers.pointerdown) this.element.removeEventListener('pointerdown', this._handlers.pointerdown);
 			}

@@ -214,6 +214,74 @@ func TestLatestMessageButtonAndControllerContract(t *testing.T) {
 	}
 }
 
+// A reader at the bottom who scrolls up a little while output streams must stay parked:
+// small trackpad steps stay within the near-bottom threshold, and a pin scheduled
+// before the scroll event is processed must not undo the user's scroll.
+func TestBrowserFunctional_ChatScrollTrackerSmallUpwardScrollSurvivesStreamingInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	var chatScript bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
+	}
+	rows := strings.Repeat(`<div class="row">message</div>`, 30)
+	html := `<!doctype html><html><head><meta charset="utf-8"><style>
+		.messages { height: 200px; overflow-y: auto; }
+		.row { height: 32px; }
+	</style></head><body><main id="fixture-root" data-test-result="pending">
+		<div id="chat-messages" class="messages">` + rows + `</div>
+	</main>` + chatScript.String() + `<script>
+	(function() {
+		var root = document.getElementById('fixture-root');
+		function fail(message) {
+			root.dataset.testResult = 'fail'; root.dataset.testError = message;
+			var p = document.createElement('pre'); p.textContent = 'FIXTURE ERROR: ' + message; document.body.appendChild(p);
+		}
+		Element.prototype.scrollTo = function(options) { this.scrollTop = options.top; };
+		var messages = document.getElementById('chat-messages');
+		function bottom() { return messages.scrollHeight - messages.clientHeight; }
+		function stream() {
+			var row = document.createElement('div'); row.className = 'row'; row.textContent = 'streamed'; messages.appendChild(row);
+			tracker.autoScroll();
+		}
+		function userScrollTo(top, deltaY) {
+			messages.dispatchEvent(new WheelEvent('wheel', {bubbles: true, deltaY: deltaY}));
+			messages.scrollTop = top;
+			messages.dispatchEvent(new Event('scroll', {bubbles: true}));
+		}
+		messages.scrollTop = bottom();
+		var tracker = new window.ChatScrollTracker(messages);
+		if (!tracker.shouldAutoScroll()) return fail('tracker did not start pinned at the bottom');
+
+		// A wheel whose scroll event has not been processed yet must block pinning.
+		messages.dispatchEvent(new WheelEvent('wheel', {bubbles: true, deltaY: -30}));
+		if (tracker.shouldAutoScroll()) return fail('auto-scroll allowed while the user is mid-scroll');
+
+		// A 30px step stays inside the 100px near-bottom threshold but is still a scroll up.
+		var parkedAt = bottom() - 30;
+		userScrollTo(parkedAt, -30);
+		if (!tracker.userScrolledUp) return fail('small upward scroll did not park the reader');
+		setTimeout(function() {
+			stream();
+			if (messages.scrollTop !== parkedAt) return fail('streamed output pulled a parked reader from ' + parkedAt + ' to ' + messages.scrollTop);
+			// Scrolling back down to the bottom re-pins.
+			userScrollTo(bottom(), 60);
+			if (tracker.userScrolledUp) return fail('scrolling back to the bottom did not re-pin');
+			setTimeout(function() {
+				stream();
+				if (messages.scrollTop !== bottom()) return fail('re-pinned reader did not follow streamed output');
+				root.dataset.testResult = 'pass';
+			}, 400);
+		}, 400);
+	})();
+	</script></body></html>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "Chat small upward scroll during streaming", 3000, 20*time.Second)
+}
+
 func TestBrowserFunctional_LatestMessageButtonDynamicBehaviorInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 	var chatButton, threadButton, chatScript bytes.Buffer
@@ -5150,8 +5218,10 @@ func TestChatScrollTracker_UsesInteractionSignalsForScrollIntent(t *testing.T) {
 		"addEventListener('pointerup'",
 		"addEventListener('pointercancel'",
 		"addEventListener('keydown'",
-		// shouldAutoScroll relies solely on the persisted flag
-		"return !this.userScrolledUp;",
+		// shouldAutoScroll relies on the persisted flag and never pins mid-interaction
+		"return !this.userScrolledUp && !(this._userInteracting && this._interactionUp === true);",
+		// Upward user input parks the reader, even within the near-bottom threshold
+		"self.userScrolledUp = self._interactionUp === true ? !atBottom : !isNear;",
 	}
 	for _, r := range required {
 		if !strings.Contains(content, r) {
