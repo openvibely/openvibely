@@ -3,10 +3,14 @@
 #
 # Most flaky tests pass on a fast, idle laptop and fail on a slow, shared CI runner:
 # a goroutine is scheduled late, a fixed sleep or timeout expires first, or two pieces
-# of work race. Load soaking reproduces that locally. It starts LOAD busy-loop processes
-# (`yes > /dev/null`) so tests compete for CPU, then runs the same tests many times at
-# once. A test that fails even occasionally here is timing-sensitive and will eventually
-# fail in CI. The busy loops are always killed on exit, including Ctrl-C.
+# of work race. Load soaking reproduces that locally: it keeps most CPU cores busy so
+# tests compete for CPU, then runs the same tests many times at once. A test that fails
+# even occasionally here is timing-sensitive and will eventually fail in CI.
+#
+# The CPU load comes from `yes > /dev/null`. `yes` is a standard Unix command that prints
+# "y" in an endless loop; redirecting it to /dev/null throws the output away, so all it
+# does is spin one CPU core at 100%. The script starts LOAD of them in the background and
+# always kills them on exit, including Ctrl-C (or stop strays with `pkill -x yes`).
 #
 # Modes:
 #   browser             Browser functional tests (TestBrowserFunctional_*) in
@@ -27,8 +31,10 @@
 #   PASSES   Times each test runs per worker (unit: full suite runs; race: -count).
 #            Default 3.
 #   WORKERS  Parallel test processes for browser and test modes. Default 3.
-#   LOAD     CPU busy-loop processes for browser, unit, and test modes. Default: CPU
-#            cores minus 4, at least 1.
+#   LOAD     CPU busy-loop processes for browser, unit, and test modes. Each one keeps
+#            one CPU core fully busy, so LOAD is roughly the number of cores taken away
+#            from the tests. Default: CPU cores minus 4, at least 1 (14 on an 18-core
+#            machine), leaving about 4 cores for the tests, like a busy CI runner.
 #   OUT      Directory for raw output. Default: a new temporary directory.
 #
 # Example: PASSES=10 WORKERS=4 scripts/flake-hunt.sh browser
