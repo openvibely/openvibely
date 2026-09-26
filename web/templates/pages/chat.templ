@@ -855,11 +855,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var thinkingWrap = thinking.closest('.flex.flex-col.items-start.gap-1');
 								if (thinkingWrap) thinkingWrap.classList.add('hidden');
 							}
-							var streamDots = bubble.querySelector('.loading-dots');
-							if (streamDots) {
-								var streamDotsWrap = streamDots.closest('div');
-								if (streamDotsWrap) streamDotsWrap.classList.add('hidden');
-							}
+							var streamDotsWrap = bubble.querySelector('[id^="streaming-dots-"]');
+							if (streamDotsWrap) streamDotsWrap.classList.add('hidden');
 							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
 							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
 							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
@@ -908,7 +905,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						var dots = document.createElement('div');
 						dots.id = 'streaming-dots-resume-' + execId;
 						dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
-					dots.innerHTML = '<span class="loading loading-dots loading-xs"></span>';
+					dots.innerHTML = '<span class="ov-loading-dots ov-loading-dots-xs" aria-hidden="true"><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span></span>';
 
 						innerDiv.appendChild(thinking);
 						innerDiv.appendChild(progressDiv);
