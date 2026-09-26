@@ -235,7 +235,7 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		t.Fatalf("concurrent card mutation bypassed repository lock: %d %s", got.Code, got.Body.String())
 	case <-time.After(100 * time.Millisecond):
 	}
-	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+	if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusBlocked); err != nil {
 		close(releaseLease)
 		t.Fatal(err)
 	}
@@ -1656,6 +1656,68 @@ func TestHandler_RebaseTaskBranchRejectsForgedIneligibleRequests(t *testing.T) {
 	}
 }
 
+func TestHandler_RebaseTaskBranch_TaskCardConflictRefreshesOnlyCard(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	target := service.GetCurrentBranch(repoDir)
+	sharedPath := filepath.Join(repoDir, "card-rebase-conflict.txt")
+	if err := os.WriteFile(sharedPath, []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "card-rebase-conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "rebase conflict base")
+	project := &models.Project{Name: "Card rebase conflict", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Card rebase conflict", Prompt: "test", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, MergeTargetBranch: target, MergeStatus: models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	worktreePath, branchName, err := h.worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath, task.WorktreeBranch = worktreePath, branchName
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, branchName); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "card-rebase-conflict.txt"), []byte("task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "task conflict"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sharedPath, []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repoDir, "add", "card-rebase-conflict.txt")
+	runGit(t, repoDir, "commit", "-m", "target conflict")
+
+	form := url.Values{"merge_source": {"task_card"}, "project_id": {project.ID}}
+	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/rebase", form)
+	req.Header.Set("HX-Request", "true")
+	rec := worktreeExecute(e, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("card rebase conflict status=%d, want swap-safe 200: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="task-`+task.ID+`"`) || strings.Contains(body, `id="kanban-board"`) {
+		t.Fatalf("card rebase conflict did not return only the authoritative task card: %s", body)
+	}
+	if !strings.Contains(body, `data-task-state="merge-conflict"`) {
+		t.Fatalf("card rebase conflict did not render merge-conflict state: %s", body)
+	}
+	if got := rec.Header().Get("HX-Trigger"); !strings.Contains(got, "openvibelyToast") {
+		t.Fatalf("card rebase conflict missing toast trigger: %q", got)
+	}
+}
+
 func TestHandler_ConflictRecoveryPreflightRejectsMissingTaskAndProjectRepository(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -2495,7 +2557,7 @@ func TestHandler_MergeTaskBranch_ActiveConflictBlocksDuplicateMerge(t *testing.T
 	}
 }
 
-func TestHandler_MergeTaskBranch_TaskCardFastForwardFailureRefreshesBoardWithToast(t *testing.T) {
+func TestHandler_MergeTaskBranch_TaskCardFastForwardFailureRefreshesCardWithToast(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
 	ctx := context.Background()
@@ -2543,8 +2605,8 @@ func TestHandler_MergeTaskBranch_TaskCardFastForwardFailureRefreshesBoardWithToa
 	if got := rec.Header().Get("HX-Trigger"); !strings.Contains(got, "openvibelyToast") || !strings.Contains(got, "Local merge has conflicts") {
 		t.Fatalf("card fast-forward failure missing toast trigger: %q", got)
 	}
-	if !strings.Contains(rec.Body.String(), `id="kanban-board"`) {
-		t.Fatalf("card fast-forward failure did not return authoritative board: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `id="task-`+task.ID+`"`) || strings.Contains(rec.Body.String(), `id="kanban-board"`) {
+		t.Fatalf("card fast-forward failure did not return only the authoritative task card: %s", rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `data-task-state="merge-conflict"`) {
 		t.Fatalf("card fast-forward conflict did not render merge-conflict state: %s", rec.Body.String())

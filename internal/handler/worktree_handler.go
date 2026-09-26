@@ -17,6 +17,24 @@ import (
 
 var errTaskMutationEligibilityChanged = errors.New("task mutation eligibility changed")
 
+func (h *Handler) renderTaskCardRefresh(c echo.Context, taskID string) error {
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if children, childErr := h.taskRepo.ListSwarmChildren(c.Request().Context(), task.ID); childErr == nil {
+			task.SwarmChildren = children
+		}
+	}
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
+	agentDefs := h.listAgentDefinitions(c.Request().Context())
+	return render(c, http.StatusOK, components.TaskCard(*task, task.ProjectID, string(task.Category), agents, agentDefs))
+}
+
 func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Task, mergeType string) (taskMergeActionState, bool, string) {
 	if task == nil {
 		return taskMergeActionState{}, false, "Task not found."
@@ -463,8 +481,8 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		// merge failures return a swap-safe response so HTMX applies both the
 		// refreshed controls and the failure toast. Stale eligibility failures above
 		// retain their non-success status.
-		if fromTaskCard && mergeType == "ff" && result != nil {
-			return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		if fromTaskCard && result != nil {
+			return h.renderTaskCardRefresh(c, taskID)
 		}
 		if fromChangesTab {
 			task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
@@ -479,11 +497,8 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 		}
 		// Conflicts detected - refresh the owning surface to show current retry state.
 		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-		if fromTaskCard && mergeType == "ff" {
-			return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
-		}
 		if fromTaskCard {
-			return c.String(http.StatusConflict, "Local merge has conflicts. Resolve conflicts or abort merge.")
+			return h.renderTaskCardRefresh(c, taskID)
 		}
 		if fromChangesTab {
 			return h.GetTaskChanges(c)
@@ -503,7 +518,7 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	})
 
 	if fromTaskCard {
-		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		return h.renderTaskCardRefresh(c, taskID)
 	}
 	if fromChangesTab {
 		return h.GetTaskChanges(c)
@@ -586,6 +601,9 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		if isHTMX(c) {
 			setHTMXToast(c, errMessage, "failed")
 		}
+		if fromTaskCard && result != nil {
+			return h.renderTaskCardRefresh(c, taskID)
+		}
 		return c.String(http.StatusBadRequest, errMessage)
 	}
 
@@ -598,7 +616,7 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 			setHTMXToast(c, msg, "failed")
 		}
 		if fromTaskCard {
-			return c.String(http.StatusConflict, msg)
+			return h.renderTaskCardRefresh(c, taskID)
 		}
 		return h.GetTaskChanges(c)
 	}
@@ -609,7 +627,7 @@ func (h *Handler) RebaseTaskBranch(c echo.Context) error {
 		setHTMXToast(c, fmt.Sprintf("Rebased task branch onto %s", targetBranch), "completed")
 	}
 	if fromTaskCard {
-		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
+		return h.renderTaskCardRefresh(c, taskID)
 	}
 	return h.GetTaskChanges(c)
 }
