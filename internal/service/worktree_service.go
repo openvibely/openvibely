@@ -1383,7 +1383,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 				// A squash conflict has no MERGE_HEAD, so advertising `git merge
 				// --abort` would strand the recovery UI. Restore only paths added by
 				// this squash attempt, preserving unrelated pre-existing staged work,
-				// and return a retryable failed state instead.
+				// and return a retryable conflict state instead.
 				squashPaths, pathErr := SquashMergePaths(repoDir, stagedBeforeSquash)
 				if pathErr == nil {
 					squashPaths = appendUniquePaths(squashPaths, conflictFiles...)
@@ -1391,7 +1391,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 				}
 				if pathErr == nil {
 					mergeErrMsg := strings.TrimSpace(string(mergeOut))
-					_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+					ws.recordMergeConflict(ctx, task, false)
 					return &MergeResult{ErrorMessage: mergeErrMsg}, fmt.Errorf("squash merge conflicted and was restored: %w", mergeErr)
 				}
 				applog.Infof("[worktree] failed to restore squash conflict for task %s: %v", task.ID, pathErr)
@@ -1528,7 +1528,7 @@ func (ws *WorktreeService) rebaseBranchLocked(ctx context.Context, task *models.
 		conflictFiles := detectConflicts(task.WorktreePath)
 		if len(conflictFiles) > 0 {
 			_ = AbortRebase(task.WorktreePath)
-			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+			ws.recordMergeConflict(ctx, task, false)
 			return &RebaseResult{
 				Success:       false,
 				ConflictFiles: conflictFiles,

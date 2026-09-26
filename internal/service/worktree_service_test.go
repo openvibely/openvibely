@@ -3181,8 +3181,15 @@ func TestRebaseBranch_ConflictAborts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.MergeStatus != models.MergeStatusPending {
-		t.Fatalf("expected pending status after aborted rebase conflict, got %q", updated.MergeStatus)
+	if updated.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("expected conflict status after aborted rebase conflict, got %q", updated.MergeStatus)
+	}
+	owner, err := taskRepo.ActiveMergeConflictOwner(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != "" {
+		t.Fatalf("aborted rebase conflict recorded active owner %q", owner)
 	}
 }
 
@@ -3945,7 +3952,7 @@ func TestMergeBranch_SquashCommitFailureMarksMergeFailedAndDoesNotUseHardReset(t
 	}
 }
 
-func TestMergeBranch_SquashConflictCleansToRetryableFailure(t *testing.T) {
+func TestMergeBranch_SquashConflictCleansToRetryableConflict(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), repository.NewSettingsRepo(db))
@@ -4004,8 +4011,15 @@ func TestMergeBranch_SquashConflictCleansToRetryableFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.MergeStatus != models.MergeStatusFailed {
-		t.Fatalf("merge status=%q, want failed retry state", updated.MergeStatus)
+	if updated.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("merge status=%q, want conflict retry state", updated.MergeStatus)
+	}
+	owner, err := taskRepo.ActiveMergeConflictOwner(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != "" {
+		t.Fatalf("cleaned squash conflict recorded active owner %q", owner)
 	}
 	status := mustGit(repoDir, "status", "--porcelain")
 	if strings.Contains(status, "squash-conflict.txt") {
