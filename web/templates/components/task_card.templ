@@ -501,16 +501,8 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 				<!-- Cancel option (only show if running) -->
 				if task.Status == models.StatusRunning {
 					<li>
-						<button
-							class="text-error"
-							hx-post={ fmt.Sprintf("/tasks/%s/cancel", task.ID) }
-							hx-target="#kanban-board"
-							hx-swap="outerHTML"
-							hx-confirm="Cancel this running task?"
-						>
-							Cancel
-						</button>
-					</li>
+						@RunningTaskCancelButton(task.ID, "Cancel", "#kanban-board", "outerHTML", "text-error")
+				</li>
 				}
 				<!-- Edit option (only show if not running) -->
 				if task.Status != models.StatusRunning {

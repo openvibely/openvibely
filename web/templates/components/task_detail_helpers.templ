@@ -1380,6 +1380,17 @@ templ TaskThreadQueuedFollowupResponse(message string, attachments []models.Chat
 	@ChatBubble("Assistant", "Queued. This message will be sent to the model after the active response finishes.")
 }
 
+// RunningTaskCancelButton renders the shared cancellation control used by task surfaces.
+templ RunningTaskCancelButton(taskID string, label string, target string, swap string, class string) {
+	<button
+		class={ class }
+		hx-post={ fmt.Sprintf("/tasks/%s/cancel", taskID) }
+		hx-target={ target }
+		hx-swap={ swap }
+		hx-confirm="Cancel this running task?"
+	>{ label }</button>
+}
+
 // TaskExecutionHistory renders the bounded execution history section for polling updates.
 templ TaskExecutionHistory(task *models.Task, executions []models.Execution, hasOlder bool, windowLimit int) {
 	<div
@@ -1396,15 +1407,7 @@ templ TaskExecutionHistory(task *models.Task, executions []models.Execution, has
 			<h4 class="text-lg font-bold">Execution History</h4>
 			<div class="flex items-center gap-2">
 				if task.Status == models.StatusRunning {
-					<button
-						class="btn btn-sm btn-error"
-						hx-post={ fmt.Sprintf("/tasks/%s/cancel", task.ID) }
-						hx-target="#task-execution-history"
-						hx-swap="morph:outerHTML"
-						hx-confirm="Cancel this running task?"
-					>
-						Cancel Task
-					</button>
+					@RunningTaskCancelButton(task.ID, "Cancel Task", "#task-execution-history", "morph:outerHTML", "btn btn-sm btn-error")
 					<span class="loading loading-spinner loading-sm"></span>
 				}
 			</div>
