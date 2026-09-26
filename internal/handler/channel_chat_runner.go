@@ -57,7 +57,7 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 	workDir, worktreeContext, republishOpenPR, workDirErr := h.resolveWorktreeWorkDir(ctx, task)
 	if workDirErr != nil {
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, workDirErr.Error(), 0, req.ReplyContext)
-		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: req.ProjectID, TaskID: req.TaskID, IsTaskFollowup: true}, req.ExecID)
+		h.goStartNextQueuedTurnAfter(streamingResponseParams{ProjectID: req.ProjectID, TaskID: req.TaskID, IsTaskFollowup: true}, req.ExecID)
 		return
 	}
 	h.resumeUserStoppedGoalForManualStart(ctx, req.TaskID, req.ReplyContext.Source, "")
