@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -530,13 +532,23 @@ func TestHandler_RescheduleTask_MultiSelectMovesEveryScheduleTogether(t *testing
 }
 
 func TestHandler_RescheduleTask_MultiSelectPreservesLocalHourAcrossDST(t *testing.T) {
+	// time.Local is process-wide and read by background goroutines left over from other
+	// tests, so reassigning it races. Run the assertions in a fresh process whose TZ sets it.
+	if os.Getenv("OPENVIBELY_DST_SUBPROCESS") != "1" {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestHandler_RescheduleTask_MultiSelectPreservesLocalHourAcrossDST$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "OPENVIBELY_DST_SUBPROCESS=1", "TZ=America/New_York")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("DST reschedule subprocess failed: %v\n%s", err, out)
+		}
+		return
+	}
 	location, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Fatal(err)
 	}
-	previousLocal := time.Local
-	time.Local = location
-	t.Cleanup(func() { time.Local = previousLocal })
+	if got := time.Date(2031, 3, 9, 12, 0, 0, 0, time.Local).Format("MST"); got != "EDT" {
+		t.Fatalf("subprocess time.Local zone = %s, want America/New_York", got)
+	}
 
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

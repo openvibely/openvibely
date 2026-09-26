@@ -298,6 +298,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 })();
 </script>`
 	page = strings.Replace(page, "</body>", runner+"</body>", 1)
+	page = strings.Replace(page, "for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);", "for (var i=0;i<80 && !window.bulkFinished;i++){ window.bulkFinished=(await fetch('/bulk-finished').then(function(r){return r.text();}))==='true'; if(!window.bulkFinished) await wait(25); }", 1)
 
 	var deletes atomic.Int32
 	var payloadMu sync.Mutex
@@ -342,7 +343,6 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 		}
 	}))
 	defer fixture.Close()
-	page = strings.Replace(page, "for (var i=0;i<80 && !window.bulkFinished;i++) await wait(25);", "for (var i=0;i<80 && !window.bulkFinished;i++){ window.bulkFinished=(await fetch('/bulk-finished').then(function(r){return r.text();}))==='true'; if(!window.bulkFinished) await wait(25); }", 1)
 
 	cmd := exec.Command(chrome, "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", "--no-first-run", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"), "--window-size=390,844", fixture.URL+"?provider=openai")
 	var chromeOutput bytes.Buffer
