@@ -208,6 +208,9 @@ jobs:
 
   packaged-update:
     name: Packaged update (${{ matrix.os }}, ${{ matrix.arch }})
+    permissions:
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -477,6 +480,45 @@ jobs:
           echo "Linux desktop metadata cache save action elapsed: $((elapsed_ms / 1000)).$((elapsed_ms % 1000))s (metadata payload: ${payload_bytes} bytes)"
           echo "elapsed_ms=${elapsed_ms}" >> "$GITHUB_OUTPUT"
 
+      - name: Measure packaged-update Linux saved cache artifact sizes
+        if: runner.os == 'Linux'
+        id: packaged-linux-cache-artifact-sizes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_CACHE_KEY: ${{ steps.packaged-linux-desktop-cache-key.outputs.key }}
+          METADATA_CACHE_KEY: ${{ steps.packaged-linux-desktop-cache-key.outputs.metadata_key }}
+        run: |
+          cache_api_url="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches"
+          cache_response="unavailable"
+          if ! cache_response="$(curl --silent --show-error --fail --get \
+            --data-urlencode "ref=${GITHUB_REF}" \
+            --data-urlencode "per_page=100" \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "$cache_api_url" 2>/dev/null)"; then
+            cache_response="unavailable"
+          fi
+
+          archive_artifact_bytes="unavailable"
+          metadata_artifact_bytes="unavailable"
+          if [[ "$cache_response" != "unavailable" ]]; then
+            archive_artifact_bytes="$(jq -r --arg key "$ARCHIVE_CACHE_KEY" --arg ref "$GITHUB_REF" '
+              [(.actions_caches // [])[] | select(.key == $key and .ref == $ref)]
+              | if length == 0 then "unavailable" else (max_by(.created_at).size_in_bytes // "unavailable") end
+            ' <<< "$cache_response")"
+            metadata_artifact_bytes="$(jq -r --arg key "$METADATA_CACHE_KEY" --arg ref "$GITHUB_REF" '
+              [(.actions_caches // [])[] | select(.key == $key and .ref == $ref)]
+              | if length == 0 then "unavailable" else (max_by(.created_at).size_in_bytes // "unavailable") end
+            ' <<< "$cache_response")"
+          fi
+          echo "Linux desktop saved cache artifact sizes (archive: ${archive_artifact_bytes} bytes, metadata: ${metadata_artifact_bytes} bytes)"
+          {
+            echo "archive_artifact_bytes=${archive_artifact_bytes}"
+            echo "metadata_artifact_bytes=${metadata_artifact_bytes}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Start Linux virtual display
         if: runner.os == 'Linux'
         shell: bash
@@ -551,6 +593,8 @@ jobs:
             echo '| Archive payload size | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.archive_payload_bytes }} bytes |'
             echo '| Metadata payload size | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.metadata_payload_bytes }} bytes |'
             echo '| Cache payload size (uncompressed) | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.cache_payload_bytes }} bytes |'
+            echo '| Archive saved cache artifact size | ${{ steps.packaged-linux-cache-artifact-sizes.outputs.archive_artifact_bytes }} |'
+            echo '| Metadata saved cache artifact size | ${{ steps.packaged-linux-cache-artifact-sizes.outputs.metadata_artifact_bytes }} |'
             echo "| Runner execution elapsed from first step (not job UI duration) | ${elapsed_seconds} s |"
             echo
             echo 'Use the packaged-update job duration shown in Actions for whole-job p50/p95; this runner-side measurement begins immediately before checkout.'
