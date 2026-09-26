@@ -1130,7 +1130,7 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 		t.Fatalf("find Chrome debugging target for %s", server.URL)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	conn, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
 	if err != nil {
@@ -1202,6 +1202,9 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 		call(tb, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
 	}
 
+	// The target reports the command-line URL before it commits, so a slow runner can attach while
+	// the tab is still on about:blank; navigate through this session so the fixture loads here.
+	call(t, "Page.navigate", map[string]any{"url": server.URL}, nil)
 	pageReadyDeadline := time.Now().Add(10 * time.Second)
 	pageState := ""
 	for time.Now().Before(pageReadyDeadline) {
