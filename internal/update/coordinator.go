@@ -205,7 +205,7 @@ func (c *Coordinator) SetPersistence(path string) error {
 			return nil
 		}
 	}
-	if c.release != nil && !isTransitionState(c.state) && !c.releaseIsNewerThanCurrent(c.release) {
+	if c.release != nil && !isTransitionState(c.state) && (!c.releaseIsNewerThanCurrent(c.release) || !c.releaseIsUnexpired(c.release)) {
 		c.release, c.staged = nil, nil
 		c.clearAcceptanceLocked()
 		if c.state == StateAvailable || c.state == StateFailed || c.state == StateChecking {
@@ -431,6 +431,13 @@ func (c *Coordinator) Snapshot() CoordinatorSnapshot {
 			state = StateIdle
 			lastError = ""
 		}
+	} else if release != nil && !c.releaseIsUnexpired(release) {
+		release = nil
+		staged = false
+		if state == StateAvailable {
+			state = StateIdle
+			lastError = ""
+		}
 	}
 	snapshot := CoordinatorSnapshot{State: state, CurrentVersion: c.current.Version, Distribution: c.current.Distribution, Channel: c.channel, Release: release, ConfigurationError: c.configError, Error: lastError, Manual: c.manual, Staged: staged}
 	provider := c.managedStateProvider
@@ -492,7 +499,7 @@ func (c *Coordinator) Check(ctx context.Context) error {
 		c.staged = nil
 	} else if release != nil && c.release == nil {
 		c.release = release
-	} else if c.release != nil && !c.releaseIsNewerThanCurrent(c.release) {
+	} else if c.release != nil && (!c.releaseIsNewerThanCurrent(c.release) || !c.releaseIsUnexpired(c.release)) {
 		c.release = nil
 		c.staged = nil
 		c.lastError = ""
@@ -514,21 +521,23 @@ func (c *Coordinator) Check(ctx context.Context) error {
 	return nil
 }
 
+func (c *Coordinator) releaseIsUnexpired(release *VerifiedRelease) bool {
+	if release == nil || release.Metadata.ExpiresAt.IsZero() {
+		return release != nil
+	}
+	now := time.Now()
+	if c.client != nil {
+		now = c.client.cfg.Now()
+	}
+	return release.Metadata.ExpiresAt.After(now)
+}
+
 func (c *Coordinator) releaseIsNewerThanCurrent(release *VerifiedRelease) bool {
 	if release == nil {
 		return false
 	}
 	if release.Metadata.Channel != "" && release.Metadata.Channel != c.channel {
 		return false
-	}
-	if !release.Metadata.ExpiresAt.IsZero() {
-		now := time.Now()
-		if c.client != nil {
-			now = c.client.cfg.Now()
-		}
-		if !release.Metadata.ExpiresAt.After(now) {
-			return false
-		}
 	}
 	if compareVersions(release.Metadata.Version, c.current.Version) <= 0 {
 		return false
