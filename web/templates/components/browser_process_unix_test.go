@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func configureTestBrowserProcess(cmd *exec.Cmd) {
@@ -13,6 +15,7 @@ func configureTestBrowserProcess(cmd *exec.Cmd) {
 }
 
 func startTestBrowserProcess(cmd *exec.Cmd) error {
+	testutil.GuardBrowserProcess(cmd)
 	return cmd.Start()
 }
 
