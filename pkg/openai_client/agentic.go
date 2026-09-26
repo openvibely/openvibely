@@ -2106,6 +2106,7 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		"input":  inputItems,
 		"stream": true,
 	}
+	applyDefaultResponsesTextVerbosity(payload, opts.Model)
 
 	if !isChatGPTOAuth {
 		payload["max_output_tokens"] = opts.MaxOutputTokens

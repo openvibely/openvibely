@@ -499,6 +499,21 @@ func (c *Client) responsesWebsocketEndpoint(isChatGPTOAuth bool) (string, error)
 	return u.String(), nil
 }
 
+func applyDefaultResponsesTextVerbosity(payload map[string]any, model string) {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	if !strings.HasPrefix(normalized, "gpt-5") && !strings.HasPrefix(normalized, "gpt-6") {
+		return
+	}
+	text, _ := payload["text"].(map[string]any)
+	if text == nil {
+		text = map[string]any{}
+		payload["text"] = text
+	}
+	if _, exists := text["verbosity"]; !exists {
+		text["verbosity"] = "low"
+	}
+}
+
 func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionID string) map[string]any {
 	request := make(map[string]any, len(payload)+6)
 	for key, value := range payload {

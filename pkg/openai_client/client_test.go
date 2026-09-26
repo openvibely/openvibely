@@ -2687,3 +2687,24 @@ func TestOpenResponsesWebsocketStream_GPT6SolMidTurnSteeringAccepted(t *testing.
 		t.Fatalf("steering records = %#v", records)
 	}
 }
+
+func TestApplyDefaultResponsesTextVerbosity(t *testing.T) {
+	payload := map[string]any{"text": map[string]any{"format": "json_schema"}}
+	applyDefaultResponsesTextVerbosity(payload, "gpt-5.5")
+	text := payload["text"].(map[string]any)
+	if text["verbosity"] != "low" || text["format"] != "json_schema" {
+		t.Fatalf("text = %#v", text)
+	}
+
+	explicit := map[string]any{"text": map[string]any{"verbosity": "high"}}
+	applyDefaultResponsesTextVerbosity(explicit, "gpt-6-sol")
+	if explicit["text"].(map[string]any)["verbosity"] != "high" {
+		t.Fatalf("explicit verbosity was overwritten: %#v", explicit)
+	}
+
+	unsupported := map[string]any{}
+	applyDefaultResponsesTextVerbosity(unsupported, "gpt-4o")
+	if _, ok := unsupported["text"]; ok {
+		t.Fatalf("unsupported model received text options: %#v", unsupported)
+	}
+}
