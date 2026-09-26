@@ -868,6 +868,8 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   async function run() {
     await waitFor(function() { return row('event-0'); }, 'initial lifecycle rows');
+    // The initial render's next-frame restore would otherwise undo the scroll below on slow runners.
+    await waitForScrollRestoration('initial lifecycle scroll restoration');
     var lifecyclePort = port();
     lifecyclePort.scrollTop = row('event-0').offsetTop - 40;
     lifecyclePort.dispatchEvent(new Event('scroll', {bubbles:true}));
