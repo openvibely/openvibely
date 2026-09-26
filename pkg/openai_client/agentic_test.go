@@ -1144,7 +1144,7 @@ func TestSendAgentic_OAuthGPT56UsesResponsesLiteStandaloneWebSearch(t *testing.T
 	OpenAIChatGPTAPIBaseURL = srv.URL
 	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
-	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(24 * time.Hour).UnixMilli(), "org_test")
 	resp, err := client.SendAgentic(context.Background(), "Search", &AgenticOptions{
 		Model: "gpt-5.6-sol", DisableTools: true, WebSearchEnabled: true, MaxTurns: 2,
 		OnWebSearchResult: func(result WebSearchResult) { callbackResult = result },
@@ -1200,7 +1200,7 @@ func TestSendAgentic_ResponsesLiteStreamFailureFallsBackAfterRetries(t *testing.
 	OpenAIChatGPTAPIBaseURL = srv.URL
 	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
-	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(24 * time.Hour).UnixMilli(), "org_test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.6-sol",
 		DisableTools: true,
@@ -4362,7 +4362,7 @@ func TestSendAgenticTurnRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(time.Hour).UnixMilli(), "acct")
+	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(24 * time.Hour).UnixMilli(), "acct")
 	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
 		if tokenUsed != "old-token" {
 			t.Fatalf("tokenUsed = %q", tokenUsed)
@@ -4408,7 +4408,7 @@ func TestSendRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(time.Hour).UnixMilli(), "acct")
+	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(24 * time.Hour).UnixMilli(), "acct")
 	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
 		if tokenUsed != "old-token" {
 			t.Fatalf("tokenUsed = %q", tokenUsed)
