@@ -104,11 +104,11 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 	<!-- Task card merge, rebase, and pull request actions execute directly. -->
 	if project != nil {
 		<script>
-			function setTaskCardActionBoardBusy(busy) {
-				var board = document.getElementById('kanban-board');
-				if (!board) return;
-				if (busy) board.setAttribute('aria-busy', 'true');
-				else board.removeAttribute('aria-busy');
+			function setTaskCardActionBusy(taskID, busy) {
+				var card = document.getElementById('task-' + taskID);
+				if (!card) return;
+				if (busy) card.setAttribute('aria-busy', 'true');
+				else card.removeAttribute('aria-busy');
 			}
 
 			function taskCardActionResponseHasToast(xhr) {
@@ -153,10 +153,11 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				var path = '/tasks/' + encodeURIComponent(taskID) + '/worktree/' + endpoint;
 				var dropdown = window.kanbanDropdownForTarget ? window.kanbanDropdownForTarget(button) : button.closest('[data-kanban-menu-key]');
 				window._taskCardActionRequest = {path: path, taskID: taskID, label: button.dataset.mergeLabel || 'Task action'};
-				setTaskCardActionBoardBusy(true);
+				setTaskCardActionBusy(taskID, true);
 				if (window.closeKanbanMenu) window.closeKanbanMenu(dropdown, false);
+				var target = button.hasAttribute('data-task-card-merge-action') ? '#task-' + CSS.escape(taskID) : '#kanban-board';
 				htmx.ajax('POST', path, {
-					target: '#kanban-board',
+					target: target,
 					swap: 'outerHTML',
 					values: {merge_type: mode, merge_source: 'task_card', project_id: projectID}
 				});
@@ -175,7 +176,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					var config = event.detail && event.detail.requestConfig;
 					if (!request || !config || config.path !== request.path) return;
 					window._taskCardActionRequest = null;
-					setTaskCardActionBoardBusy(false);
+					setTaskCardActionBusy(request.taskID, false);
 					showTaskCardActionFallbackFailure(request, event.detail && event.detail.xhr);
 					window.dispatchEvent(new CustomEvent('kanban-refresh-unblocked'));
 					restoreTaskCardActionFocus(request.taskID);
