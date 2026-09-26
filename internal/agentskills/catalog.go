@@ -299,6 +299,13 @@ func buildCatalog(turnID, globalRoot, projectRoot string, includeDisabled bool) 
 		entries = append(entries, got...)
 	}
 
+	return NewCatalog(turnID, mergeCatalogEntries(entries)), nil
+}
+
+// mergeCatalogEntries applies project-over-global precedence and returns one
+// deterministically handle-sorted entry per handle. Later entries within a scope
+// retain their existing last-entry-wins behavior.
+func mergeCatalogEntries(entries []Entry) []Entry {
 	dedup := make(map[string]Entry, len(entries))
 	for _, e := range entries {
 		if existing, ok := dedup[e.Handle]; ok && existing.Source == SourceProject && e.Source == SourceGlobal {
@@ -311,7 +318,7 @@ func buildCatalog(turnID, globalRoot, projectRoot string, includeDisabled bool) 
 		deduped = append(deduped, e)
 	}
 	sort.Slice(deduped, func(i, j int) bool { return deduped[i].Handle < deduped[j].Handle })
-	return NewCatalog(turnID, deduped), nil
+	return deduped
 }
 
 func loadStandaloneSkills(root string, source Source, includeDisabled bool) ([]Entry, error) {
@@ -342,19 +349,10 @@ func BuildAgentCatalog(turnID, globalRoot, projectRoot, agentKey string) (*Catal
 		}
 		entries = append(entries, got...)
 	}
-	dedup := make(map[string]Entry, len(entries))
-	for _, e := range entries {
-		if existing, ok := dedup[e.Handle]; ok && existing.Source == SourceProject && e.Source == SourceGlobal {
-			continue
-		}
-		e.Source = SourceAgent
-		dedup[e.Handle] = e
+	deduped := mergeCatalogEntries(entries)
+	for i := range deduped {
+		deduped[i].Source = SourceAgent
 	}
-	deduped := make([]Entry, 0, len(dedup))
-	for _, e := range dedup {
-		deduped = append(deduped, e)
-	}
-	sort.Slice(deduped, func(i, j int) bool { return deduped[i].Handle < deduped[j].Handle })
 	return newCatalog(turnID, deduped, true), nil
 }
 
