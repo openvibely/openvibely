@@ -3020,7 +3020,11 @@ func TestQueuedTaskFollowupRoutesMemoryFromFollowupMessageAfterInitialMemoryTask
 		Content:        "Now answer using the usage analytics memory file.",
 	}
 	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, followup))
-	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *followup))
+	// The initial turn's finalization drains queued inputs through this same function and may claim
+	// the followup first on a slow runner; either path starts the same turn.
+	if err := h.startQueuedTaskThreadInput(ctx, *followup); err != nil && !errors.Is(err, repository.ErrInputNotPending) {
+		require.NoError(t, err)
+	}
 	require.Eventually(t, func() bool { return mock.CallCount() == 2 }, 2*time.Second, 25*time.Millisecond)
 
 	seen := invoker.Seen()
