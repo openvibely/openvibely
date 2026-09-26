@@ -75,6 +75,12 @@ func TestBuildCatalog_EnumeratesStandaloneHandlesFromIndexFiles(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("want 3 entries, got %d (%+v)", len(got), got)
 	}
+	wantHandles := []string{"debug_go_tests", "implement_change", "review_auth"}
+	for i, handle := range wantHandles {
+		if got[i].Handle != handle {
+			t.Fatalf("entry %d handle = %q, want sorted handle %q", i, got[i].Handle, handle)
+		}
+	}
 	dbg, ok := cat.Lookup("debug_go_tests")
 	if !ok {
 		t.Fatalf("expected debug_go_tests entry")
@@ -97,7 +103,9 @@ func TestBuildAgentCatalog_EnumeratesAssignedAgentSkills(t *testing.T) {
 	projectRoot := t.TempDir()
 
 	globalPath := writeAgentSkill(t, globalRoot, "task_agent", "debug", "global")
+	writeAgentSkill(t, globalRoot, "task_agent", "zeta", "global zeta")
 	projectPath := writeAgentSkill(t, projectRoot, "task_agent", "debug", "project")
+	writeAgentSkill(t, projectRoot, "task_agent", "alpha", "project alpha")
 	writeAgentSkill(t, projectRoot, "other_agent", "other", "other")
 	writeSkill(t, projectRoot, "standalone", "standalone")
 
@@ -117,6 +125,16 @@ func TestBuildAgentCatalog_EnumeratesAssignedAgentSkills(t *testing.T) {
 	}
 	if entry.AbsolutePath == globalPath {
 		t.Fatal("project agent skill should override global agent skill")
+	}
+	entries := cat.Entries()
+	wantHandles := []string{"alpha", "debug", "zeta"}
+	for i, handle := range wantHandles {
+		if entries[i].Handle != handle {
+			t.Fatalf("entry %d handle = %q, want sorted handle %q", i, entries[i].Handle, handle)
+		}
+		if entries[i].Source != SourceAgent || entries[i].AgentKey != "task_agent" {
+			t.Fatalf("entry %q lost agent ownership metadata: %+v", handle, entries[i])
+		}
 	}
 	if _, ok := cat.Lookup("standalone"); ok {
 		t.Fatal("standalone skill must not be in assigned-agent catalog")
@@ -210,6 +228,25 @@ func TestBuildCatalog_ProjectOverridesGlobalForSameHandle(t *testing.T) {
 	}
 	if entry.AbsolutePath == globalPath {
 		t.Fatalf("should not have resolved to global path")
+	}
+}
+
+func TestMergeCatalogEntries_PreservesPrecedenceAndLastEntryWithinScope(t *testing.T) {
+	got := mergeCatalogEntries([]Entry{
+		{Handle: "same", Source: SourceGlobal, AbsolutePath: "global-first"},
+		{Handle: "same", Source: SourceGlobal, AbsolutePath: "global-last"},
+		{Handle: "cross-scope", Source: SourceGlobal, AbsolutePath: "global"},
+		{Handle: "cross-scope", Source: SourceProject, AbsolutePath: "project-first"},
+		{Handle: "cross-scope", Source: SourceProject, AbsolutePath: "project-last"},
+	})
+	if len(got) != 2 {
+		t.Fatalf("want two deduplicated entries, got %+v", got)
+	}
+	if got[0].Handle != "cross-scope" || got[0].Source != SourceProject || got[0].AbsolutePath != "project-last" {
+		t.Fatalf("project entry should win and retain last-entry behavior: %+v", got[0])
+	}
+	if got[1].Handle != "same" || got[1].Source != SourceGlobal || got[1].AbsolutePath != "global-last" {
+		t.Fatalf("same-scope duplicates should retain last-entry behavior: %+v", got[1])
 	}
 }
 
