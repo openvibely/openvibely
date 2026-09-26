@@ -179,37 +179,15 @@ func (c *GitHubIssueActionCore) ExecuteListExistingAutomationIssues(ctx context.
 	if err != nil {
 		return "", err
 	}
-	summaries := compactExistingGitHubIssues(issues, limit, offset)
-	nextOffset := 0
-	if offset+len(summaries) < len(issues) {
-		nextOffset = offset + len(summaries)
-	}
+	summaries, nextOffset := compactExistingGitHubIssues(issues, limit, offset)
 	return githubIssueActionJSON(map[string]any{
 		"ok": true, "account": user, "repository": repo.FullName,
 		"issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0,
 	})
 }
 
-func compactExistingGitHubIssues(issues []GitHubIssue, limit, offset int) []map[string]any {
-	if offset >= len(issues) {
-		return []map[string]any{}
-	}
-	end := offset + limit
-	if end > len(issues) {
-		end = len(issues)
-	}
-	summaries := make([]map[string]any, 0, end-offset)
-	for _, issue := range issues[offset:end] {
-		summaries = append(summaries, map[string]any{
-			"number":     issue.Number,
-			"url":        issue.URL,
-			"title":      issue.Title,
-			"state":      issue.State,
-			"labels":     issue.Labels,
-			"created_by": issue.UserLogin,
-		})
-	}
-	return summaries
+func compactExistingGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map[string]any, int) {
+	return compactGitHubIssuePage(issues, limit, offset)
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, input json.RawMessage) (string, error) {
@@ -286,6 +264,18 @@ func githubIssueActionInputHasField(input json.RawMessage, field string) bool {
 }
 
 func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map[string]any, int) {
+	summaries, nextOffset := compactGitHubIssuePage(issues, limit, offset)
+	for i, summary := range summaries {
+		issue := issues[offset+i]
+		summary["assignees"] = issue.Assignees
+		summary["complete_for_task_creation"] = false
+		summary["task_creation_completeness_known"] = false
+		summary["detail_required"] = true
+	}
+	return summaries, nextOffset
+}
+
+func compactGitHubIssuePage(issues []GitHubIssue, limit, offset int) ([]map[string]any, int) {
 	if offset >= len(issues) {
 		return []map[string]any{}, 0
 	}
@@ -296,16 +286,12 @@ func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map
 	summaries := make([]map[string]any, 0, end-offset)
 	for _, issue := range issues[offset:end] {
 		summaries = append(summaries, map[string]any{
-			"number":                           issue.Number,
-			"url":                              issue.URL,
-			"title":                            issue.Title,
-			"state":                            issue.State,
-			"created_by":                       issue.UserLogin,
-			"assignees":                        issue.Assignees,
-			"labels":                           issue.Labels,
-			"complete_for_task_creation":       false,
-			"task_creation_completeness_known": false,
-			"detail_required":                  true,
+			"number":     issue.Number,
+			"url":        issue.URL,
+			"title":      issue.Title,
+			"state":      issue.State,
+			"labels":     issue.Labels,
+			"created_by": issue.UserLogin,
 		})
 	}
 	nextOffset := 0
