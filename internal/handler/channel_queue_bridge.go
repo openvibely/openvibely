@@ -15,10 +15,12 @@ func (h *Handler) PromoteQueuedChatInput(projectID string) {
 	if projectID == "" {
 		return
 	}
-	h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{
+	params := streamingResponseParams{
 		ProjectID: projectID,
 		ChatMode:  models.ChatModeOrchestrate,
-	}, "")
+	}
+	defer h.trackQueuedPromotion(params)()
+	h.startNextQueuedTurnAfter(context.Background(), params, "")
 }
 
 // PromoteQueuedTaskThreadInput starts the next pending queued task-thread input
@@ -27,6 +29,7 @@ func (h *Handler) PromoteQueuedTaskThreadInput(taskID string) {
 	if taskID == "" || h.taskRepo == nil {
 		return
 	}
+	defer h.trackQueuedPromotion(streamingResponseParams{TaskID: taskID, IsTaskFollowup: true})()
 	task, err := h.taskRepo.GetByID(context.Background(), taskID)
 	if err != nil {
 		applog.Infof("[handler] PromoteQueuedTaskThreadInput task=%s load error: %v", taskID, err)

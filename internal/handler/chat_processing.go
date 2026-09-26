@@ -1408,19 +1408,27 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 	}
 }
 
+// trackQueuedPromotion holds update-drain accounting for queued-turn promotion; if the
+// tracker refuses (draining), promotion proceeds untracked exactly as before.
+func (h *Handler) trackQueuedPromotion(completed streamingResponseParams) func() {
+	if h.updateWorkTracker == nil {
+		return func() {}
+	}
+	class := update.WorkChat
+	if completed.IsTaskFollowup || completed.TaskID != "" {
+		class = update.WorkTask
+	}
+	done, err := h.updateWorkTracker.Start(class)
+	if err != nil {
+		return func() {}
+	}
+	return done
+}
+
 // goStartNextQueuedTurnAfter promotes the next queued turn in the background while holding
 // update-drain accounting, so the promotion is visible as active work until it finishes.
 func (h *Handler) goStartNextQueuedTurnAfter(completed streamingResponseParams, excludeExecID string) {
-	done := func() {}
-	if h.updateWorkTracker != nil {
-		class := update.WorkChat
-		if completed.IsTaskFollowup || completed.TaskID != "" {
-			class = update.WorkTask
-		}
-		if tracked, err := h.updateWorkTracker.Start(class); err == nil {
-			done = tracked
-		}
-	}
+	done := h.trackQueuedPromotion(completed)
 	go func() {
 		defer done()
 		h.startNextQueuedTurnAfter(context.Background(), completed, excludeExecID)

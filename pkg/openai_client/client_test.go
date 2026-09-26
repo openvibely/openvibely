@@ -904,7 +904,7 @@ func TestResponsesLiteOAuthRecoveryErrorUnlocksTransportState(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL
 	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
-	client := NewWithOAuthToken("expired", "refresh", time.Now().Add(24 * time.Hour).UnixMilli(), "org_test")
+	client := NewWithOAuthToken("expired", "refresh", time.Now().Add(24*time.Hour).UnixMilli(), "org_test")
 	client.SetOAuthUnauthorizedHandler(func(context.Context, string) (OAuthTokens, bool, error) {
 		return OAuthTokens{}, false, errors.New("refresh failed")
 	})
