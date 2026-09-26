@@ -3218,7 +3218,7 @@ func (ws *WorktreeService) CleanupMergedWorktrees(ctx context.Context) error {
 		return nil
 	}
 
-	applog.Infof("[worktree] cleanup scan: checking %d tasks with worktrees", len(tasks))
+	applog.Debugf("[worktree] cleanup scan: checking %d tasks with worktrees", len(tasks))
 
 	cleanedCount := 0
 	for _, task := range tasks {
@@ -3380,22 +3380,22 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 			// the task still exists but metadata was stale or temporarily empty,
 			// treat the worktree as in-use.
 			if taskID, ok := taskIDFromWorktreePath(worktree.Path); ok && knownTaskIDs[taskID] {
-				applog.Infof("[worktree] cleanup: skipping worktree at %s because task %s still exists", worktree.Path, taskID)
+				applog.Debugf("[worktree] cleanup: skipping worktree at %s because task %s still exists", worktree.Path, taskID)
 				continue
 			}
 
 			if ownerID, ok := knownLineageBranches[worktree.Branch]; ok {
-				applog.Infof("[worktree] cleanup: skipping worktree at %s because branch %s is referenced by task lineage %s", worktree.Path, worktree.Branch, ownerID)
+				applog.Debugf("[worktree] cleanup: skipping worktree at %s because branch %s is referenced by task lineage %s", worktree.Path, worktree.Branch, ownerID)
 				continue
 			}
 
 			if dirty, ok := worktreeDirtyState(ctx, worktree.Path); !ok || dirty {
-				applog.Infof("[worktree] cleanup: skipping worktree at %s because dirty state is unsafe (dirty=%v ok=%v)", worktree.Path, dirty, ok)
+				applog.Debugf("[worktree] cleanup: skipping worktree at %s because dirty state is unsafe (dirty=%v ok=%v)", worktree.Path, dirty, ok)
 				continue
 			}
 
 			if !worktreeHeadMergedIntoTarget(ctx, worktree.Path, targetBranch) {
-				applog.Infof("[worktree] cleanup: skipping worktree at %s because HEAD is not merged into %s", worktree.Path, targetBranch)
+				applog.Debugf("[worktree] cleanup: skipping worktree at %s because HEAD is not merged into %s", worktree.Path, targetBranch)
 				continue
 			}
 
