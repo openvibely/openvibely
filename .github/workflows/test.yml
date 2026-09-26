@@ -233,6 +233,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
     steps:
+      - name: Mark packaged-update Linux job execution start
+        if: runner.os == 'Linux'
+        id: packaged-linux-job-start
+        shell: bash
+        run: echo "started_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Check out repo
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -252,8 +258,9 @@ jobs:
           package_hash="$(printf '%s\n' "${packages[@]}" | sha256sum | cut -d' ' -f1)"
           runner_image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}-${{ matrix.arch }}"
           metadata_date="$(date -u +%Y%m%d)"
-          echo "key=packaged-linux-desktop-apt-v1-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
+          echo "key=packaged-linux-desktop-apt-v1-${runner_image}-${package_hash}-${metadata_date}" >> "$GITHUB_OUTPUT"
           echo "metadata_key=packaged-linux-desktop-apt-lists-v1-${runner_image}-${package_hash}-${metadata_date}" >> "$GITHUB_OUTPUT"
+          echo "archive_restore_started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
           mkdir -p "$HOME/.cache/openvibely-apt/archives/partial" "$HOME/.cache/openvibely-apt/lists/partial"
 
       - name: Restore packaged-update Linux desktop dependency downloads
@@ -265,6 +272,22 @@ jobs:
           path: ~/.cache/openvibely-apt/archives/*.deb
           key: ${{ steps.packaged-linux-desktop-cache-key.outputs.key }}
 
+      - name: Report packaged-update Linux archive cache restore time
+        if: runner.os == 'Linux'
+        id: packaged-linux-archive-restore-timing
+        shell: bash
+        run: |
+          started_ns="${{ steps.packaged-linux-desktop-cache-key.outputs.archive_restore_started_ns }}"
+          elapsed_ms=$((($(date +%s%N) - started_ns) / 1000000))
+          echo "Linux desktop archive cache restore action elapsed: $((elapsed_ms / 1000)).$((elapsed_ms % 1000))s (cache hit: ${{ steps.packaged-linux-desktop-cache.outputs.cache-hit }})"
+          echo "elapsed_ms=${elapsed_ms}" >> "$GITHUB_OUTPUT"
+
+      - name: Mark packaged-update Linux metadata cache restore start
+        if: runner.os == 'Linux'
+        id: packaged-linux-metadata-restore-start
+        shell: bash
+        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
+
       - name: Restore fresh packaged-update Linux APT metadata
         if: runner.os == 'Linux'
         id: packaged-linux-desktop-metadata-cache
@@ -274,8 +297,19 @@ jobs:
           path: ~/.cache/openvibely-apt/lists
           key: ${{ steps.packaged-linux-desktop-cache-key.outputs.metadata_key }}
 
+      - name: Report packaged-update Linux metadata cache restore time
+        if: runner.os == 'Linux'
+        id: packaged-linux-metadata-restore-timing
+        shell: bash
+        run: |
+          started_ns="${{ steps.packaged-linux-metadata-restore-start.outputs.started_ns }}"
+          elapsed_ms=$((($(date +%s%N) - started_ns) / 1000000))
+          echo "Linux desktop metadata cache restore action elapsed: $((elapsed_ms / 1000)).$((elapsed_ms % 1000))s (cache hit: ${{ steps.packaged-linux-desktop-metadata-cache.outputs.cache-hit }})"
+          echo "elapsed_ms=${elapsed_ms}" >> "$GITHUB_OUTPUT"
+
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
+        id: install-packaged-linux-desktop-dependencies
         shell: bash
         run: |
           archives_directory="$HOME/.cache/openvibely-apt/archives"
@@ -299,7 +333,7 @@ jobs:
           metadata_fresh=false
           apt_refresh="no"
           online_install="no"
-          started_at=$SECONDS
+          started_ns="$(date +%s%N)"
           read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
           packages+=(lsof xvfb)
           mkdir -p "$archives_directory/partial" "$lists_directory/partial"
@@ -325,11 +359,24 @@ jobs:
             timeout 10m sudo apt-get "${apt_install_options[@]}" "$@" install -y "${packages[@]}"
           }
 
-          if [[ "$metadata_cache_hit" == "true" ]] &&
-            find "$lists_directory" -maxdepth 1 -type f -name '*InRelease' -mmin "-${metadata_max_age_minutes}" -print -quit | grep -q . &&
+          metadata_files=()
+          while IFS= read -r metadata_file; do
+            metadata_files+=("$metadata_file")
+          done < <(find "$lists_directory" -maxdepth 1 -type f \( -name '*InRelease' -o -name '*_Release' \) -print)
+          all_metadata_fresh=false
+          if ((${#metadata_files[@]} > 0)); then
+            all_metadata_fresh=true
+            for metadata_file in "${metadata_files[@]}"; do
+              if ! find "$metadata_file" -maxdepth 0 -type f -mmin "-${metadata_max_age_minutes}" -print -quit | grep -q .; then
+                all_metadata_fresh=false
+                break
+              fi
+            done
+          fi
+          if [[ "$metadata_cache_hit" == "true" && "$all_metadata_fresh" == "true" ]] &&
             sudo apt-get "${apt_common_options[@]}" -s install "${packages[@]}" >/dev/null; then
             metadata_fresh=true
-            metadata_validation="fresh-preflight"
+            metadata_validation="all-release-metadata-fresh-preflight"
           elif [[ "$metadata_cache_hit" == "true" ]]; then
             metadata_validation="stale-or-invalid"
           fi
@@ -356,6 +403,7 @@ jobs:
             apt_install
             online_install="yes"
           fi
+          metadata_elapsed_ms=$((($(date +%s%N) - started_ns) / 1000000))
           archives_bytes="$(find "$archives_directory" -maxdepth 1 -type f -name '*.deb' -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }')"
           apt_download_bytes=$((archives_bytes - archives_bytes_before))
           apt_downloads="no"
@@ -363,7 +411,71 @@ jobs:
             apt_downloads="yes"
           fi
           lists_bytes="$(du -sb "$lists_directory" | cut -f1)"
-          echo "Linux desktop dependencies installed in $((SECONDS - started_at))s (archive cache hit: ${archive_cache_hit}, metadata cache hit: ${metadata_cache_hit}, metadata: ${metadata_validation}, APT refresh: ${apt_refresh}, online install: ${online_install}, package downloads: ${apt_downloads} (${apt_download_bytes} new archive bytes), cache payload: $((archives_bytes + lists_bytes)) bytes)"
+          cache_payload_bytes=$((archives_bytes + lists_bytes))
+          echo "Linux desktop dependencies installed in $((metadata_elapsed_ms / 1000)).$((metadata_elapsed_ms % 1000))s (archive cache hit: ${archive_cache_hit}, metadata cache hit: ${metadata_cache_hit}, metadata: ${metadata_validation}, APT refresh: ${apt_refresh}, online install: ${online_install}, package downloads: ${apt_downloads} (${apt_download_bytes} new archive bytes), cache payload: ${cache_payload_bytes} bytes)"
+          {
+            echo "dependency_elapsed_ms=${metadata_elapsed_ms}"
+            echo "dependency_elapsed_seconds=$((metadata_elapsed_ms / 1000)).$((metadata_elapsed_ms % 1000))"
+            echo "archive_payload_bytes=${archives_bytes}"
+            echo "metadata_payload_bytes=${lists_bytes}"
+            echo "cache_payload_bytes=${cache_payload_bytes}"
+            echo "apt_refresh=${apt_refresh}"
+            echo "apt_downloads=${apt_downloads}"
+            echo "archive_cache_hit=${archive_cache_hit}"
+            echo "metadata_cache_hit=${metadata_cache_hit}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Mark packaged-update Linux archive cache save start
+        if: runner.os == 'Linux'
+        id: packaged-linux-archive-save-start
+        shell: bash
+        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
+
+      - name: Save packaged-update Linux desktop dependency downloads
+        if: runner.os == 'Linux' && success()
+        id: packaged-linux-archive-save
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/openvibely-apt/archives/*.deb
+          key: ${{ steps.packaged-linux-desktop-cache-key.outputs.key }}
+
+      - name: Report packaged-update Linux archive cache save time
+        if: runner.os == 'Linux'
+        id: packaged-linux-archive-save-timing
+        shell: bash
+        run: |
+          started_ns="${{ steps.packaged-linux-archive-save-start.outputs.started_ns }}"
+          elapsed_ms=$((($(date +%s%N) - started_ns) / 1000000))
+          payload_bytes="${{ steps.install-packaged-linux-desktop-dependencies.outputs.archive_payload_bytes }}"
+          echo "Linux desktop archive cache save action elapsed: $((elapsed_ms / 1000)).$((elapsed_ms % 1000))s (archive payload: ${payload_bytes} bytes)"
+          echo "elapsed_ms=${elapsed_ms}" >> "$GITHUB_OUTPUT"
+
+      - name: Mark packaged-update Linux metadata cache save start
+        if: runner.os == 'Linux'
+        id: packaged-linux-metadata-save-start
+        shell: bash
+        run: echo "started_ns=$(date +%s%N)" >> "$GITHUB_OUTPUT"
+
+      - name: Save packaged-update Linux APT metadata
+        if: runner.os == 'Linux' && success()
+        id: packaged-linux-metadata-save
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/openvibely-apt/lists
+          key: ${{ steps.packaged-linux-desktop-cache-key.outputs.metadata_key }}
+
+      - name: Report packaged-update Linux metadata cache save time
+        if: runner.os == 'Linux'
+        id: packaged-linux-metadata-save-timing
+        shell: bash
+        run: |
+          started_ns="${{ steps.packaged-linux-metadata-save-start.outputs.started_ns }}"
+          elapsed_ms=$((($(date +%s%N) - started_ns) / 1000000))
+          payload_bytes="${{ steps.install-packaged-linux-desktop-dependencies.outputs.metadata_payload_bytes }}"
+          echo "Linux desktop metadata cache save action elapsed: $((elapsed_ms / 1000)).$((elapsed_ms % 1000))s (metadata payload: ${payload_bytes} bytes)"
+          echo "elapsed_ms=${elapsed_ms}" >> "$GITHUB_OUTPUT"
 
       - name: Start Linux virtual display
         if: runner.os == 'Linux'
@@ -407,3 +519,40 @@ jobs:
           files: coverage.update-native.out,coverage.update-binary.out,coverage.update-desktop.out
           disable_search: true
           flags: packaged-update-${{ matrix.os }}-${{ matrix.arch }}
+
+      - name: Record Linux packaged-update cache metrics
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          elapsed_seconds=$(($(date +%s) - ${{ steps.packaged-linux-job-start.outputs.started_epoch }}))
+          dependency_pipeline_ms=$((
+            ${{ steps.packaged-linux-archive-restore-timing.outputs.elapsed_ms }} +
+            ${{ steps.packaged-linux-metadata-restore-timing.outputs.elapsed_ms }} +
+            ${{ steps.install-packaged-linux-desktop-dependencies.outputs.dependency_elapsed_ms }} +
+            ${{ steps.packaged-linux-archive-save-timing.outputs.elapsed_ms }} +
+            ${{ steps.packaged-linux-metadata-save-timing.outputs.elapsed_ms }}
+          ))
+          dependency_pipeline_seconds="$((dependency_pipeline_ms / 1000)).$(printf '%03d' "$((dependency_pipeline_ms % 1000))")"
+          {
+            echo '## Linux packaged-update cache metrics'
+            echo
+            echo '| Metric | Value |'
+            echo '| --- | ---: |'
+            echo '| Dependency installation elapsed | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.dependency_elapsed_seconds }} s |'
+            echo "| Dependency pipeline elapsed (restore + install + save) | ${dependency_pipeline_seconds} s |"
+            echo '| Archive cache restore elapsed | $(( ${{ steps.packaged-linux-archive-restore-timing.outputs.elapsed_ms }} / 1000 )).$(( ${{ steps.packaged-linux-archive-restore-timing.outputs.elapsed_ms }} % 1000 )) s |'
+            echo '| Metadata cache restore elapsed | $(( ${{ steps.packaged-linux-metadata-restore-timing.outputs.elapsed_ms }} / 1000 )).$(( ${{ steps.packaged-linux-metadata-restore-timing.outputs.elapsed_ms }} % 1000 )) s |'
+            echo '| Archive cache save elapsed | $(( ${{ steps.packaged-linux-archive-save-timing.outputs.elapsed_ms }} / 1000 )).$(( ${{ steps.packaged-linux-archive-save-timing.outputs.elapsed_ms }} % 1000 )) s |'
+            echo '| Metadata cache save elapsed | $(( ${{ steps.packaged-linux-metadata-save-timing.outputs.elapsed_ms }} / 1000 )).$(( ${{ steps.packaged-linux-metadata-save-timing.outputs.elapsed_ms }} % 1000 )) s |'
+            echo '| Archive cache hit | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.archive_cache_hit }} |'
+            echo '| Metadata cache hit | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.metadata_cache_hit }} |'
+            echo '| APT refresh performed | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.apt_refresh }} |'
+            echo '| APT package downloads | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.apt_downloads }} |'
+            echo '| Archive payload size | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.archive_payload_bytes }} bytes |'
+            echo '| Metadata payload size | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.metadata_payload_bytes }} bytes |'
+            echo '| Cache payload size (uncompressed) | ${{ steps.install-packaged-linux-desktop-dependencies.outputs.cache_payload_bytes }} bytes |'
+            echo "| Runner execution elapsed from first step (not job UI duration) | ${elapsed_seconds} s |"
+            echo
+            echo 'Use the packaged-update job duration shown in Actions for whole-job p50/p95; this runner-side measurement begins immediately before checkout.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Linux packaged-update runner execution elapsed from first step: ${elapsed_seconds}s (whole-job duration is available in Actions job details)"
