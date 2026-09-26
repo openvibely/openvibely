@@ -9,7 +9,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -22,28 +21,8 @@ func setupProjectTestHandler(t *testing.T) (*Handler, *service.ProjectService) {
 
 func setupProjectTestHandlerWithDB(t *testing.T) (*Handler, *service.ProjectService, *sql.DB) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
-
-	projectRepo := repository.NewProjectRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
-
-	projectSvc := service.NewProjectService(projectRepo)
-	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
-	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
-
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
-
-	return h, projectSvc, db
+	env := newTestHandlerEnv(t, testutil.NewTestDB(t))
+	return env.Handler, env.ProjectSvc, env.DB
 }
 
 func TestMutationProjectID(t *testing.T) {
