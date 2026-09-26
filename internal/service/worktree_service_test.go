@@ -3493,6 +3493,13 @@ func TestMergeBranch_FastForward_SequentialMergesRebaseConflictPreserved(t *test
 	if updatedTaskB.MergeStatus != models.MergeStatusConflict {
 		t.Fatalf("expected merge status conflict for task B, got %q", updatedTaskB.MergeStatus)
 	}
+	owner, err := taskRepo.ActiveMergeConflictOwner(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != "" {
+		t.Fatalf("aborted fast-forward conflict recorded active owner %q", owner)
+	}
 
 	statusCmd := exec.Command("git", "status", "--porcelain")
 	statusCmd.Dir = wtPathB

@@ -455,6 +455,33 @@ func worktreeHasConflictFiles(worktreePath string) bool {
 	return len(detectConflicts(worktreePath)) > 0
 }
 
+func (ws *WorktreeService) recordMergeConflict(ctx context.Context, task *models.Task, active bool) {
+	if ws.taskRepo == nil || task == nil {
+		return
+	}
+	if err := ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+		applog.Infof("[worktree] error recording merge conflict status for task %s: %v", task.ID, err)
+	}
+	var err error
+	if active {
+		err = ws.taskRepo.SetActiveMergeConflictOwner(ctx, task.ProjectID, task.ID)
+	} else {
+		err = ws.taskRepo.ClearActiveMergeConflictOwner(ctx, task.ID)
+	}
+	if err != nil {
+		applog.Infof("[worktree] error recording active merge conflict ownership for task %s: %v", task.ID, err)
+	}
+}
+
+func (ws *WorktreeService) clearMergeConflictOwner(ctx context.Context, taskID string) {
+	if ws.taskRepo == nil || taskID == "" {
+		return
+	}
+	if err := ws.taskRepo.ClearActiveMergeConflictOwner(ctx, taskID); err != nil {
+		applog.Infof("[worktree] error clearing active merge conflict ownership for task %s: %v", taskID, err)
+	}
+}
+
 func (ws *WorktreeService) clearStaleConflictStatusIfClean(ctx context.Context, task *models.Task) {
 	if task == nil || task.MergeStatus != models.MergeStatusConflict || task.WorktreePath == "" || ws.taskRepo == nil {
 		return
@@ -590,9 +617,7 @@ func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Conte
 		conflictFiles := detectConflicts(task.WorktreePath)
 		if len(conflictFiles) > 0 {
 			abortErr := abortMergeLocked(task.WorktreePath)
-			if ws.taskRepo != nil {
-				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
-			}
+			ws.recordMergeConflict(ctx, task, false)
 			conflictErr := &StartupSyncConflictError{
 				TargetBranch:  mergeSource,
 				TaskBranch:    currentBranch,
@@ -1310,6 +1335,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 
 	// Update merge status to pending
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+	ws.clearMergeConflictOwner(ctx, task.ID)
 
 	if mergeType == "ff" && task.WorktreePath != "" {
 		return ws.fastForwardTaskWorktreeToTarget(ctx, task, repoDir, targetBranch)
@@ -1370,7 +1396,7 @@ func (ws *WorktreeService) mergeBranchLocked(ctx context.Context, task *models.T
 				}
 				applog.Infof("[worktree] failed to restore squash conflict for task %s: %v", task.ID, pathErr)
 			}
-			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
+			ws.recordMergeConflict(ctx, task, true)
 			return &MergeResult{
 				ConflictFiles: conflictFiles,
 				ErrorMessage:  string(mergeOut),
@@ -1565,7 +1591,7 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 			conflictFiles := detectConflicts(task.WorktreePath)
 			if len(conflictFiles) > 0 {
 				_ = AbortRebase(task.WorktreePath)
-				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
+				ws.recordMergeConflict(ctx, task, false)
 				return &MergeResult{
 					Success:       false,
 					ConflictFiles: conflictFiles,
@@ -1865,7 +1891,10 @@ func (ws *WorktreeService) AbortMergeForTaskValidated(ctx context.Context, taskI
 	if ws.taskRepo == nil {
 		return fmt.Errorf("task repository not available")
 	}
-	return ws.taskRepo.UpdateMergeStatus(ctx, taskID, status)
+	if err := ws.taskRepo.UpdateMergeStatus(ctx, taskID, status); err != nil {
+		return err
+	}
+	return ws.taskRepo.ClearActiveMergeConflictOwner(ctx, taskID)
 }
 
 func (ws *WorktreeService) validateAutoConflictRecovery(ctx context.Context, task *models.Task, repoDir string, project *models.Project, trigger automaticMergeTrigger, requireConflicts bool) error {
@@ -2113,6 +2142,7 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 	conflictFiles := detectConflicts(repoDir)
 	if len(conflictFiles) == 0 {
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
+		ws.clearMergeConflictOwner(ctx, task.ID)
 		return &MergeResult{ErrorMessage: "no active merge conflicts found"}, fmt.Errorf("no active merge conflicts found")
 	}
 
@@ -2227,6 +2257,7 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 	}
 
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged)
+	ws.clearMergeConflictOwner(ctx, task.ID)
 
 	hashCmd := exec.Command("git", "rev-parse", "HEAD")
 	hashCmd.Dir = repoDir
