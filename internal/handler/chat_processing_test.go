@@ -3488,8 +3488,11 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	}
 	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
 
+	var sentMu sync.Mutex
 	var sentChannel, sentThread, sentTitle, sentOutput, sentErr, sentUser string
 	h.SetSlackService(&fakeSlackService{taskCompletionFn: func(_ context.Context, channelID, threadTS, taskTitle, output, errMsg, userID string) {
+		sentMu.Lock()
+		defer sentMu.Unlock()
 		sentChannel = channelID
 		sentThread = threadTS
 		sentTitle = taskTitle
@@ -3506,12 +3509,19 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
-	require.Eventually(t, func() bool { return sentChannel == "C1" }, 2*time.Second, 25*time.Millisecond)
-	require.Equal(t, "1710000000.100000", sentThread)
-	require.Equal(t, "Queued Channel Reply Task", sentTitle)
-	require.Equal(t, "queued task done", sentOutput)
-	require.Empty(t, sentErr)
-	require.Equal(t, "U1", sentUser)
+	require.Eventually(t, func() bool {
+		sentMu.Lock()
+		defer sentMu.Unlock()
+		return sentChannel == "C1"
+	}, 2*time.Second, 25*time.Millisecond)
+	sentMu.Lock()
+	gotThread, gotTitle, gotOutput, gotErr, gotUser := sentThread, sentTitle, sentOutput, sentErr, sentUser
+	sentMu.Unlock()
+	require.Equal(t, "1710000000.100000", gotThread)
+	require.Equal(t, "Queued Channel Reply Task", gotTitle)
+	require.Equal(t, "queued task done", gotOutput)
+	require.Empty(t, gotErr)
+	require.Equal(t, "U1", gotUser)
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotEqual(t, models.TaskOriginSlack, updatedTask.CreatedVia)

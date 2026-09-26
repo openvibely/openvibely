@@ -486,10 +486,14 @@ func TestListOpenAICompatibleAvailableModelsUsesLiveEditsForSavedAPIKeyConfig(t 
 func TestListOpenAICompatibleAvailableModelsUsesUnsavedCustomRequestSettings(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, _ := setupTestHandler(t)
+	// Discovery probes endpoints concurrently, so the captured headers need a lock.
+	var mu sync.Mutex
 	var gotAPIKey, gotRequiredHeader string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		gotAPIKey = r.Header.Get("X-API-Key")
 		gotRequiredHeader = r.Header.Get("X-Required-Header")
+		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"models":[{"name":"live-model"}]}`))
 	}))
@@ -508,6 +512,8 @@ func TestListOpenAICompatibleAvailableModelsUsesUnsavedCustomRequestSettings(t *
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if gotAPIKey != "live-key" || gotRequiredHeader != "required" {
 		t.Fatalf("live discovery headers = X-API-Key %q, X-Required-Header %q", gotAPIKey, gotRequiredHeader)
 	}

@@ -2245,8 +2245,15 @@ func TestAutomationRuntimeDispatchFailureBackoffIsOwnerOnlyAndTerminal(t *testin
 	now := time.Now().UTC()
 	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, fixture.schedule.ComputeNextRun(now))
 	require.NoError(t, err)
-	leased, err := fixture.repo.LeaseNextDispatch(ctx, "owner", now, time.Minute)
+	// next_attempt_at defaults to SQLite's second-precision CURRENT_TIMESTAMP at insert time,
+	// which can land after the earlier-captured now when a second boundary passes.
+	leaseAt := now
+	if dispatch.NextAttemptAt.After(leaseAt) {
+		leaseAt = dispatch.NextAttemptAt
+	}
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "owner", leaseAt, time.Minute)
 	require.NoError(t, err)
+	require.NotNil(t, leased)
 	require.Equal(t, dispatch.ID, leased.ID)
 	require.ErrorIs(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "other", "wrong owner", 2, now), repository.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.repo.FailDispatch(ctx, dispatch.ID, "owner", "retry", 2, now))
