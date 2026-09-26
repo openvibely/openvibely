@@ -295,6 +295,12 @@ window.addEventListener('DOMContentLoaded', function() {
 			window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-browser', project_id:'project-lifecycle-browser'}}));
 			await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-empty-live"]'); }, 'live insert after empty lifecycle state');
 
+			// The live insert can render before its newer request settles; the loader ignores clicks while a
+			// request is in flight and re-renders the button afterwards, so click only once the list is idle.
+			await waitFor(function() {
+				var state = window._taskLifecycleActivityStates['project-lifecycle-browser:task-lifecycle-browser'];
+				return state && !state.refreshLoading && !state.olderLoading && !state.newerLoading && !state.refreshLiveTimer && !state.newerLiveTimer;
+			}, 'idle lifecycle requests before loading older');
 			var older = list().querySelector('[data-lifecycle-load-older]');
 			if (!older) fail('initial bounded lifecycle page did not expose older loader');
 			older.click();
