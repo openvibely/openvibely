@@ -291,7 +291,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				opts.OnToolUse(tc.Function.Name, inputJSON)
 			}
 
-			applog.Infof("[openai-completions] executing tool %s", tc.Function.Name)
+			applog.Debugf("[openai-completions] executing tool %s", tc.Function.Name)
 			output := ""
 			isError := false
 			var err error

@@ -196,7 +196,7 @@ func (s *TaskService) ListByProjectWithCategorySorts(ctx context.Context, projec
 }
 
 func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, projectID, category string, backlogSort string, completedSort string) ([]models.Task, error) {
-	applog.Infof("[task-svc] ListBoardByProjectWithCategorySorts project=%s category=%q backlog_sort=%s completed_sort=%s",
+	applog.Debugf("[task-svc] ListBoardByProjectWithCategorySorts project=%s category=%q backlog_sort=%s completed_sort=%s",
 		projectID, category, backlogSort, completedSort)
 	tasks, err := s.repo.ListBoardByProjectWithCategorySorts(ctx, projectID, category, backlogSort, completedSort)
 	if err != nil {
@@ -213,7 +213,7 @@ func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, p
 			return nil, err
 		}
 	}
-	applog.Infof("[task-svc] ListBoardByProjectWithCategorySorts returned %d tasks", len(tasks))
+	applog.Debugf("[task-svc] ListBoardByProjectWithCategorySorts returned %d tasks", len(tasks))
 	return tasks, nil
 }
 

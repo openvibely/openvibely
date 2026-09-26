@@ -182,7 +182,7 @@ func (w *Writer) Flush() {
 		return
 	}
 	if w.buf.Len() == 0 {
-		applog.Infof("[agent-svc] streamingWriter final flush skipped empty buffer exec=%s task=%s", w.execID, w.taskID)
+		applog.Debugf("[agent-svc] streamingWriter final flush skipped empty buffer exec=%s task=%s", w.execID, w.taskID)
 		w.dirty = false
 		w.mu.Unlock()
 		return
@@ -196,7 +196,7 @@ func (w *Writer) Flush() {
 	if dbErr := w.repo.UpdateOutput(flushCtx, w.execID, output); dbErr != nil {
 		applog.Infof("[agent-svc] streamingWriter final flush error exec=%s task=%s: %v", w.execID, w.taskID, dbErr)
 	} else {
-		applog.Infof("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
+		applog.Debugf("[agent-svc] streamingWriter final flush to DB exec=%s task=%s total_len=%d", w.execID, w.taskID, totalLen)
 	}
 }
 

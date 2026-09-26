@@ -385,7 +385,11 @@ func logContextDecision(originalHistory []models.Execution, req llmcontracts.Age
 
 func logContextDecisionWithBudget(originalHistory []models.Execution, req llmcontracts.AgentRequest, strategy string, externalized bool, trigger error, budget requestBudget) {
 	retained, removed := historyRetentionCounts(originalHistory, req.ChatHistory)
-	applog.Infof("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, providerTransport(req), budget.ContextWindow, budget.SafeInputLimit, budget.FixedTokens, budget.HistoryTokens+budget.NativeStateTokens, budget.PendingTokens, budget.AttachmentTokens, budget.ReservedOutputTokens, budget.SafetyMargin, strategy, externalized, retained, removed, req.RetrySourceExecutionID, contextFailureCategory(trigger))
+	logf := applog.Infof
+	if strategy == "none" && !externalized && removed == 0 && trigger == nil {
+		logf = applog.Debugf
+	}
+	logf("[agent-svc] context decision provider=%s model=%s transport=%s context_window=%d safe_input_limit=%d fixed_tokens=%d history_tokens=%d pending_tokens=%d attachment_tokens=%d reserved_output_tokens=%d safety_margin=%d strategy=%s externalized=%t history_retained=%d history_removed=%d retry_source_execution_id=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, providerTransport(req), budget.ContextWindow, budget.SafeInputLimit, budget.FixedTokens, budget.HistoryTokens+budget.NativeStateTokens, budget.PendingTokens, budget.AttachmentTokens, budget.ReservedOutputTokens, budget.SafetyMargin, strategy, externalized, retained, removed, req.RetrySourceExecutionID, contextFailureCategory(trigger))
 }
 
 func logContextFailure(req llmcontracts.AgentRequest, err error) {

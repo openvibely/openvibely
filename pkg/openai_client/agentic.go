@@ -901,7 +901,7 @@ func exclusiveRequestUserInputTask(tasks []openAIToolExecutionTask) int {
 }
 
 func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool, *WebSearchResult) {
-	applog.Infof("[openai-client] executing tool %s", name)
+	applog.Debugf("[openai-client] executing tool %s", name)
 	output := ""
 	isError := false
 	var err error

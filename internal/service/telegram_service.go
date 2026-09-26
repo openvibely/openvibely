@@ -2192,9 +2192,9 @@ func (s *TelegramService) SendTaskCompletionNotification(ctx context.Context, ta
 	needsHydration := task.CreatedVia != models.TaskOriginTelegram || task.TelegramChatID == 0
 	if needsHydration {
 		if task.ID == "" || s.taskRepo == nil {
-			applog.Infof("[telegram] completion notification task %s missing Telegram origin and cannot reload (has_id=%t task_repo_set=%t)", task.ID, task.ID != "", s.taskRepo != nil)
+			applog.Debugf("[telegram] completion notification task %s missing Telegram origin and cannot reload (has_id=%t task_repo_set=%t)", task.ID, task.ID != "", s.taskRepo != nil)
 		} else {
-			applog.Infof("[telegram] completion notification task %s missing Telegram origin in memory (created_via=%q chat_id=%d), reloading from DB", task.ID, task.CreatedVia, task.TelegramChatID)
+			applog.Debugf("[telegram] completion notification task %s missing Telegram origin in memory (created_via=%q chat_id=%d), reloading from DB", task.ID, task.CreatedVia, task.TelegramChatID)
 			loadedTask, err := s.taskRepo.GetByID(ctx, task.ID)
 			if err != nil {
 				applog.Infof("[telegram] failed reloading task %s for completion notification: %v", task.ID, err)
@@ -2202,29 +2202,29 @@ func (s *TelegramService) SendTaskCompletionNotification(ctx context.Context, ta
 				applog.Infof("[telegram] task %s not found during completion notification reload", task.ID)
 			} else {
 				task = *loadedTask
-				applog.Infof("[telegram] reloaded task %s for completion notification (created_via=%q chat_id=%d category=%s)", task.ID, task.CreatedVia, task.TelegramChatID, task.Category)
+				applog.Debugf("[telegram] reloaded task %s for completion notification (created_via=%q chat_id=%d category=%s)", task.ID, task.CreatedVia, task.TelegramChatID, task.Category)
 			}
 		}
 	}
 
 	if task.CreatedVia != models.TaskOriginTelegram {
-		applog.Infof("[telegram] skipping completion notification for task %s: created_via=%q", task.ID, task.CreatedVia)
+		applog.Debugf("[telegram] skipping completion notification for task %s: created_via=%q", task.ID, task.CreatedVia)
 		return
 	}
 	if task.TelegramChatID == 0 {
-		applog.Infof("[telegram] skipping completion notification for task %s: missing telegram chat id", task.ID)
+		applog.Debugf("[telegram] skipping completion notification for task %s: missing telegram chat id", task.ID)
 		return
 	}
 
 	// Check the setting
 	if !s.IsSendResponsesEnabled(ctx) {
-		applog.Infof("[telegram] send-responses disabled, skipping notification for task %s", task.ID)
+		applog.Debugf("[telegram] send-responses disabled, skipping notification for task %s", task.ID)
 		return
 	}
 
 	// Don't notify for chat tasks (they already get a direct response)
 	if task.Category == models.CategoryChat {
-		applog.Infof("[telegram] skipping completion notification for task %s: category=chat", task.ID)
+		applog.Debugf("[telegram] skipping completion notification for task %s: category=chat", task.ID)
 		return
 	}
 

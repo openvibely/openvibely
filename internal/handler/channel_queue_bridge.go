@@ -39,7 +39,7 @@ func (h *Handler) PromoteQueuedTaskThreadInput(taskID string) {
 		applog.Infof("[handler] PromoteQueuedTaskThreadInput task=%s not found", taskID)
 		return
 	}
-	applog.Infof("[handler] PromoteQueuedTaskThreadInput task=%s checking queue", taskID)
+	applog.Debugf("[handler] PromoteQueuedTaskThreadInput task=%s checking queue", taskID)
 	h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{
 		ProjectID:      task.ProjectID,
 		TaskID:         task.ID,
