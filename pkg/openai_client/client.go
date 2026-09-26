@@ -517,6 +517,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		"model": opts.Model,
 		"input": inputItems,
 	}
+	applyDefaultResponsesTextVerbosity(payload, opts.Model)
 
 	if !isChatGPTOAuth {
 		payload["max_output_tokens"] = opts.MaxOutputTokens
