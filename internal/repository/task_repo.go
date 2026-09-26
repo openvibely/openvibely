@@ -3190,6 +3190,46 @@ func (r *TaskRepo) UpdateMergeStatus(ctx context.Context, id string, status mode
 	return nil
 }
 
+// SetActiveMergeConflictOwner records the only task allowed to recover a
+// no-MERGE_HEAD conflict in a project's repository.
+func (r *TaskRepo) SetActiveMergeConflictOwner(ctx context.Context, projectID, taskID string) error {
+	_, err := execBoundSQLite(ctx, r.db, `
+		INSERT INTO project_merge_conflict_owners (project_id, task_id, created_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(project_id) DO UPDATE SET task_id = excluded.task_id, created_at = CURRENT_TIMESTAMP`,
+		projectID, taskID)
+	if err != nil {
+		return fmt.Errorf("setting active merge conflict owner: %w", err)
+	}
+	return nil
+}
+
+// ActiveMergeConflictOwner returns the task recorded as the active conflict
+// owner for a project, or an empty string when no owner is recorded.
+func (r *TaskRepo) ActiveMergeConflictOwner(ctx context.Context, projectID string) (string, error) {
+	var taskID string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT task_id FROM project_merge_conflict_owners WHERE project_id = ?`, projectID).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("loading active merge conflict owner: %w", err)
+	}
+	return taskID, nil
+}
+
+// ClearActiveMergeConflictOwner removes ownership only when it still belongs
+// to taskID, so one task cannot clear a newer task's conflict record.
+func (r *TaskRepo) ClearActiveMergeConflictOwner(ctx context.Context, taskID string) error {
+	_, err := execBoundSQLite(ctx, r.db,
+		`DELETE FROM project_merge_conflict_owners WHERE task_id = ?`, taskID)
+	if err != nil {
+		return fmt.Errorf("clearing active merge conflict owner: %w", err)
+	}
+	return nil
+}
+
 // UpdateAutoMerge sets the completion auto-merge flag and merge target branch.
 // Callers that expose both task settings should use UpdateAutoMergeSettings.
 func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge bool, targetBranch string) error {

@@ -765,6 +765,14 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 		taskCardLoadBranchRelations(ctx, repoPath, relationRequests, snapshot)
 	}()
 	snapshotWG.Wait()
+	conflictOwnerTaskID := ""
+	if h.taskRepo != nil && !snapshot.activeMerge && snapshot.activeConflicts {
+		if owner, err := h.taskRepo.ActiveMergeConflictOwner(ctx, projectID); err != nil {
+			applog.Infof("[handler] taskCardMergeMenuStates conflict owner lookup failed project=%s: %v", projectID, err)
+		} else {
+			conflictOwnerTaskID = owner
+		}
+	}
 
 	for i := range tasks {
 		task := &tasks[i]
@@ -772,7 +780,7 @@ func (h *Handler) taskCardMergeMenuStates(ctx context.Context, tasks []models.Ta
 		branchAlreadyMerged := reconcileTaskCardMergeStatus(task, snapshot, targetBranch)
 		locked := snapshot.worktreeLocked(task.WorktreePath)
 		ownsConflict := (snapshot.activeMerge && snapshot.mergeHead != "" && snapshot.mergeHead == snapshot.refTip(task.WorktreeBranch)) ||
-			(!snapshot.activeMerge && task.MergeStatus == models.MergeStatusConflict && snapshot.activeConflicts)
+			(!snapshot.activeMerge && conflictOwnerTaskID == task.ID && snapshot.activeConflicts)
 		relationsValid := snapshot.relationshipValid(task.WorktreeBranch, targetBranch)
 		localEligible := taskStatusMayMerge(task.Status) && snapshot.valid && relationsValid && !locked && !ownsConflict &&
 			!snapshot.activeMerge && !snapshot.activeConflicts && !branchAlreadyMerged && task.MergeStatus != models.MergeStatusMerged &&
@@ -1481,8 +1489,24 @@ func (h *Handler) resolveTaskMergeEligibility(ctx context.Context, task *models.
 
 	hasActiveMerge := service.HasActiveMerge(project.RepoPath)
 	activeConflictFiles := service.ActiveConflictFiles(project.RepoPath)
+	conflictOwnerTaskID := ""
+	if !hasActiveMerge {
+		owner, err := h.taskRepo.ActiveMergeConflictOwner(ctx, project.ID)
+		if err != nil {
+			result.Reason = "merge conflict ownership could not be verified"
+			return result
+		}
+		conflictOwnerTaskID = owner
+		if len(activeConflictFiles) == 0 && conflictOwnerTaskID != "" {
+			if err := h.taskRepo.ClearActiveMergeConflictOwner(ctx, conflictOwnerTaskID); err != nil {
+				result.Reason = "stale merge conflict ownership could not be cleared"
+				return result
+			}
+			conflictOwnerTaskID = ""
+		}
+	}
 	ownsLiveConflict := (hasActiveMerge && service.ActiveMergeMatchesBranch(project.RepoPath, task.WorktreeBranch)) ||
-		(!hasActiveMerge && task.MergeStatus == models.MergeStatusConflict && len(activeConflictFiles) > 0)
+		(!hasActiveMerge && conflictOwnerTaskID == task.ID && len(activeConflictFiles) > 0)
 	if ownsLiveConflict {
 		if task.MergeStatus != models.MergeStatusConflict {
 			if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err == nil {

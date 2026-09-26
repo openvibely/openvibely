@@ -2291,6 +2291,13 @@ func TestHandler_MergeTaskBranch_Conflict_ReturnsHTMXToast(t *testing.T) {
 	if updated.MergeStatus != models.MergeStatusConflict {
 		t.Fatalf("expected merge_status=conflict, got %s", updated.MergeStatus)
 	}
+	owner, err := h.taskRepo.ActiveMergeConflictOwner(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != task.ID {
+		t.Fatalf("active merge conflict owner = %q, want %q", owner, task.ID)
+	}
 
 	leaseStarted := make(chan struct{})
 	leaseRelease := make(chan struct{})

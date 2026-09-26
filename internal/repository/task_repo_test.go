@@ -28,6 +28,46 @@ func getDefaultProjectID(t *testing.T, db interface {
 	return "default"
 }
 
+func TestTaskRepo_ActiveMergeConflictOwnerIsProjectScoped(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewTaskRepo(db, nil)
+	first := &models.Task{ProjectID: "default", Title: "First conflict owner", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	second := &models.Task{ProjectID: "default", Title: "Second conflict owner", Category: models.CategoryCompleted, Status: models.StatusCompleted}
+	if err := repo.Create(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetActiveMergeConflictOwner(ctx, "default", first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetActiveMergeConflictOwner(ctx, "default", second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ClearActiveMergeConflictOwner(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := repo.ActiveMergeConflictOwner(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != second.ID {
+		t.Fatalf("active conflict owner = %q, want %q", owner, second.ID)
+	}
+	if err := repo.ClearActiveMergeConflictOwner(ctx, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	owner, err = repo.ActiveMergeConflictOwner(ctx, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner != "" {
+		t.Fatalf("active conflict owner after clear = %q, want empty", owner)
+	}
+}
+
 func TestTaskRepo_SwarmUpdatesPreserveNewerStopRevision(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
