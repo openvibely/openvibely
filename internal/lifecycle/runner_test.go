@@ -212,24 +212,37 @@ func TestRunSlot_BlockingFirstThenParallel(t *testing.T) {
 			"np-a": json.RawMessage(`{"content":"policy","sources":["p1"]}`),
 			"np-b": json.RawMessage(`{"content":"extra","sources":["e1"]}`),
 		},
-		delay: map[string]time.Duration{
-			"np-a": 30 * time.Millisecond,
-			"np-b": 30 * time.Millisecond,
-		},
 	}
-	runner := NewRunner(store, inv, nil)
+	// Each non-blocking hook waits until the other has started, so serial execution cannot
+	// finish them both; this proves parallelism without depending on wall-clock timing.
+	started := map[string]chan struct{}{"np-a": make(chan struct{}), "np-b": make(chan struct{})}
+	peer := map[string]string{"np-a": "np-b", "np-b": "np-a"}
+	var overlapMu sync.Mutex
+	var notOverlapped []string
+	parallel := &fakeInvokerFunc{fn: func(ctx context.Context, hook models.AgentLifecycleHook, in HookInput) (json.RawMessage, error) {
+		if ch, ok := started[hook.ID]; ok {
+			close(ch)
+			select {
+			case <-started[peer[hook.ID]]:
+			case <-time.After(5 * time.Second):
+				overlapMu.Lock()
+				notOverlapped = append(notOverlapped, hook.ID)
+				overlapMu.Unlock()
+			}
+		}
+		return inv.Invoke(ctx, hook, in)
+	}}
+	runner := NewRunner(store, parallel, nil)
 
-	start := time.Now()
 	res, err := runner.RunSlot(context.Background(), models.LifecycleBeforeRun, HookInput{TaskID: "t", TaskRunID: "r"})
-	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("RunSlot err: %v", err)
 	}
 	if len(res.Outputs) != 3 {
 		t.Fatalf("expected 3 outputs, got %d", len(res.Outputs))
 	}
-	if elapsed >= 90*time.Millisecond {
-		t.Fatalf("non-blocking hooks did not run in parallel (elapsed=%v)", elapsed)
+	if len(notOverlapped) > 0 {
+		t.Fatalf("non-blocking hooks did not run in parallel: %v never saw its peer start", notOverlapped)
 	}
 	// Blocking hook must have been called first.
 	if inv.calls[0] != "blk" {
