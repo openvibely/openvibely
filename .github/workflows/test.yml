@@ -242,13 +242,128 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Prepare Linux packaged-update dependency cache
+        if: runner.os == 'Linux'
+        id: packaged-linux-desktop-cache-key
+        shell: bash
+        run: |
+          read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
+          packages+=(lsof xvfb)
+          package_hash="$(printf '%s\n' "${packages[@]}" | sha256sum | cut -d' ' -f1)"
+          runner_image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}-${{ matrix.arch }}"
+          metadata_date="$(date -u +%Y%m%d)"
+          echo "key=packaged-linux-desktop-apt-v1-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
+          echo "metadata_key=packaged-linux-desktop-apt-lists-v1-${runner_image}-${package_hash}-${metadata_date}" >> "$GITHUB_OUTPUT"
+          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial" "$HOME/.cache/openvibely-apt/lists/partial"
+
+      - name: Restore packaged-update Linux desktop dependency downloads
+        if: runner.os == 'Linux'
+        id: packaged-linux-desktop-cache
+        continue-on-error: true
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/openvibely-apt/archives/*.deb
+          key: ${{ steps.packaged-linux-desktop-cache-key.outputs.key }}
+
+      - name: Restore fresh packaged-update Linux APT metadata
+        if: runner.os == 'Linux'
+        id: packaged-linux-desktop-metadata-cache
+        continue-on-error: true
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/openvibely-apt/lists
+          key: ${{ steps.packaged-linux-desktop-cache-key.outputs.metadata_key }}
+
       - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sudo apt-get update
+          archives_directory="$HOME/.cache/openvibely-apt/archives"
+          lists_directory="$HOME/.cache/openvibely-apt/lists"
+          metadata_max_age_minutes=1440
+          archive_cache_restore_outcome="${{ steps.packaged-linux-desktop-cache.outcome }}"
+          metadata_cache_restore_outcome="${{ steps.packaged-linux-desktop-metadata-cache.outcome }}"
+          archive_cache_hit="${{ steps.packaged-linux-desktop-cache.outputs.cache-hit }}"
+          metadata_cache_hit="${{ steps.packaged-linux-desktop-metadata-cache.outputs.cache-hit }}"
+          if [[ "$archive_cache_restore_outcome" != "success" ]]; then
+            archive_cache_hit=false
+            sudo find "$archives_directory" -maxdepth 1 -type f -name '*.deb' -delete
+          fi
+          if [[ "$metadata_cache_restore_outcome" != "success" ]]; then
+            metadata_cache_hit=false
+          fi
+          metadata_validation="cache-miss"
+          if [[ "$metadata_cache_restore_outcome" != "success" ]]; then
+            metadata_validation="restore-failed"
+          fi
+          metadata_fresh=false
+          apt_refresh="no"
+          online_install="no"
+          started_at=$SECONDS
           read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
-          sudo apt-get install -y "${packages[@]}" lsof xvfb
+          packages+=(lsof xvfb)
+          mkdir -p "$archives_directory/partial" "$lists_directory/partial"
+          sudo chown -R _apt:"$(id -gn)" "$archives_directory" "$lists_directory"
+          sudo chmod 0775 \
+            "$archives_directory" \
+            "$archives_directory/partial" \
+            "$lists_directory" \
+            "$lists_directory/partial"
+          apt_common_options=(
+            -o Dir::State::lists="$lists_directory"
+            -o Acquire::Retries=3
+            -o Acquire::http::Timeout=30
+            -o Acquire::https::Timeout=30
+          )
+          apt_install_options=(
+            "${apt_common_options[@]}"
+            -o Dir::Cache::archives="$archives_directory"
+            -o APT::Keep-Downloaded-Packages=true
+          )
+
+          apt_install() {
+            timeout 10m sudo apt-get "${apt_install_options[@]}" "$@" install -y "${packages[@]}"
+          }
+
+          if [[ "$metadata_cache_hit" == "true" ]] &&
+            find "$lists_directory" -maxdepth 1 -type f -name '*InRelease' -mmin "-${metadata_max_age_minutes}" -print -quit | grep -q . &&
+            sudo apt-get "${apt_common_options[@]}" -s install "${packages[@]}" >/dev/null; then
+            metadata_fresh=true
+            metadata_validation="fresh-preflight"
+          elif [[ "$metadata_cache_hit" == "true" ]]; then
+            metadata_validation="stale-or-invalid"
+          fi
+
+          if [[ "$metadata_cache_hit" != "true" || "$metadata_fresh" != "true" ]]; then
+            sudo find "$lists_directory" -type f -delete
+          fi
+          archives_bytes_before="$(find "$archives_directory" -maxdepth 1 -type f -name '*.deb' -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }')"
+          if [[ "$archive_cache_hit" == "true" && "$metadata_fresh" == "true" ]]; then
+            if ! apt_install --no-download; then
+              metadata_validation="cached-install-failed+updated"
+              sudo find "$archives_directory" -maxdepth 1 -type f -name '*.deb' -delete
+              archives_bytes_before=0
+              sudo find "$lists_directory" -type f -delete
+              timeout 5m sudo apt-get "${apt_common_options[@]}" update
+              apt_refresh="yes"
+              apt_install
+              online_install="yes"
+            fi
+          else
+            timeout 5m sudo apt-get "${apt_common_options[@]}" update
+            apt_refresh="yes"
+            metadata_validation="${metadata_validation}+updated"
+            apt_install
+            online_install="yes"
+          fi
+          archives_bytes="$(find "$archives_directory" -maxdepth 1 -type f -name '*.deb' -printf '%s\n' | awk '{ total += $1 } END { print total + 0 }')"
+          apt_download_bytes=$((archives_bytes - archives_bytes_before))
+          apt_downloads="no"
+          if (( apt_download_bytes > 0 )); then
+            apt_downloads="yes"
+          fi
+          lists_bytes="$(du -sb "$lists_directory" | cut -f1)"
+          echo "Linux desktop dependencies installed in $((SECONDS - started_at))s (archive cache hit: ${archive_cache_hit}, metadata cache hit: ${metadata_cache_hit}, metadata: ${metadata_validation}, APT refresh: ${apt_refresh}, online install: ${online_install}, package downloads: ${apt_downloads} (${apt_download_bytes} new archive bytes), cache payload: $((archives_bytes + lists_bytes)) bytes)"
 
       - name: Start Linux virtual display
         if: runner.os == 'Linux'
