@@ -734,6 +734,24 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		steeringMu.Unlock()
 		timer := time.NewTimer(astraSteeringAckTimeout)
 		defer timer.Stop()
+		// select picks randomly among ready cases, so acceptance can be ready alongside a
+		// terminal case; an accepted steer must keep its identity when it becomes ambiguous.
+		acceptedAmbiguous := func() (AstraSteeringDelivery, bool) {
+			select {
+			case <-ack.acceptedCh:
+			default:
+				return AstraSteeringDelivery{}, false
+			}
+			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
+			delivery := ResponsesSteeringDelivery{
+				Status:             AstraSteeringAmbiguous,
+				SteeringID:         ack.steeringID,
+				PreviousResponseID: previousID,
+			}
+			state.appendAstraSteeringAmbiguousLocked(delivery)
+			state.recordSteeringDelivery(delivery)
+			return AstraSteeringDelivery(delivery), true
+		}
 		select {
 		case delivery := <-ack.ch:
 			return delivery, nil
@@ -756,17 +774,13 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 					return delivery, nil
 				default:
 				}
-				removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-				delivery := ResponsesSteeringDelivery{
-					Status:             AstraSteeringAmbiguous,
-					SteeringID:         ack.steeringID,
-					PreviousResponseID: previousID,
-				}
-				state.appendAstraSteeringAmbiguousLocked(delivery)
-				state.recordSteeringDelivery(delivery)
-				return AstraSteeringDelivery(delivery), nil
+				delivery, _ := acceptedAmbiguous()
+				return delivery, nil
 			}
 		case <-deliverCtx.Done():
+			if delivery, ok := acceptedAmbiguous(); ok {
+				return delivery, nil
+			}
 			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
 			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: deliverCtx.Err().Error()}
 			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
@@ -777,11 +791,17 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 				return delivery, nil
 			default:
 			}
+			if delivery, ok := acceptedAmbiguous(); ok {
+				return delivery, nil
+			}
 			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
 			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: "response.steer acknowledgement unavailable after stream closed"}
 			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
 			return delivery, nil
 		case <-timer.C:
+			if delivery, ok := acceptedAmbiguous(); ok {
+				return delivery, nil
+			}
 			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
 			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: "response.steer acknowledgement timed out"}
 			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
