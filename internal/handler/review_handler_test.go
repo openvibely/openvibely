@@ -28,46 +28,17 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 func setupReviewHandlerForDB(t *testing.T, db *sql.DB) (*Handler, *echo.Echo, *repository.ReviewCommentRepo, *repository.ExecutionRepo, *testutil.MockLLMCaller, string) {
 	t.Helper()
 
-	broadcaster := events.NewBroadcaster()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, broadcaster)
-	execRepo := repository.NewExecutionRepo(db)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
+	env := newTestHandlerEnv(t, db, withTestBroadcaster(events.NewBroadcaster()), withTestTaskGoals())
+	h, e := env.Handler, env.Echo
+	projectSvc, llmConfigRepo, taskRepo, execRepo, mockLLM := env.ProjectSvc, env.LLMConfigRepo, env.TaskRepo, env.ExecRepo, env.LLM
+	env.WorkerSvc.SetProjectRepo(env.ProjectRepo)
+	env.WorkerSvc.SetTaskRepo(taskRepo)
+	env.WorkerSvc.SetLLMConfigRepo(llmConfigRepo)
 	reviewCommentRepo := repository.NewReviewCommentRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-	taskGoalRepo := repository.NewTaskGoalRepo(db)
-
-	mockLLM := testutil.NewMockLLMCaller()
-	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	llmSvc.SetLLMCaller(mockLLM)
-	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
-	workerSvc.SetProjectRepo(projectRepo)
-	workerSvc.SetTaskRepo(taskRepo)
-	workerSvc.SetLLMConfigRepo(llmConfigRepo)
-	projectSvc := service.NewProjectService(projectRepo)
-	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, nil)
-	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	taskSvc.SetTaskGoalService(taskGoalSvc)
-	workerSvc.SetTaskGoalService(taskGoalSvc)
-
-	h := New(
-		projectSvc,
-		taskSvc,
-		llmSvc,
-		workerSvc, nil, nil, nil, nil,
-		llmConfigRepo, taskRepo, scheduleRepo, execRepo, nil, attachmentRepo, nil, projectRepo, settingsRepo, broadcaster, nil,
-	)
 	h.SetReviewCommentRepo(reviewCommentRepo)
-	h.SetTaskGoalService(taskGoalSvc)
 	threadInputRepo := repository.NewThreadInputRepo(db)
 	h.SetThreadInputRepo(threadInputRepo)
-	llmSvc.SetThreadInputRepo(threadInputRepo)
-	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
-
-	e := echo.New()
-	h.RegisterRoutes(e)
+	env.LLMSvc.SetThreadInputRepo(threadInputRepo)
 
 	// Create a project and task
 	ctx := context.Background()

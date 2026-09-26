@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/openvibely/openvibely/internal/update"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -39,137 +38,15 @@ func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfig
 
 func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
 	t.Helper()
-	oldUploadsDir := uploadsDir
-	uploadsDir = t.TempDir()
-	t.Cleanup(func() {
-		uploadsDir = oldUploadsDir
-	})
-
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
-
-	alertRepo := repository.NewAlertRepo(db)
-	upcomingRepo := repository.NewUpcomingRepo(db)
-
-	projectSvc := service.NewProjectService(projectRepo)
-	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
-	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	taskSvc.SetDeletionUploadsDir(uploadsDir)
-	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
-	alertSvc := service.NewAlertService(alertRepo, nil)
-	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
-	discordAuthRepo := repository.NewDiscordAuthRepo(db)
-	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
-
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
-	h.oauthIdentityResolver = nil
-	h.SetGitHubAuthRepo(githubAuthRepo)
-	h.SetSlackAuthRepo(slackAuthRepo)
-	h.SetEmailAuthRepo(emailAuthRepo)
-	h.SetEmailTaskContextRepo(emailTaskContextRepo)
-	h.SetDiscordAuthRepo(discordAuthRepo)
-	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
-	h.SetLocalRepoPathEnabled(true)
-	// Turns run on background goroutines; wait for them before the test's database closes so
-	// no test leaves work running into the next one.
-	h.SetUpdateWorkTracker(update.NewWorkTracker())
-	t.Cleanup(func() { waitForHandlerBackgroundWork(t, h) })
-
-	e := echo.New()
-	h.RegisterRoutes(e)
-	return h, e, llmConfigRepo
+	env := newTestHandlerEnv(t, db)
+	return env.Handler, env.Echo, env.LLMConfigRepo
 }
 
-func waitForHandlerBackgroundWork(t testing.TB, h *Handler) {
-	t.Helper()
-	tracker := h.updateWorkTracker
-	if tracker == nil {
-		return
-	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		active := tracker.Active()
-		if active == (update.ActiveWork{}) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Errorf("background work still running after test: %+v", active)
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
 
 func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
 	t.Helper()
-	oldUploadsDir := uploadsDir
-	uploadsDir = t.TempDir()
-	t.Cleanup(func() {
-		uploadsDir = oldUploadsDir
-	})
-
-	db := testutil.NewTestDB(t)
-
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
-
-	alertRepo := repository.NewAlertRepo(db)
-	upcomingRepo := repository.NewUpcomingRepo(db)
-
-	projectSvc := service.NewProjectService(projectRepo)
-	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
-	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	taskSvc.SetDeletionUploadsDir(uploadsDir)
-	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
-	alertSvc := service.NewAlertService(alertRepo, nil)
-	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-
-	settingsRepo := repository.NewSettingsRepo(db)
-	slackAuthRepo := repository.NewSlackAuthRepo(db)
-	emailAuthRepo := repository.NewEmailAuthRepo(db)
-	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
-	discordAuthRepo := repository.NewDiscordAuthRepo(db)
-	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
-
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
-	h.oauthIdentityResolver = nil
-	h.SetGitHubAuthRepo(githubAuthRepo)
-	h.SetSlackAuthRepo(slackAuthRepo)
-	h.SetEmailAuthRepo(emailAuthRepo)
-	h.SetEmailTaskContextRepo(emailTaskContextRepo)
-	h.SetDiscordAuthRepo(discordAuthRepo)
-	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
-	h.SetLocalRepoPathEnabled(true)
-	h.SetUpdateWorkTracker(update.NewWorkTracker())
-	t.Cleanup(func() { waitForHandlerBackgroundWork(t, h) })
-
-	e := echo.New()
-	h.RegisterRoutes(e)
-
-	return h, e, llmConfigRepo, db
+	env := newTestHandlerEnv(t, testutil.NewTestDB(t))
+	return env.Handler, env.Echo, env.LLMConfigRepo, env.DB
 }
 
 // createProject creates a test project with the given name.
@@ -349,35 +226,8 @@ func boolPtr(b bool) *bool { return &b }
 
 func setupTestHandlerWithInsights(t *testing.T) (*Handler, *echo.Echo) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
-	insightsRepo := repository.NewInsightsRepo(db)
-	alertRepo := repository.NewAlertRepo(db)
-	upcomingRepo := repository.NewUpcomingRepo(db)
-
-	projectSvc := service.NewProjectService(projectRepo)
-	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
-	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	taskSvc.SetDeletionUploadsDir(uploadsDir)
-	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
-	alertSvc := service.NewAlertService(alertRepo, nil)
-	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
-	insightsSvc.SetLLMService(llmSvc)
-
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, nil, nil, nil)
-	e := echo.New()
-	h.RegisterRoutes(e)
-	return h, e
+	env := newTestHandlerEnv(t, testutil.NewTestDB(t), withTestInsights())
+	return env.Handler, env.Echo
 }
 
 func TestHandler_GetTask_HTMX(t *testing.T) {

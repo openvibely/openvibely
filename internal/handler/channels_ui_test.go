@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -524,32 +523,10 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 
 func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	workerRepo := repository.NewWorkerRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
-	alertRepo := repository.NewAlertRepo(db)
-	upcomingRepo := repository.NewUpcomingRepo(db)
-	settingsRepo := repository.NewSettingsRepo(db)
-
-	projectSvc := service.NewProjectService(projectRepo)
-	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
-	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
-	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
-	alertSvc := service.NewAlertService(alertRepo, nil)
-	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
-	h.SetLocalRepoPathEnabled(true)
+	env := newTestHandlerEnv(t, db)
+	h, e := env.Handler, env.Echo
 	agentRepo := repository.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)
-	e := echo.New()
-	h.RegisterRoutes(e)
 
 	alpha := &models.Agent{Name: "Alpha Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024), ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}}}
 	if err := agentRepo.Create(context.Background(), alpha); err != nil {
