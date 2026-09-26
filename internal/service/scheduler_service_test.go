@@ -1676,3 +1676,61 @@ func TestSchedulerService_CheckActiveTasksStartsSwarmPlanner(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+func TestSchedulerService_DSTGapPersistsNextRunAndDoesNotDispatchEarly(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	require.NoError(t, err)
+	originalLocal := time.Local
+	time.Local = location
+	t.Cleanup(func() { time.Local = originalLocal })
+
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "DST gap schedule",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "test",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	anchor := time.Date(2026, time.March, 7, 2, 30, 0, 0, location)
+	clock := anchor
+	svc.now = func() time.Time { return clock }
+	schedule := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          anchor,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+
+	svc.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("expected anchor occurrence to be dispatched")
+	}
+
+	gapRun := time.Date(2026, time.March, 8, 3, 30, 0, 0, location)
+	persisted, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.NextRun)
+	require.True(t, persisted.NextRun.Equal(gapRun), "next_run should be the shifted-forward spring occurrence; got %s", persisted.NextRun.In(location))
+
+	clock = time.Date(2026, time.March, 8, 1, 30, 0, 0, location)
+	svc.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("schedule dispatched before its configured wall-clock time: %s", submitted.ID)
+	default:
+	}
+}
