@@ -527,7 +527,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 
 // CallStreaming makes a streaming OpenAI API call with tool use.
 func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, projectID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
-	applog.Infof("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
+	applog.Debugf("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
 
 	client, releaseTransport, err := a.getClient(ctx, agent, a.taskTransportScope(ctx, execID))
 	if err != nil {
@@ -647,7 +647,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
 	recordOpenAINativeCompactionState(&usage, resp)
-	applog.Infof("[openai-adapter] CallStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	applog.Debugf("[openai-adapter] CallStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, textOnly, usage, errMaxTokens
 	}
@@ -656,7 +656,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 
 // CallChatStreaming makes a streaming OpenAI chat call with history.
 func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID, projectID, transportScope string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
-	applog.Infof("[openai-adapter] CallChatStreaming model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v auth_method=%s workDir=%s",
+	applog.Debugf("[openai-adapter] CallChatStreaming model=%s history=%d message_len=%d context_len=%d attachments=%d exec=%s isTaskFollowup=%v auth_method=%s workDir=%s",
 		agent.Model, len(chatHistory), len(message), len(chatSystemContext), len(attachments), execID, isTaskFollowup, agent.AuthMethod, workDir)
 
 	transportScope = strings.TrimSpace(transportScope)
@@ -779,7 +779,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	output := sw.String()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
 	recordOpenAINativeCompactionState(&usage, resp)
-	applog.Infof("[openai-adapter] CallChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
+	applog.Debugf("[openai-adapter] CallChatStreaming success output_len=%d tokens=%d tools=%d stop=%s compacted=%v", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason, resp.Compacted)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, usage, errMaxTokens
 	}
@@ -788,7 +788,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 
 // CallCompletionsStreaming uses /v1/chat/completions as a fallback.
 func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
-	applog.Infof("[openai-adapter] CallCompletionsStreaming (fallback) model=%s exec=%s", agent.Model, execID)
+	applog.Debugf("[openai-adapter] CallCompletionsStreaming (fallback) model=%s exec=%s", agent.Model, execID)
 
 	client, releaseTransport, err := a.getClient(ctx, agent, "")
 	if err != nil {
@@ -861,7 +861,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	output := sw.String()
 	textOnly := sw.TextString()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	applog.Infof("[openai-adapter] CallCompletionsStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
+	applog.Debugf("[openai-adapter] CallCompletionsStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, textOnly, usage, errMaxTokens
 	}
@@ -870,7 +870,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 
 // CallCompletionsChatStreaming uses /v1/chat/completions for chat with history.
 func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string, agentDef *models.Agent) (string, llmcontracts.Usage, error) {
-	applog.Infof("[openai-adapter] CallCompletionsChatStreaming (fallback) model=%s history=%d exec=%s", agent.Model, len(chatHistory), execID)
+	applog.Debugf("[openai-adapter] CallCompletionsChatStreaming (fallback) model=%s history=%d exec=%s", agent.Model, len(chatHistory), execID)
 
 	client, releaseTransport, err := a.getClient(ctx, agent, "")
 	if err != nil {
@@ -944,7 +944,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 
 	output := sw.String()
 	usage := llmusage.FromOpenAI(resp.InputTokens, resp.OutputTokens, resp.CachedInputTokens, resp.ReasoningTokens)
-	applog.Infof("[openai-adapter] CallCompletionsChatStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
+	applog.Debugf("[openai-adapter] CallCompletionsChatStreaming success output_len=%d tokens=%d tools=%d stop=%s", len(output), usage.TotalTokens, len(resp.ToolCalls), resp.StopReason)
 	if isMaxTokensStopReason(resp.StopReason) {
 		return output, usage, errMaxTokens
 	}

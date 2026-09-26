@@ -348,8 +348,11 @@ func requestLoggerConfig(output io.Writer) middleware.RequestLoggerConfig {
 		LogStatus:    true,
 		LogRequestID: true,
 		LogValuesFunc: func(_ echo.Context, values middleware.RequestLoggerValues) error {
-			if values.Method == http.MethodGet && values.URIPath == "/api/system/update" && values.Status >= 200 && values.Status < 300 {
-				return nil
+			if values.Method == http.MethodGet && values.Status >= 200 && values.Status < 300 {
+				switch values.URIPath {
+				case "/api/system/update", "/alerts/unread-count", "/chat/input-requests", "/chat/pending-inputs", "/events/live":
+					return nil
+				}
 			}
 			_, err := fmt.Fprintf(output, "%s method=%s path=%s status=%d latency=%s request_id=%s\n",
 				time.Now().Format(time.RFC3339), values.Method, values.URIPath, values.Status, values.Latency, values.RequestID)

@@ -826,12 +826,12 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	isHTMX := isHTMX(c)
 	htmxTarget := c.Request().Header.Get("HX-Target")
-	applog.Infof("[handler] ListTasks project=%s htmx=%v target=%s", projectID, isHTMX, htmxTarget)
+	applog.Debugf("[handler] ListTasks project=%s htmx=%v target=%s", projectID, isHTMX, htmxTarget)
 
 	// Read sort preferences from cookies
 	sortPrefs := getSortPreferences(c)
 	if sortPrefs.Backlog != "" || sortPrefs.Completed != "" {
-		applog.Infof("[handler] ListTasks using sort preferences: backlog=%s completed=%s", sortPrefs.Backlog, sortPrefs.Completed)
+		applog.Debugf("[handler] ListTasks using sort preferences: backlog=%s completed=%s", sortPrefs.Backlog, sortPrefs.Completed)
 	}
 
 	// For kanban-board-only refreshes (SSE, etc.), project_id must be provided
@@ -845,7 +845,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 			return err
 		}
 		tasks = service.AttachSwarmChildren(tasks)
-		applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
+		applog.Debugf("[handler] ListTasks found %d tasks", len(tasks))
 		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
@@ -865,7 +865,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		return err
 	}
 	tasks = service.AttachSwarmChildren(tasks)
-	applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
+	applog.Debugf("[handler] ListTasks found %d tasks", len(tasks))
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())

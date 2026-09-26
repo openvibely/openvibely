@@ -129,7 +129,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("X-Accel-Buffering", "no")
 
-	applog.Infof(
+	applog.Debugf(
 		"[sse-live] client connected project=%s task=%s subscribers(tasks=%d chat=%d files=%d)",
 		projectID,
 		taskID,
@@ -147,7 +147,7 @@ func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			applog.Infof("[sse-live] client disconnected project=%s task=%s", projectID, taskID)
+			applog.Debugf("[sse-live] client disconnected project=%s task=%s", projectID, taskID)
 			return nil
 		case event := <-taskSub:
 			if projectID != "" && event.ProjectID != projectID {

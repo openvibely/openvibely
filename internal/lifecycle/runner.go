@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -216,7 +217,7 @@ func (r *Runner) RunSlotFiltered(ctx context.Context, when models.LifecycleWhen,
 		hooks = filtered
 	}
 	if len(hooks) == 0 {
-		r.logger.Printf("[lifecycle] slot=%s task=%s hooks=0", when, input.TaskID)
+		applog.Debugf("[lifecycle] slot=%s task=%s hooks=0", when, input.TaskID)
 	}
 	// Deterministic ordering: blocking hooks first, then by agent/created order.
 	sort.SliceStable(hooks, func(i, j int) bool {

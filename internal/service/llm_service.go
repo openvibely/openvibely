@@ -1073,7 +1073,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if task.AgentDefinitionID != nil && s.agentRepo != nil {
 		if ad, adErr := s.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
 			agentDef = ad
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
+			applog.Debugf("[agent-svc] ExecuteTaskWithAgent using agent definition=%s (%s)", ad.Name, ad.ID)
 		}
 	}
 	// Atomically claim the task (only succeeds if status is pending). The
@@ -1102,7 +1102,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s pre-claimed flag set but status=%v, skipping", task.ID, statusOrNil(current))
 			return nil, llmcontracts.ChatContext{}, nil
 		}
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s already claimed by worker, proceeding", task.ID)
+		applog.Debugf("[agent-svc] ExecuteTaskWithAgent task=%s already claimed by worker, proceeding", task.ID)
 	} else {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s status -> running", task.ID)
 	}
@@ -1188,7 +1188,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent error binding pre-execution queued inputs: %v", err)
 		}
 	}
-	applog.Infof("[agent-svc] ExecuteTaskWithAgent execution=%s created, calling LLM...", exec.ID)
+	applog.Debugf("[agent-svc] ExecuteTaskWithAgent execution=%s created, calling LLM...", exec.ID)
 
 	// Load attachments for the task
 	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
@@ -1208,14 +1208,14 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		return exec, llmcontracts.ChatContext{}, fmt.Errorf("loading attachments: %w", err)
 	}
 	attachments = s.reconcileMissingTaskAttachments(ctx, task.ID, attachments)
-	applog.Infof("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
+	applog.Debugf("[agent-svc] ExecuteTaskWithAgent loaded %d attachments for task=%s", len(attachments), task.ID)
 
 	// Vision-aware agent override: if the task has image attachments and the
 	// current agent doesn't support vision, try to find a vision-capable agent.
 	// API key and OAuth agents can support vision via multimodal content blocks.
 	visionDecision := s.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, task.Prompt, attachments, agent, "ExecuteTaskWithAgent", task.ID)
 	agent = visionDecision.Agent
-	applog.Infof("[agent-svc] ExecuteTaskWithAgent vision routing changed=%v reason=%s detail=%q selected_agent=%s selected_provider=%s",
+	applog.Debugf("[agent-svc] ExecuteTaskWithAgent vision routing changed=%v reason=%s detail=%q selected_agent=%s selected_provider=%s",
 		visionDecision.Changed, visionDecision.Reason, visionDecision.Detail, agent.Name, agent.Provider)
 
 	// Look up the project's repo path to use as the working directory for model
@@ -1251,7 +1251,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			}
 			repoDir = project.RepoPath
 			workDir = project.RepoPath
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent using project workDir=%s", workDir)
+			applog.Debugf("[agent-svc] ExecuteTaskWithAgent using project workDir=%s", workDir)
 		}
 	}
 
@@ -1293,7 +1293,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			managedWorktree = true
 			task.WorktreePath = wtPath
 			task.WorktreeBranch = wtBranch
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
+			applog.Debugf("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
 
 			if syncErr := s.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, &task, repoDir); syncErr != nil {
 				var conflictErr *StartupSyncConflictError
@@ -1372,7 +1372,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		if agentDef.ToolConfig.SkipDefaultTools && scopedFilesWorkDir != "" {
 			workDir = scopedFilesWorkDir
 			repoDir = ""
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent using scoped files workDir=%s", workDir)
+			applog.Debugf("[agent-svc] ExecuteTaskWithAgent using scoped files workDir=%s", workDir)
 		}
 	}
 	if agentSkillTools := s.agentDeclaredSkillRuntimeTools(ctx, task, agentDef, workDir); agentSkillTools != nil {
@@ -1380,7 +1380,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	projectInstructions := combineProjectInstructions(additionalProjectInstructionsFromContext(ctx), startupWorktreeContext, loadRootProjectInstructions(repoDir))
 	if projectInstructions != "" {
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent prepared project instructions (%d bytes)", len(projectInstructions))
+		applog.Debugf("[agent-svc] ExecuteTaskWithAgent prepared project instructions (%d bytes)", len(projectInstructions))
 	}
 	// Start background diff snapshot broadcaster (if file change broadcaster is configured)
 	var stopDiffBroadcast chan struct{}

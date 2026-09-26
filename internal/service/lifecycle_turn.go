@@ -83,7 +83,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 		legacyContext := lifecycle.MergeContextBlocks(before.Outputs)
 		preparedContext = joinLifecyclePromptBlocks(preparedContext, legacyContext)
 		if preparedContext != "" {
-			applog.Infof("[lifecycle-turn] chat memory prepared_context task=%s bytes=%d", task.ID, len(preparedContext))
+			applog.Debugf("[lifecycle-turn] chat memory prepared_context task=%s bytes=%d", task.ID, len(preparedContext))
 		}
 	}
 	promptContext := buildLifecyclePromptContext("", preparedContext)
@@ -136,7 +136,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		ctx = llmcontracts.WithRuntimeTools(ctx, hookReadTools)
 	}
 	hookMutationTools := w.buildLifecycleRuntimeTools(task, catalog)
-	applog.Infof("[lifecycle-turn] prepared task=%s catalog_skills=%d runtime_tools=%t", task.ID, len(catalog.Entries()), hookReadTools != nil)
+	applog.Debugf("[lifecycle-turn] prepared task=%s catalog_skills=%d runtime_tools=%t", task.ID, len(catalog.Entries()), hookReadTools != nil)
 	effectiveTask := task
 	if incomingTurn.TaskThreadTurn && incomingTurn.TurnPrompt != "" {
 		effectiveTask.Prompt = incomingTurn.TurnPrompt
@@ -239,7 +239,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		before := w.runLifecycleSlot(ctx, models.LifecycleBeforeRun, task, runID, nil, llmcontracts.ChatContext{})
 		preparedContext = lifecycle.MergeContextBlocks(before.Outputs)
 		if preparedContext != "" {
-			applog.Infof("[lifecycle-turn] before_run prepared_context task=%s bytes=%d outputs=%d", task.ID, len(preparedContext), len(before.Outputs))
+			applog.Debugf("[lifecycle-turn] before_run prepared_context task=%s bytes=%d outputs=%d", task.ID, len(preparedContext), len(before.Outputs))
 		}
 	}
 
@@ -636,7 +636,7 @@ func logAlwaysUseProvenance(taskID string, prov agentskills.SkillSelectionProven
 		}
 	}
 	if len(alwaysUse) > 0 {
-		applog.Infof("[lifecycle-turn] always_use injected task=%s handles=%v", taskID, alwaysUse)
+		applog.Debugf("[lifecycle-turn] always_use injected task=%s handles=%v", taskID, alwaysUse)
 	}
 	if len(both) > 0 {
 		applog.Infof("[lifecycle-turn] always_use+skill_curator overlap task=%s handles=%v", taskID, both)

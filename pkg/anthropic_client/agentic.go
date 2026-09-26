@@ -1014,7 +1014,7 @@ func exclusiveAnthropicRequestUserInput(blocks []agenticBlock) int {
 }
 
 func runAnthropicToolUse(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
-	applog.Infof("[anthropicclient] executing tool %s", name)
+	applog.Debugf("[anthropicclient] executing tool %s", name)
 	output := ""
 	isError := false
 	var err error
