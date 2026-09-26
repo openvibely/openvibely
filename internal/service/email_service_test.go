@@ -2765,6 +2765,11 @@ func TestEmailServiceReloadFencesBlockedPreviousAccount(t *testing.T) {
 		t.Fatal("replacement poll did not process the new account")
 	}
 
+	// The replacement poll acknowledges after handing off the message; wait for that before
+	// Stop cancels it, or a slow runner can stop the poll between handoff and acknowledgement.
+	require.Eventually(t, func() bool { return newClient.storeCallCount() == 1 }, 5*time.Second, 10*time.Millisecond,
+		"the replacement poll should acknowledge its handled message")
+
 	close(oldClient.releaseFetch)
 	select {
 	case <-oldRun.done:
