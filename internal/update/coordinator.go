@@ -521,6 +521,15 @@ func (c *Coordinator) releaseIsNewerThanCurrent(release *VerifiedRelease) bool {
 	if release.Metadata.Channel != "" && release.Metadata.Channel != c.channel {
 		return false
 	}
+	if !release.Metadata.ExpiresAt.IsZero() {
+		now := time.Now()
+		if c.client != nil {
+			now = c.client.cfg.Now()
+		}
+		if !release.Metadata.ExpiresAt.After(now) {
+			return false
+		}
+	}
 	if compareVersions(release.Metadata.Version, c.current.Version) <= 0 {
 		return false
 	}
