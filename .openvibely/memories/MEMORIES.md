@@ -16,5 +16,6 @@
 - [Product Vision, Reviewable Autonomy, and Naming](product_vision_and_autonomy.md) - Product direction, review-gated autonomy, user-priority/bootstrap principles, SDLC direction, and naming constraints.
 - [Alerts and Actionable Notifications](alerts_and_actionable_notifications.md) - Project-scoped alerts, approval notifications, claims/task linkage, runtime tools, UI, and content standards.
 - [Automation Graphs](automation_graphs.md) - YAML-first project-scoped Automation authoring, maintained/custom topology, persistence, runtime projection, approvals, handoffs, and gaps.
+- [Native SDLC Finder Audits](native_sdlc_finder_audits.md) - Redundancy Finder and Bug Finder component rotation history, findings, and audit focus tracking.
 
 Topic files contain durable current context only. Historical audit transcripts, raw logs, task-by-task summaries, secrets, transient benchmark numbers, and procedure-only runbooks are intentionally excluded; cross-topic details belong in the most specific handle above.

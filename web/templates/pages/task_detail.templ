@@ -97,7 +97,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				})
 			</div>
 			<button id="task-workspace-back" type="button" class="btn btn-ghost btn-sm" hidden onclick="window.taskWorkspace.openThread()">‹ Back to thread</button>
-			<button id="task-details-opener" type="button" class="btn btn-ghost btn-sm" aria-controls="task-details-panel" aria-expanded="false" onclick="window.taskWorkspace.togglePanel()">Details</button>
+			<button id="task-details-opener" type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Toggle details panel" aria-controls="task-details-panel" aria-expanded="false" onclick="window.taskWorkspace.togglePanel()"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></button>
 			<script>
 				(function() {
 					var params = new URLSearchParams(window.location.search);

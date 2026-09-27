@@ -2472,11 +2472,15 @@ window.addEventListener('DOMContentLoaded', function() {
     var description = card.querySelector('[data-lifecycle-description]');
     var firstRow = document.querySelector('#lifecycle-activity-list [data-lifecycle-execution-id]');
     var port = document.getElementById('lifecycle-activity-scroll');
-    var rootRect = root.getBoundingClientRect();
+    var inspector = document.getElementById('task-details-panel');
+    var inspectorBody = document.getElementById('task-inspector-body');
+    var bodyBottom = inspectorBody.getBoundingClientRect().bottom - parseFloat(getComputedStyle(inspectorBody).paddingBottom);
+    var inspectorRect = inspector.getBoundingClientRect();
+    if (Math.abs(inspectorRect.top) > 1 || Math.abs(inspectorRect.bottom - innerHeight) > 1 || Math.abs(inspectorRect.right - innerWidth) > 1) throw new Error('inspector is not flush with the viewport');
     var cardRect = card.getBoundingClientRect();
     var descriptionRect = description.getBoundingClientRect();
     var firstRowRect = firstRow.getBoundingClientRect();
-    if (Math.abs(cardRect.bottom - rootRect.bottom) > 2) throw new Error('lifecycle card does not fill remaining height: card=' + cardRect.bottom + ' root=' + rootRect.bottom);
+    if (Math.abs(cardRect.bottom - bodyBottom) > 2) throw new Error('lifecycle card does not fill inspector body: card=' + cardRect.bottom + ' body=' + bodyBottom);
     if (firstRowRect.top - descriptionRect.bottom > 32) throw new Error('lifecycle rows start too far below the description: gap=' + (firstRowRect.top - descriptionRect.bottom));
     if (port.clientHeight < 500) throw new Error('lifecycle scrollport is unexpectedly short: ' + port.clientHeight);
     if (port.scrollHeight <= port.clientHeight) throw new Error('lifecycle rows do not overflow their internal scrollport');
@@ -2498,7 +2502,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "task-detail-lifecycle-fill-profile"),
+		"--window-size=1500,1100", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "task-detail-lifecycle-fill-profile"),
 		server.URL+"/tasks/task-lifecycle-fill-browser",
 	)
 	cmd.Stderr = stderrFile
