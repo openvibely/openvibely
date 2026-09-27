@@ -38,6 +38,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					_, _ = w.Write([]byte(`export const Window = {};`))
 					return
 				}
+				if strings.HasPrefix(r.URL.Path, "/projects/") && strings.HasSuffix(r.URL.Path, "/edit") {
+					w.Header().Set("Content-Type", "text/html")
+					fmt.Fprintf(w, `<div id="settings-project">%s</div>`, r.URL.Path)
+					return
+				}
 				if r.URL.Path == "/ui/preferences" {
 					var req struct {
 						ProjectID string    `json:"project_id"`
@@ -118,10 +123,20 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape"}, nil)
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape"}, nil)
 				browser.waitFor("dismiss context menu", `String(document.getElementById('project-tab-menu').matches(':popover-open'))`, "false")
+				if got := browser.evaluate(`String(!document.getElementById('project-settings-btn') && getComputedStyle(document.querySelector('[data-project-tab="p00"]').parentElement,'::before').backgroundImage.includes('radial-gradient'))`); got != "true" {
+					t.Fatal("desktop gear removed and active curved joins required", got)
+				}
+				browser.evaluate(`(function(){document.querySelector('[data-project-tab="p01"]').focus();return 'focused';})()`)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "F10", "code": "F10", "modifiers": 8}, nil)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "F10", "code": "F10", "modifiers": 8}, nil)
+				browser.click("#project-tab-settings-action")
+				browser.waitFor("settings belong to clicked inactive tab", `document.getElementById('settings-project')?.textContent || ''`, "/projects/p01/edit")
+				browser.waitFor("settings do not switch projects", `document.getElementById('project-selector').value`, "p00")
+
 				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(tab.width>=240 && tab.top-bar.top>=5 && controls && Array.from(controls.querySelectorAll('button')).every(function(button){var r=button.getBoundingClientRect();return Math.abs((r.top+r.bottom-bar.top-bar.bottom)/2)<1 && getComputedStyle(button).getPropertyValue('--wails-draggable').trim()==='no-drag';}));})()`); got != "true" {
 					t.Fatal("wide inset tabs and vertically centered window controls must share the titlebar", got)
 				}
-				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();return String(['project-selector-trigger','project-settings-btn'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
+				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();return String(['project-selector-trigger'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
 					t.Fatal("titlebar selector and actions must share a centered row inside the bar", got)
 				}
 				if got := browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollWidth > document.getElementById('desktop-project-tabs').clientWidth && document.documentElement.scrollWidth <= innerWidth)`); got != "true" {
