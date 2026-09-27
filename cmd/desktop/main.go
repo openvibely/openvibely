@@ -277,9 +277,10 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	titleBar := application.MacTitleBarHiddenInset
 	titleBar.ShowToolbarWhenFullscreen = true
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:      "main",
-		Title:     "OpenVibely",
-		URL:       "/",
+		Name:  "main",
+		Title: "OpenVibely",
+		// WebKit's native asset transport cannot follow the root's /chat redirect.
+		URL:       "/chat",
 		Width:     1280,
 		Height:    820,
 		MinWidth:  1024,
