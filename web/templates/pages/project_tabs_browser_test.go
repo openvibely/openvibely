@@ -105,6 +105,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					return
 				}
 				browser.waitFor("tabs controller", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
+				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(tab.width>=240 && tab.top-bar.top>=5 && controls && Array.from(controls.children).every(function(button){var r=button.getBoundingClientRect();return r.height>0 && Math.abs((r.top+r.bottom-bar.top-bar.bottom)/2)<1;}));})()`); got != "true" {
+					t.Fatal("wide inset tabs and vertically centered window controls must share the titlebar", got)
+				}
 				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();return String(['project-selector-trigger','project-settings-btn','new-project-btn'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
 					t.Fatal("titlebar selector and actions must share a centered row inside the bar", got)
 				}
@@ -114,6 +117,16 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`JSON.stringify([getComputedStyle(document.querySelector('.desktop-titlebar-space')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.querySelector('[data-project-tab]')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.getElementById('project-selector-trigger')).getPropertyValue('--wails-draggable').trim()])`); got != `["drag","no-drag","no-drag"]` {
 					t.Fatal("drag regions", got)
 				}
+				if got := browser.evaluate(`(function(){var active=document.querySelector('[data-project-tab="p00"]'),inactive=document.querySelector('[data-project-tab="p01"]');return String(getComputedStyle(active.parentElement).backgroundColor!==getComputedStyle(inactive.parentElement).backgroundColor && getComputedStyle(active).backgroundColor==='rgba(0, 0, 0, 0)' && active.getBoundingClientRect().width===active.parentElement.getBoundingClientRect().width);})()`); got != "true" {
+					t.Fatal("active background must cover the whole tab, not only the label", got)
+				}
+				// A fullscreen-sized content viewport must retain the same visible bar.
+				// Native macOS fullscreen transitions require separate Wails verification.
+				browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1920, "height": 1080, "deviceScaleFactor": 1, "mobile": false}, nil)
+				if got := browser.evaluate(`(function(){var controls=document.querySelector('.desktop-window-controls').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect();return String(controls.top>=0 && controls.bottom<=46 && tab.top>=5 && tab.bottom<=46);})()`); got != "true" {
+					t.Fatal("fullscreen-sized viewport lost window controls or tabs", got)
+				}
+				browser.call("Emulation.clearDeviceMetricsOverride", map[string]any{}, nil)
 				browser.click(`[data-project-tab="p01"]`)
 				browser.waitFor("shared navigation", `location.search`, "?project_id=p01")
 				browser.waitFor("active tab", `document.querySelector('[data-project-tab="p01"]').getAttribute('aria-selected')`, "true")
