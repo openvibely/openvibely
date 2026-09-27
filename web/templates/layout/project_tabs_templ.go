@@ -61,14 +61,14 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  [data-openvibely-runtime=\"desktop\"] body > .drawer { height: calc(100% - 46px); }\n  [data-openvibely-runtime=\"desktop\"] #sidebar { height: calc(100dvh - 46px); }\n  [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }\n  @media (min-width: 1024px) { [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 0; } }\n  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }\n  #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }\n  #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }\n  #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding-top: 6px; }\n  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 10px 10px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }\n  .desktop-project-tab:has([aria-selected=\"true\"]) { background: oklch(var(--b1)); }\n  .desktop-project-tab [role=\"tab\"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }\n  .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }\n  .desktop-project-tab:hover { background: oklch(var(--bc) / .08); }\n  .desktop-project-tab:has([aria-selected=\"true\"]):hover { background: oklch(var(--b1)); }\n  .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }\n  #project-pin-toggle { flex-shrink: 0; }\n  .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }\n  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }\n  #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }\n  #desktop-project-titlebar [data-project-selector] .label-text { display: none; }\n  #desktop-project-titlebar #project-selector-trigger { width: 150px; }\n </style><header id=\"desktop-project-titlebar\" class=\"bg-base-200\" data-platform=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  [data-openvibely-runtime=\"desktop\"] body > .drawer { height: calc(100% - 46px); }\n  [data-openvibely-runtime=\"desktop\"] #sidebar { height: calc(100dvh - 46px); }\n  [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }\n  @media (min-width: 1024px) { [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 0; } }\n  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }\n  #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }\n  #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }\n  #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding-top: 6px; }\n  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 10px 10px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }\n  .desktop-project-tab:has([aria-selected=\"true\"]) { background: oklch(var(--b1)); }\n  .desktop-project-tab [role=\"tab\"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }\n  .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }\n  .desktop-project-tab:hover { background: oklch(var(--bc) / .08); }\n  .desktop-project-tab:has([aria-selected=\"true\"]):hover { background: oklch(var(--b1)); }\n  .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }\n  #project-pin-toggle { flex-shrink: 0; }\n  .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }\n  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }\n  #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }\n  #desktop-project-titlebar [data-project-selector] .label-text { display: none; }\n\t  #desktop-project-titlebar #project-selector-trigger { width: 150px; }\n\t  .desktop-window-controls { display: flex; align-items: center; align-self: stretch; flex-shrink: 0; --wails-draggable: no-drag; }\n\t  .desktop-window-controls button { display: flex; align-items: center; justify-content: center; padding: 0; width: 46px; height: 100%; color: inherit; }\n\t  .desktop-window-controls svg { width: 12px; height: 12px; pointer-events: none; }\n\t  .desktop-window-controls:not(.desktop-traffic-lights) button:hover { background: oklch(var(--bc) / .12); }\n\t  .desktop-window-controls:not(.desktop-traffic-lights) button:last-child:hover { background: #c42b1c; color: white; }\n\t  .desktop-traffic-lights { gap: 8px; padding: 0 12px 0 8px; }\n\t  .desktop-traffic-lights button { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgb(0 0 0 / .12); color: rgb(0 0 0 / .65); }\n\t  .desktop-traffic-lights [data-wml-window=\"Close\"] { background: #ff5f57; }\n\t  .desktop-traffic-lights [data-wml-window=\"Minimise\"] { background: #febc2e; }\n\t  .desktop-traffic-lights [data-wml-window=\"ToggleFullscreen\"] { background: #28c840; }\n\t  .desktop-traffic-lights svg { width: 8px; height: 8px; opacity: 0; }\n\t  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }\n\t  .desktop-traffic-lights button:active { filter: brightness(.85); } </style><header id=\"desktop-project-titlebar\" class=\"bg-base-200\" data-platform=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(runtime.GOOS)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 59, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 71, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
@@ -81,152 +81,162 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 59, Col: 193}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 71, Col: 193}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" aria-label=\"Project title bar\"><div id=\"desktop-project-tabs\" role=\"tablist\" aria-label=\"Pinned projects\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" aria-label=\"Project title bar\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if runtime.GOOS == "darwin" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"desktop-window-controls desktop-traffic-lights\" role=\"group\" aria-label=\"Window controls\"><button type=\"button\" data-wml-window=\"Close\" aria-label=\"Close window\" title=\"Close\"><svg viewBox=\"0 0 10 10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\" aria-hidden=\"true\"><path d=\"m2 2 6 6m0-6-6 6\"></path></svg></button> <button type=\"button\" data-wml-window=\"Minimise\" aria-label=\"Minimize window\" title=\"Minimize\"><svg viewBox=\"0 0 10 10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.3\" aria-hidden=\"true\"><path d=\"M1 5h8\"></path></svg></button> <button type=\"button\" data-wml-window=\"ToggleFullscreen\" aria-label=\"Enter or exit fullscreen\" title=\"Enter or exit fullscreen\"><svg viewBox=\"0 0 10 10\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M1 1h5L1 6zm8 8H4l5-5z\"></path></svg></button></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div id=\"desktop-project-tabs\" role=\"tablist\" aria-label=\"Pinned projects\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"desktop-project-tab\"><button type=\"button\" role=\"tab\" aria-selected=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"desktop-project-tab\"><button type=\"button\" role=\"tab\" aria-selected=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmtBool(project.ID == currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 63, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\" tabindex=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" tabindex=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(tabIndex(project.ID == currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 63, Col: 147}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 147}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" data-project-tab=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" data-project-tab=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 63, Col: 179}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 179}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" title=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" title=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 63, Col: 202}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 202}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 63, Col: 219}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 219}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</button> <button type=\"button\" data-close-project=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</button> <button type=\"button\" data-close-project=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 64, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 82, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" aria-label=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" aria-label=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue("Close project tab: " + project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 64, Col: 110}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 82, Col: 110}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" title=\"Close tab (unpin)\">×</button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" title=\"Close tab (unpin)\">×</button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</div><div class=\"desktop-titlebar-space\" aria-hidden=\"true\"></div><button id=\"project-pin-toggle\" type=\"button\" class=\"btn btn-ghost btn-sm\" aria-label=\"Toggle pin for current project\" aria-pressed=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</div><div class=\"desktop-titlebar-space\" aria-hidden=\"true\"></div><button id=\"project-pin-toggle\" type=\"button\" class=\"btn btn-ghost btn-sm\" aria-label=\"Toggle pin for current project\" aria-pressed=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmtBool(slices.Contains(uiPreferences(ctx).PinnedProjectIDs, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 69, Col: 215}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 215}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(projects) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, " disabled")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " disabled")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, ">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, ">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if slices.Contains(uiPreferences(ctx).PinnedProjectIDs, currentProjectID) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "Unpin")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "Unpin")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "Pin")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "Pin")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</button>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</button>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -234,7 +244,13 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</header><script>\n (function() {\n  function installProjectTabs() {\n   var bar = document.getElementById('desktop-project-titlebar');\n   var select = document.getElementById('project-selector');\n   var list = document.getElementById('desktop-project-tabs');\n   var pin = document.getElementById('project-pin-toggle');\n   if (!bar || !select || bar.dataset.installed) return;\n   bar.dataset.installed = 'true';\n   bar.addEventListener('dblclick', function(event) {\n    if (getComputedStyle(event.target).getPropertyValue('--wails-draggable').trim() !== 'drag') return;\n    if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();\n   });\n   var ids = JSON.parse(bar.dataset.pinnedProjects);\n   var saveQueue = Promise.resolve();\n   function savePins() {\n    bar.dataset.pinnedProjects = JSON.stringify(ids);\n    var payload = JSON.stringify({pinned_project_ids: ids});\n    // Serialize saves so rapid pin/unpin clicks cannot persist out of order.\n    saveQueue = saveQueue.catch(function() {}).then(function() {\n     return fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: payload, keepalive: true}).then(function(response) {\n      if (!response.ok) throw new Error('Could not save pinned projects');\n     });\n    }).catch(function() { if (window.showToast) window.showToast('Could not save pinned projects. Try again.', 'failed'); });\n   }\n   function switchProject(id) {\n    select.value = id;\n    select.dispatchEvent(new Event('change', {bubbles: true}));\n    return select.value === id;\n   }\n   function sync() {\n    var active = select.value;\n    list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {\n     tab.setAttribute('aria-selected', String(tab.dataset.projectTab === active));\n     tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;\n    });\n    var pinned = ids.indexOf(active) !== -1;\n    pin.setAttribute('aria-pressed', String(pinned));\n    pin.setAttribute('aria-label', pinned ? 'Unpin current project' : 'Pin current project');\n    pin.textContent = pinned ? 'Unpin' : 'Pin';\n    var activeTab = list.querySelector('[aria-selected=\"true\"]');\n    if (activeTab) activeTab.scrollIntoView({block: 'nearest', inline: 'nearest'});\n   }\n   function render() {\n    list.replaceChildren();\n    ids.forEach(function(id) {\n     var option = Array.from(select.options).find(function(option) { return option.value === id; });\n     if (!option) return;\n     var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';\n     var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim(); tab.title = tab.textContent;\n     var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.textContent = '×'; close.title = 'Close tab (unpin)'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);\n     wrapper.append(tab, close); list.append(wrapper);\n    });\n    sync();\n   }\n   pin.addEventListener('click', function() {\n    if (!select.value) return;\n    var index = ids.indexOf(select.value);\n    if (index === -1) ids.push(select.value); else ids.splice(index, 1);\n    render(); savePins();\n   });\n   list.addEventListener('click', function(event) {\n    var tab = event.target.closest('[data-project-tab]');\n    if (tab) { switchProject(tab.dataset.projectTab); return; }\n    var close = event.target.closest('[data-close-project]');\n    if (!close) return;\n    var index = ids.indexOf(close.dataset.closeProject);\n    var next = ids[index + 1] || ids[index - 1];\n    if (close.dataset.closeProject === select.value && next && !switchProject(next)) return;\n    ids.splice(index, 1); render(); savePins();\n    var focus = list.querySelector('[aria-selected=\"true\"]') || list.querySelector('[data-project-tab]') || pin;\n    focus.focus();\n   });\n   list.addEventListener('keydown', function(event) {\n    var tab = event.target.closest('[data-project-tab]');\n    if (!tab) return;\n    var tabs = Array.from(list.querySelectorAll('[data-project-tab]'));\n    var index = tabs.indexOf(tab);\n    if (event.key === 'ArrowRight') index = (index + 1) % tabs.length;\n    else if (event.key === 'ArrowLeft') index = (index + tabs.length - 1) % tabs.length;\n    else if (event.key === 'Home') index = 0;\n    else if (event.key === 'End') index = tabs.length - 1;\n    else if (event.key === 'Delete') { event.preventDefault(); tab.parentElement.querySelector('[data-close-project]').click(); return; }\n    else return;\n    event.preventDefault();\n    tabs.forEach(function(item) { item.tabIndex = -1; });\n    tabs[index].tabIndex = 0; tabs[index].focus(); tabs[index].scrollIntoView({block: 'nearest', inline: 'nearest'});\n   });\n   window.openVibelyProjectTabsSync = sync;\n   sync();\n  }\n  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installProjectTabs, {once: true});\n  else installProjectTabs();\n })();\n </script>")
+		if runtime.GOOS != "darwin" {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "<div class=\"desktop-window-controls\" role=\"group\" aria-label=\"Window controls\"><button type=\"button\" data-wml-window=\"Minimise\" aria-label=\"Minimize window\" title=\"Minimize\"><svg viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" aria-hidden=\"true\"><path d=\"M1 6h10\"></path></svg></button> <button type=\"button\" data-wml-window=\"ToggleMaximise\" aria-label=\"Maximize or restore window\" title=\"Maximize or restore\"><svg viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" aria-hidden=\"true\"><rect x=\"1.5\" y=\"1.5\" width=\"9\" height=\"9\"></rect></svg></button> <button type=\"button\" data-wml-window=\"Close\" aria-label=\"Close window\" title=\"Close\"><svg viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" aria-hidden=\"true\"><path d=\"m1 1 10 10m0-10L1 11\"></path></svg></button></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</header><script>\n (function() {\n  function installProjectTabs() {\n   var bar = document.getElementById('desktop-project-titlebar');\n   var select = document.getElementById('project-selector');\n   var list = document.getElementById('desktop-project-tabs');\n   var pin = document.getElementById('project-pin-toggle');\n   if (!bar || !select || bar.dataset.installed) return;\n   bar.dataset.installed = 'true';\n   bar.addEventListener('dblclick', function(event) {\n    if (getComputedStyle(event.target).getPropertyValue('--wails-draggable').trim() !== 'drag') return;\n    if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();\n   });\n   var ids = JSON.parse(bar.dataset.pinnedProjects);\n   var saveQueue = Promise.resolve();\n   function savePins() {\n    bar.dataset.pinnedProjects = JSON.stringify(ids);\n    var payload = JSON.stringify({pinned_project_ids: ids});\n    // Serialize saves so rapid pin/unpin clicks cannot persist out of order.\n    saveQueue = saveQueue.catch(function() {}).then(function() {\n     return fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: payload, keepalive: true}).then(function(response) {\n      if (!response.ok) throw new Error('Could not save pinned projects');\n     });\n    }).catch(function() { if (window.showToast) window.showToast('Could not save pinned projects. Try again.', 'failed'); });\n   }\n   function switchProject(id) {\n    select.value = id;\n    select.dispatchEvent(new Event('change', {bubbles: true}));\n    return select.value === id;\n   }\n   function sync() {\n    var active = select.value;\n    list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {\n     tab.setAttribute('aria-selected', String(tab.dataset.projectTab === active));\n     tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;\n    });\n    var pinned = ids.indexOf(active) !== -1;\n    pin.setAttribute('aria-pressed', String(pinned));\n    pin.setAttribute('aria-label', pinned ? 'Unpin current project' : 'Pin current project');\n    pin.textContent = pinned ? 'Unpin' : 'Pin';\n    var activeTab = list.querySelector('[aria-selected=\"true\"]');\n    if (activeTab) activeTab.scrollIntoView({block: 'nearest', inline: 'nearest'});\n   }\n   function render() {\n    list.replaceChildren();\n    ids.forEach(function(id) {\n     var option = Array.from(select.options).find(function(option) { return option.value === id; });\n     if (!option) return;\n     var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';\n     var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim(); tab.title = tab.textContent;\n     var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.textContent = '×'; close.title = 'Close tab (unpin)'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);\n     wrapper.append(tab, close); list.append(wrapper);\n    });\n    sync();\n   }\n   pin.addEventListener('click', function() {\n    if (!select.value) return;\n    var index = ids.indexOf(select.value);\n    if (index === -1) ids.push(select.value); else ids.splice(index, 1);\n    render(); savePins();\n   });\n   list.addEventListener('click', function(event) {\n    var tab = event.target.closest('[data-project-tab]');\n    if (tab) { switchProject(tab.dataset.projectTab); return; }\n    var close = event.target.closest('[data-close-project]');\n    if (!close) return;\n    var index = ids.indexOf(close.dataset.closeProject);\n    var next = ids[index + 1] || ids[index - 1];\n    if (close.dataset.closeProject === select.value && next && !switchProject(next)) return;\n    ids.splice(index, 1); render(); savePins();\n    var focus = list.querySelector('[aria-selected=\"true\"]') || list.querySelector('[data-project-tab]') || pin;\n    focus.focus();\n   });\n   list.addEventListener('keydown', function(event) {\n    var tab = event.target.closest('[data-project-tab]');\n    if (!tab) return;\n    var tabs = Array.from(list.querySelectorAll('[data-project-tab]'));\n    var index = tabs.indexOf(tab);\n    if (event.key === 'ArrowRight') index = (index + 1) % tabs.length;\n    else if (event.key === 'ArrowLeft') index = (index + tabs.length - 1) % tabs.length;\n    else if (event.key === 'Home') index = 0;\n    else if (event.key === 'End') index = tabs.length - 1;\n    else if (event.key === 'Delete') { event.preventDefault(); tab.parentElement.querySelector('[data-close-project]').click(); return; }\n    else return;\n    event.preventDefault();\n    tabs.forEach(function(item) { item.tabIndex = -1; });\n    tabs[index].tabIndex = 0; tabs[index].focus(); tabs[index].scrollIntoView({block: 'nearest', inline: 'nearest'});\n   });\n   window.openVibelyProjectTabsSync = sync;\n   sync();\n  }\n  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installProjectTabs, {once: true});\n  else installProjectTabs();\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
