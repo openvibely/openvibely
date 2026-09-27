@@ -1404,7 +1404,11 @@ func TestHandler_NewTaskFirstMessage(t *testing.T) {
 			assertCode(t, rec, http.StatusBadRequest)
 		} else {
 			assertCode(t, rec, http.StatusOK)
-			require.Contains(t, rec.Header().Get("HX-Location"), "/tasks/")
+			var location map[string]string
+			require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &location))
+			require.Contains(t, location["path"], "/tasks/")
+			require.Equal(t, "#main-content", location["target"])
+			require.Equal(t, "innerHTML", location["swap"])
 		}
 	}
 	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")

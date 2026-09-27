@@ -38,7 +38,7 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 					t.Errorf("unexpected first message: %v", r.Form)
 				}
 				sends.Add(1)
-				w.Header().Set("HX-Location", "/tasks/created?project_id="+project.ID)
+				w.Header().Set("HX-Location", `{"path":"/tasks/created?project_id=`+project.ID+`","target":"#main-content","swap":"innerHTML"}`)
 				return
 			}
 			view = Tasks([]models.Project{project}, &project, nil, nil, nil, "", "")
@@ -68,6 +68,7 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id="+project.ID, "new-task-workspace", func(b *composerFocusCDP) {
 		b.waitFor("board ready", `String(Boolean(document.querySelector('a[hx-get^="/tasks/new"]')))`, "true")
+		b.evaluate(`window.originalSidebar=document.getElementById('sidebar'); 'saved'`)
 		b.click(`a[hx-get^="/tasks/new"]`)
 		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="message"]')))`, "/tasks/new:true")
 		b.waitFor("no creation dialog", `String(document.querySelector('dialog[open]')===null)`, "true")
@@ -88,6 +89,7 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.click("#task-message-input")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
 		b.waitFor("first message navigation", `location.pathname`, "/tasks/created")
+		b.waitFor("app shell retained after first send", `String(Boolean(window.originalSidebar && window.originalSidebar.isConnected && document.getElementById('sidebar')===window.originalSidebar && window.originalSidebar.getClientRects().length && document.querySelector('#main-content #created-thread')))`, "true")
 	})
 	if sends.Load() != 1 {
 		t.Fatalf("expected one first-message send, got %d", sends.Load())
