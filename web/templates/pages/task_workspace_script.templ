@@ -29,6 +29,7 @@ templ TaskWorkspaceScript() {
 			store('task-inspector-width', width);
 			var overlay = root.clientWidth < width + 560 || !changes.classList.contains('hidden');
 			panel.dataset.overlay = String(overlay);
+			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
 			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
 			if (overlay && !panel.hidden) panel.setAttribute('aria-modal', 'true');
 			else panel.removeAttribute('aria-modal');
