@@ -9,11 +9,21 @@ Use the Insights section in the sidebar to understand project activity after tas
 | Grades | Proactive insights, health checks, knowledge signals, and idea grading. |
 | Pulse | Upcoming work and generated pulse summaries. |
 | Reflection | Historical task activity and generated reflections. |
-| Analytics | Token usage, cost, model breakdowns, execution rates, duration trends, agent usage, frequent tasks, and failure trends. |
+| Analytics | Outcomes, supporting task evidence, agent and model comparisons, learning signals, automations, and provider usage. |
 
 ## Analytics
 
-Analytics is the quantitative view of how OpenVibely is being used. Open it from the Insights section of the sidebar.
+Analytics is the quantitative view of whether project work is producing useful outcomes and where attention is needed. Open it from the Insights section of the sidebar, then select a time window and optional project filters. Each section uses explicit denominators so a completed run is not confused with an achieved goal or merged work.
+
+### Overview And Outcomes
+
+The Overview summarizes tasks worked on, goals achieved, work merged, skills used, and automation activity. Outcome trends and the funnel connect run success, goal achievement, first-run success, follow-up work, and merge completion. Improvement, attention, and actionable-exception cards surface slow, costly, repeatedly failing, or reworked tasks.
+
+Open Outcomes for detailed success/failure, rework, follow-up, timing, and failure evidence. Use Supporting task evidence to drill into the tasks behind a metric instead of treating an aggregate chart as the final answer.
+
+### Agents, Models, Automations, And Learning
+
+Compare agents and model configurations by goal achievement, merge completion, first-run success, follow-up rate, runtime, reliability, and effort. The Automations view reports graph invocation and node behavior. Learning connects skill selection and usage to task outcomes so you can identify productive agent/skill pairings and enabled skills that may need clearer guidance or cleanup.
 
 ### Token Usage And Cost
 
@@ -27,42 +37,19 @@ Analytics is the quantitative view of how OpenVibely is being used. Open it from
 
 OAuth-connected provider accounts (Anthropic, OpenAI) show a usage snapshot card so you can see which account is consuming capacity.
 
-### Performance
-
-| Chart | What It Shows |
-|---|---|
-| Average Execution Time by Model | Compare latency across providers and models. |
-| Execution rate | Task execution frequency over time. |
-| Duration trend | Whether execution time is increasing or decreasing. |
-| Agent usage | Which agents are handling most work. |
-| Frequent task | Which task types recur most often. |
-| Failure trend | Whether task failure rate is increasing or stable. |
-
-### Skill Curation
-
-Analytics also shows whether Skill Curator is producing useful reusable guidance over time.
-
-| Chart / Table | What It Shows |
-|---|---|
-| Skill activity | When skills are selected, loaded, viewed, created, and edited. |
-| Top skills | The reusable guidance seeing the most activity. |
-| Follow-through | Whether selected skills later become used task context. |
-| Top agent/skill pairs | Which agents and skills work together most often. |
-| Least active enabled skills | Enabled skills that may need cleanup, consolidation, or clearer descriptions. |
-
 Analytics charts render in the browser timezone so time-axis labels match local working hours.
 
 ## How Insights Fit The Workflow
 
 Use the task board for live execution status. Use Insights when you want to step back and answer questions like:
 
-- Are tasks succeeding or failing more often?
-- Which agents or models are most active?
+- Are tasks reaching their goals, merging, or requiring rework?
+- Which agents, models, skills, or automations produce the strongest outcomes?
 - What work is coming up this week?
 - What historical trends are emerging?
 - Which model is consuming the most tokens or cost?
 
-Use Analytics specifically to understand provider spend, token consumption by model, and execution performance across the project.
+Use Analytics specifically to connect outcome and task evidence with provider spend, token consumption, execution performance, and learning across the project.
 
 ## Related Pages
 
