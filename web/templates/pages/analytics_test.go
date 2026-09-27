@@ -1120,8 +1120,12 @@ func TestBrowserFunctional_AnalyticsContent_ModelScorecardIsReadableWithoutHover
 	      if(!tip.matches(':popover-open'))fail('clicked help must remain open');
 	      document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
 	      if(tip.matches(':popover-open'))fail('Escape must close help');
-	      help.focus();if(!tip.matches(':popover-open'))fail('keyboard focus must open help');
-	      help.blur();if(tip.matches(':popover-open'))fail('leaving focus must close help');
+	      // A headless page under load can lack system focus; Chrome then moves focus without
+	      // firing focus events, so deliver them as a real keyboard focus change would.
+	      help.focus();if(!document.hasFocus())help.dispatchEvent(new FocusEvent('focusin',{bubbles:true}));
+	      if(!tip.matches(':popover-open'))fail('keyboard focus must open help');
+	      help.blur();if(!document.hasFocus())help.dispatchEvent(new FocusEvent('focusout',{bubbles:true}));
+	      if(tip.matches(':popover-open'))fail('leaving focus must close help');
 	      help.click();document.body.click();if(tip.matches(':popover-open'))fail('outside click must close help');
 	      if(!card.querySelector('td.bg-success\\/10')||!card.querySelector('td.bg-primary\\/10'))fail('colored scorecard missing');
 	      if(document.getElementById('modelTaskTime')||document.getElementById('modelTaskUsage'))fail('duplicate model lists remain');
