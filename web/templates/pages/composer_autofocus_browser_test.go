@@ -155,21 +155,23 @@ func (c *composerFocusCDP) waitForTimeout(label, expression, want string, timeou
 
 func (c *composerFocusCDP) click(selector string) {
 	c.t.Helper()
-	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';el.scrollIntoView({block:'center',inline:'center'});var r=el.getBoundingClientRect();var x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);return JSON.stringify({x:x,y:y,hit:hit&&(hit.id||hit.tagName),owns:!!(hit&&(hit===el||el.contains(hit)))});})()`, selector))
+	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';el.scrollIntoView({block:'center',inline:'center'});var r=el.getBoundingClientRect();var x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);return JSON.stringify({x:x,y:y,hit:hit&&(hit.id||hit.tagName),owns:!!(hit&&(hit===el||el.contains(hit))),visibility:getComputedStyle(el).visibility,active:document.activeElement&&(document.activeElement.id||document.activeElement.tagName)});})()`, selector))
 	if coordinates == "missing" {
 		c.t.Fatalf("native click target %s is missing", selector)
 	}
 	var point struct {
-		X    float64 `json:"x"`
-		Y    float64 `json:"y"`
-		Hit  string  `json:"hit"`
-		Owns bool    `json:"owns"`
+		X          float64 `json:"x"`
+		Y          float64 `json:"y"`
+		Hit        string  `json:"hit"`
+		Owns       bool    `json:"owns"`
+		Visibility string  `json:"visibility"`
+		Active     string  `json:"active"`
 	}
 	if err := json.Unmarshal([]byte(coordinates), &point); err != nil {
 		c.t.Fatalf("decode click coordinates for %s: %v", selector, err)
 	}
 	if !point.Owns {
-		c.t.Fatalf("native click target %s was covered by %s", selector, point.Hit)
+		c.t.Fatalf("native click target %s was covered by %s (target visibility %s, focus on %s)", selector, point.Hit, point.Visibility, point.Active)
 	}
 	for _, params := range []map[string]any{
 		{"type": "mouseMoved", "x": point.X, "y": point.Y},

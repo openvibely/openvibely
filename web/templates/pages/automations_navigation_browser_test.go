@@ -448,7 +448,9 @@ func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcro
 					el.scrollIntoView({block: 'nearest', inline: 'nearest'});
 					var rect = el.getBoundingClientRect();
 					var hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-					return rect.width > 0 && rect.height > 0 && hit && (hit === el || el.contains(hit)) ? 'ready' : 'waiting';
+					if (rect.width > 0 && rect.height > 0 && hit && (hit === el || el.contains(hit))) return 'ready';
+					var describe = function(node) { return node ? node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + (typeof node.className === 'string' && node.className ? '.' + node.className.trim().split(/\s+/).slice(0, 4).join('.') : '') : 'none'; };
+					return 'waiting: rect=' + Math.round(rect.left) + ',' + Math.round(rect.top) + ' ' + Math.round(rect.width) + 'x' + Math.round(rect.height) + ' viewport=' + innerWidth + 'x' + innerHeight + ' hit=' + describe(hit) + ' visibility=' + getComputedStyle(el).visibility + ' focus=' + describe(document.activeElement);
 				})()`, selector), "ready")
 		}
 		assertCard := func(id, name string) {
@@ -597,6 +599,13 @@ func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcro
 			var visibleCards = Array.from(root.querySelectorAll('[data-automation-url]')).filter(function(card) { return window.getComputedStyle(card).display !== 'none' && card.getClientRects().length > 0; });
 			return visibleCards.length + ':' + (visibleCards[0] && visibleCards[0].getAttribute('data-card-select-id') || '');
 		})()`, "1:automation-paused-browser")
+		// Typing filters instantly, then a debounced server search replaces the card grid.
+		// Wait for it, or it can land mid-interaction and destroy an open card menu.
+		browser.waitFor("server search for filtered Automations", `(function() {
+			var root = document.getElementById('automations-container');
+			var state = root && root._openVibelyCardPaginationState;
+			return state && state.search === 'Paused Delivery' && !state.loading && state.nextPage >= 1 ? 'settled' : 'waiting';
+		})()`, "settled")
 		assertCard("automation-paused-browser", "Paused Delivery")
 		tabToCard("automation-paused-browser")
 		press("Enter", "Enter", "")
