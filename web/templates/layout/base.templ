@@ -166,7 +166,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<link rel="stylesheet" href={ static.URL("vendor/highlight-github-dark.min.css") }/>
 			<script src={ static.URL("vendor/highlight.min.js") }></script>
 			<meta name="ov-asset-chartjs" content={ static.URL("vendor/chart.umd.min.js") }/>
-			<script src="wails://wails/runtime.js" onload="window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode()"></script>
+			if serverRuntimeMode(ctx) == "desktop" {
+				<script type="module">
+					import * as runtime from '/wails/runtime.js';
+					window.wails = runtime;
+					window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();
+				</script>
+			}
 			<style>
 				/* Disable DaisyUI button-pop animation on initial render.
 				   Without this, HTMX swaps cause all newly-inserted .btn elements

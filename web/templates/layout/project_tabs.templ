@@ -38,7 +38,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="desktop"] #sidebar { height: calc(100dvh - 46px); }
   [data-openvibely-runtime="desktop"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }
   @media (min-width: 1024px) { [data-openvibely-runtime="desktop"] .drawer-side { top: 0; } }
-  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 4px 8px 0; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }
+  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }
   #desktop-project-titlebar[data-platform="darwin"] { padding-left: 80px; }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
@@ -49,13 +49,13 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab [data-close-project] { padding: 5px 9px; border-radius: 50%; }
   .desktop-project-tab button:hover { background: oklch(var(--bc) / .08); }
   .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }
-  #desktop-project-titlebar [data-project-selector] { margin: 0 0 4px; width: 200px; flex-shrink: 0; display: flex; align-items: center; gap: 5px; }
-  #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; }
+  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }
+  #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
   #desktop-project-titlebar #project-selector-trigger { width: 150px; }
   #project-pin-toggle, .desktop-window-controls { flex-shrink: 0; }
   .desktop-window-controls { display: flex; align-self: stretch; --wails-draggable: no-drag; }
-  .desktop-window-controls button { width: 40px; }
+  .desktop-window-controls button { width: 40px; display: flex; align-items: center; justify-content: center; padding: 0; }
   .desktop-window-controls button:hover { background: oklch(var(--bc) / .1); }
   .desktop-window-controls button:last-child:hover { background: #c42b1c; color: white; }
  </style>

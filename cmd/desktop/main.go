@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -230,7 +232,16 @@ func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBacke
 }
 
 func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.Coordinator) error {
+	backendURL, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("parse desktop backend URL: %w", err)
+	}
+	// Keep the document and native runtime on Wails' origin. Application routes
+	// still use the shared backend; immediate flushing preserves SSE streaming.
+	proxy := httputil.NewSingleHostReverseProxy(backendURL)
+	proxy.FlushInterval = -1
 	app := application.New(application.Options{
+		Assets:      application.AssetOptions{Handler: proxy},
 		Name:        "OpenVibely",
 		Description: "OpenVibely desktop application",
 		Icon:        desktopicons.OpenVibelyPNG,
@@ -263,10 +274,12 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 			}
 		})
 	}
+	titleBar := application.MacTitleBarHiddenInset
+	titleBar.ShowToolbarWhenFullscreen = true
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",
 		Title:     "OpenVibely",
-		URL:       baseURL,
+		URL:       "/",
 		Width:     1280,
 		Height:    820,
 		MinWidth:  1024,
@@ -274,7 +287,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		// macOS keeps native traffic lights over the full-size content view.
 		// Other platforms use Wails window controls in the shared title bar.
 		Frameless: runtime.GOOS != "darwin",
-		Mac:       application.MacWindow{TitleBar: application.MacTitleBarHidden},
+		Mac:       application.MacWindow{TitleBar: titleBar},
 	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 

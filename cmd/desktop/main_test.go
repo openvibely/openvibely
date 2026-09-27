@@ -201,13 +201,13 @@ func TestDesktopPackagedUpdateHelperInvalidTimeoutsReturnBeforeHelper(t *testing
 	}
 }
 
-func TestDesktopWindowUsesEphemeralPortWebViewWithPersistentStorage(t *testing.T) {
+func TestDesktopWindowProxiesEphemeralBackendWithPersistentStorage(t *testing.T) {
 	content, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatalf("read desktop main.go: %v", err)
 	}
 	source := string(content)
-	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       baseURL,`) {
+	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       "/",`) || !strings.Contains(source, `httputil.NewSingleHostReverseProxy(backendURL)`) || !strings.Contains(source, `proxy.FlushInterval = -1`) {
 		t.Fatal("desktop launcher must keep loading the server UI through a Wails WebView window")
 	}
 	for _, disallowed := range []string{`DataPath:`, `PrivateMode`, `Incognito`, `Ephemeral`, `ClearBrowsingData`} {

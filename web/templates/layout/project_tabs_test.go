@@ -31,7 +31,7 @@ func TestProjectTabsPlatformRendering(t *testing.T) {
 			t.Fatal("selector must be in sidebar only on web")
 		}
 		if desktop {
-			for _, want := range []string{`data-pinned-projects="[&#34;b&#34;,&#34;a&#34;]"`, `data-project-tab="a"`, `role="tablist"`, `--wails-draggable: drag`, `--wails-draggable: no-drag`, `overflow-x: auto`, `:focus-visible`, `aria-selected="true"`} {
+			for _, want := range []string{`import * as runtime from '/wails/runtime.js'`, `window.wails = runtime`, `data-pinned-projects="[&#34;b&#34;,&#34;a&#34;]"`, `data-project-tab="a"`, `role="tablist"`, `--wails-draggable: drag`, `--wails-draggable: no-drag`, `overflow-x: auto`, `:focus-visible`, `aria-selected="true"`} {
 				if !strings.Contains(html, want) {
 					t.Errorf("missing %s", want)
 				}
@@ -45,7 +45,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`Frameless: runtime.GOOS != "darwin"`, `application.MacTitleBarHidden`} {
+	for _, want := range []string{`Frameless: runtime.GOOS != "darwin"`, `application.MacTitleBarHiddenInset`, `titleBar.ShowToolbarWhenFullscreen = true`, `httputil.NewSingleHostReverseProxy`, `Handler: proxy`} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing native window configuration: %s", want)
 		}

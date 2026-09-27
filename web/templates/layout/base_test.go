@@ -878,12 +878,9 @@ func TestToastDismissalCleanup(t *testing.T) {
 		t.Error("openvibelyToast bridge must map click_url and use it for toast body navigation")
 	}
 
-	// Verify Wails runtime is loaded so desktop pages can call window.wails.OpenURL.
-	if !strings.Contains(html, `src="wails://wails/runtime.js"`) {
-		t.Error("base layout must load wails runtime script for desktop bridge APIs")
-	}
-	if !strings.Contains(html, `onload="window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode()"`) {
-		t.Error("base layout wails runtime script must re-apply desktop runtime detection after load")
+	// Normal web pages must not attempt to load a native-only runtime.
+	if strings.Contains(html, `wails://wails/runtime.js`) || strings.Contains(html, `import * as runtime from '/wails/runtime.js'`) {
+		t.Error("web layout must not load the native runtime")
 	}
 
 	// Verify the desktop external-link bridge exists so target="_blank" anchors
