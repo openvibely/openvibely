@@ -286,6 +286,9 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		// The app draws native-looking controls alongside the project tabs.
 		// Do not reserve a second native titlebar above this shared row.
 		Frameless: true,
+		// A nonzero radius selects Wails' genuinely borderless AppKit window,
+		// rather than retaining a native titlebar that can reappear in fullscreen.
+		Mac: application.MacWindow{CornerRadius: 20},
 	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 
