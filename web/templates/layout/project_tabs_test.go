@@ -40,6 +40,27 @@ func TestProjectTabsPlatformRendering(t *testing.T) {
 	}
 }
 
+func TestMacFullscreenPresentationAndGlyphs(t *testing.T) {
+	source, err := os.ReadFile("../../../cmd/desktop/fullscreen_darwin.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"NSApplicationPresentationHideMenuBar", "NSApplicationPresentationHideDock", "NSApplicationDidResignActiveNotification", "NSWindowWillExitFullScreenNotification"} {
+		if !strings.Contains(string(source), want) {
+			t.Errorf("missing fullscreen lifecycle contract: %s", want)
+		}
+	}
+	source, err = os.ReadFile("project_tabs.templ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"common:WindowFullscreen", "common:WindowUnFullscreen", "data-fullscreen-glyph", "data-restore-glyph"} {
+		if !strings.Contains(string(source), want) {
+			t.Errorf("missing stateful traffic-light glyph: %s", want)
+		}
+	}
+}
+
 func TestProjectTabsNativeWindowContract(t *testing.T) {
 	source, err := os.ReadFile("../../../cmd/desktop/main.go")
 	if err != nil {
