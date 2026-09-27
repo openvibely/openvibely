@@ -37,13 +37,24 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 				if r.FormValue("message") != "Implement this feature" || r.FormValue("title") != "" {
 					t.Errorf("unexpected first message: %v", r.Form)
 				}
-				sends.Add(1)
-				w.Header().Set("HX-Location", `{"path":"/tasks/created?project_id=`+project.ID+`","target":"#main-content","swap":"innerHTML"}`)
+				createdID := fmt.Sprintf("created-%d", sends.Add(1))
+				w.Header().Set("X-Created-Task-ID", createdID)
+				w.Header().Set("HX-Location", `{"path":"/tasks/`+createdID+`?project_id=`+project.ID+`","target":"#main-content","swap":"innerHTML"}`)
 				return
 			}
-			view = Tasks([]models.Project{project}, &project, nil, nil, nil, "", "")
-		case "/tasks/created":
-			_, _ = w.Write([]byte(`<div id="created-thread">First message accepted</div>`))
+			if r.Header.Get("HX-Request") == "true" {
+				view = TasksContent(&project, nil, nil, nil, "", "")
+			} else {
+				view = Tasks([]models.Project{project}, &project, nil, nil, nil, "", "")
+			}
+		case "/tasks/created-1", "/tasks/created-2":
+			task := &models.Task{ID: strings.TrimPrefix(r.URL.Path, "/tasks/"), ProjectID: project.ID, Title: "Created task", Status: models.StatusCompleted}
+			fmt.Fprint(w, `<div id="created-thread">`)
+			view = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
+			if err := view.Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+			fmt.Fprint(w, `</div><a id="back-to-tasks" hx-get="/tasks?project_id=draft-project" hx-target="#main-content" hx-push-url="true">Tasks</a>`)
 			return
 		case "/breadcrumb-selectors/tasks":
 			_, _ = w.Write([]byte(`<div role="listbox"><a role="option" href="/tasks/existing">Existing task</a></div>`))
@@ -72,6 +83,7 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.click(`a[hx-get^="/tasks/new"]`)
 		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="message"]')))`, "/tasks/new:true")
 		b.waitFor("no creation dialog", `String(document.querySelector('dialog[open]')===null)`, "true")
+		b.waitFor("initial composer settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request'))`, "true")
 		b.click(`input[name="title"]`)
 		b.typeText("New task draft")
 		b.click(`textarea[name="message"]`)
@@ -88,11 +100,30 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.evaluate(`document.querySelector('input[name="title"]').value=''`)
 		b.click("#task-message-input")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
-		b.waitFor("first message navigation", `location.pathname`, "/tasks/created")
+		b.waitFor("first message navigation", `location.pathname`, "/tasks/created-1")
 		b.waitFor("app shell retained after first send", `String(Boolean(window.originalSidebar && window.originalSidebar.isConnected && document.getElementById('sidebar')===window.originalSidebar && window.originalSidebar.getClientRects().length && document.querySelector('#main-content #created-thread')))`, "true")
+		for attempt := 1; attempt <= 2; attempt++ {
+			b.waitFor("accepted composer cleared", `document.getElementById('task-message-input').value`, "")
+			b.click("#task-message-input")
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowUp", "code": "ArrowUp", "windowsVirtualKeyCode": 38}, nil)
+			b.waitFor("initial message recalled", `document.getElementById('task-message-input').value`, "Implement this feature")
+			if attempt == 2 {
+				break
+			}
+			b.click(`#sidebar [data-nav-base="/tasks"]`)
+			b.waitFor("board return", `location.pathname`, "/tasks")
+			b.waitFor("board settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request'))`, "true")
+			b.click(`a[hx-get^="/tasks/new"]`)
+			b.waitFor("second new workspace", `location.pathname`, "/tasks/new")
+			b.waitFor("new composer settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request') && !!document.getElementById('task-message-input'))`, "true")
+			b.click("#task-message-input")
+			b.typeText("Implement this feature")
+			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
+			b.waitFor("second message navigation", `location.pathname`, "/tasks/created-2")
+		}
 	})
-	if sends.Load() != 1 {
-		t.Fatalf("expected one first-message send, got %d", sends.Load())
+	if sends.Load() != 2 {
+		t.Fatalf("expected two first-message sends, got %d", sends.Load())
 	}
 	if unexpected.Load() != 0 {
 		t.Fatalf("unsaved task made %d persisted-task requests", unexpected.Load())

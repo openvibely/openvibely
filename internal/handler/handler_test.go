@@ -1409,6 +1409,8 @@ func TestHandler_NewTaskFirstMessage(t *testing.T) {
 			require.Contains(t, location["path"], "/tasks/")
 			require.Equal(t, "#main-content", location["target"])
 			require.Equal(t, "innerHTML", location["swap"])
+			require.NotEmpty(t, rec.Header().Get("X-Created-Task-ID"))
+			require.Contains(t, location["path"], "/tasks/"+rec.Header().Get("X-Created-Task-ID")+"?")
 		}
 	}
 	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")

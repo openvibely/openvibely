@@ -3071,17 +3071,22 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						var submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';
 						var accepted = false;
 						var replayAsNormal = false;
-						if (event.detail.successful) {
+						var createdTaskID = request.status >= 200 && request.status < 300 && request.getResponseHeader('X-Created-Task-ID');
+						// HX-Location returns before HTMX sets detail.successful.
+						if (event.detail.successful || createdTaskID) {
 							var responseText = request.responseText || '';
-							// Keep user draft intact when the handler intentionally returns no content
-							// (e.g. model-setup guard toasts) so users don't lose their message.
-							if (responseText.trim() !== '') {
+							// First-message creation redirects with an empty body, but explicitly
+							// acknowledges acceptance and supplies the new task's history scope.
+							if (createdTaskID) messageHistoryStorageKey = 'openvibely-task-thread-message-history-' + createdTaskID;
+							// Keep user draft intact for empty model-setup guard responses.
+							if (responseText.trim() !== '' || createdTaskID) {
 								accepted = true;
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
 									if (messageInput && messageInput.value === submittedMessage) {
 										messageInput.value = '';
+										messageInput.dispatchEvent(new Event('input', { bubbles: true }));
 										refreshPrimaryActionForInput();
 									}
 									if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
