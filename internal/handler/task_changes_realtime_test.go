@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -642,5 +643,61 @@ func TestGetTaskChanges_WorktreeFollowupReeditingCommittedFileRendersSingleDiffE
 	}
 	if strings.Contains(body, "first run") {
 		t.Fatalf("expected intermediate first-run content to be collapsed from active net diff")
+	}
+}
+
+func TestTaskChangesSummaryAuthoritativePreservedDiffAndScope(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	foreign := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	path := "/tasks/" + task.ID + "/changes/summary?project_id=" + project.ID
+	read := func() map[string]any {
+		t.Helper()
+		rec := requestWithAccept(tc, http.MethodGet, path, "application/json", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("summary status %d: %s", rec.Code, rec.Body.String())
+		}
+		var summary map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &summary); err != nil {
+			t.Fatal(err)
+		}
+		return summary
+	}
+	if got := read()["files"]; got != float64(0) {
+		t.Fatalf("empty files = %v", got)
+	}
+	execution := &models.Execution{TaskID: task.ID, Status: models.ExecRunning}
+	if err := tc.execRepo.Create(ctx, execution); err != nil {
+		t.Fatal(err)
+	}
+	diff := "diff --git a/main.go b/main.go\n--- a/main.go\n+++ b/main.go\n@@ -1 +1,2 @@\n-old\n+new\n+more\ndiff --git a/image.png b/image.png\nBinary files a/image.png and b/image.png differ\n"
+	if err := tc.execRepo.UpdateDiffOutput(ctx, execution.ID, diff); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []models.TaskStatus{models.StatusRunning, models.StatusCompleted, models.StatusFailed} {
+		task.Status = status
+		if status == models.StatusCompleted {
+			task.MergeStatus = models.MergeStatusMerged
+		}
+		if err := tc.taskRepo.Update(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		got := read()
+		for key, want := range map[string]any{"files": float64(2), "insertions": float64(2), "deletions": float64(1), "status": string(status), "review_comments": float64(0)} {
+			if got[key] != want {
+				t.Errorf("%s: %s = %v, want %v", status, key, got[key], want)
+			}
+		}
+	}
+	if err := tc.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"", foreign.ID} {
+		rec := requestWithAccept(tc, http.MethodGet, "/tasks/"+task.ID+"/changes/summary?project_id="+scope, "application/json", "")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("scope %q: %d %s", scope, rec.Code, rec.Body.String())
+		}
 	}
 }

@@ -808,6 +808,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/tasks/:taskId/detail-status", h.GetTaskDetailStatus)
 	e.GET("/tasks/:taskId/detail-actions", h.GetTaskDetailActions)
 	e.GET("/tasks/:taskId/changes", h.GetTaskChanges)
+	e.GET("/tasks/:taskId/changes/summary", h.GetTaskChangesSummary)
 	e.GET("/tasks/:taskId/changes/file", h.GetTaskChangesFile)
 	e.POST("/tasks/:taskId/changes/live", h.GetTaskChangesLive)
 	e.GET("/tasks/:taskId/thread", h.GetTaskThread)

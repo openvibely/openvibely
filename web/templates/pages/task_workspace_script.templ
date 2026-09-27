@@ -1,0 +1,210 @@
+package pages
+
+templ TaskWorkspaceScript() {
+	<script>
+	(function() {
+		if (window.taskWorkspace) window.taskWorkspace.destroy();
+		var root = document.getElementById('task-detail-content');
+		var taskID = root.dataset.taskId;
+		var panel = root.querySelector('#task-details-panel');
+		var opener = root.querySelector('#task-details-opener');
+		var divider = root.querySelector('#task-panel-divider');
+		var thread = root.querySelector('#tab-chat');
+		var changes = root.querySelector('#tab-changes');
+		var back = root.querySelector('#task-workspace-back');
+		var abort = new AbortController();
+		var signal = abort.signal;
+		var tabNames = ['details', 'schedules', 'chaining', 'attachments', 'lifecycle'];
+		var selected = 'details', width = 420, scrollState = null, returnFocus = null, composerFocus = null;
+		var summary = null, timer = null, pending = false, dirty = false;
+		function read(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
+		function store(key, value) { try { localStorage.setItem(key, value); } catch (_) {} }
+		var saved = read('task-inspector-tab-' + taskID);
+		if (tabNames.indexOf(saved) >= 0) selected = saved;
+		function on(el, name, fn) { el.addEventListener(name, fn, {signal: signal}); }
+		function resize(value) {
+			width = Math.max(340, Math.min(720, Number(value) || 420));
+			root.style.setProperty('--task-panel-width', width + 'px');
+			divider.setAttribute('aria-valuenow', String(width));
+			store('task-inspector-width', width);
+			var overlay = root.clientWidth < width + 560 || !changes.classList.contains('hidden');
+			panel.dataset.overlay = String(overlay);
+			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
+			if (overlay && !panel.hidden) panel.setAttribute('aria-modal', 'true');
+			else panel.removeAttribute('aria-modal');
+			thread.inert = overlay && !panel.hidden;
+			changes.inert = overlay && !panel.hidden;
+		}
+		function historyView(tab) {
+			var url = new URL(window.location.href);
+			url.searchParams.set('tab', tab);
+			if (url.href !== window.location.href) history.pushState(Object.assign({}, history.state, {taskWorkspace: taskID}), '', url);
+			var context = root.querySelector('[data-breadcrumb-selector-context][name="tab"]');
+			if (context) context.value = tab;
+		}
+		function selectTab(name, push) {
+			if (tabNames.indexOf(name) < 0) name = selected;
+			selected = name;
+			store('task-inspector-tab-' + taskID, name);
+			panel.querySelectorAll('[role="tab"]').forEach(function(tab) {
+				var active = !panel.hidden && tab.dataset.tab === name;
+				tab.classList.toggle('tab-active', active);
+				tab.setAttribute('aria-selected', String(active));
+				tab.tabIndex = active ? 0 : -1;
+				var section = root.querySelector('#tab-' + tab.dataset.tab);
+				section.classList.toggle('hidden', !active);
+				section.setAttribute('role', 'tabpanel');
+				section.setAttribute('aria-labelledby', tab.id);
+			});
+			if (!panel.hidden && name === 'lifecycle' && window.refreshLifecycleActivity) {
+				var list = root.querySelector('#lifecycle-activity-list');
+				if (list) window.refreshLifecycleActivity(taskID, list.dataset.projectId || '');
+			}
+			if (push) historyView(changes.classList.contains('hidden') ? name : 'changes');
+		}
+		function closePanel(push, focus) {
+			panel.hidden = true;
+			opener.setAttribute('aria-expanded', 'false');
+			selectTab(selected, false);
+			resize(width);
+			if (push !== false) historyView(changes.classList.contains('hidden') ? 'chat' : 'changes');
+			if (focus !== false) opener.focus({preventScroll:true});
+		}
+		function openPanel(name, push, focus) {
+			panel.hidden = false;
+			opener.setAttribute('aria-expanded', 'true');
+			selectTab(name || selected, push !== false);
+			resize(width);
+			if (focus !== false || panel.dataset.overlay === 'true') panel.querySelector('[aria-selected="true"]').focus({preventScroll:true});
+		}
+		function workspace(diff, push) {
+			var wasDiff = !changes.classList.contains('hidden');
+			var messages = root.querySelector('#task-thread-messages');
+			if (diff && !wasDiff) {
+				scrollState = messages ? messages.scrollTop : null;
+				returnFocus = composerFocus || document.activeElement;
+				composerFocus = null;
+			}
+			if (diff) thread.dataset.workspaceHidden = 'true';
+			thread.classList.toggle('hidden', diff);
+			changes.classList.toggle('hidden', !diff);
+			back.hidden = !diff;
+			resize(width);
+			if (diff) {
+				_startFileChangesSSE(taskID);
+				if (!wasDiff && window.htmx) {
+					htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskID) + '/changes', {
+						target: changes.querySelector('#changes-content'), swap: 'innerHTML'
+					}).then(function() {
+						if (!signal.aborted) _lastDiffFingerprint = _computeDiffFingerprint(changes);
+					}).catch(function() {});
+				}
+				if (push !== false) back.focus({preventScroll:true});
+			} else {
+				_stopFileChangesSSE();
+				delete thread.dataset.workspaceHidden;
+				if (wasDiff && messages && scrollState !== null) {
+					messages.scrollTop = scrollState;
+					var tracker = window._taskThreadPageTracker;
+					if (tracker) tracker.userScrolledUp = messages.scrollHeight - messages.clientHeight - scrollState > 10;
+				}
+				if (wasDiff && returnFocus && returnFocus.isConnected && push !== false) returnFocus.focus({preventScroll:true});
+				else if (wasDiff && push !== false) _focusTaskThreadComposer(back);
+			}
+			if (push !== false) historyView(diff ? 'changes' : (panel.hidden ? 'chat' : selected));
+		}
+		function applyURL() {
+			var tab = new URLSearchParams(location.search).get('tab') || root.dataset.initialTab || 'chat';
+			workspace(tab === 'changes', false);
+			if (tabNames.indexOf(tab) >= 0) openPanel(tab, false, false);
+			else closePanel(false, false);
+		}
+		function renderSummary() {
+			var bar = root.querySelector('#task-change-activity');
+			if (!bar || !summary) return;
+			bar.hidden = summary.files === 0;
+			root.dataset.hasChanges = String(summary.files > 0);
+			var labels = {running:'● Working', queued:'● Queued', completed:'✓ Completed', failed:'× Failed', cancelled:'Cancelled', pending:'Pending', blocked:'Blocked'};
+			var text = [labels[summary.status] || summary.status];
+			if (summary.duration && (summary.status === 'completed' || summary.status === 'failed')) text.push(summary.duration);
+			text.push(summary.files + ' files changed', '+' + summary.insertions + ' −' + summary.deletions);
+			if (summary.review_comments) text.push(summary.review_comments + ' comments');
+			bar.querySelector('[data-change-summary]').textContent = text.join(' · ');
+			bar.querySelector('[data-review-changes]').textContent = summary.status === 'failed' ? 'Inspect changes' : summary.status === 'completed' ? 'Review changes' : 'View changes';
+		}
+		function refreshSummary() {
+			timer = null;
+			if (signal.aborted || !root.isConnected) return;
+			if (pending) { dirty = true; return; }
+			pending = true;
+			fetch('/tasks/' + encodeURIComponent(taskID) + '/changes/summary?project_id=' + encodeURIComponent(root.dataset.projectId), {signal:signal}).then(function(response) {
+				if (!response.ok) throw new Error('Summary unavailable');
+				return response.json();
+			}).then(function(value) { if (!signal.aborted) { summary = value; renderSummary(); } }).catch(function() {}).finally(function() {
+				pending = false;
+				if (dirty && !signal.aborted) { dirty = false; scheduleSummary(); }
+			});
+		}
+		function scheduleSummary() { if (!timer) timer = setTimeout(refreshSummary, 350); }
+		function invalidation(event) { if (event.detail && event.detail.task_id === taskID) scheduleSummary(); }
+		on(root, 'pointerdown', function(event) {
+			if (event.target.closest('[data-review-changes]')) {
+				var form = root.querySelector('#task-thread-form');
+				composerFocus = form && form.contains(document.activeElement) ? document.activeElement : null;
+			}
+		});
+		on(window, 'sse-file-change-event', invalidation);
+		on(window, 'sse-task-event', invalidation);
+		on(window, 'sse-live-connected', scheduleSummary);
+		on(document, 'htmx:afterSettle', renderSummary);
+		window.addEventListener('popstate', function(event) {
+			if (location.pathname === '/tasks/' + taskID) { event.stopImmediatePropagation(); applyURL(); }
+		}, {signal:signal, capture:true});
+		on(panel, 'click', function(event) { var tab = event.target.closest('[role="tab"]'); if (tab) selectTab(tab.dataset.tab, true); });
+		on(document, 'keydown', function(event) {
+			if (event.key === 'Escape' && !event.defaultPrevented && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open]')) {
+				event.preventDefault();
+				closePanel();
+			}
+		});
+		on(panel, 'keydown', function(event) {
+			var tab = event.target.closest('[role="tab"]');
+			if (tab && ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) >= 0) {
+				event.preventDefault();
+				var index = tabNames.indexOf(selected);
+				index = event.key === 'Home' ? 0 : event.key === 'End' ? 4 : (index + (event.key === 'ArrowRight' ? 1 : 4)) % 5;
+				selectTab(tabNames[index], true);
+				panel.querySelector('[aria-selected="true"]').focus();
+			}
+			if (event.key === 'Tab' && panel.dataset.overlay === 'true') {
+				var controls = Array.from(panel.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')).filter(function(el) { return !el.disabled && el.tabIndex >= 0 && el.getClientRects().length; });
+				var first = controls[0], last = controls[controls.length - 1];
+				if (event.shiftKey && event.target === first) { event.preventDefault(); last.focus(); }
+				else if (!event.shiftKey && event.target === last) { event.preventDefault(); first.focus(); }
+			}
+		});
+		on(divider, 'dblclick', function() { resize(420); });
+		on(divider, 'keydown', function(event) {
+			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize(width + (event.key === 'ArrowLeft' ? 20 : -20)); }
+			if (event.key === 'Home') { event.preventDefault(); resize(340); }
+			if (event.key === 'End') { event.preventDefault(); resize(720); }
+		});
+		var drag = null;
+		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
+		on(divider, 'pointermove', function(event) { if (drag) resize(drag.width + drag.x - event.clientX); });
+		on(divider, 'pointerup', function() { drag = null; });
+		on(divider, 'pointercancel', function() { drag = null; });
+		var observer = new ResizeObserver(function() { resize(width); });
+		observer.observe(root);
+		function destroy() { abort.abort(); clearTimeout(timer); observer.disconnect(); }
+		on(document, 'htmx:beforeSwap', function(event) { var target = event.detail.target; if (target === root || (target && target.contains(root))) destroy(); });
+		window.taskWorkspace = {
+			openChanges: function() { workspace(true); }, openThread: function() { workspace(false); },
+			closePanel: closePanel, togglePanel: function() { if (panel.hidden) openPanel(); else closePanel(); }, destroy: destroy
+		};
+		resize(read('task-inspector-width'));
+		applyURL();
+		refreshSummary();
+	})();
+	</script>
+}

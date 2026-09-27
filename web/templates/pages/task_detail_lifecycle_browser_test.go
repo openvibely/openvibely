@@ -1903,6 +1903,10 @@ window.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(reboundScript);
 
     window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
+    await new Promise(function(resolve) { setTimeout(resolve, 250); });
+    if (document.querySelector('[data-lifecycle-execution-id="event-1"]')) fail('hidden lifecycle must not refresh');
+    document.getElementById('tab-lifecycle').classList.remove('hidden');
+    document.querySelector('[data-tab="lifecycle"]').click();
     await waitFor(function() {
       return !!document.querySelector('[data-lifecycle-execution-id="event-1"]');
     }, 'lifecycle reconnect recovery after HTMX swap', 4000);

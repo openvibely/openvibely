@@ -21,8 +21,8 @@ func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
 	}
 
 	html := buf.String()
-	if strings.Contains(html, "history.pushState") {
-		t.Fatal("task detail must use centralized HTMX-managed navigation instead of manual history.pushState")
+	if !strings.Contains(html, "history.pushState") {
+		t.Fatal("workspace transitions must push same-document history")
 	}
 	if !strings.Contains(html, `data-openvibely-page-title="Investigate &lt;title&gt; &amp; history - OpenVibely"`) {
 		t.Fatalf("task detail fragment missing escaped authoritative title marker: %s", html)
@@ -171,8 +171,8 @@ func TestTaskDetailContent_ChangesTabHidesReviewCommentCountBadge(t *testing.T) 
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, ">Changes</a>") {
-		t.Fatal("expected Changes tab to render")
+	if !strings.Contains(output, `id="task-workspace-back"`) {
+		t.Fatal("expected full diff workspace back control")
 	}
 	if strings.Contains(output, "badge badge-warning badge-xs") {
 		t.Fatal("did not expect Changes tab review comment count badge")
@@ -195,11 +195,11 @@ func TestTaskDetailContent_TabsRemainScrollableOnMobile(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, `role="tablist" class="tabs tabs-bordered tabs-sm mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap"`) {
-		t.Fatal("expected task detail tabs to scroll horizontally instead of clipping on mobile")
+	if !strings.Contains(output, `aria-label="Task details" class="tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap"`) {
+		t.Fatal("expected inspector tabs to scroll horizontally")
 	}
-	for _, label := range []string{"Details", "Thread", "Changes", "Schedules", "Chaining", "Attachments", "Lifecycle"} {
-		if !strings.Contains(output, ">"+label+"</a>") {
+	for _, label := range []string{"Details", "Schedules", "Chaining", "Attachments", "Lifecycle"} {
+		if !strings.Contains(output, ">"+label+"</button>") {
 			t.Fatalf("expected %s tab to remain rendered", label)
 		}
 	}
@@ -443,7 +443,7 @@ func TestTaskDetailContent_ThreadTabRequestsSharedComposerFocus(t *testing.T) {
 		"window.openVibelyRequestComposerFocus",
 		"reason: 'task-thread-tab'",
 		"trigger: trigger",
-		"_focusTaskThreadComposer(tab)",
+		"returnFocus.focus({preventScroll:true})",
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("task Thread tab shared focus handoff missing %q", want)
@@ -467,7 +467,7 @@ func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "Thread loads on demand when you open this tab.") {
+	if !strings.Contains(output, "Thread is loading...") {
 		t.Fatal("expected thread placeholder copy for inactive tab")
 	}
 	if strings.Contains(output, "id=\"task-thread-view\"") {
@@ -479,7 +479,7 @@ func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	if !strings.Contains(output, "htmx.ajax('GET', '/tasks/' + taskId + '/thread'") {
 		t.Fatal("expected thread loader to fetch /tasks/:id/thread via HTMX")
 	}
-	if !strings.Contains(output, "if (tabName === 'chat') {") || !strings.Contains(output, "_loadThreadContent(taskId).then(function() {") {
+	if !strings.Contains(output, "if (document.getElementById('thread-content')) {") || !strings.Contains(output, "_loadThreadContent(taskId).then(function() {") {
 		t.Fatal("expected chat tab switch to trigger thread lazy load")
 	}
 }
@@ -586,7 +586,7 @@ func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.
 	if !strings.Contains(output, "Thread is loading...") {
 		t.Fatal("expected loading placeholder when chat tab is initially active")
 	}
-	if !strings.Contains(output, "if (_isChatTabActive()) {") {
+	if !strings.Contains(output, "if (document.getElementById('thread-content')) {") {
 		t.Fatal("expected initial-load handler to detect active chat tab")
 	}
 	if !strings.Contains(output, "_loadThreadContent(taskId).then(function() {") {
@@ -831,8 +831,8 @@ func TestTaskDetailContent_ThreadTabRestoresPerTaskScrollState(t *testing.T) {
 		"function _restoreThreadScrollOrBottom(taskId, forceBottom) {",
 		"chatMessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : chatMessages.scrollHeight;",
 		"userScrolledUp: userScrolledUp, pinned: !userScrolledUp",
-		"if (_isChatTabActive()) {",
-		"_saveTaskThreadScrollState();",
+		"if (document.getElementById('thread-content')) {",
+		"scrollState = messages ? messages.scrollTop : null;",
 		"_restoreThreadScrollOrBottom(taskId, false);",
 	}
 	for _, r := range required {

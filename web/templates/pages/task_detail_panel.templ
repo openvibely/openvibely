@@ -1,0 +1,36 @@
+package pages
+
+// TaskDetailPanel keeps supporting information outside the permanent thread workspace.
+templ TaskDetailPanel() {
+	<aside id="task-details-panel" aria-label="Task details" class="bg-base-100 border border-base-300" hidden>
+		<div id="task-panel-divider" role="separator" aria-label="Resize details panel" aria-orientation="vertical" aria-valuemin="340" aria-valuemax="720" aria-valuenow="420" tabindex="0"></div>
+		<div class="flex items-center justify-between p-3">
+			<h2 class="font-semibold">Details</h2>
+			<button type="button" class="btn btn-ghost btn-sm" aria-label="Close details panel" onclick="window.taskWorkspace.closePanel()">×</button>
+		</div>
+		<div role="tablist" aria-label="Task details" class="tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap">
+			for _, tab := range []struct{ Key, Label string }{{"details", "Details"}, {"schedules", "Schedules"}, {"chaining", "Chaining"}, {"attachments", "Attachments"}, {"lifecycle", "Lifecycle"}} {
+				<button type="button" role="tab" class="tab" id={ "inspector-tab-" + tab.Key } data-tab={ tab.Key } aria-controls={ "tab-" + tab.Key } aria-selected="false" tabindex="-1">{ tab.Label }</button>
+			}
+		</div>
+		<div id="task-inspector-body" class="flex flex-col flex-1 min-h-0 overflow-y-auto p-3">
+			{ children... }
+		</div>
+	</aside>
+	<style>
+		#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }
+		#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }
+		#tab-changes { overflow:auto; }
+		#task-details-panel { order:1; position:relative; display:flex; flex-direction:column; flex:none; width:var(--task-panel-width,420px); min-height:0; max-width:100%; }
+		#task-details-panel[hidden] { display:none; }
+		#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }
+		#task-panel-divider:focus-visible { outline:2px solid currentColor; }
+		#task-inspector-body > .task-tab-panel { min-height:0; }
+		#task-details-panel[data-overlay="true"] { position:absolute; right:0; top:0; bottom:0; z-index:40; box-shadow:0 8px 30px #0003; }
+		#task-detail-content[data-has-changes="true"] [data-task-terminal-status] { display:none; }
+		@media(max-width:640px) {
+			#task-details-panel[data-overlay="true"] { position:fixed; inset:0; width:100%; max-width:none; z-index:60; }
+			#task-panel-divider { display:none; }
+		}
+	</style>
+}

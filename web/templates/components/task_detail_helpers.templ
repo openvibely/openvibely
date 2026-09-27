@@ -274,7 +274,7 @@ func TaskLatestDuration(executions []models.Execution) string {
 // Shows only when the task is completed or failed, providing clear visual feedback.
 templ TaskThreadStatusIndicator(task *models.Task, executions []models.Execution) {
 	if task.Status == models.StatusCompleted {
-		<div class="flex items-center justify-center gap-2 py-2">
+		<div data-task-terminal-status class="flex items-center justify-center gap-2 py-2">
 			<div class="flex items-center gap-2 text-success text-sm opacity-70">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
@@ -286,7 +286,7 @@ templ TaskThreadStatusIndicator(task *models.Task, executions []models.Execution
 			</div>
 		</div>
 	} else if task.Status == models.StatusFailed {
-		<div class="flex items-center justify-center gap-2 py-2">
+		<div data-task-terminal-status class="flex items-center justify-center gap-2 py-2">
 			<div class="flex items-center gap-2 text-error text-sm opacity-70">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -381,6 +381,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			</div>
 			@ChatLatestMessageButton("task-thread-messages", "scrollTracker_task-thread-messages")
 		</div>
+		@TaskChangeActivity(task.ID)
 		<!-- Message Input Form (shared component with model selector) -->
 		@ChatInputForm(ChatInputFormConfig{
 			FormID:                 "task-thread-form",
