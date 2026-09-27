@@ -31,7 +31,9 @@ templ TaskWorkspaceScript() {
 			panel.dataset.overlay = String(overlay);
 			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
 			root.dataset.inspectorOverlay = String(overlay && !panel.hidden);
-			root.style.setProperty('--task-panel-reserved-width', Math.max(0, width - (window.innerWidth - root.getBoundingClientRect().right) + 8) + 'px');
+			var main = root.closest('#main-content');
+			var gutter = main ? root.getBoundingClientRect().left - main.getBoundingClientRect().left : 24;
+			root.style.setProperty('--task-panel-reserved-width', Math.max(0, width - (window.innerWidth - root.getBoundingClientRect().right) + gutter) + 'px');
 			opener.querySelector('path').setAttribute('d', panel.hidden ? 'm15 6-6 6 6 6' : 'm9 6 6 6-6 6');
 			opener.setAttribute('aria-label', panel.hidden ? 'Open details panel' : 'Collapse details panel');
 			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
