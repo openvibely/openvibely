@@ -363,7 +363,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 			document = strings.Replace(document, render(ChatContent(nil, nil, project.ID, nil, nil, false, false, 30)), fragment, 1)
 			_, _ = w.Write([]byte(injectPageControl(document, controls)))
 		case "/tasks/task-focus":
-			defaultTab := "details"
+			defaultTab := "chat"
 			if r.URL.Query().Get("tab") == "chat" {
 				defaultTab = "chat"
 			}
@@ -398,7 +398,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		browser.click("#to-task")
 		browser.waitFor("real HTMX Task Detail navigation", `location.pathname+':'+Boolean(document.getElementById('task-detail-content'))`, "/tasks/task-focus:true")
 		browser.waitFor("Task Detail HTMX settle", `(function(){var el=document.getElementById('main-content');return el.classList.contains('htmx-swapping')+':'+el.classList.contains('htmx-settling')})()`, "false:false")
-		browser.click(`[data-tab="chat"]`)
+		// The permanent thread loads without a page-tab click.
 		browser.waitFor("lazy Thread focus", `document.activeElement&&document.activeElement.id`, "task-message-input")
 		browser.typeText("lazy thread")
 		browser.waitFor("native Thread typing", `document.getElementById('task-message-input').value`, "lazy thread")

@@ -52,7 +52,7 @@ script removeEditAttachment(attID string) {
 }
 
 templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
-	<div id="task-detail-content" class="h-full flex flex-col">
+	<div id="task-detail-content" class="h-full flex flex-col" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-initial-tab={ defaultTab }>
 		@layout.PageTitle(task.Title)
 		<!-- Breadcrumb navigation -->
 		<div class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
@@ -96,6 +96,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					OriginName: "from",
 				})
 			</div>
+			<button id="task-workspace-back" type="button" class="btn btn-ghost btn-sm" hidden onclick="window.taskWorkspace.openThread()">‹ Back to thread</button>
+			<button id="task-details-opener" type="button" class="btn btn-ghost btn-sm" aria-controls="task-details-panel" aria-expanded="false" onclick="window.taskWorkspace.togglePanel()">Details</button>
 			<script>
 				(function() {
 					var params = new URLSearchParams(window.location.search);
@@ -157,16 +159,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				})();
 			</script>
 		</div>
-		<!-- Tabs Navigation -->
-		<div role="tablist" class="tabs tabs-bordered tabs-sm mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap">
-			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "details") } data-tab="details" onclick="switchTaskTab('details')">Details</a>
-			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "chat") } data-tab="chat" onclick="switchTaskTab('chat')">Thread</a>
-			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "changes") } data-tab="changes" onclick="switchTaskTab('changes')">Changes</a>
-			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "schedules") } data-tab="schedules" onclick="switchTaskTab('schedules')">Schedules</a>
-			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "chaining") } data-tab="chaining" onclick="switchTaskTab('chaining')">Chaining</a>
-			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "attachments") } data-tab="attachments" onclick="switchTaskTab('attachments')">Attachments</a>
-			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "lifecycle") } data-tab="lifecycle" onclick="switchTaskTab('lifecycle')">Lifecycle</a>
-		</div>
+		<div id="task-workspaces">
+			@TaskDetailPanel() {
 		<!-- Tab: Details -->
 		<div id="tab-details" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details") }>
 			<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -1433,6 +1427,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						}
 
 						function refreshLifecycleActivity(taskID, projectID, fromPending) {
+							var inspector = document.getElementById('task-details-panel');
+							var lifecyclePanel = document.getElementById('tab-lifecycle');
+							if ((inspector && inspector.hidden) || (lifecyclePanel && lifecyclePanel.classList.contains('hidden'))) return;
 							var container = lifecycleContainer(taskID, projectID);
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
@@ -1528,6 +1525,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						}
 
 						function loadOlder(taskID, projectID) {
+							var inspector = document.getElementById('task-details-panel');
+							var lifecyclePanel = document.getElementById('tab-lifecycle');
+							if ((inspector && inspector.hidden) || (lifecyclePanel && lifecyclePanel.classList.contains('hidden'))) return;
 							var container = lifecycleContainer(taskID, projectID);
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
@@ -1567,6 +1567,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						}
 
 						function loadNewer(taskID, projectID, catchupCount, fromPending) {
+							var inspector = document.getElementById('task-details-panel');
+							var lifecyclePanel = document.getElementById('tab-lifecycle');
+							if ((inspector && inspector.hidden) || (lifecyclePanel && lifecyclePanel.classList.contains('hidden'))) return;
 							var container = lifecycleContainer(taskID, projectID);
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
@@ -1621,6 +1624,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							});
 						}
 						function scheduleLiveRefresh(taskID, projectID, mode) {
+							var inspector = document.getElementById('task-details-panel');
+							var lifecyclePanel = document.getElementById('tab-lifecycle');
+							if ((inspector && inspector.hidden) || (lifecyclePanel && lifecyclePanel.classList.contains('hidden'))) return;
 							var state = getState(taskID, projectID);
 							if (mode === 'newer') {
 								if (state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer) return;
@@ -1846,7 +1852,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				</script>
 			</div>
 			<!-- End Tab: Lifecycle -->
-			<!-- Tab: Changes -->
+			}
+		<!-- Tab: Changes -->
 		<div id="tab-changes" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes") }>
 			<div
 				id="changes-content"
@@ -1876,7 +1883,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		</div>
 		<!-- End Tab: Changes -->
 		<!-- Tab: Thread -->
-		<div id="tab-chat" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "chat") }>
+		<div id="tab-chat" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab == "changes") }>
 			<div
 				id="thread-content"
 				hx-get={ fmt.Sprintf("/tasks/%s/thread", task.ID) }
@@ -1890,16 +1897,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden">
 					<div class="card-body flex-1 flex flex-col min-h-0">
 						<h4 class="text-lg font-bold mb-3">Thread</h4>
-						if defaultTab == "chat" {
-							<p class="text-sm opacity-60">Thread is loading...</p>
-						} else {
-							<p class="text-sm opacity-60">Thread loads on demand when you open this tab.</p>
-						}
+						<p class="text-sm opacity-60">Thread is loading...</p>
 					</div>
 				</div>
 			</div>
 		</div>
 		<!-- End Tab: Thread -->
+		</div>
+
 		@DestructiveConfirmDialog("delete_schedule_confirm_modal", "Close delete schedule confirmation", "Delete Schedule", "Are you sure you want to delete the schedule for ", "delete_schedule_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_schedule_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSchedule()"}) {
 			The task will remain, but it will no longer run on this schedule.
 		}
@@ -1947,8 +1952,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					}
 
 					function _isChatTabActive() {
-						var chatTab = document.querySelector('[data-tab="chat"]');
-						if (!chatTab || !chatTab.classList.contains('tab-active')) return false;
 						var chatPanel = document.getElementById('tab-chat');
 						return !!chatPanel && !chatPanel.classList.contains('hidden');
 					}
@@ -1983,7 +1986,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					function _restoreThreadScrollOrBottom(taskId, forceBottom) {
 						requestAnimationFrame(function() {
 							var chatMessages = document.getElementById('task-thread-messages');
-							if (!chatMessages || !window.chatAutoScroll) return;
+							if (!chatMessages || !window.chatAutoScroll || !_isChatTabActive()) return;
 
 							var state = _getTaskThreadScrollState(taskId);
 							if (!forceBottom && state) {
@@ -2072,9 +2075,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							window._openTaskThreadAfterRun = function(taskId) {
 								taskId = taskId || _currentTaskIdFromPath();
 								if (!taskId) return;
-								switchTaskTab('chat');
+								window.taskWorkspace.closePanel(false, false);
+								window.taskWorkspace.openThread();
 								var nextURL = '/tasks/' + taskId + '?tab=chat';
-								if (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {
+								if (window.location.pathname !== '/tasks/' + taskId) {
 									window.openVibelyNavigate(nextURL).catch(function(err) {
 										console.error('[task-thread] Failed to open task thread:', err);
 									});
@@ -2089,76 +2093,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						window.openVibelyRequestComposerFocus({ root: threadForm, reason: 'task-thread-tab', trigger: trigger, force: true });
 					}
 
-					function switchTaskTab(tabName) {
-					var container = document.getElementById('task-detail-content');
-					if (!container) return;
-
-					if (_isChatTabActive()) {
-						_saveTaskThreadScrollState();
-					}
-
-				container.querySelectorAll('.task-tab-panel').forEach(function(panel) {
-					panel.classList.add('hidden');
-				});
-
-				container.querySelectorAll('[data-tab]').forEach(function(tab) {
-					tab.classList.remove('tab-active');
-				});
-
-				var panel = container.querySelector('#tab-' + tabName);
-				if (panel) panel.classList.remove('hidden');
-
-					var tab = container.querySelector('[data-tab="' + tabName + '"]');
-					if (tab) tab.classList.add('tab-active');
-					var selectorContext = container.querySelector('[data-breadcrumb-selector-context][name="tab"]');
-					if (selectorContext) selectorContext.value = tabName;
-
-					// Auto-scroll thread to bottom when switching to thread tab
-					if (tabName === 'chat') {
-						var threadContent = document.getElementById('thread-content');
-						var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
-						if (taskId) {
-							_loadThreadContent(taskId).then(function() {
-								_restoreThreadScrollOrBottom(taskId, false);
-								_focusTaskThreadComposer(tab);
-							});
-						} else {
-							_restoreThreadScrollOrBottom(taskId, false);
-						}
-					}
-				// Reload changes content and start SSE when switching to changes tab
-				if (tabName === 'changes') {
-					var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
-					if (taskIdMatch && taskIdMatch[1]) {
-						var taskId = taskIdMatch[1];
-						if (typeof htmx !== 'undefined') {
-							htmx.ajax('GET', '/tasks/' + taskId + '/changes', {
-								target: '#changes-content',
-								swap: 'innerHTML'
-							}).then(function() {
-								// Seed fingerprint so the first SSE update can detect no-ops.
-								var cc = document.getElementById('changes-content');
-								if (cc) _lastDiffFingerprint = _computeDiffFingerprint(cc);
-							}).catch(function() {});
-						}
-						// Start SSE for real-time file changes
-						_startFileChangesSSE(taskId);
-					}
-				} else {
-					// Stop SSE when switching away from changes tab
-					_stopFileChangesSSE();
-				}
-				}
-
-				// File changes are consumed from the shared sidebar live stream.
+					// File changes are consumed from the shared sidebar live stream.
 				// Keep per-task filtering in-page to avoid creating another EventSource.
 				var _fileChangesListening = false;
 				var _fileChangesUpdatePending = false;
 				var _fileChangesTaskId = null;
 
 				function _isChangesTabActive() {
-					var changesTab = document.querySelector('[data-tab="changes"]');
-					if (!changesTab || !changesTab.classList.contains('tab-active')) return false;
 					var changesPanel = document.getElementById('tab-changes');
 					return !!changesPanel && !changesPanel.classList.contains('hidden');
 				}
@@ -2235,6 +2176,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					}).then(function(html) {
 						_fileChangesUpdatePending = false;
 
+						if (!changesContent.isConnected || !_isChangesTabActive()) return;
 						// Parse the response in a detached element to compute fingerprint
 						// without touching the live DOM at all.
 						var offscreen = document.createElement('div');
@@ -2277,7 +2219,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				// Start SSE if changes tab is active on page load and task is running/queued
 				(function() {
 					setTimeout(function() {
-						if (_isChatTabActive()) {
+						if (document.getElementById('thread-content')) {
 							var threadContent = document.getElementById('thread-content');
 							var taskId = (threadContent && threadContent.dataset.taskId) || _currentTaskIdFromPath();
 							if (taskId) {
@@ -2485,6 +2427,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				});
 			}
 		</script>
+		@TaskWorkspaceScript()
 	</div>
 }
 

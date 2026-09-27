@@ -1,0 +1,11 @@
+package components
+
+// This node is preserved during thread morphs; the workspace controller owns its compact JSON projection.
+templ TaskChangeActivity(taskID string) {
+	<div id="task-change-activity" data-task-id={ taskID } hx-preserve="true" class="flex-shrink-0 border-t border-base-300 py-2 text-sm" hidden>
+		<div class="flex items-center justify-between gap-2">
+			<span data-change-summary role="status" aria-live="polite"></span>
+			<button type="button" class="btn btn-ghost btn-sm" data-review-changes onclick="window.taskWorkspace.openChanges()">Review changes</button>
+		</div>
+	</div>
+}

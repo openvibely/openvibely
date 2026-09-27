@@ -3144,7 +3144,7 @@ templ ChatAutoScrollScript() {
 				return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
 			},
 			scrollToBottom: function(element, smooth) {
-				if (!element) return;
+				if (!element || element.closest('[data-workspace-hidden="true"]')) return;
 				element.scrollTo({
 					top: element.scrollHeight,
 					behavior: smooth ? 'smooth' : 'auto'
@@ -3520,6 +3520,7 @@ templ ChatAutoScrollScript() {
 
 					this._handlers.scroll = function() {
 						if (!self.element || !self.element.isConnected) return;
+						if (self.element.closest('[data-workspace-hidden="true"]')) return;
 						var isNear = window.chatAutoScroll.isNearBottom(self.element);
 						var el = self.element;
 						var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= 2;
@@ -3559,6 +3560,7 @@ templ ChatAutoScrollScript() {
 			// shouldAutoScroll: only the persisted flag governs auto-scroll. Once the
 			// user scrolls up they stay parked there until they themselves scroll back.
 				shouldAutoScroll: function() {
+					if (this.element && this.element.closest('[data-workspace-hidden="true"]')) return false;
 					if (!this.element) return true;
 					// While the user is scrolling up, their scroll event may not have been
 					// processed yet; pinning now would undo it. Downward or undirected input

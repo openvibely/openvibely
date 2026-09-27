@@ -1099,20 +1099,12 @@ func (h *Handler) GetTask(c echo.Context) error {
 		}
 		return err
 	}
-	task := data.task
 	applog.Infof("[handler] GetTask id=%s schedules=%d attachments=%d", taskID, len(data.schedules), len(data.attachments))
 
 	// Determine default tab
 	defaultTab := c.QueryParam("tab")
 	if defaultTab == "" {
-		if task.Status == models.StatusCompleted ||
-			task.Status == models.StatusFailed ||
-			task.Status == models.StatusCancelled ||
-			task.Status == models.StatusRunning {
-			defaultTab = "chat"
-		} else {
-			defaultTab = "details"
-		}
+		defaultTab = "chat"
 	}
 	// Migrate old/alternate thread tab params to the internal chat tab key.
 	if defaultTab == "history" || defaultTab == "thread" {
@@ -1681,6 +1673,42 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 	}
 	meta.Index = fileIndex
 	return meta, true
+}
+
+// GetTaskChangesSummary returns authoritative counts without rendering diff cards.
+func (h *Handler) GetTaskChangesSummary(c echo.Context) error {
+	ctx := c.Request().Context()
+	projectID := h.mutationProjectID(c)
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project context is required")
+	}
+	task, err := h.requireTaskInRequestProject(ctx, c.Param("taskId"), projectID)
+	if err != nil {
+		return err
+	}
+	files := components.ParseDiffOutput(h.resolveTaskChangesDiffOutput(ctx, task))
+	insertions, deletions := 0, 0
+	for _, file := range files {
+		for _, hunk := range file.Hunks {
+			for _, line := range hunk.Lines {
+				switch line.Type {
+				case "add":
+					insertions++
+				case "del":
+					deletions++
+				}
+			}
+		}
+	}
+	metrics, err := h.execRepo.GetTaskExecutionMetrics(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"files": len(files), "insertions": insertions, "deletions": deletions,
+		"review_comments": len(h.loadTaskReviewComments(ctx, task.ID)),
+		"status":          task.Status, "duration": components.FormatDuration(metrics.LatestDurationMs),
+	})
 }
 
 // GetTaskChanges returns just the changes tab content for fresh updates when switching tabs.

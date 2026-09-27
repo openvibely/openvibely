@@ -45,8 +45,8 @@ func assertSchedulesTaskDetailFragment(t *testing.T, body string) {
 	if !strings.Contains(body, `id="task-detail-content"`) {
 		t.Fatal("expected task-detail-content in HTMX response")
 	}
-	if !strings.Contains(body, `class="tab tab-active" data-tab="schedules"`) {
-		t.Fatal("expected schedules tab to be active in HTMX response")
+	if !strings.Contains(body, `data-initial-tab="schedules"`) || !strings.Contains(body, `aria-controls="tab-schedules"`) {
+		t.Fatal("expected schedules inspector tab to be selected in HTMX response")
 	}
 }
 

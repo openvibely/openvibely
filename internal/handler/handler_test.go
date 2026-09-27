@@ -1409,7 +1409,7 @@ func TestHandler_GetTask_ThreadTabAliasActivatesThread(t *testing.T) {
 		t.Fatalf("GetTask failed: %v", err)
 	}
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `data-tab="chat"`)
+	assertContains(t, rec, `data-initial-tab="chat"`)
 	assertContains(t, rec, `id="tab-chat"`)
 	assertContains(t, rec, "tab-active")
 	assertContains(t, rec, "Thread is loading...")
@@ -1445,7 +1445,7 @@ func TestHandler_GetTask_CompletedTaskDefaultsToChat(t *testing.T) {
 				t.Fatalf("GetTask failed: %v", err)
 			}
 			assertCode(t, rec, http.StatusOK)
-			assertContains(t, rec, `data-tab="chat"`)
+			assertContains(t, rec, `data-initial-tab="chat"`)
 			assertContains(t, rec, `id="tab-chat"`)
 			assertContains(t, rec, "tab-active")
 		})

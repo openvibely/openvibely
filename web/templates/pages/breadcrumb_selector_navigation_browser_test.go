@@ -106,9 +106,8 @@ window.addEventListener('DOMContentLoaded', function() {
 
   (async function() {
     await waitFor(function(){ return route('task', 'task-one'); }, 'initial Task detail');
-    var changesTab=document.querySelector('[data-tab="changes"]');
-    changesTab.click();
-    await waitFor(function(){ return changesTab.classList.contains('tab-active') && !document.getElementById('tab-changes').classList.contains('hidden'); }, 'client-side Changes tab transition');
+    window.taskWorkspace.openChanges();
+    await waitFor(function(){ return !document.getElementById('tab-changes').classList.contains('hidden'); }, 'client-side Changes workspace transition');
     key(button(), 'Enter');
     await waitFor(function(){ return dialog() && dialog().open; }, 'Task selector dialog open');
     await waitFor(function(){ return document.activeElement===input(); }, 'Task selector search focus');

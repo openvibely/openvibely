@@ -1042,6 +1042,17 @@ func TestHandler_TaskChangesEndpointsShareActiveLiveWorktreeResolution(t *testin
 		t.Fatalf("update stale diff: %v", err)
 	}
 
+	summaryRecorder := httptest.NewRecorder()
+	summaryContext := e.NewContext(httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/summary?project_id="+project.ID, nil), summaryRecorder)
+	summaryContext.SetParamNames("taskId")
+	summaryContext.SetParamValues(task.ID)
+	if err := h.GetTaskChangesSummary(summaryContext); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summaryRecorder.Body.String(), `"files":1`) || !strings.Contains(summaryRecorder.Body.String(), `"insertions":1`) {
+		t.Fatalf("unexpected authoritative summary: %s", summaryRecorder.Body.String())
+	}
+
 	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
 	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
 
@@ -1101,6 +1112,17 @@ func TestHandler_TaskChangesEndpointsShareMergedPreservedDiffResolution(t *testi
 		t.Fatalf("update preserved diff: %v", err)
 	}
 
+	summaryRecorder := httptest.NewRecorder()
+	summaryContext := e.NewContext(httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/summary?project_id="+project.ID, nil), summaryRecorder)
+	summaryContext.SetParamNames("taskId")
+	summaryContext.SetParamValues(task.ID)
+	if err := h.GetTaskChangesSummary(summaryContext); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summaryRecorder.Body.String(), `"files":1`) || !strings.Contains(summaryRecorder.Body.String(), `"insertions":1`) {
+		t.Fatalf("unexpected authoritative summary: %s", summaryRecorder.Body.String())
+	}
+
 	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
 	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
 
@@ -1153,6 +1175,17 @@ func TestHandler_TaskChangesEndpointsShareMissingWorktreeFallbackResolution(t *t
 	preservedDiff := "diff --git a/preserved_missing.txt b/preserved_missing.txt\n+preserved missing worktree diff\n"
 	if err := h.execRepo.UpdateDiffOutput(ctx, exec.ID, preservedDiff); err != nil {
 		t.Fatalf("update preserved diff: %v", err)
+	}
+
+	summaryRecorder := httptest.NewRecorder()
+	summaryContext := e.NewContext(httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/summary?project_id="+project.ID, nil), summaryRecorder)
+	summaryContext.SetParamNames("taskId")
+	summaryContext.SetParamValues(task.ID)
+	if err := h.GetTaskChangesSummary(summaryContext); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summaryRecorder.Body.String(), `"files":1`) || !strings.Contains(summaryRecorder.Body.String(), `"insertions":1`) {
+		t.Fatalf("unexpected authoritative summary: %s", summaryRecorder.Body.String())
 	}
 
 	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
