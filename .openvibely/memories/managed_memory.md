@@ -23,4 +23,4 @@ Lifecycle and retrieval:
 - The user prefers authorized memory updates to be performed directly by the active lifecycle agent, not delegated. If scoped mutation tools are unavailable, report that limitation.
 - Recall selects handles at route time from `MEMORIES.md`, parallel to Skill Curator selection. Topic bodies are loaded on demand through authorized, read-only `memory_view`; selected prompt context is handle-oriented rather than a dump of all topics.
 - `memory_view` is request-scoped and read-only. It permits route-selected or explicitly indexed handles, rejects the index itself, traversal, and unindexed handles, and is an explicit allowed-tool grant in agent configuration.
-- Consolidation is a normal visible scheduled task assigned to Memory Curator, not hidden scheduler behavior. A project-level durable-memory browser is not implemented; bounded read-only browsing is tracked by `openvibely/openvibely#32`.
+- Consolidation is a normal visible scheduled task assigned to Memory Curator, not hidden scheduler behavior. A project-level durable-memory browser is not implemented; bounded read-only browsing remains a product gap.

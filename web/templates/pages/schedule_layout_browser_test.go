@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_ScheduleContentTimelineFillsAvailableHeightInChrome(t *testing.T) {
@@ -103,6 +104,9 @@ func TestBrowserFunctional_ScheduleContentTimelineFillsAvailableHeightInChrome(t
 		t.Run(tc.name, func(t *testing.T) {
 			browserResult := make(chan string, 4)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if static.ServeAsset(w, r) {
+					return
+				}
 				if r.URL.Path == "/browser-result" {
 					browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 					w.WriteHeader(http.StatusNoContent)

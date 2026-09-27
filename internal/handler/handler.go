@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/openvibely/openvibely/web/static"
 	echoSwagger "github.com/swaggo/echo-swagger"
 )
 
@@ -714,6 +715,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	})
 	e.GET("/favicon.png", h.AppIconPNG)
 	e.GET("/favicon.ico", h.AppIconICO)
+	e.GET(static.Prefix+"*", echo.WrapHandler(static.Handler()))
 
 	// Machine-readable readiness and immutable build identity.
 	e.GET("/api/system/health", h.SystemHealth)

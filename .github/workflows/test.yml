@@ -153,6 +153,9 @@ jobs:
       - name: Ensure generated files are committed
         run: git diff --exit-code
 
+      - name: Ensure embedded front-end assets match their pins and templates
+        run: scripts/build-assets.sh --check
+
       - name: Validate browser test naming
         shell: bash
         run: |

@@ -18,7 +18,7 @@ Catalog and persistence:
 - Full documents read the DB setting and embed compact early theme state for first paint. HTMX fragments do not reread app settings. Changes, including footer toggles, update DOM/localStorage immediately and persist the stable ID asynchronously through `POST /ui/preferences`.
 - Footer sun/moon toggles between the most recently selected light and dark themes. Controls resynchronize after DOM insertion. If rendering separates later, a native/bootstrap preferences payload is needed to avoid first-paint flash.
 - Theme CSS variables apply before paint. Highlight.js must not load a fixed GitHub Dark stylesheet; Markdown/code colors derive from the selected theme for initial and HTMX content.
-- Theme normalization/persistence is duplicated between early and interactive paths in `web/templates/layout/base.templ`; the narrow consolidation remains `#1023` and must preserve synchronous pre-CSS startup and system-theme behavior.
+- Theme normalization/persistence is duplicated between early and interactive paths in `web/templates/layout/base.templ`; any consolidation must preserve synchronous pre-CSS startup and system-theme behavior.
 
 Native and imported styling:
 - Native dark retains original surfaces such as page/content `#191E24`, sidebar/cards/modals/inputs `#1D232A`, and border `#15191E`. Native light uses canvas `#F5F5F5` and surfaces `#FAFAFA`.

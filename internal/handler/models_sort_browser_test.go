@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -54,12 +55,9 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 	}
 	var local []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		local = append(local, line)
+		local = append(local, stripExternalAssetTags(line))
 	}
-	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>
+	page := strings.Replace(stripHeadStyles(strings.Join(local, "\n")), "</head>", `<style>
 		html, body { margin: 0; padding: 0; }
 		body { font-family: sans-serif; }
 		#models-container { padding: 16px; }
@@ -170,6 +168,9 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 	page = strings.Replace(page, "</body>", runner+"</body>", 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/models" {
 			tc.echo.ServeHTTP(w, r)
 			return
@@ -262,12 +263,9 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 	}
 	var local []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		local = append(local, line)
+		local = append(local, stripExternalAssetTags(line))
 	}
-	page := strings.Replace(strings.Join(local, "\n"), "</main>", content.String()+"</main>", 1)
+	page := strings.Replace(stripHeadStyles(strings.Join(local, "\n")), "</main>", content.String()+"</main>", 1)
 	runner := `<script>
 	(function() {
 		function finish(status, message) {
@@ -333,6 +331,9 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 	page = strings.Replace(page, "</body>", runner+"</body>", 1)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.URL.Path == "/channels" {
 			w.Header().Set(cardPageHasMoreHeader, "false")

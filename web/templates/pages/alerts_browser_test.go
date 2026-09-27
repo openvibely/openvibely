@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationInChrome(t *testing.T) {
@@ -47,11 +48,11 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 	}
 	page := rendered.String()
 	for _, external := range []string{
-		"https://cdn.tailwindcss.com",
-		"https://unpkg.com/htmx.org@2.0.4",
-		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
-		"https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js",
-		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+		static.URL("app-utilities.css"),
+		static.URL("vendor/htmx.min.js"),
+		static.URL("vendor/idiomorph-ext.min.js"),
+		static.URL("vendor/marked.min.js"),
+		static.URL("vendor/highlight.min.js"),
 		"wails://wails/runtime.js",
 	} {
 		page = strings.ReplaceAll(page, external, "/empty.js")
@@ -62,6 +63,9 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 </style></head>`, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch {
 		case r.URL.Path == "/empty.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -259,6 +263,9 @@ func TestBrowserFunctional_AlertsInspectCopyFeedbackInChrome(t *testing.T) {
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/browser-result" {
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
@@ -343,8 +350,8 @@ func TestBrowserFunctional_AlertsInspectMarkdownAndHTMXDetailLoadingInChrome(t *
 	if err := Alerts(nil, projectID, []models.AlertSummary{summary, emptyAlert}, 0).Render(context.Background(), &renderedPage); err != nil {
 		t.Fatalf("render Alerts page: %v", err)
 	}
-	page := strings.Replace(renderedPage.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
-	page = strings.Replace(page, "https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js", "/marked.min.js", 1)
+	page := strings.Replace(renderedPage.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
+	page = strings.Replace(page, static.URL("vendor/marked.min.js"), "/marked.min.js", 1)
 	expectedBody, err := json.Marshal(body)
 	if err != nil {
 		t.Fatalf("marshal expected Markdown body: %v", err)
@@ -489,6 +496,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	browserResult := make(chan string, 8)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch {
 		case r.URL.Path == "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -647,6 +657,9 @@ func TestBrowserFunctional_SystemUpdateSurfacesShareNormalizedSnapshotStateInChr
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch {
 		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
@@ -1050,6 +1063,9 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 
 	browserResult := make(chan string, 8)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
 		case r.URL.Path == "/htmx-2.0.4.min.js":
@@ -1061,7 +1077,7 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 				return
 			}
 			page := renderAlertsPage()
-			page = strings.Replace(page, "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", style+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -53,6 +54,9 @@ func TestBrowserFunctional_HTMXHistoryNavigationAndTitlesInChrome(t *testing.T) 
 	var ordinaryBetaRequests atomic.Int32
 	var fixtureServer *httptest.Server
 	fixtureServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -150,6 +154,9 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/models":
@@ -247,6 +254,9 @@ func TestBrowserFunctional_SidebarHostedIdentityPayloadIsInertInChrome(t *testin
 </script></body></html>`
 
 	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

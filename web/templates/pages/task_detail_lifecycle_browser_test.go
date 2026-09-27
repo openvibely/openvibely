@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
@@ -2420,6 +2421,9 @@ func TestBrowserFunctional_TaskDetailLifecycleFillsRemainingHeightInChrome(t *te
 	page := ""
 	browserResult := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/browser-result":
 			select {

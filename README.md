@@ -284,6 +284,8 @@ Common targets:
 - `make build`
 - `make build-desktop`
 - `make templ`
+- `make assets` (rebuild embedded CSS/JS in `web/static/dist` from pinned downloads)
+- `make assets-latest` (list pinned front-end packages with newer versions)
 - `make swagger`
 - `make run`
 - `make clean`

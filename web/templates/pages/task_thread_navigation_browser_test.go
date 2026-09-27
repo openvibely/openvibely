@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -251,6 +252,9 @@ html, body, #main-content { height: 100%; margin: 0; }
 	browserResult := make(chan string, 16)
 	var stalledImageRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")

@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/require"
@@ -58,10 +59,7 @@ func TestCollectionSelectionGutterDoesNotShiftCardContent(t *testing.T) {
 	require.NoError(t, layout.Base("Stable selection gutter", nil, "").Render(t.Context(), &base))
 	var local []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		local = append(local, line)
+		local = append(local, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>.card{position:relative}.card-body{padding:2rem}@media (min-width:768px){.md\:pl-8{padding-left:2rem!important}}</style></head>`, 1)
 	page = strings.Replace(page, "</main>", content.String()+"</main>", 1)
@@ -79,6 +77,9 @@ func TestCollectionSelectionGutterDoesNotShiftCardContent(t *testing.T) {
 
 	result := make(chan string, 1)
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/browser-result" {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 1024))
 			select {
@@ -163,10 +164,7 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	require.NoError(t, layout.Base("Collection selection browser", nil, "").Render(t.Context(), &base))
 	var local []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		local = append(local, line)
+		local = append(local, stripExternalAssetTags(line))
 	}
 	initialHTML := renderWithState(initial, pages.CardListState{Filters: map[string]string{"provider": "openai"}})
 	page := strings.Replace(strings.Join(local, "\n"), "</head>", `<style>
@@ -309,6 +307,9 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	}
 	browserResults := make(chan browserResult, 1)
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
 		case r.URL.Path == "/browser-result" && r.Method == http.MethodPost:

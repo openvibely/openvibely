@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
 
@@ -190,6 +191,9 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/htmx-2.0.4.min.js" {
 			w.Header().Set("Content-Type", "application/javascript")
 			_, _ = w.Write(htmx)
@@ -205,7 +209,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 			w.WriteHeader(recorder.Code)
 			body := recorder.Body.String()
-			body = strings.Replace(body, "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			body = strings.Replace(body, static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			if r.Header.Get("HX-Request") == "" {
 				body = strings.Replace(body, "</body>", runner+"</body>", 1)
 			}

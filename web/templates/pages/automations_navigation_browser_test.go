@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -170,12 +171,12 @@ func TestBrowserFunctional_CatalogCardsSuppressPointerFocusFlashButKeepKeyboardF
 	}
 	page := strings.Replace(base.String(), "</body>", automationFragment.String()+skillsFragment.String()+"</body>", 1)
 	for _, external := range []string{
-		"https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css",
-		"https://cdn.tailwindcss.com",
-		"https://unpkg.com/htmx.org@2.0.4",
-		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
-		"https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js",
-		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+		static.URL("app.css"),
+		static.URL("app-utilities.css"),
+		static.URL("vendor/htmx.min.js"),
+		static.URL("vendor/idiomorph-ext.min.js"),
+		static.URL("vendor/marked.min.js"),
+		static.URL("vendor/highlight.min.js"),
 		"wails://wails/runtime.js",
 	} {
 		replacement := "/empty.js"
@@ -195,6 +196,9 @@ func TestBrowserFunctional_CatalogCardsSuppressPointerFocusFlashButKeepKeyboardF
 	</style></head>`, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/empty.css":
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -333,12 +337,12 @@ func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcro
 	}
 	initialPage := strings.Replace(base.String(), "</body>", renderFragment(cards, true)+"</body>", 1)
 	for _, external := range []string{
-		"https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css",
-		"https://cdn.tailwindcss.com",
-		"https://unpkg.com/htmx.org@2.0.4",
-		"https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js",
-		"https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js",
-		"https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+		static.URL("app.css"),
+		static.URL("app-utilities.css"),
+		static.URL("vendor/htmx.min.js"),
+		static.URL("vendor/idiomorph-ext.min.js"),
+		static.URL("vendor/marked.min.js"),
+		static.URL("vendor/highlight.min.js"),
 		"wails://wails/runtime.js",
 	} {
 		replacement := "/empty.js"
@@ -362,6 +366,9 @@ func TestBrowserFunctional_AutomationPortfolioCardsSupportKeyboardNavigationAcro
 </style></head>`, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/empty.css":
 			w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -1060,6 +1067,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	browserResult := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1690,6 +1700,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	browserResult := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -2196,6 +2209,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	browserResult := make(chan string, 1)
 	var yamlParseRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/", "/automations/builder":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

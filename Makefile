@@ -1,4 +1,4 @@
-.PHONY: dev build build-desktop package-desktop-macos run migrate templ css clean install-tools test test-short test-cover docker-build docker-check-tools
+.PHONY: dev build build-desktop package-desktop-macos run migrate templ css assets assets-latest clean install-tools test test-short test-cover docker-build docker-check-tools
 
 DOCKER ?= docker
 IMAGE ?= openvibely/openvibely:local
@@ -34,6 +34,16 @@ dev:
 # Generate templ files (no global binary required)
 templ:
 	go run github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION) generate
+
+# Rebuild embedded front-end assets (web/static/dist) from the pins in scripts/build-assets.sh.
+# Downloads the pinned Tailwind binary and libraries (no Node). Run after changing
+# templates or a pinned version, and commit the result.
+assets:
+	scripts/build-assets.sh
+
+# List pinned front-end packages that have newer versions.
+assets-latest:
+	scripts/build-assets.sh --check-latest
 
 # Generate Swagger documentation (no global binary required)
 swagger:

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_ChatComposerShortcutsInChrome(t *testing.T) {
@@ -36,6 +38,9 @@ func TestBrowserFunctional_ChatComposerShortcutsInChrome(t *testing.T) {
 
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -223,6 +228,9 @@ func TestBrowserFunctional_ChatComposerAutoFocusLifecycleInChrome(t *testing.T) 
 	thread := renderForm(ChatInputFormConfig{FormID: "task-thread-form", InputID: "task-message-input", PostEndpoint: "/tasks/task-1/thread", TargetID: "task-thread-messages", TaskID: "task-1"})
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -346,6 +354,9 @@ func TestBrowserFunctional_ChatComposerIOSShortcutHintAndModifierInChrome(t *tes
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
@@ -419,6 +430,9 @@ func TestBrowserFunctional_ChatComposerPreservesSteerInfoDuringSteerAndQueueInCh
 		var mu sync.Mutex
 		var records []requestRecord
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if static.ServeAsset(w, r) {
+				return
+			}
 			switch r.URL.Path {
 			case "/htmx.js":
 				w.Header().Set("Content-Type", "text/javascript")
@@ -561,6 +575,9 @@ func TestBrowserFunctional_ChatComposerStaleSteerConflictFallsBackToNormalSendIn
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -666,6 +683,9 @@ func TestBrowserFunctional_ChatComposerImmediateModifierClickSteersInChrome(t *t
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -765,6 +785,9 @@ func TestBrowserFunctional_ChatComposerRunningActionModifierSteersInChrome(t *te
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -870,6 +893,9 @@ func TestBrowserFunctional_ChatComposerRunningPrimaryActionSwapsWithInputContent
 	var mu sync.Mutex
 	var unexpectedRequests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx.js":
 			w.Header().Set("Content-Type", "text/javascript")

@@ -17,6 +17,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -223,7 +224,7 @@ func TestActiveLaneGroupedDragUsesRealHandlerPersistenceAndRollbackInChrome(t *t
 			http.Error(w, loadErr.Error(), 500)
 			return
 		}
-		body := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+		body := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 		if r.Header.Get("HX-Request") == "" {
 			body = strings.Replace(body, "</head>", runner+"</head>", 1)
 		}

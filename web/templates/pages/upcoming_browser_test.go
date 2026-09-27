@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_UpcomingStopControlUsesConfirmationRefreshAndPreservesCardNavigationInChrome(t *testing.T) {
@@ -91,6 +92,9 @@ func TestBrowserFunctional_UpcomingStopControlUsesConfirmationRefreshAndPreserve
 	var released atomic.Bool
 	var invalidCancelRequest atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch {
 		case r.URL.Path == "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
