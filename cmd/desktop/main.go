@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
@@ -231,6 +232,22 @@ func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBacke
 	}, nil
 }
 
+func desktopAssetProxy(backendURL *url.URL) http.Handler {
+	proxy := httputil.NewSingleHostReverseProxy(backendURL)
+	proxy.FlushInterval = -1
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Wails' streaming WebView bodies can omit Content-Length. ReverseProxy
+		// drops bodies with length zero, so mark a supplied body as unknown-length
+		// before it clones the request (its Director runs too late).
+		if r.ContentLength == 0 && r.Body != nil && r.Body != http.NoBody {
+			r = r.Clone(r.Context())
+			r.ContentLength = -1
+			r.Header.Del("Content-Length")
+		}
+		proxy.ServeHTTP(w, r)
+	})
+}
+
 func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.Coordinator) error {
 	backendURL, err := url.Parse(baseURL)
 	if err != nil {
@@ -238,8 +255,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	}
 	// Keep the document and native runtime on Wails' origin. Application routes
 	// still use the shared backend; immediate flushing preserves SSE streaming.
-	proxy := httputil.NewSingleHostReverseProxy(backendURL)
-	proxy.FlushInterval = -1
+	proxy := desktopAssetProxy(backendURL)
 	app := application.New(application.Options{
 		Assets:      application.AssetOptions{Handler: proxy},
 		Name:        "OpenVibely",
