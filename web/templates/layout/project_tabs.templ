@@ -54,11 +54,29 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }
   #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
-  #desktop-project-titlebar #project-selector-trigger { width: 150px; }
- </style>
+	  #desktop-project-titlebar #project-selector-trigger { width: 150px; }
+	  .desktop-window-controls { display: flex; align-items: center; align-self: stretch; flex-shrink: 0; --wails-draggable: no-drag; }
+	  .desktop-window-controls button { display: flex; align-items: center; justify-content: center; padding: 0; width: 46px; height: 100%; color: inherit; }
+	  .desktop-window-controls svg { width: 12px; height: 12px; pointer-events: none; }
+	  .desktop-window-controls:not(.desktop-traffic-lights) button:hover { background: oklch(var(--bc) / .12); }
+	  .desktop-window-controls:not(.desktop-traffic-lights) button:last-child:hover { background: #c42b1c; color: white; }
+	  .desktop-traffic-lights { gap: 8px; padding: 0 12px 0 8px; }
+	  .desktop-traffic-lights button { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgb(0 0 0 / .12); color: rgb(0 0 0 / .65); }
+	  .desktop-traffic-lights [data-wml-window="Close"] { background: #ff5f57; }
+	  .desktop-traffic-lights [data-wml-window="Minimise"] { background: #febc2e; }
+	  .desktop-traffic-lights [data-wml-window="ToggleFullscreen"] { background: #28c840; }
+	  .desktop-traffic-lights svg { width: 8px; height: 8px; opacity: 0; }
+	  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }
+	  .desktop-traffic-lights button:active { filter: brightness(.85); } </style>
 	<header id="desktop-project-titlebar" class="bg-base-200" data-platform={ runtime.GOOS } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
-		<div id="desktop-project-tabs" role="tablist" aria-label="Pinned projects">
-			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
+			if runtime.GOOS == "darwin" {
+				<div class="desktop-window-controls desktop-traffic-lights" role="group" aria-label="Window controls">
+					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="m2 2 6 6m0-6-6 6"/></svg></button>
+					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1 5h8"/></svg></button>
+					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><path d="M1 1h5L1 6zm8 8H4l5-5z"/></svg></button>
+				</div>
+			}
+			<div id="desktop-project-tabs" role="tablist" aria-label="Pinned projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab">
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID } title={ project.Name }>{ project.Name }</button>
 					<button type="button" data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name } title="Close tab (unpin)">×</button>
@@ -73,7 +91,14 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 				Pin
 			}
 		</button>
-		@ProjectSelector(projects, currentProjectID)
+			@ProjectSelector(projects, currentProjectID)
+			if runtime.GOOS != "darwin" {
+				<div class="desktop-window-controls" role="group" aria-label="Window controls">
+					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="M1 6h10"/></svg></button>
+					<button type="button" data-wml-window="ToggleMaximise" aria-label="Maximize or restore window" title="Maximize or restore"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
+					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="m1 1 10 10m0-10L1 11"/></svg></button>
+				</div>
+			}
 
 	</header>
 	<script>

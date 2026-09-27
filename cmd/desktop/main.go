@@ -283,15 +283,9 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		Height:    820,
 		MinWidth:  1024,
 		MinHeight: 680,
-		// Let the OS own window controls and reserve their layout space rather
-		// than extending web content underneath the fullscreen toolbar.
-		Frameless: false,
-		Mac: application.MacWindow{TitleBar: application.MacTitleBar{
-			FullSizeContent:           false,
-			UseToolbar:                true,
-			HideTitle:                 true,
-			ShowToolbarWhenFullscreen: true,
-		}},
+		// The app draws native-looking controls alongside the project tabs.
+		// Do not reserve a second native titlebar above this shared row.
+		Frameless: true,
 	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 
