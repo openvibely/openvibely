@@ -90,7 +90,8 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 }
 
 func TestScheduleContent_RightClickContextMenuContract(t *testing.T) {
-	runAt := time.Now().Local().Truncate(time.Hour)
+	now := time.Now().Local()
+	runAt := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
 	pausedRunAt := runAt.Add(time.Hour)
 	tasks := []repository.TaskWithSchedule{
 		{
