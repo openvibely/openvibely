@@ -1048,6 +1048,9 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 						</option>
 					}
 				</select>
+                if serverRuntimeMode(ctx) == "desktop" {
+                    <button id="project-selector-trigger" type="button" aria-label="Open project" title="Open project" aria-haspopup="dialog" aria-expanded="false" aria-controls="project-selector-dialog" data-searchable-selector-trigger>+</button>
+                } else {
 				<button
 					id="project-selector-trigger"
 					class="select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center text-left"
@@ -1061,12 +1064,16 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 				>
 					<span id="project-selector-current-label" class="min-w-0 truncate" data-searchable-selector-current-label>{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
 				</button>
+                }
 				@templateui.SearchableSelector(templateui.SearchableSelectorConfig{
 					ID: "project-selector",
 					Kind: "project",
 					Local: true,
 					InitialStatus: "All projects shown.",
 				}) {
+                    if serverRuntimeMode(ctx) == "desktop" {
+                        <button id="new-project-btn" type="button" class="btn btn-ghost w-full justify-start" onclick="this.closest('dialog').close()">+ Create New Project</button>
+                    }
 					if len(projects) == 0 {
 						<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
 					} else {
