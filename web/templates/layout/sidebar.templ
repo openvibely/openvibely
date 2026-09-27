@@ -1018,6 +1018,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
 							</svg>
 						</button>
+                        if serverRuntimeMode(ctx) != "desktop" {
 						<button
 							id="new-project-btn"
 							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
@@ -1027,6 +1028,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
 							</svg>
 						</button>
+                        }
 					</div>
 				</div>
 				<select
