@@ -81,6 +81,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"/><path data-restore-glyph d="M2 5.5h3.5V2zm8 1H6.5V10z" style="display: none"/></svg></button>
 				</div>
 			}
+			@ProjectSelector(projects, currentProjectID)
 			<div id="desktop-project-tabs" role="tablist" aria-label="Pinned projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab">
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID } title={ project.Name }>{ project.Name }</button>
@@ -91,7 +92,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
         </div>
 
 		<div class="desktop-titlebar-space" aria-hidden="true"></div>
-		@ProjectSelector(projects, currentProjectID)
 			if runtime.GOOS != "darwin" {
 				<div class="desktop-window-controls" role="group" aria-label="Window controls">
 					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="M1 6h10"/></svg></button>
