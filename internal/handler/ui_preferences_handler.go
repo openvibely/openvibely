@@ -15,6 +15,7 @@ const (
 	uiPreferenceThemeKey             = "ui.theme"
 	uiPreferenceSidebarCollapsedKey  = "ui.sidebar_collapsed"
 	uiPreferenceDiffViewKey          = "ui.diff_view"
+	uiPreferencePinnedProjectIDsKey  = "ui.pinned_project_ids"
 	uiPreferenceSelectedProjectIDKey = "ui.selected_project_id"
 )
 
@@ -22,12 +23,14 @@ func (h *Handler) uiPreferences(ctx context.Context) layout.UIPreferences {
 	if h == nil || h.settingsRepo == nil {
 		return layout.UIPreferences{}
 	}
-	values, err := h.settingsRepo.GetMany(ctx, []string{uiPreferenceThemeKey, uiPreferenceSidebarCollapsedKey})
+	values, err := h.settingsRepo.GetMany(ctx, []string{uiPreferenceThemeKey, uiPreferenceSidebarCollapsedKey, uiPreferencePinnedProjectIDsKey})
 	if err != nil {
 		applog.Debugf("[handler] failed to load desktop UI preferences: %v", err)
 		return layout.UIPreferences{}
 	}
 	prefs := layout.UIPreferences{}
+	// IDs are reconciled with the current project catalog when rendering the shell.
+	_ = json.Unmarshal([]byte(values[uiPreferencePinnedProjectIDsKey]), &prefs.PinnedProjectIDs)
 	if theme := strings.TrimSpace(values[uiPreferenceThemeKey]); isSafeUIPreferenceValue(theme) {
 		prefs.Theme = theme
 	}
@@ -78,10 +81,11 @@ func (h *Handler) uiDiffViewPreference(ctx context.Context) string {
 }
 
 type uiPreferencesRequest struct {
-	Theme            string `json:"theme"`
-	SidebarCollapsed *bool  `json:"sidebar_collapsed"`
-	DiffView         string `json:"diff_view"`
-	ProjectID        string `json:"project_id"`
+	PinnedProjectIDs *[]string `json:"pinned_project_ids"`
+	Theme            string    `json:"theme"`
+	SidebarCollapsed *bool     `json:"sidebar_collapsed"`
+	DiffView         string    `json:"diff_view"`
+	ProjectID        string    `json:"project_id"`
 }
 
 func (h *Handler) SaveUIPreferences(c echo.Context) error {
@@ -93,6 +97,32 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid preferences payload")
 	}
 	ctx := c.Request().Context()
+	if req.PinnedProjectIDs != nil {
+		if h.projectSvc == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "projects unavailable")
+		}
+		projects, err := h.projectSvc.ListSelectorOptions(ctx)
+		if err != nil {
+			return err
+		}
+		available := make(map[string]bool, len(projects))
+		for _, project := range projects {
+			available[project.ID] = true
+		}
+		for _, id := range *req.PinnedProjectIDs {
+			if !available[id] {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid or duplicate pinned project")
+			}
+			delete(available, id)
+		}
+		value, err := json.Marshal(*req.PinnedProjectIDs)
+		if err != nil {
+			return err
+		}
+		if err := h.settingsRepo.Set(ctx, uiPreferencePinnedProjectIDsKey, string(value)); err != nil {
+			return err
+		}
+	}
 	if theme := strings.TrimSpace(req.Theme); theme != "" {
 		if !isSafeUIPreferenceValue(theme) {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid theme")
