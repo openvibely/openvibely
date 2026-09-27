@@ -52,97 +52,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			</div>
 
 			<!-- Project Selector -->
-			<div class="form-control mb-6 sidebar-hide-collapsed" data-project-selector data-searchable-selector data-searchable-selector-local data-searchable-selector-left-anchor data-searchable-selector-kind="project">
-				<div class="flex items-center justify-between mb-1">
-					<span class="label-text text-xs uppercase tracking-wider opacity-60">Project</span>
-					<div class="flex items-center gap-1">
-						<button
-							id="project-settings-btn"
-							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
-							title="Project Settings"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-							</svg>
-						</button>
-						<button
-							id="new-project-btn"
-							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
-							title="New Project"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-							</svg>
-						</button>
-					</div>
-				</div>
-				<select
-					id="project-selector"
-					class="sr-only"
-					aria-hidden="true"
-					tabindex="-1"
-					data-project-selector-value
-					data-searchable-selector-value
-				>
-					for _, p := range projects {
-						<option
-							value={ p.ID }
-							selected?={ p.ID == currentProjectID }
-						>
-							{ p.Name }
-						</option>
-					}
-				</select>
-				<button
-					id="project-selector-trigger"
-					class="select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center text-left"
-					type="button"
-					aria-label="Switch project"
-					aria-haspopup="dialog"
-					aria-expanded="false"
-					aria-controls="project-selector-dialog"
-					data-searchable-selector-trigger
-					disabled?={ len(projects) == 0 }
-				>
-					<span id="project-selector-current-label" class="min-w-0 truncate" data-searchable-selector-current-label>{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
-				</button>
-				@templateui.SearchableSelector(templateui.SearchableSelectorConfig{
-					ID: "project-selector",
-					Kind: "project",
-					Local: true,
-					InitialStatus: "All projects shown.",
-				}) {
-					if len(projects) == 0 {
-						<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
-					} else {
-						<div role="listbox" aria-label="Projects" class={ templateui.SearchableSelectorMenuClass }>
-							for _, p := range projects {
-								<button
-									class={ templateui.SearchableSelectorOptionClass }
-									type="button"
-									role="option"
-									aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
-									tabindex="-1"
-									data-project-selector-option
-									data-project-id={ p.ID }
-									data-project-name={ p.Name }
-									data-searchable-selector-option
-									data-searchable-selector-id={ p.ID }
-									data-searchable-selector-name={ p.Name }
-								>
-									<span class="w-4 shrink-0" aria-hidden="true" data-project-selector-current data-searchable-selector-current>{ sidebarProjectCheck(p.ID == currentProjectID) }</span>
-									<span class="min-w-0 break-words">{ p.Name }</span>
-								</button>
-							}
-						</div>
-						<div class="px-3 py-8 text-center" data-project-selector-no-match data-searchable-selector-no-match hidden>
-							<p class="font-medium">No projects match your search.</p>
-							<p class="mt-1 text-sm text-base-content/60">Try a different name.</p>
-						</div>
-					}
-				}
-			</div>
+			if serverRuntimeMode(ctx) != "desktop" {
+				@ProjectSelector(projects, currentProjectID)
+			}
 			<script>
 				(function() {
 					if (window.openVibelyProjectSelectorChangeInstalled) return;
@@ -166,6 +78,15 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						if (window.openVibelySearchableSelector && typeof window.openVibelySearchableSelector.sync === 'function') {
 							window.openVibelySearchableSelector.sync(sel.closest('[data-searchable-selector]'), sel.value);
 						}
+						if (window.openVibelyProjectTabsSync) window.openVibelyProjectTabsSync();
+					}
+
+					// Freeze the rendered project in this tab before another browser tab
+					// changes the shared launch preference. Preserve route, filters and hash.
+					if (sel.value) {
+						var initialURL = new URL(window.location.href);
+						initialURL.searchParams.set('project_id', sel.value);
+						history.replaceState(history.state, '', initialURL.pathname + initialURL.search + initialURL.hash);
 					}
 
 					sel.addEventListener('change', function() {
@@ -256,14 +177,39 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					});
 
 					function syncProjectSelectorFromURL() {
-						var projectID = new URLSearchParams(window.location.search).get('project_id');
-						if (!projectID) return;
+						var url = new URL(window.location.href);
+						var projectID = url.searchParams.get('project_id');
+						if (!projectID && sel.value) {
+							projectID = sel.value;
+							url.searchParams.set('project_id', projectID);
+							history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+						}
 						var option = Array.prototype.slice.call(sel.options).find(function(candidate) { return candidate.value === projectID; });
-						if (!option || sel.value === projectID) return;
+						if (!option) return;
 						sel.value = projectID;
 						previousProjectID = projectID;
 						syncProjectSelector();
+						document.querySelectorAll('[data-nav-base]').forEach(function(link) {
+							var scopedURL = link.getAttribute('data-nav-base') + '?project_id=' + encodeURIComponent(projectID);
+							link.setAttribute('href', scopedURL);
+							link.setAttribute('hx-get', scopedURL);
+							htmx.process(link);
+						});
+						var badge = document.getElementById('alert-badge');
+						if (badge) {
+							badge.setAttribute('hx-get', '/alerts/unread-count?project_id=' + encodeURIComponent(projectID));
+							htmx.process(badge);
+						}
 					}
+					// Unscoped fragment GETs inherit this tab's project, not the shared
+					// startup preference most recently written by a different browser tab.
+					document.addEventListener('htmx:configRequest', function(event) {
+						var detail = event.detail;
+						if (!sel.value || detail.verb !== 'get') return;
+						var url = new URL(detail.path, window.location.href);
+						if (url.origin === window.location.origin && !url.searchParams.has('project_id') && !detail.parameters.project_id) detail.parameters.project_id = sel.value;
+					});
+					document.addEventListener('htmx:pushedIntoHistory', syncProjectSelectorFromURL);
 					document.addEventListener('htmx:afterSwap', function(event) {
 						var target = event.detail && event.detail.target;
 						if (target && target.id === 'main-content') syncProjectSelectorFromURL();
@@ -1030,4 +976,99 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 		</script>
 
 	</aside>
+}
+
+// ProjectSelector is shared by the web sidebar and desktop title bar.
+templ ProjectSelector(projects []models.Project, currentProjectID string) {
+			<div class="form-control mb-6 sidebar-hide-collapsed" data-project-selector data-searchable-selector data-searchable-selector-local data-searchable-selector-left-anchor data-searchable-selector-kind="project">
+				<div class="flex items-center justify-between mb-1">
+					<span class="label-text text-xs uppercase tracking-wider opacity-60">Project</span>
+					<div class="flex items-center gap-1">
+						<button
+							id="project-settings-btn"
+							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
+							title="Project Settings"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+							</svg>
+						</button>
+						<button
+							id="new-project-btn"
+							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
+							title="New Project"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+							</svg>
+						</button>
+					</div>
+				</div>
+				<select
+					id="project-selector"
+					class="sr-only"
+					aria-hidden="true"
+					tabindex="-1"
+					data-project-selector-value
+					data-searchable-selector-value
+				>
+					for _, p := range projects {
+						<option
+							value={ p.ID }
+							selected?={ p.ID == currentProjectID }
+						>
+							{ p.Name }
+						</option>
+					}
+				</select>
+				<button
+					id="project-selector-trigger"
+					class="select select-bordered select-sm w-full sidebar-project-select flex min-w-0 items-center text-left"
+					type="button"
+					aria-label="Switch project"
+					aria-haspopup="dialog"
+					aria-expanded="false"
+					aria-controls="project-selector-dialog"
+					data-searchable-selector-trigger
+					disabled?={ len(projects) == 0 }
+				>
+					<span id="project-selector-current-label" class="min-w-0 truncate" data-searchable-selector-current-label>{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
+				</button>
+				@templateui.SearchableSelector(templateui.SearchableSelectorConfig{
+					ID: "project-selector",
+					Kind: "project",
+					Local: true,
+					InitialStatus: "All projects shown.",
+				}) {
+					if len(projects) == 0 {
+						<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>
+					} else {
+						<div role="listbox" aria-label="Projects" class={ templateui.SearchableSelectorMenuClass }>
+							for _, p := range projects {
+								<button
+									class={ templateui.SearchableSelectorOptionClass }
+									type="button"
+									role="option"
+									aria-selected={ fmt.Sprintf("%t", p.ID == currentProjectID) }
+									tabindex="-1"
+									data-project-selector-option
+									data-project-id={ p.ID }
+									data-project-name={ p.Name }
+									data-searchable-selector-option
+									data-searchable-selector-id={ p.ID }
+									data-searchable-selector-name={ p.Name }
+								>
+									<span class="w-4 shrink-0" aria-hidden="true" data-project-selector-current data-searchable-selector-current>{ sidebarProjectCheck(p.ID == currentProjectID) }</span>
+									<span class="min-w-0 break-words">{ p.Name }</span>
+								</button>
+							}
+						</div>
+						<div class="px-3 py-8 text-center" data-project-selector-no-match data-searchable-selector-no-match hidden>
+							<p class="font-medium">No projects match your search.</p>
+							<p class="mt-1 text-sm text-base-content/60">Try a different name.</p>
+						</div>
+					}
+				}
+			</div>
 }

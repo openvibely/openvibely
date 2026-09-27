@@ -11,6 +11,7 @@ type desktopModeContextKey struct{}
 type uiPreferencesContextKey struct{}
 
 type UIPreferences struct {
+	PinnedProjectIDs []string
 	Theme            string
 	SidebarCollapsed string
 }
@@ -4257,6 +4258,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								document.body.classList.add('sidebar-collapsed-pending');
 							}
 						})();				</script>
+			if serverRuntimeMode(ctx) == "desktop" {
+				@DesktopProjectTabs(projects, currentProjectID)
+			}
 			<div class="drawer lg:drawer-open h-full">
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
 				<div class="drawer-content flex flex-col h-full overflow-hidden">
@@ -4274,7 +4278,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						</div>
 					</div>
 					<!-- Main Content -->
-					<main id="main-content" class="p-6 flex-1 overflow-y-auto overflow-x-hidden">
+					<main id="main-content" class="p-6 flex-1 overflow-y-auto overflow-x-hidden" hx-history-elt>
 						{ children... }
 					</main>
 				</div>

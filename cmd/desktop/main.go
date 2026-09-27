@@ -271,6 +271,10 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		Height:    820,
 		MinWidth:  1024,
 		MinHeight: 680,
+		// macOS keeps native traffic lights over the full-size content view.
+		// Other platforms use Wails window controls in the shared title bar.
+		Frameless: runtime.GOOS != "darwin",
+		Mac:       application.MacWindow{TitleBar: application.MacTitleBarHidden},
 	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 

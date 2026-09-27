@@ -412,6 +412,10 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		browser.navigateHistory(-1)
 		browser.waitFor("real Back history restoration", `location.pathname+':'+Boolean(document.getElementById('task-detail-content'))`, "/tasks/task-focus:true")
 		browser.waitFor("cancelled history focus callback", `(function(){var state=window._openVibelyComposerFocusState;return (document.activeElement&&document.activeElement.id)+':'+window._historyRestoreFocusRequests+':'+Boolean(state&&state.historyTimer)+':'+Boolean(state&&state.timer)})()`, "focus-guard:0:false:false")
+		// The shell now survives history restoration. Explicitly leave the
+		// intentional shell focus owner before expecting composer autofocus;
+		// history must not steal focus from a still-focused shell control.
+		browser.click("#sidebar .sidebar-header h1")
 		browser.navigateHistory(1)
 		browser.waitFor("real Forward history composer focus", `location.pathname+':'+(document.activeElement&&document.activeElement.id)+':'+window._historyRestoreFocusRequests`, "/chat:message-input:1")
 		expectedHistoryDraft := browser.evaluate(`(function(){var input=document.getElementById('message-input');return input.value.slice(0,input.selectionStart)+' history'+input.value.slice(input.selectionEnd);})()`)
