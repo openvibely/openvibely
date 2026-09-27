@@ -43,6 +43,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					fmt.Fprintf(w, `<div id="settings-project">%s</div>`, r.URL.Path)
 					return
 				}
+				if r.URL.Path == "/projects/new" {
+					w.Header().Set("Content-Type", "text/html")
+					fmt.Fprint(w, `<div id="create-project-fixture">Create New Project</div>`)
+					return
+				}
 				if r.URL.Path == "/ui/preferences" {
 					var req struct {
 						ProjectID string    `json:"project_id"`
@@ -110,7 +115,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					return
 				}
 				browser.waitFor("tabs controller", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
-				if got := browser.evaluate(`String(document.querySelectorAll('#new-project-btn').length === 1 && document.getElementById('desktop-project-tabs').lastElementChild.id === 'new-project-btn' && !document.getElementById('project-pin-toggle'))`); got != "true" {
+				if got := browser.evaluate(`String(document.querySelectorAll('#new-project-btn').length === 1 && document.getElementById('desktop-project-tabs').lastElementChild.hasAttribute('data-project-selector') && document.getElementById('project-selector-trigger').textContent.trim() === '+' && document.getElementById('project-selector-dialog').contains(document.getElementById('new-project-btn')) && !document.getElementById('project-pin-toggle'))`); got != "true" {
 					t.Fatal("create must follow the last tab with no standalone pin control", got)
 				}
 				var point struct{ X, Y float64 }
@@ -136,11 +141,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(tab.width>=240 && tab.top-bar.top>=5 && controls && Array.from(controls.querySelectorAll('button')).every(function(button){var r=button.getBoundingClientRect();return Math.abs((r.top+r.bottom-bar.top-bar.bottom)/2)<1 && getComputedStyle(button).getPropertyValue('--wails-draggable').trim()==='no-drag';}));})()`); got != "true" {
 					t.Fatal("wide inset tabs and vertically centered window controls must share the titlebar", got)
 				}
-				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();var tabs=document.getElementById('desktop-project-tabs').getBoundingClientRect(), controls=document.querySelector('.desktop-window-controls').getBoundingClientRect();return String(trigger.right<=tabs.left && (document.getElementById('desktop-project-titlebar').dataset.platform!=='darwin' || controls.right<=trigger.left) && Math.abs((trigger.top+trigger.bottom-bar.top-bar.bottom)/2)<1 && ['project-selector-trigger'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
-					t.Fatal("titlebar selector and actions must share a centered row inside the bar", got)
-				}
+
 				if got := browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollWidth > document.getElementById('desktop-project-tabs').clientWidth && document.documentElement.scrollWidth <= innerWidth)`); got != "true" {
-					t.Fatal("tabs must overflow within their own scrollport", got)
+					t.Fatal("tabs must overflow within their own scrollport", got, browser.evaluate(`JSON.stringify([document.getElementById("desktop-project-tabs").scrollWidth,document.getElementById("desktop-project-tabs").clientWidth,document.documentElement.scrollWidth,innerWidth])`))
 				}
 				if got := browser.evaluate(`JSON.stringify([getComputedStyle(document.querySelector('.desktop-titlebar-space')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.querySelector('[data-project-tab]')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.getElementById('project-selector-trigger')).getPropertyValue('--wails-draggable').trim()])`); got != `["drag","no-drag","no-drag"]` {
 					t.Fatal("drag regions", got)
@@ -233,6 +236,13 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.navigateHistory(-1)
 				browser.waitFor("history project", `document.getElementById('project-selector').value`, "p23")
 				browser.waitFor("history sidebar scope", `String(Array.from(document.querySelectorAll('[data-nav-base]')).every(a=>a.getAttribute('href').includes('project_id=p23')))`, "true")
+				browser.click("#project-selector-trigger")
+				browser.waitFor("add menu opens", `String(document.getElementById('project-selector-dialog').open)`, "true")
+				browser.click("#project-selector-search")
+				browser.typeText("no matching project")
+				browser.click("#new-project-btn")
+				browser.waitFor("create action loads existing project form route", `String(!!document.querySelector('#new-project-container #create-project-fixture') && !document.getElementById('project-selector-dialog').open)`, "true")
+
 			})
 			mu.Lock()
 			final := strings.Join(pins, ",")

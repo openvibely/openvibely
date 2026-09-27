@@ -51,16 +51,16 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab:not(:has([aria-selected="true"])) [role="tab"]:hover { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; padding-left: 12px; padding-right: 36px; }
   .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
-  #new-project-btn { flex-shrink: 0; width: 30px; height: 30px; align-self: center; border-radius: 50%; }
- #new-project-btn:hover { background: oklch(var(--bc) / .12); }
+  #desktop-project-titlebar #project-selector-trigger { flex-shrink: 0; width: 30px; height: 30px; align-self: center; border-radius: 50%; }
+ #desktop-project-titlebar #project-selector-trigger:hover { background: oklch(var(--bc) / .12); }
  #project-tab-menu { position: fixed; margin: 0; padding: 4px; border: 1px solid oklch(var(--bc) / .2); border-radius: 8px; background: oklch(var(--b1)); color: oklch(var(--bc)); --wails-draggable: no-drag; }
  #project-tab-menu button { display: block; width: 100%; text-align: left; padding: 8px 16px; border-radius: 4px; }
  #project-tab-menu button:hover { background: oklch(var(--bc) / .12); }
   .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }
-  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 150px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }
-  #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }
+  #desktop-project-titlebar [data-project-selector] { position: relative; margin: 0; width: 30px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; align-self: center; gap: 0; }
+  #desktop-project-titlebar [data-project-selector] > div:first-child { display: none; }
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
-	  #desktop-project-titlebar #project-selector-trigger { width: 150px; }
+	  #desktop-project-titlebar #project-selector-trigger { width: 30px; }
 	  .desktop-window-controls { display: flex; align-items: center; align-self: stretch; flex-shrink: 0; --wails-draggable: no-drag; }
 	  .desktop-window-controls button { display: flex; align-items: center; justify-content: center; padding: 0; width: 46px; height: 100%; color: inherit; }
 	  .desktop-window-controls svg { width: 12px; height: 12px; pointer-events: none; }
@@ -81,14 +81,13 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"/><path data-restore-glyph d="M2 5.5h3.5V2zm8 1H6.5V10z" style="display: none"/></svg></button>
 				</div>
 			}
-			@ProjectSelector(projects, currentProjectID)
 			<div id="desktop-project-tabs" role="tablist" aria-label="Pinned projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab">
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID } title={ project.Name }>{ project.Name }</button>
 					<button type="button" data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name } title="Close tab (unpin)">×</button>
 				</div>
 			}
-		<button id="new-project-btn" type="button" aria-label="Create project" title="Create project">+</button>
+		@ProjectSelector(projects, currentProjectID)
         </div>
 
 		<div class="desktop-titlebar-space" aria-hidden="true"></div>
@@ -111,7 +110,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var menu = document.getElementById('project-tab-menu');
  var pin = document.getElementById('project-tab-pin-action');
  var menuTab;
- var add = document.getElementById('new-project-btn');
+ var add = bar.querySelector('[data-project-selector]');
  list.append(add);
    if (!bar || !select || bar.dataset.installed) return;
    bar.dataset.installed = 'true';
