@@ -39,7 +39,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="desktop"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }
   @media (min-width: 1024px) { [data-openvibely-runtime="desktop"] .drawer-side { top: 0; } }
   #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }
-  #desktop-project-titlebar[data-platform="darwin"] .desktop-window-controls { order: -1; margin-right: 8px; }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
   #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding-top: 6px; }
@@ -50,16 +49,12 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab:hover { background: oklch(var(--bc) / .08); }
   .desktop-project-tab:has([aria-selected="true"]):hover { background: oklch(var(--b1)); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
+  #project-pin-toggle { flex-shrink: 0; }
   .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }
   #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }
   #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
   #desktop-project-titlebar #project-selector-trigger { width: 150px; }
-  #project-pin-toggle, .desktop-window-controls { flex-shrink: 0; }
-  .desktop-window-controls { display: flex; align-items: center; height: 100%; --wails-draggable: no-drag; }
-  .desktop-window-controls button { width: 32px; height: 32px; border-radius: 5px; display: flex; align-items: center; justify-content: center; padding: 0; }
-  .desktop-window-controls button:hover { background: oklch(var(--bc) / .1); }
-  .desktop-window-controls button:last-child:hover { background: #c42b1c; color: white; }
  </style>
 	<header id="desktop-project-titlebar" class="bg-base-200" data-platform={ runtime.GOOS } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
 		<div id="desktop-project-tabs" role="tablist" aria-label="Pinned projects">
@@ -79,15 +74,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 			}
 		</button>
 		@ProjectSelector(projects, currentProjectID)
-		<div class="desktop-window-controls" aria-label="Window controls">
-			<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="M1 6h10"/></svg></button>
-			if runtime.GOOS == "darwin" {
-			<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
-			} else {
-			<button type="button" data-wml-window="ToggleMaximise" aria-label="Maximize or restore window" title="Maximize or restore window"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
-			}
-			<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="m2 2 8 8m0-8-8 8"/></svg></button>
-		</div>
+
 	</header>
 	<script>
  (function() {

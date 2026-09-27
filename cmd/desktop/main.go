@@ -283,9 +283,15 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		Height:    820,
 		MinWidth:  1024,
 		MinHeight: 680,
-		// Keep tabs and window controls in one content-owned bar, including
-		// fullscreen, rather than underneath a separate native toolbar.
-		Frameless: true,
+		// Let the OS own window controls and reserve their layout space rather
+		// than extending web content underneath the fullscreen toolbar.
+		Frameless: false,
+		Mac: application.MacWindow{TitleBar: application.MacTitleBar{
+			FullSizeContent:           false,
+			UseToolbar:                true,
+			HideTitle:                 true,
+			ShowToolbarWhenFullscreen: true,
+		}},
 	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 

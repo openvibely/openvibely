@@ -45,8 +45,8 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`Frameless: true`, `httputil.NewSingleHostReverseProxy`, `Handler: proxy`} {
-		if !strings.Contains(string(source), want) {
+	for _, want := range []string{`Frameless: false`, `FullSizeContent: false`, `ShowToolbarWhenFullscreen: true`, `httputil.NewSingleHostReverseProxy`, `Handler: proxy`} {
+		if !strings.Contains(strings.Join(strings.Fields(string(source)), " "), want) {
 			t.Errorf("missing native window configuration: %s", want)
 		}
 	}
@@ -54,9 +54,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`data-wml-window="Minimise"`, `data-wml-window="ToggleFullscreen"`, `data-wml-window="Close"`} {
-		if !strings.Contains(string(source), want) {
-			t.Errorf("missing native window contract: %s", want)
-		}
+	if strings.Contains(string(source), `data-wml-window=`) {
+		t.Error("native window controls must not be replaced by HTML buttons")
 	}
 }

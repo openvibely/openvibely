@@ -58,7 +58,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					w.WriteHeader(204)
 					return
 				}
-				if r.URL.Path != "/tasks" {
+				if r.URL.Path != "/tasks" && r.URL.Path != "/chat" && r.URL.Path != "/schedule" {
 					w.WriteHeader(204)
 					return
 				}
@@ -71,7 +71,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				mu.Unlock()
 				w.Header().Set("Content-Type", "text/html")
 				if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
-					fmt.Fprintf(w, `<div id="fixture-project">%s</div>`, id)
+					fmt.Fprintf(w, `<div id="fixture-project">%s</div><a id="filtered-page" href="/tasks?project_id=%s&amp;view=board#keep" hx-get="/tasks?project_id=%s&amp;view=board" hx-push-url="/tasks?project_id=%s&amp;view=board#keep" hx-target="#main-content">Filtered tasks</a>`, id, id, id, id)
 					return
 				}
 				ctx := layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), desktop), layout.UIPreferences{PinnedProjectIDs: saved})
@@ -105,7 +105,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					return
 				}
 				browser.waitFor("tabs controller", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
-				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(tab.width>=240 && tab.top-bar.top>=5 && controls && Array.from(controls.children).every(function(button){var r=button.getBoundingClientRect();return r.height>0 && Math.abs((r.top+r.bottom-bar.top-bar.bottom)/2)<1;}));})()`); got != "true" {
+				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(tab.width>=240 && tab.top-bar.top>=5 && !controls);})()`); got != "true" {
 					t.Fatal("wide inset tabs and vertically centered window controls must share the titlebar", got)
 				}
 				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();return String(['project-selector-trigger','project-settings-btn','new-project-btn'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
@@ -123,10 +123,33 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				// A fullscreen-sized content viewport must retain the same visible bar.
 				// Native macOS fullscreen transitions require separate Wails verification.
 				browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1920, "height": 1080, "deviceScaleFactor": 1, "mobile": false}, nil)
-				if got := browser.evaluate(`(function(){var controls=document.querySelector('.desktop-window-controls').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect();return String(controls.top>=0 && controls.bottom<=46 && tab.top>=5 && tab.bottom<=46);})()`); got != "true" {
+				if got := browser.evaluate(`(function(){var tab=document.querySelector('.desktop-project-tab').getBoundingClientRect();return String(tab.top>=5 && tab.bottom<=46);})()`); got != "true" {
 					t.Fatal("fullscreen-sized viewport lost window controls or tabs", got)
 				}
 				browser.call("Emulation.clearDeviceMetricsOverride", map[string]any{}, nil)
+				browser.click(`[data-nav-base="/schedule"]`)
+				browser.waitFor("project A schedule", `location.pathname`, "/schedule")
+				browser.click(`[data-project-tab="p01"]`)
+				browser.waitFor("new project starts independently", `location.pathname+location.search`, "/chat?project_id=p01")
+				browser.click(`[data-nav-base="/tasks"]`)
+				browser.waitFor("project B tasks", `location.pathname`, "/tasks")
+				browser.click(`[data-project-tab="p00"]`)
+				browser.waitFor("project A remembers schedule", `location.pathname+location.search`, "/schedule?project_id=p00")
+				browser.click(`[data-project-tab="p01"]`)
+				browser.waitFor("project B remembers tasks", `location.pathname+location.search`, "/tasks?project_id=p01")
+				browser.click("#filtered-page")
+				browser.waitFor("project B filters", `location.search+location.hash`, "?project_id=p01&view=board#keep")
+				browser.click(`[data-project-tab="p00"]`)
+				browser.waitFor("project A unaffected by B filters", `location.pathname+location.search`, "/schedule?project_id=p00")
+				browser.evaluate(`String(window.beforeProjectTabsReload = true)`)
+				browser.call("Page.reload", map[string]any{}, nil)
+				browser.waitFor("navigation session reload", `String(!window.beforeProjectTabsReload && typeof window.openVibelyProjectTabsSync === 'function')`, "true")
+				browser.click(`[data-project-tab="p01"]`)
+				browser.waitFor("project B route survives reload", `location.pathname+location.search+location.hash`, "/tasks?project_id=p01&view=board#keep")
+				browser.click(`[data-nav-base="/schedule"]`)
+				browser.waitFor("leave filtered tasks", `location.pathname`, "/schedule")
+				browser.click(`[data-nav-base="/tasks"]`)
+				browser.waitFor("return to unfiltered tasks", `location.pathname+location.search`, "/tasks?project_id=p01")
 				browser.click(`[data-project-tab="p01"]`)
 				browser.waitFor("shared navigation", `location.search`, "?project_id=p01")
 				browser.waitFor("active tab", `document.querySelector('[data-project-tab="p01"]').getAttribute('aria-selected')`, "true")
