@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
@@ -207,6 +206,33 @@ func TestDesktopPackagedUpdateHelperInvalidTimeoutsReturnBeforeHelper(t *testing
 	}
 }
 
+func TestDesktopProxyPreservesUnknownLengthPreferenceBody(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Pins []string `json:"pinned_project_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	target, _ := url.Parse(backend.URL)
+	proxy := desktopAssetProxy(target)
+	for _, body := range []string{`{"pinned_project_ids":["remaining"]}`, `{"pinned_project_ids":[]}`} {
+		req := httptest.NewRequest(http.MethodPost, "/ui/preferences", io.NopCloser(strings.NewReader(body)))
+		// Wails constructs a streaming body with zero length when WebKit omits Content-Length.
+		req.ContentLength = 0
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		proxy.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("save %s: status %d: %s", body, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestDesktopStartupServesDocumentWithoutRedirect(t *testing.T) {
 	// Read the actual window URL, rather than letting an HTTP client silently
 	// follow the redirect that WebKit's native asset transport cannot handle.
@@ -236,7 +262,16 @@ func TestDesktopStartupServesDocumentWithoutRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := httputil.NewSingleHostReverseProxy(backendURL)
+	proxy := desktopAssetProxy(backendURL)
+	// Exercise clearing the last pin through the real backend and desktop proxy.
+	unpin := httptest.NewRequest(http.MethodPost, "/ui/preferences", io.NopCloser(strings.NewReader(`{"pinned_project_ids":[]}`)))
+	unpin.ContentLength = 0
+	unpin.Header.Set("Content-Type", "application/json")
+	saved := httptest.NewRecorder()
+	proxy.ServeHTTP(saved, unpin)
+	if saved.Code != http.StatusNoContent {
+		t.Fatalf("desktop unpin returned %d: %s", saved.Code, saved.Body.String())
+	}
 	response := httptest.NewRecorder()
 	proxy.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "wails://localhost"+string(match[1]), nil))
 	if response.Code != http.StatusOK {
