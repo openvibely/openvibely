@@ -122,7 +122,7 @@ templ TaskWorkspaceScript() {
 		}
 		function applyURL() {
 			var tab = new URLSearchParams(location.search).get('tab') || root.dataset.initialTab || 'chat';
-			workspace(tab === 'changes', false);
+			if (taskID) workspace(tab === 'changes', false);
 			if (tabNames.indexOf(tab) >= 0) openPanel(tab, false, false);
 			else closePanel(false, false);
 		}
@@ -141,7 +141,7 @@ templ TaskWorkspaceScript() {
 		}
 		function refreshSummary() {
 			timer = null;
-			if (signal.aborted || !root.isConnected) return;
+			if (!taskID || signal.aborted || !root.isConnected) return;
 			if (pending) { dirty = true; return; }
 			pending = true;
 			fetch('/tasks/' + encodeURIComponent(taskID) + '/changes/summary?project_id=' + encodeURIComponent(root.dataset.projectId), {signal:signal}).then(function(response) {

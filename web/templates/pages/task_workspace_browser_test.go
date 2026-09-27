@@ -17,6 +17,58 @@ import (
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
+func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	project := models.Project{ID: "draft-project", Name: "Draft"}
+	var unexpected atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		var view templ.Component
+		switch r.URL.Path {
+		case "/tasks":
+			view = Tasks([]models.Project{project}, &project, nil, nil, nil, "", "")
+		case "/tasks/new":
+			if r.Header.Get("HX-Request") == "true" {
+				view = NewTaskContent(&project, nil, nil)
+			} else {
+				view = NewTask([]models.Project{project}, &project, nil, nil)
+			}
+		default:
+			if strings.HasPrefix(r.URL.Path, "/tasks/") {
+				unexpected.Add(1)
+			}
+			http.NotFound(w, r)
+			return
+		}
+		if err := view.Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id="+project.ID, "new-task-workspace", func(b *composerFocusCDP) {
+		b.waitFor("board ready", `String(Boolean(document.querySelector('a[hx-get^="/tasks/new"]')))`, "true")
+		b.click(`a[hx-get^="/tasks/new"]`)
+		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="prompt"]')))`, "/tasks/new:true")
+		b.waitFor("no creation dialog", `String(document.querySelector('dialog[open]')===null)`, "true")
+		b.click(`input[name="title"]`)
+		b.typeText("New task draft")
+		b.click(`textarea[name="prompt"]`)
+		b.typeText("Implement this feature")
+		b.click("#task-details-opener")
+		b.waitFor("draft inspector", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
+		b.click(`[data-tab="attachments"]`)
+		b.waitFor("draft attachments", `String(document.getElementById('new-task-files').getClientRects().length>0)`, "true")
+		b.click("#task-details-opener")
+		b.waitFor("draft retained", `document.querySelector('textarea[name="prompt"]').value`, "Implement this feature")
+	})
+	if unexpected.Load() != 0 {
+		t.Fatalf("unsaved task made %d persisted-task requests", unexpected.Load())
+	}
+}
+
 func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "workspace-project", Name: "Workspace"}

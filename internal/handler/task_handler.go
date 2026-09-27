@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -882,6 +883,34 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	return render(c, http.StatusOK, pages.Tasks(projects, project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
 }
 
+func (h *Handler) NewTask(c echo.Context) error {
+	ctx := c.Request().Context()
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	project, err := h.projectSvc.GetByID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "project not found")
+	}
+	agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
+	if err != nil {
+		return err
+	}
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, projectID, nil)
+	if isHTMX(c) {
+		return render(c, http.StatusOK, pages.NewTaskContent(project, agents, agentDefs))
+	}
+	projects, err := h.projectSvc.ListSelectorOptions(ctx)
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, pages.NewTask(projects, project, agents, agentDefs))
+}
+
 func isSwarmTaskForm(c echo.Context) bool {
 	v := c.FormValue("swarm_mode")
 	return v == "on" || v == "true" || v == "1"
@@ -1035,6 +1064,15 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			}
 		}
 		return render(c, http.StatusOK, pages.ScheduleContent(project, scheduledTasks, weekOffset, agents, agentDefs))
+	}
+
+	if c.QueryParam("from") == "new" {
+		destination := "/tasks/" + t.ID + "?project_id=" + url.QueryEscape(projectID)
+		if isHTMX(c) {
+			c.Response().Header().Set("HX-Location", destination)
+			return c.NoContent(http.StatusOK)
+		}
+		return c.Redirect(http.StatusSeeOther, destination)
 	}
 
 	// Return the full kanban board

@@ -1,0 +1,163 @@
+package pages
+
+import (
+ "fmt"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/internal/repository"
+ "github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ NewTask(projects []models.Project, project *models.Project, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
+ @layout.Base("New Task", projects, project.ID) {
+  @NewTaskContent(project, agents, agentDefs)
+ }
+}
+
+templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
+ <form id="task-detail-content" class="h-full flex flex-col" data-task-id="" data-project-id={ project.ID } data-initial-tab="chat" method="post" action={ fmt.Sprintf("/tasks?project_id=%s&from=new", project.ID) } enctype="multipart/form-data" hx-post={ fmt.Sprintf("/tasks?project_id=%s&from=new", project.ID) } hx-encoding="multipart/form-data" hx-target="#main-content" hx-swap="innerHTML" hx-on::after-request="if(!event.detail.successful) { document.getElementById('new-task-error').textContent=event.detail.xhr.responseText; }">
+  @layout.PageTitle("New Task")
+  <div class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
+   <a class="text-2xl font-bold" href={ templ.URL("/tasks?project_id=" + project.ID) }>Tasks</a>
+   <span class="text-2xl opacity-30">/</span>
+   <input name="title" aria-label="Task title" placeholder="New task title" class="input input-ghost text-xl flex-1 min-w-0" required/>
+   <button id="task-workspace-back" type="button" hidden></button>
+   <button id="task-details-opener" type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Open details panel" aria-controls="task-details-panel" aria-expanded="false" onclick="window.taskWorkspace.togglePanel()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></button>
+  </div>
+  <div id="task-workspaces">
+   @TaskDetailPanel() {
+    <div id="tab-details" class="task-tab-panel hidden">
+     @NewTaskOptions(agents, agentDefs)
+    </div>
+    <div id="tab-attachments" class="task-tab-panel hidden">
+     <label class="label" for="new-task-files">Attachments</label>
+     <input id="new-task-files" name="files" type="file" multiple class="file-input file-input-bordered w-full"/>
+    </div>
+    for _, tab := range []string{"schedules", "chaining", "lifecycle"} {
+     <div id={ "tab-" + tab } class="task-tab-panel hidden"><p class="text-sm opacity-60">Available after the task is created.</p></div>
+    }
+   }
+   <div id="tab-changes" class="hidden"></div>
+   <div id="tab-chat" class="flex flex-col flex-1 min-h-0">
+    <div class="flex flex-1 items-center justify-center text-base-content/60">Describe the task to start a new thread.</div>
+    <div id="new-task-error" role="alert" class="text-error text-sm"></div>
+    <div class="border border-base-300 rounded-lg p-3">
+     <textarea name="prompt" aria-label="Task prompt" class="textarea w-full min-h-24" placeholder="What should this task do?" required></textarea>
+     <div class="flex justify-end"><button type="submit" class="btn btn-primary btn-sm">Create Task</button></div>
+    </div>
+   </div>
+  </div>
+  @TaskWorkspaceScript()
+ </form>
+}
+
+ templ NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
+<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Goal (optional)</span></label>
+								<textarea name="goal" class="textarea textarea-bordered h-20" placeholder="Completion condition for automatic continuation"></textarea>
+							</div>						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">Model</span></label>
+							<select name="agent_id" class="select select-bordered">
+								<option value="">Use Default Model</option>
+								for _, agent := range agents {
+									<option value={ agent.ID }>
+										{ agent.Name }
+										if agent.IsDefault {
+											(Default)
+										}
+									</option>
+								}
+							</select>
+						</div>
+						if len(agentDefs) > 0 {
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Agent</span></label>
+								<select name="agent_definition_id" class="select select-bordered" id="task-agent-def-select">
+									<option value="">No Agent</option>
+									for _, ad := range agentDefs {
+										<option value={ ad.ID } data-agent-model={ ad.Model }>
+											{ ad.Name }
+											if ad.Model != "inherit" {
+												({ ad.Model })
+											}
+										</option>
+									}
+								</select>
+							</div>
+						}
+							<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">							<div class="form-control">
+								<label class="label"><span class="label-text">Category</span></label>
+								<select name="category" class="select select-bordered" id="task-category-select">
+									for _, cat := range models.SelectableCategories {
+										<option value={ string(cat) }>
+											{ string(cat) }
+										</option>
+									}
+								</select>
+							</div>
+							<div class="form-control">
+								<label class="label"><span class="label-text">Priority</span></label>
+								<select name="priority" class="select select-bordered">
+									<option value="1">Low</option>
+									<option value="2" selected>Normal</option>
+									<option value="3">High</option>
+									<option value="4">Urgent</option>
+								</select>
+							</div>
+						</div>
+							<div class="form-control mt-3">
+								<label class="label"><span class="label-text">Tag</span></label>
+								<select name="tag" class="select select-bordered">
+									<option value="">None</option>
+									<option value="feature">Feature</option>
+									<option value="bug">Bug</option>
+								</select>
+							</div>
+								<div class="card bg-base-200/50 border border-base-300 mt-3">
+									<div class="card-body p-3 space-y-3">
+										<label class="label cursor-pointer justify-start gap-2 p-0">
+											<input type="checkbox" name="swarm_mode" id="create-task-swarm-mode-toggle" onchange="document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)" class="toggle toggle-sm toggle-primary"/>
+											<span class="label-text font-medium">Swarm mode</span>
+										</label>
+										<div id="create-task-swarm-options" class="hidden space-y-3">
+											<p class="text-xs opacity-70">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p>
+											<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+												<div class="form-control">
+													<label class="label"><span class="label-text">Max workers</span></label>
+													<input type="number" name="swarm_max_workers" class="input input-bordered" min="1" max="8" value="3"/>
+												</div>
+												<div class="form-control">
+													<label class="label"><span class="label-text">Worker isolation</span></label>
+													<select name="swarm_worker_isolation" class="select select-bordered">
+														<option value="worktree" selected>Worktree</option>
+														<option value="read_only">Read only</option>
+														<option value="shared">Shared</option>
+													</select>
+												</div>
+											</div>
+											<div class="flex flex-wrap gap-4">
+												<input type="hidden" name="swarm_reviewer_enabled" value="false"/>
+												<label class="label cursor-pointer justify-start gap-2 p-0">
+													<input type="checkbox" name="swarm_reviewer_enabled" value="true" class="checkbox checkbox-sm" checked/>
+													<span class="label-text">Reviewer enabled</span>
+												</label>
+												<input type="hidden" name="swarm_merger_enabled" value="false"/>
+												<label class="label cursor-pointer justify-start gap-2 p-0">
+													<input type="checkbox" name="swarm_merger_enabled" value="true" class="checkbox checkbox-sm" checked/>
+													<span class="label-text">Merger enabled</span>
+												</label>
+											</div>
+										</div>
+									</div>
+								</div>
+								<!-- Git Worktree: Automatic merge triggers -->
+								<div class="form-control mt-3 space-y-2">
+									<label class="label cursor-pointer justify-start gap-2">
+										<input type="checkbox" name="auto_merge" class="toggle toggle-sm toggle-primary"/>
+										<span class="label-text">Auto-merge to target branch on successful completion</span>
+									</label>
+									<label class="label cursor-pointer justify-start gap-2">
+										<input type="checkbox" name="auto_merge_on_goal_achieved" class="toggle toggle-sm toggle-primary"/>
+										<span class="label-text">Auto-merge to target branch when goal is achieved</span>
+									</label>
+								</div>
+}
