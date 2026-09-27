@@ -1826,7 +1826,9 @@ func TestToggleScheduleEnabled_HTMXFromScheduleRefreshesSchedulePage(t *testing.
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).WithTitle("Schedule page toggle").Build()
-	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+	now := time.Now().Local()
+	runAt := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
+	s := tc.CreateSchedule(task.ID).WithRunAt(runAt).Build()
 
 	rec := tc.HTMX().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID + "&from=schedule").Execute()
 

@@ -911,7 +911,8 @@ func TestHandler_RunTask_HTMXFromScheduleRefreshesSchedulePage(t *testing.T) {
 		WithCategory(models.CategoryScheduled).
 		WithStatus(models.StatusPending).
 		Build()
-	runAt := time.Now().Add(time.Hour)
+	now := time.Now().Local()
+	runAt := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, now.Location())
 	tc.CreateSchedule(task.ID).WithRunAt(runAt).Build()
 
 	rec := tc.HTMX().Post("/tasks/" + task.ID + "/run?project_id=" + project.ID + "&from=schedule").Execute()
