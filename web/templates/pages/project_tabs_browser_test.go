@@ -33,6 +33,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if static.ServeAsset(w, r) {
 					return
 				}
+				if r.URL.Path == "/wails/runtime.js" {
+					w.Header().Set("Content-Type", "text/javascript")
+					_, _ = w.Write([]byte(`export const Window = {};`))
+					return
+				}
 				if r.URL.Path == "/ui/preferences" {
 					var req struct {
 						ProjectID string    `json:"project_id"`
@@ -100,6 +105,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					return
 				}
 				browser.waitFor("tabs controller", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
+				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();return String(['project-selector-trigger','project-settings-btn','new-project-btn'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
+					t.Fatal("titlebar selector and actions must share a centered row inside the bar", got)
+				}
 				if got := browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollWidth > document.getElementById('desktop-project-tabs').clientWidth && document.documentElement.scrollWidth <= innerWidth)`); got != "true" {
 					t.Fatal("tabs must overflow within their own scrollport", got)
 				}
@@ -136,8 +144,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("save completed", `String(document.readyState)`, "complete")
 				// A marker request is queued after the UI's fetch on the browser event loop.
 				browser.evaluateAwait(`new Promise(resolve => { function check() { fetch('/tasks').then(r=>r.text()).then(html=> { if (!html.includes('data-project-tab="p02"')) resolve('saved'); else setTimeout(check,20); }); } check(); })`)
+				browser.evaluate(`String(window.beforeProjectTabsReload = true)`)
 				browser.call("Page.reload", map[string]any{}, nil)
-				browser.waitFor("restored unpinned project", `document.readyState === 'complete' ? String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02') : ''`, "true")
+				browser.waitFor("restored unpinned project", `!window.beforeProjectTabsReload && document.readyState === 'complete' ? String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02') : ''`, "true")
 				browser.click("#project-pin-toggle")
 				browser.waitFor("repin", `String(!!document.querySelector('[data-project-tab="p02"]'))`, "true")
 				browser.click(`[data-close-project="p02"]`)
