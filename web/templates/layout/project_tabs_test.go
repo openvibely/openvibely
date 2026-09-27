@@ -45,7 +45,7 @@ func TestMacFullscreenPresentationAndGlyphs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"NSApplicationPresentationHideMenuBar", "NSApplicationPresentationHideDock", "NSApplicationDidResignActiveNotification", "NSWindowWillExitFullScreenNotification"} {
+	for _, want := range []string{"window:willUseFullScreenPresentationOptions:", "ovConfigureFullscreenDelegate", "NSApplicationPresentationHideMenuBar", "NSApplicationPresentationHideDock", "NSApplicationDidResignActiveNotification", "NSWindowWillExitFullScreenNotification"} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing fullscreen lifecycle contract: %s", want)
 		}
