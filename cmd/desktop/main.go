@@ -274,8 +274,6 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 			}
 		})
 	}
-	titleBar := application.MacTitleBarHiddenInset
-	titleBar.ShowToolbarWhenFullscreen = true
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:  "main",
 		Title: "OpenVibely",
@@ -285,10 +283,9 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		Height:    820,
 		MinWidth:  1024,
 		MinHeight: 680,
-		// macOS keeps native traffic lights over the full-size content view.
-		// Other platforms use Wails window controls in the shared title bar.
-		Frameless: runtime.GOOS != "darwin",
-		Mac:       application.MacWindow{TitleBar: titleBar},
+		// Keep tabs and window controls in one content-owned bar, including
+		// fullscreen, rather than underneath a separate native toolbar.
+		Frameless: true,
 	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 

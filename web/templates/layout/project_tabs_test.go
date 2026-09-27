@@ -45,7 +45,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`Frameless: runtime.GOOS != "darwin"`, `application.MacTitleBarHiddenInset`, `titleBar.ShowToolbarWhenFullscreen = true`, `httputil.NewSingleHostReverseProxy`, `Handler: proxy`} {
+	for _, want := range []string{`Frameless: true`, `httputil.NewSingleHostReverseProxy`, `Handler: proxy`} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing native window configuration: %s", want)
 		}
@@ -54,7 +54,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`if runtime.GOOS != "darwin"`, `data-wml-window="Minimise"`, `data-wml-window="ToggleMaximise"`, `data-wml-window="Close"`, `padding-left: 80px`} {
+	for _, want := range []string{`data-wml-window="Minimise"`, `data-wml-window="ToggleFullscreen"`, `data-wml-window="Close"`} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing native window contract: %s", want)
 		}
