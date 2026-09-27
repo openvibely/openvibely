@@ -1389,6 +1389,49 @@ func TestHandler_GetTask_RunningTask(t *testing.T) {
 	assertContains(t, rec, "function _loadThreadContent(taskId, forceReload, expectedExecId)")
 }
 
+func TestHandler_NewTaskWorkspace(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "New workspace")
+	for _, htmx := range []bool{false, true} {
+		req := httptest.NewRequest(http.MethodGet, "/tasks/new?project_id="+project.ID, nil)
+		if htmx {
+			req.Header.Set("HX-Request", "true")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assertCode(t, rec, http.StatusOK)
+		assertContains(t, rec, `id="task-details-panel"`)
+		assertContains(t, rec, `name="prompt"`)
+		assertContains(t, rec, `from=new`)
+		require.NotContains(t, rec.Body.String(), `id="new_task_modal"`)
+	}
+	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks, "opening the workspace must not persist a task")
+	for _, htmx := range []bool{false, true} {
+		form := url.Values{"title": {fmt.Sprintf("Workspace %t", htmx)}, "prompt": {"Implement it"}, "category": {"backlog"}, "priority": {"2"}}
+		req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if htmx {
+			req.Header.Set("HX-Request", "true")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		header := "Location"
+		status := http.StatusSeeOther
+		if htmx {
+			header = "HX-Location"
+			status = http.StatusOK
+		}
+		assertCode(t, rec, status)
+		require.Contains(t, rec.Header().Get(header), "?project_id="+project.ID)
+		require.True(t, strings.HasPrefix(rec.Header().Get(header), "/tasks/"))
+	}
+	tasks, err = h.taskRepo.ListByProject(context.Background(), project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 2)
+}
+
 func TestHandler_GetTask_ThreadTabAliasActivatesThread(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Thread Alias Project")
