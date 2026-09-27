@@ -21,6 +21,7 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "draft-project", Name: "Draft"}
 	var unexpected atomic.Int32
+	var sends atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
@@ -29,7 +30,24 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		var view templ.Component
 		switch r.URL.Path {
 		case "/tasks":
+			if r.Method == http.MethodPost {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				if r.FormValue("message") != "Implement this feature" || r.FormValue("title") != "" {
+					t.Errorf("unexpected first message: %v", r.Form)
+				}
+				sends.Add(1)
+				w.Header().Set("HX-Location", "/tasks/created?project_id="+project.ID)
+				return
+			}
 			view = Tasks([]models.Project{project}, &project, nil, nil, nil, "", "")
+		case "/tasks/created":
+			_, _ = w.Write([]byte(`<div id="created-thread">First message accepted</div>`))
+			return
+		case "/breadcrumb-selectors/tasks":
+			_, _ = w.Write([]byte(`<div role="listbox"><a role="option" href="/tasks/existing">Existing task</a></div>`))
+			return
 		case "/tasks/new":
 			if r.Header.Get("HX-Request") == "true" {
 				view = NewTaskContent(&project, nil, nil)
@@ -51,19 +69,29 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id="+project.ID, "new-task-workspace", func(b *composerFocusCDP) {
 		b.waitFor("board ready", `String(Boolean(document.querySelector('a[hx-get^="/tasks/new"]')))`, "true")
 		b.click(`a[hx-get^="/tasks/new"]`)
-		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="prompt"]')))`, "/tasks/new:true")
+		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="message"]')))`, "/tasks/new:true")
 		b.waitFor("no creation dialog", `String(document.querySelector('dialog[open]')===null)`, "true")
 		b.click(`input[name="title"]`)
 		b.typeText("New task draft")
-		b.click(`textarea[name="prompt"]`)
+		b.click(`textarea[name="message"]`)
 		b.typeText("Implement this feature")
 		b.click("#task-details-opener")
 		b.waitFor("draft inspector", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
 		b.click(`[data-tab="attachments"]`)
 		b.waitFor("draft attachments", `String(document.getElementById('new-task-files').getClientRects().length>0)`, "true")
 		b.click("#task-details-opener")
-		b.waitFor("draft retained", `document.querySelector('textarea[name="prompt"]').value`, "Implement this feature")
+		b.waitFor("draft retained", `document.querySelector('textarea[name="message"]').value`, "Implement this feature")
+		b.click("#task-resource-selector-button")
+		b.waitFor("task breadcrumb results", `String(document.querySelector('#task-resource-selector-dialog').textContent.includes('Existing task'))`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
+		b.evaluate(`document.querySelector('input[name="title"]').value=''`)
+		b.click("#task-message-input")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
+		b.waitFor("first message navigation", `location.pathname`, "/tasks/created")
 	})
+	if sends.Load() != 1 {
+		t.Fatalf("expected one first-message send, got %d", sends.Load())
+	}
 	if unexpected.Load() != 0 {
 		t.Fatalf("unsaved task made %d persisted-task requests", unexpected.Load())
 	}
