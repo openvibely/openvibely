@@ -4,9 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -201,13 +207,59 @@ func TestDesktopPackagedUpdateHelperInvalidTimeoutsReturnBeforeHelper(t *testing
 	}
 }
 
+func TestDesktopStartupServesDocumentWithoutRedirect(t *testing.T) {
+	// Read the actual window URL, rather than letting an HTTP client silently
+	// follow the redirect that WebKit's native asset transport cannot handle.
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`URL:\s+"([^"]+)"`).FindSubmatch(source)
+	if len(match) != 2 {
+		t.Fatal("missing desktop startup URL")
+	}
+	updates := httptest.NewServer(http.NotFoundHandler())
+	defer updates.Close()
+	root := t.TempDir()
+	backend, err := startDesktopBackend(context.Background(), &config.Config{
+		Mode: config.ModeDesktop, Port: "0", Environment: "test",
+		DatabasePath:     filepath.Join(root, "test.db"),
+		ProjectRepoRoot:  filepath.Join(root, "repos"),
+		AppDataDir:       filepath.Join(root, "appdata"),
+		UpdateServiceURL: updates.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Shutdown()
+	backendURL, err := url.Parse(backend.BaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(backendURL)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "wails://localhost"+string(match[1]), nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("desktop startup returned %d (Location %q), want a document without a native-scheme redirect", response.Code, response.Header().Get("Location"))
+	}
+	body, err := io.ReadAll(response.Result().Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{`id="main-content"`, `id="desktop-project-titlebar"`, `/wails/runtime.js`} {
+		if !strings.Contains(string(body), marker) {
+			t.Errorf("startup document missing %s", marker)
+		}
+	}
+}
+
 func TestDesktopWindowProxiesEphemeralBackendWithPersistentStorage(t *testing.T) {
 	content, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatalf("read desktop main.go: %v", err)
 	}
 	source := string(content)
-	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       "/",`) || !strings.Contains(source, `httputil.NewSingleHostReverseProxy(backendURL)`) || !strings.Contains(source, `proxy.FlushInterval = -1`) {
+	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       "/chat",`) || !strings.Contains(source, `httputil.NewSingleHostReverseProxy(backendURL)`) || !strings.Contains(source, `proxy.FlushInterval = -1`) {
 		t.Fatal("desktop launcher must keep loading the server UI through a Wails WebView window")
 	}
 	for _, disallowed := range []string{`DataPath:`, `PrivateMode`, `Incognito`, `Ephemeral`, `ClearBrowsingData`} {
