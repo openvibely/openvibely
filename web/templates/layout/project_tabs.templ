@@ -40,21 +40,24 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; --project-tab-selected: color-mix(in oklch, oklch(var(--b2)), oklch(var(--bc)) 24%); border-bottom: 1px solid var(--project-tab-selected); }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
-  #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding-top: 6px; }
-  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 10px 10px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }
-  .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); }
+  #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding: 6px 10px 0; }
+  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 16px 16px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }
+  .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); z-index: 1; }
+  .desktop-project-tab:has([aria-selected="true"])::before, .desktop-project-tab:has([aria-selected="true"])::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
+  .desktop-project-tab:has([aria-selected="true"])::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 10px, var(--project-tab-selected) 10.5px); }
+  .desktop-project-tab:has([aria-selected="true"])::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 10px, var(--project-tab-selected) 10.5px); }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }
-  .desktop-project-tab:not(:has([aria-selected="true"])) [role="tab"]:hover { background: oklch(var(--bc) / .08); border-radius: 8px; box-shadow: inset 0 0 0 4px oklch(var(--b2)); }
+  .desktop-project-tab:not(:has([aria-selected="true"])) [role="tab"]:hover { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; padding-left: 12px; padding-right: 36px; }
   .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
   #new-project-btn { flex-shrink: 0; width: 30px; height: 30px; align-self: center; border-radius: 50%; }
  #new-project-btn:hover { background: oklch(var(--bc) / .12); }
  #project-tab-menu { position: fixed; margin: 0; padding: 4px; border: 1px solid oklch(var(--bc) / .2); border-radius: 8px; background: oklch(var(--b1)); color: oklch(var(--bc)); --wails-draggable: no-drag; }
- #project-tab-menu button { padding: 8px 16px; border-radius: 4px; }
+ #project-tab-menu button { display: block; width: 100%; text-align: left; padding: 8px 16px; border-radius: 4px; }
  #project-tab-menu button:hover { background: oklch(var(--bc) / .12); }
   .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }
-  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }
+  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 150px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }
   #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
 	  #desktop-project-titlebar #project-selector-trigger { width: 150px; }
@@ -98,7 +101,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 			}
 
 	</header>
- <div id="project-tab-menu" popover="manual" role="menu" aria-label="Project tab"><button type="button" role="menuitem" id="project-tab-pin-action">Pin</button></div>
+ <div id="project-tab-menu" popover="manual" role="menu" aria-label="Project tab"><button type="button" role="menuitem" id="project-tab-pin-action">Pin</button><button type="button" role="menuitem" id="project-tab-settings-action">Project Settings</button></div>
 	<script>
  (function() {
   function installProjectTabs() {
@@ -196,7 +199,17 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    });
    window.addEventListener('resize', function() { menu.hidePopover(); });
    list.addEventListener('scroll', function() { menu.hidePopover(); });
-   menu.addEventListener('keydown', function(event) { if (event.key === 'Escape' || event.key === 'Tab') { menu.hidePopover(); if (menuTab) menuTab.focus(); } });
+   menu.addEventListener('keydown', function(event) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+     event.preventDefault(); var items = Array.from(menu.querySelectorAll('[role=menuitem]'));
+     items[(items.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+    }
+    if (event.key === 'Escape' || event.key === 'Tab') { menu.hidePopover(); if (menuTab) menuTab.focus(); } });
+   document.getElementById('project-tab-settings-action').addEventListener('click', function() {
+    if (!menuTab) return;
+    menu.hidePopover();
+    htmx.ajax('GET', '/projects/' + encodeURIComponent(menuTab.dataset.projectTab) + '/edit', {target: document.getElementById('project-settings-container'), swap: 'innerHTML'});
+   });
    pin.addEventListener('click', function() {
     if (!menuTab) return;
     var id = menuTab.dataset.projectTab;
