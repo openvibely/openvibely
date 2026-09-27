@@ -957,7 +957,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 	}
 	var scheduledFormValues scheduleFormValues
-	if category == models.CategoryScheduled {
+	if category == models.CategoryScheduled || (threadDraft && c.FormValue("add_schedule") == "on") {
 		var err error
 		scheduledFormValues, err = parseScheduleForm(c, models.RepeatDaily)
 		if err != nil {
@@ -1043,15 +1043,8 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
 
-	if threadDraft && !isSwarmTaskForm(c) {
-		c.SetParamNames("taskId")
-		c.SetParamValues(t.ID)
-		c.Set("newTaskThread", true)
-		return h.TaskThreadSend(c)
-	}
-
 	// If category is scheduled, create its schedule before reporting success.
-	if t.Category == models.CategoryScheduled {
+	if t.Category == models.CategoryScheduled || (threadDraft && c.FormValue("add_schedule") == "on") {
 		clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
 		sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
 			TaskID:              t.ID,
@@ -1069,6 +1062,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			return err
 		}
 		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
+	}
+
+	if threadDraft && !isSwarmTaskForm(c) {
+		c.SetParamNames("taskId")
+		c.SetParamValues(t.ID)
+		c.Set("newTaskThread", true)
+		return h.TaskThreadSend(c)
 	}
 
 	// Handle optional file attachments (multiple files supported)
@@ -3301,17 +3301,11 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 
 	if c.Get("newTaskThread") == true {
-		location, err := json.Marshal(map[string]string{
-			"path":   "/tasks/" + taskID + "?project_id=" + url.QueryEscape(task.ProjectID),
-			"target": "#main-content",
-			"swap":   "innerHTML",
-		})
-		if err != nil {
-			return err
-		}
 		c.Response().Header().Set("X-Created-Task-ID", taskID)
-		c.Response().Header().Set("HX-Location", string(location))
-		return c.NoContent(http.StatusOK)
+		c.Response().Header().Set("HX-Retarget", "#main-content")
+		c.Response().Header().Set("HX-Reswap", "innerHTML")
+		c.Response().Header().Set("HX-Push-Url", "/tasks/"+taskID+"?project_id="+url.QueryEscape(task.ProjectID))
+		return h.GetTaskThread(c)
 	}
 
 	return render(c, http.StatusOK, templ.Join(
@@ -3456,7 +3450,15 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		}
 		return render(c, http.StatusOK, components.TaskThreadPollView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit, preservedExecIDs))
 	}
-	return render(c, http.StatusOK, components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
+	thread := components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit)
+	if c.Get("newTaskThread") == true {
+		data, err := h.loadTaskDetailContentData(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, "chat", data.reviewComments, thread))
+	}
+	return render(c, http.StatusOK, thread)
 }
 
 func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, task *models.Task, agents []models.LLMConfig) *models.Task {
