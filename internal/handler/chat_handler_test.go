@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -3423,8 +3424,8 @@ func TestHandler_Chat_FullPageVsHTMXPartial(t *testing.T) {
 
 	// Full page must include the complete HTML structure with CSS/JS
 	assert.Contains(t, fullBody, "<!doctype html>", "full page load must include doctype")
-	assert.Contains(t, fullBody, "daisyui", "full page load must include CSS framework")
-	assert.Contains(t, fullBody, "htmx.org", "full page load must include HTMX script")
+	assert.Contains(t, fullBody, static.URL("app.css"), "full page load must include CSS framework")
+	assert.Contains(t, fullBody, static.URL("vendor/htmx.min.js"), "full page load must include HTMX script")
 
 	// HTMX partial must NOT include the full page structure
 	assert.NotContains(t, htmxBody, "<!doctype html>", "HTMX partial must not include doctype")

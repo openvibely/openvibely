@@ -19,6 +19,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBreadcrumbSelectorCaretOnlyUsesRealTriggerDimensions(t *testing.T) {
@@ -122,6 +123,9 @@ func TestBrowserFunctional_BreadcrumbSelectorKeyboardFocusAndContainmentInChrome
 	</script>`
 	page := `<!doctype html><html data-theme="light"><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}.bg-base-100{background-color:var(--fixture-base)}.border-base-300{border:1px solid var(--fixture-border)}.text-base-content{color:var(--fixture-content)}[data-theme="light"]{--fixture-base:rgb(255,255,255);--fixture-border:rgb(210,210,210);--fixture-content:rgb(20,20,20)}[data-theme="dark"]{--fixture-base:rgb(24,24,27);--fixture-border:rgb(82,82,91);--fixture-content:rgb(244,244,245)}[data-theme="imported-contrast"]{--fixture-base:rgb(0,0,0);--fixture-border:rgb(255,255,255);--fixture-content:rgb(255,255,255)}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/":
 			_, _ = fmt.Fprint(w, page)
@@ -171,6 +175,9 @@ func TestBrowserFunctional_BreadcrumbSelectorRefreshesOpenResultsOnTaskSSEInChro
 	page := `<!doctype html><html><head><meta name="viewport" content="width=device-width"><style>dialog{border:0;background:transparent;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}</style><script src="/htmx.js"></script></head><body data-test-result="pending">` + selector.String() + runner + `</body></html>`
 	var resultRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/":
 			_, _ = fmt.Fprint(w, page)
@@ -229,6 +236,9 @@ func TestBrowserFunctional_BreadcrumbSelectorLongTitleClampsInsideNarrowViewport
 	</script>`
 	page := `<!doctype html><html><head><meta name="viewport" content="width=device-width"><style>html,body{margin:0;width:100%;overflow:hidden}body{font-family:sans-serif}.fixture{box-sizing:border-box;display:flex;justify-content:flex-end;padding:16px 8px 0 110px;width:100%}.fixture>[data-breadcrumb-selector]{min-width:0}.fixture button{max-width:100%;overflow:hidden}.fixture button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}dialog{border:1px solid #ccc;background:#fff;box-sizing:border-box}.fixed{position:fixed}.m-0{margin:0}.w-\[28rem\]{width:28rem}.max-w-\[calc\(100vw-1rem\)\]{max-width:calc(100vw - 1rem)}.max-h-\[min\(32rem\,calc\(100dvh-1rem\)\)\]{max-height:min(32rem,calc(100dvh - 1rem))}</style></head><body data-test-result="pending"><div class="fixture">` + selector.String() + `</div>` + runner + `</body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		_, _ = fmt.Fprint(w, page)
 	}))
 	defer server.Close()

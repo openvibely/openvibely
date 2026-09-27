@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *testing.T) {
@@ -209,6 +211,9 @@ func TestChatInputRequestBrowserRendersSubmitsRetriesAndDisablesControls(t *test
 	</script>`, string(eventJSON), pending.ID, pending.ID)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/browser-result" {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 			select {
@@ -346,6 +351,9 @@ func TestChatInputRequestBrowserRefreshRestoresPendingControls(t *testing.T) {
 	refreshRunner = fmt.Sprintf(refreshRunner, pending.ID)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/browser-result" {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 			select {

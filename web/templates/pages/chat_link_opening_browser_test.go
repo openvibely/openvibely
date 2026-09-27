@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -30,6 +31,9 @@ func TestBrowserFunctional_ChatRenderedLinksOpenOutsideAppAndDesktopExternalBrow
 
 	fixtureHTML := chatLinkOpeningBrowserFixture(t, base.String())
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

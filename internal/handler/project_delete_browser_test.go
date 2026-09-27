@@ -13,6 +13,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,6 +50,9 @@ func TestProjectCleanupWarningSurvivesRedirectInChrome(t *testing.T) {
 	</script>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/browser-result" {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 			select {
@@ -176,6 +180,9 @@ func TestProjectDeletionConfirmationAndSuccessfulFlowInChrome(t *testing.T) {
 	</script>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/browser-result" {
 			body, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 			select {

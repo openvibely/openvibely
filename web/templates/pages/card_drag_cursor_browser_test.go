@@ -22,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -546,6 +547,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	var groupedExpectedStates []string
 	var dragOnlyMode bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		requestMu.Lock()
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		requestMu.Unlock()
@@ -572,7 +576,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, persistedTasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/refresh-kanban":
@@ -605,7 +609,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Schedule([]models.Project{project}, &project, scheduledTasks, 0, nil, nil).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Schedule page: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-native-grouped-ready":
@@ -876,6 +880,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	groupAttempts := 0
 	result := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
@@ -894,7 +901,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Schedule([]models.Project{project}, &project, scheduled, 0, nil, nil).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render schedule: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/schedules/schedule-multi-b/reschedule":

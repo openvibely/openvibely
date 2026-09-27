@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -274,7 +275,10 @@ func TestBrowserFunctional_ChatScrollTrackerSmallUpwardScrollSurvivesStreamingIn
 		}, 400);
 	})();
 	</script></body></html>`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))
@@ -359,7 +363,10 @@ func TestBrowserFunctional_LatestMessageButtonDynamicBehaviorInChrome(t *testing
 	})();
 	</script></body></html>`
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))
@@ -1199,7 +1206,10 @@ func TestBrowserFunctional_CompletedBubbleSharedHydrationInChrome(t *testing.T) 
 	  }).catch(function(error) { fail(String(error && error.stack || error)); });
 	});
 	</script></body></html>`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))
@@ -1343,7 +1353,10 @@ func TestBrowserFunctional_FailedAssistantTerminalErrorOrderingAndSmartScrollInC
 	  }).catch(function(error) { fail(String(error && error.stack || error)); });
 	});
 	</script></body></html>`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))
@@ -1456,6 +1469,9 @@ func TestBrowserPerformance_CodeRangeWorkerCanCompleteAfterFormerTimeoutInChrome
 	});
 	</script></body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/result" {
 			query := r.URL.Query()
 			select {
@@ -6068,7 +6084,10 @@ func TestBrowserFunctional_TranscriptScrollCoordinatorInChrome(t *testing.T) {
 	});
 	</script></body></html>`
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))
@@ -6337,7 +6356,10 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 </script>`
 	html += fixture + "</body></html>"
-	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))

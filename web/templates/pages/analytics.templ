@@ -2066,7 +2066,8 @@ templ analyticsContent(currentProject *models.Project) {
 							var shouldAppend = false;
 							if (!script) {
 								script = document.createElement('script');
-								script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+								var chartSrc = document.querySelector('meta[name="ov-asset-chartjs"]');
+								script.src = chartSrc ? chartSrc.content : '';
 								script.setAttribute('data-analytics-chart-loader', '');
 								shouldAppend = true;
 							}

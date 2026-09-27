@@ -23,6 +23,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/require"
@@ -1260,10 +1261,7 @@ func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *t
 	baseHTML := base.String()
 	var localBaseLines []string
 	for _, line := range strings.Split(baseHTML, "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		localBaseLines = append(localBaseLines, line)
+		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
 	page = strings.Replace(page, "</body>", `<script>
@@ -1325,6 +1323,9 @@ func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *t
 </script></body>`, 1)
 
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/models" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			switch r.URL.Query().Get("page") {
@@ -1411,10 +1412,7 @@ func TestCardPaginationProductionBrowserDoesNotRestoreClearedURLSearchAfterRefre
 	require.NoError(t, layout.Base("Models URL search pagination", nil, "").Render(context.Background(), &base))
 	var localBaseLines []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		localBaseLines = append(localBaseLines, line)
+		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
 	page = strings.Replace(page, "</body>", `<script>
@@ -1479,6 +1477,9 @@ func TestCardPaginationProductionBrowserDoesNotRestoreClearedURLSearchAfterRefre
 
 	var clearedSearchRequests atomic.Int32
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/card-search-state" {
 			if clearedSearchRequests.Load() > 0 {
 				_, _ = w.Write([]byte("ready"))
@@ -1565,10 +1566,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
 	require.NoError(t, layout.Base("Fixed Personality focus fixture", nil, "").Render(context.Background(), &base))
 	var localBaseLines []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		localBaseLines = append(localBaseLines, line)
+		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
 	page = strings.Replace(page, "</head>", `<style>
@@ -1620,7 +1618,10 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
 })();
 </script></body>`, 1)
 
-	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(page))
 	}))
@@ -1683,10 +1684,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *tes
 	require.NoError(t, layout.Base("Fixed Channel focus fixture", nil, "").Render(context.Background(), &base))
 	var localBaseLines []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		localBaseLines = append(localBaseLines, line)
+		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
 	page = strings.Replace(page, "</head>", `<style>
@@ -1745,7 +1743,10 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *tes
 })();
 </script></body>`, 1)
 
-	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(page))
 	}))
@@ -1817,10 +1818,7 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 	require.NoError(t, layout.Base("Card pagination focus fixture", nil, "").Render(context.Background(), &base))
 	var localBaseLines []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		localBaseLines = append(localBaseLines, line)
+		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
 	page = strings.Replace(page, "</head>", `<style>
@@ -1970,6 +1968,9 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 	var continuationRequests atomic.Int32
 	var wrongOffsets atomic.Int32
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.URL.Path == "/models" && r.URL.Query().Get("partial") == "1" {
 			continuationRequests.Add(1)
@@ -2060,10 +2061,7 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
 	require.NoError(t, layout.Base("Models browser race", nil, "").Render(context.Background(), &base))
 	var localBaseLines []string
 	for _, line := range strings.Split(base.String(), "\n") {
-		if strings.Contains(line, "<script src=") || strings.Contains(line, "<link href=") || strings.Contains(line, `<link rel="stylesheet" href=`) {
-			continue
-		}
-		localBaseLines = append(localBaseLines, line)
+		localBaseLines = append(localBaseLines, stripExternalAssetTags(line))
 	}
 	page := strings.Replace(strings.Join(localBaseLines, "\n"), "</main>", initialHTML+"</main>", 1)
 	page = strings.Replace(page, "</body>", `<script>
@@ -2179,6 +2177,9 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
 	var retryRequests atomic.Int32
 	var livePageRequests atomic.Int32
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/models-state" {
 			if staleStarted.Load() {
 				_, _ = w.Write([]byte("started"))

@@ -91,6 +91,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - New models belong in `internal/models/`, repositories in `internal/repository/`, services in `internal/service/`, and handlers in `internal/handler/`.
 - Register new handlers and routes in `internal/handler/handler.go`.
 - Update templates under `web/templates/**/*.templ` when UI changes are needed, then run `templ generate`.
+- Front-end CSS/JS is served from the binary (`web/static`), never a CDN. Tailwind/DaisyUI classes are compiled at build time, so after adding a class that does not already appear in `web/templates` or `internal` Go files, run `make assets` and commit `web/static/dist` (CI fails otherwise). Write class names out in full; classes assembled from pieces at runtime are not compiled. Library versions and checksums are pinned in `scripts/build-assets.sh`.
 
 ## Testing And Validation
 

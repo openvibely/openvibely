@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -86,6 +87,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 			e := echo.New()
 			e.GET("/events/live", tc.handler.LiveEventsSSE)
 			mux := http.NewServeMux()
+			mux.Handle(static.Prefix, static.Handler())
 			mux.Handle("/events/live", e)
 			mux.HandleFunc("/htmx-2.0.4.min.js", func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -131,7 +133,7 @@ func TestAutomationClaimsRefreshCapacityQueuedBoardThroughLiveEventsInChrome(t *
 				if err != nil {
 					t.Fatalf("render authoritative board: %v", err)
 				}
-				page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+				page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 				if r.Header.Get("HX-Request") == "" {
 					page = strings.Replace(page, "</head>", runner+"</head>", 1)
 				}
@@ -302,6 +304,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 	})
 
 	mux := http.NewServeMux()
+	mux.Handle(static.Prefix, static.Handler())
 	mux.Handle("/events/live", liveEcho)
 	mux.HandleFunc("/disconnect-live", func(w http.ResponseWriter, _ *http.Request) {
 		firstSSEMu.Lock()
@@ -323,7 +326,7 @@ func TestAutomationRunNowSupersedesFailedLiveStateAcrossRefreshAndReloadInChrome
 		if err := pages.AutomationLive([]models.Project{*project}, project.ID, *failedGraph, true).Render(r.Context(), &out); err != nil {
 			t.Fatalf("render Automation Live fixture: %v", err)
 		}
-		page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+		page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 		page = strings.Replace(page, "</head>", automationRunNowFreshnessBrowserRunner(definition.Automation.ID)+"</head>", 1)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(page))

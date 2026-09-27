@@ -14,6 +14,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -48,7 +49,7 @@ func renderTerminalBrowserComponent(t *testing.T, component templ.Component) str
 }
 
 func installTerminalBrowserPrelude(document string) string {
-	document = strings.Replace(document, `https://unpkg.com/htmx.org@2.0.4`, `/htmx-2.0.4.min.js`, 1)
+	document = strings.Replace(document, static.URL("vendor/htmx.min.js"), `/htmx-2.0.4.min.js`, 1)
 	return strings.Replace(document, "<head>", "<head>"+terminalErrorBrowserPrelude(), 1)
 }
 
@@ -139,6 +140,9 @@ func TestBrowserFunctional_TaskThreadLiveFailureProductionWiringInChrome(t *test
 	var lazyRequests atomic.Int32
 	var fragmentRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
 		case r.URL.Path == "/htmx-2.0.4.min.js":
@@ -330,6 +334,9 @@ func TestBrowserFunctional_ChatLiveCreatedFailureProductionWiringInChrome(t *tes
 	var phase atomic.Int32
 	var chatRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -459,4 +460,24 @@ func (a *Assertions) Location(path string) *Assertions {
 // contains checks if a string contains a substring
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
+}
+
+var externalAssetTag = regexp.MustCompile(`<script src="[^"]*"[^>]*></script>|<link (?:href|rel="stylesheet" href)="[^"]*"[^>]*>`)
+
+// stripExternalAssetTags removes the layout's asset <script> and stylesheet <link> tags
+// from one line of rendered HTML, leaving the rest of the line intact.
+func stripExternalAssetTags(line string) string {
+	return externalAssetTag.ReplaceAllString(line, "")
+}
+
+var headStyleBlock = regexp.MustCompile(`(?s)<style>.*?</style>`)
+
+// stripHeadStyles removes the layout's inline <style> blocks from <head>, for fixtures
+// that assert window-level scrolling against a page without any layout CSS.
+func stripHeadStyles(html string) string {
+	end := strings.Index(html, "</head>")
+	if end < 0 {
+		return html
+	}
+	return headStyleBlock.ReplaceAllString(html[:end], "") + html[end:]
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -196,7 +197,10 @@ window.__hiddenToVisible = function() {
 func runReconnectChromeFixture(t *testing.T, body string) string {
 	t.Helper()
 	chrome := reconnectTestChrome(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte("<!doctype html><html><head><meta charset=\"utf-8\"></head><body>" + body + "</body></html>"))
 	}))

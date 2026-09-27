@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/stretchr/testify/require"
 )
@@ -249,6 +250,9 @@ func TestTaskThreadScheduledSteeringFallsBackToNormalFollowupInChrome(t *testing
 	var requests []browserRequest
 	htmxBytes := handlerPinnedHTMX(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if r.URL.Path == "/htmx.js" {
 			w.Header().Set("Content-Type", "text/javascript")
 			_, _ = w.Write(htmxBytes)

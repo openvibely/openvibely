@@ -19,6 +19,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -316,7 +317,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		return strings.Replace(html, `<main id="main-content"`, control+`<main id="main-content"`, 1)
 	}
 	usePinnedHTMX := func(html string) string {
-		return strings.Replace(html, `https://unpkg.com/htmx.org@2.0.4`, `/htmx-2.0.4.min.js`, 1)
+		return strings.Replace(html, static.URL("vendor/htmx.min.js"), `/htmx-2.0.4.min.js`, 1)
 	}
 	chatFragment := func() string {
 		html := render(ChatContent(nil, nil, project.ID, nil, nil, false, false, 30))
@@ -335,6 +336,9 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 	var taskHTMXRequests atomic.Int32
 	var threadHTMXRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":

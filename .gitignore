@@ -56,3 +56,6 @@ bin/
 .env.local
 .env.*.local
 .release-signing.env
+
+# Downloaded front-end build inputs (pinned in scripts/build-assets.sh)
+web/assets/.cache/

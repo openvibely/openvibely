@@ -26,6 +26,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -5537,8 +5538,8 @@ func TestTabDuplication_PagesReturnFullLayoutOrPartial(t *testing.T) {
 			if !strings.Contains(body, "<!doctype html>") {
 				t.Errorf("%s full page: missing <!doctype html> — page would be unstyled when tab is duplicated", pg.name)
 			}
-			if !strings.Contains(body, "htmx.org") {
-				t.Errorf("%s full page: missing htmx.org script — page would be non-functional when tab is duplicated", pg.name)
+			if !strings.Contains(body, static.URL("vendor/htmx.min.js")) {
+				t.Errorf("%s full page: missing HTMX script — page would be non-functional when tab is duplicated", pg.name)
 			}
 		})
 

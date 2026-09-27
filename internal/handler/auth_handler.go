@@ -16,6 +16,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 const (
@@ -61,7 +62,7 @@ func (h *Handler) isAuthPublicPath(path string) bool {
 	if path == "/login" || path == "/logout" || path == "/auth/me" || path == "/auth/sso/start" || path == "/auth/sso/callback" || path == "/logged-out" || path == "/api/system/health" || path == "/favicon.png" || path == "/favicon.ico" {
 		return true
 	}
-	if strings.HasPrefix(path, "/swagger/") {
+	if strings.HasPrefix(path, "/swagger/") || strings.HasPrefix(path, static.Prefix) {
 		return true
 	}
 	if path == "/webhooks/inbound" || strings.HasPrefix(path, "/webhooks/inbound/") {
@@ -199,8 +200,8 @@ func (h *Handler) AuthLoginPage(c echo.Context) error {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Login - OpenVibely</title>
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="` + static.URL("app.css") + `" rel="stylesheet" type="text/css" />
+  <link href="` + static.URL("app-utilities.css") + `" rel="stylesheet" type="text/css" />
 </head>
 <body class="min-h-screen bg-base-200 flex items-center justify-center p-6">
   <div class="card w-full max-w-md bg-base-100 shadow-xl border border-base-300">

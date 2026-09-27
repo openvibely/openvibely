@@ -20,6 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -458,6 +459,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	moveRefreshes := 0
 	newerRefreshStarted := make(chan struct{}, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		requestMu.Lock()
 		requestLog = append(requestLog, r.Method+" "+r.URL.RequestURI()+" HX="+r.Header.Get("HX-Request"))
 		requestMu.Unlock()
@@ -491,7 +495,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, sortedTasks(backlogSort, completedSort), nil, nil, backlogSort, completedSort).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case strings.HasPrefix(r.URL.Path, "/tasks/") && strings.HasSuffix(r.URL.Path, "/sort") && r.Method == http.MethodPost:
@@ -749,6 +753,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		requestMu.Lock()
 		requestLog = append(requestLog, r.Method+" "+r.URL.RequestURI()+" HX="+r.Header.Get("HX-Request"))
 		requestMu.Unlock()
@@ -766,7 +773,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case r.URL.Path == "/tasks/backlog/execute" && r.Method == http.MethodPost:
@@ -913,6 +920,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
@@ -972,7 +982,7 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 			if err := Tasks([]models.Project{project}, &project, boardTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Tasks page: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":
@@ -1069,7 +1079,10 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>` + automationActions.String() + taskActions.String()
 	html := `<!doctype html><html data-theme="dark" data-color-theme="openvibely-dark"><head><meta charset="utf-8">` + inlineStyles.String() + importedCSS + `</head><body>` + fixture + `</body></html>`
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, assetReq *http.Request) {
+		if static.ServeAsset(w, assetReq) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))
@@ -1411,6 +1424,9 @@ func TestBrowserFunctional_TaskCardStateIconStaysVisibleWithLongTitleAtMobileWid
 
 	browserResult := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1565,6 +1581,9 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 		})().catch(function(error){fetch('/browser-result?status=fail&message='+encodeURIComponent(String(error&&error.stack||error)),{method:'POST'})})
 	});</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -1574,7 +1593,7 @@ func TestBrowserFunctional_TaskCardMergeOptionLoaderDeduplicatesRetriesAndRedire
 			if err := Tasks([]models.Project{project}, &project, []models.Task{task}, nil, nil, "", "").Render(r.Context(), &out); err != nil {
 				t.Fatal(err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/board-refresh":
@@ -1754,6 +1773,9 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 			await report('pass','');
 		})().catch(function(e){report('fail',String(e&&e.stack||e))})});</script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript")
@@ -1781,7 +1803,7 @@ func TestBrowserFunctional_TaskCardMergeMenuDirectActionNon2xxRetryAndCardRefres
 			if err := Tasks([]models.Project{project}, &project, []models.Task{task}, nil, nil, "", "", menuStates()).Render(context.Background(), &out); err != nil {
 				t.Fatal(err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/arm-delayed-board-refresh":
@@ -2178,6 +2200,9 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 
 	browserResult := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
@@ -2195,7 +2220,7 @@ func TestBrowserFunctional_TaskAndAutomationCardKebabMenuRowHeightParityAndDropZ
 			if err := AutomationsContent(automationCards, project.ID).Render(context.Background(), &automationOut); err != nil {
 				t.Fatalf("render Automation menu height reference: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</body>", automationOut.String()+"</body>", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
@@ -2425,6 +2450,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch {
 		case r.URL.Path == "/htmx-2.0.4.min.js":
@@ -2435,7 +2463,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				_, _ = w.Write([]byte(renderBoard()))
 				return
 			}
-			page := strings.Replace(renderPage(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(renderPage(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case (r.URL.Path == "/tasks/completed" || r.URL.Path == "/tasks/backlog") && r.Method == http.MethodDelete:
@@ -2575,6 +2603,9 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 </script>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
@@ -2585,7 +2616,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
 				t.Fatalf("render mobile delete-all page: %v", err)
 			}
-			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page := strings.Replace(out.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":

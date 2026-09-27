@@ -15,6 +15,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T) {
@@ -263,6 +264,9 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 })();
 	</script>`, a.ID, b.ID, protected.ID, "?project_id="+url.QueryEscape(projectID))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -282,7 +286,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 					http.Error(w, rec.Body.String(), rec.Code)
 					return
 				}
-				page := strings.Replace(rec.Body.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+				page := strings.Replace(rec.Body.String(), static.URL("vendor/htmx.min.js"), "/htmx-2.0.4.min.js", 1)
 				page = strings.Replace(page, "</body>", runner+"</body>", 1)
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				_, _ = w.Write([]byte(page))
