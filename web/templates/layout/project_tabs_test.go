@@ -45,7 +45,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`Frameless: true`, `httputil.NewSingleHostReverseProxy`, `Handler: proxy`} {
+	for _, want := range []string{`Frameless: true`, `CornerRadius: 20`, `httputil.NewSingleHostReverseProxy`, `Handler: proxy`} {
 		if !strings.Contains(strings.Join(strings.Fields(string(source)), " "), want) {
 			t.Errorf("missing native window configuration: %s", want)
 		}
