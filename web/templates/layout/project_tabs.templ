@@ -3,7 +3,6 @@ package layout
 import (
 	"encoding/json"
 	"runtime"
-	"slices"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -38,18 +37,22 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="desktop"] #sidebar { height: calc(100dvh - 46px); }
   [data-openvibely-runtime="desktop"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }
   @media (min-width: 1024px) { [data-openvibely-runtime="desktop"] .drawer-side { top: 0; } }
-  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }
+  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; --project-tab-selected: color-mix(in oklch, oklch(var(--b2)), oklch(var(--bc)) 24%); border-bottom: 1px solid var(--project-tab-selected); }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
   #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding-top: 6px; }
   .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 10px 10px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }
-  .desktop-project-tab:has([aria-selected="true"]) { background: oklch(var(--b1)); }
+  .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }
-  .desktop-project-tab:hover { background: oklch(var(--bc) / .08); }
-  .desktop-project-tab:has([aria-selected="true"]):hover { background: oklch(var(--b1)); }
+  .desktop-project-tab:not(:has([aria-selected="true"])) [role="tab"]:hover { background: oklch(var(--bc) / .08); border-radius: 8px; box-shadow: inset 0 0 0 4px oklch(var(--b2)); }
+  .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
-  #project-pin-toggle { flex-shrink: 0; }
+  #new-project-btn { flex-shrink: 0; width: 30px; height: 30px; align-self: center; border-radius: 50%; }
+ #new-project-btn:hover { background: oklch(var(--bc) / .12); }
+ #project-tab-menu { position: fixed; margin: 0; padding: 4px; border: 1px solid oklch(var(--bc) / .2); border-radius: 8px; background: oklch(var(--b1)); color: oklch(var(--bc)); --wails-draggable: no-drag; }
+ #project-tab-menu button { padding: 8px 16px; border-radius: 4px; }
+ #project-tab-menu button:hover { background: oklch(var(--bc) / .12); }
   .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }
   #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }
   #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }
@@ -81,16 +84,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 					<button type="button" data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name } title="Close tab (unpin)">×</button>
 				</div>
 			}
-		</div>
+		<button id="new-project-btn" type="button" aria-label="Create project" title="Create project">+</button>
+        </div>
+
 		<div class="desktop-titlebar-space" aria-hidden="true"></div>
-		<button id="project-pin-toggle" type="button" class="btn btn-ghost btn-sm" aria-label="Toggle pin for current project" aria-pressed={ fmtBool(slices.Contains(uiPreferences(ctx).PinnedProjectIDs, currentProjectID)) } disabled?={ len(projects) == 0 }>
-			if slices.Contains(uiPreferences(ctx).PinnedProjectIDs, currentProjectID) {
-				Unpin
-			} else {
-				Pin
-			}
-		</button>
-			@ProjectSelector(projects, currentProjectID)
+		@ProjectSelector(projects, currentProjectID)
 			if runtime.GOOS != "darwin" {
 				<div class="desktop-window-controls" role="group" aria-label="Window controls">
 					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="M1 6h10"/></svg></button>
@@ -100,13 +98,18 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 			}
 
 	</header>
+ <div id="project-tab-menu" popover="manual" role="menu" aria-label="Project tab"><button type="button" role="menuitem" id="project-tab-pin-action">Pin</button></div>
 	<script>
  (function() {
   function installProjectTabs() {
    var bar = document.getElementById('desktop-project-titlebar');
    var select = document.getElementById('project-selector');
    var list = document.getElementById('desktop-project-tabs');
-   var pin = document.getElementById('project-pin-toggle');
+   var menu = document.getElementById('project-tab-menu');
+ var pin = document.getElementById('project-tab-pin-action');
+ var menuTab;
+ var add = document.getElementById('new-project-btn');
+ list.append(add);
    if (!bar || !select || bar.dataset.installed) return;
    bar.dataset.installed = 'true';
    var fullscreenButton = bar.querySelector('[data-wml-window="ToggleFullscreen"]');
@@ -129,7 +132,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();
    });
    var ids = JSON.parse(bar.dataset.pinnedProjects);
-   var saveQueue = Promise.resolve();
+   var openIDs = ids.slice();
+ var closedActive = "";
+ var saveQueue = Promise.resolve();
    function savePins() {
     bar.dataset.pinnedProjects = JSON.stringify(ids);
     var payload = JSON.stringify({pinned_project_ids: ids});
@@ -147,20 +152,17 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    }
    function sync() {
     var active = select.value;
+ if (active && !openIDs.includes(active) && active !== closedActive) { openIDs.push(active); render(); return; }
     list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {
      tab.setAttribute('aria-selected', String(tab.dataset.projectTab === active));
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
     });
-    var pinned = ids.indexOf(active) !== -1;
-    pin.setAttribute('aria-pressed', String(pinned));
-    pin.setAttribute('aria-label', pinned ? 'Unpin current project' : 'Pin current project');
-    pin.textContent = pinned ? 'Unpin' : 'Pin';
     var activeTab = list.querySelector('[aria-selected="true"]');
     if (activeTab) activeTab.scrollIntoView({block: 'nearest', inline: 'nearest'});
    }
    function render() {
     list.replaceChildren();
-    ids.forEach(function(id) {
+    openIDs.forEach(function(id) {
      var option = Array.from(select.options).find(function(option) { return option.value === id; });
      if (!option) return;
      var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';
@@ -168,24 +170,51 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.textContent = '×'; close.title = 'Close tab (unpin)'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
      wrapper.append(tab, close); list.append(wrapper);
     });
+    list.append(add);
     sync();
    }
+   function openMenu(tab, x, y) {
+    menuTab = tab;
+    pin.textContent = ids.includes(tab.dataset.projectTab) ? 'Unpin' : 'Pin';
+    menu.showPopover();
+    menu.style.left = Math.max(0, Math.min(x, innerWidth - menu.offsetWidth)) + 'px';
+    menu.style.top = Math.max(0, Math.min(y, innerHeight - menu.offsetHeight)) + 'px';
+    pin.focus();
+   }
+   list.addEventListener('contextmenu', function(event) {
+    var wrapper = event.target.closest('.desktop-project-tab');
+    if (!wrapper) return;
+    event.preventDefault(); openMenu(wrapper.querySelector('[data-project-tab]'), event.clientX, event.clientY);
+   });
+   list.addEventListener('keydown', function(event) {
+    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+    var tab = event.target.closest('[data-project-tab]'); if (!tab) return;
+    event.preventDefault(); var rect = tab.getBoundingClientRect(); openMenu(tab, rect.left, rect.bottom);
+   });
+   document.addEventListener('pointerdown', function(event) {
+    if (!menu.contains(event.target)) menu.hidePopover();
+   });
+   window.addEventListener('resize', function() { menu.hidePopover(); });
+   list.addEventListener('scroll', function() { menu.hidePopover(); });
+   menu.addEventListener('keydown', function(event) { if (event.key === 'Escape' || event.key === 'Tab') { menu.hidePopover(); if (menuTab) menuTab.focus(); } });
    pin.addEventListener('click', function() {
-    if (!select.value) return;
-    var index = ids.indexOf(select.value);
-    if (index === -1) ids.push(select.value); else ids.splice(index, 1);
-    render(); savePins();
+    if (!menuTab) return;
+    var id = menuTab.dataset.projectTab;
+    var index = ids.indexOf(id);
+    if (index === -1) ids.push(id); else ids.splice(index, 1);
+    menu.hidePopover(); menuTab.focus(); savePins();
    });
    list.addEventListener('click', function(event) {
     var tab = event.target.closest('[data-project-tab]');
     if (tab) { switchProject(tab.dataset.projectTab); return; }
     var close = event.target.closest('[data-close-project]');
     if (!close) return;
-    var index = ids.indexOf(close.dataset.closeProject);
-    var next = ids[index + 1] || ids[index - 1];
+    var index = openIDs.indexOf(close.dataset.closeProject);
+    var next = openIDs[index + 1] || openIDs[index - 1];
     if (close.dataset.closeProject === select.value && next && !switchProject(next)) return;
-    ids.splice(index, 1); render(); savePins();
-    var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || pin;
+    closedActive = close.dataset.closeProject;
+ openIDs.splice(index, 1); ids = ids.filter(function(id) { return id !== close.dataset.closeProject; }); render(); savePins();
+    var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
     focus.focus();
    });
    list.addEventListener('keydown', function(event) {

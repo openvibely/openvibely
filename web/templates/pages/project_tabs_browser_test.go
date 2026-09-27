@@ -105,10 +105,23 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					return
 				}
 				browser.waitFor("tabs controller", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
+				if got := browser.evaluate(`String(document.querySelectorAll('#new-project-btn').length === 1 && document.getElementById('desktop-project-tabs').lastElementChild.id === 'new-project-btn' && !document.getElementById('project-pin-toggle'))`); got != "true" {
+					t.Fatal("create must follow the last tab with no standalone pin control", got)
+				}
+				var point struct{ X, Y float64 }
+				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p00"]').getBoundingClientRect();return {X:r.x+40,Y:r.y+15};})())`)), &point); err != nil {
+					t.Fatal(err)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "right", "buttons": 2, "clickCount": 1}, nil)
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "right", "buttons": 0, "clickCount": 1}, nil)
+				browser.waitFor("native context menu", `String(document.getElementById('project-tab-menu').matches(':popover-open'))+':'+document.getElementById('project-tab-pin-action').textContent`, "true:Unpin")
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape"}, nil)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape"}, nil)
+				browser.waitFor("dismiss context menu", `String(document.getElementById('project-tab-menu').matches(':popover-open'))`, "false")
 				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(tab.width>=240 && tab.top-bar.top>=5 && controls && Array.from(controls.querySelectorAll('button')).every(function(button){var r=button.getBoundingClientRect();return Math.abs((r.top+r.bottom-bar.top-bar.bottom)/2)<1 && getComputedStyle(button).getPropertyValue('--wails-draggable').trim()==='no-drag';}));})()`); got != "true" {
 					t.Fatal("wide inset tabs and vertically centered window controls must share the titlebar", got)
 				}
-				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();return String(['project-selector-trigger','project-settings-btn','new-project-btn'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
+				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect();var trigger=document.getElementById('project-selector-trigger').getBoundingClientRect();return String(['project-selector-trigger','project-settings-btn'].every(function(id){var r=document.getElementById(id).getBoundingClientRect();return r.top>=bar.top && r.bottom<=bar.bottom && Math.abs((r.top+r.bottom-trigger.top-trigger.bottom)/2)<2;}));})()`); got != "true" {
 					t.Fatal("titlebar selector and actions must share a centered row inside the bar", got)
 				}
 				if got := browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollWidth > document.getElementById('desktop-project-tabs').clientWidth && document.documentElement.scrollWidth <= innerWidth)`); got != "true" {
@@ -117,7 +130,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`JSON.stringify([getComputedStyle(document.querySelector('.desktop-titlebar-space')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.querySelector('[data-project-tab]')).getPropertyValue('--wails-draggable').trim(),getComputedStyle(document.getElementById('project-selector-trigger')).getPropertyValue('--wails-draggable').trim()])`); got != `["drag","no-drag","no-drag"]` {
 					t.Fatal("drag regions", got)
 				}
-				if got := browser.evaluate(`(function(){var active=document.querySelector('[data-project-tab="p00"]'),inactive=document.querySelector('[data-project-tab="p01"]');return String(getComputedStyle(active.parentElement).backgroundColor!==getComputedStyle(inactive.parentElement).backgroundColor && getComputedStyle(active).backgroundColor==='rgba(0, 0, 0, 0)' && active.getBoundingClientRect().width===active.parentElement.getBoundingClientRect().width);})()`); got != "true" {
+				if got := browser.evaluate(`(function(){var active=document.querySelector('[data-project-tab="p00"]'),inactive=document.querySelector('[data-project-tab="p01"]');return String(getComputedStyle(active.parentElement).backgroundColor===getComputedStyle(document.getElementById('desktop-project-titlebar')).borderBottomColor && getComputedStyle(active.parentElement).backgroundColor!==getComputedStyle(inactive.parentElement).backgroundColor && getComputedStyle(active).backgroundColor==='rgba(0, 0, 0, 0)' && active.getBoundingClientRect().width===active.parentElement.getBoundingClientRect().width);})()`); got != "true" {
 					t.Fatal("active background must cover the whole tab, not only the label", got)
 				}
 				// A fullscreen-sized content viewport must retain the same visible bar.
@@ -172,9 +185,12 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				key("Enter", "Enter")
 				browser.waitFor("keyboard switch", `location.search`, "?project_id=p02")
-				browser.click("#project-pin-toggle")
-				browser.waitFor("unpin keeps project", `String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02')`, "true")
-				browser.waitFor("pin save", `String(document.getElementById('project-pin-toggle').getAttribute('aria-pressed'))`, "false")
+				browser.click(`[data-project-tab="p02"]`)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "F10", "code": "F10", "modifiers": 8}, nil)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "F10", "code": "F10", "modifiers": 8}, nil)
+				browser.click("#project-tab-pin-action")
+				browser.waitFor("unpin keeps project", `String(!!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02')`, "true")
+				browser.waitFor("pin save", `String(JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).includes('p02'))`, "false")
 				browser.waitFor("serialized saves", `String(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects.includes('p02'))`, "false")
 				// Wait for the server-observed preference before simulating a relaunch.
 				browser.waitFor("save completed", `String(document.readyState)`, "complete")
@@ -182,8 +198,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.evaluateAwait(`new Promise(resolve => { function check() { fetch('/tasks').then(r=>r.text()).then(html=> { if (!html.includes('data-project-tab="p02"')) resolve('saved'); else setTimeout(check,20); }); } check(); })`)
 				browser.evaluate(`String(window.beforeProjectTabsReload = true)`)
 				browser.call("Page.reload", map[string]any{}, nil)
-				browser.waitFor("restored unpinned project", `!window.beforeProjectTabsReload && document.readyState === 'complete' ? String(!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02') : ''`, "true")
-				browser.click("#project-pin-toggle")
+				browser.waitFor("restored unpinned project", `!window.beforeProjectTabsReload && document.readyState === 'complete' ? String(!!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02') : ''`, "true")
+				browser.click(`[data-project-tab="p02"]`)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "F10", "code": "F10", "modifiers": 8}, nil)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "F10", "code": "F10", "modifiers": 8}, nil)
+				browser.click("#project-tab-pin-action")
 				browser.waitFor("repin", `String(!!document.querySelector('[data-project-tab="p02"]'))`, "true")
 				browser.click(`[data-close-project="p02"]`)
 				browser.waitFor("closing active tab chooses neighbor", `location.search`, "?project_id=p23")
