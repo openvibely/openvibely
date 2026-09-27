@@ -1072,7 +1072,10 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 					InitialStatus: "All projects shown.",
 				}) {
                     if serverRuntimeMode(ctx) == "desktop" {
-                        <button id="new-project-btn" type="button" class="btn btn-ghost w-full justify-start" onclick="this.closest('dialog').close()">+ Create New Project</button>
+                        <div class={ templateui.SearchableSelectorMenuClass }>
+                        <button id="new-project-btn" type="button" class={ templateui.SearchableSelectorOptionClass } onclick="this.closest('dialog').close()"><span class="w-4 shrink-0" aria-hidden="true">+</span><span>Create New Project</span></button>
+                        </div>
+                        <hr class="border-base-300 my-1" role="separator"/>
                     }
 					if len(projects) == 0 {
 						<div class="px-3 py-8 text-center text-sm text-base-content/60" data-project-selector-no-projects>No projects available.</div>

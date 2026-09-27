@@ -217,6 +217,13 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     menu.hidePopover(); menuTab.focus(); savePins();
    });
    list.addEventListener('click', function(event) {
+    var option = event.target.closest('[data-project-selector-option]');
+    if (option) {
+     closedActive = '';
+     // Selecting the current project does not emit a change event.
+     if (option.dataset.projectId === select.value) sync();
+     return;
+    }
     var tab = event.target.closest('[data-project-tab]');
     if (tab) { switchProject(tab.dataset.projectTab); return; }
     var close = event.target.closest('[data-close-project]');
