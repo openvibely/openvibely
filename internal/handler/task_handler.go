@@ -3301,7 +3301,15 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 
 	if c.Get("newTaskThread") == true {
-		c.Response().Header().Set("HX-Location", "/tasks/"+taskID+"?project_id="+url.QueryEscape(task.ProjectID))
+		location, err := json.Marshal(map[string]string{
+			"path":   "/tasks/" + taskID + "?project_id=" + url.QueryEscape(task.ProjectID),
+			"target": "#main-content",
+			"swap":   "innerHTML",
+		})
+		if err != nil {
+			return err
+		}
+		c.Response().Header().Set("HX-Location", string(location))
 		return c.NoContent(http.StatusOK)
 	}
 
