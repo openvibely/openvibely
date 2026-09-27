@@ -61,6 +61,25 @@ func TestMacFullscreenPresentationAndGlyphs(t *testing.T) {
 	}
 }
 
+func TestMacTrafficLightGeometry(t *testing.T) {
+	source, err := os.ReadFile("project_tabs.templ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`box-shadow: inset 0 0 0 .5px`,
+		`transform: translate(-50%, -50%)`,
+		`stroke-width="1" stroke-linecap="round"`,
+		`d="M3.5 3.5l5 5m0-5-5 5"`,
+		`d="M2.5 6h7"`,
+		`d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Errorf("missing traffic-light geometry: %s", want)
+		}
+	}
+}
+
 func TestProjectTabsNativeWindowContract(t *testing.T) {
 	source, err := os.ReadFile("../../../cmd/desktop/main.go")
 	if err != nil {

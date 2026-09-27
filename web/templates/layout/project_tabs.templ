@@ -61,19 +61,18 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 	  .desktop-window-controls:not(.desktop-traffic-lights) button:hover { background: oklch(var(--bc) / .12); }
 	  .desktop-window-controls:not(.desktop-traffic-lights) button:last-child:hover { background: #c42b1c; color: white; }
 	  .desktop-traffic-lights { gap: 8px; padding: 0 12px 0 8px; }
-	  .desktop-traffic-lights button { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgb(0 0 0 / .12); color: rgb(0 0 0 / .65); }
-	  .desktop-traffic-lights [data-wml-window="Close"] { background: #ff5f57; color: #4c0000; }
-	  .desktop-traffic-lights [data-wml-window="Minimise"] { background: #febc2e; color: #995700; }
-	  .desktop-traffic-lights [data-wml-window="ToggleFullscreen"] { background: #28c840; color: #006500; }
-	  .desktop-traffic-lights svg { width: 12px; height: 12px; flex-shrink: 0; opacity: 0; }
-	  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }
+		  .desktop-traffic-lights button { position: relative; flex: 0 0 12px; width: 12px; height: 12px; border-radius: 50%; border: 0; appearance: none; }
+		  .desktop-traffic-lights [data-wml-window="Close"] { background: #ff5f57; color: #4c0000; box-shadow: inset 0 0 0 .5px #e0443e; }
+		  .desktop-traffic-lights [data-wml-window="Minimise"] { background: #febc2e; color: #995700; box-shadow: inset 0 0 0 .5px #dea123; }
+		  .desktop-traffic-lights [data-wml-window="ToggleFullscreen"] { background: #28c840; color: #006500; box-shadow: inset 0 0 0 .5px #1aab29; }
+		  .desktop-traffic-lights svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; opacity: 0; }	  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }
 	  .desktop-traffic-lights button:active { filter: brightness(.85); } </style>
 	<header id="desktop-project-titlebar" class="bg-base-200" data-platform={ runtime.GOOS } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
 			if runtime.GOOS == "darwin" {
 				<div class="desktop-window-controls desktop-traffic-lights" role="group" aria-label="Window controls">
-					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="m3 3 6 6m0-6L3 9"/></svg></button>
-					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2 6h8"/></svg></button>
-					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M2 2h5L2 7zm8 8H5l5-5z"/><path data-restore-glyph d="M1 5h4V1zm10 2H7v4z" style="display: none"/></svg></button>
+					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l5 5m0-5-5 5"/></svg></button>
+					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M2.5 6h7"/></svg></button>
+					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"/><path data-restore-glyph d="M2 5.5h3.5V2zm8 1H6.5V10z" style="display: none"/></svg></button>
 				</div>
 			}
 			<div id="desktop-project-tabs" role="tablist" aria-label="Pinned projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {

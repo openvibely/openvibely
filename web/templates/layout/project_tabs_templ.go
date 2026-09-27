@@ -61,14 +61,14 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  [data-openvibely-runtime=\"desktop\"] body > .drawer { height: calc(100% - 46px); }\n  [data-openvibely-runtime=\"desktop\"] #sidebar { height: calc(100dvh - 46px); }\n  [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }\n  @media (min-width: 1024px) { [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 0; } }\n  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }\n  #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }\n  #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }\n  #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding-top: 6px; }\n  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 10px 10px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }\n  .desktop-project-tab:has([aria-selected=\"true\"]) { background: oklch(var(--b1)); }\n  .desktop-project-tab [role=\"tab\"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }\n  .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }\n  .desktop-project-tab:hover { background: oklch(var(--bc) / .08); }\n  .desktop-project-tab:has([aria-selected=\"true\"]):hover { background: oklch(var(--b1)); }\n  .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }\n  #project-pin-toggle { flex-shrink: 0; }\n  .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }\n  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }\n  #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }\n  #desktop-project-titlebar [data-project-selector] .label-text { display: none; }\n\t  #desktop-project-titlebar #project-selector-trigger { width: 150px; }\n\t  .desktop-window-controls { display: flex; align-items: center; align-self: stretch; flex-shrink: 0; --wails-draggable: no-drag; }\n\t  .desktop-window-controls button { display: flex; align-items: center; justify-content: center; padding: 0; width: 46px; height: 100%; color: inherit; }\n\t  .desktop-window-controls svg { width: 12px; height: 12px; pointer-events: none; }\n\t  .desktop-window-controls:not(.desktop-traffic-lights) button:hover { background: oklch(var(--bc) / .12); }\n\t  .desktop-window-controls:not(.desktop-traffic-lights) button:last-child:hover { background: #c42b1c; color: white; }\n\t  .desktop-traffic-lights { gap: 8px; padding: 0 12px 0 8px; }\n\t  .desktop-traffic-lights button { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgb(0 0 0 / .12); color: rgb(0 0 0 / .65); }\n\t  .desktop-traffic-lights [data-wml-window=\"Close\"] { background: #ff5f57; color: #4c0000; }\n\t  .desktop-traffic-lights [data-wml-window=\"Minimise\"] { background: #febc2e; color: #995700; }\n\t  .desktop-traffic-lights [data-wml-window=\"ToggleFullscreen\"] { background: #28c840; color: #006500; }\n\t  .desktop-traffic-lights svg { width: 12px; height: 12px; flex-shrink: 0; opacity: 0; }\n\t  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }\n\t  .desktop-traffic-lights button:active { filter: brightness(.85); } </style><header id=\"desktop-project-titlebar\" class=\"bg-base-200\" data-platform=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n  [data-openvibely-runtime=\"desktop\"] body > .drawer { height: calc(100% - 46px); }\n  [data-openvibely-runtime=\"desktop\"] #sidebar { height: calc(100dvh - 46px); }\n  [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }\n  @media (min-width: 1024px) { [data-openvibely-runtime=\"desktop\"] .drawer-side { top: 0; } }\n  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; border-bottom: 1px solid oklch(var(--bc) / .15); }\n  #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }\n  #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }\n  #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding-top: 6px; }\n  .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 10px 10px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }\n  .desktop-project-tab:has([aria-selected=\"true\"]) { background: oklch(var(--b1)); }\n  .desktop-project-tab [role=\"tab\"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }\n  .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }\n  .desktop-project-tab:hover { background: oklch(var(--bc) / .08); }\n  .desktop-project-tab:has([aria-selected=\"true\"]):hover { background: oklch(var(--b1)); }\n  .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }\n  #project-pin-toggle { flex-shrink: 0; }\n  .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }\n  #desktop-project-titlebar [data-project-selector] { margin: 0; width: 210px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; gap: 5px; }\n  #desktop-project-titlebar [data-project-selector] > div:first-child { margin: 0; order: 2; flex-shrink: 0; }\n  #desktop-project-titlebar [data-project-selector] .label-text { display: none; }\n\t  #desktop-project-titlebar #project-selector-trigger { width: 150px; }\n\t  .desktop-window-controls { display: flex; align-items: center; align-self: stretch; flex-shrink: 0; --wails-draggable: no-drag; }\n\t  .desktop-window-controls button { display: flex; align-items: center; justify-content: center; padding: 0; width: 46px; height: 100%; color: inherit; }\n\t  .desktop-window-controls svg { width: 12px; height: 12px; pointer-events: none; }\n\t  .desktop-window-controls:not(.desktop-traffic-lights) button:hover { background: oklch(var(--bc) / .12); }\n\t  .desktop-window-controls:not(.desktop-traffic-lights) button:last-child:hover { background: #c42b1c; color: white; }\n\t  .desktop-traffic-lights { gap: 8px; padding: 0 12px 0 8px; }\n\t\t  .desktop-traffic-lights button { position: relative; flex: 0 0 12px; width: 12px; height: 12px; border-radius: 50%; border: 0; appearance: none; }\n\t\t  .desktop-traffic-lights [data-wml-window=\"Close\"] { background: #ff5f57; color: #4c0000; box-shadow: inset 0 0 0 .5px #e0443e; }\n\t\t  .desktop-traffic-lights [data-wml-window=\"Minimise\"] { background: #febc2e; color: #995700; box-shadow: inset 0 0 0 .5px #dea123; }\n\t\t  .desktop-traffic-lights [data-wml-window=\"ToggleFullscreen\"] { background: #28c840; color: #006500; box-shadow: inset 0 0 0 .5px #1aab29; }\n\t\t  .desktop-traffic-lights svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; opacity: 0; }\t  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }\n\t  .desktop-traffic-lights button:active { filter: brightness(.85); } </style><header id=\"desktop-project-titlebar\" class=\"bg-base-200\" data-platform=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
 		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(runtime.GOOS)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 71, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 70, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
@@ -81,7 +81,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 71, Col: 193}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 70, Col: 193}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 		if templ_7745c5c3_Err != nil {
@@ -92,7 +92,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			return templ_7745c5c3_Err
 		}
 		if runtime.GOOS == "darwin" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"desktop-window-controls desktop-traffic-lights\" role=\"group\" aria-label=\"Window controls\"><button type=\"button\" data-wml-window=\"Close\" aria-label=\"Close window\" title=\"Close\"><svg viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" aria-hidden=\"true\"><path d=\"m3 3 6 6m0-6L3 9\"></path></svg></button> <button type=\"button\" data-wml-window=\"Minimise\" aria-label=\"Minimize window\" title=\"Minimize\"><svg viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\" aria-hidden=\"true\"><path d=\"M2 6h8\"></path></svg></button> <button type=\"button\" data-wml-window=\"ToggleFullscreen\" aria-label=\"Enter or exit fullscreen\" title=\"Enter or exit fullscreen\"><svg viewBox=\"0 0 12 12\" fill=\"currentColor\" aria-hidden=\"true\"><path data-fullscreen-glyph d=\"M2 2h5L2 7zm8 8H5l5-5z\"></path><path data-restore-glyph d=\"M1 5h4V1zm10 2H7v4z\" style=\"display: none\"></path></svg></button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"desktop-window-controls desktop-traffic-lights\" role=\"group\" aria-label=\"Window controls\"><button type=\"button\" data-wml-window=\"Close\" aria-label=\"Close window\" title=\"Close\"><svg viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M3.5 3.5l5 5m0-5-5 5\"></path></svg></button> <button type=\"button\" data-wml-window=\"Minimise\" aria-label=\"Minimize window\" title=\"Minimize\"><svg viewBox=\"0 0 12 12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" aria-hidden=\"true\"><path d=\"M2.5 6h7\"></path></svg></button> <button type=\"button\" data-wml-window=\"ToggleFullscreen\" aria-label=\"Enter or exit fullscreen\" title=\"Enter or exit fullscreen\"><svg viewBox=\"0 0 12 12\" fill=\"currentColor\" aria-hidden=\"true\"><path data-fullscreen-glyph d=\"M2.5 2.5h4l-4 4zm7 7h-4l4-4z\"></path><path data-restore-glyph d=\"M2 5.5h3.5V2zm8 1H6.5V10z\" style=\"display: none\"></path></svg></button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -109,7 +109,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmtBool(project.ID == currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 80, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
@@ -122,7 +122,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(tabIndex(project.ID == currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 147}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 80, Col: 147}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {
@@ -135,7 +135,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 179}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 80, Col: 179}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -148,7 +148,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 202}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 80, Col: 202}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
@@ -161,7 +161,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 219}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 80, Col: 219}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -174,7 +174,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 82, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 			if templ_7745c5c3_Err != nil {
@@ -187,7 +187,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue("Close project tab: " + project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 82, Col: 110}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 81, Col: 110}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
@@ -205,7 +205,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmtBool(slices.Contains(uiPreferences(ctx).PinnedProjectIDs, currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 215}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 86, Col: 215}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
