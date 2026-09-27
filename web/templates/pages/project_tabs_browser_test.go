@@ -228,10 +228,13 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				key("Home", "Home")
 				browser.click("#project-selector-trigger")
 				browser.waitFor("full selector", `String(document.getElementById('project-selector-dialog').open)`, "true")
+				if got := browser.evaluate(`String(Math.abs(document.getElementById('new-project-btn').getBoundingClientRect().height - document.querySelector('[data-project-selector-option]').getBoundingClientRect().height) < 1 && document.getElementById('new-project-btn').parentElement.nextElementSibling.matches('[role="separator"]'))`); got != "true" {
+					t.Fatal("create row must match option height and have a separator", got)
+				}
 				browser.click("#project-selector-search")
-				browser.typeText("Project p03")
-				browser.click(`[data-project-selector-option][data-project-id="p03"]`)
-				browser.waitFor("selector and tabs share state", `String(location.search === '?project_id=p03' && document.querySelector('[data-project-tab="p03"]').getAttribute('aria-selected') === 'true')`, "true")
+				browser.typeText("Project p02")
+				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
+				browser.waitFor("selector reopens a closed project tab", `String(location.search === '?project_id=p02' && !!document.querySelector('[data-project-tab="p02"][aria-selected="true"]'))`, "true")
 				// History restoration updates both tab selection and sidebar URLs.
 				browser.navigateHistory(-1)
 				browser.waitFor("history project", `document.getElementById('project-selector').value`, "p23")
