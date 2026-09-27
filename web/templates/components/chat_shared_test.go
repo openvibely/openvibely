@@ -2416,8 +2416,10 @@ func TestChatInputForm_CommitsSendScrollIntentAfterSuccessfulAcceptance(t *testi
 		t.Fatal("composer must not replace upward-reading intent before the send is accepted")
 	}
 	for _, required := range []string{
-		"if (event.detail.successful)",
-		"if (responseText.trim() !== '')",
+		"if (event.detail.successful || createdTaskID)",
+		"if (responseText.trim() !== '' || createdTaskID)",
+		"request.status >= 200 && request.status < 300 && request.getResponseHeader('X-Created-Task-ID')",
+		"messageHistoryStorageKey = 'openvibely-task-thread-message-history-' + createdTaskID",
 		"if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);",
 	} {
 		if !strings.Contains(content, required) {

@@ -3309,6 +3309,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		if err != nil {
 			return err
 		}
+		c.Response().Header().Set("X-Created-Task-ID", taskID)
 		c.Response().Header().Set("HX-Location", string(location))
 		return c.NoContent(http.StatusOK)
 	}
