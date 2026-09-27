@@ -51,7 +51,7 @@ script removeEditAttachment(attID string) {
 	}
 }
 
-templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
+templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment, initialThread ...templ.Component) {
 	<div id="task-detail-content" class="h-full flex flex-col" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-initial-tab={ defaultTab }>
 		@layout.PageTitle(task.Title)
 		<!-- Breadcrumb navigation -->
@@ -1890,16 +1890,20 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				hx-trigger="none"
 				hx-swap="innerHTML"
 				data-task-id={ task.ID }
-				data-loaded="false"
+				data-loaded={ fmt.Sprint(len(initialThread) > 0) }
 				data-loading="false"
 				class="flex-1 flex flex-col min-h-0"
 			>
+                if len(initialThread) > 0 {
+                    @initialThread[0]
+                } else {
 				<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden">
 					<div class="card-body flex-1 flex flex-col min-h-0">
 						<h4 class="text-lg font-bold mb-3">Thread</h4>
 						<p class="text-sm opacity-60">Thread is loading...</p>
 					</div>
 				</div>
+                }
 			</div>
 		</div>
 		<!-- End Tab: Thread -->

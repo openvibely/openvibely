@@ -1394,7 +1394,7 @@ func TestHandler_NewTaskFirstMessage(t *testing.T) {
 	project := createProject(t, h, "First message")
 	agent := createAgent(t, modelsRepo)
 	for _, message := range []string{"   ", "Hello from a new task"} {
-		form := url.Values{"message": {message}, "agent_id": {agent.ID}}
+		form := url.Values{"message": {message}, "agent_id": {agent.ID}, "add_schedule": {"on"}, "run_at": {"2035-01-02T09:30"}, "repeat_type": {"weekly"}, "repeat_interval": {"2"}, "clear_context_on_start": {"false"}}
 		req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("HX-Request", "true")
@@ -1404,23 +1404,45 @@ func TestHandler_NewTaskFirstMessage(t *testing.T) {
 			assertCode(t, rec, http.StatusBadRequest)
 		} else {
 			assertCode(t, rec, http.StatusOK)
-			var location map[string]string
-			require.NoError(t, json.Unmarshal([]byte(rec.Header().Get("HX-Location")), &location))
-			require.Contains(t, location["path"], "/tasks/")
-			require.Equal(t, "#main-content", location["target"])
-			require.Equal(t, "innerHTML", location["swap"])
+			require.Empty(t, rec.Header().Get("HX-Location"))
+			require.Equal(t, "#main-content", rec.Header().Get("HX-Retarget"))
+			require.Equal(t, "innerHTML", rec.Header().Get("HX-Reswap"))
 			require.NotEmpty(t, rec.Header().Get("X-Created-Task-ID"))
-			require.Contains(t, location["path"], "/tasks/"+rec.Header().Get("X-Created-Task-ID")+"?")
+			require.Contains(t, rec.Header().Get("HX-Push-Url"), "/tasks/"+rec.Header().Get("X-Created-Task-ID")+"?")
+			require.Contains(t, rec.Body.String(), `data-loaded="true"`)
+			require.Contains(t, rec.Body.String(), "Hello from a new task")
+			require.NotContains(t, rec.Body.String(), "Thread is loading...")
 		}
 	}
 	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.NotEmpty(t, tasks[0].Title)
+	schedules, err := h.scheduleRepo.ListByTask(context.Background(), tasks[0].ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
+	require.Equal(t, 2, schedules[0].RepeatInterval)
+	require.False(t, schedules[0].ClearContextOnStart)
 	executions, err := h.execRepo.ListByTask(context.Background(), tasks[0].ID)
 	require.NoError(t, err)
 	require.Len(t, executions, 1)
 	require.Equal(t, "Hello from a new task", executions[0].PromptSent)
+}
+
+func TestHandler_NewTaskInvalidScheduleDoesNotCreateTask(t *testing.T) {
+	h, e, modelsRepo := setupTestHandler(t)
+	project := createProject(t, h, "Invalid draft schedule")
+	agent := createAgent(t, modelsRepo)
+	form := url.Values{"message": {"Hello"}, "agent_id": {agent.ID}, "add_schedule": {"on"}, "run_at": {"invalid"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assertCode(t, rec, http.StatusBadRequest)
+	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks)
 }
 
 func TestHandler_NewTaskWorkspace(t *testing.T) {

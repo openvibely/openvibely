@@ -36,7 +36,18 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      <label class="label" for="new-task-files">Attachments</label>
      <button id="new-task-files" type="button" class="btn btn-ghost" onclick="document.getElementById('task-thread-form-file-input').click()">Attach files to message</button>
     </div>
-    for _, tab := range []string{"schedules", "chaining", "lifecycle"} {
+    <div id="tab-schedules" class="task-tab-panel hidden">
+     <label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="add_schedule" form="task-thread-form" class="toggle toggle-sm"/><span>Add a schedule</span></label>
+     <p class="text-sm opacity-60 mb-4">Your first message runs now. The schedule starts future runs using this task’s prompt.</p>
+     <label class="form-control mb-4"><span class="label">Run at</span><input type="datetime-local" name="run_at" form="task-thread-form" class="input input-bordered"/></label>
+     <label class="form-control mb-4"><span class="label">Repeat</span><select name="repeat_type" form="task-thread-form" class="select select-bordered">
+      <option value="once">Once</option><option value="seconds">Every N seconds</option><option value="minutes">Every N minutes</option><option value="hours">Every N hours</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+     </select></label>
+     <label class="form-control mb-4"><span class="label">Repeat interval</span><input type="number" name="repeat_interval" form="task-thread-form" value="1" min="1" class="input input-bordered"/></label>
+     <input type="hidden" name="clear_context_on_start" value="false" form="task-thread-form"/>
+     <label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_context_on_start" form="task-thread-form" checked class="checkbox checkbox-sm"/><span>Clear context on scheduled start</span></label>
+    </div>
+    for _, tab := range []string{"chaining", "lifecycle"} {
      <div id={ "tab-" + tab } class="task-tab-panel hidden"><p class="text-sm opacity-60">Available after the task is created.</p></div>
     }
    }

@@ -37,9 +37,21 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 				if r.FormValue("message") != "Implement this feature" || r.FormValue("title") != "" {
 					t.Errorf("unexpected first message: %v", r.Form)
 				}
+				if sends.Load() == 0 && (r.FormValue("add_schedule") != "on" || r.FormValue("run_at") != "2035-01-02T09:30" || r.FormValue("repeat_type") != "weekly") {
+					t.Errorf("missing draft schedule settings: %v", r.Form)
+				}
 				createdID := fmt.Sprintf("created-%d", sends.Add(1))
 				w.Header().Set("X-Created-Task-ID", createdID)
-				w.Header().Set("HX-Location", `{"path":"/tasks/`+createdID+`?project_id=`+project.ID+`","target":"#main-content","swap":"innerHTML"}`)
+				w.Header().Set("HX-Retarget", "#main-content")
+				w.Header().Set("HX-Reswap", "innerHTML")
+				w.Header().Set("HX-Push-Url", "/tasks/"+createdID+"?project_id="+project.ID)
+				task := &models.Task{ID: createdID, ProjectID: project.ID, Title: "Created task", Status: models.StatusCompleted}
+				fmt.Fprint(w, `<div id="created-thread">`)
+				if err := components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(r.Context(), w); err != nil {
+					t.Error(err)
+				}
+				fmt.Fprint(w, `</div>`)
+
 				return
 			}
 			if r.Header.Get("HX-Request") == "true" {
@@ -47,15 +59,6 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 			} else {
 				view = Tasks([]models.Project{project}, &project, nil, nil, nil, "", "")
 			}
-		case "/tasks/created-1", "/tasks/created-2":
-			task := &models.Task{ID: strings.TrimPrefix(r.URL.Path, "/tasks/"), ProjectID: project.ID, Title: "Created task", Status: models.StatusCompleted}
-			fmt.Fprint(w, `<div id="created-thread">`)
-			view = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
-			if err := view.Render(r.Context(), w); err != nil {
-				t.Error(err)
-			}
-			fmt.Fprint(w, `</div><a id="back-to-tasks" hx-get="/tasks?project_id=draft-project" hx-target="#main-content" hx-push-url="true">Tasks</a>`)
-			return
 		case "/breadcrumb-selectors/tasks":
 			_, _ = w.Write([]byte(`<div role="listbox"><a role="option" href="/tasks/existing">Existing task</a></div>`))
 			return
@@ -90,6 +93,9 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.typeText("Implement this feature")
 		b.click("#task-details-opener")
 		b.waitFor("draft inspector", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
+		b.click(`[data-tab="schedules"]`)
+		b.click(`input[name="add_schedule"]`)
+		b.evaluate(`document.querySelector('input[name="run_at"]').value='2035-01-02T09:30'; document.querySelector('select[name="repeat_type"]').value='weekly'; 'configured'`)
 		b.click(`[data-tab="attachments"]`)
 		b.waitFor("draft attachments", `String(document.getElementById('new-task-files').getClientRects().length>0)`, "true")
 		b.click("#task-details-opener")
