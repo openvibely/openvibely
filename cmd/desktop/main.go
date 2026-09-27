@@ -290,6 +290,9 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		// rather than retaining a native titlebar that can reappear in fullscreen.
 		Mac: application.MacWindow{CornerRadius: 20},
 	})
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		application.InvokeAsync(installFullscreenPresentation)
+	})
 	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 
 	if err := app.Run(); err != nil {
