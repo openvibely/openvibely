@@ -1389,6 +1389,34 @@ func TestHandler_GetTask_RunningTask(t *testing.T) {
 	assertContains(t, rec, "function _loadThreadContent(taskId, forceReload, expectedExecId)")
 }
 
+func TestHandler_NewTaskFirstMessage(t *testing.T) {
+	h, e, modelsRepo := setupTestHandler(t)
+	project := createProject(t, h, "First message")
+	agent := createAgent(t, modelsRepo)
+	for _, message := range []string{"   ", "Hello from a new task"} {
+		form := url.Values{"message": {message}, "agent_id": {agent.ID}}
+		req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if strings.TrimSpace(message) == "" {
+			assertCode(t, rec, http.StatusBadRequest)
+		} else {
+			assertCode(t, rec, http.StatusOK)
+			require.Contains(t, rec.Header().Get("HX-Location"), "/tasks/")
+		}
+	}
+	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.NotEmpty(t, tasks[0].Title)
+	executions, err := h.execRepo.ListByTask(context.Background(), tasks[0].ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	require.Equal(t, "Hello from a new task", executions[0].PromptSent)
+}
+
 func TestHandler_NewTaskWorkspace(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "New workspace")
@@ -1401,7 +1429,7 @@ func TestHandler_NewTaskWorkspace(t *testing.T) {
 		e.ServeHTTP(rec, req)
 		assertCode(t, rec, http.StatusOK)
 		assertContains(t, rec, `id="task-details-panel"`)
-		assertContains(t, rec, `name="prompt"`)
+		assertContains(t, rec, `name="message"`)
 		assertContains(t, rec, `from=new`)
 		require.NotContains(t, rec.Body.String(), `id="new_task_modal"`)
 	}

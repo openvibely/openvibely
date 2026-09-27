@@ -934,10 +934,27 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if _, err := parseTaskAttachmentForm(c, "CreateTask"); err != nil {
 		return err
 	}
+	threadDraft := c.QueryParam("from") == "new" && c.QueryParam("thread") == "1"
+	if threadDraft {
+		message := strings.TrimSpace(c.FormValue("message"))
+		if message == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "message is required")
+		}
+		if _, err := h.selectAgent(c.Request().Context(), c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
+		}
+	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
 	category := models.TaskCategory(c.FormValue("category"))
 	if category == "" {
 		category = models.CategoryActive
+	}
+	if threadDraft && !isSwarmTaskForm(c) {
+		// The first composer send owns admission; do not also submit a worker run.
+		category = models.CategoryBacklog
+		if priority == 0 {
+			priority = 2
+		}
 	}
 	var scheduledFormValues scheduleFormValues
 	if category == models.CategoryScheduled {
@@ -974,8 +991,16 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		MergeTargetBranch:       c.FormValue("merge_target_branch"),
 	}
 
+	if threadDraft {
+		t.Prompt = strings.TrimSpace(c.FormValue("message"))
+		t.Title = strings.TrimSpace(t.Title)
+		if t.Title == "" {
+			t.Title = "New task " + repository.NewID()[:8]
+		}
+	}
+
 	// Handle optional agent (LLM config) selection
-	if agentID := c.FormValue("agent_id"); agentID != "" {
+	if agentID := c.FormValue("agent_id"); agentID != "" && (!threadDraft || (agentID != "auto" && agentID != "default")) {
 		t.AgentID = &agentID
 	}
 	// Handle optional primary Agent definition selection separately from the model config.
@@ -1017,6 +1042,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
+
+	if threadDraft && !isSwarmTaskForm(c) {
+		c.SetParamNames("taskId")
+		c.SetParamValues(t.ID)
+		c.Set("newTaskThread", true)
+		return h.TaskThreadSend(c)
+	}
 
 	// If category is scheduled, create its schedule before reporting success.
 	if t.Category == models.CategoryScheduled {
@@ -3266,6 +3298,11 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}); err != nil {
 		c.Response().Header().Set("Retry-After", "30")
 		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
+
+	if c.Get("newTaskThread") == true {
+		c.Response().Header().Set("HX-Location", "/tasks/"+taskID+"?project_id="+url.QueryEscape(task.ProjectID))
+		return c.NoContent(http.StatusOK)
 	}
 
 	return render(c, http.StatusOK, templ.Join(

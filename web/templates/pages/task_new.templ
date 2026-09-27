@@ -2,6 +2,7 @@ package pages
 
 import (
  "fmt"
+ "github.com/openvibely/openvibely/web/templates/components"
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/repository"
  "github.com/openvibely/openvibely/web/templates/layout"
@@ -14,12 +15,15 @@ templ NewTask(projects []models.Project, project *models.Project, agents []model
 }
 
 templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
- <form id="task-detail-content" class="h-full flex flex-col" data-task-id="" data-project-id={ project.ID } data-initial-tab="chat" method="post" action={ fmt.Sprintf("/tasks?project_id=%s&from=new", project.ID) } enctype="multipart/form-data" hx-post={ fmt.Sprintf("/tasks?project_id=%s&from=new", project.ID) } hx-encoding="multipart/form-data" hx-target="#main-content" hx-swap="innerHTML" hx-on::after-request="if(!event.detail.successful) { document.getElementById('new-task-error').textContent=event.detail.xhr.responseText; }">
+ <div id="task-detail-content" class="h-full flex flex-col" data-task-id="" data-project-id={ project.ID } data-initial-tab="chat">
   @layout.PageTitle("New Task")
   <div class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
-   <a class="text-2xl font-bold" href={ templ.URL("/tasks?project_id=" + project.ID) }>Tasks</a>
-   <span class="text-2xl opacity-30">/</span>
-   <input name="title" aria-label="Task title" placeholder="New task title" class="input input-ghost text-xl flex-1 min-w-0" required/>
+   <nav class="flex min-w-0 flex-1 flex-shrink-0 flex-wrap items-start" aria-label="Breadcrumb">
+    <a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL("/tasks?project_id=" + project.ID) } hx-get={ "/tasks?project_id=" + project.ID } hx-target="#main-content" hx-push-url="true">Tasks</a>
+    <span class="ml-2 flex-shrink-0 text-2xl text-base-content/30">/</span>
+    <input name="title" form="task-thread-form" aria-label="Task title" placeholder="New task" maxlength="200" class="input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl"/>
+    @components.BreadcrumbSelector(models.BreadcrumbSelector{ID: "task-resource-selector", Kind: "Task", CurrentName: "New task", SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s", project.ID), CaretOnly: true, ContextName: "tab", ContextValue: "chat"})
+   </nav>
    <button id="task-workspace-back" type="button" hidden></button>
    <button id="task-details-opener" type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Open details panel" aria-controls="task-details-panel" aria-expanded="false" onclick="window.taskWorkspace.togglePanel()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></button>
   </div>
@@ -30,7 +34,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     </div>
     <div id="tab-attachments" class="task-tab-panel hidden">
      <label class="label" for="new-task-files">Attachments</label>
-     <input id="new-task-files" name="files" type="file" multiple class="file-input file-input-bordered w-full"/>
+     <button id="new-task-files" type="button" class="btn btn-ghost" onclick="document.getElementById('task-thread-form-file-input').click()">Attach files to message</button>
     </div>
     for _, tab := range []string{"schedules", "chaining", "lifecycle"} {
      <div id={ "tab-" + tab } class="task-tab-panel hidden"><p class="text-sm opacity-60">Available after the task is created.</p></div>
@@ -38,16 +42,30 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
    }
    <div id="tab-changes" class="hidden"></div>
    <div id="tab-chat" class="flex flex-col flex-1 min-h-0">
-    <div class="flex flex-1 items-center justify-center text-base-content/60">Describe the task to start a new thread.</div>
+    <div id="task-thread-messages" class="flex-1 min-h-0 overflow-y-auto"></div>
     <div id="new-task-error" role="alert" class="text-error text-sm"></div>
-    <div class="border border-base-300 rounded-lg p-3">
-     <textarea name="prompt" aria-label="Task prompt" class="textarea w-full min-h-24" placeholder="What should this task do?" required></textarea>
-     <div class="flex justify-end"><button type="submit" class="btn btn-primary btn-sm">Create Task</button></div>
-    </div>
+    @components.ChatInputForm(components.ChatInputFormConfig{
+     FormID: "task-thread-form", InputID: "task-message-input",
+     PostEndpoint: fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", project.ID),
+     TargetID: "task-thread-messages", Agents: agents, ShowModelSelector: true,
+    })
    </div>
   </div>
   @TaskWorkspaceScript()
- </form>
+  <script>
+   (function() {
+    var root = document.getElementById('task-detail-content');
+    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {
+     if (input.name === 'agent_id' || input.name === 'category') { input.disabled = true; input.closest('.form-control').hidden = true; }
+     else input.setAttribute('form', 'task-thread-form');
+    });
+    var form = document.getElementById('task-thread-form');
+    form.addEventListener('htmx:afterRequest', function(event) {
+     if (!event.detail.successful) document.getElementById('new-task-error').textContent = event.detail.xhr.responseText;
+    });
+   })();
+  </script>
+ </div>
 }
 
  templ NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {

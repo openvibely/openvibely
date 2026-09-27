@@ -11,6 +11,24 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+func TestNewTaskUsesThreadComposerAndEditableBreadcrumb(t *testing.T) {
+	var buf bytes.Buffer
+	if err := NewTaskContent(&models.Project{ID: "project"}, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, want := range []string{`id="task-message-input"`, `name="message"`, `id="task-resource-selector-button"`, `input input-bordered ml-1 h-8 min-w-0 flex-1 px-[3px] py-0 text-xl font-bold leading-none sm:max-w-xl sm:text-2xl`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+	for _, unwanted := range []string{"What should this task do?", ">Create Task</button>", `name="title" required`} {
+		if strings.Contains(html, unwanted) {
+			t.Fatalf("unexpected %s", unwanted)
+		}
+	}
+}
+
 func stringPtr(s string) *string { return &s }
 
 func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
