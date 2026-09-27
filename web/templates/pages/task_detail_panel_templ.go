@@ -30,7 +30,7 @@ func TaskDetailPanel() templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<aside id=\"task-details-panel\" aria-label=\"Task details\" class=\"bg-base-100 border border-base-300\" hidden><div id=\"task-panel-divider\" role=\"separator\" aria-label=\"Resize details panel\" aria-orientation=\"vertical\" aria-valuemin=\"340\" aria-valuemax=\"720\" aria-valuenow=\"420\" tabindex=\"0\"></div><div class=\"flex items-center justify-between p-3\"><h2 class=\"font-semibold\">Details</h2><button type=\"button\" class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"Collapse details panel\" onclick=\"window.taskWorkspace.closePanel()\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><path d=\"m9 6 6 6-6 6\"></path></svg></button></div><div role=\"tablist\" aria-label=\"Task details\" class=\"tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<aside id=\"task-details-panel\" aria-label=\"Task details\" class=\"bg-base-100 border border-base-300\" hidden><div id=\"task-panel-divider\" role=\"separator\" aria-label=\"Resize details panel\" aria-orientation=\"vertical\" aria-valuemin=\"340\" aria-valuemax=\"720\" aria-valuenow=\"420\" tabindex=\"0\"></div><div role=\"tablist\" aria-label=\"Task details\" class=\"tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -42,7 +42,7 @@ func TaskDetailPanel() templ.Component {
 			var templ_7745c5c3_Var2 string
 			templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue("inspector-tab-" + tab.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 13, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 9, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 			if templ_7745c5c3_Err != nil {
@@ -55,7 +55,7 @@ func TaskDetailPanel() templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(tab.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 13, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 9, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 			if templ_7745c5c3_Err != nil {
@@ -68,7 +68,7 @@ func TaskDetailPanel() templ.Component {
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue("tab-" + tab.Key)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 13, Col: 136}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 9, Col: 136}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
@@ -81,7 +81,7 @@ func TaskDetailPanel() templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(tab.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 13, Col: 186}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail_panel.templ`, Line: 9, Col: 186}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -100,7 +100,7 @@ func TaskDetailPanel() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div></aside><style>\n\t\t#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }\n\t\t#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }\n\t\t#tab-changes { overflow:auto; }\n\t\t#task-detail-content[data-inspector-docked=\"true\"] { padding-right:calc(var(--task-panel-width,420px) + 12px); }\n\t\t\t#task-details-panel { position:fixed; right:0; top:0; bottom:0; z-index:40; display:flex; flex-direction:column; width:var(--task-panel-width,420px); min-height:0; max-width:100%; border-width:0 0 0 1px; border-radius:0; }\n\t\t#task-details-panel[hidden] { display:none; }\n\t\t#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }\n\t\t#task-panel-divider:focus-visible { outline:2px solid currentColor; }\n\t\t#task-inspector-body > .task-tab-panel { min-height:0; }\n\t\t#task-details-panel[data-overlay=\"true\"] { box-shadow:0 8px 30px #0003; }\n\t\t#task-detail-content[data-has-changes=\"true\"] [data-task-terminal-status] { display:none; }\n\t\t@media(max-width:640px) {\n\t\t\t#task-details-panel[data-overlay=\"true\"] { position:fixed; inset:0; width:100%; max-width:none; z-index:60; }\n\t\t\t#task-panel-divider { display:none; }\n\t\t}\n\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div></aside><style>\n\t\t#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }\n\t\t#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }\n\t\t#tab-changes { overflow:auto; }\n\t\t#task-detail-content[data-inspector-docked=\"true\"] { padding-right:var(--task-panel-reserved-width); }\n\t\t\t#task-detail-content[data-inspector-overlay=\"true\"] #task-details-opener { position:fixed; top:0; right:0; z-index:61; }\n\t\t\t#task-details-panel[data-overlay=\"true\"] > [role=\"tablist\"] { padding-right:2.5rem; }\n\t\t\t#task-details-panel { position:fixed; right:0; top:0; bottom:0; z-index:40; display:flex; flex-direction:column; width:var(--task-panel-width,420px); min-height:0; max-width:100%; border-width:0 0 0 1px; border-radius:0; }\n\t\t#task-details-panel[hidden] { display:none; }\n\t\t#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }\n\t\t#task-panel-divider:focus-visible { outline:2px solid currentColor; }\n\t\t#task-inspector-body > .task-tab-panel { min-height:0; }\n\t\t#task-details-panel[data-overlay=\"true\"] { box-shadow:0 8px 30px #0003; }\n\t\t#task-detail-content[data-has-changes=\"true\"] [data-task-terminal-status] { display:none; }\n\t\t@media(max-width:640px) {\n\t\t\t#task-details-panel[data-overlay=\"true\"] { position:fixed; inset:0; width:100%; max-width:none; z-index:60; }\n\t\t\t#task-panel-divider { display:none; }\n\t\t}\n\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

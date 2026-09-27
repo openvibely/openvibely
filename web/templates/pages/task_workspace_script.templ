@@ -30,6 +30,10 @@ templ TaskWorkspaceScript() {
 			var overlay = root.clientWidth < width + 560 || !changes.classList.contains('hidden');
 			panel.dataset.overlay = String(overlay);
 			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
+			root.dataset.inspectorOverlay = String(overlay && !panel.hidden);
+			root.style.setProperty('--task-panel-reserved-width', Math.max(0, width - (window.innerWidth - root.getBoundingClientRect().right) + 8) + 'px');
+			opener.querySelector('path').setAttribute('d', panel.hidden ? 'm15 6-6 6 6 6' : 'm9 6 6 6-6 6');
+			opener.setAttribute('aria-label', panel.hidden ? 'Open details panel' : 'Collapse details panel');
 			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
 			if (overlay && !panel.hidden) panel.setAttribute('aria-modal', 'true');
 			else panel.removeAttribute('aria-modal');
@@ -179,10 +183,15 @@ templ TaskWorkspaceScript() {
 			}
 			if (event.key === 'Tab' && panel.dataset.overlay === 'true') {
 				var controls = Array.from(panel.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')).filter(function(el) { return !el.disabled && el.tabIndex >= 0 && el.getClientRects().length; });
-				var first = controls[0], last = controls[controls.length - 1];
+				var first = controls[0], last = opener;
 				if (event.shiftKey && event.target === first) { event.preventDefault(); last.focus(); }
-				else if (!event.shiftKey && event.target === last) { event.preventDefault(); first.focus(); }
+				else if (!event.shiftKey && event.target === controls[controls.length - 1]) { event.preventDefault(); opener.focus(); }
 			}
+		});
+		on(opener, 'keydown', function(event) {
+			if (event.key !== 'Tab' || panel.hidden || panel.dataset.overlay !== 'true') return;
+			var controls = Array.from(panel.querySelectorAll('button, a[href], input, select, textarea, [tabindex="0"]')).filter(function(el) { return !el.disabled && el.tabIndex >= 0 && el.getClientRects().length; });
+			if (controls.length) { event.preventDefault(); controls[event.shiftKey ? controls.length - 1 : 0].focus(); }
 		});
 		on(divider, 'dblclick', function() { resize(420); });
 		on(divider, 'keydown', function(event) {
