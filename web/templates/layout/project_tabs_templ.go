@@ -96,6 +96,10 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 				return templ_7745c5c3_Err
 			}
 		}
+		templ_7745c5c3_Err = ProjectSelector(projects, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div id=\"desktop-project-tabs\" role=\"tablist\" aria-label=\"Pinned projects\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -108,7 +112,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmtBool(project.ID == currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 86, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var4)
 			if templ_7745c5c3_Err != nil {
@@ -121,7 +125,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(tabIndex(project.ID == currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 86, Col: 147}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 147}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 			if templ_7745c5c3_Err != nil {
@@ -134,7 +138,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 86, Col: 179}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 179}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -147,7 +151,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 86, Col: 202}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 202}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
@@ -160,7 +164,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 86, Col: 219}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 219}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -173,7 +177,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(project.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 88, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 			if templ_7745c5c3_Err != nil {
@@ -186,7 +190,7 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue("Close project tab: " + project.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 87, Col: 110}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/project_tabs.templ`, Line: 88, Col: 110}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
@@ -198,10 +202,6 @@ func DesktopProjectTabs(projects []models.Project, currentProjectID string) temp
 			}
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<button id=\"new-project-btn\" type=\"button\" aria-label=\"Create project\" title=\"Create project\">+</button></div><div class=\"desktop-titlebar-space\" aria-hidden=\"true\"></div>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = ProjectSelector(projects, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
