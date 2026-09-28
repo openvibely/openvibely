@@ -165,7 +165,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "right", "buttons": 2, "clickCount": 1}, nil)
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "right", "buttons": 0, "clickCount": 1}, nil)
-				browser.waitFor("native context menu", `String(document.getElementById('project-tab-menu').matches(':popover-open'))+':'+document.getElementById('project-tab-pin-action').textContent`, "true:Unpin")
+				browser.waitFor("native context menu", `String(document.getElementById('project-tab-menu').matches(':popover-open'))+':'+String(!document.getElementById('project-tab-pin-action'))`, "true:true")
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape", "code": "Escape"}, nil)
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape", "code": "Escape"}, nil)
 				browser.waitFor("dismiss context menu", `String(document.getElementById('project-tab-menu').matches(':popover-open'))`, "false")
@@ -245,27 +245,8 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				key("Enter", "Enter")
 				browser.waitFor("keyboard switch", `location.search`, "?project_id=p02")
-				browser.click(`[data-project-tab="p02"]`)
-				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "F10", "code": "F10", "modifiers": 8}, nil)
-				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "F10", "code": "F10", "modifiers": 8}, nil)
-				browser.click("#project-tab-pin-action")
-				browser.waitFor("unpin keeps project", `String(!!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02')`, "true")
-				browser.waitFor("pin save", `String(JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).includes('p02'))`, "false")
-				browser.waitFor("serialized saves", `String(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects.includes('p02'))`, "false")
-				// Wait for the server-observed preference before simulating a relaunch.
-				browser.waitFor("save completed", `String(document.readyState)`, "complete")
-				// A marker request is queued after the UI's fetch on the browser event loop.
-				browser.evaluateAwait(`new Promise(resolve => { function check() { fetch('/tasks').then(r=>r.text()).then(html=> { if (!html.includes('data-project-tab="p02"')) resolve('saved'); else setTimeout(check,20); }); } check(); })`)
-				browser.evaluate(`String(window.beforeProjectTabsReload = true)`)
-				browser.call("Page.reload", map[string]any{}, nil)
-				browser.waitFor("restored unpinned project", `!window.beforeProjectTabsReload && document.readyState === 'complete' ? String(!!document.querySelector('[data-project-tab="p02"]') && document.getElementById('project-selector').value === 'p02') : ''`, "true")
-				browser.click(`[data-project-tab="p02"]`)
-				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "F10", "code": "F10", "modifiers": 8}, nil)
-				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "F10", "code": "F10", "modifiers": 8}, nil)
-				browser.click("#project-tab-pin-action")
-				browser.waitFor("repin", `String(!!document.querySelector('[data-project-tab="p02"]'))`, "true")
 				browser.click(`[data-close-project="p02"]`)
-				browser.waitFor("closing active tab chooses neighbor", `location.search`, "?project_id=p23")
+				browser.waitFor("closing active tab chooses neighbor", `location.search`, "?project_id=p03")
 				browser.waitFor("closed tab", `String(!document.querySelector('[data-project-tab="p02"]'))`, "true")
 				key("Home", "Home")
 				browser.click("#project-selector-trigger")
@@ -277,10 +258,12 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.typeText("Project p02")
 				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
 				browser.waitFor("selector reopens a closed project tab", `String(location.search === '?project_id=p02' && !!document.querySelector('[data-project-tab="p02"][aria-selected="true"]'))`, "true")
+				browser.waitFor("opened tab automatically saved", `String(JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).includes('p02'))`, "true")
+				browser.evaluateAwait(`new Promise(resolve => { function check() { fetch('/tasks').then(r=>r.text()).then(html=> { if (html.includes('data-project-tab="p02"')) resolve('saved'); else setTimeout(check,20); }); } check(); })`)
 				// History restoration updates both tab selection and sidebar URLs.
 				browser.navigateHistory(-1)
-				browser.waitFor("history project", `document.getElementById('project-selector').value`, "p23")
-				browser.waitFor("history sidebar scope", `String(Array.from(document.querySelectorAll('[data-nav-base]')).every(a=>a.getAttribute('href').includes('project_id=p23')))`, "true")
+				browser.waitFor("history project", `document.getElementById('project-selector').value`, "p03")
+				browser.waitFor("history sidebar scope", `String(Array.from(document.querySelectorAll('[data-nav-base]')).every(a=>a.getAttribute('href').includes('project_id=p03')))`, "true")
 				browser.click("#project-selector-trigger")
 				browser.waitFor("add menu opens", `String(document.getElementById('project-selector-dialog').open)`, "true")
 				browser.click("#project-selector-search")
@@ -289,11 +272,20 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("create action loads existing project form route", `String(!!document.querySelector('#new-project-container #create-project-fixture') && !document.getElementById('project-selector-dialog').open)`, "true")
 
 			})
+			if desktop {
+				mu.Lock()
+				expected := strings.Join(pins, ",")
+				mu.Unlock()
+				// A new browser process/profile has no prior sessionStorage or DOM.
+				runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id=p03", "project-tabs-restart", func(browser *composerFocusCDP) {
+					browser.waitFor("opened tabs restored in saved order after restart", `Array.from(document.querySelectorAll('[data-project-tab]')).map(tab=>tab.dataset.projectTab).join(',')`, expected)
+				})
+			}
 			mu.Lock()
 			final := strings.Join(pins, ",")
 			mu.Unlock()
-			if desktop && strings.Contains(final, "p02") {
-				t.Fatal("closed pin persisted", final)
+			if desktop && !strings.Contains(final, "p02") {
+				t.Fatal("opened tab not persisted", final)
 			}
 		})
 	}
