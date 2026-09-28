@@ -509,12 +509,30 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 		budget.HistoryTokens += estimateExecutionTokens(exec)
 	}
 	for _, att := range req.Attachments {
-		budget.AttachmentTokens += estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
-		if att.FileSize > 0 {
-			budget.AttachmentTokens += tokenestimate.FromByteCount(int(att.FileSize))
-		}
+		budget.AttachmentTokens += estimateAttachmentTokens(req.Agent.Provider, att)
 	}
 	return budget
+}
+
+// Image payload bytes are not text tokens. Match the harness estimates for
+// the image modes we send: OpenAI detail:auto and Anthropic image blocks.
+// Attachment does not currently expose OpenAI original-detail images.
+func estimateAttachmentTokens(provider models.LLMProvider, att models.Attachment) int {
+	metadata := estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
+	switch provider {
+	case models.ProviderOpenAI:
+		if openaiclient.IsImageMediaType(att.MediaType) {
+			return metadata + 1844
+		}
+	case models.ProviderAnthropic:
+		if anthropicclient.IsImageMediaType(att.MediaType) {
+			return metadata + 2000
+		}
+	}
+	if att.FileSize > 0 {
+		return metadata + tokenestimate.FromByteCount(int(att.FileSize))
+	}
+	return metadata
 }
 
 func estimateExecutionTokens(exec models.Execution) int {
@@ -706,10 +724,7 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	total += estimateRuntimeToolDefinitionTokens(llmcontracts.RuntimeToolsFromContext(req.Ctx))
 	total += estimateAgentDefinitionTokens(req.AgentDefinition)
 	for _, att := range req.Attachments {
-		total += estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
-		if att.FileSize > 0 {
-			total += tokenestimate.FromByteCount(int(att.FileSize))
-		}
+		total += estimateAttachmentTokens(req.Agent.Provider, att)
 	}
 	for _, exec := range req.ChatHistory {
 		total += estimatedUTF8Tokens(exec.PromptSent) + estimatedUTF8Tokens(exec.Output) + estimatedUTF8Tokens(exec.ErrorMessage) + estimatedUTF8Tokens(exec.ReasoningContent)
