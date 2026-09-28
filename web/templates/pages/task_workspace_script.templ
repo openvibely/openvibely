@@ -22,18 +22,29 @@ templ TaskWorkspaceScript() {
 		var saved = read('task-inspector-tab-' + taskID);
 		if (tabNames.indexOf(saved) >= 0) selected = saved;
 		function on(el, name, fn) { el.addEventListener(name, fn, {signal: signal}); }
+		var titlebar = null;
 		function resize(value) {
+			var currentTitlebar = document.getElementById('desktop-project-titlebar');
+			if (currentTitlebar !== titlebar) {
+				if (titlebar) observer.unobserve(titlebar);
+				titlebar = currentTitlebar;
+				if (titlebar) observer.observe(titlebar);
+			}
+			root.style.setProperty('--task-panel-top', (titlebar ? Math.max(0, titlebar.getBoundingClientRect().bottom) : 0) + 'px');
 			width = Math.max(340, Math.min(720, Number(value) || 420));
-			root.style.setProperty('--task-panel-width', width + 'px');
+			// Keep desktop windows docked, reducing the displayed panel width before
+			// falling back to a sheet. Preserve the user's preferred width on resize.
+			var displayedWidth = titlebar ? Math.min(width, Math.max(340, root.clientWidth - 340)) : width;
+			root.style.setProperty('--task-panel-width', displayedWidth + 'px');
 			divider.setAttribute('aria-valuenow', String(width));
 			store('task-inspector-width', width);
-			var overlay = root.clientWidth < width + 560 || !changes.classList.contains('hidden');
+			var overlay = (titlebar ? root.clientWidth < 680 : root.clientWidth < width + 560) || !changes.classList.contains('hidden');
 			panel.dataset.overlay = String(overlay);
 			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
 			root.dataset.inspectorOverlay = String(overlay && !panel.hidden);
 			var main = root.closest('#main-content');
 			var gutter = main ? root.getBoundingClientRect().left - main.getBoundingClientRect().left : 24;
-			root.style.setProperty('--task-panel-reserved-width', Math.max(0, width - (window.innerWidth - root.getBoundingClientRect().right) + gutter) + 'px');
+			root.style.setProperty('--task-panel-reserved-width', Math.max(0, displayedWidth - (window.innerWidth - root.getBoundingClientRect().right) + gutter) + 'px');
 			opener.querySelector('path').setAttribute('d', panel.hidden ? 'm15 6-6 6 6 6' : 'm9 6 6 6-6 6');
 			opener.setAttribute('aria-label', panel.hidden ? 'Open details panel' : 'Collapse details panel');
 			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
