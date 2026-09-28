@@ -182,6 +182,66 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     list.append(add);
     sync();
    }
+   // Track on the document so moving tab nodes cannot interrupt the gesture.
+   var drag = null;
+   var dragFrame = 0;
+   var suppressDragClick = false;
+   function moveDraggedTab() {
+    if (!drag || !drag.started) return;
+    var bounds = list.getBoundingClientRect();
+    var speed = drag.x < bounds.left + 32 ? -12 : drag.x > bounds.right - 32 ? 12 : 0;
+    list.scrollLeft += speed;
+    var others = Array.from(list.querySelectorAll('.desktop-project-tab')).filter(function(node) { return node !== drag.wrapper; });
+    var before = others.find(function(node) { var rect = node.getBoundingClientRect(); return drag.x < rect.left + rect.width / 2; });
+    if (drag.wrapper.nextElementSibling !== (before || add)) {
+     list.insertBefore(drag.wrapper, before || add);
+    }
+   }
+   function dragTick() {
+    if (!drag || !drag.started) return;
+    moveDraggedTab();
+    dragFrame = requestAnimationFrame(dragTick);
+   }
+   list.addEventListener('pointerdown', function(event) {
+    var tab = event.target.closest('[data-project-tab]');
+    if (!tab || event.button !== 0 || !event.isPrimary) return;
+    drag = {pointer: event.pointerId, startX: event.clientX, x: event.clientX, wrapper: tab.parentElement, started: false};
+   });
+   document.addEventListener('pointermove', function(event) {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    drag.x = event.clientX;
+    if (!drag.started && Math.abs(drag.x - drag.startX) >= 6) {
+     drag.started = true;
+     menu.hidePopover();
+     drag.wrapper.style.opacity = '0.7';
+     list.style.cursor = 'grabbing';
+     dragTick();
+    }
+    if (drag.started) { event.preventDefault(); moveDraggedTab(); }
+   });
+   function finishDrag(event) {
+    if (!drag || (event.pointerId != null && event.pointerId !== drag.pointer)) return;
+    var ended = drag;
+    drag = null;
+    cancelAnimationFrame(dragFrame);
+    list.style.cursor = '';
+    ended.wrapper.style.opacity = '';
+    if (!ended.started) return;
+    suppressDragClick = true;
+    setTimeout(function() { suppressDragClick = false; }, 0);
+    if (event.type !== 'pointerup') { render(); return; }
+    openIDs = Array.from(list.querySelectorAll('[data-project-tab]')).map(function(tab) { return tab.dataset.projectTab; });
+    var reordered = openIDs.filter(function(id) { return ids.includes(id); });
+    if (JSON.stringify(reordered) !== JSON.stringify(ids)) { ids = reordered; savePins(); }
+   }
+   document.addEventListener('pointerup', finishDrag);
+   document.addEventListener('pointercancel', finishDrag);
+   window.addEventListener('blur', finishDrag);
+   document.addEventListener('keydown', function(event) { if (event.key === 'Escape' && drag) { event.preventDefault(); finishDrag(event); } });
+   list.addEventListener('click', function(event) {
+    if (suppressDragClick) { event.preventDefault(); event.stopImmediatePropagation(); }
+   }, true);
+   list.addEventListener('dragstart', function(event) { if (event.target.closest('[data-project-tab]')) event.preventDefault(); });
    function openMenu(tab, x, y) {
     menuTab = tab;
     pin.textContent = ids.includes(tab.dataset.projectTab) ? 'Unpin' : 'Pin';
