@@ -41,12 +41,15 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
   #desktop-project-titlebar:not([data-keyboard-navigation]) [data-project-tab]:focus { outline: none; }
-  #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding: 6px 10px 0; }
+  #desktop-project-tabs { position: relative; display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding: 6px 10px 0; }
   .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 16px 16px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }
   .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); z-index: 1; }
   .desktop-project-tab:has([aria-selected="true"])::before, .desktop-project-tab:has([aria-selected="true"])::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
   .desktop-project-tab:has([aria-selected="true"])::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 10px, var(--project-tab-selected) 10.5px); }
   .desktop-project-tab:has([aria-selected="true"])::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 10px, var(--project-tab-selected) 10.5px); }
+  .desktop-project-tab:not(:has([aria-selected="true"]))::after { content: ""; position: absolute; right: -3px; top: 50%; width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: opacity 150ms ease; }
+  .desktop-project-tab:not(:has([aria-selected="true"])):hover::after, .desktop-project-tab:has(+ .desktop-project-tab:hover)::after, .desktop-project-tab:has(+ .desktop-project-tab [aria-selected="true"])::after { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) { .desktop-project-tab::after { transition: none; } }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }
   .desktop-project-tab:not(:has([aria-selected="true"])) [role="tab"]:hover { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; padding-left: 12px; padding-right: 36px; }
@@ -184,16 +187,26 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var drag = null;
    var dragFrame = 0;
    var suppressDragClick = false;
+   var reducedTabMotion = matchMedia('(prefers-reduced-motion: reduce)');
+   function animateTabPosition(node, from) {
+    node.getAnimations().forEach(function(animation) { animation.cancel(); });
+    if (!reducedTabMotion.matches && Math.abs(from) > 0.5) node.animate([{transform: 'translateX(' + from + 'px)'}, {transform: 'translateX(0)'}], {duration: 180, easing: 'cubic-bezier(.2, 0, 0, 1)'});
+   }
    function moveDraggedTab() {
     if (!drag || !drag.started) return;
     var bounds = list.getBoundingClientRect();
     var speed = drag.x < bounds.left + 32 ? -12 : drag.x > bounds.right - 32 ? 12 : 0;
     list.scrollLeft += speed;
     var others = Array.from(list.querySelectorAll('.desktop-project-tab')).filter(function(node) { return node !== drag.wrapper; });
-    var before = others.find(function(node) { var rect = node.getBoundingClientRect(); return drag.x < rect.left + rect.width / 2; });
+    // Hit-test layout positions, not animated bounds, to avoid oscillating slots.
+    var origin = list.getBoundingClientRect().left - list.scrollLeft;
+    var before = others.find(function(node) { return drag.x < origin + node.offsetLeft + node.offsetWidth / 2; });
     if (drag.wrapper.nextElementSibling !== (before || add)) {
+     var previous = others.map(function(node) { return node.getBoundingClientRect().left; });
      list.insertBefore(drag.wrapper, before || add);
+     others.forEach(function(node, index) { animateTabPosition(node, previous[index] - (origin + node.offsetLeft)); });
     }
+    drag.wrapper.style.transform = 'translateX(' + (drag.x - drag.grabOffset - (origin + drag.wrapper.offsetLeft)) + 'px)';
    }
    function dragTick() {
     if (!drag || !drag.started) return;
@@ -203,7 +216,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    list.addEventListener('pointerdown', function(event) {
     var tab = event.target.closest('[data-project-tab]');
     if (!tab || event.button !== 0 || !event.isPrimary) return;
-    drag = {pointer: event.pointerId, startX: event.clientX, x: event.clientX, wrapper: tab.parentElement, started: false};
+    drag = {pointer: event.pointerId, startX: event.clientX, grabOffset: event.clientX - tab.parentElement.getBoundingClientRect().left, x: event.clientX, wrapper: tab.parentElement, started: false};
    });
    document.addEventListener('pointermove', function(event) {
     if (!drag || event.pointerId !== drag.pointer) return;
@@ -211,7 +224,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (!drag.started && Math.abs(drag.x - drag.startX) >= 6) {
      drag.started = true;
      menu.hidePopover();
-     drag.wrapper.style.opacity = '0.7';
+     drag.wrapper.getAnimations().forEach(function(animation) { animation.cancel(); });
+     drag.wrapper.style.zIndex = '3';
      list.style.cursor = 'grabbing';
      dragTick();
     }
@@ -223,8 +237,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     drag = null;
     cancelAnimationFrame(dragFrame);
     list.style.cursor = '';
-    ended.wrapper.style.opacity = '';
+    var releaseOffset = parseFloat(ended.wrapper.style.transform.replace('translateX(', '')) || 0;
+    ended.wrapper.style.transform = '';
+    ended.wrapper.style.zIndex = '';
     if (!ended.started) return;
+    animateTabPosition(ended.wrapper, releaseOffset);
     suppressDragClick = true;
     setTimeout(function() { suppressDragClick = false; }, 0);
     if (event.type !== 'pointerup') { render(); return; }
