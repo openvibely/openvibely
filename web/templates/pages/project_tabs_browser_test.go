@@ -129,7 +129,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("keyboard tab navigation must retain a focus outline", got)
 				}
 				// Reorder with real mouse input, in both directions, without navigation.
+				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p02"]').parentElement,'::after').width`); got != "2px" {
+					t.Fatal("missing background tab separator", got)
+				}
 				dragTab := func(id string, delta float64) {
+					browser.waitFor("tab motion settled", `String(document.querySelectorAll('.desktop-project-tab').length > 0 && Array.from(document.querySelectorAll('.desktop-project-tab')).every(t=>t.getAnimations().length===0))`, "true")
 					var p struct{ X, Y float64 }
 					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="`+id+`"] ').getBoundingClientRect();return {X:r.x+80,Y:r.y+15};})())`)), &p); err != nil {
 						t.Fatal(err)
@@ -137,6 +141,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": p.X, "y": p.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
 					for i := 1; i <= 10; i++ {
 						browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": p.X + delta*float64(i)/10, "y": p.Y, "buttons": 1}, nil)
+					}
+					if got := browser.evaluate(`String(Math.abs(document.querySelector('[data-project-tab="` + id + `"]').getBoundingClientRect().left + 80 - ` + fmt.Sprint(p.X+delta) + `) < 2)`); got != "true" {
+						t.Fatal("dragged tab must follow pointer continuously", got)
 					}
 					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": p.X + delta, "y": p.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
 				}
