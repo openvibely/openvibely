@@ -200,8 +200,17 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var others = Array.from(list.querySelectorAll('.desktop-project-tab')).filter(function(node) { return node !== drag.wrapper; });
     // Hit-test layout positions, not animated bounds, to avoid oscillating slots.
     var origin = list.getBoundingClientRect().left - list.scrollLeft;
-    var before = others.find(function(node) { return drag.x < origin + node.offsetLeft + node.offsetWidth / 2; });
-    if (drag.wrapper.nextElementSibling !== (before || add)) {
+    var left = drag.x - drag.grabOffset;
+    var right = left + drag.wrapper.offsetWidth;
+    var tabs = Array.from(list.querySelectorAll('.desktop-project-tab'));
+    var index = tabs.indexOf(drag.wrapper);
+    var target = index;
+    while (target + 1 < tabs.length && right > origin + tabs[target + 1].offsetLeft + tabs[target + 1].offsetWidth / 2) target++;
+    if (target === index) {
+     while (target > 0 && left < origin + tabs[target - 1].offsetLeft + tabs[target - 1].offsetWidth / 2) target--;
+    }
+    var before = target > index ? tabs[target].nextElementSibling : tabs[target];
+    if (target !== index) {
      var previous = others.map(function(node) { return node.getBoundingClientRect().left; });
      list.insertBefore(drag.wrapper, before || add);
      others.forEach(function(node, index) { animateTabPosition(node, previous[index] - (origin + node.offsetLeft)); });
