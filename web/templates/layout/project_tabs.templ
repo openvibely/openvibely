@@ -116,7 +116,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    if (!bar || !select || bar.dataset.installed) return;
    bar.dataset.installed = 'true';
    // WebViews may focus the first tab automatically on launch. Only show
-   // its focus ring after keyboard input, not startup or pointer focus.
+   // its focus outline after keyboard input, not startup or pointer focus.
    document.addEventListener('keydown', function(event) {
     if (['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'ContextMenu', 'F10'].includes(event.key)) bar.setAttribute('data-keyboard-navigation', '');
    }, true);
