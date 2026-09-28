@@ -148,7 +148,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": p.X + delta, "y": p.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
 				}
 				browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollLeft = 0)`)
-				dragTab("p00", 300)
+				dragTab("p00", 130)
 				browser.waitFor("drag right", `Array.from(document.querySelectorAll('[data-project-tab]')).slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p01,p00")
 				browser.waitFor("drag preserves active project", `document.getElementById('project-selector').value`, "p00")
 				browser.waitFor("reordered pins saved", `JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).slice(0,2).join(',')`, "p01,p00")
@@ -164,7 +164,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					}
 					time.Sleep(10 * time.Millisecond)
 				}
-				dragTab("p00", -244)
+				dragTab("p00", -130)
 				browser.waitFor("drag left", `Array.from(document.querySelectorAll('[data-project-tab]')).slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p00,p01")
 				var point struct{ X, Y float64 }
 				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p00"]').getBoundingClientRect();return {X:r.x+40,Y:r.y+15};})())`)), &point); err != nil {
