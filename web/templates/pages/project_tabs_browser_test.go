@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/static"
@@ -127,6 +128,37 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`getComputedStyle(document.activeElement).outlineStyle`); got != "solid" {
 					t.Fatal("keyboard tab navigation must retain a focus outline", got)
 				}
+				// Reorder with real mouse input, in both directions, without navigation.
+				dragTab := func(id string, delta float64) {
+					var p struct{ X, Y float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="`+id+`"] ').getBoundingClientRect();return {X:r.x+80,Y:r.y+15};})())`)), &p); err != nil {
+						t.Fatal(err)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": p.X, "y": p.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+					for i := 1; i <= 10; i++ {
+						browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": p.X + delta*float64(i)/10, "y": p.Y, "buttons": 1}, nil)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": p.X + delta, "y": p.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+				}
+				browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollLeft = 0)`)
+				dragTab("p00", 300)
+				browser.waitFor("drag right", `Array.from(document.querySelectorAll('[data-project-tab]')).slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p01,p00")
+				browser.waitFor("drag preserves active project", `document.getElementById('project-selector').value`, "p00")
+				browser.waitFor("reordered pins saved", `JSON.parse(document.getElementById('desktop-project-titlebar').dataset.pinnedProjects).slice(0,2).join(',')`, "p01,p00")
+				for deadline := time.Now().Add(3 * time.Second); ; {
+					mu.Lock()
+					savedOrder := strings.Join(pins[:2], ",")
+					mu.Unlock()
+					if savedOrder == "p01,p00" {
+						break
+					}
+					if time.Now().After(deadline) {
+						t.Fatalf("dragged order not persisted: %s", savedOrder)
+					}
+					time.Sleep(10 * time.Millisecond)
+				}
+				dragTab("p00", -244)
+				browser.waitFor("drag left", `Array.from(document.querySelectorAll('[data-project-tab]')).slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p00,p01")
 				var point struct{ X, Y float64 }
 				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p00"]').getBoundingClientRect();return {X:r.x+40,Y:r.y+15};})())`)), &point); err != nil {
 					t.Fatal(err)
@@ -179,6 +211,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("project B remembers tasks", `location.pathname+location.search`, "/tasks?project_id=p01")
 				browser.click("#filtered-page")
 				browser.waitFor("project B filters", `location.search+location.hash`, "?project_id=p01&view=board#keep")
+				browser.waitFor("filtered page shell ready", `String(document.readyState === 'complete' && !!document.querySelector('[data-project-tab="p00"]'))`, "true")
 				browser.click(`[data-project-tab="p00"]`)
 				browser.waitFor("project A unaffected by B filters", `location.pathname+location.search`, "/schedule?project_id=p00")
 				browser.evaluate(`String(window.beforeProjectTabsReload = true)`)
