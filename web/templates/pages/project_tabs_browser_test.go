@@ -118,6 +118,15 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`String(document.querySelectorAll('#new-project-btn').length === 1 && document.getElementById('desktop-project-tabs').lastElementChild.hasAttribute('data-project-selector') && document.getElementById('project-selector-trigger').textContent.trim() === '+' && document.getElementById('project-selector-dialog').contains(document.getElementById('new-project-btn')) && !document.getElementById('project-pin-toggle'))`); got != "true" {
 					t.Fatal("create must follow the last tab with no standalone pin control", got)
 				}
+				// Simulate WebView startup assigning focus before any keyboard input.
+				if got := browser.evaluate(`(function(){var tab=document.querySelector('[data-project-tab]');tab.focus();return getComputedStyle(tab).outlineStyle;})()`); got != "none" {
+					t.Fatal("startup tab focus must not show a selection-like outline", got)
+				}
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight", "code": "ArrowRight"}, nil)
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "ArrowRight", "code": "ArrowRight"}, nil)
+				if got := browser.evaluate(`getComputedStyle(document.activeElement).outlineStyle`); got != "solid" {
+					t.Fatal("keyboard tab navigation must retain a focus outline", got)
+				}
 				var point struct{ X, Y float64 }
 				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p00"]').getBoundingClientRect();return {X:r.x+40,Y:r.y+15};})())`)), &point); err != nil {
 					t.Fatal(err)

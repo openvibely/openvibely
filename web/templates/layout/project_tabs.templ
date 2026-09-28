@@ -40,6 +40,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; --project-tab-selected: color-mix(in oklch, oklch(var(--b2)), oklch(var(--bc)) 24%); border-bottom: 1px solid var(--project-tab-selected); }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
+  #desktop-project-titlebar:not([data-keyboard-navigation]) [data-project-tab]:focus { outline: none; }
   #desktop-project-tabs { display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding: 6px 10px 0; }
   .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 16px 16px 0 0; background: oklch(var(--b2)); --wails-draggable: no-drag; }
   .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); z-index: 1; }
@@ -114,6 +115,12 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
  list.append(add);
    if (!bar || !select || bar.dataset.installed) return;
    bar.dataset.installed = 'true';
+   // WebViews may focus the first tab automatically on launch. Only show
+   // its focus ring after keyboard input, not startup or pointer focus.
+   document.addEventListener('keydown', function(event) {
+    if (['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'ContextMenu', 'F10'].includes(event.key)) bar.setAttribute('data-keyboard-navigation', '');
+   }, true);
+   document.addEventListener('pointerdown', function() { bar.removeAttribute('data-keyboard-navigation'); }, true);
    var fullscreenButton = bar.querySelector('[data-wml-window="ToggleFullscreen"]');
    if (fullscreenButton && window.wails && window.wails.Events) {
     var fullscreenRevision = 0;
