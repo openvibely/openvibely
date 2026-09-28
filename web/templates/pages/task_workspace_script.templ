@@ -38,7 +38,7 @@ templ TaskWorkspaceScript() {
 			root.style.setProperty('--task-panel-width', displayedWidth + 'px');
 			divider.setAttribute('aria-valuenow', String(width));
 			store('task-inspector-width', width);
-			var overlay = (titlebar ? root.clientWidth < 680 : root.clientWidth < width + 560) || !changes.classList.contains('hidden');
+			var overlay = titlebar ? root.clientWidth < 680 : root.clientWidth < width + 560;
 			panel.dataset.overlay = String(overlay);
 			root.dataset.inspectorDocked = String(!overlay && !panel.hidden);
 			root.dataset.inspectorOverlay = String(overlay && !panel.hidden);
