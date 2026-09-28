@@ -82,10 +82,10 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"/><path data-restore-glyph d="M2 5.5h3.5V2zm8 1H6.5V10z" style="display: none"/></svg></button>
 				</div>
 			}
-			<div id="desktop-project-tabs" role="tablist" aria-label="Pinned projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
+			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab">
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID } title={ project.Name }>{ project.Name }</button>
-					<button type="button" data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name } title="Close tab (unpin)">×</button>
+					<button type="button" data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name } title="Close tab">×</button>
 				</div>
 			}
 		@ProjectSelector(projects, currentProjectID)
@@ -101,7 +101,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 			}
 
 	</header>
- <div id="project-tab-menu" popover="manual" role="menu" aria-label="Project tab"><button type="button" role="menuitem" id="project-tab-pin-action">Pin</button><button type="button" role="menuitem" id="project-tab-settings-action">Project Settings</button></div>
+ <div id="project-tab-menu" popover="manual" role="menu" aria-label="Project tab"><button type="button" role="menuitem" id="project-tab-settings-action">Project Settings</button></div>
 	<script>
  (function() {
   function installProjectTabs() {
@@ -109,7 +109,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var select = document.getElementById('project-selector');
    var list = document.getElementById('desktop-project-tabs');
    var menu = document.getElementById('project-tab-menu');
- var pin = document.getElementById('project-tab-pin-action');
  var menuTab;
  var add = bar.querySelector('[data-project-selector]');
  list.append(add);
@@ -141,18 +140,17 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();
    });
    var ids = JSON.parse(bar.dataset.pinnedProjects);
-   var openIDs = ids.slice();
  var closedActive = "";
  var saveQueue = Promise.resolve();
-   function savePins() {
+   function saveTabs() {
     bar.dataset.pinnedProjects = JSON.stringify(ids);
     var payload = JSON.stringify({pinned_project_ids: ids});
-    // Serialize saves so rapid pin/unpin clicks cannot persist out of order.
+    // Serialize saves so rapid tab changes cannot persist out of order.
     saveQueue = saveQueue.catch(function() {}).then(function() {
      return fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: payload, keepalive: true}).then(function(response) {
-      if (!response.ok) throw new Error('Could not save pinned projects');
+      if (!response.ok) throw new Error('Could not save project tabs');
      });
-    }).catch(function() { if (window.showToast) window.showToast('Could not save pinned projects. Try again.', 'failed'); });
+    }).catch(function() { if (window.showToast) window.showToast('Could not save project tabs. Try again.', 'failed'); });
    }
    function switchProject(id) {
     select.value = id;
@@ -161,7 +159,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    }
    function sync() {
     var active = select.value;
- if (active && !openIDs.includes(active) && active !== closedActive) { openIDs.push(active); render(); return; }
+ if (active && !ids.includes(active) && active !== closedActive) { ids.push(active); saveTabs(); render(); return; }
     list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {
      tab.setAttribute('aria-selected', String(tab.dataset.projectTab === active));
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
@@ -171,12 +169,12 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    }
    function render() {
     list.replaceChildren();
-    openIDs.forEach(function(id) {
+    ids.forEach(function(id) {
      var option = Array.from(select.options).find(function(option) { return option.value === id; });
      if (!option) return;
      var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';
      var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim(); tab.title = tab.textContent;
-     var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.textContent = '×'; close.title = 'Close tab (unpin)'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
+     var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.textContent = '×'; close.title = 'Close tab'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
      wrapper.append(tab, close); list.append(wrapper);
     });
     list.append(add);
@@ -230,9 +228,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     suppressDragClick = true;
     setTimeout(function() { suppressDragClick = false; }, 0);
     if (event.type !== 'pointerup') { render(); return; }
-    openIDs = Array.from(list.querySelectorAll('[data-project-tab]')).map(function(tab) { return tab.dataset.projectTab; });
-    var reordered = openIDs.filter(function(id) { return ids.includes(id); });
-    if (JSON.stringify(reordered) !== JSON.stringify(ids)) { ids = reordered; savePins(); }
+    var reordered = Array.from(list.querySelectorAll('[data-project-tab]')).map(function(tab) { return tab.dataset.projectTab; });
+    if (JSON.stringify(reordered) !== JSON.stringify(ids)) { ids = reordered; saveTabs(); }
    }
    document.addEventListener('pointerup', finishDrag);
    document.addEventListener('pointercancel', finishDrag);
@@ -244,11 +241,10 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    list.addEventListener('dragstart', function(event) { if (event.target.closest('[data-project-tab]')) event.preventDefault(); });
    function openMenu(tab, x, y) {
     menuTab = tab;
-    pin.textContent = ids.includes(tab.dataset.projectTab) ? 'Unpin' : 'Pin';
     menu.showPopover();
     menu.style.left = Math.max(0, Math.min(x, innerWidth - menu.offsetWidth)) + 'px';
     menu.style.top = Math.max(0, Math.min(y, innerHeight - menu.offsetHeight)) + 'px';
-    pin.focus();
+    document.getElementById('project-tab-settings-action').focus();
    }
    list.addEventListener('contextmenu', function(event) {
     var wrapper = event.target.closest('.desktop-project-tab');
@@ -276,13 +272,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     menu.hidePopover();
     htmx.ajax('GET', '/projects/' + encodeURIComponent(menuTab.dataset.projectTab) + '/edit', {target: document.getElementById('project-settings-container'), swap: 'innerHTML'});
    });
-   pin.addEventListener('click', function() {
-    if (!menuTab) return;
-    var id = menuTab.dataset.projectTab;
-    var index = ids.indexOf(id);
-    if (index === -1) ids.push(id); else ids.splice(index, 1);
-    menu.hidePopover(); menuTab.focus(); savePins();
-   });
    list.addEventListener('click', function(event) {
     var option = event.target.closest('[data-project-selector-option]');
     if (option) {
@@ -295,11 +284,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (tab) { switchProject(tab.dataset.projectTab); return; }
     var close = event.target.closest('[data-close-project]');
     if (!close) return;
-    var index = openIDs.indexOf(close.dataset.closeProject);
-    var next = openIDs[index + 1] || openIDs[index - 1];
+    var index = ids.indexOf(close.dataset.closeProject);
+    var next = ids[index + 1] || ids[index - 1];
     if (close.dataset.closeProject === select.value && next && !switchProject(next)) return;
     closedActive = close.dataset.closeProject;
- openIDs.splice(index, 1); ids = ids.filter(function(id) { return id !== close.dataset.closeProject; }); render(); savePins();
+ ids.splice(index, 1); render(); saveTabs();
     var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
     focus.focus();
    });
