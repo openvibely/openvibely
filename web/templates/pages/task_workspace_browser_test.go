@@ -17,6 +17,37 @@ import (
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
+func TestBrowserFunctional_TaskMetadataBadgesAtMinimumPanelWidth(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	agentID := "long-agent"
+	task := &models.Task{ID: "badge-task", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: 2, AgentDefinitionID: &agentID}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<!doctype html><html><head><link rel="stylesheet" href="%s"><link rel="stylesheet" href="%s"></head><body>`, static.URL("app.css"), static.URL("app-utilities.css"))
+		if err := TaskDetailPanel().Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, `<main style="width:340px;padding:12px">`)
+		if err := TaskDetailMetrics(task, models.TaskExecutionMetrics{LatestDurationMs: 229000}, nil, "An exceptionally long agent label with several words").Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+		fmt.Fprint(w, `</main></body></html>`)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL, "task-metadata-badges", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("metrics ready", `String(Boolean(document.getElementById('task-detail-metrics')) && document.styleSheets.length > 0)`, "true")
+		b.waitFor("production styles loaded", `String(document.readyState==='complete' && getComputedStyle(document.getElementById('task-detail-metrics')).display==='grid')`, "true")
+		for _, width := range []int{340, 420, 720} {
+			b.evaluate(fmt.Sprintf(`document.querySelector('main').style.width='%dpx'; 'sized'`, width))
+			b.waitFor("badge text inside borders", `(function(){var grid=document.getElementById('task-detail-metrics'),bounds=grid.getBoundingClientRect();return String(Array.from(grid.querySelectorAll('.badge')).every(function(badge){var box=badge.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(badge);return box.left>=bounds.left && box.right<=bounds.right+1 && Array.from(range.getClientRects()).every(function(text){return text.top>=box.top-1 && text.bottom<=box.bottom+1 && text.right<=box.right+1;});}));})()`, "true")
+		}
+	})
+}
+
 func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "draft-project", Name: "Draft"}
