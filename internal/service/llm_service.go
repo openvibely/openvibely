@@ -1412,15 +1412,12 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			preparedSteering = append(preparedSteering, inputs...)
-			attachments, steeringErr := s.hydrateTaskSteeringAttachments(inputs)
+			messages, steeringErr := s.hydrateTaskSteeringMessages(inputs)
 			if steeringErr != nil {
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
-			return llmcontracts.LocalSteeringInput{
-				Text:        formatSteeringInstruction(combinedSteeringContent(inputs)),
-				Attachments: attachments,
-			}, nil
+			return llmcontracts.LocalSteeringInput{Messages: messages}, nil
 		})
 		callCtx = llmcontracts.WithSteeringRetryResetCallback(callCtx, func(callbackCtx context.Context) error {
 			if len(preparedSteering) == 0 {
@@ -1916,6 +1913,21 @@ func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput)
 		}
 	}
 	return attachments, nil
+}
+
+func (s *LLMService) hydrateTaskSteeringMessages(inputs []models.ThreadInput) ([]llmcontracts.LocalSteeringMessage, error) {
+	messages := make([]llmcontracts.LocalSteeringMessage, 0, len(inputs))
+	for i := range inputs {
+		attachments, err := s.hydrateTaskSteeringAttachments(inputs[i : i+1])
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, llmcontracts.LocalSteeringMessage{
+			Text:        inputs[i].Content,
+			Attachments: attachments,
+		})
+	}
+	return messages, nil
 }
 
 func taskSteeringImageMediaType(name string) string {

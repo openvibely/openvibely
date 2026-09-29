@@ -183,6 +183,7 @@ type Client struct {
 	oauthUnauthorizedHandler      OAuthUnauthorizedHandler
 	oauthRefreshExternallyManaged bool
 	responsesTransportState       *ResponsesTransportState
+	supportsResponsesWebsockets   bool
 	History                       []Message
 	completionsHistory            []CompletionsHistoryMessage
 	lastCompletionsReasoning      string
@@ -191,7 +192,9 @@ type Client struct {
 
 // NewWithAPIKey creates a client using an API key.
 func NewWithAPIKey(apiKey string) *Client {
-	return newClient(&StoredAuth{APIKey: apiKey})
+	client := newClient(&StoredAuth{APIKey: apiKey})
+	client.supportsResponsesWebsockets = true
+	return client
 }
 
 // SetCompletionsHistory replaces the client's conversation history, preserving
@@ -254,12 +257,14 @@ func NewWithCompatibleOAuthToken(token, refreshToken string, expiresAt int64, ba
 
 // NewWithOAuthToken creates a client using an OAuth access token.
 func NewWithOAuthToken(token, refreshToken string, expiresAt int64, accountID string) *Client {
-	return newClient(&StoredAuth{
+	client := newClient(&StoredAuth{
 		Token:        token,
 		RefreshToken: refreshToken,
 		ExpiresAt:    expiresAt,
 		AccountID:    accountID,
 	})
+	client.supportsResponsesWebsockets = true
+	return client
 }
 
 func newClient(auth *StoredAuth) *Client {
@@ -549,13 +554,15 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		payload["tool_choice"] = "none"
 	}
 
-	if isResponsesLiteWebsocketModel(opts.Model) {
+	if c.supportsResponsesWebsockets {
 		payload["stream"] = true
-		useResponsesLite := true
-		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		useResponsesLite := isResponsesLiteWebsocketModel(opts.Model)
+		wsPayload := buildStandardResponsesWebsocketPayload(payload)
+		if useResponsesLite {
+			wsPayload = buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
+		}
 		result, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
-			RetryableError:                       isRetryableResponsesTransportError,
-			RetryConnectionFailuresWithoutBudget: true,
+			RetryableError: isRetryableResponsesTransportError,
 			OnRetry: func(event httpretry.RetryEvent) {
 				if httpretry.IsConnectionSetupFailure(event.Err) {
 					applog.Infof("[openai-client] reconnecting responses websocket stream in %v: %v", event.Delay, event.Err)

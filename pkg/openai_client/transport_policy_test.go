@@ -39,9 +39,9 @@ func TestStandardWebSearchPermission(t *testing.T) {
 				oldAPI, oldOAuth := OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL
 				OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = srv.URL, srv.URL
 				defer func() { OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = oldAPI, oldOAuth }()
-				client := NewWithAPIKey("test")
+				client := newHTTPTestAPIKeyClient("test")
 				if oauth {
-					client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+					client = newHTTPTestOAuthClient(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 				}
 				_, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{Model: "gpt-5.5", MaxTurns: 1, WebSearchEnabled: true, ToolFilter: func(name string) bool { return allowed && name == openAIWebSearchToolType }})
 				if err != nil {
@@ -138,10 +138,7 @@ func TestResponsesFallbackBudgets(t *testing.T) {
 		if err == nil || wsAttempts != 3 {
 			t.Fatalf("model=%s attempts=%d err=%v", model, wsAttempts, err)
 		}
-		wantHTTP := 0
-		if model == "gpt-6-sol" {
-			wantHTTP = 3
-		}
+		wantHTTP := 3
 		if httpAttempts != wantHTTP {
 			t.Fatalf("model=%s HTTP attempts=%d want=%d", model, httpAttempts, wantHTTP)
 		}
@@ -315,7 +312,7 @@ func TestSteeringStopsUnsafeRetryOrTools(t *testing.T) {
 }
 
 func TestUncertainSteeringVetoesOverflowRecovery(t *testing.T) {
-	client := NewWithAPIKey("test")
+	client := newHTTPTestAPIKeyClient("test")
 	calledRecovery := false
 	_, err := doResponsesStreamTurn(context.Background(), client, "gpt-6-sol", httpretry.StreamTurnPolicy{
 		Recover: func(error) (bool, error) { calledRecovery = true; return false, nil },
@@ -329,7 +326,7 @@ func TestUncertainSteeringVetoesOverflowRecovery(t *testing.T) {
 }
 
 func TestCommittedSteeringVetoesOverflowRecovery(t *testing.T) {
-	client := NewWithAPIKey("test")
+	client := newHTTPTestAPIKeyClient("test")
 	calledRecovery := false
 	attempts := 0
 	_, err := doResponsesStreamTurn(context.Background(), client, "gpt-6-sol", httpretry.StreamTurnPolicy{

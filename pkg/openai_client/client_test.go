@@ -51,7 +51,7 @@ func TestResponsesWebSocketHandshakePreservesRetryAfter(t *testing.T) {
 
 func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
 	attempts := 0
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		attempts++
 		body := io.ReadCloser(failingCompletionsBody{})
@@ -201,7 +201,7 @@ func TestSend_NonStreaming(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
 		Model:           "gpt-5.3-codex",
 		MaxOutputTokens: 128,
@@ -329,7 +329,7 @@ func TestSend_OAuthUsesChatGPTBackendAndAccountHeader(t *testing.T) {
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
 	// Ensure OAuth token is treated as valid and no refresh request is made.
-	client := NewWithOAuthToken(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
+	client := newHTTPTestOAuthClient(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
 		Model: "gpt-5.5",
 	})
@@ -580,8 +580,8 @@ func TestSendAgentic_GPT6SolLunaAPIKeyWebSearchUsesResponsesLiteNamespace(t *tes
 
 func TestSetResponsesTransportStateSharesSessionID(t *testing.T) {
 	state := NewResponsesTransportState()
-	first := NewWithAPIKey("first")
-	second := NewWithAPIKey("second")
+	first := newHTTPTestAPIKeyClient("first")
+	second := newHTTPTestAPIKeyClient("second")
 	first.SetResponsesTransportState(state)
 	second.SetResponsesTransportState(state)
 	if first.sessionID == "" || first.sessionID != second.sessionID || first.sessionID != state.sessionID {
@@ -876,7 +876,7 @@ func TestOpenResponsesLiteHTTPStream_OAuthPreservesGPT56AutoImageDetail(t *testi
 	OpenAIChatGPTAPIBaseURL = srv.URL
 	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
-	client := NewWithOAuthToken("oauth-token", "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	client := newHTTPTestOAuthClient("oauth-token", "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	payload := buildResponsesLiteWebsocketPayload(map[string]any{
 		"model": "gpt-5.6-sol",
 		"input": []any{map[string]any{
@@ -1162,7 +1162,7 @@ func TestSend_OAuthGPT56Live(t *testing.T) {
 	}
 	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		t.Run(model, func(t *testing.T) {
-			client := NewWithOAuthToken(
+			client := newHTTPTestOAuthClient(
 				token,
 				os.Getenv("OPENVIBELY_LIVE_OPENAI_REFRESH_TOKEN"),
 				time.Now().Add(2*time.Hour).UnixMilli(),
@@ -1180,7 +1180,7 @@ func TestSend_OAuthGPT56Live(t *testing.T) {
 		})
 	}
 
-	agenticClient := NewWithOAuthToken(
+	agenticClient := newHTTPTestOAuthClient(
 		token,
 		os.Getenv("OPENVIBELY_LIVE_OPENAI_REFRESH_TOKEN"),
 		time.Now().Add(2*time.Hour).UnixMilli(),
@@ -1208,7 +1208,7 @@ func TestNormalizeReasoningEffort_PreservesNone(t *testing.T) {
 }
 
 func TestClearHistoryClearsCompletionsReasoningState(t *testing.T) {
-	client := NewWithAPIKey("test-key")
+	client := newHTTPTestAPIKeyClient("test-key")
 	client.SetCompletionsHistory([]CompletionsHistoryMessage{
 		{Role: "user", Content: "question"},
 		{Role: "assistant", Content: "answer", ReasoningContent: "private thought"},
@@ -1250,7 +1250,7 @@ func TestSend_StreamingPreservesSpacesInDeltas(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	var streamed strings.Builder
 	resp, err := client.Send(context.Background(), "Hi", &SendOptions{
 		Model:  "gpt-5.3-codex",
@@ -1378,7 +1378,7 @@ func TestSend_StreamingFormatsToolItems(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	var streamed strings.Builder
 	resp, err := client.Send(context.Background(), "Hi", &SendOptions{
 		Model:  "gpt-5.3-codex",
@@ -1427,7 +1427,7 @@ func TestSend_StreamingKeepsPseudoToolTextPlain(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	var streamed strings.Builder
 	resp, err := client.Send(context.Background(), "Hi", &SendOptions{
 		Model:  "gpt-5.3-codex",
@@ -1552,7 +1552,7 @@ func TestSend_OAuthDisableToolsSetsToolChoiceNone(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
+	client := newHTTPTestOAuthClient(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.3-codex", DisableTools: true})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -1580,7 +1580,7 @@ func TestSend_OAuthSuppressToolMarkersStripsFunctionCallMarkers(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
+	client := newHTTPTestOAuthClient(testOAuthJWT("org_test_123"), "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "org_test_123")
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.3-codex", DisableTools: true, SuppressToolMarkers: true})
 	if err != nil {
 		t.Fatalf("Send: %v", err)

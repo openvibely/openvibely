@@ -587,13 +587,20 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if steeringErr != nil || batch.count() == 0 {
 			return llmcontracts.LocalSteeringInput{}, steeringErr
 		}
-		attachments := append([]models.Attachment(nil), steeringCallbackParams.ImageAttachments[attachmentStart:]...)
+		messages := make([]llmcontracts.LocalSteeringMessage, 0, len(batch.inputs))
+		for _, input := range batch.inputs {
+			var attachments []models.Attachment
+			if input.AttachmentSessionID != "" {
+				_, attachments, _ = h.previewPendingAttachments(input.AttachmentSessionID)
+			}
+			messages = append(messages, llmcontracts.LocalSteeringMessage{Text: input.Content, Attachments: attachments})
+		}
 		steeringCallbackParams.ImageAttachments = steeringCallbackParams.ImageAttachments[:attachmentStart]
 		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
 		text := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		steeringCallbackParams.lifecycleUserMessage = text
-		return llmcontracts.LocalSteeringInput{Text: text, Attachments: attachments}, nil
+		return llmcontracts.LocalSteeringInput{Messages: messages}, nil
 	}
 	start := time.Now()
 	finalizeLifecycle := func(runErr error, chatContext llmcontracts.ChatContext) {
@@ -653,9 +660,8 @@ modelLoop:
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
 		}
-		// Codex-style steering is owned by the active agentic turn. The provider
-		// adapter preempts only model sampling; the outer call and any tools that
-		// already started keep their original context and run to completion.
+		// Codex-style steering is owned by the active agentic turn. Active model
+		// sampling and its completed tools finish before pending input is drained.
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
 			requestCtx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,

@@ -1211,7 +1211,15 @@ func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (ope
 		if err != nil {
 			return openaiclient.LocalSteeringInput{}, err
 		}
-		return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments}, nil
+		messages := make([]openaiclient.LocalSteeringMessage, 0, len(input.Messages))
+		for _, message := range input.Messages {
+			messageAttachments, convertErr := convertAttachments(message.Attachments)
+			if convertErr != nil {
+				return openaiclient.LocalSteeringInput{}, convertErr
+			}
+			messages = append(messages, openaiclient.LocalSteeringMessage{Text: message.Text, Attachments: messageAttachments})
+		}
+		return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments, Messages: messages}, nil
 	}
 }
 

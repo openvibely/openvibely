@@ -119,7 +119,7 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 
 // doResponsesStreamTurn gives WebSocket its full retry budget before switching
 // the session to HTTP, which then gets its own retry budget (as in Codex).
-func doResponsesStreamTurn[T any](ctx context.Context, c *Client, model string, policy httpretry.StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
+func doResponsesStreamTurn[T any](ctx context.Context, c *Client, _ string, policy httpretry.StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
 	state := c.responsesTransportState
 	// Recover runs before generic EOF/network retry classification. A negative
 	// RetryableError result alone cannot veto those retries.
@@ -154,7 +154,7 @@ func doResponsesStreamTurn[T any](ctx context.Context, c *Client, model string, 
 		return result, err
 	}
 	result, err := httpretry.DoStreamTurn(ctx, policy, guardedAttempt)
-	if err == nil || ctx.Err() != nil || !isResponsesLiteWebsocketModel(model) || state.websocketDisabled.Load() || state.hasAstraSteeringAmbiguous() || state.hasAstraSteeringCommits() ||
+	if err == nil || ctx.Err() != nil || !c.supportsResponsesWebsockets || state.websocketDisabled.Load() || state.hasAstraSteeringAmbiguous() || state.hasAstraSteeringCommits() ||
 		!(isRetryableResponsesTransportError(err) || httpretry.IsRetryableError(err)) {
 		return result, err
 	}

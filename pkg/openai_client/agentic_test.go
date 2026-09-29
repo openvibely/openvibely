@@ -142,7 +142,7 @@ func TestSendAgentic_AstraHTTPFallbackSuppressesMidTurnSteering(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("test-key")
+	client := newHTTPTestAPIKeyClient("test-key")
 	client.responsesTransportState.websocketDisabled.Store(true)
 	resp, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{
 		Model:                      "gpt-6-astra",
@@ -198,7 +198,7 @@ func TestSendAgentic_APIKeyResponsesLiteDoesNotReplayUnencryptedReasoning(t *tes
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("test-key")
+	client := newHTTPTestAPIKeyClient("test-key")
 	client.responsesTransportState.websocketDisabled.Store(true)
 	resp, err := client.SendAgentic(context.Background(), "use echo", &AgenticOptions{
 		Model:            "gpt-5.6-sol",
@@ -226,8 +226,10 @@ func TestSendAgentic_APIKeyResponsesLiteDoesNotReplayUnencryptedReasoning(t *tes
 	}
 }
 
-func TestSendAgentic_LocalSteeringPreemptsOnlySamplingAndDrainsCompletedTools(t *testing.T) {
-	firstResponseStarted := make(chan struct{}, 1)
+func TestSendAgentic_LocalSteeringWaitsForSamplingAndTools(t *testing.T) {
+	firstResponseStarted := make(chan struct{})
+	releaseFirstResponse := make(chan struct{})
+	firstResponseCanceled := make(chan struct{})
 	secondRequest := make(chan map[string]any, 1)
 	var turns atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,12 +240,18 @@ func TestSendAgentic_LocalSteeringPreemptsOnlySamplingAndDrainsCompletedTools(t 
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		if turns.Add(1) == 1 {
+			close(firstResponseStarted)
+			select {
+			case <-releaseFirstResponse:
+			case <-r.Context().Done():
+				close(firstResponseCanceled)
+				return
+			}
 			_, _ = w.Write([]byte(buildSSE([]string{
 				`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_steer","name":"echo","arguments":"{}"}}`,
 				`{"type":"response.output_text.delta","delta":"sampling"}`,
+				`{"type":"response.completed","response":{"id":"resp_first","status":"completed","model":"gpt-test"}}`,
 			})))
-			w.(http.Flusher).Flush()
-			<-r.Context().Done()
 			return
 		}
 		secondRequest <- request
@@ -258,24 +266,23 @@ func TestSendAgentic_LocalSteeringPreemptsOnlySamplingAndDrainsCompletedTools(t 
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	wakeup := make(chan struct{}, 1)
 	toolRan := make(chan struct{}, 1)
-	client := NewWithAPIKey("test-key")
+	client := newHTTPTestAPIKeyClient("test-key")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	var steeringClaimed atomic.Bool
 	resultCh := make(chan *AgenticResponse, 1)
 	errCh := make(chan error, 1)
 	go func() {
 		resp, err := client.SendAgentic(context.Background(), "original request", &AgenticOptions{
-			Model:                  "gpt-test",
-			MaxTurns:               2,
-			SkipDefaultTools:       true,
-			ExtraTools:             []ToolDefinition{{Type: "function", Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}},
-			LocalSteeringWakeup:    wakeup,
-			OnToolBoundarySteering: func(context.Context) (string, error) { return "new direction", nil },
-			OnText: func(string) {
-				select {
-				case firstResponseStarted <- struct{}{}:
-				default:
+			Model:            "gpt-test",
+			MaxTurns:         2,
+			SkipDefaultTools: true,
+			ExtraTools:       []ToolDefinition{{Type: "function", Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}},
+			OnToolBoundarySteering: func(context.Context) (string, error) {
+				if steeringClaimed.CompareAndSwap(false, true) {
+					return "new direction", nil
 				}
+				return "", nil
 			},
 			ToolExecutor: func(toolCtx context.Context, _ string, _ json.RawMessage) (string, bool, error) {
 				if err := toolCtx.Err(); err != nil {
@@ -294,7 +301,12 @@ func TestSendAgentic_LocalSteeringPreemptsOnlySamplingAndDrainsCompletedTools(t 
 	case <-time.After(2 * time.Second):
 		t.Fatal("first response did not start")
 	}
-	wakeup <- struct{}{}
+	select {
+	case <-firstResponseCanceled:
+		t.Fatal("steering canceled active model sampling")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirstResponse)
 
 	select {
 	case <-toolRan:
@@ -328,7 +340,7 @@ func TestSendAgentic_LocalSteeringPreemptsOnlySamplingAndDrainsCompletedTools(t 
 	}
 }
 
-func TestSendAgentic_LocalSteeringKeepsEveryRapidInstruction(t *testing.T) {
+func TestSendAgentic_LocalSteeringKeepsEveryQueuedInstruction(t *testing.T) {
 	requestStarted := make(chan int, 3)
 	requests := make(chan map[string]any, 3)
 	var turns atomic.Int32
@@ -342,14 +354,13 @@ func TestSendAgentic_LocalSteeringKeepsEveryRapidInstruction(t *testing.T) {
 		requests <- request
 		w.Header().Set("Content-Type", "text/event-stream")
 		requestStarted <- turn
-		if turn < 3 {
-			w.(http.Flusher).Flush()
-			<-r.Context().Done()
-			return
+		text := "continuing"
+		if turn == 3 {
+			text = "done"
 		}
 		_, _ = w.Write([]byte(buildSSE([]string{
-			`{"type":"response.output_text.delta","delta":"done"}`,
-			`{"type":"response.completed","response":{"id":"resp_done","status":"completed","model":"gpt-test"}}`,
+			fmt.Sprintf(`{"type":"response.output_text.delta","delta":%q}`, text),
+			fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_%d","status":"completed","model":"gpt-test"}}`, turn),
 		})))
 	}))
 	defer srv.Close()
@@ -358,20 +369,22 @@ func TestSendAgentic_LocalSteeringKeepsEveryRapidInstruction(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	wakeup := make(chan struct{}, 2)
 	steers := []string{"first correction", "second correction"}
 	var claimed atomic.Int32
-	client := NewWithAPIKey("test-key")
+	client := newHTTPTestAPIKeyClient("test-key")
+	client.responsesTransportState.websocketDisabled.Store(true)
 	done := make(chan error, 1)
 	go func() {
 		_, err := client.SendAgentic(context.Background(), "original request", &AgenticOptions{
-			Model:               "gpt-test",
-			MaxTurns:            1,
-			SkipDefaultTools:    true,
-			LocalSteeringWakeup: wakeup,
-			OnToolBoundarySteering: func(context.Context) (string, error) {
+			Model:            "gpt-test",
+			MaxTurns:         1,
+			SkipDefaultTools: true,
+			OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
 				index := int(claimed.Add(1)) - 1
-				return steers[index], nil
+				if index >= len(steers) {
+					return LocalSteeringInput{}, nil
+				}
+				return LocalSteeringInput{Text: steers[index]}, nil
 			},
 		})
 		done <- err
@@ -386,7 +399,6 @@ func TestSendAgentic_LocalSteeringKeepsEveryRapidInstruction(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("request %d did not start", wantTurn)
 		}
-		wakeup <- struct{}{}
 	}
 	select {
 	case gotTurn := <-requestStarted:
@@ -431,8 +443,9 @@ func TestSendAgentic_LocalSteeringCarriesStructuredAttachments(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		if turns.Add(1) == 1 {
 			requestStarted <- struct{}{}
-			w.(http.Flusher).Flush()
-			<-r.Context().Done()
+			_, _ = w.Write([]byte(buildSSE([]string{
+				`{"type":"response.completed","response":{"id":"resp_first","status":"completed","model":"gpt-test"}}`,
+			})))
 			return
 		}
 		secondRequest <- request
@@ -451,16 +464,19 @@ func TestSendAgentic_LocalSteeringCarriesStructuredAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wakeup := make(chan struct{}, 1)
-	client := NewWithAPIKey("test-key")
+	client := newHTTPTestAPIKeyClient("test-key")
+	client.responsesTransportState.websocketDisabled.Store(true)
+	var claimed atomic.Bool
 	done := make(chan error, 1)
 	go func() {
 		_, sendErr := client.SendAgentic(context.Background(), "original request", &AgenticOptions{
-			Model:               "gpt-test",
-			MaxTurns:            1,
-			SkipDefaultTools:    true,
-			LocalSteeringWakeup: wakeup,
+			Model:            "gpt-test",
+			MaxTurns:         1,
+			SkipDefaultTools: true,
 			OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
+				if !claimed.CompareAndSwap(false, true) {
+					return LocalSteeringInput{}, nil
+				}
 				return LocalSteeringInput{Text: "look at this", Attachments: []*FileAttachment{attachment}}, nil
 			},
 		})
@@ -472,7 +488,6 @@ func TestSendAgentic_LocalSteeringCarriesStructuredAttachments(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("first response did not start")
 	}
-	wakeup <- struct{}{}
 	if err := <-done; err != nil {
 		t.Fatalf("SendAgentic: %v", err)
 	}
@@ -494,6 +509,220 @@ func TestSendAgentic_LocalSteeringCarriesStructuredAttachments(t *testing.T) {
 	}
 	if !sawText || !sawImage {
 		t.Fatalf("structured steering input missing text or image: %#v", input)
+	}
+}
+
+func TestSendAgentic_WebsocketQueuesLocalSteeringUntilResponseCompletes(t *testing.T) {
+	responseStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	secondRequest := make(chan map[string]any, 1)
+	var connections atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connections.Add(1)
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		if _, _, err = conn.Read(r.Context()); err != nil {
+			t.Errorf("read first request: %v", err)
+			return
+		}
+		if err = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"resp_first"}}`)); err != nil {
+			t.Errorf("write response.created: %v", err)
+			return
+		}
+		close(responseStarted)
+		<-releaseResponse
+		for _, event := range []string{
+			`{"type":"response.output_text.delta","delta":"first answer"}`,
+			`{"type":"response.completed","response":{"id":"resp_first","status":"completed","model":"gpt-5.5"}}`,
+		} {
+			if err = conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write first response: %v", err)
+				return
+			}
+		}
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("read steered request: %v", err)
+			return
+		}
+		var request map[string]any
+		if err = json.Unmarshal(data, &request); err != nil {
+			t.Errorf("decode steered request: %v", err)
+			return
+		}
+		secondRequest <- request
+		for _, event := range []string{
+			`{"type":"response.output_text.delta","delta":" after steer"}`,
+			`{"type":"response.completed","response":{"id":"resp_second","status":"completed","model":"gpt-5.5"}}`,
+		} {
+			if err = conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write second response: %v", err)
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	var pending atomic.Bool
+	var claimed atomic.Bool
+	client := NewWithAPIKey("sk-test")
+	done := make(chan struct {
+		response *AgenticResponse
+		err      error
+	}, 1)
+	go func() {
+		response, sendErr := client.SendAgentic(context.Background(), "original", &AgenticOptions{
+			Model:            "gpt-5.5",
+			MaxTurns:         1,
+			SkipDefaultTools: true,
+			OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
+				if pending.Load() && claimed.CompareAndSwap(false, true) {
+					return LocalSteeringInput{Text: "new direction"}, nil
+				}
+				return LocalSteeringInput{}, nil
+			},
+		})
+		done <- struct {
+			response *AgenticResponse
+			err      error
+		}{response: response, err: sendErr}
+	}()
+
+	select {
+	case <-responseStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first websocket response did not start")
+	}
+	pending.Store(true)
+	select {
+	case request := <-secondRequest:
+		t.Fatalf("steering started a request before the active response completed: %#v", request)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseResponse)
+
+	result := <-done
+	if result.err != nil {
+		t.Fatalf("SendAgentic: %v", result.err)
+	}
+	if result.response == nil || result.response.Text != "first answer after steer" {
+		t.Fatalf("response = %#v", result.response)
+	}
+	request := <-secondRequest
+	if request["type"] != "response.create" || request["model"] != "gpt-5.5" {
+		t.Fatalf("steered request type/model = %v/%v", request["type"], request["model"])
+	}
+	input, _ := request["input"].([]any)
+	if len(input) != 1 {
+		t.Fatalf("steered incremental input = %#v", input)
+	}
+	message, _ := input[0].(map[string]any)
+	if message["role"] != "user" || message["content"] != "new direction" {
+		t.Fatalf("steered input = %#v", message)
+	}
+	if connections.Load() != 1 {
+		t.Fatalf("websocket connections = %d, want 1", connections.Load())
+	}
+}
+
+func TestSendAgentic_ResponsesLiteWebsocketPreservesToolAndQueuedSteeringMessages(t *testing.T) {
+	secondRequest := make(chan map[string]any, 1)
+	var connections atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connections.Add(1)
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		if _, _, err = conn.Read(r.Context()); err != nil {
+			t.Errorf("read first request: %v", err)
+			return
+		}
+		for _, event := range []string{
+			`{"type":"response.created","response":{"id":"resp_tool"}}`,
+			`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"echo","arguments":"{}"}}`,
+			`{"type":"response.completed","response":{"id":"resp_tool","status":"completed","model":"gpt-5.6-sol"}}`,
+		} {
+			if err = conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write first response: %v", err)
+				return
+			}
+		}
+		_, data, err := conn.Read(r.Context())
+		if err != nil {
+			t.Errorf("read continuation request: %v", err)
+			return
+		}
+		var request map[string]any
+		if err = json.Unmarshal(data, &request); err != nil {
+			t.Errorf("decode continuation request: %v", err)
+			return
+		}
+		secondRequest <- request
+		for _, event := range []string{
+			`{"type":"response.output_text.delta","delta":"done"}`,
+			`{"type":"response.completed","response":{"id":"resp_done","status":"completed","model":"gpt-5.6-sol"}}`,
+		} {
+			if err = conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+				t.Errorf("write continuation response: %v", err)
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	var claimed atomic.Bool
+	response, err := client.SendAgentic(context.Background(), "original", &AgenticOptions{
+		Model:            "gpt-5.6-sol",
+		MaxTurns:         1,
+		SkipDefaultTools: true,
+		ExtraTools:       []ToolDefinition{{Type: "function", Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+			return "tool output", false, nil
+		},
+		OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
+			if !claimed.CompareAndSwap(false, true) {
+				return LocalSteeringInput{}, nil
+			}
+			return LocalSteeringInput{Messages: []LocalSteeringMessage{{Text: "first correction"}, {Text: "second correction"}}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if response.Text != "done" {
+		t.Fatalf("response text = %q, want done", response.Text)
+	}
+	request := <-secondRequest
+	input, _ := request["input"].([]any)
+	if len(input) != 3 {
+		t.Fatalf("continuation input = %#v, want tool output and two user messages", input)
+	}
+	output, _ := input[0].(map[string]any)
+	first, _ := input[1].(map[string]any)
+	second, _ := input[2].(map[string]any)
+	if output["type"] != "function_call_output" || output["call_id"] != "call_1" ||
+		first["role"] != "user" || first["content"] != "first correction" ||
+		second["role"] != "user" || second["content"] != "second correction" {
+		t.Fatalf("continuation input lost order or boundaries: %#v", input)
+	}
+	if connections.Load() != 1 {
+		t.Fatalf("websocket connections = %d, want 1", connections.Load())
 	}
 }
 
@@ -1207,7 +1436,7 @@ func TestSendAgentic_ReasoningSummaryPayload(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:            "gpt-5.5",
 		DisableTools:     true,
@@ -1618,7 +1847,7 @@ func TestSendAgentic_OAuthModelsReplayEncryptedReasoningWithStoreFalse(t *testin
 
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
-			client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+			client := newHTTPTestOAuthClient(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 			resp, err := client.SendAgentic(context.Background(), "use echo", &AgenticOptions{
 				Model:            model,
 				SkipDefaultTools: true,
@@ -1678,7 +1907,7 @@ func TestSendAgentic_TextOnly(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "Hello", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
@@ -1755,11 +1984,12 @@ func TestSendAgentic_InjectsToolBoundarySteeringAfterFunctionOutput(t *testing.T
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	var callbackCalls int
 	resp, err := client.SendAgentic(context.Background(), "fix the bug", &AgenticOptions{
-		Model:   "gpt-5.3-codex",
-		WorkDir: tmpDir,
+		Model:    "gpt-5.3-codex",
+		MaxTurns: 1,
+		WorkDir:  tmpDir,
 		OnToolBoundarySteering: func(ctx context.Context) (string, error) {
 			callbackCalls++
 			return "actually only review it", nil
@@ -1853,7 +2083,7 @@ func TestSendAgentic_ToolCalling(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	var toolUseCalled, toolResultCalled bool
 	resp, err := client.SendAgentic(context.Background(), "Read test.txt", &AgenticOptions{
 		Model:   "gpt-5.3-codex",
@@ -1930,7 +2160,7 @@ func TestSendAgentic_ReadOnlyToolCallsExecuteInParallel(t *testing.T) {
 	var inFlight int32
 	var maxInFlight int32
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "parallel tools", &AgenticOptions{
 		Model: "gpt-5.3-codex",
 		ToolExecutor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
@@ -1983,7 +2213,7 @@ func TestSendAgentic_MutatingToolMixStaysSerial(t *testing.T) {
 	var inFlight int32
 	var maxInFlight int32
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "serial tools", &AgenticOptions{
 		Model: "gpt-5.3-codex",
 		ToolExecutor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
@@ -2023,7 +2253,7 @@ func TestSendAgentic_MaxTurns(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "echo", &AgenticOptions{
 		Model:    "gpt-5.3-codex",
 		MaxTurns: 3,
@@ -2070,7 +2300,7 @@ func TestSendAgentic_DefaultMaxTurnsNoLimit(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "echo", &AgenticOptions{
 		Model:   "gpt-5.3-codex",
 		WorkDir: t.TempDir(),
@@ -2113,7 +2343,7 @@ func TestSendAgentic_DisableTools(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
@@ -2147,7 +2377,7 @@ func TestSendAgentic_WithRetry(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
@@ -2176,7 +2406,7 @@ func TestSendAgentic_DoesNotRetryRateLimit(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
@@ -2209,7 +2439,7 @@ func TestSendAgentic_RetriesStreamAfterPartialOutputFromTurnState(t *testing.T) 
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	var streamed strings.Builder
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
@@ -2279,7 +2509,7 @@ func TestSendAgentic_RetriedTurnReplaysCompletedToolOutput(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "use lookup", &AgenticOptions{
 		Model:            "gpt-5.3-codex",
 		SkipDefaultTools: true,
@@ -2337,7 +2567,7 @@ func TestSendAgentic_OAuthUsesCorrectEndpoint(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	client := newHTTPTestOAuthClient(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.5",
 		DisableTools: true,
@@ -2419,7 +2649,7 @@ func TestSendAgentic_AutoCompactionBeforeFirstTurn_APIKey(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.History = []Message{
 		{Role: "user", Content: "previously compacted history"},
 		{Role: "assistant", Content: "assistant response"},
@@ -2518,7 +2748,7 @@ func TestSendAgentic_ForceCompactionBeforeTurnUsesNativeCompaction(t *testing.T)
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.History = []Message{
 		{Role: "user", Content: "short history"},
 		{Role: "assistant", Content: "short answer"},
@@ -2586,7 +2816,7 @@ func TestSendAgentic_AutoCompactionUsesDedicatedCompactionPrompt(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.History = []Message{
 		{Role: "user", Content: "older context"},
 		{Role: "assistant", Content: "assistant response"},
@@ -2652,7 +2882,7 @@ func TestSendAgentic_AutoCompactionUsesCompactionPromptOverride(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.History = []Message{
 		{Role: "user", Content: "older context"},
 		{Role: "assistant", Content: "assistant response"},
@@ -2689,6 +2919,7 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 
 	requests := 0
 	var compactionCallback string
+	var steeringClaimed atomic.Bool
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -2729,6 +2960,9 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 			if !foundToolCall {
 				t.Fatal("compaction input missing function_call")
 			}
+			if encoded, _ := json.Marshal(input); strings.Contains(string(encoded), "after compaction") {
+				t.Fatalf("pending steering entered tool-continuation compaction: %s", encoded)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"output":[{"type":"message","role":"user","content":"Read test.txt"},{"type":"compaction","encrypted_content":"tool summary"}]}`))
 		case 3:
@@ -2750,9 +2984,32 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 			if !foundCompaction {
 				t.Fatal("post-compaction request should include compaction item")
 			}
+			if encoded, _ := json.Marshal(input); strings.Contains(string(encoded), "after compaction") {
+				t.Fatalf("steering was drained before required continuation: %s", encoded)
+			}
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_3\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}}\n\n",
+			))
+		case 4:
+			if !strings.HasSuffix(r.URL.Path, "/responses/compact") {
+				t.Fatalf("request 4 path = %q, want /responses/compact", r.URL.Path)
+			}
+			input := body["input"].([]any)
+			if encoded, _ := json.Marshal(input); strings.Contains(string(encoded), "after compaction") {
+				t.Fatalf("claimed steering entered compaction: %s", encoded)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"output":[{"type":"message","role":"user","content":"Read test.txt"},{"type":"compaction","encrypted_content":"second summary"}]}`))
+		case 5:
+			w.Header().Set("Content-Type", "text/event-stream")
+			input := body["input"].([]any)
+			encoded, _ := json.Marshal(input)
+			if !strings.Contains(string(encoded), "after compaction") {
+				t.Fatalf("post-compaction request missing pending steering: %s", encoded)
+			}
 			_, _ = w.Write([]byte(
 				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n" +
-					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_3\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}}\n\n",
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_5\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}}\n\n",
 			))
 		default:
 			t.Fatalf("unexpected request %d", requests)
@@ -2764,7 +3021,7 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "Read test.txt", &AgenticOptions{
 		Model:                    "gpt-5.3-codex",
 		WorkDir:                  tmpDir,
@@ -2773,13 +3030,19 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 		OnCompaction: func(summary string) {
 			compactionCallback = summary
 		},
+		OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
+			if steeringClaimed.CompareAndSwap(false, true) {
+				return LocalSteeringInput{Text: "after compaction"}, nil
+			}
+			return LocalSteeringInput{}, nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("SendAgentic: %v", err)
 	}
 
-	if requests != 3 {
-		t.Fatalf("requests = %d, want 3", requests)
+	if requests != 5 {
+		t.Fatalf("requests = %d, want 5", requests)
 	}
 	if !resp.Compacted {
 		t.Fatal("expected response to report compaction")
@@ -2867,7 +3130,7 @@ func TestSendAgentic_AutoCompactionOAuthUsesOAuthRequestShape(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	client := newHTTPTestOAuthClient(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	client.History = []Message{{Role: "user", Content: "oauth history"}}
 
 	resp, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
@@ -2971,7 +3234,7 @@ func TestSendAgentic_AutoCompactionOAuthUsesResponsesEndpoint(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	client := newHTTPTestOAuthClient(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	client.History = []Message{{Role: "user", Content: "oauth history"}}
 
 	resp, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
@@ -3112,7 +3375,7 @@ func TestSendAgentic_ContextLengthExceeded_TriggersForcedCompactionAndRetry(t *t
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "Read tiny.txt", &AgenticOptions{
 		Model:                    "gpt-5.3-codex",
 		WorkDir:                  tmpDir,
@@ -3149,7 +3412,7 @@ func TestSendAgentic_ContextLengthExceeded_NoAutoCompactionReturnsError(t *testi
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:           "gpt-5.3-codex",
 		DisableTools:    true,
@@ -3236,7 +3499,7 @@ func TestSendAgentic_AutoCompactionMidTurn_UsesObservedInputTokens(t *testing.T)
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "Read tiny.txt", &AgenticOptions{
 		Model:                    "gpt-5.3-codex",
 		WorkDir:                  tmpDir,
@@ -3326,7 +3589,7 @@ func TestSendAgentic_AutoCompactionMidTurn_UsesSessionLevelTokenAccounting(t *te
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "Read tiny.txt", &AgenticOptions{
 		Model:                    "gpt-5.3-codex",
 		WorkDir:                  tmpDir,
@@ -3430,7 +3693,7 @@ func TestSendAgentic_AutoCompactionMidTurn_UsesLatestSessionTokenBaseline(t *tes
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "Read tiny.txt", &AgenticOptions{
 		Model:                    "gpt-5.3-codex",
 		WorkDir:                  tmpDir,
@@ -3563,7 +3826,7 @@ func TestSendAgentic_ToolOutputTruncatedOnlyForModelInput(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "run command", &AgenticOptions{
 		Model:                "gpt-5.3-codex",
 		ToolOutputTokenLimit: tokenLimit,
@@ -3746,7 +4009,7 @@ func TestTrimCompactionInputItemsToFitContextWindow_UsesConfiguredWindowForUnkno
 	OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { OpenAIAPIBaseURL = old }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	items := []any{map[string]any{"type": "message", "role": "user", "content": strings.Repeat("dense!", 2000)}}
 	_, _, err := client.compactAgenticInputItems(context.Background(), items, nil, &AgenticOptions{
 		Model: "unknown-first-party-model", ContextWindow: 4096, MaxOutputTokens: 1024,
@@ -3961,7 +4224,7 @@ func TestAgenticResponse_UpdatesHistory(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "Hello", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
@@ -4005,7 +4268,7 @@ func TestSendAgentic_DisableToolsWithExtraTools(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:        "gpt-5.3-codex",
 		DisableTools: true,
@@ -4056,7 +4319,7 @@ func TestSendAgentic_ToolFilterRemovesDeniedToolsFromRequest(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model: "gpt-5.3-codex",
 		ExtraTools: []ToolDefinition{
@@ -4102,7 +4365,7 @@ func TestSendAgentic_SkipDefaultToolsUsesOnlyExtraTools(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:            "gpt-5.3-codex",
 		SkipDefaultTools: true,
@@ -4216,7 +4479,7 @@ func TestSendAgentic_WebSearchToolIncluded(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "search for Go docs", &AgenticOptions{
 		Model:            "gpt-5.3-codex",
 		WebSearchEnabled: true,
@@ -4269,7 +4532,7 @@ func TestSendAgentic_WebSearchNotIncludedForUnsupportedModel(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
 		Model:            "gpt-4o",
 		WebSearchEnabled: true, // enabled, but model doesn't support it
@@ -4325,7 +4588,7 @@ func TestSendAgentic_WebSearchToolIncluded_OAuthPath(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken("oauth-token", "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "acct_123")
+	client := newHTTPTestOAuthClient("oauth-token", "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "acct_123")
 	resp, err := client.SendAgentic(context.Background(), "search for go docs", &AgenticOptions{
 		Model:            "gpt-5.3-codex",
 		WebSearchEnabled: true,
@@ -4633,7 +4896,7 @@ func TestSendAgenticTurnRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(24*time.Hour).UnixMilli(), "acct")
+	client := newHTTPTestOAuthClient("old-token", "old-refresh", time.Now().Add(24*time.Hour).UnixMilli(), "acct")
 	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
 		if tokenUsed != "old-token" {
 			t.Fatalf("tokenUsed = %q", tokenUsed)
@@ -4679,7 +4942,7 @@ func TestSendRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
 	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
 	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
 
-	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(24*time.Hour).UnixMilli(), "acct")
+	client := newHTTPTestOAuthClient("old-token", "old-refresh", time.Now().Add(24*time.Hour).UnixMilli(), "acct")
 	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
 		if tokenUsed != "old-token" {
 			t.Fatalf("tokenUsed = %q", tokenUsed)
@@ -4703,7 +4966,7 @@ func TestSendRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
 }
 
 func TestExternallyManagedOAuthSkipsPackagePreflightRefresh(t *testing.T) {
-	client := NewWithOAuthToken("old-token", "old-refresh", time.Now().Add(-time.Hour).UnixMilli(), "acct")
+	client := newHTTPTestOAuthClient("old-token", "old-refresh", time.Now().Add(-time.Hour).UnixMilli(), "acct")
 	client.SetOAuthUnauthorizedHandler(func(ctx context.Context, tokenUsed string) (OAuthTokens, bool, error) {
 		return OAuthTokens{}, false, nil
 	})
@@ -4780,7 +5043,7 @@ func TestSendAgentic_GPT6LunaConfigurationUpdatePreservesRequestEffort(t *testin
 	OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { OpenAIAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.responsesTransportState.websocketDisabled.Store(true)
 	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
 	client.responsesTransportState.setAstraReasoningEffort("gpt-6-luna", "medium")
@@ -4927,7 +5190,7 @@ func TestSendAgentic_AstraConfigurationUpdateSurvivesRewrittenHistory(t *testing
 	OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { OpenAIAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.responsesTransportState.websocketDisabled.Store(true)
 	client.History = []Message{{Role: "user", Content: "compacted summary"}, {Role: "assistant", Content: "summary acknowledged"}}
 	client.responsesTransportState.mu.Lock()
@@ -4974,7 +5237,7 @@ func TestSendAgentic_AstraConfigurationUpdateReplacesConflictingTrailingUpdate(t
 	OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { OpenAIAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.responsesTransportState.websocketDisabled.Store(true)
 	client.responsesTransportState.mu.Lock()
 	client.responsesTransportState.astraRequestEffort = "medium"
@@ -5102,7 +5365,7 @@ func TestSendAgentic_AstraConfigurationUpdateIsReestablishedAfterCompaction(t *t
 	OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { OpenAIAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.responsesTransportState.websocketDisabled.Store(true)
 	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
 	client.responsesTransportState.setAstraReasoningEffort("gpt-6-astra", "medium")
@@ -5139,7 +5402,7 @@ func TestSendAgentic_NonGPT6DoesNotEmitConfigurationUpdate(t *testing.T) {
 	OpenAIAPIBaseURL = srv.URL + "/v1/"
 	defer func() { OpenAIAPIBaseURL = original }()
 
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	client.responsesTransportState.websocketDisabled.Store(true)
 	client.History = []Message{{Role: "user", Content: "previous"}, {Role: "assistant", Content: "answer"}}
 	client.responsesTransportState.setAstraReasoningEffort("gpt-6-astra", "medium")
