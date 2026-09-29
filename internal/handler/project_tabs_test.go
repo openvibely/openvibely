@@ -49,3 +49,30 @@ func TestPinnedProjectPreferences(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectLocationPreferences(t *testing.T) {
+	h, svc := setupProjectTestHandler(t)
+	projects, _ := svc.List(context.Background())
+	id := projects[0].ID
+	path := "/tasks?project_id=" + id + "&view=list#recent"
+	for _, value := range []string{path, "https://example.com/tasks?project_id=" + id, "/tasks?project_id=wrong"} {
+		body, _ := json.Marshal(map[string]any{"project_locations": map[string]string{id: value}})
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest("POST", "/ui/preferences", strings.NewReader(string(body))), rec)
+		if err := h.SaveUIPreferences(c); err != nil {
+			e.HTTPErrorHandler(err, c)
+		}
+		want := 400
+		if value == path {
+			want = 204
+		}
+		if rec.Code != want {
+			t.Fatalf("%s: got %d want %d", value, rec.Code, want)
+		}
+	}
+	got, _ := h.settingsRepo.Get(context.Background(), "ui.project_locations")
+	if !strings.Contains(got, "recent") {
+		t.Fatalf("location not persisted: %s", got)
+	}
+}

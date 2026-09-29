@@ -11,6 +11,7 @@ type desktopModeContextKey struct{}
 type uiPreferencesContextKey struct{}
 
 type UIPreferences struct {
+ ProjectLocations string
 	PinnedProjectIDs []string
 	Theme            string
 	SidebarCollapsed string
@@ -54,6 +55,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 		data-theme="dark"
 		data-openvibely-runtime={ serverRuntimeMode(ctx) }
 		data-runtime={ serverRuntimeMode(ctx) }
+		data-project-locations={ uiPreferences(ctx).ProjectLocations }
 		data-ui-theme={ uiPreferences(ctx).Theme }
 		data-ui-sidebar-collapsed={ uiPreferences(ctx).SidebarCollapsed }
 	>
