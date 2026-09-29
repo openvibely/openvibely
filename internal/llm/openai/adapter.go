@@ -481,6 +481,9 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 			OnLocalSteering:                openAILocalSteeringCallback(ctx),
 			LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
+			EnableAstraMidTurnSteering:     true,
+			OnAstraMidTurnSteering:         openAIMidTurnSteeringCallback(ctx),
+			AstraMidTurnSteeringWakeup:     llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 			EnableAstraConfigurationUpdate: true,
 			SkipDefaultTools:               rt.SkipDefaultTools})
 		if err != nil {
@@ -583,6 +586,9 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
+		EnableAstraMidTurnSteering:     true,
+		OnAstraMidTurnSteering:         openAIMidTurnSteeringCallback(ctx),
+		AstraMidTurnSteeringWakeup:     llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !inThinking {
@@ -719,6 +725,9 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
+		EnableAstraMidTurnSteering:     true,
+		OnAstraMidTurnSteering:         openAIMidTurnSteeringCallback(ctx),
+		AstraMidTurnSteeringWakeup:     llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !chatInThinking {
@@ -1217,19 +1226,46 @@ func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (ope
 		if err != nil {
 			return openaiclient.LocalSteeringInput{}, err
 		}
-		attachments, err := convertAttachments(input.Attachments)
-		if err != nil {
-			return openaiclient.LocalSteeringInput{}, err
+		return convertLocalSteeringInput(input)
+	}
+}
+
+func convertLocalSteeringInput(input llmcontracts.LocalSteeringInput) (openaiclient.LocalSteeringInput, error) {
+	attachments, err := convertAttachments(input.Attachments)
+	if err != nil {
+		return openaiclient.LocalSteeringInput{}, err
+	}
+	messages := make([]openaiclient.LocalSteeringMessage, 0, len(input.Messages))
+	for _, message := range input.Messages {
+		messageAttachments, convertErr := convertAttachments(message.Attachments)
+		if convertErr != nil {
+			return openaiclient.LocalSteeringInput{}, convertErr
 		}
-		messages := make([]openaiclient.LocalSteeringMessage, 0, len(input.Messages))
-		for _, message := range input.Messages {
-			messageAttachments, convertErr := convertAttachments(message.Attachments)
-			if convertErr != nil {
-				return openaiclient.LocalSteeringInput{}, convertErr
+		messages = append(messages, openaiclient.LocalSteeringMessage{Text: message.Text, Attachments: messageAttachments})
+	}
+	return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments, Messages: messages}, nil
+}
+
+func openAIMidTurnSteeringCallback(ctx context.Context) openaiclient.AstraMidTurnSteeringCallback {
+	callback := llmcontracts.MidTurnSteeringCallbackFromContext(ctx)
+	if callback == nil {
+		return nil
+	}
+	return func(callbackCtx context.Context, deliver openaiclient.AstraSteeringDeliverer) error {
+		return callback(callbackCtx, func(deliverCtx context.Context, input llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
+			converted, err := convertLocalSteeringInput(input)
+			if err != nil {
+				return llmcontracts.SteeringDeliveryState{Status: llmcontracts.SteeringDeliveryFailed, Error: err.Error()}, err
 			}
-			messages = append(messages, openaiclient.LocalSteeringMessage{Text: message.Text, Attachments: messageAttachments})
-		}
-		return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments, Messages: messages}, nil
+			state, deliverErr := deliver(deliverCtx, converted)
+			return llmcontracts.SteeringDeliveryState{
+				Status:             llmcontracts.SteeringDeliveryStatus(state.Status),
+				SteeringID:         state.SteeringID,
+				ResponseID:         state.ResponseID,
+				PreviousResponseID: state.PreviousResponseID,
+				Error:              state.Error,
+			}, deliverErr
+		})
 	}
 }
 

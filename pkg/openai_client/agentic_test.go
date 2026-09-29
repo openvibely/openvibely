@@ -150,7 +150,7 @@ func TestSendAgentic_AstraHTTPFallbackSuppressesMidTurnSteering(t *testing.T) {
 		EnableAstraMidTurnSteering: true,
 		OnAstraMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
 			callbackCalls.Add(1)
-			_, _ = deliver(ctx, "must not send over HTTP")
+			_, _ = deliver(ctx, LocalSteeringInput{Text: "must not send over HTTP"})
 			return nil
 		},
 	})
@@ -5518,4 +5518,33 @@ func TestSendAgentic_NonGPT6DoesNotEmitConfigurationUpdate(t *testing.T) {
 			t.Fatalf("non-GPT-6 input contained configuration_update: %#v", input)
 		}
 	}
+}
+
+func TestResponseSteeringInputPreservesMessagesAndAttachments(t *testing.T) {
+	input, err := responseSteeringInput(LocalSteeringInput{Messages: []LocalSteeringMessage{
+		{Text: "first"},
+		{Text: "second", Attachments: []*FileAttachment{{FileName: "note.txt", MediaType: "text/plain", Data: []byte("details")}}},
+	}})
+	require.NoError(t, err)
+
+	items, ok := input.([]any)
+	require.True(t, ok)
+	require.Len(t, items, 2)
+	first, ok := items[0].(agenticInputItem)
+	require.True(t, ok)
+	require.Equal(t, "user", first["role"])
+	require.Equal(t, "first", first["content"])
+	second, ok := items[1].(agenticInputItem)
+	require.True(t, ok)
+	require.Equal(t, "user", second["role"])
+	content, ok := second["content"].([]any)
+	require.True(t, ok)
+	require.Equal(t, map[string]any{"type": "input_text", "text": "second"}, content[0])
+	require.Equal(t, map[string]any{"type": "input_text", "text": "--- File: note.txt ---\ndetails\n--- End of note.txt ---"}, content[1])
+}
+
+func TestResponseSteeringInputUsesCompactStringForPlainText(t *testing.T) {
+	input, err := responseSteeringInput(LocalSteeringInput{Text: " steer now "})
+	require.NoError(t, err)
+	require.Equal(t, "steer now", input)
 }

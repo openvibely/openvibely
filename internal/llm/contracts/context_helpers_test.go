@@ -42,13 +42,13 @@ func TestLifecycleHookAndSteeringContextHelpers(t *testing.T) {
 		t.Fatal("mid-turn steering helpers should be nil-safe")
 	}
 	ctx = WithMidTurnSteeringCallback(context.Background(), func(ctx context.Context, deliver SteeringDeliverer) error {
-		state, err := deliver(ctx, "steer")
+		state, err := deliver(ctx, LocalSteeringInput{Text: "steer"})
 		if err != nil || state.Status != SteeringDeliveryAccepted {
 			t.Fatalf("delivery state = %#v, err=%v", state, err)
 		}
 		return nil
 	})
-	if err := MidTurnSteeringCallbackFromContext(ctx)(context.Background(), func(context.Context, string) (SteeringDeliveryState, error) {
+	if err := MidTurnSteeringCallbackFromContext(ctx)(context.Background(), func(context.Context, LocalSteeringInput) (SteeringDeliveryState, error) {
 		return SteeringDeliveryState{Status: SteeringDeliveryAccepted}, nil
 	}); err != nil {
 		t.Fatalf("mid-turn steering callback error = %v", err)
