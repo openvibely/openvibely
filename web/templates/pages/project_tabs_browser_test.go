@@ -123,7 +123,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					return
 				}
 				browser.waitFor("tabs controller", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
-				if got := browser.evaluate(`String(document.querySelectorAll('#new-project-btn').length === 1 && document.getElementById('desktop-project-tabs').lastElementChild.hasAttribute('data-project-selector') && document.getElementById('project-selector-trigger').textContent.trim() === '+' && document.getElementById('project-selector-dialog').contains(document.getElementById('new-project-btn')) && !document.getElementById('project-pin-toggle'))`); got != "true" {
+				if got := browser.evaluate(`String(document.querySelectorAll('#new-project-btn').length === 1 && document.getElementById('desktop-project-tabs').lastElementChild.hasAttribute('data-project-selector') && document.getElementById('project-selector-trigger').querySelector('svg[aria-hidden="true"]') !== null && document.getElementById('project-selector-dialog').contains(document.getElementById('new-project-btn')) && !document.getElementById('project-pin-toggle'))`); got != "true" {
 					t.Fatal("create must follow the last tab with no standalone pin control", got)
 				}
 				// Simulate WebView startup assigning focus before any keyboard input.
@@ -260,6 +260,10 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				if got := browser.evaluate(`(function(){var plus=document.getElementById('project-selector-trigger').getBoundingClientRect(),close=document.querySelector('[data-close-project]').getBoundingClientRect();return String(Math.abs((plus.top+plus.bottom-close.top-close.bottom)/2)<0.5);})()`); got != "true" {
 					t.Fatal("plus button must align vertically with tab close buttons", got)
+				}
+
+				if got := browser.evaluate(`(function(){var button=document.getElementById('project-selector-trigger'),icon=button.querySelector('svg');if(!icon)return 'missing icon';var a=button.getBoundingClientRect(),b=icon.getBoundingClientRect();return String(Math.abs(a.left+a.right-b.left-b.right)<1 && Math.abs(a.top+a.bottom-b.top-b.bottom)<1);})()`); got != "true" {
+					t.Fatal("plus icon must be centered inside its hover circle", got)
 				}
 
 				// A fullscreen-sized content viewport must retain the same visible bar.
