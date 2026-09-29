@@ -15,11 +15,19 @@ type localSteeringCallbackKey struct{}
 // SteeringCallback returns raw steering text to inject before the next provider/tool-loop model request.
 type SteeringCallback func(context.Context) (string, error)
 
-// LocalSteeringInput mirrors Codex's structured turn/steer user input. Unlike
-// provider-neutral tool-boundary steering, it may include local attachments.
+// LocalSteeringMessage preserves one queued Codex-style user input and its
+// attachment boundary.
+type LocalSteeringMessage struct {
+	Text        string
+	Attachments []models.Attachment
+}
+
+// LocalSteeringInput mirrors Codex's ordered pending-input drain. Messages is
+// preferred; Text and Attachments retain compatibility with single-input callers.
 type LocalSteeringInput struct {
 	Text        string
 	Attachments []models.Attachment
+	Messages    []LocalSteeringMessage
 }
 
 type LocalSteeringCallback func(context.Context) (LocalSteeringInput, error)

@@ -22,6 +22,30 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func newHTTPOnlyOpenAIServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "websocket unavailable", http.StatusUpgradeRequired)
+			return
+		}
+		recorded := httptest.NewRecorder()
+		handler.ServeHTTP(recorded, r)
+		for key, values := range recorded.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		body := recorded.Body.Bytes()
+		if strings.Contains(r.Header.Get("Accept"), "text/event-stream") && strings.Contains(recorded.Header().Get("Content-Type"), "application/json") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			body = []byte(`data: {"type":"response.completed","response":` + strings.TrimSpace(string(body)) + "}\n\n")
+		}
+		w.WriteHeader(recorded.Code)
+		_, _ = w.Write(body)
+	}))
+}
+
 func TestMaxTokensErrorIsCategorized(t *testing.T) {
 	if !llmcontracts.ErrorIs(errMaxTokens, llmcontracts.ErrorOutputTokenLimitReached) {
 		t.Fatalf("errMaxTokens category missing: %v", errMaxTokens)
@@ -173,7 +197,7 @@ func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Fatalf("path=%q want /v1/responses", r.URL.Path)
 		}
@@ -740,7 +764,7 @@ func TestApplyOpenAIOAuthSystemPrompt_OAuthNoDuplicateAppend(t *testing.T) {
 // its system prompt from "" and system agents ran with no identity at all.
 func TestCallDirectLifecycleHookSendsAgentPromptWithoutCodingFraming(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode request: %v", err)
 			return
@@ -775,7 +799,7 @@ func TestCallDirectLifecycleHookSendsAgentPromptWithoutCodingFraming(t *testing.
 // Ordinary direct calls keep both the agent prompt and the coding-agent framing.
 func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode request: %v", err)
 			return
@@ -808,7 +832,7 @@ func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
 
 func TestCallDirectRawPromptOmitsInteractiveAgentFraming(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode request: %v", err)
 			return
@@ -844,7 +868,7 @@ func TestCallDirectRawPromptOmitsInteractiveAgentFraming(t *testing.T) {
 
 func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/responses" {
 			t.Fatalf("path=%q want /v1/responses", r.URL.Path)
 		}
@@ -892,7 +916,7 @@ func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
 
 func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := newHTTPOnlyOpenAIServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}

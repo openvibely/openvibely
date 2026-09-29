@@ -50,7 +50,7 @@ func TestSendAgentic_AsyncToolPersistsExecutesAndDeliversWithOriginalCallID(t *t
 	var persisted []AsyncToolCall
 	var completed []AsyncToolCallRecord
 	var delivered []AsyncToolCallRecord
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "use memory", &AgenticOptions{
 		Model:            "gpt-test",
 		SkipDefaultTools: true,
@@ -146,7 +146,7 @@ func TestSendAgentic_RecoveredAsyncToolResultIsDeliveredWithOriginalCallID(t *te
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
 	var delivered []AsyncToolCallRecord
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
 		Model:            "gpt-test",
 		SkipDefaultTools: true,
@@ -204,7 +204,7 @@ func TestSendAgentic_AsyncDeliveryProviderRejectionIsReported(t *testing.T) {
 	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
 
 	var rejected []AsyncToolCallRecord
-	client := NewWithAPIKey("sk-test")
+	client := newHTTPTestAPIKeyClient("sk-test")
 	_, err := client.SendAgentic(context.Background(), "use memory", &AgenticOptions{
 		Model:                "gpt-test",
 		SkipDefaultTools:     true,

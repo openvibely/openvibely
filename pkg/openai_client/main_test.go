@@ -9,6 +9,18 @@ import (
 	"testing"
 )
 
+func newHTTPTestAPIKeyClient(apiKey string) *Client {
+	client := NewWithAPIKey(apiKey)
+	client.supportsResponsesWebsockets = false
+	return client
+}
+
+func newHTTPTestOAuthClient(accessToken, refreshToken string, expiresAt int64, accountID string) *Client {
+	client := NewWithOAuthToken(accessToken, refreshToken, expiresAt, accountID)
+	client.supportsResponsesWebsockets = false
+	return client
+}
+
 // TestMain points the OAuth token endpoint at a local server for the whole package so an
 // accidental refresh can never reach auth.openai.com. Tests that exercise refresh still
 // install their own server; anything reaching this one fails the run.
