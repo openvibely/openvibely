@@ -52,6 +52,35 @@ func TestMaxTokensErrorIsCategorized(t *testing.T) {
 	}
 }
 
+func TestOpenAIMidTurnSteeringCallbackPreservesMessageBoundaries(t *testing.T) {
+	ctx := llmcontracts.WithMidTurnSteeringCallback(context.Background(), func(callbackCtx context.Context, deliver llmcontracts.SteeringDeliverer) error {
+		state, err := deliver(callbackCtx, llmcontracts.LocalSteeringInput{Messages: []llmcontracts.LocalSteeringMessage{
+			{Text: "first"},
+			{Text: "second"},
+		}})
+		if err != nil {
+			return err
+		}
+		if state.Status != llmcontracts.SteeringDeliveryPending || state.SteeringID != "steer_1" {
+			return fmt.Errorf("unexpected delivery state: %#v", state)
+		}
+		return nil
+	})
+	callback := openAIMidTurnSteeringCallback(ctx)
+	if callback == nil {
+		t.Fatal("mid-turn steering callback was not adapted")
+	}
+	err := callback(context.Background(), func(_ context.Context, input openaiclient.LocalSteeringInput) (openaiclient.AstraSteeringDelivery, error) {
+		if len(input.Messages) != 2 || input.Messages[0].Text != "first" || input.Messages[1].Text != "second" {
+			return openaiclient.AstraSteeringDelivery{}, fmt.Errorf("unexpected steering input: %#v", input)
+		}
+		return openaiclient.AstraSteeringDelivery{Status: openaiclient.AstraSteeringPending, SteeringID: "steer_1"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 	if got := applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}); got != "base" {
 		t.Fatalf("non-OAuth prompt changed: %q", got)

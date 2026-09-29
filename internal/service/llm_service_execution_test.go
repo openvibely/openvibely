@@ -1690,6 +1690,57 @@ func TestLLMService_ExecuteTaskWithAgent_ExposesSteeringWakeup(t *testing.T) {
 	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
 }
 
+func TestLLMService_ExecuteTaskWithAgent_DeliversProviderOwnedMidTurnSteering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-mid-turn-steer-test")
+	task := &models.Task{ProjectID: "default", Title: "Mid-turn Steer", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	var steeringID string
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			steering := &models.ThreadInput{
+				Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID,
+				AgentConfigID: req.Agent.ID, ExpectedTurnID: req.ExecID, Content: "change direction",
+			}
+			require.NoError(t, threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, req.ExecID))
+			steeringID = steering.ID
+			callback := llmcontracts.MidTurnSteeringCallbackFromContext(req.Ctx)
+			require.NotNil(t, callback)
+			err := callback(req.Ctx, func(_ context.Context, input llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
+				require.Len(t, input.Messages, 1)
+				require.Equal(t, "change direction", input.Messages[0].Text)
+				return llmcontracts.SteeringDeliveryState{
+					Status: llmcontracts.SteeringDeliveryAccepted, SteeringID: "steer_1",
+					PreviousResponseID: "resp_1", ResponseID: "resp_2",
+				}, nil
+			})
+			if err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			return llmcontracts.AgentResult{Output: "done", TextOnlyOutput: "done", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	require.NoError(t, err)
+	require.NotEmpty(t, steeringID)
+	stored, err := threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+}
+
 func TestLLMService_ExecuteTaskWithAgent_QueuesSteeringAtTerminalBoundary(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)

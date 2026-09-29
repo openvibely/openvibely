@@ -1751,7 +1751,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringPendingAfterToolStopCo
 			if !callbackCalls.CompareAndSwap(0, 1) {
 				return nil
 			}
-			delivery, err := deliver(ctx, "steer now")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "steer now"})
 			if err == nil {
 				pending <- delivery
 			}
@@ -1898,7 +1898,7 @@ func TestOpenResponsesWebsocketStream_AstraPendingSteeringCanFailBeforeSuccessor
 	}, false, responsesWebsocketStreamOptions{
 		Model: "gpt-6-astra",
 		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
-			delivery, err := deliver(ctx, "change course")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "change course"})
 			pending <- delivery
 			return err
 		},
@@ -2030,7 +2030,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringRejectedDoesNotClaimDe
 			if !callbackCalls.CompareAndSwap(0, 1) {
 				return nil
 			}
-			delivery, err := deliver(ctx, "try rejected steering")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "try rejected steering"})
 			failed <- delivery
 			return err
 		},
@@ -2117,7 +2117,7 @@ func TestOpenResponsesWebsocketStream_AstraAcceptedSteeringCanFailBeforeCommit(t
 	}, false, responsesWebsocketStreamOptions{
 		Model: "gpt-6-astra",
 		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
-			delivery, err := deliver(ctx, "change course")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "change course"})
 			deliveries <- delivery
 			return err
 		},
@@ -2189,7 +2189,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringDisconnectReturnsAmbig
 			if !callbackCalls.CompareAndSwap(0, 1) {
 				return nil
 			}
-			delivery, err := deliver(ctx, "steer before disconnect")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "steer before disconnect"})
 			ambiguous <- delivery
 			return err
 		},
@@ -2267,7 +2267,7 @@ func TestOpenResponsesWebsocketStream_AstraAcceptedSteeringDisconnectPreservesSe
 			if !callbackCalls.CompareAndSwap(0, 1) {
 				return nil
 			}
-			delivery, err := deliver(ctx, "do not replay after acceptance")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "do not replay after acceptance"})
 			deliveries <- delivery
 			return err
 		},
@@ -2361,7 +2361,7 @@ func TestOpenResponsesWebsocketStream_AstraMidTurnSteeringCompletedResponseCance
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			_, err := deliver(ctx, "late steer")
+			_, err := deliver(ctx, LocalSteeringInput{Text: "late steer"})
 			return err
 		},
 	})
@@ -2436,7 +2436,7 @@ func TestOpenResponsesWebsocketStream_NonGPT6SuppressesMidTurnSteeringCallback(t
 		Model: "gpt-5.6-sol",
 		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
 			callbackCalls.Add(1)
-			_, _ = deliver(ctx, "must not send")
+			_, _ = deliver(ctx, LocalSteeringInput{Text: "must not send"})
 			return nil
 		},
 	})
@@ -2550,7 +2550,7 @@ func TestOpenResponsesWebsocketStream_AstraMissingAcknowledgementIsAmbiguous(t *
 	}, false, responsesWebsocketStreamOptions{
 		Model: "gpt-6-astra",
 		OnMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
-			delivery, err := deliver(ctx, "steer without an acknowledgement")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "steer without an acknowledgement"})
 			deliveryResult <- delivery
 			close(deliveryObserved)
 			return err
@@ -2645,7 +2645,7 @@ func TestOpenResponsesWebsocketStream_GPT6SolMidTurnSteeringAccepted(t *testing.
 			if !callbackCalls.CompareAndSwap(0, 1) {
 				return nil
 			}
-			delivery, err := deliver(ctx, "steer now")
+			delivery, err := deliver(ctx, LocalSteeringInput{Text: "steer now"})
 			if err == nil {
 				accepted <- delivery
 			}

@@ -4261,7 +4261,6 @@ func TestProcessStreamingResponse_ExposesLocalSteeringToActiveAgenticTurn(t *tes
 }
 
 func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable(t *testing.T) {
-	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4301,8 +4300,11 @@ func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable
 		steeringID = steering.ID
 		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, instruction string) (llmcontracts.SteeringDeliveryState, error) {
-			deliveredInstruction = instruction
+		require.NoError(t, callback(callCtx, func(_ context.Context, input llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
+			deliveredInstruction = input.Text
+			for _, message := range input.Messages {
+				deliveredInstruction += message.Text
+			}
 			return llmcontracts.SteeringDeliveryState{Status: llmcontracts.SteeringDeliveryUnavailable, PreviousResponseID: "resp_done"}, nil
 		}))
 		restored, err := h.threadInputRepo.GetByID(ctx, steering.ID)
@@ -4336,7 +4338,6 @@ func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable
 }
 
 func TestProcessStreamingResponse_CommitsMidTurnSteeringAfterPendingDeliveryCompletes(t *testing.T) {
-	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4374,7 +4375,7 @@ func TestProcessStreamingResponse_CommitsMidTurnSteeringAfterPendingDeliveryComp
 		steeringID = steering.ID
 		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, _ string) (llmcontracts.SteeringDeliveryState, error) {
+		require.NoError(t, callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
 			return llmcontracts.SteeringDeliveryState{
 				Status:             llmcontracts.SteeringDeliveryPending,
 				SteeringID:         "steer_pending",
@@ -4421,7 +4422,6 @@ func (e ambiguousSteeringTestError) Error() string {
 func (e ambiguousSteeringTestError) AmbiguousSteeringIDs() []string { return e.ids }
 
 func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFailure(t *testing.T) {
-	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4455,7 +4455,7 @@ func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFail
 		steeringID = steering.ID
 		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, _ string) (llmcontracts.SteeringDeliveryState, error) {
+		require.NoError(t, callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
 			return llmcontracts.SteeringDeliveryState{
 				Status: llmcontracts.SteeringDeliveryAccepted, SteeringID: "steer_committed",
 				ResponseID: "resp_successor", PreviousResponseID: "resp_original",
@@ -4476,7 +4476,6 @@ func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFail
 }
 
 func TestProcessStreamingResponse_PreservesAmbiguousSteeringWithoutApplyingOrRequeueing(t *testing.T) {
-	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4510,7 +4509,7 @@ func TestProcessStreamingResponse_PreservesAmbiguousSteeringWithoutApplyingOrReq
 		steeringID = steering.ID
 		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, _ string) (llmcontracts.SteeringDeliveryState, error) {
+		require.NoError(t, callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
 			return llmcontracts.SteeringDeliveryState{
 				Status: llmcontracts.SteeringDeliveryAmbiguous, SteeringID: "steer_ambiguous",
 				PreviousResponseID: "resp_original",
@@ -4535,7 +4534,6 @@ func TestProcessStreamingResponse_PreservesAmbiguousSteeringWithoutApplyingOrReq
 }
 
 func TestProcessStreamingResponse_DoesNotReplaySteeringWhenReceiptPersistenceFails(t *testing.T) {
-	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4577,7 +4575,7 @@ func TestProcessStreamingResponse_DoesNotReplaySteeringWhenReceiptPersistenceFai
 		steeringID = steering.ID
 		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		callbackErr := callback(callCtx, func(_ context.Context, _ string) (llmcontracts.SteeringDeliveryState, error) {
+		callbackErr := callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
 			return llmcontracts.SteeringDeliveryState{
 				Status: llmcontracts.SteeringDeliveryPending, SteeringID: "steer_receipt_failure",
 				PreviousResponseID: "resp_original",
@@ -4605,7 +4603,6 @@ func TestProcessStreamingResponse_DoesNotReplaySteeringWhenReceiptPersistenceFai
 }
 
 func TestProcessStreamingResponse_FallsBackWhenSteeringClaimPersistenceFails(t *testing.T) {
-	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4651,7 +4648,7 @@ func TestProcessStreamingResponse_FallsBackWhenSteeringClaimPersistenceFails(t *
 		steeringID = steering.ID
 		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(context.Context, string) (llmcontracts.SteeringDeliveryState, error) {
+		require.NoError(t, callback(callCtx, func(context.Context, llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
 			t.Fatal("provider delivery must not run without a durable claim")
 			return llmcontracts.SteeringDeliveryState{}, nil
 		}))

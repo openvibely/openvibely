@@ -56,8 +56,10 @@ type SteeringDeliveryState struct {
 	Error              string
 }
 
-// SteeringDeliverer sends raw steering text to an active provider response.
-type SteeringDeliverer func(context.Context, string) (SteeringDeliveryState, error)
+// SteeringDeliverer sends ordered user input to an active provider response.
+// The structured shape preserves message and attachment boundaries, matching
+// Codex turn/steer and the Responses WebSocket response.steer input contract.
+type SteeringDeliverer func(context.Context, LocalSteeringInput) (SteeringDeliveryState, error)
 
 // MidTurnSteeringCallback claims and delivers steering while a provider stream is active.
 type MidTurnSteeringCallback func(context.Context, SteeringDeliverer) error

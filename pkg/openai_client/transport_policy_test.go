@@ -269,7 +269,7 @@ func TestSteeringStopsUnsafeRetryOrTools(t *testing.T) {
 						if delivered.Swap(true) {
 							return nil
 						}
-						_, err := deliver(ctx, "stop tool execution")
+						_, err := deliver(ctx, LocalSteeringInput{Text: "stop tool execution"})
 						return err
 					},
 					ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {

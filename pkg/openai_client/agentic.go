@@ -342,8 +342,8 @@ func (e *astraSteeringFailedError) FailedSteeringIDs() []string {
 	return append([]string(nil), e.ids...)
 }
 
-// AstraSteeringDeliverer sends raw steering text to an active Astra WebSocket response.
-type AstraSteeringDeliverer func(context.Context, string) (AstraSteeringDelivery, error)
+// AstraSteeringDeliverer sends ordered user input to an active GPT-6 WebSocket response.
+type AstraSteeringDeliverer func(context.Context, LocalSteeringInput) (AstraSteeringDelivery, error)
 
 // AstraMidTurnSteeringCallback claims and delivers steering during an active Astra stream.
 type AstraMidTurnSteeringCallback func(context.Context, AstraSteeringDeliverer) error
@@ -2167,6 +2167,25 @@ func appendLocalSteeringInput(inputItems []any, steering LocalSteeringInput) ([]
 		}
 	}
 	return inputItems, nil
+}
+
+func responseSteeringInput(steering LocalSteeringInput) (any, error) {
+	// Keep the compact string form for a plain single message. Structured input
+	// uses the same user-message encoding as the next response.create request.
+	if len(steering.Messages) == 0 && len(steering.Attachments) == 0 {
+		if text := strings.TrimSpace(steering.Text); text != "" {
+			return text, nil
+		}
+		return nil, nil
+	}
+	items, err := appendLocalSteeringInput(nil, steering)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return items, nil
 }
 
 func appendLocalSteeringMessage(inputItems []any, message LocalSteeringMessage) ([]any, error) {

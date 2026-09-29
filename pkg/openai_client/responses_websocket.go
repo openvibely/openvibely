@@ -686,12 +686,15 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		}
 		return conn.Write(writeCtx, websocket.MessageText, body)
 	}
-	deliverSteering := func(deliverCtx context.Context, text string) (AstraSteeringDelivery, error) {
+	deliverSteering := func(deliverCtx context.Context, input LocalSteeringInput) (AstraSteeringDelivery, error) {
 		if !isGPT6WorkflowModel(opts.Model) || opts.OnMidTurnSteering == nil {
 			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
 		}
-		text = strings.TrimSpace(text)
-		if text == "" {
+		wireInput, inputErr := responseSteeringInput(input)
+		if inputErr != nil {
+			return AstraSteeringDelivery{Status: AstraSteeringFailed, Error: inputErr.Error()}, inputErr
+		}
+		if wireInput == nil {
 			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
 		}
 		select {
@@ -721,7 +724,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		event := map[string]any{
 			"type":                 "response.steer",
 			"previous_response_id": previousID,
-			"input":                text,
+			"input":                wireInput,
 		}
 		if err := writeFrame(deliverCtx, event); err != nil {
 			removePendingSteeringAckLocked(&pendingAcks, ack)
