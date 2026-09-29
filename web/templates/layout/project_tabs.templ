@@ -37,16 +37,16 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="desktop"] #sidebar { height: calc(100dvh - 46px); }
   [data-openvibely-runtime="desktop"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }
   @media (min-width: 1024px) { [data-openvibely-runtime="desktop"] .drawer-side { top: 0; } }
-  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; --project-tab-selected: oklch(var(--b2)); border-bottom: 1px solid var(--project-tab-selected); }
+  #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; --project-tab-selected: oklch(var(--b2)); --project-tab-accent: oklch(var(--p)); border-bottom: 1px solid var(--project-tab-accent); }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
   #desktop-project-titlebar:not([data-keyboard-navigation]) [data-project-tab]:focus { outline: none; }
   #desktop-project-tabs { position: relative; display: flex; min-width: 0; overflow-x: auto; scrollbar-width: thin; gap: 4px; align-self: stretch; padding: 6px 10px 0; }
   .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 16px 16px 0 0; background: transparent; --wails-draggable: no-drag; }
-  .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); z-index: 1; }
+  .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); z-index: 1; margin-bottom: -1px; box-shadow: inset 1px 1px 0 var(--project-tab-accent), inset -1px 0 0 var(--project-tab-accent); }
   .desktop-project-tab:has([aria-selected="true"])::before, .desktop-project-tab:has([aria-selected="true"])::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
-  .desktop-project-tab:has([aria-selected="true"])::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 10px, var(--project-tab-selected) 10.5px); }
-  .desktop-project-tab:has([aria-selected="true"])::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 10px, var(--project-tab-selected) 10.5px); }
+  .desktop-project-tab:has([aria-selected="true"])::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 9px, var(--project-tab-accent) 9.5px, var(--project-tab-accent) 10px, var(--project-tab-selected) 10.5px); }
+  .desktop-project-tab:has([aria-selected="true"])::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 9px, var(--project-tab-accent) 9.5px, var(--project-tab-accent) 10px, var(--project-tab-selected) 10.5px); }
   .desktop-project-tab:not(:has([aria-selected="true"]))::after { content: ""; position: absolute; right: -3px; top: 50%; width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: opacity 150ms ease; }
   .desktop-project-tab:not(:has([aria-selected="true"])):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::after { transition: none; } }
