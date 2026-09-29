@@ -55,7 +55,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<aside id=\"sidebar\" class=\"sidebar-aside relative z-[210] lg:z-auto bg-base-100 w-64 h-screen border-r border-base-300 flex flex-col\"><div class=\"p-4 flex-1 overflow-y-auto overflow-x-hidden sidebar-inner\"><div class=\"sidebar-header flex items-center justify-between mb-6\"><h1 class=\"text-2xl font-bold sidebar-text\">OpenVibely</h1>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<aside id=\"sidebar\" class=\"sidebar-aside relative z-[210] lg:z-auto bg-base-100 w-64 h-screen border-r border-base-300 flex flex-col\"><div class=\"p-4 flex-1 overflow-y-auto overflow-x-hidden sidebar-inner\"><div class=\"sidebar-header flex items-center justify-between mb-6\"><h1 class=\"text-2xl font-bold sidebar-text pl-5\">OpenVibely</h1>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
