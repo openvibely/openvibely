@@ -37,7 +37,7 @@ func TestTaskDetailCompactBreadcrumbToolbar(t *testing.T) {
 	}
 	for _, want := range []string{
 		`id="task-breadcrumb-toolbar"`,
-		`min-height: 38px; padding: 3px 0; margin-bottom: 4px;`,
+		`min-height: 40px; padding: 4px 0; margin-bottom: 0;`,
 		`font-size: 16px; line-height: 22px; font-weight: 400;`,
 		`#task-breadcrumb-toolbar [data-breadcrumb-selector-button] { font-weight: 500; }`,
 		`#main-content:has(> #task-detail-content) { padding-top: 0; }`,

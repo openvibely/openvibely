@@ -11,13 +11,13 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestAnalyticsContent_Subtitle(t *testing.T) {
+func TestAnalyticsContent_OmitsSubtitle(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "p", Name: "P"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rendered.String(), "Understand usage and evaluate models on real work.</p>") {
-		t.Fatal("analytics subtitle missing")
+	if strings.Contains(rendered.String(), "Understand usage and evaluate models on real work.</p>") {
+		t.Fatal("analytics header must omit its subtitle")
 	}
 }
 

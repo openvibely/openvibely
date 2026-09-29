@@ -121,14 +121,14 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><div><h2 class=\"text-2xl font-bold\">Pulse</h2><p class=\"text-sm opacity-60 mt-1\">Your project's heartbeat</p></div><div class=\"flex items-center gap-2\"><span class=\"text-xs opacity-40\">Updated ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><div><h2 class=\"text-2xl font-bold\">Pulse</h2></div><div class=\"flex items-center gap-2\"><span class=\"text-xs opacity-40\">Updated ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(upcoming.GeneratedAt.Local().Format("3:04 PM"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 30, Col: 93}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 29, Col: 93}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -141,7 +141,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 33, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 32, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 		if templ_7745c5c3_Err != nil {
@@ -159,7 +159,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(upcoming.AISummary)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 50, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 49, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -177,7 +177,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/upcoming/summary?project_id=%s", currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 56, Col: 79}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 55, Col: 79}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 			if templ_7745c5c3_Err != nil {
@@ -195,7 +195,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(upcoming.RunningTasks)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 71, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 70, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -208,7 +208,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(upcoming.WaitingTasks)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 76, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 75, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
@@ -221,7 +221,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d pending · %d queued", len(upcoming.PendingTasks), len(upcoming.QueuedTasks)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 77, Col: 122}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 76, Col: 122}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {
@@ -234,7 +234,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcomingBlockedTaskCount(upcoming)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 81, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 80, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
@@ -247,7 +247,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(upcoming.ScheduledTasks)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 86, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 85, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
@@ -265,7 +265,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var14 string
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.TotalPending))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 103, Col: 61}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 102, Col: 61}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
@@ -322,7 +322,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.UrgentCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 112, Col: 158}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 111, Col: 158}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 			if templ_7745c5c3_Err != nil {
@@ -379,7 +379,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.HighCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 116, Col: 156}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 115, Col: 156}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
@@ -392,7 +392,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.NormalCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 120, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 119, Col: 92}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 			if templ_7745c5c3_Err != nil {
@@ -405,7 +405,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.LowCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 124, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 123, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 			if templ_7745c5c3_Err != nil {
@@ -418,7 +418,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.PendingCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 141, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 140, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
@@ -431,7 +431,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var28 string
 			templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.QueuedCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 148, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 147, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 			if templ_7745c5c3_Err != nil {
@@ -444,7 +444,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var29 string
 			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.RunningCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 155, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 154, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 			if templ_7745c5c3_Err != nil {
@@ -457,7 +457,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.CompletedCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 162, Col: 103}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 161, Col: 103}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
@@ -475,7 +475,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.FailedCount))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 170, Col: 112}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 169, Col: 112}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 				if templ_7745c5c3_Err != nil {
@@ -494,7 +494,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 				var templ_7745c5c3_Var32 string
 				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.BlockedCount))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 179, Col: 115}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 178, Col: 115}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 				if templ_7745c5c3_Err != nil {
@@ -512,7 +512,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.ActiveCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 194, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 193, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -525,7 +525,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.BacklogCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 201, Col: 101}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 200, Col: 101}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -538,7 +538,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.ScheduledCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 208, Col: 103}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 207, Col: 103}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -561,7 +561,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 					var templ_7745c5c3_Var36 string
 					templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.OverdueCount))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 223, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 222, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 					if templ_7745c5c3_Err != nil {
@@ -580,7 +580,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 					var templ_7745c5c3_Var37 string
 					templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.ScheduledToday))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 231, Col: 71}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 230, Col: 71}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 					if templ_7745c5c3_Err != nil {
@@ -599,7 +599,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 					var templ_7745c5c3_Var38 string
 					templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", upcoming.TaskSummary.ScheduledThisWeek))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 239, Col: 74}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 238, Col: 74}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 					if templ_7745c5c3_Err != nil {
@@ -787,7 +787,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 		var templ_7745c5c3_Var41 string
 		templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(bt.Task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 333, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 332, Col: 36}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 		if templ_7745c5c3_Err != nil {
@@ -814,7 +814,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("#%d", order))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 340, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 339, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 			if templ_7745c5c3_Err != nil {
@@ -853,7 +853,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 		var templ_7745c5c3_Var44 string
 		templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(bt.Task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 351, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 350, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 		if templ_7745c5c3_Err != nil {
@@ -871,7 +871,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", bt.Task.Priority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 355, Col: 85}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 354, Col: 85}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -908,7 +908,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 			var templ_7745c5c3_Var48 string
 			templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(bt.Task.Tag))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 358, Col: 112}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 357, Col: 112}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 			if templ_7745c5c3_Err != nil {
@@ -926,7 +926,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 		var templ_7745c5c3_Var49 string
 		templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(bt.AgentName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 360, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 359, Col: 52}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 		if templ_7745c5c3_Err != nil {
@@ -944,7 +944,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 			var templ_7745c5c3_Var50 string
 			templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue("Stop task " + bt.Task.Title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 366, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 365, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 			if templ_7745c5c3_Err != nil {
@@ -957,7 +957,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 			var templ_7745c5c3_Var51 string
 			templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/cancel?pulse=1&project_id=%s", bt.Task.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 367, Col: 100}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 366, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 			if templ_7745c5c3_Err != nil {
@@ -970,7 +970,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 			var templ_7745c5c3_Var52 string
 			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(upcomingTaskStopConfirmation(bt.Task.Status))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 370, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 369, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 			if templ_7745c5c3_Err != nil {
@@ -993,7 +993,7 @@ func upcomingTaskCardWithOrder(bt models.UpcomingTask, currentProjectID string, 
 			var templ_7745c5c3_Var53 string
 			templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(truncatePrompt(bt.Task.Prompt, 200))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 380, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 379, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 			if templ_7745c5c3_Err != nil {
@@ -1053,7 +1053,7 @@ func upcomingScheduledCard(bt models.UpcomingTask, currentProjectID string) temp
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(bt.Task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 394, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 393, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 		if templ_7745c5c3_Err != nil {
@@ -1071,7 +1071,7 @@ func upcomingScheduledCard(bt models.UpcomingTask, currentProjectID string) temp
 			var templ_7745c5c3_Var57 string
 			templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(bt.NextRun.Local().Format("Jan 2, 3:04 PM"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 398, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 397, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 			if templ_7745c5c3_Err != nil {
@@ -1090,7 +1090,7 @@ func upcomingScheduledCard(bt models.UpcomingTask, currentProjectID string) temp
 			var templ_7745c5c3_Var58 string
 			templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(scheduleLabel(bt.Schedule))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 401, Col: 75}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 400, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 			if templ_7745c5c3_Err != nil {
@@ -1108,7 +1108,7 @@ func upcomingScheduledCard(bt models.UpcomingTask, currentProjectID string) temp
 		var templ_7745c5c3_Var59 string
 		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(bt.AgentName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 403, Col: 52}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 402, Col: 52}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 		if templ_7745c5c3_Err != nil {
@@ -1126,7 +1126,7 @@ func upcomingScheduledCard(bt models.UpcomingTask, currentProjectID string) temp
 			var templ_7745c5c3_Var60 string
 			templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(truncatePrompt(bt.Task.Prompt, 200))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 407, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 406, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 			if templ_7745c5c3_Err != nil {
@@ -1174,7 +1174,7 @@ func AISummaryResult(summary string, err error) templ.Component {
 			var templ_7745c5c3_Var62 string
 			templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.JoinStringErrs(err.Error())
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 416, Col: 38}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 415, Col: 38}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
 			if templ_7745c5c3_Err != nil {
@@ -1192,7 +1192,7 @@ func AISummaryResult(summary string, err error) templ.Component {
 			var templ_7745c5c3_Var63 string
 			templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinStringErrs(summary)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 421, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/upcoming.templ`, Line: 420, Col: 43}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 			if templ_7745c5c3_Err != nil {
