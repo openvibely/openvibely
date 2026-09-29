@@ -62,7 +62,14 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar > #sidebar-collapse-btn { position: absolute; left: 8px; top: 7px; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; }
   #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: 82px; }
   #desktop-project-titlebar > .desktop-traffic-lights { position: absolute; left: 8px; top: 0; height: 46px; }
+  .project-bar-brand { display: none; position: absolute; left: 16px; font-size: 14px; line-height: 20px; font-weight: 500; }
   @media (min-width: 1024px) {
+    #desktop-project-titlebar .project-bar-brand { display: block; }
+    #desktop-project-titlebar[data-platform="darwin"] .project-bar-brand { left: 90px; }
+    #desktop-project-titlebar > #sidebar-collapse-btn, #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: calc(16rem - 40px); }
+    body.sidebar-collapsed-pending #desktop-project-titlebar .project-bar-brand { display: none; }
+    body.sidebar-collapsed-pending #desktop-project-titlebar > #sidebar-collapse-btn { left: 8px; }
+    body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: 82px; }
     #desktop-project-titlebar { padding-left: 16rem; }
     #desktop-project-titlebar[data-platform="darwin"] { padding-left: 16rem; }
     body.sidebar-collapsed-pending #desktop-project-titlebar { padding-left: 3.5rem; }
@@ -117,6 +124,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 		  .desktop-traffic-lights svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; opacity: 0; }	  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }
 	  .desktop-traffic-lights button:active { filter: brightness(.85); } </style>
 	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ projectBarPlatform(ctx) } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
+			<span class="project-bar-brand">OpenVibely</span>
 			if serverRuntimeMode(ctx) == "desktop" && runtime.GOOS == "darwin" {
 				<div class="desktop-window-controls desktop-traffic-lights" role="group" aria-label="Window controls">
 					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l5 5m0-5-5 5"/></svg></button>
