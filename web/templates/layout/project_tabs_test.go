@@ -10,6 +10,25 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestProjectTabsHaveNoHoverTooltips(t *testing.T) {
+	ctx := WithUIPreferences(WithDesktopMode(context.Background(), true), UIPreferences{PinnedProjectIDs: []string{"a"}})
+	var buf bytes.Buffer
+	if err := DesktopProjectTabs([]models.Project{{ID: "a", Name: "Alpha"}}, "a").Render(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, fragment := range []string{`title="Alpha"`, `title="Close tab"`, `tab.title =`, `close.title =`} {
+		if strings.Contains(html, fragment) {
+			t.Errorf("unexpected tab tooltip: %s", fragment)
+		}
+	}
+	for _, fragment := range []string{`title="Open project"`, `aria-label="Close project tab: Alpha"`} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("missing retained tooltip or accessible label: %s", fragment)
+		}
+	}
+}
+
 func TestProjectTabsPlatformRendering(t *testing.T) {
 	projects := []models.Project{{ID: "a", Name: "Alpha"}, {ID: "b", Name: "Beta"}}
 	for _, desktop := range []bool{false, true} {
