@@ -339,6 +339,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("create row must match option height and have a separator", got)
 				}
 				browser.click("#project-selector-search")
+				if got := browser.evaluate(`String(getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor !== 'rgba(0, 0, 0, 0)')`); got != "true" {
+					t.Fatal("plus must stay highlighted while its menu is open and pointer leaves")
+				}
 				browser.typeText("Project p02")
 				browser.click(`[data-project-selector-option][data-project-id="p02"]`)
 				browser.waitFor("selector reopens a closed project tab", `String(location.search === '?project_id=p02' && !!document.querySelector('[data-project-tab="p02"][aria-selected="true"]'))`, "true")
