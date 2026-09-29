@@ -22,6 +22,7 @@ func TestProjectTabsCleanSelectedShape(t *testing.T) {
 		`var(--project-tab-contour) 10px, var(--project-tab-selected) 10px)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, white)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, black)`,
+		`[data-theme="light"] #desktop-project-titlebar { --project-tab-contour: #FAFAFA; }`,
 		`--project-tab-contour: oklch(var(--b1))`,
 		`box-shadow: inset 0 -2px var(--project-tab-contour)`,
 		`border: 2px solid var(--project-tab-contour); border-bottom: 0`,
