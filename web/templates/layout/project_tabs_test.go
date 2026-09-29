@@ -18,7 +18,7 @@ func TestProjectTabsReserveSidebarWidth(t *testing.T) {
 	for _, rule := range []string{
 		`#desktop-project-titlebar { padding-left: 16rem; }`,
 		`body.sidebar-collapsed-pending #desktop-project-titlebar { padding-left: 3.5rem; }`,
-		`padding-left: max(3.5rem, 90px);`,
+		`padding-left: max(3.5rem, 128px);`,
 	} {
 		if !strings.Contains(buf.String(), rule) {
 			t.Errorf("missing sidebar-aligned tab layout: %s", rule)
@@ -168,6 +168,33 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	for _, want := range []string{`data-wml-window="Close"`, `data-wml-window="Minimise"`, `data-wml-window="ToggleFullscreen"`, `desktop-traffic-lights`, `#ff5f57`, `#febc2e`, `#28c840`} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing app-drawn native-style control: %s", want)
+		}
+	}
+}
+
+func TestProjectTabsSidebarTogglePlacement(t *testing.T) {
+	for _, desktop := range []bool{false, true} {
+		ctx := WithDesktopMode(context.Background(), desktop)
+		var sidebar, bar bytes.Buffer
+		if err := Sidebar(nil, "").Render(ctx, &sidebar); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(sidebar.String(), ">OpenVibely</h1>") {
+			t.Error("sidebar branding must be removed")
+		}
+		hasToggle := strings.Contains(sidebar.String(), `id="sidebar-collapse-btn"`)
+		if hasToggle == desktop {
+			t.Errorf("sidebar toggle placement incorrect for desktop=%v", desktop)
+		}
+		if desktop {
+			if err := DesktopProjectTabs(nil, "").Render(ctx, &bar); err != nil {
+				t.Fatal(err)
+			}
+			toggle := strings.Index(bar.String(), `id="sidebar-collapse-btn"`)
+			tabs := strings.Index(bar.String(), `id="desktop-project-tabs"`)
+			if toggle < 0 || toggle >= tabs {
+				t.Error("desktop toggle must precede tabs")
+			}
 		}
 	}
 }

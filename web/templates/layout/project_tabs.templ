@@ -40,13 +40,15 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; --project-tab-selected: oklch(var(--b2)); --project-tab-contour: oklch(var(--b1)); box-shadow: inset 0 -2px var(--project-tab-contour); }
   /* Reserve the sidebar column; the first tab's curved foot starts at its edge. */
   #desktop-project-titlebar { position: relative; }
-  #desktop-project-titlebar[data-platform="darwin"] { padding-left: 90px; }
+  #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px; }
+  #desktop-project-titlebar > #sidebar-collapse-btn { position: absolute; left: 8px; top: 7px; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; }
+  #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: 90px; }
   #desktop-project-titlebar > .desktop-traffic-lights { position: absolute; left: 8px; top: 0; height: 46px; }
   @media (min-width: 1024px) {
     #desktop-project-titlebar { padding-left: 16rem; }
     #desktop-project-titlebar[data-platform="darwin"] { padding-left: 16rem; }
     body.sidebar-collapsed-pending #desktop-project-titlebar { padding-left: 3.5rem; }
-    body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] { padding-left: max(3.5rem, 90px); }
+    body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] { padding-left: max(3.5rem, 128px); }
   }
   [data-theme="light"] #desktop-project-titlebar { --project-tab-contour: var(--ov-l-border); }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
@@ -104,6 +106,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"/><path data-restore-glyph d="M2 5.5h3.5V2zm8 1H6.5V10z" style="display: none"/></svg></button>
 				</div>
 			}
+			@SidebarToggle()
 			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab">
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID }>{ project.Name }</button>
