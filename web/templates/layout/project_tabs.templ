@@ -74,7 +74,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
   #desktop-project-titlebar #project-selector-trigger { display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; flex-shrink: 0; width: 30px; height: 30px; align-self: center; transform: translateY(-3px); border-radius: 50%; }
- #desktop-project-titlebar #project-selector-trigger:is(:hover, [aria-expanded="true"]) { background: oklch(var(--bc) / .12); }
+ #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]) { background: oklch(var(--bc) / .12); }
  #project-tab-menu { position: fixed; margin: 0; padding: 4px; border: 1px solid oklch(var(--bc) / .2); border-radius: 8px; background: oklch(var(--b1)); color: oklch(var(--bc)); --wails-draggable: no-drag; }
  #project-tab-menu button { display: block; width: 100%; text-align: left; padding: 8px 16px; border-radius: 4px; }
  #project-tab-menu button:hover { background: oklch(var(--bc) / .12); }
@@ -135,6 +135,19 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
  list.append(add);
    if (!bar || !select || bar.dataset.installed) return;
    bar.dataset.installed = 'true';
+   // Modal dialogs make the trigger inert, interrupting CSS :hover even
+   // when the pointer stays over it. Keep that visual state across toggles.
+   var addButton = document.getElementById('project-selector-trigger');
+   function trackAddHover(event) {
+    var rect = addButton.getBoundingClientRect();
+    addButton.toggleAttribute('data-pointer-over', event.pointerType !== 'touch' && event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom);
+   }
+   document.addEventListener('pointermove', trackAddHover, true);
+   document.addEventListener('pointerdown', trackAddHover, true);
+   document.addEventListener('pointerout', function(event) {
+    if (!event.relatedTarget) addButton.removeAttribute('data-pointer-over');
+   }, true);
+   window.addEventListener('blur', function() { addButton.removeAttribute('data-pointer-over'); });
    // WebViews may focus the first tab automatically on launch. Only show
    // its focus outline after keyboard input, not startup or pointer focus.
    document.addEventListener('keydown', function(event) {
