@@ -22,7 +22,7 @@ func TestPageHeadersUseCompactShellStyle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rule := range []string{"#main-content:has([data-page-header]) { padding-top: 0; }", "min-height: 48px; padding-top: 8px; padding-bottom: 8px; margin-bottom: 8px", "font-size: 16px; line-height: 22px; font-weight: 500;", "[data-page-header] [data-page-header] { min-height: 0; padding: 0; margin: 0; }"} {
+	for _, rule := range []string{"#main-content:has([data-page-header]) { padding-top: 0; }", "min-height: 38px; padding-top: 3px; padding-bottom: 3px; margin-bottom: 4px", "#main-content [data-page-header]:has(> div > h2) { align-items: flex-start; }", "#main-content [data-page-header] h2 { display: flex; align-items: center; min-height: 32px; }", "#main-content h2[data-page-header] { display: flex; }", "font-size: 16px; line-height: 22px; font-weight: 500;", "[data-page-header] [data-page-header] { min-height: 0; padding: 0; margin: 0; }"} {
 		if !strings.Contains(string(source), rule) {
 			t.Errorf("missing shared compact header rule: %s", rule)
 		}

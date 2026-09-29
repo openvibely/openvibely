@@ -1166,7 +1166,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				/* Compact page navigation, scoped away from dialogs and section headings. */
 				#main-content:has([data-page-header]) { padding-top: 0; }
-				#main-content [data-page-header] { min-height: 48px; padding-top: 8px; padding-bottom: 8px; margin-bottom: 8px; align-items: center; }
+				#main-content [data-page-header] { min-height: 38px; padding-top: 3px; padding-bottom: 3px; margin-bottom: 4px; align-items: center; }
+				#main-content [data-page-header]:has(> div > h2) { align-items: flex-start; }
+				#main-content [data-page-header] h2 { display: flex; align-items: center; min-height: 32px; }
+				#main-content h2[data-page-header] { display: flex; }
 				#main-content [data-page-header] [data-page-header] { min-height: 0; padding: 0; margin: 0; }
 				#main-content h2[data-page-header],
 				#main-content [data-page-header] h2,
