@@ -1590,6 +1590,109 @@ func TestLLMService_ExecuteTaskWithAgent_RequeuesToolBoundarySteeringOnFailure(t
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_ExposesSteeringWakeup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-steer-wakeup-test")
+	task := &models.Task{ProjectID: "default", Title: "Steer Main Run Wakeup", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	var steeringID string
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			wakeup := llmcontracts.MidTurnSteeringWakeupFromContext(req.Ctx)
+			if wakeup == nil {
+				return llmcontracts.AgentResult{}, fmt.Errorf("missing steering wakeup")
+			}
+			steering := &models.ThreadInput{
+				Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID,
+				AgentConfigID: req.Agent.ID, ExpectedTurnID: req.ExecID, Content: "change the active task",
+			}
+			if err := threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, req.ExecID); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			steeringID = steering.ID
+			select {
+			case <-wakeup:
+			case <-time.After(2 * time.Second):
+				return llmcontracts.AgentResult{}, fmt.Errorf("active task did not receive steering wakeup")
+			}
+			callback := llmcontracts.SteeringCallbackFromContext(req.Ctx)
+			if callback == nil {
+				return llmcontracts.AgentResult{}, fmt.Errorf("missing steering callback")
+			}
+			instruction, err := callback(req.Ctx)
+			if err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			if instruction != "change the active task" {
+				return llmcontracts.AgentResult{}, fmt.Errorf("unexpected steering %q", instruction)
+			}
+			return llmcontracts.AgentResult{Output: "done", TextOnlyOutput: "done", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	require.NoError(t, err)
+	require.NotEmpty(t, steeringID)
+	stored, err := threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+}
+
+func TestLLMService_ExecuteTaskWithAgent_QueuesSteeringAtTerminalBoundary(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	svc.SetThreadInputRepo(threadInputRepo)
+	testProvider := models.LLMProvider("task-steer-terminal-boundary-test")
+	task := &models.Task{ProjectID: "default", Title: "Steer Terminal Boundary", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	var steeringID string
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		testProvider: providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+			steering := &models.ThreadInput{
+				Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID,
+				AgentConfigID: req.Agent.ID, ExpectedTurnID: req.ExecID, Content: "arrived at completion",
+			}
+			if err := threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, req.ExecID); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+			steeringID = steering.ID
+			return llmcontracts.AgentResult{Output: "done", TextOnlyOutput: "done", Usage: llmcontracts.Usage{TotalTokens: 1}}, nil
+		}),
+	}
+	svc.routing = nil
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	agent.Provider = testProvider
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	require.NoError(t, err)
+	require.NotEmpty(t, steeringID)
+	stored, err := threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputModeQueued, stored.InputMode)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Empty(t, stored.TurnID)
+	require.Empty(t, stored.ExpectedTurnID)
+}
+
 func TestLLMService_ExecuteTaskWithAgent_CommitFailureWithCancelledContextMarksExecutionFailed(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
