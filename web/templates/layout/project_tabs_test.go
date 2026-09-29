@@ -15,15 +15,15 @@ func TestProjectTabsCleanSelectedShape(t *testing.T) {
 	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(buf.String(), "--project-tab-accent") {
-		t.Error("unexpected accent outline")
+	if strings.Contains(buf.String(), "font-weight: 600") {
+		t.Error("selected tab must not use bold text")
 	}
 	for _, want := range []string{
-		`transparent 10px, var(--project-tab-selected) 10.5px)`,
+		`var(--project-tab-contour) 10px, var(--project-tab-selected) 10px)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, white)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, black)`,
-		`font-weight: 600`,
-		`border-bottom: 1px solid var(--project-tab-selected)`,
+		`--project-tab-contour: oklch(var(--b1))`,
+		`border-bottom: 1px solid var(--project-tab-contour)`,
 	} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing active-tab contour: %s", want)
