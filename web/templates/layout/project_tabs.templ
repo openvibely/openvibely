@@ -68,7 +68,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab [role="tab"][aria-selected="true"] { color: color-mix(in oklch, oklch(var(--bc)) 70%, black); font-weight: 400; }
   [data-theme="dark"] .desktop-project-tab [role="tab"][aria-selected="true"] { color: color-mix(in oklch, oklch(var(--bc)) 70%, white); }
   .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: calc(50% - 3px); transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }
-  .desktop-project-tab:not(:has([aria-selected="true"])):hover [role="tab"] { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; border-width: 1px 4px 7px; padding-top: 0; padding-bottom: 0; padding-left: 12px; padding-right: 36px; }
+  .desktop-project-tab:not(:has([aria-selected="true"])):hover [role="tab"] { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; border-width: 1px 2px 7px; padding-top: 0; padding-bottom: 0; padding-left: 14px; padding-right: 38px; }
   .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
   #desktop-project-titlebar #project-selector-trigger { flex-shrink: 0; width: 30px; height: 30px; align-self: center; transform: translateY(-3px); border-radius: 50%; }
