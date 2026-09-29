@@ -200,11 +200,14 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var others = Array.from(list.querySelectorAll('.desktop-project-tab')).filter(function(node) { return node !== drag.wrapper; });
     // Hit-test layout positions, not animated bounds, to avoid oscillating slots.
     var origin = list.getBoundingClientRect().left - list.scrollLeft;
-     // Keep the entire dragged surface before the + section, even if the
-     // pointer continues past it. Use the same bounded position for reordering.
-     var left = Math.min(drag.x - drag.grabOffset, origin + add.offsetLeft - drag.wrapper.offsetWidth);
-    var right = left + drag.wrapper.offsetWidth;
     var tabs = Array.from(list.querySelectorAll('.desktop-project-tab'));
+    // Clamp to resting tab slots, excluding the gap before +. Neither end
+    // should need a corrective slide when the pointer is released.
+    var first = tabs[0];
+    var last = tabs[tabs.length - 1];
+    var left = Math.max(origin + first.offsetLeft, Math.min(drag.x - drag.grabOffset,
+     origin + last.offsetLeft + last.offsetWidth - drag.wrapper.offsetWidth));
+    var right = left + drag.wrapper.offsetWidth;
     var index = tabs.indexOf(drag.wrapper);
     var target = index;
     while (target + 1 < tabs.length && right > origin + tabs[target + 1].offsetLeft + tabs[target + 1].offsetWidth / 2) target++;
