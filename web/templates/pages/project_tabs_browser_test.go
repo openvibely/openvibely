@@ -270,11 +270,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("tab typography must match sidebar and plus must use label inset with a compact icon", got)
 				}
 
-					if got := browser.evaluate(`(function(){return String(Array.from(document.querySelectorAll('.desktop-project-tab')).filter(function(tab){return !tab.querySelector('[aria-selected="true"]');}).every(function(tab){var separator=getComputedStyle(tab,'::after'),rect=tab.getBoundingClientRect(),close=tab.querySelector('[data-close-project]').getBoundingClientRect();return Math.abs(rect.top+parseFloat(separator.top)-(close.top+close.bottom)/2)<0.5;}));})()`); got != "true" {
-						t.Fatal("inactive separators must share the close buttons' vertical center", got)
-					}
+				if got := browser.evaluate(`(function(){return String(Array.from(document.querySelectorAll('.desktop-project-tab')).filter(function(tab){return !tab.querySelector('[aria-selected="true"]');}).every(function(tab){var separator=getComputedStyle(tab,'::after'),rect=tab.getBoundingClientRect(),close=tab.querySelector('[data-close-project]').getBoundingClientRect();return Math.abs(rect.top+parseFloat(separator.top)-(close.top+close.bottom)/2)<0.5;}));})()`); got != "true" {
+					t.Fatal("inactive separators must share the close buttons' vertical center", got)
+				}
 
-					// A fullscreen-sized content viewport must retain the same visible bar.				// Native macOS fullscreen transitions require separate Wails verification.
+				// A fullscreen-sized content viewport must retain the same visible bar.				// Native macOS fullscreen transitions require separate Wails verification.
 				browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1920, "height": 1080, "deviceScaleFactor": 1, "mobile": false}, nil)
 				if got := browser.evaluate(`(function(){var tab=document.querySelector('.desktop-project-tab').getBoundingClientRect();return String(tab.top>=5 && tab.bottom<=46);})()`); got != "true" {
 					t.Fatal("fullscreen-sized viewport lost window controls or tabs", got)
@@ -337,6 +337,18 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("full selector", `String(document.getElementById('project-selector-dialog').open)`, "true")
 				if got := browser.evaluate(`String(Math.abs(document.getElementById('new-project-btn').getBoundingClientRect().height - document.querySelector('[data-project-selector-option]').getBoundingClientRect().height) < 1 && document.getElementById('new-project-btn').parentElement.nextElementSibling.matches('[role="separator"]'))`); got != "true" {
 					t.Fatal("create row must match option height and have a separator", got)
+				}
+				var plusPoint struct{ X, Y float64 }
+				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.getElementById('project-selector-trigger').getBoundingClientRect();return {X:r.x+r.width/2,Y:r.y+r.height/2};})())`)), &plusPoint); err != nil {
+					t.Fatal(err)
+				}
+				for i := 0; i < 4; i++ {
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": plusPoint.X, "y": plusPoint.Y}, nil)
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": plusPoint.X, "y": plusPoint.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": plusPoint.X, "y": plusPoint.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+					if got := browser.evaluate(`String(getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor !== 'rgba(0, 0, 0, 0)')`); got != "true" {
+						t.Fatal("plus highlight flashes off when toggling menu")
+					}
 				}
 				browser.click("#project-selector-search")
 				if got := browser.evaluate(`String(getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor !== 'rgba(0, 0, 0, 0)')`); got != "true" {
