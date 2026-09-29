@@ -10,11 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -23,8 +21,6 @@ import (
 var errResponsesWebsocketTransport = errors.New("Responses websocket transport error")
 var errResponsesWebsocketStale = errors.New("Responses websocket stale connection")
 
-var astraSteeringAckTimeout = 5 * time.Second
-
 func isRetryableResponsesTransportError(err error) bool {
 	return errors.Is(err, errResponsesWebsocketTransport) || errors.Is(err, errResponsesWebsocketStale)
 }
@@ -32,23 +28,16 @@ func isRetryableResponsesTransportError(err error) bool {
 // ResponsesTransportState holds connection/fallback state that may be shared
 // by short-lived clients for the same configured model.
 type ResponsesTransportState struct {
-	websocketDisabled      atomic.Bool
-	steeringUncertain      atomic.Bool
-	sessionID              string
-	mu                     sync.Mutex
-	conn                   *websocket.Conn
-	lastProperties         string
-	lastBaseline           []any
-	lastResponseID         string
-	astraRequestEffort     string
-	astraConfiguredEffort  string
-	astraConfigUpdates     []astraConfigurationUpdate
-	pendingAstraSteering   map[string]ResponsesSteeringDelivery
-	astraSteeringFailures  []ResponsesSteeringDelivery
-	astraSteeringCommits   []ResponsesSteeringDelivery
-	astraSteeringAmbiguous []ResponsesSteeringDelivery
-	steeringRecordsMu      sync.Mutex
-	steeringRecords        []ResponsesSteeringDelivery
+	websocketDisabled     atomic.Bool
+	sessionID             string
+	mu                    sync.Mutex
+	conn                  *websocket.Conn
+	lastProperties        string
+	lastBaseline          []any
+	lastResponseID        string
+	astraRequestEffort    string
+	astraConfiguredEffort string
+	astraConfigUpdates    []astraConfigurationUpdate
 }
 
 type astraConfigurationUpdate struct {
@@ -62,22 +51,6 @@ type astraReasoningSessionState struct {
 	RequestEffort    string                     `json:"request_effort"`
 	ConfiguredEffort string                     `json:"configured_effort"`
 	Updates          []astraConfigurationUpdate `json:"updates,omitempty"`
-}
-
-type ResponsesSteeringDelivery struct {
-	Status             AstraSteeringDeliveryStatus
-	SteeringID         string
-	ResponseID         string
-	PreviousResponseID string
-	Error              string
-}
-
-type pendingSteeringAck struct {
-	previousResponseID string
-	steeringID         string
-	accepted           bool
-	acceptedCh         chan struct{}
-	ch                 chan AstraSteeringDelivery
 }
 
 func NewResponsesTransportState() *ResponsesTransportState {
@@ -106,7 +79,6 @@ func (s *ResponsesTransportState) resetConnectionLocked() {
 	s.lastProperties = ""
 	s.lastBaseline = nil
 	s.lastResponseID = ""
-	s.markAllPendingAstraSteeringAmbiguousLocked()
 }
 
 func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
@@ -121,45 +93,13 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 // the session to HTTP, which then gets its own retry budget (as in Codex).
 func doResponsesStreamTurn[T any](ctx context.Context, c *Client, _ string, policy httpretry.StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
 	state := c.responsesTransportState
-	// Recover runs before generic EOF/network retry classification. A negative
-	// RetryableError result alone cannot veto those retries.
-	recoverTurn := policy.Recover
-	policy.Recover = func(err error) (bool, error) {
-		if state.hasAstraSteeringAmbiguous() {
-			return false, fmt.Errorf("cannot resume while steering delivery is unresolved: %w", err)
-		}
-		// Committed steering lives in the server-side successor, not in the
-		// original input captured by fn. Replaying that input would silently
-		// lose the user's update. Leave commits intact for the caller's durable
-		// recovery handling, and stop before retry or overflow compaction.
-		if state.hasAstraSteeringCommits() {
-			return false, fmt.Errorf("cannot retry after committed steering without restoring its input: %w", err)
-		}
-		if recoverTurn != nil {
-			return recoverTurn(err)
-		}
-		return false, nil
-	}
-	guardedAttempt := func(attemptCtx context.Context) (T, error) {
-		if state.hasAstraSteeringAmbiguous() {
-			var zero T
-			return zero, errors.New("steering delivery is unresolved")
-		}
-		result, err := fn(attemptCtx)
-		// A stream can complete after a steering acknowledgement is lost. Do
-		// not allow its returned tool calls to execute in that case either.
-		if err == nil && state.hasAstraSteeringAmbiguous() {
-			err = errors.New("steering delivery is unresolved")
-		}
-		return result, err
-	}
-	result, err := httpretry.DoStreamTurn(ctx, policy, guardedAttempt)
-	if err == nil || ctx.Err() != nil || !c.supportsResponsesWebsockets || state.websocketDisabled.Load() || state.hasAstraSteeringAmbiguous() || state.hasAstraSteeringCommits() ||
+	result, err := httpretry.DoStreamTurn(ctx, policy, fn)
+	if err == nil || ctx.Err() != nil || !c.supportsResponsesWebsockets || state.websocketDisabled.Load() ||
 		!(isRetryableResponsesTransportError(err) || httpretry.IsRetryableError(err)) {
 		return result, err
 	}
 	state.disableWebsocket()
-	return httpretry.DoStreamTurn(ctx, policy, guardedAttempt)
+	return httpretry.DoStreamTurn(ctx, policy, fn)
 }
 
 const (
@@ -290,122 +230,6 @@ func (s *ResponsesTransportState) commitAstraReasoningEffort(model, effort strin
 		})
 	}
 	s.astraConfiguredEffort = effort
-}
-
-func (s *ResponsesTransportState) takeAstraSteeringFailure() error {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.astraSteeringFailures) == 0 {
-		return nil
-	}
-	delivery := s.astraSteeringFailures[0]
-	s.astraSteeringFailures = s.astraSteeringFailures[1:]
-	err := fmt.Errorf("astra steering %s failed after being queued: %s", delivery.SteeringID, firstNonEmpty(delivery.Error, "provider rejected queued steering"))
-	return &astraSteeringFailedError{err: err, ids: steeringDeliveryIDs([]ResponsesSteeringDelivery{delivery})}
-}
-
-func (s *ResponsesTransportState) takeUnresolvedAstraSteering() error {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.pendingAstraSteering) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(s.pendingAstraSteering))
-	for id := range s.pendingAstraSteering {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	// response.steer.accepted transfers ownership to the server, but only a
-	// successor response confirms application. Preserve an unresolved delivery
-	// as ambiguous so callers neither replay it nor mark it applied.
-	for id, pending := range s.pendingAstraSteering {
-		pending.Status = AstraSteeringAmbiguous
-		s.appendAstraSteeringAmbiguousLocked(pending)
-		delete(s.pendingAstraSteering, id)
-	}
-	s.pendingAstraSteering = nil
-	return fmt.Errorf("astra steering remained pending without a successor response: %s", strings.Join(ids, ", "))
-}
-
-func (s *ResponsesTransportState) takeAstraSteeringCommits() []ResponsesSteeringDelivery {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	commits := append([]ResponsesSteeringDelivery(nil), s.astraSteeringCommits...)
-	s.astraSteeringCommits = nil
-	return commits
-}
-
-func (s *ResponsesTransportState) hasAstraSteeringCommits() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.astraSteeringCommits) > 0
-}
-
-func (s *ResponsesTransportState) takeAstraSteeringAmbiguous() []ResponsesSteeringDelivery {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	ambiguous := append([]ResponsesSteeringDelivery(nil), s.astraSteeringAmbiguous...)
-	s.astraSteeringAmbiguous = nil
-	s.steeringUncertain.Store(false)
-	return ambiguous
-}
-
-func (s *ResponsesTransportState) hasAstraSteeringAmbiguous() bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.steeringUncertain.Load() || len(s.astraSteeringAmbiguous) > 0
-}
-
-func (s *ResponsesTransportState) clearAstraSteeringCommits() {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.astraSteeringCommits = nil
-}
-
-func (s *ResponsesTransportState) recordSteeringDelivery(record ResponsesSteeringDelivery) {
-	if s == nil {
-		return
-	}
-	if record.Status == AstraSteeringAmbiguous {
-		// Lost acknowledgements may not have a server-assigned steering ID.
-		// They still prohibit replay, even though the ID-based list is empty.
-		s.steeringUncertain.Store(true)
-	}
-	s.steeringRecordsMu.Lock()
-	defer s.steeringRecordsMu.Unlock()
-	s.steeringRecords = append(s.steeringRecords, record)
-}
-
-func (s *ResponsesTransportState) SteeringDeliveries() []ResponsesSteeringDelivery {
-	if s == nil {
-		return nil
-	}
-	s.steeringRecordsMu.Lock()
-	defer s.steeringRecordsMu.Unlock()
-	out := make([]ResponsesSteeringDelivery, len(s.steeringRecords))
-	copy(out, s.steeringRecords)
-	return out
 }
 
 func responsesLiteTools(tools any) []any {
@@ -563,9 +387,7 @@ func buildStandardResponsesWebsocketPayload(payload map[string]any) map[string]a
 }
 
 type responsesWebsocketStreamOptions struct {
-	Model                 string
-	OnMidTurnSteering     AstraMidTurnSteeringCallback
-	MidTurnSteeringWakeup <-chan struct{}
+	Model string
 }
 
 func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[string]any, isChatGPTOAuth bool, opts responsesWebsocketStreamOptions) (io.ReadCloser, error) {
@@ -649,7 +471,6 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 	state.conn = conn
 
 	wirePayload, fullInput, properties := incrementalResponsesWebsocketPayload(payload, state)
-	requestPreviousResponseID := strings.TrimSpace(stringFromAny(wirePayload["previous_response_id"]))
 
 	body, err := json.Marshal(wirePayload)
 	if err != nil {
@@ -668,223 +489,13 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 	}
 
 	reader, writer := io.Pipe()
-	callbackErrors := make(chan error, 1)
-	var steeringMu sync.Mutex
-	activeResponseID := ""
-	primaryResponseID := ""
-	acceptedSteering := false
-	pendingAcks := []*pendingSteeringAck{}
-	streamDone := make(chan struct{})
-	responseStarted := make(chan struct{})
-	var responseStartedOnce sync.Once
-	var steeringCallbackDone <-chan struct{}
-	var cancelSteeringCallback context.CancelFunc
-	writeFrame := func(writeCtx context.Context, payload map[string]any) error {
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		return conn.Write(writeCtx, websocket.MessageText, body)
-	}
-	deliverSteering := func(deliverCtx context.Context, input LocalSteeringInput) (AstraSteeringDelivery, error) {
-		if !isGPT6WorkflowModel(opts.Model) || opts.OnMidTurnSteering == nil {
-			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
-		}
-		wireInput, inputErr := responseSteeringInput(input)
-		if inputErr != nil {
-			return AstraSteeringDelivery{Status: AstraSteeringFailed, Error: inputErr.Error()}, inputErr
-		}
-		if wireInput == nil {
-			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
-		}
-		select {
-		case <-streamDone:
-			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
-		default:
-		}
-		steeringMu.Lock()
-		select {
-		case <-streamDone:
-			steeringMu.Unlock()
-			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
-		default:
-		}
-		previousID := activeResponseID
-		if previousID == "" {
-			steeringMu.Unlock()
-			return AstraSteeringDelivery{Status: AstraSteeringUnavailable}, nil
-		}
-		ack := &pendingSteeringAck{
-			previousResponseID: previousID,
-			acceptedCh:         make(chan struct{}),
-			ch:                 make(chan AstraSteeringDelivery, 1),
-		}
-		pendingAcks = append(pendingAcks, ack)
-
-		event := map[string]any{
-			"type":                 "response.steer",
-			"previous_response_id": previousID,
-			"input":                wireInput,
-		}
-		if err := writeFrame(deliverCtx, event); err != nil {
-			removePendingSteeringAckLocked(&pendingAcks, ack)
-			steeringMu.Unlock()
-			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: err.Error()}
-			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
-			return delivery, nil
-		}
-		state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringDelivered, PreviousResponseID: previousID})
-		steeringMu.Unlock()
-		timer := time.NewTimer(astraSteeringAckTimeout)
-		defer timer.Stop()
-		// select picks randomly among ready cases, so acceptance can be ready alongside a
-		// terminal case; an accepted steer must keep its identity when it becomes ambiguous.
-		acceptedAmbiguous := func() (AstraSteeringDelivery, bool) {
-			select {
-			case <-ack.acceptedCh:
-			default:
-				return AstraSteeringDelivery{}, false
-			}
-			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-			delivery := ResponsesSteeringDelivery{
-				Status:             AstraSteeringAmbiguous,
-				SteeringID:         ack.steeringID,
-				PreviousResponseID: previousID,
-			}
-			state.appendAstraSteeringAmbiguousLocked(delivery)
-			state.recordSteeringDelivery(delivery)
-			return AstraSteeringDelivery(delivery), true
-		}
-		select {
-		case delivery := <-ack.ch:
-			return delivery, nil
-		case <-ack.acceptedCh:
-			// Acceptance transfers ownership to the server, but the input is not
-			// committed until a successor response is created. A pending event is an
-			// intermediate state that lets the local tool loop continue.
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			select {
-			case delivery := <-ack.ch:
-				return delivery, nil
-			case <-streamDone:
-				select {
-				case delivery := <-ack.ch:
-					return delivery, nil
-				default:
-				}
-				delivery, _ := acceptedAmbiguous()
-				return delivery, nil
-			}
-		case <-deliverCtx.Done():
-			if delivery, ok := acceptedAmbiguous(); ok {
-				return delivery, nil
-			}
-			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: deliverCtx.Err().Error()}
-			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
-			return delivery, nil
-		case <-streamDone:
-			select {
-			case delivery := <-ack.ch:
-				return delivery, nil
-			default:
-			}
-			if delivery, ok := acceptedAmbiguous(); ok {
-				return delivery, nil
-			}
-			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: "response.steer acknowledgement unavailable after stream closed"}
-			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
-			return delivery, nil
-		case <-timer.C:
-			if delivery, ok := acceptedAmbiguous(); ok {
-				return delivery, nil
-			}
-			removePendingSteeringAck(&steeringMu, &pendingAcks, ack)
-			delivery := AstraSteeringDelivery{Status: AstraSteeringAmbiguous, PreviousResponseID: previousID, Error: "response.steer acknowledgement timed out"}
-			state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
-			return delivery, nil
-		}
-	}
-	if isGPT6WorkflowModel(opts.Model) && opts.OnMidTurnSteering != nil {
-		steeringCallbackCtx, cancelCallback := context.WithCancel(ctx)
-		cancelSteeringCallback = cancelCallback
-		done := make(chan struct{})
-		steeringCallbackDone = done
-		go func() {
-			defer close(done)
-			fallbackInterval := 100 * time.Millisecond
-			if opts.MidTurnSteeringWakeup != nil {
-				fallbackInterval = 2 * time.Second
-			}
-			ticker := time.NewTicker(fallbackInterval)
-			defer ticker.Stop()
-			runCallback := func() bool {
-				if err := opts.OnMidTurnSteering(steeringCallbackCtx, deliverSteering); err != nil {
-					select {
-					case <-streamDone:
-						return false
-					default:
-					}
-					if steeringCallbackCtx.Err() != nil {
-						return false
-					}
-					state.recordSteeringDelivery(ResponsesSteeringDelivery{Status: AstraSteeringFailed, Error: err.Error()})
-					callbackErrors <- fmt.Errorf("persisting Astra steering delivery: %w", err)
-					_ = conn.CloseNow()
-					return false
-				}
-				return true
-			}
-			runCallbackWhenReady := func() bool {
-				select {
-				case <-responseStarted:
-				case <-steeringCallbackCtx.Done():
-					return false
-				case <-streamDone:
-					return false
-				}
-				return runCallback()
-			}
-			for {
-				select {
-				case <-steeringCallbackCtx.Done():
-					return
-				case <-streamDone:
-					return
-				case <-opts.MidTurnSteeringWakeup:
-					if !runCallbackWhenReady() {
-						return
-					}
-				case <-ticker.C:
-					if !runCallbackWhenReady() {
-						return
-					}
-				}
-			}
-		}()
-	}
 	go func() {
 		defer func() {
-			close(streamDone)
-			if cancelSteeringCallback != nil {
-				cancelSteeringCallback()
-			}
-			if steeringCallbackDone != nil {
-				<-steeringCallbackDone
-			}
 			state.mu.Unlock()
 			_ = writer.Close()
 		}()
 		var outputItems []any
 		responseID := ""
-		var deferredPrimaryCompleted []byte
-		deferredPrimaryCompletedID := ""
 		receivedFrame := false
 		forwardEventData := func(data []byte) bool {
 			// A WebSocket frame is a complete JSON event and may contain line
@@ -911,19 +522,6 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		for {
 			messageType, data, readErr := conn.Read(ctx)
 			if readErr != nil {
-				select {
-				case callbackErr := <-callbackErrors:
-					state.resetConnectionLocked()
-					writer.CloseWithError(callbackErr)
-					return
-				default:
-				}
-				if len(deferredPrimaryCompleted) > 0 {
-					if forwardEventData(deferredPrimaryCompleted) {
-						recordCompletedResponse(deferredPrimaryCompletedID)
-					}
-					return
-				}
 				state.resetConnectionLocked()
 				kind := errResponsesWebsocketTransport
 				if reusedConnection && !receivedFrame {
@@ -951,94 +549,15 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 						return
 					}
 				}
-				if eventType == "response.created" {
-					if response, ok := event["response"].(map[string]any); ok {
-						id := stringFromAny(response["id"])
-						successorResponse := false
-						steeringMu.Lock()
-						previousActiveResponseID := activeResponseID
-						activeResponseID = id
-						if id != "" {
-							responseStartedOnce.Do(func() { close(responseStarted) })
-						}
-						if primaryResponseID == "" {
-							primaryResponseID = id
-						} else if acceptedSteering && id != "" && id != primaryResponseID {
-							successorResponse = true
-						}
-						committed := commitAcceptedSteeringLocked(&pendingAcks, previousActiveResponseID, id, "")
-						persistedCommitted := state.commitPendingAstraSteeringLocked(requestPreviousResponseID, id)
-						steeringMu.Unlock()
-						for _, delivery := range committed {
-							state.appendAstraSteeringCommitLocked(ResponsesSteeringDelivery(delivery))
-							state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
-						}
-						for _, delivery := range persistedCommitted {
-							state.appendAstraSteeringCommitLocked(delivery)
-							state.recordSteeringDelivery(delivery)
-						}
-						if successorResponse {
-							deferredPrimaryCompleted = nil
-							deferredPrimaryCompletedID = ""
-						}
-					}
-				}
-				if eventType == "response.steer.accepted" || eventType == "response.steer.failed" {
-					delivery := steeringDeliveryFromEvent(eventType, event)
-					if delivery.Status == AstraSteeringFailed {
-						state.failPendingAstraSteeringLocked(delivery)
-					}
-					recordAndHandlePendingSteeringAck(state, &steeringMu, &pendingAcks, delivery)
-					if delivery.Status == AstraSteeringAccepted {
-						acceptedSteering = true
-					} else {
-						steeringMu.Lock()
-						acceptedSteering = hasAcceptedSteeringLocked(pendingAcks)
-						steeringMu.Unlock()
-					}
-				}
 				if eventType == "response.output_item.done" {
 					if item, ok := event["item"].(map[string]any); ok {
 						outputItems = append(outputItems, item)
 					}
 				}
-				if eventType == "response.steer.pending" {
-					delivery := steeringDeliveryFromEvent(eventType, event)
-					steeringMu.Lock()
-					pendingDeliveries := pendAcceptedSteeringLocked(&pendingAcks, delivery)
-					for _, pendingDelivery := range pendingDeliveries {
-						state.addPendingAstraSteeringLocked(pendingDelivery)
-					}
-					steeringMu.Unlock()
-					for _, pendingDelivery := range pendingDeliveries {
-						state.recordSteeringDelivery(ResponsesSteeringDelivery(pendingDelivery))
-					}
-					if len(deferredPrimaryCompleted) > 0 {
-						if forwardEventData(deferredPrimaryCompleted) {
-							recordCompletedResponse(deferredPrimaryCompletedID)
-						}
-						return
-					}
-					continue
-				}
-				if eventType == "response.completed" && acceptedSteering {
-					completedID := responseIDFromEvent(event)
-					if completedID != "" && completedID == primaryResponseID {
-						deferredPrimaryCompleted = append(deferredPrimaryCompleted[:0], data...)
-						deferredPrimaryCompletedID = completedID
-						continue
-					}
-				}
-				if !shouldForwardResponsesWebsocketEvent(eventType, event) {
-					continue
-				}
 				if !forwardEventData(data) {
 					return
 				}
 				if isTerminalResponsesWebsocketEvent(eventType) {
-					if eventType == "response.incomplete" && responseIncompleteReason(event) == "steered" {
-						continue
-					}
 					if eventType == "response.completed" {
 						responseID = responseIDFromEvent(event)
 						recordCompletedResponse(responseID)
@@ -1055,246 +574,6 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 	return reader, nil
 }
 
-func removePendingSteeringAck(mu *sync.Mutex, pending *[]*pendingSteeringAck, target *pendingSteeringAck) {
-	if mu == nil || pending == nil || target == nil {
-		return
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	removePendingSteeringAckLocked(pending, target)
-}
-
-func removePendingSteeringAckLocked(pending *[]*pendingSteeringAck, target *pendingSteeringAck) {
-	if pending == nil || target == nil {
-		return
-	}
-	items := *pending
-	for i, ack := range items {
-		if ack == target {
-			copy(items[i:], items[i+1:])
-			items[len(items)-1] = nil
-			*pending = items[:len(items)-1]
-			return
-		}
-	}
-}
-
-func recordAndHandlePendingSteeringAck(state *ResponsesTransportState, mu *sync.Mutex, pending *[]*pendingSteeringAck, delivery AstraSteeringDelivery) bool {
-	if state == nil || mu == nil || pending == nil {
-		return false
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	// The sender holds mu until it has recorded a successful frame write. This
-	// keeps a fast acknowledgement from appearing before the delivered record.
-	state.recordSteeringDelivery(ResponsesSteeringDelivery(delivery))
-	items := *pending
-	for i, ack := range items {
-		if ack == nil {
-			continue
-		}
-		if delivery.SteeringID != "" && ack.steeringID != "" && delivery.SteeringID != ack.steeringID {
-			continue
-		}
-		if delivery.PreviousResponseID != "" && ack.previousResponseID != "" && delivery.PreviousResponseID != ack.previousResponseID {
-			continue
-		}
-		if delivery.Status == AstraSteeringAccepted {
-			ack.steeringID = delivery.SteeringID
-			if !ack.accepted {
-				ack.accepted = true
-				close(ack.acceptedCh)
-			}
-			return false
-		}
-		copy(items[i:], items[i+1:])
-		items[len(items)-1] = nil
-		*pending = items[:len(items)-1]
-		select {
-		case ack.ch <- delivery:
-		default:
-		}
-		return true
-	}
-	return false
-}
-
-func commitAcceptedSteeringLocked(pending *[]*pendingSteeringAck, previousResponseID, responseID, steeringID string) []AstraSteeringDelivery {
-	if pending == nil {
-		return nil
-	}
-	items := *pending
-	committed := make([]AstraSteeringDelivery, 0, len(items))
-	retained := items[:0]
-	for _, ack := range items {
-		if ack == nil || !ack.accepted ||
-			(steeringID != "" && ack.steeringID != steeringID) ||
-			(previousResponseID != "" && ack.previousResponseID != previousResponseID) {
-			retained = append(retained, ack)
-			continue
-		}
-		delivery := AstraSteeringDelivery{
-			Status:             AstraSteeringAccepted,
-			SteeringID:         ack.steeringID,
-			ResponseID:         responseID,
-			PreviousResponseID: ack.previousResponseID,
-		}
-		committed = append(committed, delivery)
-		select {
-		case ack.ch <- delivery:
-		default:
-		}
-	}
-	for i := len(retained); i < len(items); i++ {
-		items[i] = nil
-	}
-	*pending = retained
-	return committed
-}
-
-func pendAcceptedSteeringLocked(pending *[]*pendingSteeringAck, delivery AstraSteeringDelivery) []AstraSteeringDelivery {
-	if pending == nil {
-		return nil
-	}
-	items := *pending
-	pendingDeliveries := make([]AstraSteeringDelivery, 0, len(items))
-	retained := items[:0]
-	for _, ack := range items {
-		if ack == nil || !ack.accepted ||
-			(delivery.SteeringID != "" && ack.steeringID != delivery.SteeringID) ||
-			(delivery.PreviousResponseID != "" && ack.previousResponseID != delivery.PreviousResponseID) {
-			retained = append(retained, ack)
-			continue
-		}
-		pendingDelivery := AstraSteeringDelivery{
-			Status:             AstraSteeringPending,
-			SteeringID:         firstNonEmpty(delivery.SteeringID, ack.steeringID),
-			PreviousResponseID: firstNonEmpty(delivery.PreviousResponseID, ack.previousResponseID),
-		}
-		pendingDeliveries = append(pendingDeliveries, pendingDelivery)
-		select {
-		case ack.ch <- pendingDelivery:
-		default:
-		}
-	}
-	for i := len(retained); i < len(items); i++ {
-		items[i] = nil
-	}
-	*pending = retained
-	return pendingDeliveries
-}
-
-// The caller holds s.mu for all three helpers below.
-func (s *ResponsesTransportState) addPendingAstraSteeringLocked(delivery AstraSteeringDelivery) {
-	if s == nil || delivery.SteeringID == "" {
-		return
-	}
-	if s.pendingAstraSteering == nil {
-		s.pendingAstraSteering = make(map[string]ResponsesSteeringDelivery)
-	}
-	s.pendingAstraSteering[delivery.SteeringID] = ResponsesSteeringDelivery(delivery)
-}
-
-func (s *ResponsesTransportState) commitPendingAstraSteeringLocked(previousResponseID, responseID string) []ResponsesSteeringDelivery {
-	if s == nil || previousResponseID == "" || responseID == "" {
-		return nil
-	}
-	committed := make([]ResponsesSteeringDelivery, 0, len(s.pendingAstraSteering))
-	for id, pending := range s.pendingAstraSteering {
-		if pending.PreviousResponseID != previousResponseID {
-			continue
-		}
-		pending.Status = AstraSteeringAccepted
-		pending.ResponseID = responseID
-		committed = append(committed, pending)
-		delete(s.pendingAstraSteering, id)
-	}
-	return committed
-}
-
-func (s *ResponsesTransportState) failPendingAstraSteeringLocked(delivery AstraSteeringDelivery) bool {
-	if s == nil || delivery.SteeringID == "" {
-		return false
-	}
-	if _, ok := s.pendingAstraSteering[delivery.SteeringID]; !ok {
-		return false
-	}
-	delete(s.pendingAstraSteering, delivery.SteeringID)
-	s.astraSteeringFailures = append(s.astraSteeringFailures, ResponsesSteeringDelivery(delivery))
-	return true
-}
-
-func (s *ResponsesTransportState) appendAstraSteeringCommitLocked(delivery ResponsesSteeringDelivery) {
-	if s == nil || delivery.SteeringID == "" {
-		return
-	}
-	for _, existing := range s.astraSteeringCommits {
-		if existing.SteeringID == delivery.SteeringID {
-			return
-		}
-	}
-	delivery.Status = AstraSteeringAccepted
-	s.astraSteeringCommits = append(s.astraSteeringCommits, delivery)
-}
-
-func (s *ResponsesTransportState) appendAstraSteeringAmbiguousLocked(delivery ResponsesSteeringDelivery) {
-	if s == nil || delivery.SteeringID == "" {
-		return
-	}
-	for _, existing := range s.astraSteeringAmbiguous {
-		if existing.SteeringID == delivery.SteeringID {
-			return
-		}
-	}
-	delivery.Status = AstraSteeringAmbiguous
-	s.astraSteeringAmbiguous = append(s.astraSteeringAmbiguous, delivery)
-}
-
-func (s *ResponsesTransportState) markAllPendingAstraSteeringAmbiguousLocked() {
-	if s == nil || len(s.pendingAstraSteering) == 0 {
-		return
-	}
-	for id, pending := range s.pendingAstraSteering {
-		pending.Status = AstraSteeringAmbiguous
-		s.appendAstraSteeringAmbiguousLocked(pending)
-		s.recordSteeringDelivery(pending)
-		delete(s.pendingAstraSteering, id)
-	}
-}
-
-func hasAcceptedSteeringLocked(pending []*pendingSteeringAck) bool {
-	for _, ack := range pending {
-		if ack != nil && ack.accepted {
-			return true
-		}
-	}
-	return false
-}
-
-func steeringDeliveryFromEvent(eventType string, event map[string]any) AstraSteeringDelivery {
-	status := AstraSteeringAccepted
-	if eventType == "response.steer.pending" {
-		status = AstraSteeringPending
-	} else if eventType == "response.steer.failed" {
-		status = AstraSteeringFailed
-	}
-	steer, _ := event["steer"].(map[string]any)
-	delivery := AstraSteeringDelivery{
-		Status:             status,
-		SteeringID:         strings.TrimSpace(stringFromAny(steer["id"])),
-		ResponseID:         strings.TrimSpace(firstNonEmpty(stringFromAny(event["response_id"]), stringFromAny(event["response"]), stringFromAny(event["id"]))),
-		PreviousResponseID: strings.TrimSpace(firstNonEmpty(stringFromAny(steer["previous_response_id"]), stringFromAny(event["previous_response_id"]))),
-		Error:              strings.TrimSpace(firstNonEmpty(stringFromAny(event["error"]), stringFromAny(event["message"]))),
-	}
-	if nested, ok := event["response"].(map[string]any); ok && delivery.ResponseID == "" {
-		delivery.ResponseID = stringFromAny(nested["id"])
-	}
-	if nested, ok := event["error"].(map[string]any); ok && delivery.Error == "" {
-		delivery.Error = firstNonEmpty(stringFromAny(nested["message"]), stringFromAny(nested["code"]), stringFromAny(nested["type"]))
-	}
-	return delivery
-}
-
 func responseIDFromEvent(event map[string]any) string {
 	if event == nil {
 		return ""
@@ -1305,32 +584,6 @@ func responseIDFromEvent(event map[string]any) string {
 		}
 	}
 	return strings.TrimSpace(firstNonEmpty(stringFromAny(event["response_id"]), stringFromAny(event["id"])))
-}
-
-func responseIncompleteReason(event map[string]any) string {
-	if event == nil {
-		return ""
-	}
-	if response, ok := event["response"].(map[string]any); ok {
-		if details, ok := response["incomplete_details"].(map[string]any); ok {
-			return strings.ToLower(strings.TrimSpace(stringFromAny(details["reason"])))
-		}
-		if reason := strings.TrimSpace(stringFromAny(response["reason"])); reason != "" {
-			return strings.ToLower(reason)
-		}
-	}
-	return strings.ToLower(strings.TrimSpace(stringFromAny(event["reason"])))
-}
-
-func shouldForwardResponsesWebsocketEvent(eventType string, event map[string]any) bool {
-	switch eventType {
-	case "response.steer.accepted", "response.steer.failed", "response.steer.pending":
-		return false
-	case "response.incomplete":
-		return responseIncompleteReason(event) != "steered"
-	default:
-		return true
-	}
 }
 
 func incrementalResponsesWebsocketPayload(payload map[string]any, state *ResponsesTransportState) (map[string]any, []any, string) {

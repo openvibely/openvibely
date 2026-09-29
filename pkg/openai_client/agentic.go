@@ -127,16 +127,13 @@ type AgenticOptions struct {
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
 	// OnLocalSteering claims Codex-style structured input for an active turn.
 	// It is preferred over OnToolBoundarySteering after sampling and tools finish.
+	// Codex rust-v0.155.0-alpha.16.3 queues turn/steer in core/session/turn_input.rs
+	// and drains it in core/session/turn.rs before the next model request.
+	// This boundary is shared by HTTP, standard WebSocket, and Responses Lite.
 	OnLocalSteering func(ctx context.Context) (LocalSteeringInput, error)
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
 	// wait-style tools. Model sampling itself is not preempted by local steering.
 	LocalSteeringWakeup <-chan struct{}
-	// EnableAstraMidTurnSteering allows active gpt-6-astra WebSocket streams to
-	// deliver steering through response.steer instead of waiting for the next
-	// OpenVibely-owned model boundary.
-	EnableAstraMidTurnSteering bool
-	OnAstraMidTurnSteering     AstraMidTurnSteeringCallback
-	AstraMidTurnSteeringWakeup <-chan struct{}
 	// EnableAstraConfigurationUpdate allows gpt-6-astra to carry cache-preserving
 	// reasoning-effort changes as Responses input items between turns.
 	EnableAstraConfigurationUpdate bool
@@ -203,42 +200,6 @@ type AsyncToolResult struct {
 	IsError   bool
 }
 
-// AstraSteeringDeliveryStatus describes provider-side mid-turn steering delivery state.
-type AstraSteeringDeliveryStatus string
-
-const (
-	AstraSteeringUnavailable AstraSteeringDeliveryStatus = "unavailable"
-	AstraSteeringDelivered   AstraSteeringDeliveryStatus = "delivered"
-	AstraSteeringPending     AstraSteeringDeliveryStatus = "pending"
-	AstraSteeringAmbiguous   AstraSteeringDeliveryStatus = "ambiguous"
-	AstraSteeringAccepted    AstraSteeringDeliveryStatus = "accepted"
-	AstraSteeringFailed      AstraSteeringDeliveryStatus = "failed"
-)
-
-// AstraSteeringDelivery records response.steer delivery state for an active WebSocket response.
-type AstraSteeringDelivery struct {
-	Status             AstraSteeringDeliveryStatus
-	SteeringID         string
-	ResponseID         string
-	PreviousResponseID string
-	Error              string
-}
-
-type astraSteeringCommittedError struct {
-	err error
-	ids []string
-}
-
-type astraSteeringAmbiguousError struct {
-	err error
-	ids []string
-}
-
-type astraSteeringFailedError struct {
-	err error
-	ids []string
-}
-
 // LocalSteeringMessage preserves one queued user message and its attachments.
 type LocalSteeringMessage struct {
 	Text        string
@@ -277,76 +238,6 @@ func (i LocalSteeringInput) empty() bool {
 	}
 	return true
 }
-
-func wrapAstraSteeringCommits(err error, state *ResponsesTransportState) error {
-	if err == nil || state == nil {
-		return err
-	}
-	ambiguous := steeringDeliveryIDs(state.takeAstraSteeringAmbiguous())
-	if len(ambiguous) > 0 {
-		err = &astraSteeringAmbiguousError{err: err, ids: ambiguous}
-	}
-	commits := state.takeAstraSteeringCommits()
-	if len(commits) == 0 {
-		return err
-	}
-	seen := make(map[string]struct{}, len(commits))
-	ids := make([]string, 0, len(commits))
-	for _, commit := range commits {
-		if commit.SteeringID == "" {
-			continue
-		}
-		if _, exists := seen[commit.SteeringID]; exists {
-			continue
-		}
-		seen[commit.SteeringID] = struct{}{}
-		ids = append(ids, commit.SteeringID)
-	}
-	if len(ids) == 0 {
-		return err
-	}
-	return &astraSteeringCommittedError{err: err, ids: ids}
-}
-
-func steeringDeliveryIDs(deliveries []ResponsesSteeringDelivery) []string {
-	seen := make(map[string]struct{}, len(deliveries))
-	ids := make([]string, 0, len(deliveries))
-	for _, delivery := range deliveries {
-		if delivery.SteeringID == "" {
-			continue
-		}
-		if _, exists := seen[delivery.SteeringID]; exists {
-			continue
-		}
-		seen[delivery.SteeringID] = struct{}{}
-		ids = append(ids, delivery.SteeringID)
-	}
-	return ids
-}
-
-func (e *astraSteeringCommittedError) Error() string { return e.err.Error() }
-func (e *astraSteeringCommittedError) Unwrap() error { return e.err }
-func (e *astraSteeringCommittedError) CommittedSteeringIDs() []string {
-	return append([]string(nil), e.ids...)
-}
-
-func (e *astraSteeringAmbiguousError) Error() string { return e.err.Error() }
-func (e *astraSteeringAmbiguousError) Unwrap() error { return e.err }
-func (e *astraSteeringAmbiguousError) AmbiguousSteeringIDs() []string {
-	return append([]string(nil), e.ids...)
-}
-
-func (e *astraSteeringFailedError) Error() string { return e.err.Error() }
-func (e *astraSteeringFailedError) Unwrap() error { return e.err }
-func (e *astraSteeringFailedError) FailedSteeringIDs() []string {
-	return append([]string(nil), e.ids...)
-}
-
-// AstraSteeringDeliverer sends ordered user input to an active GPT-6 WebSocket response.
-type AstraSteeringDeliverer func(context.Context, LocalSteeringInput) (AstraSteeringDelivery, error)
-
-// AstraMidTurnSteeringCallback claims and delivers steering during an active Astra stream.
-type AstraMidTurnSteeringCallback func(context.Context, AstraSteeringDeliverer) error
 
 // agenticInputItem represents an item in the Responses API input array.
 type agenticInputItem = map[string]any
@@ -552,23 +443,19 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	var allText strings.Builder
-	wrapSteeringCommits := func(err error) error {
-		return wrapAstraSteeringCommits(err, c.responsesTransportState)
-	}
-
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
 			if turn == 0 || !opts.AutoCompaction {
-				return nil, wrapSteeringCommits(err)
+				return nil, err
 			}
 			var compactErr error
 			inputItems, compactErr = compactIfNeeded(inputItems, compactionThreshold, true)
 			if compactErr != nil {
-				return nil, wrapSteeringCommits(fmt.Errorf("turn %d preflight compaction: %w", turn+1, compactErr))
+				return nil, fmt.Errorf("turn %d preflight compaction: %w", turn+1, compactErr)
 			}
 			if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
-				return nil, wrapSteeringCommits(err)
+				return nil, err
 			}
 		}
 		var turnResult *agenticTurnResult
@@ -576,7 +463,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		overflowRecovered := false
 		turnResult, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 			RetryableError: func(err error) bool {
-				return !c.responsesTransportState.hasAstraSteeringAmbiguous() && isRetryableResponsesTransportError(err)
+				return isRetryableResponsesTransportError(err)
 			},
 			Recover: func(err error) (bool, error) {
 				if !opts.AutoCompaction || overflowRecovered || !isContextLengthExceededError(err) {
@@ -608,23 +495,17 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 					_ = opts.OnAsyncToolRejected(ctx, record, providerErr)
 				}
 			}
-			if steeringFailure := c.responsesTransportState.takeAstraSteeringFailure(); steeringFailure != nil {
-				return nil, wrapSteeringCommits(steeringFailure)
-			}
-			return nil, wrapSteeringCommits(providerErr)
+			return nil, providerErr
 		}
 		if localSteering.empty() {
 			for _, record := range pendingAsyncDeliveries {
 				if opts.OnAsyncToolDelivered != nil {
 					if err := opts.OnAsyncToolDelivered(ctx, record); err != nil {
-						return nil, wrapSteeringCommits(fmt.Errorf("turn %d mark async tool delivered: %w", turn+1, err))
+						return nil, fmt.Errorf("turn %d mark async tool delivered: %w", turn+1, err)
 					}
 				}
 			}
 			pendingAsyncDeliveries = nil
-		}
-		if steeringFailure := c.responsesTransportState.takeAstraSteeringFailure(); steeringFailure != nil {
-			return nil, wrapSteeringCommits(steeringFailure)
 		}
 
 		result.InputTokens += turnResult.inputTokens
@@ -660,21 +541,21 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		if len(turnResult.toolCalls) == 0 {
 			localSteering, err = claimLocalSteeringAtBoundary(ctx, opts, false)
 			if err != nil {
-				return nil, wrapSteeringCommits(fmt.Errorf("turn %d claim local steering: %w", turn+1, err))
+				return nil, fmt.Errorf("turn %d claim local steering: %w", turn+1, err)
 			}
 			if !localSteering.empty() {
 				inputItems, err = compactIfNeeded(inputItems, tokenLedger.projectedTokens(nil), false)
 				if err != nil {
-					return nil, wrapSteeringCommits(fmt.Errorf("turn %d compaction: %w", turn+1, err))
+					return nil, fmt.Errorf("turn %d compaction: %w", turn+1, err)
 				}
 				tools, err = refreshAgenticToolsAtSteeringBoundary(ctx, opts, tools, useStandaloneWebSearch)
 				if err != nil {
-					return nil, wrapSteeringCommits(fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err))
+					return nil, fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err)
 				}
 				var appendErr error
 				inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
 				if appendErr != nil {
-					return nil, wrapSteeringCommits(fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr))
+					return nil, fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr)
 				}
 				// A user follow-up does not consume the agentic tool-loop budget.
 				turn--
@@ -699,7 +580,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			if shouldRunOpenAIToolAsync(opts, tools, tc.Name) {
 				record, err := opts.OnAsyncToolCall(ctx, AsyncToolCall{ResponseID: turnResult.responseID, CallID: tc.CallID, Name: tc.Name, Arguments: inputJSON})
 				if err != nil {
-					return nil, wrapSteeringCommits(fmt.Errorf("turn %d persist async tool call: %w", turn+1, err))
+					return nil, fmt.Errorf("turn %d persist async tool call: %w", turn+1, err)
 				}
 				task.record = record
 				asyncTasks = append(asyncTasks, task)
@@ -713,7 +594,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		for _, exec := range asyncExecuted {
 			if opts.OnAsyncToolResult != nil {
 				if err := opts.OnAsyncToolResult(ctx, exec.record, exec.output, exec.isError); err != nil {
-					return nil, wrapSteeringCommits(fmt.Errorf("turn %d complete async tool call: %w", turn+1, err))
+					return nil, fmt.Errorf("turn %d complete async tool call: %w", turn+1, err)
 				}
 			}
 		}
@@ -759,7 +640,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		generationBeforeCompaction := compactionGeneration
 		compactedItems, err := compactIfNeeded(inputItems, tokenLedger.projectedTokens(localItemsAfterResponse), false)
 		if err != nil {
-			return nil, wrapSteeringCommits(fmt.Errorf("turn %d compaction: %w", turn+1, err))
+			return nil, fmt.Errorf("turn %d compaction: %w", turn+1, err)
 		}
 		inputItems = compactedItems
 		if compactionGeneration != generationBeforeCompaction {
@@ -774,18 +655,18 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		localSteering, err = claimLocalSteeringAtBoundary(ctx, opts, true)
 		if err != nil {
-			return nil, wrapSteeringCommits(fmt.Errorf("turn %d claim local steering: %w", turn+1, err))
+			return nil, fmt.Errorf("turn %d claim local steering: %w", turn+1, err)
 		}
 		if !localSteering.empty() {
 			tools, err = refreshAgenticToolsAtSteeringBoundary(ctx, opts, tools, useStandaloneWebSearch)
 			if err != nil {
-				return nil, wrapSteeringCommits(fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err))
+				return nil, fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err)
 			}
 			pendingAsyncDeliveries = append(pendingAsyncDeliveries, deliveryRecords...)
 			var appendErr error
 			inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
 			if appendErr != nil {
-				return nil, wrapSteeringCommits(fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr))
+				return nil, fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr)
 			}
 			// Pending user input extends the active turn even when the configured
 			// tool-loop budget would otherwise end here.
@@ -794,11 +675,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
 		}
 	}
-	if unresolved := c.responsesTransportState.takeUnresolvedAstraSteering(); unresolved != nil {
-		return nil, wrapSteeringCommits(unresolved)
-	}
-	c.responsesTransportState.clearAstraSteeringCommits()
-
 	result.Text = allText.String()
 	if result.Compacted {
 		result.CompactedInputItems = append([]any(nil), inputItems...)
@@ -1460,9 +1336,6 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	compactionOpts.OnToolBoundarySteering = nil
 	compactionOpts.OnLocalSteering = nil
 	compactionOpts.LocalSteeringWakeup = nil
-	compactionOpts.EnableAstraMidTurnSteering = false
-	compactionOpts.OnAstraMidTurnSteering = nil
-	compactionOpts.AstraMidTurnSteeringWakeup = nil
 	isOAuth := strings.TrimSpace(c.auth.APIKey) == ""
 	result, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 		MaxRetries:     2, // Includes connection failures; unlimited reconnects are for normal generation only.
@@ -2169,25 +2042,6 @@ func appendLocalSteeringInput(inputItems []any, steering LocalSteeringInput) ([]
 	return inputItems, nil
 }
 
-func responseSteeringInput(steering LocalSteeringInput) (any, error) {
-	// Keep the compact string form for a plain single message. Structured input
-	// uses the same user-message encoding as the next response.create request.
-	if len(steering.Messages) == 0 && len(steering.Attachments) == 0 {
-		if text := strings.TrimSpace(steering.Text); text != "" {
-			return text, nil
-		}
-		return nil, nil
-	}
-	items, err := appendLocalSteeringInput(nil, steering)
-	if err != nil {
-		return nil, err
-	}
-	if len(items) == 0 {
-		return nil, nil
-	}
-	return items, nil
-}
-
 func appendLocalSteeringMessage(inputItems []any, message LocalSteeringMessage) ([]any, error) {
 	text := strings.TrimSpace(message.Text)
 	if len(message.Attachments) == 0 {
@@ -2387,10 +2241,6 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
 			if useWebsocket {
 				wsOptions := responsesWebsocketStreamOptions{Model: opts.Model}
-				if opts.EnableAstraMidTurnSteering {
-					wsOptions.OnMidTurnSteering = opts.OnAstraMidTurnSteering
-					wsOptions.MidTurnSteeringWakeup = opts.AstraMidTurnSteeringWakeup
-				}
 				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth, wsOptions)
 			}
 			return c.openResponsesHTTPStream(ctx, wsPayload, isChatGPTOAuth, useResponsesLite)
@@ -2688,9 +2538,6 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 			}
 
 		case "response.failed", "response.incomplete", "response.error", "error":
-			if typ == "response.incomplete" && responseIncompleteReason(ev) == "steered" {
-				continue
-			}
 			return nil, responsesStreamTerminalError(typ, ev)
 
 		case "response.completed":

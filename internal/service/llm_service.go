@@ -1419,66 +1419,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
 			return llmcontracts.LocalSteeringInput{Messages: messages}, nil
 		})
-		callCtx = llmcontracts.WithMidTurnSteeringCallback(callCtx, func(callbackCtx context.Context, deliver llmcontracts.SteeringDeliverer) error {
-			if deliver == nil {
-				return nil
-			}
-			inputs, steeringErr := s.threadInputRepo.PreparePendingSteering(callbackCtx, exec.ID, exec.ID)
-			if steeringErr != nil || len(inputs) == 0 {
-				return steeringErr
-			}
-			inputIDs := threadInputIDs(inputs)
-			cleanupCtx := context.WithoutCancel(callbackCtx)
-			messages, steeringErr := s.hydrateTaskSteeringMessages(inputs)
-			if steeringErr != nil {
-				if restoreErr := s.threadInputRepo.RestorePreparedSteering(cleanupCtx, inputIDs, exec.ID, exec.ID); restoreErr != nil {
-					return errors.Join(steeringErr, restoreErr)
-				}
-				return steeringErr
-			}
-
-			claimID := "unknown:" + inputs[0].ID
-			if claimErr := s.threadInputRepo.RecordProviderSteering(
-				cleanupCtx, inputIDs, claimID, "", "", repository.ProviderSteeringAcceptedAmbiguous,
-			); claimErr != nil {
-				if restoreErr := s.threadInputRepo.RestorePreparedSteering(cleanupCtx, inputIDs, exec.ID, exec.ID); restoreErr != nil {
-					return errors.Join(claimErr, restoreErr)
-				}
-				return nil
-			}
-
-			delivery, deliveryErr := deliver(callbackCtx, llmcontracts.LocalSteeringInput{Messages: messages})
-			if deliveryErr == nil && (delivery.Status == llmcontracts.SteeringDeliveryUnavailable || delivery.Status == llmcontracts.SteeringDeliveryFailed) {
-				if clearErr := s.threadInputRepo.ClearProviderSteering(cleanupCtx, []string{claimID}); clearErr != nil {
-					return clearErr
-				}
-				return s.threadInputRepo.RestorePreparedSteering(cleanupCtx, inputIDs, exec.ID, exec.ID)
-			}
-			if deliveryErr != nil || (delivery.Status != llmcontracts.SteeringDeliveryAccepted && delivery.Status != llmcontracts.SteeringDeliveryPending && delivery.Status != llmcontracts.SteeringDeliveryAmbiguous) {
-				delivery.Status = llmcontracts.SteeringDeliveryAmbiguous
-				if deliveryErr != nil {
-					delivery.Error = deliveryErr.Error()
-				}
-			}
-			deliveryState := repository.ProviderSteeringAcceptedConfirmed
-			if delivery.Status == llmcontracts.SteeringDeliveryPending {
-				deliveryState = repository.ProviderSteeringAcceptedPending
-			} else if delivery.Status == llmcontracts.SteeringDeliveryAmbiguous || delivery.ResponseID == "" {
-				deliveryState = repository.ProviderSteeringAcceptedAmbiguous
-			}
-			steeringID := strings.TrimSpace(delivery.SteeringID)
-			if steeringID == "" {
-				steeringID = claimID
-			}
-			if recordErr := s.threadInputRepo.RecordProviderSteering(
-				cleanupCtx, inputIDs, steeringID, delivery.PreviousResponseID, delivery.ResponseID, deliveryState,
-			); recordErr != nil {
-				return recordErr
-			}
-			preparedSteering = append(preparedSteering, inputs...)
-			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
-			return nil
-		})
 		callCtx = llmcontracts.WithSteeringRetryResetCallback(callCtx, func(callbackCtx context.Context) error {
 			if len(preparedSteering) == 0 {
 				return nil
