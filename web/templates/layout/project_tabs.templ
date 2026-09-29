@@ -200,7 +200,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var others = Array.from(list.querySelectorAll('.desktop-project-tab')).filter(function(node) { return node !== drag.wrapper; });
     // Hit-test layout positions, not animated bounds, to avoid oscillating slots.
     var origin = list.getBoundingClientRect().left - list.scrollLeft;
-    var left = drag.x - drag.grabOffset;
+     // Keep the entire dragged surface before the + section, even if the
+     // pointer continues past it. Use the same bounded position for reordering.
+     var left = Math.min(drag.x - drag.grabOffset, origin + add.offsetLeft - drag.wrapper.offsetWidth);
     var right = left + drag.wrapper.offsetWidth;
     var tabs = Array.from(list.querySelectorAll('.desktop-project-tab'));
     var index = tabs.indexOf(drag.wrapper);
@@ -215,8 +217,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      list.insertBefore(drag.wrapper, before || add);
      others.forEach(function(node, index) { animateTabPosition(node, previous[index] - (origin + node.offsetLeft)); });
     }
-    drag.wrapper.style.transform = 'translateX(' + (drag.x - drag.grabOffset - (origin + drag.wrapper.offsetLeft)) + 'px)';
-   }
+     drag.wrapper.style.transform = 'translateX(' + (left - (origin + drag.wrapper.offsetLeft)) + 'px)';   }
    function dragTick() {
     if (!drag || !drag.started) return;
     moveDraggedTab();
