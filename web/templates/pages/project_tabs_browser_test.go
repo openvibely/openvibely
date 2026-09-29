@@ -108,6 +108,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				if !desktop {
 					browser.waitFor("web selector", `String(!!document.querySelector('#desktop-project-titlebar #project-selector') && !document.querySelector('[data-wml-window]'))`, "true")
+					browser.waitFor("web plus idle background", `getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor`, "rgba(0, 0, 0, 0)")
 					browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": true}, nil)
 					browser.waitFor("mobile keeps sidebar selector", `String(!!document.querySelector('#sidebar #project-selector') && getComputedStyle(document.getElementById('desktop-project-titlebar')).display === 'none')`, "true")
 					browser.call("Emulation.clearDeviceMetricsOverride", map[string]any{}, nil)
