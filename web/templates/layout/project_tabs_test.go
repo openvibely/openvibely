@@ -179,8 +179,8 @@ func TestProjectTabsSidebarTogglePlacement(t *testing.T) {
 		if err := Sidebar(nil, "").Render(ctx, &sidebar); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(sidebar.String(), ">OpenVibely</h1>") {
-			t.Error("sidebar branding must be removed")
+		if !strings.Contains(sidebar.String(), ">OpenVibely</h1>") {
+			t.Error("sidebar branding must remain visible")
 		}
 		hasToggle := strings.Contains(sidebar.String(), `id="sidebar-collapse-btn"`)
 		if hasToggle == desktop {
