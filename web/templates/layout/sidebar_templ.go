@@ -559,7 +559,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 			return templ_7745c5c3_Err
 		}
 		if serverRuntimeMode(ctx) == "desktop" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<button id=\"project-selector-trigger\" type=\"button\" aria-label=\"Open project\" title=\"Open project\" aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-controls=\"project-selector-dialog\" data-searchable-selector-trigger>+</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<button id=\"project-selector-trigger\" type=\"button\" aria-label=\"Open project\" title=\"Open project\" aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-controls=\"project-selector-dialog\" data-searchable-selector-trigger><svg width=\"14\" height=\"14\" viewBox=\"0 0 14 14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M7 2v10M2 7h10\"></path></svg></button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
