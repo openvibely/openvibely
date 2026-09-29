@@ -90,7 +90,7 @@ func TestProjectTabsPlatformRendering(t *testing.T) {
 			t.Fatal(err)
 		}
 		html := buf.String()
-		if strings.Contains(html, `id="desktop-project-titlebar"`) != desktop {
+		if !strings.Contains(html, `id="desktop-project-titlebar"`) {
 			t.Fatalf("wrong titlebar for desktop=%v", desktop)
 		}
 		if strings.Count(html, `id="project-selector"`) != 1 {
@@ -196,5 +196,21 @@ func TestProjectTabsSidebarTogglePlacement(t *testing.T) {
 				t.Error("desktop toggle must precede tabs")
 			}
 		}
+	}
+}
+
+func TestWebProjectBarResponsiveShell(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Projects", nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, want := range []string{`id="desktop-project-titlebar"`, `data-platform="web"`, `matchMedia('(min-width: 1024px)')`, `web-project-selector-home`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("missing responsive web shell %s", want)
+		}
+	}
+	if strings.Contains(html, `<button type="button" data-wml-window=`) {
+		t.Error("web must not render native window controls")
 	}
 }

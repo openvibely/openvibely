@@ -2,6 +2,7 @@ package layout
 
 import (
 	"encoding/json"
+ "context"
 	"runtime"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -31,8 +32,25 @@ func pinnedProjectJSON(projects []models.Project) string {
 	return string(value)
 }
 
+func projectBarPlatform(ctx context.Context) string {
+ if serverRuntimeMode(ctx) == "desktop" { return runtime.GOOS }
+ return "web"
+}
+
 templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 	<style>
+ [data-openvibely-runtime="web"] #desktop-project-titlebar { display: none; --wails-draggable: no-drag; }
+ #project-selector-trigger .project-selector-plus { display: none; }
+ #desktop-project-titlebar #project-selector-trigger .project-selector-plus { display: block; }
+ #desktop-project-titlebar #project-selector-current-label { display: none; }
+ #desktop-project-titlebar #project-selector-trigger { background-image: none; border: 0; }
+ @media (min-width: 1024px) {
+  [data-openvibely-runtime="web"] #desktop-project-titlebar { display: flex; }
+  [data-openvibely-runtime="web"] body > .drawer { height: calc(100% - 46px); }
+  [data-openvibely-runtime="web"] #sidebar { height: calc(100dvh - 46px); }
+  [data-openvibely-runtime="web"] .sidebar-header { display: none; }
+ }
+
   [data-openvibely-runtime="desktop"] body > .drawer { height: calc(100% - 46px); }
   [data-openvibely-runtime="desktop"] #sidebar { height: calc(100dvh - 46px); }
   [data-openvibely-runtime="desktop"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }
@@ -98,26 +116,30 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 		  .desktop-traffic-lights [data-wml-window="ToggleFullscreen"] { background: #28c840; color: #006500; box-shadow: inset 0 0 0 .5px #1aab29; }
 		  .desktop-traffic-lights svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; opacity: 0; }	  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }
 	  .desktop-traffic-lights button:active { filter: brightness(.85); } </style>
-	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ runtime.GOOS } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
-			if runtime.GOOS == "darwin" {
+	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ projectBarPlatform(ctx) } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
+			if serverRuntimeMode(ctx) == "desktop" && runtime.GOOS == "darwin" {
 				<div class="desktop-window-controls desktop-traffic-lights" role="group" aria-label="Window controls">
 					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5l5 5m0-5-5 5"/></svg></button>
 					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true"><path d="M2.5 6h7"/></svg></button>
 					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"/><path data-restore-glyph d="M2 5.5h3.5V2zm8 1H6.5V10z" style="display: none"/></svg></button>
 				</div>
 			}
-			@SidebarToggle()
+			if serverRuntimeMode(ctx) == "desktop" {
+ @SidebarToggle()
+ }
 			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab">
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID }>{ project.Name }</button>
 					<button type="button" disabled?={ len(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) <= 1 } data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name }><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>
 				</div>
 			}
-		@ProjectSelector(projects, currentProjectID)
+		if serverRuntimeMode(ctx) == "desktop" {
+ @ProjectSelector(projects, currentProjectID)
+ }
         </div>
 
 		<div class="desktop-titlebar-space" aria-hidden="true"></div>
-			if runtime.GOOS != "darwin" {
+			if serverRuntimeMode(ctx) == "desktop" && runtime.GOOS != "darwin" {
 				<div class="desktop-window-controls" role="group" aria-label="Window controls">
 					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="M1 6h10"/></svg></button>
 					<button type="button" data-wml-window="ToggleMaximise" aria-label="Maximize or restore window" title="Maximize or restore"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
@@ -135,8 +157,40 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var list = document.getElementById('desktop-project-tabs');
    var menu = document.getElementById('project-tab-menu');
  var menuTab;
- var add = bar.querySelector('[data-project-selector]');
- list.append(add);
+ var add = document.querySelector('[data-project-selector]');
+ if (bar.dataset.platform === 'web') {
+  var home = document.createElement('span');
+  home.id = 'web-project-selector-home';
+  add.before(home);
+  var toggle = document.getElementById('sidebar-collapse-btn');
+  var toggleHome = toggle.parentElement;
+  var create = document.getElementById('new-project-btn');
+  var createHome = create.parentElement;
+  var originalCreateClass = create.className;
+  var selectorMenu = document.getElementById('project-selector-dialog');
+  var results = selectorMenu.querySelector('[role="listbox"]');
+  var createRow = document.createElement('div');
+  createRow.hidden = true;
+  createRow.style.cssText = 'padding: 8px; border-bottom: 1px solid oklch(var(--bc) / .15)';
+  (results || selectorMenu.firstElementChild).before(createRow);
+  var label = document.createElement('span'); label.textContent = 'Create New Project';
+  var media = matchMedia('(min-width: 1024px)');
+  function placeWebControls() {
+   if (selectorMenu.open) selectorMenu.close();
+   if (media.matches) {
+    list.append(add); bar.prepend(toggle);
+    createRow.append(create); create.append(label);
+    create.className = 'btn btn-ghost btn-sm w-full justify-start';
+   } else {
+    home.after(add); toggleHome.append(toggle);
+    createHome.append(create); label.remove(); create.className = originalCreateClass;
+   }
+   createRow.hidden = !media.matches;
+  }
+  media.addEventListener('change', function() { placeWebControls(); sync(); });
+  placeWebControls();
+  create.addEventListener('click', function() { if (selectorMenu.open) selectorMenu.close(); });
+ } else { list.append(add); }
    if (!bar || !select || bar.dataset.installed) return;
    bar.dataset.installed = 'true';
    // Modal dialogs make the trigger inert, interrupting CSS :hover even
@@ -196,6 +250,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     return select.value === id;
    }
    function sync() {
+    if (bar.dataset.platform === 'web' && !matchMedia('(min-width: 1024px)').matches) return;
     var active = select.value;
  if (active && !ids.includes(active) && active !== closedActive) { ids.push(active); saveTabs(); render(); return; }
     list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {

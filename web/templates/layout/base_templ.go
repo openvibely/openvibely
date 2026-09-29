@@ -311,11 +311,9 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if serverRuntimeMode(ctx) == "desktop" {
-			templ_7745c5c3_Err = DesktopProjectTabs(projects, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+		templ_7745c5c3_Err = DesktopProjectTabs(projects, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<div class=\"drawer lg:drawer-open h-full\"><input id=\"sidebar-toggle\" type=\"checkbox\" class=\"drawer-toggle\"><div class=\"drawer-content flex flex-col h-full overflow-hidden\"><!-- Navbar (mobile only) --><div class=\"navbar bg-base-100 shadow-sm flex-shrink-0 lg:hidden\"><div class=\"flex-none lg:hidden\"><label for=\"sidebar-toggle\" class=\"btn btn-square btn-ghost\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"inline-block w-6 h-6 stroke-current\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 6h16M4 12h16M4 18h16\"></path></svg></label></div><div class=\"flex-1\"><span class=\"text-xl font-bold lg:hidden\">OpenVibely</span></div></div><!-- Main Content --><main id=\"main-content\" class=\"p-6 flex-1 overflow-y-auto overflow-x-hidden\" hx-history-elt>")
 		if templ_7745c5c3_Err != nil {
