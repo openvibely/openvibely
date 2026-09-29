@@ -10,21 +10,20 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestProjectTabsAccentContour(t *testing.T) {
+func TestProjectTabsCleanSelectedShape(t *testing.T) {
 	var buf bytes.Buffer
 	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(buf.String(), "--project-tab-accent") {
+		t.Error("unexpected accent outline")
+	}
 	for _, want := range []string{
-		`--project-tab-accent: oklch(var(--p))`,
+		`transparent 10px, var(--project-tab-selected) 10.5px)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, white)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, black)`,
 		`font-weight: 600`,
-		`border-bottom: 1px solid var(--project-tab-accent)`,
-		`margin-bottom: -1px`,
-		`inset 2px 2px 0 var(--project-tab-accent)`,
-		`inset -2px 0 0 var(--project-tab-accent)`,
-		`transparent 8px, var(--project-tab-accent) 8.5px`,
+		`border-bottom: 1px solid var(--project-tab-selected)`,
 	} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing active-tab contour: %s", want)
