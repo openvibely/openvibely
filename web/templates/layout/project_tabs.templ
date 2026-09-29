@@ -87,8 +87,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 			}
 			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
 				<div class="desktop-project-tab">
-					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID } title={ project.Name }>{ project.Name }</button>
-					<button type="button" data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name } title="Close tab">×</button>
+					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID }>{ project.Name }</button>
+					<button type="button" data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name }>×</button>
 				</div>
 			}
 		@ProjectSelector(projects, currentProjectID)
@@ -176,8 +176,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      var option = Array.from(select.options).find(function(option) { return option.value === id; });
      if (!option) return;
      var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';
-     var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim(); tab.title = tab.textContent;
-     var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.textContent = '×'; close.title = 'Close tab'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
+     var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim();
+     var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.textContent = '×'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
      wrapper.append(tab, close); list.append(wrapper);
     });
     list.append(add);
