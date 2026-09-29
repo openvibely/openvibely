@@ -345,25 +345,6 @@ func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chat
 	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
 }
 
-func openAIAstraMidTurnSteeringCallback(ctx context.Context) openaiclient.AstraMidTurnSteeringCallback {
-	callback := llmcontracts.MidTurnSteeringCallbackFromContext(ctx)
-	if callback == nil {
-		return nil
-	}
-	return func(callbackCtx context.Context, deliver openaiclient.AstraSteeringDeliverer) error {
-		return callback(callbackCtx, func(deliverCtx context.Context, text string) (llmcontracts.SteeringDeliveryState, error) {
-			state, err := deliver(deliverCtx, text)
-			return llmcontracts.SteeringDeliveryState{
-				Status:             llmcontracts.SteeringDeliveryStatus(state.Status),
-				SteeringID:         state.SteeringID,
-				ResponseID:         state.ResponseID,
-				PreviousResponseID: state.PreviousResponseID,
-				Error:              state.Error,
-			}, err
-		})
-	}
-}
-
 func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]openaiclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
 	cleanup := func() {}
 	if agentDef == nil || len(agentDef.MCPServers) == 0 {
@@ -592,9 +573,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
-		EnableAstraMidTurnSteering:     true,
-		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
-		AstraMidTurnSteeringWakeup:     llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !inThinking {
@@ -725,9 +703,6 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
-		EnableAstraMidTurnSteering:     true,
-		OnAstraMidTurnSteering:         openAIAstraMidTurnSteeringCallback(ctx),
-		AstraMidTurnSteeringWakeup:     llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !chatInThinking {

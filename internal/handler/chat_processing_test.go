@@ -4195,7 +4195,65 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	}
 }
 
+func TestProcessStreamingResponse_InterruptsActiveModelCallForLocalSteering(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	mock := testutil.NewMockLLMCaller()
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Local Steering Project")
+	task := createTask(t, h, project.ID, "Local Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+
+	var steeringID string
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		if mock.CallCount() != 1 {
+			mock.Response = "finished after local steering"
+			mock.TextOnly = mock.Response
+			mock.Err = nil
+			return
+		}
+		steering := &models.ThreadInput{
+			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
+			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
+			Content: "change course locally",
+		}
+		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+		steeringID = steering.ID
+		select {
+		case <-callCtx.Done():
+			mock.Err = callCtx.Err()
+		case <-time.After(2 * time.Second):
+			t.Fatal("active model call was not interrupted for steering")
+		}
+	}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
+		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 2, mock.CallCount())
+	require.Contains(t, mock.LastAgentRequest().Message, "change course locally")
+	require.NotEmpty(t, steeringID)
+	applied, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+}
+
 func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable(t *testing.T) {
+	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4270,6 +4328,7 @@ func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable
 }
 
 func TestProcessStreamingResponse_CommitsMidTurnSteeringAfterPendingDeliveryCompletes(t *testing.T) {
+	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4354,6 +4413,7 @@ func (e ambiguousSteeringTestError) Error() string {
 func (e ambiguousSteeringTestError) AmbiguousSteeringIDs() []string { return e.ids }
 
 func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFailure(t *testing.T) {
+	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4408,6 +4468,7 @@ func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFail
 }
 
 func TestProcessStreamingResponse_PreservesAmbiguousSteeringWithoutApplyingOrRequeueing(t *testing.T) {
+	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4466,6 +4527,7 @@ func TestProcessStreamingResponse_PreservesAmbiguousSteeringWithoutApplyingOrReq
 }
 
 func TestProcessStreamingResponse_DoesNotReplaySteeringWhenReceiptPersistenceFails(t *testing.T) {
+	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4535,6 +4597,7 @@ func TestProcessStreamingResponse_DoesNotReplaySteeringWhenReceiptPersistenceFai
 }
 
 func TestProcessStreamingResponse_FallsBackWhenSteeringClaimPersistenceFails(t *testing.T) {
+	t.Skip("provider-owned response.steer was removed in favor of local turn interruption")
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -5001,7 +5064,7 @@ func TestProcessStreamingResponse_AppliesPreparedSteeringAfterSuccessfulProvider
 	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
 }
 
-func TestProcessStreamingResponse_RequeuesLateAttachmentSteeringInsteadOfCommittingToCompletedChatTurn(t *testing.T) {
+func TestProcessStreamingResponse_InterruptsForLateAttachmentSteeringAndCommitsIt(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc = nil
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
@@ -5072,19 +5135,17 @@ func TestProcessStreamingResponse_RequeuesLateAttachmentSteeringInsteadOfCommitt
 		suppressQueuedTurnPromotion: true,
 	})
 
-	require.Equal(t, 1, providerCalls, "late attachment steering must not trigger a continuation on the completed turn")
+	require.Equal(t, 2, providerCalls, "attachment steering should interrupt and continue the active turn")
 	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
 	require.NoError(t, err)
-	require.Empty(t, chatAttachments, "late steering attachments must not be published on the original user turn")
-	requeued, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.Len(t, chatAttachments, 1)
+	applied, err := h.threadInputRepo.GetByID(ctx, steeringID)
 	require.NoError(t, err)
-	require.NotNil(t, requeued)
-	require.Equal(t, models.ThreadInputPending, requeued.InputStatus)
-	require.Equal(t, models.ThreadInputModeQueued, requeued.InputMode)
-	require.Empty(t, requeued.TurnID)
-	require.Empty(t, requeued.ExpectedTurnID)
-	require.Equal(t, sessionID, requeued.AttachmentSessionID)
-	require.FileExists(t, filepath.Join(pendingDir, "screen.png"))
+	require.NotNil(t, applied)
+	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+	require.Equal(t, models.ThreadInputModeSteering, applied.InputMode)
+	require.Equal(t, sessionID, applied.AttachmentSessionID)
+	require.NoFileExists(t, filepath.Join(pendingDir, "screen.png"))
 
 	var usageCount, totalTokens int
 	var usageStatus, operation string
@@ -5093,7 +5154,7 @@ func TestProcessStreamingResponse_RequeuesLateAttachmentSteeringInsteadOfCommitt
 		FROM llm_usage_events
 		WHERE execution_id = ?`, exec.ID).Scan(&usageCount, &totalTokens, &usageStatus, &operation)
 	require.NoError(t, err)
-	require.Equal(t, 1, usageCount, "late attachment-steering completion must still record provider usage")
+	require.Equal(t, 1, usageCount, "the interrupted request has no completed usage record")
 	require.Equal(t, 37, totalTokens)
 	require.Equal(t, string(models.ExecCompleted), usageStatus)
 	require.Equal(t, string(llmcontracts.OperationStreaming), operation)
@@ -5391,7 +5452,7 @@ func TestProcessStreamingResponse_RequeuesOnlyUncommittedSteeringWhenLaterCommit
 	require.Empty(t, storedSecond.TurnID)
 }
 
-func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCall(t *testing.T) {
+func TestProcessStreamingResponse_RequeuesLocallySteeredInputWhenRestartedModelCallFails(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -5414,7 +5475,11 @@ func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCa
 		ex.IsFollowup = true
 	})
 	var steeringID string
-	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		if mock.CallCount() != 1 {
+			mock.Err = errors.New("provider failed")
+			return
+		}
 		steering := &models.ThreadInput{
 			Scope:          models.ThreadInputScopeTask,
 			ProjectID:      project.ID,
@@ -5428,6 +5493,12 @@ func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCa
 		}
 		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
 		steeringID = steering.ID
+		select {
+		case <-callCtx.Done():
+			mock.Err = callCtx.Err()
+		case <-time.After(2 * time.Second):
+			t.Fatal("active model call was not interrupted for steering")
+		}
 	}
 
 	h.processStreamingResponse(streamingResponseParams{
@@ -5440,7 +5511,7 @@ func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCa
 		suppressQueuedTurnPromotion: true,
 	})
 
-	require.Equal(t, 1, mock.CallCount())
+	require.Equal(t, 2, mock.CallCount())
 	require.NotEmpty(t, steeringID)
 	steering, err := h.threadInputRepo.GetByID(ctx, steeringID)
 	require.NoError(t, err)
@@ -5594,18 +5665,11 @@ func TestProcessStreamingResponse_MultipleSteeringBatchesDoNotDuplicateActiveCon
 	}
 	finalRequest := requests[1]
 	finalHistory := finalRequest.ChatHistory
-	var firstTurnOutput string
 	var duplicateSecondSteering bool
 	for _, turn := range finalHistory {
-		if strings.Contains(turn.PromptSent, "first steering") {
-			firstTurnOutput = turn.Output
-		}
 		if turn.PromptSent == "second steering" {
 			duplicateSecondSteering = true
 		}
-	}
-	if firstTurnOutput != "assistant step one" {
-		t.Fatalf("expected first request output attached before second steering, got %q in %#v", firstTurnOutput, finalHistory)
 	}
 	if duplicateSecondSteering {
 		t.Fatalf("second steering should be delivered as current provider message, not trailing user-only history: %#v", finalHistory)

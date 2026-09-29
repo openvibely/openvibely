@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 201
+const latestMigrationVersion = 202
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -1800,6 +1800,65 @@ func TestMigration197AddsDurableProviderSteeringLedger(t *testing.T) {
 	}
 	if tableCount != 0 {
 		t.Fatal("migration 197 rollback retained provider steering table")
+	}
+}
+
+func TestMigration202RecoversUnresolvedProviderSteering(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "recover-provider-steering-202.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 201); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path)
+		VALUES ('provider-steering-202', 'Provider steering 202', '', '');
+		INSERT INTO thread_inputs
+			(id, scope, project_id, input_mode, input_status, content, queue_position)
+		VALUES
+			('ambiguous-202', 'chat', 'provider-steering-202', 'steering', 'pending', 'ambiguous', 1),
+			('pending-202', 'chat', 'provider-steering-202', 'steering', 'pending', 'pending', 2),
+			('confirmed-202', 'chat', 'provider-steering-202', 'steering', 'applied', 'confirmed', 3);
+		INSERT INTO thread_input_provider_steering
+			(thread_input_id, steering_id, delivery_state)
+		VALUES
+			('ambiguous-202', 'steer-ambiguous-202', 'accepted_ambiguous'),
+			('pending-202', 'steer-pending-202', 'accepted_pending'),
+			('confirmed-202', 'steer-confirmed-202', 'accepted_confirmed');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 202); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range []string{"ambiguous-202", "pending-202"} {
+		var mode, turnID, expectedTurnID string
+		if err := db.QueryRow(`SELECT input_mode, COALESCE(turn_id, ''), COALESCE(expected_turn_id, '') FROM thread_inputs WHERE id = ?`, id).
+			Scan(&mode, &turnID, &expectedTurnID); err != nil {
+			t.Fatal(err)
+		}
+		if mode != "queued" || turnID != "" || expectedTurnID != "" {
+			t.Fatalf("recovered input %s = mode %q turn %q expected %q", id, mode, turnID, expectedTurnID)
+		}
+	}
+	var unresolved int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM thread_input_provider_steering WHERE delivery_state != 'accepted_confirmed'`).Scan(&unresolved); err != nil {
+		t.Fatal(err)
+	}
+	if unresolved != 0 {
+		t.Fatalf("unresolved provider steering rows = %d, want 0", unresolved)
+	}
+	var confirmed int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM thread_input_provider_steering WHERE thread_input_id = 'confirmed-202' AND delivery_state = 'accepted_confirmed'`).Scan(&confirmed); err != nil {
+		t.Fatal(err)
+	}
+	if confirmed != 1 {
+		t.Fatal("confirmed provider steering receipt was removed")
 	}
 }
 

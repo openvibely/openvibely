@@ -418,10 +418,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 
 	startRuntimeCancellation()
+	var steeringWakeup <-chan struct{}
 	if h.threadInputRepo != nil {
-		steeringWakeup, unsubscribeSteeringWakeup := h.threadInputRepo.SubscribeSteeringWakeups(params.ExecID)
+		var unsubscribeSteeringWakeup func()
+		steeringWakeup, unsubscribeSteeringWakeup = h.threadInputRepo.SubscribeSteeringWakeups(params.ExecID)
 		defer unsubscribeSteeringWakeup()
-		ctx = llmcontracts.WithMidTurnSteeringWakeup(ctx, steeringWakeup)
 	}
 	if err := h.prepareAutomationTaskFollowup(ctx, &params); err != nil {
 		applog.Infof("[handler] processStreamingResponse exec=%s task=%s Automation follow-up context error: %v", params.ExecID, params.TaskID, err)
@@ -565,7 +566,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	var err error
 	var pendingSteering preparedSteeringBatch
 	var attemptSteering preparedSteeringBatch
-	steeringBatchesByID := make(map[string]preparedSteeringBatch)
 	var steeringCallbackParams *streamingResponseParams
 	steeringCallback := func(callbackCtx context.Context) (string, error) {
 		if steeringCallbackParams == nil {
@@ -578,72 +578,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
 		return formatSteeringInstruction(combinedSteeringContent(batch.inputs)), nil
-	}
-	midTurnSteeringCallback := func(callbackCtx context.Context, deliver llmcontracts.SteeringDeliverer) error {
-		if steeringCallbackParams == nil || h.threadInputRepo == nil || deliver == nil {
-			return nil
-		}
-		batch, steeringErr := h.claimPendingTextSteeringInputs(callbackCtx, steeringCallbackParams)
-		if steeringErr != nil || batch.count() == 0 {
-			return steeringErr
-		}
-		inputIDs := preparedSteeringInputIDs(batch)
-		claimID := "unknown:" + batch.inputs[0].ID
-		// Persist an unknown-outcome claim before contacting the provider. If the
-		// process or the receipt update fails after the frame is sent, recovery must
-		// not replay input whose provider ownership is uncertain.
-		if claimErr := h.threadInputRepo.RecordProviderSteering(
-			steeringCleanupContext(callbackCtx), inputIDs, claimID, "", "",
-			repository.ProviderSteeringAcceptedAmbiguous,
-		); claimErr != nil {
-			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), inputIDs, steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
-				return errors.Join(claimErr, restoreErr)
-			}
-			applog.Infof("[handler] processStreamingResponse exec=%s unable to persist Astra steering claim; retaining queued fallback: %v", steeringCallbackParams.ExecID, claimErr)
-			return nil
-		}
-		instruction := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
-		delivery, deliveryErr := deliver(callbackCtx, instruction)
-		if deliveryErr == nil && (delivery.Status == llmcontracts.SteeringDeliveryUnavailable || delivery.Status == llmcontracts.SteeringDeliveryFailed) {
-			if clearErr := h.threadInputRepo.ClearProviderSteering(steeringCleanupContext(callbackCtx), []string{claimID}); clearErr != nil {
-				return clearErr
-			}
-			if restoreErr := h.threadInputRepo.RestorePreparedSteering(steeringCleanupContext(callbackCtx), inputIDs, steeringCallbackParams.ExecID, steeringCallbackParams.ExecID); restoreErr != nil {
-				return restoreErr
-			}
-			if delivery.Status != llmcontracts.SteeringDeliveryUnavailable {
-				applog.Infof("[handler] processStreamingResponse exec=%s Astra mid-turn steering not accepted status=%s error=%s", steeringCallbackParams.ExecID, delivery.Status, delivery.Error)
-			}
-			return nil
-		}
-		if deliveryErr != nil || (delivery.Status != llmcontracts.SteeringDeliveryAccepted && delivery.Status != llmcontracts.SteeringDeliveryPending && delivery.Status != llmcontracts.SteeringDeliveryAmbiguous) {
-			delivery.Status = llmcontracts.SteeringDeliveryAmbiguous
-			if deliveryErr != nil {
-				delivery.Error = deliveryErr.Error()
-			}
-		}
-		deliveryState := repository.ProviderSteeringAcceptedConfirmed
-		if delivery.Status == llmcontracts.SteeringDeliveryPending {
-			deliveryState = repository.ProviderSteeringAcceptedPending
-		} else if delivery.Status == llmcontracts.SteeringDeliveryAmbiguous || delivery.ResponseID == "" {
-			deliveryState = repository.ProviderSteeringAcceptedAmbiguous
-		}
-		steeringID := strings.TrimSpace(delivery.SteeringID)
-		if steeringID == "" {
-			steeringID = claimID
-		}
-		if recordErr := h.threadInputRepo.RecordProviderSteering(
-			steeringCleanupContext(callbackCtx), inputIDs, steeringID,
-			delivery.PreviousResponseID, delivery.ResponseID, deliveryState,
-		); recordErr != nil {
-			return recordErr
-		}
-		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
-		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
-		if delivery.SteeringID != "" {
-			steeringBatchesByID[delivery.SteeringID] = batch
-		}
-		return nil
 	}
 	start := time.Now()
 	finalizeLifecycle := func(runErr error, chatContext llmcontracts.ChatContext) {
@@ -676,7 +610,6 @@ modelLoop:
 		steeringCallbackParams = &params
 		attemptSteering = preparedSteeringBatch{}
 		ctx = llmcontracts.WithSteeringCallback(ctx, steeringCallback)
-		ctx = llmcontracts.WithMidTurnSteeringCallback(ctx, midTurnSteeringCallback)
 		ctx = llmcontracts.WithSteeringRetryResetCallback(ctx, func(callbackCtx context.Context) error {
 			if attemptSteering.count() == 0 || h.threadInputRepo == nil {
 				return nil
@@ -702,36 +635,76 @@ modelLoop:
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
 		}
+		// Codex-style steering is owned by the local turn runner. A new input
+		// interrupts the active model call, then the normal loop resumes with the
+		// durable steering row as its next user input. Provider response.steer is
+		// deliberately not part of this path.
+		modelCallCtx, cancelModelCall := context.WithCancel(requestCtx)
+		modelCallDone := make(chan struct{})
+		modelCallWatcherDone := make(chan struct{})
+		steeringInterrupted := make(chan struct{}, 1)
+		if steeringWakeup != nil {
+			go func() {
+				defer close(modelCallWatcherDone)
+				select {
+				case <-modelCallDone:
+					return
+				case <-modelCallCtx.Done():
+					return
+				case <-steeringWakeup:
+				}
+				inputs, listErr := h.threadInputRepo.ListPendingSteering(
+					context.WithoutCancel(requestCtx), params.ExecID, params.ExecID,
+				)
+				if listErr != nil {
+					applog.Infof("[handler] processStreamingResponse exec=%s error checking steering interrupt: %v", params.ExecID, listErr)
+					return
+				}
+				if len(inputs) == 0 {
+					return
+				}
+				steeringInterrupted <- struct{}{}
+				cancelModelCall()
+			}()
+		} else {
+			close(modelCallWatcherDone)
+		}
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
-			requestCtx, params.Message, requestImageAttachments, params.Agent,
+			modelCallCtx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,
 			params.WorkDir, agentDef, params.IsTaskFollowup,
 		)
+		close(modelCallDone)
+		cancelModelCall()
+		<-modelCallWatcherDone
+		wasSteeringInterrupted := false
+		select {
+		case <-steeringInterrupted:
+			wasSteeringInterrupted = true
+		default:
+		}
 		steeringCallbackParams = nil
 		attemptSteering = preparedSteeringBatch{}
+		if wasSteeringInterrupted && ctx.Err() == nil {
+			partialOutput := ""
+			if current, loadErr := h.execRepo.GetByID(context.WithoutCancel(ctx), params.ExecID); loadErr != nil {
+				err = fmt.Errorf("loading interrupted steering output: %w", loadErr)
+				break
+			} else if current != nil {
+				partialOutput = current.Output
+			}
+			interruptedBatch, steeringErr := h.preparePendingSteeringInputs(ctx, &params, partialOutput)
+			if steeringErr != nil {
+				err = fmt.Errorf("preparing interrupted steering: %w", steeringErr)
+				break
+			}
+			if interruptedBatch.count() > 0 {
+				pendingSteering.inputs = append(pendingSteering.inputs, interruptedBatch.inputs...)
+				applog.Infof("[handler] processStreamingResponse exec=%s interrupted model call for %d local steering inputs", params.ExecID, interruptedBatch.count())
+				continue modelLoop
+			}
+		}
 		if err != nil || ctx.Err() != nil {
-			if h.threadInputRepo != nil {
-				ambiguousIDs := ambiguousSteeringIDs(err)
-				if markErr := h.threadInputRepo.MarkProviderSteeringAmbiguous(steeringCleanupContext(ctx), ambiguousIDs); markErr != nil {
-					applog.Infof("[handler] processStreamingResponse exec=%s error preserving ambiguous Astra steering: %v", params.ExecID, markErr)
-				}
-				failedIDs := failedSteeringIDs(err)
-				if clearErr := h.threadInputRepo.ClearProviderSteering(steeringCleanupContext(ctx), failedIDs); clearErr != nil {
-					applog.Infof("[handler] processStreamingResponse exec=%s error clearing failed Astra steering: %v", params.ExecID, clearErr)
-				}
-			}
-			for _, steeringID := range committedSteeringIDs(err) {
-				batch := steeringBatchesByID[steeringID]
-				if batch.count() == 0 {
-					continue
-				}
-				if commitErr := h.commitPreparedSteeringInputs(steeringCleanupContext(ctx), params, batch); commitErr != nil {
-					applog.Infof("[handler] processStreamingResponse exec=%s error committing confirmed Astra steering %s during recovery: %v", params.ExecID, steeringID, commitErr)
-					continue
-				}
-				pendingSteering = removePreparedSteeringInputs(pendingSteering, batch)
-				delete(steeringBatchesByID, steeringID)
-			}
 			h.requeuePendingSteeringForExecution(ctx, params.ExecID)
 			pendingSteering = preparedSteeringBatch{}
 			break
@@ -901,51 +874,6 @@ modelLoop:
 
 type preparedSteeringBatch struct {
 	inputs []models.ThreadInput
-}
-
-type committedSteeringError interface {
-	CommittedSteeringIDs() []string
-}
-
-type ambiguousSteeringError interface {
-	AmbiguousSteeringIDs() []string
-}
-
-type failedSteeringError interface {
-	FailedSteeringIDs() []string
-}
-
-func committedSteeringIDs(err error) []string {
-	if err == nil {
-		return nil
-	}
-	var committed committedSteeringError
-	if !errors.As(err, &committed) {
-		return nil
-	}
-	return committed.CommittedSteeringIDs()
-}
-
-func ambiguousSteeringIDs(err error) []string {
-	if err == nil {
-		return nil
-	}
-	var ambiguous ambiguousSteeringError
-	if !errors.As(err, &ambiguous) {
-		return nil
-	}
-	return ambiguous.AmbiguousSteeringIDs()
-}
-
-func failedSteeringIDs(err error) []string {
-	if err == nil {
-		return nil
-	}
-	var failed failedSteeringError
-	if !errors.As(err, &failed) {
-		return nil
-	}
-	return failed.FailedSteeringIDs()
 }
 
 func (b preparedSteeringBatch) count() int {
