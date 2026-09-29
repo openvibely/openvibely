@@ -89,6 +89,9 @@ type AgenticOptions struct {
 
 	// ExtraTools are appended to the default local tools (for example MCP tools).
 	ExtraTools []ToolDefinition
+	// OnSteeringToolRefresh rebuilds the request's advertised tool view after
+	// pending user input is accepted, matching Codex's step-context refresh.
+	OnSteeringToolRefresh func(ctx context.Context) (AgenticToolSnapshot, error)
 	// ToolExecutor overrides tool execution. It should return (output, isError, err).
 	// If nil, built-in local tool execution is used.
 	ToolExecutor func(ctx context.Context, name string, input json.RawMessage) (string, bool, error)
@@ -141,6 +144,15 @@ type AgenticOptions struct {
 	OnCompaction                   func(summary string) // called when history is compacted
 	// onCompactionUsage records billing usage separately from active context size.
 	onCompactionUsage func(*agenticTurnResult)
+}
+
+// AgenticToolSnapshot is the tool-definition portion of a refreshed Codex
+// step context. Executors and filters remain live callbacks on AgenticOptions.
+type AgenticToolSnapshot struct {
+	ExtraTools       []ToolDefinition
+	SkipDefaultTools bool
+	ToolExecutor     func(ctx context.Context, name string, input json.RawMessage) (string, bool, error)
+	ToolFilter       func(name string) bool
 }
 
 // AgenticResponse is the result of an agentic send.
@@ -386,19 +398,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		return nil, err
 	}
 
-	var tools []ToolDefinition
-	if !opts.DisableTools {
-		if !opts.SkipDefaultTools {
-			tools = DefaultTools()
-		}
-		if len(opts.ExtraTools) > 0 {
-			tools = append(tools, opts.ExtraTools...)
-		}
-		tools = filterToolDefinitions(tools, opts.ToolFilter)
-	}
-	if useStandaloneWebSearch {
-		tools = append(tools, standaloneWebSearchTool())
-	}
+	tools := agenticToolDefinitions(opts, useStandaloneWebSearch)
 
 	finalReasoningEffort := normalizedAstraReasoningEffort(opts.Model, opts.ReasoningEffort)
 	requestLevelReasoningEffort := ""
@@ -667,6 +667,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				if err != nil {
 					return nil, wrapSteeringCommits(fmt.Errorf("turn %d compaction: %w", turn+1, err))
 				}
+				tools, err = refreshAgenticToolsAtSteeringBoundary(ctx, opts, tools, useStandaloneWebSearch)
+				if err != nil {
+					return nil, wrapSteeringCommits(fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err))
+				}
 				var appendErr error
 				inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
 				if appendErr != nil {
@@ -762,6 +766,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			// Codex resumes the required model/tool continuation after compaction
 			// before draining pending user input.
 			pendingAsyncDeliveries = append(pendingAsyncDeliveries, deliveryRecords...)
+			// A mandatory post-compaction model/tool continuation is not a new
+			// agent turn and must survive an explicit MaxTurns boundary.
+			turn--
 			continue
 		}
 
@@ -770,6 +777,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return nil, wrapSteeringCommits(fmt.Errorf("turn %d claim local steering: %w", turn+1, err))
 		}
 		if !localSteering.empty() {
+			tools, err = refreshAgenticToolsAtSteeringBoundary(ctx, opts, tools, useStandaloneWebSearch)
+			if err != nil {
+				return nil, wrapSteeringCommits(fmt.Errorf("turn %d refresh steering tools: %w", turn+1, err))
+			}
 			pendingAsyncDeliveries = append(pendingAsyncDeliveries, deliveryRecords...)
 			var appendErr error
 			inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
@@ -978,6 +989,12 @@ func exclusiveRequestUserInputTask(tasks []openAIToolExecutionTask) int {
 
 func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool, *WebSearchResult) {
 	applog.Debugf("[openai-client] executing tool %s", name)
+	if opts != nil && opts.LocalSteeringWakeup != nil {
+		// Wait-style runtime tools can observe the same turn-local notification
+		// Codex uses to stop waiting when new user input arrives. Ordinary tools
+		// are not cancelled and remain responsible for their normal completion.
+		ctx = llmcontracts.WithMidTurnSteeringWakeup(ctx, opts.LocalSteeringWakeup)
+	}
 	output := ""
 	isError := false
 	var err error
@@ -2199,6 +2216,39 @@ func claimLocalSteeringAtBoundary(ctx context.Context, opts *AgenticOptions, inc
 		return LocalSteeringInput{Text: strings.TrimSpace(text)}, err
 	}
 	return LocalSteeringInput{}, nil
+}
+
+func agenticToolDefinitions(opts *AgenticOptions, includeStandaloneWebSearch bool) []ToolDefinition {
+	if opts == nil {
+		return nil
+	}
+	var tools []ToolDefinition
+	if !opts.DisableTools {
+		if !opts.SkipDefaultTools {
+			tools = DefaultTools()
+		}
+		tools = append(tools, opts.ExtraTools...)
+		tools = filterToolDefinitions(tools, opts.ToolFilter)
+	}
+	if includeStandaloneWebSearch {
+		tools = append(tools, standaloneWebSearchTool())
+	}
+	return tools
+}
+
+func refreshAgenticToolsAtSteeringBoundary(ctx context.Context, opts *AgenticOptions, current []ToolDefinition, includeStandaloneWebSearch bool) ([]ToolDefinition, error) {
+	if opts == nil || opts.OnSteeringToolRefresh == nil {
+		return current, nil
+	}
+	snapshot, err := opts.OnSteeringToolRefresh(ctx)
+	if err != nil {
+		return current, err
+	}
+	opts.ExtraTools = append([]ToolDefinition(nil), snapshot.ExtraTools...)
+	opts.SkipDefaultTools = snapshot.SkipDefaultTools
+	opts.ToolExecutor = snapshot.ToolExecutor
+	opts.ToolFilter = snapshot.ToolFilter
+	return agenticToolDefinitions(opts, includeStandaloneWebSearch), nil
 }
 
 // sendAgenticTurn sends a single request and returns parsed results.

@@ -464,6 +464,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	if rt != nil && len(rt.Definitions) > 0 && !disableTools {
+		toolPolicy := runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)
 		restoreOpenAIAstraReasoningState(ctx, client, agent.Model)
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 			Model:            agent.Model,
@@ -475,7 +476,8 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			WorkDir:          effectiveWorkDir,
 			Attachments:      oaAttachments,
 			ExtraTools:       runtimeOpenAITools(rt, false), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
-			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)),
+			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, toolPolicy),
+			OnSteeringToolRefresh:          openAISteeringToolRefresh(nil, nil, nil, toolPolicy, false, false),
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 			OnLocalSteering:                openAILocalSteeringCallback(ctx),
 			LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
@@ -536,10 +538,13 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
+	steeringBaseTools := append([]openaiclient.ToolDefinition(nil), extraTools...)
+	steeringBaseExecutor, steeringBaseFilter := toolExecutor, toolFilter
 	enableAsyncTools := openAIAsyncRuntimeToolsEnabledForRequest(ctx, agent) && strings.TrimSpace(execID) != "" && a.execRepo != nil
+	toolPolicy := runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)
 	extraTools = append(extraTools, runtimeOpenAITools(rt, enableAsyncTools)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
-	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
+	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, toolPolicy)
 
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
@@ -574,6 +579,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnAsyncToolResult:              asyncCallbacks.onResult,
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
+		OnSteeringToolRefresh:          openAISteeringToolRefresh(steeringBaseTools, steeringBaseExecutor, steeringBaseFilter, toolPolicy, agentSkipDefaultTools(agentDef), enableAsyncTools),
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
@@ -666,10 +672,13 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildOpenAIRuntime(ctx, effectiveWorkDir, agentDef)
 	defer cleanupRuntime()
+	steeringBaseTools := append([]openaiclient.ToolDefinition(nil), extraTools...)
+	steeringBaseExecutor, steeringBaseFilter := toolExecutor, toolFilter
 	enableAsyncTools := openAIAsyncRuntimeToolsEnabledForRequest(ctx, agent) && strings.TrimSpace(execID) != "" && a.execRepo != nil
+	toolPolicy := runtimeToolPolicyOptions(isTaskFollowup, chatMode)
 	extraTools = append(extraTools, runtimeOpenAITools(rt, enableAsyncTools)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
-	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(isTaskFollowup, chatMode))
+	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, toolPolicy)
 
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
@@ -706,6 +715,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnAsyncToolResult:              asyncCallbacks.onResult,
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
+		OnSteeringToolRefresh:          openAISteeringToolRefresh(steeringBaseTools, steeringBaseExecutor, steeringBaseFilter, toolPolicy, agentSkipDefaultTools(agentDef), enableAsyncTools),
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
@@ -1220,6 +1230,28 @@ func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (ope
 			messages = append(messages, openaiclient.LocalSteeringMessage{Text: message.Text, Attachments: messageAttachments})
 		}
 		return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments, Messages: messages}, nil
+	}
+}
+
+func openAISteeringToolRefresh(
+	baseTools []openaiclient.ToolDefinition,
+	baseExecutor func(context.Context, string, json.RawMessage) (string, bool, error),
+	baseFilter func(string) bool,
+	policy llmcontracts.RuntimeToolPolicyOptions,
+	skipDefaultTools bool,
+	enableAsync bool,
+) func(context.Context) (openaiclient.AgenticToolSnapshot, error) {
+	base := append([]openaiclient.ToolDefinition(nil), baseTools...)
+	return func(callbackCtx context.Context) (openaiclient.AgenticToolSnapshot, error) {
+		rt := llmcontracts.RuntimeToolsFromContext(callbackCtx)
+		extraTools := append([]openaiclient.ToolDefinition(nil), base...)
+		extraTools = append(extraTools, runtimeOpenAITools(rt, enableAsync)...)
+		return openaiclient.AgenticToolSnapshot{
+			ExtraTools:       extraTools,
+			SkipDefaultTools: skipDefaultTools || llmcontracts.RuntimeSkipDefaultTools(rt),
+			ToolExecutor:     composeRuntimeToolExecutor(baseExecutor, rt),
+			ToolFilter:       llmcontracts.ComposeRuntimeToolFilter(baseFilter, rt, policy),
+		}, nil
 	}
 }
 

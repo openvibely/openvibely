@@ -126,6 +126,30 @@ func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 		t.Fatalf("plain executor output=%q err=%v", out, err)
 	}
 
+	refreshRT := &llmcontracts.RuntimeTools{
+		Definitions:      []llmcontracts.RuntimeToolDefinition{{Name: "late_tool", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		SkipDefaultTools: true,
+		Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+			return "late result", true, false, nil
+		},
+	}
+	refresh := openAISteeringToolRefresh(
+		[]openaiclient.ToolDefinition{{Type: "function", Name: "static_tool"}},
+		baseExec,
+		nil,
+		runtimeToolPolicyOptions(true, models.ChatModeOrchestrate),
+		false,
+		false,
+	)
+	snapshot, err := refresh(llmcontracts.WithRuntimeTools(context.Background(), refreshRT))
+	if err != nil || len(snapshot.ExtraTools) != 2 || snapshot.ExtraTools[1].Name != "late_tool" || !snapshot.SkipDefaultTools {
+		t.Fatalf("steering tool snapshot=%#v err=%v", snapshot, err)
+	}
+	out, isErr, err = snapshot.ToolExecutor(context.Background(), "late_tool", nil)
+	if out != "late result" || isErr || err != nil {
+		t.Fatalf("refreshed executor output=%q isErr=%v err=%v", out, isErr, err)
+	}
+
 }
 
 func TestBuildOpenAIRuntimeAdvertisesAndExecutesMCPToolsOnce(t *testing.T) {
