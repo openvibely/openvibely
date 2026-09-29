@@ -52,7 +52,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::after { transition: none; } }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 0 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }
-  .desktop-project-tab:not(:has([aria-selected="true"])) [role="tab"]:hover { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; padding-left: 12px; padding-right: 36px; }
+  .desktop-project-tab:not(:has([aria-selected="true"])):hover [role="tab"] { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; padding-left: 12px; padding-right: 36px; }
   .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
   #desktop-project-titlebar #project-selector-trigger { flex-shrink: 0; width: 30px; height: 30px; align-self: center; border-radius: 50%; }

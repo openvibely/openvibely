@@ -148,6 +148,17 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p00"]').parentElement,'::after').opacity`); got != "1" {
 					t.Fatal("active tab curve disappeared on adjacent hover", got)
 				}
+				tabHoverColor := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p01"]')).backgroundColor`)
+				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-close-project="p01"]').getBoundingClientRect();return {X:r.x+r.width/2,Y:r.y+r.height/2};})())`)), &hoverPoint); err != nil {
+					t.Fatal(err)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": hoverPoint.X, "y": hoverPoint.Y}, nil)
+				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p01"]')).backgroundColor`); got != tabHoverColor {
+					t.Fatal("inactive tab hover background disappeared over close button", got, tabHoverColor)
+				}
+				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-close-project="p01"]')).backgroundColor`); got == "rgba(0, 0, 0, 0)" || got == tabHoverColor {
+					t.Fatal("close button needs its own hover highlight", got)
+				}
 				// Reorder with real mouse input, in both directions, without navigation.
 				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p02"]').parentElement,'::after').width`); got != "2px" {
 					t.Fatal("missing background tab separator", got)
