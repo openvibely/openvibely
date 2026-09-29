@@ -21,6 +21,15 @@ func TestLifecycleHookAndSteeringContextHelpers(t *testing.T) {
 	if got, err := SteeringCallbackFromContext(ctx)(context.Background()); got != "steer" || err != nil {
 		t.Fatalf("steering callback = %q, %v", got, err)
 	}
+	if WithLocalSteeringCallback(context.Background(), nil) == nil || LocalSteeringCallbackFromContext(nil) != nil {
+		t.Fatal("local steering callback helpers should be nil-safe")
+	}
+	ctx = WithLocalSteeringCallback(context.Background(), func(context.Context) (LocalSteeringInput, error) {
+		return LocalSteeringInput{Text: "structured steer"}, nil
+	})
+	if got, err := LocalSteeringCallbackFromContext(ctx)(context.Background()); got.Text != "structured steer" || err != nil {
+		t.Fatalf("local steering callback = %#v, %v", got, err)
+	}
 	wantErr := errors.New("reset")
 	ctx = WithSteeringRetryResetCallback(context.Background(), func(context.Context) error { return wantErr })
 	if err := SteeringRetryResetCallbackFromContext(ctx)(context.Background()); !errors.Is(err, wantErr) {

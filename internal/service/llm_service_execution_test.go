@@ -1446,6 +1446,24 @@ func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T
 	}
 }
 
+func TestLLMService_HydrateTaskSteeringAttachmentsKeepsImagesStructured(t *testing.T) {
+	uploadsDir := t.TempDir()
+	sessionID := "structured-steering"
+	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("attachment notes"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("image bytes"), 0644))
+
+	svc := &LLMService{taskSvc: &TaskService{uploadsDir: uploadsDir}}
+	inputs := []models.ThreadInput{{Content: "inspect these", AttachmentSessionID: sessionID}}
+	attachments, err := svc.hydrateTaskSteeringAttachments(inputs)
+	require.NoError(t, err)
+	require.Contains(t, inputs[0].Content, "attachment notes")
+	require.Len(t, attachments, 1)
+	require.Equal(t, "screen.png", attachments[0].FileName)
+	require.Equal(t, "image/png", attachments[0].MediaType)
+}
+
 func TestLLMService_ExecuteTaskWithAgent_DoesNotReplayProviderCall(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)

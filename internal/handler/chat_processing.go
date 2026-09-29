@@ -578,6 +578,23 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
 		return formatSteeringInstruction(combinedSteeringContent(batch.inputs)), nil
 	}
+	localSteeringCallback := func(callbackCtx context.Context) (llmcontracts.LocalSteeringInput, error) {
+		if steeringCallbackParams == nil {
+			return llmcontracts.LocalSteeringInput{}, nil
+		}
+		attachmentStart := len(steeringCallbackParams.ImageAttachments)
+		batch, steeringErr := h.claimPendingSteeringInputs(callbackCtx, steeringCallbackParams)
+		if steeringErr != nil || batch.count() == 0 {
+			return llmcontracts.LocalSteeringInput{}, steeringErr
+		}
+		attachments := append([]models.Attachment(nil), steeringCallbackParams.ImageAttachments[attachmentStart:]...)
+		steeringCallbackParams.ImageAttachments = steeringCallbackParams.ImageAttachments[:attachmentStart]
+		pendingSteering.inputs = append(pendingSteering.inputs, batch.inputs...)
+		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
+		text := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
+		steeringCallbackParams.lifecycleUserMessage = text
+		return llmcontracts.LocalSteeringInput{Text: text, Attachments: attachments}, nil
+	}
 	start := time.Now()
 	finalizeLifecycle := func(runErr error, chatContext llmcontracts.ChatContext) {
 		if lifecycleAfter != nil {
@@ -609,6 +626,7 @@ modelLoop:
 		steeringCallbackParams = &params
 		attemptSteering = preparedSteeringBatch{}
 		ctx = llmcontracts.WithSteeringCallback(ctx, steeringCallback)
+		ctx = llmcontracts.WithLocalSteeringCallback(ctx, localSteeringCallback)
 		ctx = llmcontracts.WithSteeringRetryResetCallback(ctx, func(callbackCtx context.Context) error {
 			if attemptSteering.count() == 0 || h.threadInputRepo == nil {
 				return nil

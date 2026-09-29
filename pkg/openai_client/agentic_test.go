@@ -418,6 +418,85 @@ func TestSendAgentic_LocalSteeringKeepsEveryRapidInstruction(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_LocalSteeringCarriesStructuredAttachments(t *testing.T) {
+	requestStarted := make(chan struct{}, 1)
+	secondRequest := make(chan map[string]any, 1)
+	var turns atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turns.Add(1) == 1 {
+			requestStarted <- struct{}{}
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		secondRequest <- request
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"done"}`,
+			`{"type":"response.completed","response":{"id":"resp_done","status":"completed","model":"gpt-test"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	attachment, err := NewFileAttachmentFromBytes("steer.png", "image/png", []byte("image bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeup := make(chan struct{}, 1)
+	client := NewWithAPIKey("test-key")
+	done := make(chan error, 1)
+	go func() {
+		_, sendErr := client.SendAgentic(context.Background(), "original request", &AgenticOptions{
+			Model:               "gpt-test",
+			MaxTurns:            1,
+			SkipDefaultTools:    true,
+			LocalSteeringWakeup: wakeup,
+			OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
+				return LocalSteeringInput{Text: "look at this", Attachments: []*FileAttachment{attachment}}, nil
+			},
+		})
+		done <- sendErr
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first response did not start")
+	}
+	wakeup <- struct{}{}
+	if err := <-done; err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+
+	request := <-secondRequest
+	input, _ := request["input"].([]any)
+	var sawText, sawImage bool
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] != "message" || item["role"] != "user" {
+			continue
+		}
+		content, _ := item["content"].([]any)
+		for _, rawBlock := range content {
+			block, _ := rawBlock.(map[string]any)
+			sawText = sawText || block["type"] == "input_text" && block["text"] == "look at this"
+			sawImage = sawImage || block["type"] == "input_image" && strings.HasPrefix(fmt.Sprint(block["image_url"]), "data:image/png;base64,")
+		}
+	}
+	if !sawText || !sawImage {
+		t.Fatalf("structured steering input missing text or image: %#v", input)
+	}
+}
+
 func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.T) {
 	var gotHeader string
 	var gotBody map[string]any

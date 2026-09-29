@@ -288,6 +288,31 @@ func (r *ThreadInputRepo) SubscribeSteeringWakeups(activeExecutionID string) (<-
 	listeners[wakeup] = struct{}{}
 	r.steeringWakeupsMu.Unlock()
 
+	// Register before checking the database so a steer created in either side
+	// of this boundary is observed. Duplicate notifications are coalesced.
+	var pending int
+	err := r.db.QueryRowContext(context.Background(), `
+		SELECT EXISTS(
+			SELECT 1
+			FROM thread_inputs ti
+			WHERE ti.input_mode = ?
+			  AND ti.input_status = ?
+			  AND ti.turn_id = ?
+			  AND ti.expected_turn_id = ?
+			  AND NOT EXISTS (
+				SELECT 1 FROM thread_input_provider_steering ps
+				WHERE ps.thread_input_id = ti.id
+			  )
+		)`,
+		models.ThreadInputModeSteering,
+		models.ThreadInputPending,
+		activeExecutionID,
+		activeExecutionID,
+	).Scan(&pending)
+	if err == nil && pending != 0 {
+		wakeup <- struct{}{}
+	}
+
 	return wakeup, func() {
 		r.steeringWakeupsMu.Lock()
 		listeners := r.steeringWakeups[activeExecutionID]

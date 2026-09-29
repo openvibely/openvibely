@@ -1,14 +1,28 @@
 package contracts
 
-import "context"
+import (
+	"context"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
 
 type steeringCallbackKey struct{}
 type steeringRetryResetCallbackKey struct{}
 type midTurnSteeringCallbackKey struct{}
 type midTurnSteeringWakeupKey struct{}
+type localSteeringCallbackKey struct{}
 
 // SteeringCallback returns raw steering text to inject before the next provider/tool-loop model request.
 type SteeringCallback func(context.Context) (string, error)
+
+// LocalSteeringInput mirrors Codex's structured turn/steer user input. Unlike
+// provider-neutral tool-boundary steering, it may include local attachments.
+type LocalSteeringInput struct {
+	Text        string
+	Attachments []models.Attachment
+}
+
+type LocalSteeringCallback func(context.Context) (LocalSteeringInput, error)
 
 // SteeringRetryResetCallback resets steering claimed by a failed provider attempt before retrying.
 type SteeringRetryResetCallback func(context.Context) error
@@ -52,6 +66,21 @@ func SteeringCallbackFromContext(ctx context.Context) SteeringCallback {
 		return nil
 	}
 	callback, _ := ctx.Value(steeringCallbackKey{}).(SteeringCallback)
+	return callback
+}
+
+func WithLocalSteeringCallback(ctx context.Context, callback LocalSteeringCallback) context.Context {
+	if callback == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, localSteeringCallbackKey{}, callback)
+}
+
+func LocalSteeringCallbackFromContext(ctx context.Context) LocalSteeringCallback {
+	if ctx == nil {
+		return nil
+	}
+	callback, _ := ctx.Value(localSteeringCallbackKey{}).(LocalSteeringCallback)
 	return callback
 }
 

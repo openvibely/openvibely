@@ -122,6 +122,9 @@ type AgenticOptions struct {
 	OnToolResult func(name string, output string, isError bool) // called when a tool completes
 	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
+	// OnLocalSteering claims Codex-style structured input for an active turn.
+	// It is preferred over OnToolBoundarySteering at the sampling interrupt.
+	OnLocalSteering func(ctx context.Context) (LocalSteeringInput, error)
 	// LocalSteeringWakeup signals that user input is pending for this active
 	// turn. It preempts only the provider stream; the outer turn and tools keep
 	// running, matching Codex's InstantInterrupt boundary.
@@ -226,8 +229,27 @@ type astraSteeringFailedError struct {
 }
 
 type localSteeringInterruptError struct {
-	steering    string
+	steering    LocalSteeringInput
 	callbackErr error
+}
+
+// LocalSteeringInput is the user input injected at a Codex-style local turn
+// boundary. Attachments are encoded as content blocks in the next request.
+type LocalSteeringInput struct {
+	Text        string
+	Attachments []*FileAttachment
+}
+
+func (i LocalSteeringInput) empty() bool {
+	if strings.TrimSpace(i.Text) != "" {
+		return false
+	}
+	for _, attachment := range i.Attachments {
+		if attachment != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *localSteeringInterruptError) Error() string {
@@ -541,7 +563,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 		}
 		var turnResult *agenticTurnResult
-		localSteering := ""
+		localSteering := LocalSteeringInput{}
 		overflowRecovered := false
 		turnResult, err := doResponsesStreamTurn(ctx, c, opts.Model, httpretry.StreamTurnPolicy{
 			RetryableError: func(err error) bool {
@@ -577,7 +599,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				if interrupted.callbackErr != nil {
 					return nil, wrapSteeringCommits(interrupted)
 				}
-				localSteering = strings.TrimSpace(interrupted.steering)
+				localSteering = interrupted.steering
 				if turnResult == nil {
 					turnResult = &agenticTurnResult{}
 				}
@@ -594,7 +616,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				return nil, wrapSteeringCommits(providerErr)
 			}
 		}
-		if localSteering == "" {
+		if localSteering.empty() {
 			for _, record := range pendingAsyncDeliveries {
 				if opts.OnAsyncToolDelivered != nil {
 					if err := opts.OnAsyncToolDelivered(ctx, record); err != nil {
@@ -639,12 +661,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		// If no tool calls, we're done
 		if len(turnResult.toolCalls) == 0 {
-			if localSteering != "" {
-				inputItems = append(inputItems, agenticInputItem{
-					"type":    "message",
-					"role":    "user",
-					"content": localSteering,
-				})
+			if !localSteering.empty() {
+				var appendErr error
+				inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
+				if appendErr != nil {
+					return nil, wrapSteeringCommits(fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr))
+				}
 				// An interrupted sample without a completed tool call does not
 				// consume the agentic tool-loop budget.
 				turn--
@@ -726,25 +748,30 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				deliveryRecords = append(deliveryRecords, exec.record)
 			}
 		}
-		if localSteering != "" {
+		if !localSteering.empty() {
 			pendingAsyncDeliveries = append(pendingAsyncDeliveries, deliveryRecords...)
 		} else {
 			pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
 		}
 
-		steering := localSteering
-		if steering == "" && opts.OnToolBoundarySteering != nil {
-			steering, err = opts.OnToolBoundarySteering(ctx)
-			if err != nil {
-				return nil, wrapSteeringCommits(fmt.Errorf("turn %d tool-boundary steering: %w", turn+1, err))
+		if !localSteering.empty() {
+			var appendErr error
+			inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
+			if appendErr != nil {
+				return nil, wrapSteeringCommits(fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr))
 			}
-		}
-		if steering = strings.TrimSpace(steering); steering != "" {
-			inputItems = append(inputItems, agenticInputItem{
-				"type":    "message",
-				"role":    "user",
-				"content": steering,
-			})
+		} else if opts.OnToolBoundarySteering != nil {
+			steering, steeringErr := opts.OnToolBoundarySteering(ctx)
+			if steeringErr != nil {
+				return nil, wrapSteeringCommits(fmt.Errorf("turn %d tool-boundary steering: %w", turn+1, steeringErr))
+			}
+			if steering = strings.TrimSpace(steering); steering != "" {
+				inputItems = append(inputItems, agenticInputItem{
+					"type":    "message",
+					"role":    "user",
+					"content": steering,
+				})
+			}
 		}
 
 		compactedItems, err := compactIfNeeded(inputItems, tokenLedger.projectedTokens(localItemsAfterResponse), false)
@@ -1411,6 +1438,7 @@ func (c *Client) compactAgenticInputItemsViaResponsesV2(ctx context.Context, inp
 	compactionOpts.OnToolResult = nil
 	// Compaction must not consume user steering intended for the next model turn.
 	compactionOpts.OnToolBoundarySteering = nil
+	compactionOpts.OnLocalSteering = nil
 	compactionOpts.LocalSteeringWakeup = nil
 	compactionOpts.EnableAstraMidTurnSteering = false
 	compactionOpts.OnAstraMidTurnSteering = nil
@@ -2106,6 +2134,39 @@ func statelessOAuthOutputItems(items []any) []any {
 	return filtered
 }
 
+func appendLocalSteeringInput(inputItems []any, steering LocalSteeringInput) ([]any, error) {
+	text := strings.TrimSpace(steering.Text)
+	if len(steering.Attachments) == 0 {
+		if text == "" {
+			return inputItems, nil
+		}
+		return append(inputItems, agenticInputItem{
+			"type": "message", "role": "user", "content": text,
+		}), nil
+	}
+
+	content := make([]any, 0, len(steering.Attachments)+1)
+	if text != "" {
+		content = append(content, map[string]any{"type": "input_text", "text": text})
+	}
+	for _, attachment := range steering.Attachments {
+		if attachment == nil {
+			continue
+		}
+		block, err := attachment.toInputContent()
+		if err != nil {
+			return inputItems, fmt.Errorf("attachment %s: %w", attachment.FileName, err)
+		}
+		content = append(content, block)
+	}
+	if len(content) == 0 {
+		return inputItems, nil
+	}
+	return append(inputItems, agenticInputItem{
+		"type": "message", "role": "user", "content": content,
+	}), nil
+}
+
 // sendAgenticTurn sends a single request and returns parsed results.
 func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	policy := httpretry.DefaultPolicy()
@@ -2161,13 +2222,13 @@ func (c *Client) parseAgenticStreamWithLocalSteering(
 	onToolUse func(string, json.RawMessage),
 	onToolResult func(string, string, bool),
 ) (*agenticTurnResult, error) {
-	if opts == nil || opts.LocalSteeringWakeup == nil || opts.OnToolBoundarySteering == nil {
+	if opts == nil || opts.LocalSteeringWakeup == nil || (opts.OnLocalSteering == nil && opts.OnToolBoundarySteering == nil) {
 		return c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
 	}
 
 	type steeringOutcome struct {
-		text string
-		err  error
+		input LocalSteeringInput
+		err   error
 	}
 	watchCtx, stopWatching := context.WithCancel(ctx)
 	defer stopWatching()
@@ -2179,15 +2240,21 @@ func (c *Client) parseAgenticStreamWithLocalSteering(
 				outcomeCh <- steeringOutcome{}
 				return
 			case <-opts.LocalSteeringWakeup:
-				steering, err := opts.OnToolBoundarySteering(watchCtx)
-				steering = strings.TrimSpace(steering)
-				if err == nil && steering == "" {
+				steering := LocalSteeringInput{}
+				var err error
+				if opts.OnLocalSteering != nil {
+					steering, err = opts.OnLocalSteering(watchCtx)
+				} else {
+					steering.Text, err = opts.OnToolBoundarySteering(watchCtx)
+				}
+				steering.Text = strings.TrimSpace(steering.Text)
+				if err == nil && steering.empty() {
 					// A stale/coalesced wakeup is harmless. Keep watching the same
 					// response for the next actual user input.
 					continue
 				}
 				_ = body.Close()
-				outcomeCh <- steeringOutcome{text: steering, err: err}
+				outcomeCh <- steeringOutcome{input: steering, err: err}
 				return
 			}
 		}
@@ -2196,8 +2263,8 @@ func (c *Client) parseAgenticStreamWithLocalSteering(
 	result, parseErr := c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
 	stopWatching()
 	outcome := <-outcomeCh
-	if outcome.err != nil || outcome.text != "" {
-		return result, &localSteeringInterruptError{steering: outcome.text, callbackErr: outcome.err}
+	if outcome.err != nil || !outcome.input.empty() {
+		return result, &localSteeringInterruptError{steering: outcome.input, callbackErr: outcome.err}
 	}
 	return result, parseErr
 }

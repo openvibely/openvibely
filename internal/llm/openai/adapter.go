@@ -477,6 +477,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			ExtraTools:       runtimeOpenAITools(rt, false), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
 			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)),
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+			OnLocalSteering:                openAILocalSteeringCallback(ctx),
 			LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 			EnableAstraConfigurationUpdate: true,
 			SkipDefaultTools:               rt.SkipDefaultTools})
@@ -574,6 +575,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
@@ -705,6 +707,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
@@ -1192,6 +1195,24 @@ func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAt
 		result = append(result, oaAtt)
 	}
 	return result, nil
+}
+
+func openAILocalSteeringCallback(ctx context.Context) func(context.Context) (openaiclient.LocalSteeringInput, error) {
+	callback := llmcontracts.LocalSteeringCallbackFromContext(ctx)
+	if callback == nil {
+		return nil
+	}
+	return func(callbackCtx context.Context) (openaiclient.LocalSteeringInput, error) {
+		input, err := callback(callbackCtx)
+		if err != nil {
+			return openaiclient.LocalSteeringInput{}, err
+		}
+		attachments, err := convertAttachments(input.Attachments)
+		if err != nil {
+			return openaiclient.LocalSteeringInput{}, err
+		}
+		return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments}, nil
+	}
 }
 
 func reasoningEffort(model, value string) string {

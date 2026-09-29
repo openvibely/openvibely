@@ -5454,7 +5454,7 @@ func TestProcessStreamingResponse_RequeuesOnlyUncommittedSteeringWhenLaterCommit
 	require.Empty(t, storedSecond.TurnID)
 }
 
-func TestProcessStreamingResponse_RequeuesLocallySteeredInputWhenRestartedModelCallFails(t *testing.T) {
+func TestProcessStreamingResponse_RequeuesSteeringCreatedDuringFailedModelCall(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -5495,12 +5495,7 @@ func TestProcessStreamingResponse_RequeuesLocallySteeredInputWhenRestartedModelC
 		}
 		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
 		steeringID = steering.ID
-		select {
-		case <-callCtx.Done():
-			mock.Err = callCtx.Err()
-		case <-time.After(2 * time.Second):
-			t.Fatal("active model call was not interrupted for steering")
-		}
+		require.NoError(t, callCtx.Err(), "Codex-style steering must not cancel the outer model call context")
 	}
 
 	h.processStreamingResponse(streamingResponseParams{
@@ -5513,7 +5508,7 @@ func TestProcessStreamingResponse_RequeuesLocallySteeredInputWhenRestartedModelC
 		suppressQueuedTurnPromotion: true,
 	})
 
-	require.Equal(t, 2, mock.CallCount())
+	require.Equal(t, 1, mock.CallCount())
 	require.NotEmpty(t, steeringID)
 	steering, err := h.threadInputRepo.GetByID(ctx, steeringID)
 	require.NoError(t, err)
