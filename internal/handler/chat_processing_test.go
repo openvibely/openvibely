@@ -4195,7 +4195,7 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	}
 }
 
-func TestProcessStreamingResponse_InterruptsActiveModelCallForLocalSteering(t *testing.T) {
+func TestProcessStreamingResponse_ExposesLocalSteeringToActiveAgenticTurn(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4217,12 +4217,6 @@ func TestProcessStreamingResponse_InterruptsActiveModelCallForLocalSteering(t *t
 
 	var steeringID string
 	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
-		if mock.CallCount() != 1 {
-			mock.Response = "finished after local steering"
-			mock.TextOnly = mock.Response
-			mock.Err = nil
-			return
-		}
 		steering := &models.ThreadInput{
 			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
 			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
@@ -4231,12 +4225,21 @@ func TestProcessStreamingResponse_InterruptsActiveModelCallForLocalSteering(t *t
 		}
 		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
 		steeringID = steering.ID
+		wakeup := llmcontracts.MidTurnSteeringWakeupFromContext(callCtx)
+		require.NotNil(t, wakeup)
 		select {
-		case <-callCtx.Done():
-			mock.Err = callCtx.Err()
+		case <-wakeup:
 		case <-time.After(2 * time.Second):
-			t.Fatal("active model call was not interrupted for steering")
+			t.Fatal("active agentic turn did not receive steering wakeup")
 		}
+		callback := llmcontracts.SteeringCallbackFromContext(callCtx)
+		require.NotNil(t, callback)
+		instruction, err := callback(callCtx)
+		require.NoError(t, err)
+		require.Contains(t, instruction, "change course locally")
+		require.NoError(t, callCtx.Err(), "steering must not cancel the outer agent/tool context")
+		mock.Response = "finished after local steering"
+		mock.TextOnly = mock.Response
 	}
 
 	h.processStreamingResponse(streamingResponseParams{
@@ -4244,8 +4247,7 @@ func TestProcessStreamingResponse_InterruptsActiveModelCallForLocalSteering(t *t
 		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
 	})
 
-	require.Equal(t, 2, mock.CallCount())
-	require.Contains(t, mock.LastAgentRequest().Message, "change course locally")
+	require.Equal(t, 1, mock.CallCount())
 	require.NotEmpty(t, steeringID)
 	applied, err := h.threadInputRepo.GetByID(ctx, steeringID)
 	require.NoError(t, err)

@@ -1803,7 +1803,7 @@ func TestMigration197AddsDurableProviderSteeringLedger(t *testing.T) {
 	}
 }
 
-func TestMigration202RecoversUnresolvedProviderSteering(t *testing.T) {
+func TestMigration202QuarantinesUnresolvedProviderSteering(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "recover-provider-steering-202.db")
 	db := openMigrationTestDB(t, dbPath)
 
@@ -1842,16 +1842,23 @@ func TestMigration202RecoversUnresolvedProviderSteering(t *testing.T) {
 			Scan(&mode, &turnID, &expectedTurnID); err != nil {
 			t.Fatal(err)
 		}
-		if mode != "queued" || turnID != "" || expectedTurnID != "" {
-			t.Fatalf("recovered input %s = mode %q turn %q expected %q", id, mode, turnID, expectedTurnID)
+		if mode != "steering" || turnID != "" || expectedTurnID != "" {
+			t.Fatalf("quarantined input %s = mode %q turn %q expected %q", id, mode, turnID, expectedTurnID)
 		}
 	}
 	var unresolved int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM thread_input_provider_steering WHERE delivery_state != 'accepted_confirmed'`).Scan(&unresolved); err != nil {
 		t.Fatal(err)
 	}
-	if unresolved != 0 {
-		t.Fatalf("unresolved provider steering rows = %d, want 0", unresolved)
+	if unresolved != 2 {
+		t.Fatalf("unresolved provider steering rows = %d, want 2", unresolved)
+	}
+	var ambiguous int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM thread_input_provider_steering WHERE delivery_state = 'accepted_ambiguous'`).Scan(&ambiguous); err != nil {
+		t.Fatal(err)
+	}
+	if ambiguous != 2 {
+		t.Fatalf("ambiguous provider steering rows = %d, want 2", ambiguous)
 	}
 	var confirmed int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM thread_input_provider_steering WHERE thread_input_id = 'confirmed-202' AND delivery_state = 'accepted_confirmed'`).Scan(&confirmed); err != nil {

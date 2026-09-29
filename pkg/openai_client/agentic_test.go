@@ -226,6 +226,198 @@ func TestSendAgentic_APIKeyResponsesLiteDoesNotReplayUnencryptedReasoning(t *tes
 	}
 }
 
+func TestSendAgentic_LocalSteeringPreemptsOnlySamplingAndDrainsCompletedTools(t *testing.T) {
+	firstResponseStarted := make(chan struct{}, 1)
+	secondRequest := make(chan map[string]any, 1)
+	var turns atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turns.Add(1) == 1 {
+			_, _ = w.Write([]byte(buildSSE([]string{
+				`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_steer","name":"echo","arguments":"{}"}}`,
+				`{"type":"response.output_text.delta","delta":"sampling"}`,
+			})))
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		secondRequest <- request
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"done after steer"}`,
+			`{"type":"response.completed","response":{"id":"resp_done","status":"completed","model":"gpt-test"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	wakeup := make(chan struct{}, 1)
+	toolRan := make(chan struct{}, 1)
+	client := NewWithAPIKey("test-key")
+	resultCh := make(chan *AgenticResponse, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resp, err := client.SendAgentic(context.Background(), "original request", &AgenticOptions{
+			Model:                  "gpt-test",
+			MaxTurns:               2,
+			SkipDefaultTools:       true,
+			ExtraTools:             []ToolDefinition{{Type: "function", Name: "echo", Parameters: json.RawMessage(`{"type":"object"}`)}},
+			LocalSteeringWakeup:    wakeup,
+			OnToolBoundarySteering: func(context.Context) (string, error) { return "new direction", nil },
+			OnText: func(string) {
+				select {
+				case firstResponseStarted <- struct{}{}:
+				default:
+				}
+			},
+			ToolExecutor: func(toolCtx context.Context, _ string, _ json.RawMessage) (string, bool, error) {
+				if err := toolCtx.Err(); err != nil {
+					return "", true, fmt.Errorf("tool inherited sampling cancellation: %w", err)
+				}
+				toolRan <- struct{}{}
+				return "tool completed", false, nil
+			},
+		})
+		resultCh <- resp
+		errCh <- err
+	}()
+
+	select {
+	case <-firstResponseStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first response did not start")
+	}
+	wakeup <- struct{}{}
+
+	select {
+	case <-toolRan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("completed tool call was not drained after steering")
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	resp := <-resultCh
+	if resp == nil || !strings.HasSuffix(resp.Text, "done after steer") {
+		t.Fatalf("response = %#v, want continued steered response", resp)
+	}
+
+	request := <-secondRequest
+	input, _ := request["input"].([]any)
+	var sawCall, sawOutput, sawSteering bool
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		switch item["type"] {
+		case "function_call":
+			sawCall = item["call_id"] == "call_steer"
+		case "function_call_output":
+			sawOutput = item["call_id"] == "call_steer"
+		case "message":
+			sawSteering = item["role"] == "user" && item["content"] == "new direction"
+		}
+	}
+	if !sawCall || !sawOutput || !sawSteering {
+		t.Fatalf("continued input missing call/output/steer: %#v", input)
+	}
+}
+
+func TestSendAgentic_LocalSteeringKeepsEveryRapidInstruction(t *testing.T) {
+	requestStarted := make(chan int, 3)
+	requests := make(chan map[string]any, 3)
+	var turns atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		turn := int(turns.Add(1))
+		requests <- request
+		w.Header().Set("Content-Type", "text/event-stream")
+		requestStarted <- turn
+		if turn < 3 {
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write([]byte(buildSSE([]string{
+			`{"type":"response.output_text.delta","delta":"done"}`,
+			`{"type":"response.completed","response":{"id":"resp_done","status":"completed","model":"gpt-test"}}`,
+		})))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	wakeup := make(chan struct{}, 2)
+	steers := []string{"first correction", "second correction"}
+	var claimed atomic.Int32
+	client := NewWithAPIKey("test-key")
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.SendAgentic(context.Background(), "original request", &AgenticOptions{
+			Model:               "gpt-test",
+			MaxTurns:            1,
+			SkipDefaultTools:    true,
+			LocalSteeringWakeup: wakeup,
+			OnToolBoundarySteering: func(context.Context) (string, error) {
+				index := int(claimed.Add(1)) - 1
+				return steers[index], nil
+			},
+		})
+		done <- err
+	}()
+
+	for wantTurn := 1; wantTurn <= 2; wantTurn++ {
+		select {
+		case gotTurn := <-requestStarted:
+			if gotTurn != wantTurn {
+				t.Fatalf("started turn %d, want %d", gotTurn, wantTurn)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("request %d did not start", wantTurn)
+		}
+		wakeup <- struct{}{}
+	}
+	select {
+	case gotTurn := <-requestStarted:
+		if gotTurn != 3 {
+			t.Fatalf("started turn %d, want 3", gotTurn)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("final request did not start")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+
+	<-requests
+	<-requests
+	finalRequest := <-requests
+	input, _ := finalRequest["input"].([]any)
+	var sawFirst, sawSecond bool
+	for _, raw := range input {
+		item, _ := raw.(map[string]any)
+		if item["type"] != "message" || item["role"] != "user" {
+			continue
+		}
+		sawFirst = sawFirst || item["content"] == "first correction"
+		sawSecond = sawSecond || item["content"] == "second correction"
+	}
+	if !sawFirst || !sawSecond {
+		t.Fatalf("final request dropped a steering instruction: %#v", input)
+	}
+}
+
 func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.T) {
 	var gotHeader string
 	var gotBody map[string]any
