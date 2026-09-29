@@ -1690,7 +1690,7 @@ func TestLLMService_ExecuteTaskWithAgent_ExposesSteeringWakeup(t *testing.T) {
 	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
 }
 
-func TestLLMService_ExecuteTaskWithAgent_DeliversProviderOwnedMidTurnSteering(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_DrainsLocalSteering(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1713,16 +1713,11 @@ func TestLLMService_ExecuteTaskWithAgent_DeliversProviderOwnedMidTurnSteering(t 
 			}
 			require.NoError(t, threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, req.ExecID))
 			steeringID = steering.ID
-			callback := llmcontracts.MidTurnSteeringCallbackFromContext(req.Ctx)
+			callback := llmcontracts.LocalSteeringCallbackFromContext(req.Ctx)
 			require.NotNil(t, callback)
-			err := callback(req.Ctx, func(_ context.Context, input llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
-				require.Len(t, input.Messages, 1)
-				require.Equal(t, "change direction", input.Messages[0].Text)
-				return llmcontracts.SteeringDeliveryState{
-					Status: llmcontracts.SteeringDeliveryAccepted, SteeringID: "steer_1",
-					PreviousResponseID: "resp_1", ResponseID: "resp_2",
-				}, nil
-			})
+			input, err := callback(req.Ctx)
+			require.Len(t, input.Messages, 1)
+			require.Equal(t, "change direction", input.Messages[0].Text)
 			if err != nil {
 				return llmcontracts.AgentResult{}, err
 			}

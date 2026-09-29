@@ -124,50 +124,6 @@ func TestStatelessOAuthOutputItemsDropsUnencryptedReasoning(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_AstraHTTPFallbackSuppressesMidTurnSteering(t *testing.T) {
-	var callbackCalls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/responses" {
-			t.Fatalf("path = %q, want /responses", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte(buildSSE([]string{
-			`{"type":"response.output_text.delta","delta":"http done"}`,
-			`{"type":"response.completed","response":{"id":"resp_http","status":"completed","model":"gpt-6-astra"}}`,
-		})))
-	}))
-	defer srv.Close()
-
-	oldBaseURL := OpenAIAPIBaseURL
-	OpenAIAPIBaseURL = srv.URL + "/"
-	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
-
-	client := newHTTPTestAPIKeyClient("test-key")
-	client.responsesTransportState.websocketDisabled.Store(true)
-	resp, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{
-		Model:                      "gpt-6-astra",
-		SkipDefaultTools:           true,
-		EnableAstraMidTurnSteering: true,
-		OnAstraMidTurnSteering: func(ctx context.Context, deliver AstraSteeringDeliverer) error {
-			callbackCalls.Add(1)
-			_, _ = deliver(ctx, LocalSteeringInput{Text: "must not send over HTTP"})
-			return nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("SendAgentic: %v", err)
-	}
-	if resp.Text != "http done" {
-		t.Fatalf("Text = %q, want http done", resp.Text)
-	}
-	if callbackCalls.Load() != 0 {
-		t.Fatalf("HTTP fallback invoked mid-turn steering callback %d times", callbackCalls.Load())
-	}
-	if records := client.responsesTransportState.SteeringDeliveries(); len(records) != 0 {
-		t.Fatalf("HTTP fallback recorded steering deliveries: %#v", records)
-	}
-}
-
 func TestSendAgentic_APIKeyResponsesLiteDoesNotReplayUnencryptedReasoning(t *testing.T) {
 	requests := make(chan map[string]any, 2)
 	var turns atomic.Int32
@@ -513,6 +469,14 @@ func TestSendAgentic_LocalSteeringCarriesStructuredAttachments(t *testing.T) {
 }
 
 func TestSendAgentic_WebsocketQueuesLocalSteeringUntilResponseCompletes(t *testing.T) {
+	for _, model := range []string{"gpt-5.5", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol"} {
+		for _, oauth := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/oauth=%v", model, oauth), func(t *testing.T) { testWebsocketLocalSteering(t, model, oauth) })
+		}
+	}
+}
+
+func testWebsocketLocalSteering(t *testing.T, model string, oauth bool) {
 	responseStarted := make(chan struct{})
 	releaseResponse := make(chan struct{})
 	secondRequest := make(chan map[string]any, 1)
@@ -567,20 +531,24 @@ func TestSendAgentic_WebsocketQueuesLocalSteeringUntilResponseCompletes(t *testi
 	}))
 	defer srv.Close()
 
-	original := OpenAIAPIBaseURL
-	OpenAIAPIBaseURL = srv.URL + "/v1/"
-	defer func() { OpenAIAPIBaseURL = original }()
+	original, originalOAuth := OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL
+	OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = srv.URL, srv.URL
+	defer func() { OpenAIAPIBaseURL, OpenAIChatGPTAPIBaseURL = original, originalOAuth }()
 
 	var pending atomic.Bool
 	var claimed atomic.Bool
 	client := NewWithAPIKey("sk-test")
+	if oauth {
+		client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
+	}
+	defer client.responsesTransportState.Close()
 	done := make(chan struct {
 		response *AgenticResponse
 		err      error
 	}, 1)
 	go func() {
 		response, sendErr := client.SendAgentic(context.Background(), "original", &AgenticOptions{
-			Model:            "gpt-5.5",
+			Model:            model,
 			MaxTurns:         1,
 			SkipDefaultTools: true,
 			OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
@@ -617,7 +585,7 @@ func TestSendAgentic_WebsocketQueuesLocalSteeringUntilResponseCompletes(t *testi
 		t.Fatalf("response = %#v", result.response)
 	}
 	request := <-secondRequest
-	if request["type"] != "response.create" || request["model"] != "gpt-5.5" {
+	if request["type"] != "response.create" || request["model"] != model {
 		t.Fatalf("steered request type/model = %v/%v", request["type"], request["model"])
 	}
 	input, _ := request["input"].([]any)
@@ -5359,39 +5327,6 @@ func TestSendAgentic_AstraConfigurationUpdateReplacesConflictingTrailingUpdate(t
 	require.Equal(t, "low", updates[0]["reasoning"].(map[string]any)["effort"])
 }
 
-func TestWrapAstraSteeringCommitsPreservesConfirmedIDs(t *testing.T) {
-	state := NewResponsesTransportState()
-	state.astraSteeringCommits = []ResponsesSteeringDelivery{
-		{Status: AstraSteeringAccepted, SteeringID: "steer_1"},
-		{Status: AstraSteeringAccepted, SteeringID: "steer_1"},
-		{Status: AstraSteeringAccepted, SteeringID: "steer_2"},
-	}
-	want := errors.New("stream disconnected")
-	err := wrapAstraSteeringCommits(want, state)
-	require.ErrorIs(t, err, want)
-	var committed interface{ CommittedSteeringIDs() []string }
-	require.ErrorAs(t, err, &committed)
-	require.Equal(t, []string{"steer_1", "steer_2"}, committed.CommittedSteeringIDs())
-	require.Empty(t, state.astraSteeringCommits)
-}
-
-func TestWrapAstraSteeringCommitsPreservesAmbiguousIDsWithoutConfirmingThem(t *testing.T) {
-	state := NewResponsesTransportState()
-	state.astraSteeringAmbiguous = []ResponsesSteeringDelivery{
-		{Status: AstraSteeringAmbiguous, SteeringID: "steer_unknown"},
-		{Status: AstraSteeringAmbiguous, SteeringID: "steer_unknown"},
-	}
-	want := errors.New("stream disconnected")
-	err := wrapAstraSteeringCommits(want, state)
-	require.ErrorIs(t, err, want)
-	var ambiguous interface{ AmbiguousSteeringIDs() []string }
-	require.ErrorAs(t, err, &ambiguous)
-	require.Equal(t, []string{"steer_unknown"}, ambiguous.AmbiguousSteeringIDs())
-	var committed interface{ CommittedSteeringIDs() []string }
-	require.False(t, errors.As(err, &committed))
-	require.Empty(t, state.astraSteeringAmbiguous)
-}
-
 func TestSendAgentic_AstraConfigurationUpdateIsReestablishedAfterCompaction(t *testing.T) {
 	requestNumber := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -5518,33 +5453,4 @@ func TestSendAgentic_NonGPT6DoesNotEmitConfigurationUpdate(t *testing.T) {
 			t.Fatalf("non-GPT-6 input contained configuration_update: %#v", input)
 		}
 	}
-}
-
-func TestResponseSteeringInputPreservesMessagesAndAttachments(t *testing.T) {
-	input, err := responseSteeringInput(LocalSteeringInput{Messages: []LocalSteeringMessage{
-		{Text: "first"},
-		{Text: "second", Attachments: []*FileAttachment{{FileName: "note.txt", MediaType: "text/plain", Data: []byte("details")}}},
-	}})
-	require.NoError(t, err)
-
-	items, ok := input.([]any)
-	require.True(t, ok)
-	require.Len(t, items, 2)
-	first, ok := items[0].(agenticInputItem)
-	require.True(t, ok)
-	require.Equal(t, "user", first["role"])
-	require.Equal(t, "first", first["content"])
-	second, ok := items[1].(agenticInputItem)
-	require.True(t, ok)
-	require.Equal(t, "user", second["role"])
-	content, ok := second["content"].([]any)
-	require.True(t, ok)
-	require.Equal(t, map[string]any{"type": "input_text", "text": "second"}, content[0])
-	require.Equal(t, map[string]any{"type": "input_text", "text": "--- File: note.txt ---\ndetails\n--- End of note.txt ---"}, content[1])
-}
-
-func TestResponseSteeringInputUsesCompactStringForPlainText(t *testing.T) {
-	input, err := responseSteeringInput(LocalSteeringInput{Text: " steer now "})
-	require.NoError(t, err)
-	require.Equal(t, "steer now", input)
 }

@@ -162,11 +162,6 @@ func TestCompactionUsageAndSteeringIsolation(t *testing.T) {
 			} else {
 				phase.Store(1)
 				_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.created","response":{"id":"normal"}}`))
-				select {
-				case <-steered:
-				case <-time.After(2 * time.Second):
-					t.Error("normal steering disabled")
-				}
 				_ = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"normal","status":"completed","usage":{"input_tokens":10,"output_tokens":1,"input_tokens_details":{"cached_tokens":2}},"output":[{"type":"message","content":[{"type":"output_text","text":"2"}]}]}}`))
 			}
 		}
@@ -177,7 +172,7 @@ func TestCompactionUsageAndSteeringIsolation(t *testing.T) {
 	defer func() { OpenAIAPIBaseURL = original }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	opts := &AgenticOptions{Model: "gpt-6-astra", MaxTurns: 1, AutoCompaction: true, ForceCompactionBeforeTurn: true, InitialInputItems: []any{map[string]any{"type": "message", "role": "user", "content": "old message"}}, EnableAstraMidTurnSteering: true, OnAstraMidTurnSteering: func(context.Context, AstraSteeringDeliverer) error {
+	opts := &AgenticOptions{Model: "gpt-6-astra", MaxTurns: 1, AutoCompaction: true, ForceCompactionBeforeTurn: true, InitialInputItems: []any{map[string]any{"type": "message", "role": "user", "content": "old message"}}, OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
 		if phase.Load() == 0 {
 			duringCompaction.Add(1)
 		}
@@ -185,16 +180,19 @@ func TestCompactionUsageAndSteeringIsolation(t *testing.T) {
 		case steered <- struct{}{}:
 		default:
 		}
-		return nil
+		return LocalSteeringInput{}, nil
 	}}
 	result, err := NewWithAPIKey("test").SendAgentic(ctx, "1+1=", opts)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(steered) != 1 {
+		t.Fatal("normal steering disabled")
+	}
 	if duringCompaction.Load() != 0 {
 		t.Fatal("compaction consumed steering")
 	}
-	if !opts.EnableAstraMidTurnSteering || opts.OnAstraMidTurnSteering == nil {
+	if opts.OnLocalSteering == nil {
 		t.Fatal("mutated caller steering options")
 	}
 	if !result.Compacted || result.InputTokens != 110 || result.OutputTokens != 51 || result.CachedInputTokens != 22 || result.ReasoningTokens != 30 || result.LastContextTokens != 11 {

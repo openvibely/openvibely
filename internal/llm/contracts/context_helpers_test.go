@@ -38,21 +38,6 @@ func TestLifecycleHookAndSteeringContextHelpers(t *testing.T) {
 	if WithSteeringRetryResetCallback(context.Background(), nil) == nil || SteeringRetryResetCallbackFromContext(nil) != nil {
 		t.Fatal("steering reset helpers should be nil-safe")
 	}
-	if WithMidTurnSteeringCallback(context.Background(), nil) == nil || MidTurnSteeringCallbackFromContext(nil) != nil {
-		t.Fatal("mid-turn steering helpers should be nil-safe")
-	}
-	ctx = WithMidTurnSteeringCallback(context.Background(), func(ctx context.Context, deliver SteeringDeliverer) error {
-		state, err := deliver(ctx, LocalSteeringInput{Text: "steer"})
-		if err != nil || state.Status != SteeringDeliveryAccepted {
-			t.Fatalf("delivery state = %#v, err=%v", state, err)
-		}
-		return nil
-	})
-	if err := MidTurnSteeringCallbackFromContext(ctx)(context.Background(), func(context.Context, LocalSteeringInput) (SteeringDeliveryState, error) {
-		return SteeringDeliveryState{Status: SteeringDeliveryAccepted}, nil
-	}); err != nil {
-		t.Fatalf("mid-turn steering callback error = %v", err)
-	}
 	wakeup := make(chan struct{}, 1)
 	ctx = WithMidTurnSteeringWakeup(context.Background(), wakeup)
 	if MidTurnSteeringWakeupFromContext(ctx) != wakeup || MidTurnSteeringWakeupFromContext(nil) != nil {

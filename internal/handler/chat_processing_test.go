@@ -4260,7 +4260,7 @@ func TestProcessStreamingResponse_ExposesLocalSteeringToActiveAgenticTurn(t *tes
 	}
 }
 
-func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable(t *testing.T) {
+func TestProcessStreamingResponse_RequeuesLocalSteeringAfterFailure(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4298,20 +4298,18 @@ func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable
 		}
 		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
 		steeringID = steering.ID
-		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
+		callback := llmcontracts.LocalSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, input llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
-			deliveredInstruction = input.Text
-			for _, message := range input.Messages {
-				deliveredInstruction += message.Text
-			}
-			return llmcontracts.SteeringDeliveryState{Status: llmcontracts.SteeringDeliveryUnavailable, PreviousResponseID: "resp_done"}, nil
-		}))
+		input, err := callback(callCtx)
+		require.NoError(t, err)
+		for _, message := range input.Messages {
+			deliveredInstruction += message.Text
+		}
 		restored, err := h.threadInputRepo.GetByID(ctx, steering.ID)
 		require.NoError(t, err)
 		require.Equal(t, models.ThreadInputPending, restored.InputStatus)
 		require.Equal(t, models.ThreadInputModeSteering, restored.InputMode)
-		require.Equal(t, exec.ID, restored.ExpectedTurnID)
+		require.Empty(t, restored.ExpectedTurnID)
 	}
 
 	h.processStreamingResponse(streamingResponseParams{
@@ -4337,7 +4335,7 @@ func TestProcessStreamingResponse_RestoresMidTurnSteeringWhenDeliveryUnavailable
 	require.Empty(t, requeued.ExpectedTurnID)
 }
 
-func TestProcessStreamingResponse_CommitsMidTurnSteeringAfterPendingDeliveryCompletes(t *testing.T) {
+func TestProcessStreamingResponse_CommitsLocalSteeringAfterContinuation(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4373,15 +4371,12 @@ func TestProcessStreamingResponse_CommitsMidTurnSteeringAfterPendingDeliveryComp
 		}
 		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
 		steeringID = steering.ID
-		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
+		callback := llmcontracts.LocalSteeringCallbackFromContext(callCtx)
 		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
-			return llmcontracts.SteeringDeliveryState{
-				Status:             llmcontracts.SteeringDeliveryPending,
-				SteeringID:         "steer_pending",
-				PreviousResponseID: "resp_original",
-			}, nil
-		}))
+		input, err := callback(callCtx)
+		require.NoError(t, err)
+		require.Len(t, input.Messages, 1)
+		require.Equal(t, "apply after the required tool output", input.Messages[0].Text)
 		prepared, err := h.threadInputRepo.GetByID(ctx, steering.ID)
 		require.NoError(t, err)
 		require.Equal(t, models.ThreadInputPending, prepared.InputStatus)
@@ -4403,273 +4398,6 @@ func TestProcessStreamingResponse_CommitsMidTurnSteeringAfterPendingDeliveryComp
 	applied, err := h.threadInputRepo.GetByID(ctx, steeringID)
 	require.NoError(t, err)
 	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
-}
-
-type committedSteeringTestError struct {
-	ids []string
-}
-
-func (e committedSteeringTestError) Error() string                  { return "stream failed after steering commit" }
-func (e committedSteeringTestError) CommittedSteeringIDs() []string { return e.ids }
-
-type ambiguousSteeringTestError struct {
-	ids []string
-}
-
-func (e ambiguousSteeringTestError) Error() string {
-	return "stream disconnected after steering acceptance"
-}
-func (e ambiguousSteeringTestError) AmbiguousSteeringIDs() []string { return e.ids }
-
-func TestProcessStreamingResponse_DoesNotRequeueConfirmedSteeringAfterStreamFailure(t *testing.T) {
-	h, _, llmConfigRepo := setupTestHandler(t)
-	h.workerSvc = nil
-	ctx := context.Background()
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = "partial output"
-	mock.TextOnly = mock.Response
-	mock.Err = committedSteeringTestError{ids: []string{"steer_committed"}}
-	h.llmSvc.SetLLMCaller(mock)
-
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Committed Midturn Steering Project")
-	task := createTask(t, h, project.ID, "Committed Midturn Steering Task", func(tk *models.Task) {
-		tk.Category = models.CategoryActive
-		tk.Status = models.StatusRunning
-		tk.AgentID = &agent.ID
-	})
-	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecRunning
-		ex.PromptSent = "active prompt"
-		ex.IsFollowup = true
-	})
-	var steeringID string
-	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
-		steering := &models.ThreadInput{
-			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
-			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
-			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
-			Content: "do not replay this confirmed steering",
-		}
-		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
-		steeringID = steering.ID
-		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
-		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
-			return llmcontracts.SteeringDeliveryState{
-				Status: llmcontracts.SteeringDeliveryAccepted, SteeringID: "steer_committed",
-				ResponseID: "resp_successor", PreviousResponseID: "resp_original",
-			}, nil
-		}))
-	}
-
-	h.processStreamingResponse(streamingResponseParams{
-		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
-		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
-	})
-
-	require.NotEmpty(t, steeringID)
-	applied, err := h.threadInputRepo.GetByID(ctx, steeringID)
-	require.NoError(t, err)
-	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
-	require.Equal(t, models.ThreadInputModeSteering, applied.InputMode)
-}
-
-func TestProcessStreamingResponse_PreservesAmbiguousSteeringWithoutApplyingOrRequeueing(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.workerSvc = nil
-	ctx := context.Background()
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = "partial output"
-	mock.TextOnly = mock.Response
-	mock.Err = ambiguousSteeringTestError{ids: []string{"steer_ambiguous"}}
-	h.llmSvc.SetLLMCaller(mock)
-
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Ambiguous Midturn Steering Project")
-	task := createTask(t, h, project.ID, "Ambiguous Midturn Steering Task", func(tk *models.Task) {
-		tk.Category = models.CategoryActive
-		tk.Status = models.StatusRunning
-		tk.AgentID = &agent.ID
-	})
-	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecRunning
-		ex.PromptSent = "active prompt"
-		ex.IsFollowup = true
-	})
-	var steeringID string
-	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
-		steering := &models.ThreadInput{
-			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
-			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
-			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
-			Content: "do not replay an unknown provider outcome",
-		}
-		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
-		steeringID = steering.ID
-		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
-		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
-			return llmcontracts.SteeringDeliveryState{
-				Status: llmcontracts.SteeringDeliveryAmbiguous, SteeringID: "steer_ambiguous",
-				PreviousResponseID: "resp_original",
-			}, nil
-		}))
-	}
-
-	h.processStreamingResponse(streamingResponseParams{
-		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
-		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
-	})
-
-	require.NotEmpty(t, steeringID)
-	stored, err := h.threadInputRepo.GetByID(ctx, steeringID)
-	require.NoError(t, err)
-	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
-	require.Equal(t, models.ThreadInputModeSteering, stored.InputMode)
-	require.Empty(t, stored.ExpectedTurnID)
-	var state string
-	require.NoError(t, db.QueryRow(`SELECT delivery_state FROM thread_input_provider_steering WHERE thread_input_id = ?`, steeringID).Scan(&state))
-	require.Equal(t, repository.ProviderSteeringAcceptedAmbiguous, state)
-}
-
-func TestProcessStreamingResponse_DoesNotReplaySteeringWhenReceiptPersistenceFails(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.workerSvc = nil
-	ctx := context.Background()
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = "partial output"
-	mock.TextOnly = mock.Response
-	h.llmSvc.SetLLMCaller(mock)
-
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Receipt Persistence Failure Project")
-	task := createTask(t, h, project.ID, "Receipt Persistence Failure Task", func(tk *models.Task) {
-		tk.Category = models.CategoryActive
-		tk.Status = models.StatusRunning
-		tk.AgentID = &agent.ID
-	})
-	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecRunning
-		ex.PromptSent = "active prompt"
-		ex.IsFollowup = true
-	})
-	_, err := db.Exec(`
-			CREATE TRIGGER fail_provider_steering_receipt
-			BEFORE UPDATE OF steering_id ON thread_input_provider_steering
-			WHEN NEW.steering_id NOT LIKE 'unknown:%'
-			BEGIN
-				SELECT RAISE(FAIL, 'receipt persistence failed');
-			END`)
-	require.NoError(t, err)
-
-	var steeringID string
-	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
-		steering := &models.ThreadInput{
-			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
-			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
-			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
-			Content: "do not replay after receipt persistence fails",
-		}
-		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
-		steeringID = steering.ID
-		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
-		require.NotNil(t, callback)
-		callbackErr := callback(callCtx, func(_ context.Context, _ llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
-			return llmcontracts.SteeringDeliveryState{
-				Status: llmcontracts.SteeringDeliveryPending, SteeringID: "steer_receipt_failure",
-				PreviousResponseID: "resp_original",
-			}, nil
-		})
-		require.ErrorContains(t, callbackErr, "receipt persistence failed")
-		mock.Err = callbackErr
-	}
-
-	h.processStreamingResponse(streamingResponseParams{
-		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
-		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
-	})
-
-	require.NotEmpty(t, steeringID)
-	stored, err := h.threadInputRepo.GetByID(ctx, steeringID)
-	require.NoError(t, err)
-	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
-	require.Equal(t, models.ThreadInputModeSteering, stored.InputMode)
-	require.Empty(t, stored.ExpectedTurnID)
-	var persistedID, state string
-	require.NoError(t, db.QueryRow(`SELECT steering_id, delivery_state FROM thread_input_provider_steering WHERE thread_input_id = ?`, steeringID).Scan(&persistedID, &state))
-	require.Equal(t, "unknown:"+steeringID, persistedID)
-	require.Equal(t, repository.ProviderSteeringAcceptedAmbiguous, state)
-}
-
-func TestProcessStreamingResponse_FallsBackWhenSteeringClaimPersistenceFails(t *testing.T) {
-	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
-	h.workerSvc = nil
-	ctx := context.Background()
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = "completed response"
-	mock.TextOnly = mock.Response
-	h.llmSvc.SetLLMCaller(mock)
-
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Steering Claim Failure Project")
-	task := createTask(t, h, project.ID, "Steering Claim Failure Task", func(tk *models.Task) {
-		tk.Category = models.CategoryActive
-		tk.Status = models.StatusRunning
-		tk.AgentID = &agent.ID
-	})
-	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecRunning
-		ex.PromptSent = "active prompt"
-		ex.IsFollowup = true
-	})
-	_, err := db.Exec(`
-		CREATE TRIGGER fail_provider_steering_claim
-		BEFORE INSERT ON thread_input_provider_steering
-		BEGIN
-			SELECT RAISE(FAIL, 'claim persistence failed');
-		END`)
-	require.NoError(t, err)
-
-	var steeringID string
-	var calls int
-	mock.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
-		calls++
-		if calls != 1 {
-			return
-		}
-		steering := &models.ThreadInput{
-			Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
-			RunExecutionID: exec.ID, InputMode: models.ThreadInputModeSteering,
-			InputStatus: models.ThreadInputPending, TurnID: exec.ID, ExpectedTurnID: exec.ID,
-			Content: "retain this instruction when the delivery claim fails",
-		}
-		require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
-		steeringID = steering.ID
-		callback := llmcontracts.MidTurnSteeringCallbackFromContext(callCtx)
-		require.NotNil(t, callback)
-		require.NoError(t, callback(callCtx, func(context.Context, llmcontracts.LocalSteeringInput) (llmcontracts.SteeringDeliveryState, error) {
-			t.Fatal("provider delivery must not run without a durable claim")
-			return llmcontracts.SteeringDeliveryState{}, nil
-		}))
-		restored, restoreErr := h.threadInputRepo.GetByID(ctx, steering.ID)
-		require.NoError(t, restoreErr)
-		require.Equal(t, exec.ID, restored.ExpectedTurnID)
-	}
-
-	h.processStreamingResponse(streamingResponseParams{
-		ExecID: exec.ID, TaskID: task.ID, Message: "active prompt", Agent: *agent,
-		ProjectID: project.ID, IsTaskFollowup: true, suppressQueuedTurnPromotion: true,
-	})
-
-	require.Equal(t, 2, mock.CallCount(), "restored steering should continue through the normal follow-up path")
-	require.NotEmpty(t, steeringID)
-	stored, err := h.threadInputRepo.GetByID(ctx, steeringID)
-	require.NoError(t, err)
-	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
-	var claims int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM thread_input_provider_steering WHERE thread_input_id = ?`, steeringID).Scan(&claims))
-	require.Zero(t, claims)
 }
 
 func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {
