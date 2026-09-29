@@ -731,6 +731,39 @@ func TestThreadInputRepo_CreateSteeringNotifiesActiveExecutionSubscriber(t *test
 	}
 }
 
+func TestThreadInputRepo_ProviderOwnedSteeringIsNeverLocallyClaimed(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, NewExecutionRepo(db).Create(ctx, active))
+
+	steering := &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+		AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "provider-owned steer",
+	}
+	require.NoError(t, repo.CreateSteeringForActiveExecution(ctx, steering, active.ID))
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO thread_input_provider_steering
+			(thread_input_id, steering_id, delivery_state)
+		VALUES (?, ?, 'accepted_ambiguous')`, steering.ID, "provider-"+steering.ID)
+	require.NoError(t, err)
+
+	listed, err := repo.ListPendingSteering(ctx, active.ID, active.ID)
+	require.NoError(t, err)
+	require.Empty(t, listed)
+	prepared, err := repo.PreparePendingSteering(ctx, active.ID, active.ID)
+	require.NoError(t, err)
+	require.Empty(t, prepared)
+
+	stored, err := repo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.Equal(t, active.ID, stored.ExpectedTurnID, "quarantined steering must remain unclaimed")
+}
+
 func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

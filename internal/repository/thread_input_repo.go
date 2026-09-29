@@ -458,7 +458,11 @@ func (r *ThreadInputRepo) populateProviderSteeringStates(ctx context.Context, in
 }
 
 func (r *ThreadInputRepo) ListPendingSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {
-	return r.list(ctx, `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != '' ORDER BY created_at ASC, rowid ASC`, runExecutionID, turnID)
+	return r.list(ctx, `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''
+		AND NOT EXISTS (
+			SELECT 1 FROM thread_input_provider_steering provider_steering
+			WHERE provider_steering.thread_input_id = thread_inputs.id
+		) ORDER BY created_at ASC, rowid ASC`, runExecutionID, turnID)
 }
 
 func (r *ThreadInputRepo) PreparePendingSteering(ctx context.Context, runExecutionID, turnID string) ([]models.ThreadInput, error) {
@@ -470,7 +474,11 @@ func (r *ThreadInputRepo) PreparePendingTextSteering(ctx context.Context, runExe
 }
 
 func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecutionID, turnID string, textOnly bool) ([]models.ThreadInput, error) {
-	pendingWhere := `run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`
+	pendingWhere := `run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''
+		AND NOT EXISTS (
+			SELECT 1 FROM thread_input_provider_steering provider_steering
+			WHERE provider_steering.thread_input_id = thread_inputs.id
+		)`
 	if textOnly {
 		pendingWhere += ` AND COALESCE(attachment_session_id, '') = ''`
 	}

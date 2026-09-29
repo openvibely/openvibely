@@ -1392,7 +1392,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Call the LLM
 	callCtx := llmcontracts.WithDirectUsageProject(ctx, task.ProjectID)
 	var preparedSteering []models.ThreadInput
+	var unsubscribeSteeringWakeup func()
 	if s.threadInputRepo != nil {
+		steeringWakeup, unsubscribe := s.threadInputRepo.SubscribeSteeringWakeups(exec.ID)
+		unsubscribeSteeringWakeup = unsubscribe
+		callCtx = llmcontracts.WithMidTurnSteeringWakeup(callCtx, steeringWakeup)
 		callCtx = llmcontracts.WithSteeringCallback(callCtx, func(callbackCtx context.Context) (string, error) {
 			inputs, steeringErr := s.threadInputRepo.PreparePendingTextSteering(callbackCtx, exec.ID, exec.ID)
 			if steeringErr != nil || len(inputs) == 0 {
@@ -1432,6 +1436,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	start := time.Now()
 	result, err := s.callLLMDetailed(callCtx, task.Prompt, attachments, agent, exec.ID, workDir, projectInstructions, agentDef)
+	if unsubscribeSteeringWakeup != nil {
+		unsubscribeSteeringWakeup()
+	}
 	output := result.Output
 	textOnlyOutput := result.TextOnlyOutput
 	tokensUsed := result.Usage.TotalTokens
@@ -1654,6 +1661,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution: %v", completeErr)
 	} else {
 		completedExecution = true
+		// Closing the execution first makes steering admission and recovery
+		// ordered like Codex turn/steer: input accepted before the terminal
+		// boundary is queued for the next turn; input after it is rejected.
+		s.requeuePendingTaskSteeringForExecution(finalizeCtx, exec.ID)
 	}
 	RecordUsageFromResult(finalizeCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCompleted), LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
 

@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const latestMigrationVersion = 202
+const latestMigrationVersion = 203
 
 func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
 	tb.Helper()
@@ -1866,6 +1866,42 @@ func TestMigration202QuarantinesUnresolvedProviderSteering(t *testing.T) {
 	}
 	if confirmed != 1 {
 		t.Fatal("confirmed provider steering receipt was removed")
+	}
+}
+
+func TestMigration203ForwardQuarantinesProviderSteering(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "forward-quarantine-provider-steering-203.db")
+	db := openMigrationTestDB(t, dbPath)
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 202); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path)
+		VALUES ('provider-steering-203', 'Provider steering 203', '', '');
+		INSERT INTO thread_inputs
+			(id, scope, project_id, input_mode, input_status, content, queue_position)
+		VALUES ('pending-203', 'chat', 'provider-steering-203', 'steering', 'pending', 'pending', 1);
+		INSERT INTO thread_input_provider_steering
+			(thread_input_id, steering_id, delivery_state)
+		VALUES ('pending-203', 'steer-pending-203', 'accepted_pending');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 203); err != nil {
+		t.Fatal(err)
+	}
+
+	var state string
+	if err := db.QueryRow(`SELECT delivery_state FROM thread_input_provider_steering WHERE thread_input_id = 'pending-203'`).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "accepted_ambiguous" {
+		t.Fatalf("provider steering state = %q, want accepted_ambiguous", state)
 	}
 }
 
