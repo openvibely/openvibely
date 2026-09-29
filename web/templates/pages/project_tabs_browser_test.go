@@ -186,6 +186,21 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				dragTab("p00", -130)
 				browser.waitFor("drag left", `Array.from(document.querySelectorAll('[data-project-tab]')).slice(0,2).map(t=>t.dataset.projectTab).join(',')`, "p00,p01")
+				// Drag the last tab into the + section without releasing the mouse.
+				browser.evaluate(`document.getElementById('desktop-project-tabs').scrollLeft = 100000; 'ready'`)
+				var wall struct{ X, Y float64 }
+				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p23"]').getBoundingClientRect();return {X:r.x+80,Y:r.y+15};})())`)), &wall); err != nil {
+					t.Fatal(err)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": wall.X, "y": wall.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 1200, "y": wall.Y, "buttons": 1}, nil)
+				if got := browser.evaluate(`String(document.querySelector('[data-project-tab="p23"]').parentElement.getBoundingClientRect().right <= document.querySelector('#desktop-project-tabs [data-project-selector]').getBoundingClientRect().left)`); got != "true" {
+					t.Fatal("dragged tab overlaps + section", got)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 1200, "y": wall.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+				browser.evaluate(`document.querySelector('[data-project-tab="p00"]').scrollIntoView({block:'nearest',inline:'start'}); 'ready'`)
+				browser.waitFor("wall drag settled", `String(Array.from(document.querySelectorAll(".desktop-project-tab")).every(t=>t.getAnimations().length===0))`, "true")
+				browser.click(`[data-project-tab="p00"]`)
 				var point struct{ X, Y float64 }
 				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p00"]').getBoundingClientRect();return {X:r.x+40,Y:r.y+15};})())`)), &point); err != nil {
 					t.Fatal(err)
