@@ -139,6 +139,15 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
 					browser.waitFor("project navigation after press", `new URLSearchParams(location.search).get('project_id')`, id)
 				}
+				// Hovering the next tab hides separators, not the selected tab's curved foot.
+				var hoverPoint struct{ X, Y float64 }
+				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p01"]').getBoundingClientRect();return {X:r.x+80,Y:r.y+15};})())`)), &hoverPoint); err != nil {
+					t.Fatal(err)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": hoverPoint.X, "y": hoverPoint.Y}, nil)
+				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p00"]').parentElement,'::after').opacity`); got != "1" {
+					t.Fatal("active tab curve disappeared on adjacent hover", got)
+				}
 				// Reorder with real mouse input, in both directions, without navigation.
 				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p02"]').parentElement,'::after').width`); got != "2px" {
 					t.Fatal("missing background tab separator", got)
