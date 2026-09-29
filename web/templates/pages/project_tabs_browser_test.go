@@ -258,6 +258,10 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`(function(){var active=document.querySelector('[data-project-tab="p00"]'),inactive=document.querySelector('[data-project-tab="p01"]');return String(getComputedStyle(active.parentElement).backgroundColor===getComputedStyle(document.body).backgroundColor && getComputedStyle(active.parentElement).backgroundColor!==getComputedStyle(inactive.parentElement).backgroundColor && getComputedStyle(active).backgroundColor==='rgba(0, 0, 0, 0)' && active.getBoundingClientRect().width===active.parentElement.getBoundingClientRect().width);})()`); got != "true" {
 					t.Fatal("active background must cover the whole tab, not only the label", got)
 				}
+				if got := browser.evaluate(`(function(){var plus=document.getElementById('project-selector-trigger').getBoundingClientRect(),close=document.querySelector('[data-close-project]').getBoundingClientRect();return String(Math.abs((plus.top+plus.bottom-close.top-close.bottom)/2)<0.5);})()`); got != "true" {
+					t.Fatal("plus button must align vertically with tab close buttons", got)
+				}
+
 				// A fullscreen-sized content viewport must retain the same visible bar.
 				// Native macOS fullscreen transitions require separate Wails verification.
 				browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1920, "height": 1080, "deviceScaleFactor": 1, "mobile": false}, nil)
