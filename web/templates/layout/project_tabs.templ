@@ -50,6 +50,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab:has([aria-selected="true"])::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
   .desktop-project-tab:not(:has([aria-selected="true"]))::after { content: ""; position: absolute; right: -3px; top: 50%; width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: opacity 150ms ease; }
   .desktop-project-tab:not(:has([aria-selected="true"])):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
+  .desktop-project-tab:not(:has([aria-selected="true"])):has(+ [data-project-selector] #project-selector-trigger:hover)::after { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::after { transition: none; } }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 6px 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   /* End the straight sides above the curved feet, never at the baseline. */
