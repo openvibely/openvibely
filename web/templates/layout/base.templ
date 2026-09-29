@@ -4280,9 +4280,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								document.body.classList.add('sidebar-collapsed-pending');
 							}
 						})();				</script>
-			if serverRuntimeMode(ctx) == "desktop" {
-				@DesktopProjectTabs(projects, currentProjectID)
-			}
+			@DesktopProjectTabs(projects, currentProjectID)
 			<div class="drawer lg:drawer-open h-full">
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
 				<div class="drawer-content flex flex-col h-full overflow-hidden">

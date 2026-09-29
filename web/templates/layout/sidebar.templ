@@ -59,7 +59,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					var previousProjectID = sel.value;
 					const desktopProjectNavigation = document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop';
-					const projectLocations = new Map(Object.entries(JSON.parse(document.documentElement.getAttribute('data-project-locations') || '{}')));
+					const projectLocations = new Map(Object.entries(desktopProjectNavigation ? JSON.parse(document.documentElement.getAttribute('data-project-locations') || '{}') : {}));
                     let locationSaveQueue = Promise.resolve();
                     const restoreDesktopLocation = desktopProjectNavigation && location.pathname === '/chat' && !location.search;
                     if (restoreDesktopLocation && projectLocations.has(sel.value)) {
@@ -67,7 +67,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         document.addEventListener('DOMContentLoaded', function() { window.openVibelyNavigate(restored); }, {once: true});
                     }
 					function rememberProjectLocation() {
-						if (!desktopProjectNavigation) return;
+						if (!desktopProjectNavigation && !matchMedia('(min-width: 1024px)').matches) return;
 						const url = new URL(window.location.href);
 						const id = url.searchParams.get('project_id');
 						if (!id) return;
@@ -75,7 +75,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						if (projectLocations.get(id) === path) return;
                         projectLocations.set(id, path);
                         const payload = JSON.stringify({project_locations: Object.fromEntries(projectLocations)});
-                        locationSaveQueue = locationSaveQueue.catch(function() {}).then(function() {
+                        if (desktopProjectNavigation) locationSaveQueue = locationSaveQueue.catch(function() {}).then(function() {
                             return fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type':'application/json'}, body: payload, keepalive: true});
                         });
 						try { sessionStorage.setItem('openvibely.project-location.' + id, path); } catch (_) {}
@@ -188,7 +188,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						}
 
 						rememberProjectLocation();
-						if (desktopProjectNavigation) newUrl = projectLocation(newProjectId);
+						if (desktopProjectNavigation || matchMedia('(min-width: 1024px)').matches) newUrl = projectLocation(newProjectId);
 						persistSelectedProject(newProjectId);
 
 						// HTMX owns the content swap, URL update, and history cache.
@@ -1061,6 +1061,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 					data-searchable-selector-trigger
 					disabled?={ len(projects) == 0 }
 				>
+					<svg class="project-selector-plus" width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 2v10M2 7h10"/></svg>
 					<span id="project-selector-current-label" class="min-w-0 truncate" data-searchable-selector-current-label>{ sidebarProjectDisplayName(projects, currentProjectID) }</span>
 				</button>
                 }

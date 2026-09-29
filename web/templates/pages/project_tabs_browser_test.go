@@ -107,7 +107,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("initial URL lost route state", got)
 				}
 				if !desktop {
-					browser.waitFor("web selector", `String(!!document.querySelector('#sidebar #project-selector') && !document.getElementById('desktop-project-titlebar'))`, "true")
+					browser.waitFor("web selector", `String(!!document.querySelector('#desktop-project-titlebar #project-selector') && !document.querySelector('[data-wml-window]'))`, "true")
+					browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": true}, nil)
+					browser.waitFor("mobile keeps sidebar selector", `String(!!document.querySelector('#sidebar #project-selector') && getComputedStyle(document.getElementById('desktop-project-titlebar')).display === 'none')`, "true")
+					browser.call("Emulation.clearDeviceMetricsOverride", map[string]any{}, nil)
+					browser.waitFor("wide selector restored", `String(!!document.querySelector('#desktop-project-titlebar #project-selector'))`, "true")
 					// A second actual browser tab opens a different explicit project. Its
 					// selection preference cannot alter this tab's canonical URL on reload.
 					var target struct {
