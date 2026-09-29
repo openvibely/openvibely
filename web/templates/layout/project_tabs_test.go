@@ -20,6 +20,16 @@ func TestProjectBrandIsNonSelectableDragRegion(t *testing.T) {
 	}
 }
 
+func TestProjectTitlebarDisablesWebKitSelection(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `--wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; --project-tab-selected:`) {
+		t.Error("titlebar empty drag regions must retain the arrow cursor and disable WebKit selection")
+	}
+}
+
 func TestProjectTabsReserveSidebarWidth(t *testing.T) {
 	var buf bytes.Buffer
 	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
