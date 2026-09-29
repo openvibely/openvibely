@@ -174,8 +174,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			@TaskDetailPanel() {
 		<!-- Tab: Details -->
 		<div id="tab-details" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "details") }>
-			<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden">
-				<div class="card-body flex-1 flex flex-col min-h-0">
+			<div class="flex flex-col min-w-0 flex-1 min-h-0 overflow-hidden">
+				<div class="flex flex-col gap-2 flex-1 min-h-0">
 					<!-- View Mode -->
 						<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
 								@TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, taskAgentLabelFromDefinitions(task, agentDefs))
@@ -539,8 +539,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		<!-- End Tab: Details -->
 		<!-- Tab: Schedules -->
 		<div id="tab-schedules" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "schedules") }>
-			<div class="card bg-base-100 shadow-sm border border-base-300">
-				<div class="card-body">
+			<div class="flex flex-col min-w-0">
+				<div class="flex flex-col gap-2 flex-1">
 					<div class="flex items-center justify-between mb-4">
 						<h4 class="text-lg font-bold">Schedules</h4>
 						<button
@@ -950,8 +950,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		<!-- End Tab: Schedules -->
 		<!-- Tab: Chaining -->
 		<div id="tab-chaining" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "chaining") }>
-			<div class="card bg-base-100 shadow-sm border border-base-300">
-				<div class="card-body">
+			<div class="flex flex-col min-w-0">
+				<div class="flex flex-col gap-2 flex-1">
 					<h4 class="text-lg font-bold mb-3">Task Chaining</h4>
 					<p class="text-sm opacity-60 mb-4">Configure this task to automatically create a child task when it completes. For example, an Opus planning task can spawn a Sonnet implementation task.</p>
 					@components.TaskChainConfigPage(task, agents)
@@ -961,8 +961,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		<!-- End Tab: Chaining -->
 		<!-- Tab: Attachments -->
 		<div id="tab-attachments" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "attachments") }>
-			<div class="card bg-base-100 shadow-sm border border-base-300">
-				<div class="card-body">
+			<div class="flex flex-col min-w-0">
+				<div class="flex flex-col gap-2 flex-1">
 					<h4 class="text-lg font-bold mb-3">Attachments</h4>
 					@components.AttachmentList(attachments, task.ProjectID, task.ID)
 				</div>
@@ -971,8 +971,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		<!-- End Tab: Attachments -->
 			<!-- Tab: Lifecycle (runbook §Rollout step 17) -->
 			<div id="tab-lifecycle" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle") }>
-				<div class="card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0">
-					<div class="card-body flex flex-col min-h-0">
+				<div class="flex flex-col min-w-0 flex-1 min-h-0">
+					<div class="flex flex-col gap-2 flex-1 min-h-0">
 						<div class="flex items-center justify-between mb-3 flex-shrink-0">
 							<h4 class="text-lg font-bold">Lifecycle Activity</h4>
 							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>

@@ -406,7 +406,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300 flex-1 flex flex-col min-h-0 overflow-hidden\"><div class=\"card-body flex-1 flex flex-col min-h-0\"><!-- View Mode --><div id=\"task-detail-view\" class=\"flex-1 overflow-y-auto min-h-0 pr-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\"><div class=\"flex flex-col min-w-0 flex-1 min-h-0 overflow-hidden\"><div class=\"flex flex-col gap-2 flex-1 min-h-0\"><!-- View Mode --><div id=\"task-detail-view\" class=\"flex-1 overflow-y-auto min-h-0 pr-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1040,7 +1040,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><div class=\"flex items-center justify-between mb-4\"><h4 class=\"text-lg font-bold\">Schedules</h4><button id=\"add-schedule-btn\" class=\"btn btn-sm btn-primary\" onclick=\"document.getElementById('schedule-form-container').classList.remove('hidden'); document.getElementById('add-schedule-btn').classList.add('hidden')\">+ Add Schedule</button></div><!-- Add Schedule Form (hidden by default) --><div id=\"schedule-form-container\" class=\"hidden mb-4 card bg-base-200 shadow-sm border border-base-300\"><div class=\"card-body p-4\"><form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 100, "\"><div class=\"flex flex-col min-w-0\"><div class=\"flex flex-col gap-2 flex-1\"><div class=\"flex items-center justify-between mb-4\"><h4 class=\"text-lg font-bold\">Schedules</h4><button id=\"add-schedule-btn\" class=\"btn btn-sm btn-primary\" onclick=\"document.getElementById('schedule-form-container').classList.remove('hidden'); document.getElementById('add-schedule-btn').classList.add('hidden')\">+ Add Schedule</button></div><!-- Add Schedule Form (hidden by default) --><div id=\"schedule-form-container\" class=\"hidden mb-4 card bg-base-200 shadow-sm border border-base-300\"><div class=\"card-body p-4\"><form method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1594,7 +1594,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">Task Chaining</h4><p class=\"text-sm opacity-60 mb-4\">Configure this task to automatically create a child task when it completes. For example, an Opus planning task can spawn a Sonnet implementation task.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 164, "\"><div class=\"flex flex-col min-w-0\"><div class=\"flex flex-col gap-2 flex-1\"><h4 class=\"text-lg font-bold mb-3\">Task Chaining</h4><p class=\"text-sm opacity-60 mb-4\">Configure this task to automatically create a child task when it completes. For example, an Opus planning task can spawn a Sonnet implementation task.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1624,7 +1624,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h4 class=\"text-lg font-bold mb-3\">Attachments</h4>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 167, "\"><div class=\"flex flex-col min-w-0\"><div class=\"flex flex-col gap-2 flex-1\"><h4 class=\"text-lg font-bold mb-3\">Attachments</h4>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1654,7 +1654,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "\"><div class=\"card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0\"><div class=\"card-body flex flex-col min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0\"><h4 class=\"text-lg font-bold\">Lifecycle Activity</h4>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, "\"><div class=\"flex flex-col min-w-0 flex-1 min-h-0\"><div class=\"flex flex-col gap-2 flex-1 min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0\"><h4 class=\"text-lg font-bold\">Lifecycle Activity</h4>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

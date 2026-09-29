@@ -2468,7 +2468,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var root = document.getElementById('task-detail-content');
     var panel = document.getElementById('tab-lifecycle');
-    var card = panel.querySelector('.card');
+    var card = panel.firstElementChild;
     var description = card.querySelector('[data-lifecycle-description]');
     var firstRow = document.querySelector('#lifecycle-activity-list [data-lifecycle-execution-id]');
     var port = document.getElementById('lifecycle-activity-scroll');
