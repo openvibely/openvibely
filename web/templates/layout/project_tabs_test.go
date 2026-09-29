@@ -10,6 +10,22 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestProjectTabsReserveSidebarWidth(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		`#desktop-project-titlebar { padding-left: 16rem; }`,
+		`body.sidebar-collapsed-pending #desktop-project-titlebar { padding-left: 3.5rem; }`,
+		`padding-left: max(3.5rem, 90px);`,
+	} {
+		if !strings.Contains(buf.String(), rule) {
+			t.Errorf("missing sidebar-aligned tab layout: %s", rule)
+		}
+	}
+}
+
 func TestProjectTabsPlusHoverHidesInactiveSeparator(t *testing.T) {
 	var buf bytes.Buffer
 	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
