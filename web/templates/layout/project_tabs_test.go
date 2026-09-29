@@ -10,6 +10,25 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestProjectTabsAccentContour(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`--project-tab-accent: oklch(var(--p))`,
+		`border-bottom: 1px solid var(--project-tab-accent)`,
+		`margin-bottom: -1px`,
+		`inset 1px 1px 0 var(--project-tab-accent)`,
+		`inset -1px 0 0 var(--project-tab-accent)`,
+		`transparent 9px, var(--project-tab-accent) 9.5px`,
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing active-tab contour: %s", want)
+		}
+	}
+}
+
 func TestProjectTabsHaveNoHoverTooltips(t *testing.T) {
 	ctx := WithUIPreferences(WithDesktopMode(context.Background(), true), UIPreferences{PinnedProjectIDs: []string{"a"}})
 	var buf bytes.Buffer
