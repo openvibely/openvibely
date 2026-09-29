@@ -48,6 +48,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="web"] #desktop-project-titlebar { display: flex; }
   [data-openvibely-runtime="web"] body > .drawer { height: calc(100% - 46px); }
   [data-openvibely-runtime="web"] #sidebar { height: calc(100dvh - 46px); }
+  [data-openvibely-runtime="web"] .drawer-side { height: calc(100dvh - 46px); }
   [data-openvibely-runtime="web"] .sidebar-header { display: none; }
  }
 
@@ -62,13 +63,13 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar > #sidebar-collapse-btn { position: absolute; left: 8px; top: 7px; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; }
   #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: 82px; }
   #desktop-project-titlebar > .desktop-traffic-lights { position: absolute; left: 8px; top: 0; height: 46px; }
-  .project-bar-brand { display: none; position: absolute; left: 16px; font-size: 14px; line-height: 20px; font-weight: 500; }
+  .project-bar-brand { cursor: text; user-select: text; --wails-draggable: no-drag; display: none; position: absolute; left: 16px; font-size: 14px; line-height: 20px; font-weight: 500; }
   @media (min-width: 1024px) {
     #desktop-project-titlebar .project-bar-brand { display: block; }
     #desktop-project-titlebar[data-platform="darwin"] .project-bar-brand { left: 90px; }
     #desktop-project-titlebar > #sidebar-collapse-btn, #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: calc(16rem - 40px); }
     body.sidebar-collapsed-pending #desktop-project-titlebar .project-bar-brand { display: none; }
-    body.sidebar-collapsed-pending #desktop-project-titlebar > #sidebar-collapse-btn { left: 8px; }
+    body.sidebar-collapsed-pending #desktop-project-titlebar > #sidebar-collapse-btn { left: calc((3.5rem - 1px - 32px) / 2); }
     body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: 82px; }
     #desktop-project-titlebar { padding-left: 16rem; }
     #desktop-project-titlebar[data-platform="darwin"] { padding-left: 16rem; }
