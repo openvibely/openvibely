@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -23,12 +24,12 @@ func (h *Handler) uiPreferences(ctx context.Context) layout.UIPreferences {
 	if h == nil || h.settingsRepo == nil {
 		return layout.UIPreferences{}
 	}
-	values, err := h.settingsRepo.GetMany(ctx, []string{uiPreferenceThemeKey, uiPreferenceSidebarCollapsedKey, uiPreferencePinnedProjectIDsKey})
+	values, err := h.settingsRepo.GetMany(ctx, []string{uiPreferenceThemeKey, uiPreferenceSidebarCollapsedKey, uiPreferencePinnedProjectIDsKey, "ui.project_locations"})
 	if err != nil {
 		applog.Debugf("[handler] failed to load desktop UI preferences: %v", err)
 		return layout.UIPreferences{}
 	}
-	prefs := layout.UIPreferences{}
+	prefs := layout.UIPreferences{ProjectLocations: values["ui.project_locations"]}
 	// IDs are reconciled with the current project catalog when rendering the shell.
 	_ = json.Unmarshal([]byte(values[uiPreferencePinnedProjectIDsKey]), &prefs.PinnedProjectIDs)
 	if theme := strings.TrimSpace(values[uiPreferenceThemeKey]); isSafeUIPreferenceValue(theme) {
@@ -81,11 +82,12 @@ func (h *Handler) uiDiffViewPreference(ctx context.Context) string {
 }
 
 type uiPreferencesRequest struct {
-	PinnedProjectIDs *[]string `json:"pinned_project_ids"`
-	Theme            string    `json:"theme"`
-	SidebarCollapsed *bool     `json:"sidebar_collapsed"`
-	DiffView         string    `json:"diff_view"`
-	ProjectID        string    `json:"project_id"`
+	ProjectLocations map[string]string `json:"project_locations"`
+	PinnedProjectIDs *[]string         `json:"pinned_project_ids"`
+	Theme            string            `json:"theme"`
+	SidebarCollapsed *bool             `json:"sidebar_collapsed"`
+	DiffView         string            `json:"diff_view"`
+	ProjectID        string            `json:"project_id"`
 }
 
 func (h *Handler) SaveUIPreferences(c echo.Context) error {
@@ -97,6 +99,22 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid preferences payload")
 	}
 	ctx := c.Request().Context()
+	if req.ProjectLocations != nil {
+		for id, path := range req.ProjectLocations {
+			u, err := url.Parse(path)
+			if err != nil || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.Contains(path, "\\") || u.IsAbs() || u.Host != "" || u.Query().Get("project_id") != id {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid project location")
+			}
+		}
+		value, err := json.Marshal(req.ProjectLocations)
+		if err != nil {
+			return err
+		}
+		if err := h.settingsRepo.Set(ctx, "ui.project_locations", string(value)); err != nil {
+			return err
+		}
+	}
+
 	if req.PinnedProjectIDs != nil {
 		if h.projectSvc == nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "projects unavailable")

@@ -23,6 +23,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 		t.Run(fmt.Sprintf("desktop=%v", desktop), func(t *testing.T) {
 			var mu sync.Mutex
 			selected := "p00"
+			locations := "{}"
 			pins := []string{}
 			projects := []models.Project{}
 			for i := 0; i < 24; i++ {
@@ -51,14 +52,19 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				if r.URL.Path == "/ui/preferences" {
 					var req struct {
-						ProjectID string    `json:"project_id"`
-						Pins      *[]string `json:"pinned_project_ids"`
+						Locations map[string]string `json:"project_locations"`
+						ProjectID string            `json:"project_id"`
+						Pins      *[]string         `json:"pinned_project_ids"`
 					}
 					if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 						http.Error(w, err.Error(), 400)
 						return
 					}
 					mu.Lock()
+					if req.Locations != nil {
+						data, _ := json.Marshal(req.Locations)
+						locations = string(data)
+					}
 					if req.ProjectID != "" {
 						selected = req.ProjectID
 					}
@@ -79,13 +85,14 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					id = selected
 				}
 				saved := append([]string{}, pins...)
+				savedLocations := locations
 				mu.Unlock()
 				w.Header().Set("Content-Type", "text/html")
 				if r.Header.Get("HX-Request") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
 					fmt.Fprintf(w, `<div id="fixture-project">%s</div><a id="filtered-page" href="/tasks?project_id=%s&amp;view=board#keep" hx-get="/tasks?project_id=%s&amp;view=board" hx-push-url="/tasks?project_id=%s&amp;view=board#keep" hx-target="#main-content">Filtered tasks</a>`, id, id, id, id)
 					return
 				}
-				ctx := layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), desktop), layout.UIPreferences{PinnedProjectIDs: saved})
+				ctx := layout.WithUIPreferences(layout.WithDesktopMode(context.Background(), desktop), layout.UIPreferences{PinnedProjectIDs: saved, ProjectLocations: savedLocations})
 				var buf bytes.Buffer
 				if err := layout.Base("Tasks", projects, id).Render(ctx, &buf); err != nil {
 					http.Error(w, err.Error(), 500)
@@ -334,9 +341,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 			if desktop {
 				mu.Lock()
 				expected := strings.Join(pins, ",")
+				selected = "p00"
 				mu.Unlock()
 				// A new browser process/profile has no prior sessionStorage or DOM.
-				runComposerFocusCDP(t, chrome, server.URL+"/chat?project_id=p03", "project-tabs-restart", func(browser *composerFocusCDP) {
+				runComposerFocusCDP(t, chrome, server.URL+"/chat", "project-tabs-restart", func(browser *composerFocusCDP) {
+					browser.waitFor("active page restored after fresh startup", `location.pathname + location.search`, "/schedule?project_id=p00")
 					browser.waitFor("opened tabs restored in saved order after restart", `Array.from(document.querySelectorAll('[data-project-tab]')).map(tab=>tab.dataset.projectTab).join(',')`, expected)
 				})
 			}
