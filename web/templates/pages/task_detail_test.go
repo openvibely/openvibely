@@ -11,6 +11,25 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+func TestTaskInspectorSectionsHaveNoOuterCards(t *testing.T) {
+	var buf bytes.Buffer
+	task := &models.Task{ID: "task", ProjectID: "project", Title: "Task"}
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, tab := range []string{"details", "schedules", "chaining", "attachments", "lifecycle"} {
+		_, section, ok := strings.Cut(buf.String(), `id="tab-`+tab+`"`)
+		if !ok {
+			t.Fatalf("missing %s section", tab)
+		}
+		_, section, _ = strings.Cut(section, ">")
+		outer, _, _ := strings.Cut(strings.TrimSpace(section), ">")
+		if strings.Contains(outer, "card") || strings.Contains(outer, "border") || strings.Contains(outer, "shadow") {
+			t.Errorf("%s has redundant outer card: %s", tab, outer)
+		}
+	}
+}
+
 func TestNewTaskUsesThreadComposerAndEditableBreadcrumb(t *testing.T) {
 	var buf bytes.Buffer
 	if err := NewTaskContent(&models.Project{ID: "project"}, nil, nil).Render(context.Background(), &buf); err != nil {
@@ -343,8 +362,8 @@ func TestTaskDetailContent_LifecycleTabFillsRemainingHeight(t *testing.T) {
 	output := buf.String()
 	for _, required := range []string{
 		`id="tab-lifecycle" class="task-tab-panel flex-1 flex flex-col min-h-0"`,
-		`class="card bg-base-100 shadow-sm border border-base-300 flex-1 min-h-0"`,
-		`class="card-body flex flex-col min-h-0"`,
+		`class="flex flex-col min-w-0 flex-1 min-h-0"`,
+		`class="flex flex-col gap-2 flex-1 min-h-0"`,
 		`data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0"`,
 		`id="lifecycle-activity-scroll"`,
 		`class="flex-1 min-h-0 overflow-y-auto pr-1"`,
