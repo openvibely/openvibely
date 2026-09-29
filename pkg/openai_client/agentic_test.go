@@ -633,6 +633,101 @@ func TestSendAgentic_WebsocketQueuesLocalSteeringUntilResponseCompletes(t *testi
 	}
 }
 
+func TestSendAgentic_WebsocketRefreshesToolsBeforeSteeredContinuation(t *testing.T) {
+	secondRequest := make(chan map[string]any, 1)
+	var refreshes atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		for turn := 1; turn <= 2; turn++ {
+			_, data, readErr := conn.Read(r.Context())
+			if readErr != nil {
+				t.Errorf("read request %d: %v", turn, readErr)
+				return
+			}
+			var request map[string]any
+			if err := json.Unmarshal(data, &request); err != nil {
+				t.Errorf("decode request %d: %v", turn, err)
+				return
+			}
+			if turn == 2 {
+				secondRequest <- request
+			}
+			for _, event := range []string{
+				fmt.Sprintf(`{"type":"response.created","response":{"id":"resp_%d"}}`, turn),
+				fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_%d","status":"completed","model":"gpt-5.5"}}`, turn),
+			} {
+				if err := conn.Write(r.Context(), websocket.MessageText, []byte(event)); err != nil {
+					t.Errorf("write response %d: %v", turn, err)
+					return
+				}
+			}
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	var claimed atomic.Bool
+	client := NewWithAPIKey("sk-test")
+	_, err := client.SendAgentic(context.Background(), "original", &AgenticOptions{
+		Model:            "gpt-5.5",
+		MaxTurns:         1,
+		SkipDefaultTools: true,
+		OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
+			if claimed.CompareAndSwap(false, true) {
+				return LocalSteeringInput{Text: "use the newly available tool"}, nil
+			}
+			return LocalSteeringInput{}, nil
+		},
+		OnSteeringToolRefresh: func(context.Context) (AgenticToolSnapshot, error) {
+			refreshes.Add(1)
+			return AgenticToolSnapshot{
+				SkipDefaultTools: true,
+				ExtraTools: []ToolDefinition{{
+					Type: "function", Name: "late_tool", Parameters: json.RawMessage(`{"type":"object"}`),
+				}},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if refreshes.Load() != 1 {
+		t.Fatalf("tool refreshes = %d, want 1", refreshes.Load())
+	}
+	request := <-secondRequest
+	tools, _ := request["tools"].([]any)
+	if len(tools) != 1 || tools[0].(map[string]any)["name"] != "late_tool" {
+		t.Fatalf("steered continuation tools = %#v", tools)
+	}
+}
+
+func TestExecuteOpenAIToolTasksExposesLocalSteeringWakeup(t *testing.T) {
+	wakeup := make(chan struct{})
+	close(wakeup)
+	results := executeOpenAIToolTasks(context.Background(), &AgenticOptions{
+		LocalSteeringWakeup: wakeup,
+		ToolExecutor: func(ctx context.Context, _ string, _ json.RawMessage) (string, bool, error) {
+			select {
+			case <-llmcontracts.MidTurnSteeringWakeupFromContext(ctx):
+				return "Wait interrupted by new input.", false, nil
+			default:
+				return "", true, errors.New("missing steering wakeup")
+			}
+		},
+	}, []openAIToolExecutionTask{{call: toolCallInfo{Name: "wait_agent"}}})
+	if len(results) != 1 || results[0].isError || results[0].output != "Wait interrupted by new input." {
+		t.Fatalf("wait result = %#v", results)
+	}
+}
+
 func TestSendAgentic_ResponsesLiteWebsocketPreservesToolAndQueuedSteeringMessages(t *testing.T) {
 	secondRequest := make(chan map[string]any, 1)
 	var connections atomic.Int32
@@ -3024,6 +3119,7 @@ func TestSendAgentic_AutoCompactionMidTurn_APIKey(t *testing.T) {
 	client := newHTTPTestAPIKeyClient("sk-test")
 	resp, err := client.SendAgentic(context.Background(), "Read test.txt", &AgenticOptions{
 		Model:                    "gpt-5.3-codex",
+		MaxTurns:                 1,
 		WorkDir:                  tmpDir,
 		AutoCompaction:           true,
 		CompactionTokenThreshold: 1,
