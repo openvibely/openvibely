@@ -38,7 +38,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   [data-openvibely-runtime="desktop"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }
   @media (min-width: 1024px) { [data-openvibely-runtime="desktop"] .drawer-side { top: 0; } }
   #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; user-select: none; --project-tab-selected: oklch(var(--b2)); --project-tab-contour: oklch(var(--b1)); box-shadow: inset 0 -2px var(--project-tab-contour); }
-  [data-theme="light"] #desktop-project-titlebar { --project-tab-contour: #FAFAFA; }
+  [data-theme="light"] #desktop-project-titlebar { --project-tab-contour: var(--ov-l-border); }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
   #desktop-project-titlebar:not([data-keyboard-navigation]) [data-project-tab]:focus { outline: none; }
