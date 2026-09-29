@@ -121,7 +121,7 @@ func upcomingContent(upcoming *models.Upcoming, currentProjectID string) templ.C
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"flex items-center justify-between mb-6\"><div><h2 class=\"text-2xl font-bold\">Pulse</h2><p class=\"text-sm opacity-60 mt-1\">Your project's heartbeat</p></div><div class=\"flex items-center gap-2\"><span class=\"text-xs opacity-40\">Updated ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><div><h2 class=\"text-2xl font-bold\">Pulse</h2><p class=\"text-sm opacity-60 mt-1\">Your project's heartbeat</p></div><div class=\"flex items-center gap-2\"><span class=\"text-xs opacity-40\">Updated ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

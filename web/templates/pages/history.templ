@@ -22,7 +22,7 @@ templ HistoryContent(history *models.History, currentProjectID string) {
 templ historyContent(history *models.History, currentProjectID string) {
 	<div id="history-container" class="h-full overflow-y-auto">
 		@layout.PageTitle("Reflection")
-		<div class="flex items-center justify-between mb-6">
+		<div data-page-header class="flex items-center justify-between mb-6">
 			<div>
 				<h2 class="text-2xl font-bold">Reflection</h2>
 				<p class="text-sm opacity-60 mt-1">Summary of completed work</p>

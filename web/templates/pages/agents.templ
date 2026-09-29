@@ -81,7 +81,7 @@ func agentRequiredSystemControlLocked(agent models.Agent) bool {
 
 templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption, hasMore bool, state CardListState) {
 		<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container data-card-pagination-root data-card-pagination-url={ CardListURL("agents", state) } data-card-pagination-list="#agents-card-list" data-card-pagination-card-selector="[data-agent-id]" data-card-pagination-key="data-agent-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Agents")
-		<div class="flex items-center justify-between mb-6">
+		<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Agents</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewAgentModal()">
 				+ Add Agent

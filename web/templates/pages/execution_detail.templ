@@ -11,7 +11,7 @@ import (
 templ ExecutionDetail(projects []models.Project, exec *models.Execution, task *models.Task) {
 	@layout.Base("Execution", projects, "") {
 		<div class="max-w-4xl">
-			<div class="flex items-center gap-2 mb-4">
+			<div data-page-header class="flex items-center gap-2 mb-4">
 				if task != nil {
 					<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s", task.ID)) } class="btn btn-ghost btn-sm">
 						Back to Task

@@ -98,7 +98,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 			hx-swap="outerHTML show:none"
 		>
 		@layout.PageTitle("Alerts")
-			<div id="alerts-page-header" class="flex items-center justify-between mb-6">
+			<div data-page-header id="alerts-page-header" class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">
 				Alerts
 				if unreadCount > 0 {

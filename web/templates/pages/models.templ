@@ -239,7 +239,7 @@ templ providerIcon(provider models.LLMProvider) {
 templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, oauthConnections []models.OAuthConnection, modelWorkerStats map[string]int, desktopMode bool, hasMore bool, state CardListState) {
 		<div id="models-container" data-search-container hx-history="false" data-card-pagination-root data-card-pagination-url={ CardListURL("models", state) } data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Models")
-	<div class="flex items-center justify-between mb-6">
+	<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Models</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewModelModal()">
 				+ Add Model

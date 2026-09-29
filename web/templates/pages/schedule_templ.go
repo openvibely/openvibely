@@ -691,7 +691,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<!-- Header: Row 1 – Title + New Task button --><div class=\"flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto\"><div class=\"flex justify-between items-center mb-3\"><h2 class=\"text-2xl font-bold\">Schedule</h2><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-2 opacity-60\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<!-- Header: Row 1 – Title + New Task button --><div class=\"flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto\"><div data-page-header class=\"flex justify-between items-center mb-3\"><h2 class=\"text-2xl font-bold\">Schedule</h2><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-2 opacity-60\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

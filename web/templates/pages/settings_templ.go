@@ -420,7 +420,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Channels</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ Add Channel</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Channels</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ Add Channel</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
