@@ -194,8 +194,8 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				}
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": wall.X, "y": wall.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 1200, "y": wall.Y, "buttons": 1}, nil)
-				if got := browser.evaluate(`String(document.querySelector('[data-project-tab="p23"]').parentElement.getBoundingClientRect().right <= document.querySelector('#desktop-project-tabs [data-project-selector]').getBoundingClientRect().left)`); got != "true" {
-					t.Fatal("dragged tab overlaps + section", got)
+				if got := browser.evaluate(`String(Math.abs(new DOMMatrix(getComputedStyle(document.querySelector('[data-project-tab="p23"]').parentElement).transform).m41) < 0.5)`); got != "true" {
+					t.Fatal("last tab must stop at its resting position", got)
 				}
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 1200, "y": wall.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
 				browser.evaluate(`document.querySelector('[data-project-tab="p00"]').scrollIntoView({block:'nearest',inline:'start'}); 'ready'`)
@@ -205,6 +205,12 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="p00"]').getBoundingClientRect();return {X:r.x+40,Y:r.y+15};})())`)), &point); err != nil {
 					t.Fatal(err)
 				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 0, "y": point.Y, "buttons": 1}, nil)
+				if got := browser.evaluate(`String(Math.abs(new DOMMatrix(getComputedStyle(document.querySelector('[data-project-tab="p00"]').parentElement).transform).m41) < 0.5)`); got != "true" {
+					t.Fatal("first tab must stop at its resting position", got)
+				}
+				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 0, "y": point.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "right", "buttons": 2, "clickCount": 1}, nil)
 				browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "right", "buttons": 0, "clickCount": 1}, nil)
 				browser.waitFor("native context menu", `String(document.getElementById('project-tab-menu').matches(':popover-open'))+':'+String(!document.getElementById('project-tab-pin-action'))`, "true:true")
