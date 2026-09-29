@@ -13,7 +13,7 @@ func TestImageAttachmentBudgetIgnoresEncodedSize(t *testing.T) {
 	for _, tc := range []struct {
 		provider models.LLMProvider
 		tokens   int
-	}{{models.ProviderOpenAI, 1844}, {models.ProviderAnthropic, 2000}} {
+	}{{models.ProviderOpenAI, 1844}, {models.ProviderAnthropic, 2000}, {models.ProviderOpenAICompatible, 2000}} {
 		for _, size := range []int64{0, 713753, 794795, 10000000} {
 			att := models.Attachment{FileName: "screen.png", FilePath: "/tmp/screen.png", MediaType: "image/png", FileSize: size}
 			want := tc.tokens + estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.FilePath) + estimatedUTF8Tokens(att.MediaType)
@@ -74,5 +74,38 @@ func TestImageAttachmentBudgetStillEnforcesContextLimit(t *testing.T) {
 	}
 	if !pendingInputInfeasible(calculateRequestBudget(req)) {
 		t.Fatal("image token budget must still enforce the context limit")
+	}
+}
+
+func TestCompatibleScreenshotFollowupReachesProvider(t *testing.T) {
+	svc := &LLMService{}
+	req := llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Followup: true,
+		Message: "Compare these screenshots.",
+		Agent:   models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "vision-model", ContextWindow: 32768},
+		Attachments: []models.Attachment{
+			{MediaType: "image/png", FileSize: 794795},
+			{MediaType: "image/png", FileSize: 713753},
+		},
+	}
+	called := false
+	adapter := providerAdapterFunc(func(got llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		called = true
+		if len(got.Attachments) != 2 || got.Message != req.Message {
+			t.Fatal("screenshots and prompt must remain unchanged")
+		}
+		return llmcontracts.AgentResult{Output: "ok"}, nil
+	})
+	if _, err := svc.callProviderWithCompaction(adapter, req); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("compatible screenshot request never reached provider")
+	}
+	for range 20 {
+		req.Attachments = append(req.Attachments, models.Attachment{MediaType: "image/png", FileSize: 1})
+	}
+	if !pendingInputInfeasible(calculateRequestBudget(req)) {
+		t.Fatal("compatible images must still count toward the context limit")
 	}
 }

@@ -516,6 +516,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 
 // Image payload bytes are not text tokens. Match the harness estimates for
 // the image modes we send: OpenAI detail:auto and Anthropic image blocks.
+// Compatible providers use a 2,000-token fallback, not an exact model charge.
 // Attachment does not currently expose OpenAI original-detail images.
 func estimateAttachmentTokens(provider models.LLMProvider, att models.Attachment) int {
 	metadata := estimatedUTF8Tokens(att.FileName) + estimatedUTF8Tokens(att.MediaType) + estimatedUTF8Tokens(att.FilePath)
@@ -526,6 +527,10 @@ func estimateAttachmentTokens(provider models.LLMProvider, att models.Attachment
 		}
 	case models.ProviderAnthropic:
 		if anthropicclient.IsImageMediaType(att.MediaType) {
+			return metadata + 2000
+		}
+	case models.ProviderOpenAICompatible:
+		if openaiclient.IsImageMediaType(att.MediaType) {
 			return metadata + 2000
 		}
 	}
