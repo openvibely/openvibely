@@ -29,6 +29,25 @@ func TestNewTaskUsesThreadComposerAndEditableBreadcrumb(t *testing.T) {
 	}
 }
 
+func TestTaskDetailCompactBreadcrumbToolbar(t *testing.T) {
+	var buf bytes.Buffer
+	task := &models.Task{ID: "task", ProjectID: "project", Title: "A long task title"}
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`id="task-breadcrumb-toolbar"`,
+		`min-height: 48px; padding: 8px 0; margin-bottom: 8px;`,
+		`font-size: 16px; line-height: 22px; font-weight: 400;`,
+		`#task-breadcrumb-toolbar [data-breadcrumb-selector-button] { font-weight: 500; }`,
+		`#main-content:has(> #task-detail-content) { padding-top: 0; }`,
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing compact toolbar contract %q", want)
+		}
+	}
+}
+
 func stringPtr(s string) *string { return &s }
 
 func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
