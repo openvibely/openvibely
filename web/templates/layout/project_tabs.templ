@@ -60,7 +60,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab:has([aria-selected="true"])::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
   .desktop-project-tab:not(:has([aria-selected="true"]))::after { content: ""; position: absolute; right: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: opacity 150ms ease; }
   .desktop-project-tab:not(:has([aria-selected="true"])):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
-  .desktop-project-tab:not(:has([aria-selected="true"])):has(+ [data-project-selector] #project-selector-trigger:hover)::after { opacity: 0; }
   .desktop-project-tab:first-child:not(:has([aria-selected="true"]))::before { content: ""; position: absolute; left: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: opacity 150ms ease; }
   .desktop-project-tab:first-child:not(:has([aria-selected="true"])):hover::before { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::before, .desktop-project-tab::after { transition: none; } }
@@ -75,7 +74,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:hover { background: oklch(var(--bc) / .18); }
   #desktop-project-titlebar #project-selector-trigger { display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; flex-shrink: 0; width: 30px; height: 30px; align-self: center; transform: translateY(-3px); border-radius: 50%; }
- #desktop-project-titlebar #project-selector-trigger:hover { background: oklch(var(--bc) / .12); }
+ #desktop-project-titlebar #project-selector-trigger:is(:hover, [aria-expanded="true"]) { background: oklch(var(--bc) / .12); }
  #project-tab-menu { position: fixed; margin: 0; padding: 4px; border: 1px solid oklch(var(--bc) / .2); border-radius: 8px; background: oklch(var(--b1)); color: oklch(var(--bc)); --wails-draggable: no-drag; }
  #project-tab-menu button { display: block; width: 100%; text-align: left; padding: 8px 16px; border-radius: 4px; }
  #project-tab-menu button:hover { background: oklch(var(--bc) / .12); }
