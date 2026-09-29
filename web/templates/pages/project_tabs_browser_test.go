@@ -284,6 +284,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("project A schedule", `location.pathname`, "/schedule")
 				browser.click(`[data-project-tab="p01"]`)
 				browser.waitFor("new project starts independently", `location.pathname+location.search`, "/chat?project_id=p01")
+				if got := browser.evaluate(`(function(){var tab=document.querySelector('.desktop-project-tab'),left=getComputedStyle(tab,'::before'),right=getComputedStyle(tab,'::after');return String(left.content==='""' && left.width==='2px' && left.height==='16px' && left.top===right.top && left.backgroundColor===right.backgroundColor && parseFloat(left.left)<0);})()`); got != "true" {
+					t.Fatal("first inactive tab must have a matching leading separator", got)
+				}
 				browser.click(`[data-nav-base="/tasks"]`)
 				browser.waitFor("project B tasks", `location.pathname`, "/tasks")
 				browser.click(`[data-project-tab="p00"]`)
