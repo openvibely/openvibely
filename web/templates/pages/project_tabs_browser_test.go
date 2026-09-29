@@ -266,6 +266,10 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("plus icon must be centered inside its hover circle", got)
 				}
 
+				if got := browser.evaluate(`(function(){var tab=document.querySelector('[data-project-tab]'),nav=document.querySelector('[data-nav-base="/tasks"]'),a=getComputedStyle(tab),b=getComputedStyle(nav),plus=document.getElementById('project-selector-trigger'),icon=plus.querySelector('svg'),container=plus.closest('[data-project-selector]');return String(a.fontFamily===b.fontFamily && a.fontSize===b.fontSize && a.lineHeight===b.lineHeight && icon.getBoundingClientRect().width===12 && Math.abs(icon.getBoundingClientRect().left-container.getBoundingClientRect().left-16)<0.5);})()`); got != "true" {
+					t.Fatal("tab typography must match sidebar and plus must use label inset with a compact icon", got)
+				}
+
 				// A fullscreen-sized content viewport must retain the same visible bar.
 				// Native macOS fullscreen transitions require separate Wails verification.
 				browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1920, "height": 1080, "deviceScaleFactor": 1, "mobile": false}, nil)
