@@ -106,6 +106,9 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`String(location.hash === '#keep' && new URL(location.href).searchParams.get('view') === 'board')`); got != "true" {
 					t.Fatal("initial URL lost route state", got)
 				}
+				if got := browser.evaluate(`String(document.querySelector('.drawer-content').getBoundingClientRect().bottom <= innerHeight + 1)`); got != "true" {
+					t.Fatal("shared page shell extends below viewport", got)
+				}
 				if !desktop {
 					browser.waitFor("web selector", `String(!!document.querySelector('#desktop-project-titlebar #project-selector') && !document.querySelector('[data-wml-window]'))`, "true")
 					browser.waitFor("web plus idle background", `getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor`, "rgba(0, 0, 0, 0)")
