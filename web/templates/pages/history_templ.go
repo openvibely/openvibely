@@ -122,7 +122,7 @@ func historyContent(history *models.History, currentProjectID string) templ.Comp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"flex items-center justify-between mb-6\"><div><h2 class=\"text-2xl font-bold\">Reflection</h2><p class=\"text-sm opacity-60 mt-1\">Summary of completed work</p></div><div class=\"flex items-center gap-2\"><!-- Time Range Selector --><div class=\"join\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div data-page-header class=\"flex items-center justify-between mb-6\"><div><h2 class=\"text-2xl font-bold\">Reflection</h2><p class=\"text-sm opacity-60 mt-1\">Summary of completed work</p></div><div class=\"flex items-center gap-2\"><!-- Time Range Selector --><div class=\"join\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

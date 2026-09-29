@@ -401,7 +401,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"mb-6 flex items-center justify-between gap-3\"><h2 class=\"text-2xl font-bold\">Automations</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ New Automation</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow\" data-automation-new-menu><li><button type=\"button\" data-automation-new-template onclick=\"openAutomationNewModal(event, 'automation-template-modal')\">Template</button></li><li><button type=\"button\" data-automation-new-describe onclick=\"openAutomationNewModal(event, 'automation-describe-modal')\">Describe</button></li><li><button type=\"button\" data-automation-new-custom onclick=\"submitAutomationCustom(event)\">Custom</button></li></ul></div><form id=\"automation-custom-form\" class=\"hidden\" method=\"post\" action=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div data-page-header class=\"mb-6 flex items-center justify-between gap-3\"><h2 class=\"text-2xl font-bold\">Automations</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\">+ New Automation</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow\" data-automation-new-menu><li><button type=\"button\" data-automation-new-template onclick=\"openAutomationNewModal(event, 'automation-template-modal')\">Template</button></li><li><button type=\"button\" data-automation-new-describe onclick=\"openAutomationNewModal(event, 'automation-describe-modal')\">Describe</button></li><li><button type=\"button\" data-automation-new-custom onclick=\"submitAutomationCustom(event)\">Custom</button></li></ul></div><form id=\"automation-custom-form\" class=\"hidden\" method=\"post\" action=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1841,7 +1841,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "<div class=\"mb-6 flex flex-wrap items-start justify-between gap-3\" data-automation-live-header><div class=\"min-w-0 flex-1\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, "<div class=\"mb-6 flex flex-wrap items-start justify-between gap-3\" data-page-header data-automation-live-header><div class=\"min-w-0 flex-1\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6062,7 +6062,7 @@ func automationNewEditableBreadcrumb(currentProjectID string, automationName str
 			templ_7745c5c3_Var312 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 473, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 473, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-page-header data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6130,7 +6130,7 @@ func automationEditableBreadcrumb(currentProjectID string, automationID string, 
 			templ_7745c5c3_Var316 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 477, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 477, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-page-header data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -6228,7 +6228,7 @@ func automationBreadcrumb(currentProjectID string, automationID string, automati
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 483, "\" aria-label=\"Breadcrumb\" data-automation-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 483, "\" aria-label=\"Breadcrumb\" data-page-header data-automation-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

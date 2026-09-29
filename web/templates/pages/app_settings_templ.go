@@ -1179,7 +1179,7 @@ func personalitySection(personality string, cards []PersonalityListCard, hasMore
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\"><div class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Personality</h2><button class=\"btn btn-primary btn-sm\" onclick=\"openNewPersonalityModal()\">+ Add Personality</button></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\"><div data-page-header class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Personality</h2><button class=\"btn btn-primary btn-sm\" onclick=\"openNewPersonalityModal()\">+ Add Personality</button></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -85,7 +85,7 @@ func defaultSkillBodyTemplate() string {
 
 templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string, hasMore bool, state CardListState) {
 		<div id="skills-container" data-search-container data-card-pagination-root data-card-pagination-replacement-managed="true" data-card-pagination-url={ CardListURL("skills", state) } data-card-pagination-list="#skills-card-list" data-card-pagination-card-selector="[data-skill-handle]" data-card-pagination-key="data-skill-handle" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>		@layout.PageTitle("Skills")
-		<div class="flex items-center justify-between mb-6">
+		<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Skills</h2>
 			<div class="dropdown dropdown-end">
 				<label

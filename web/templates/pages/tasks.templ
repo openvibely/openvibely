@@ -27,7 +27,7 @@ templ Tasks(projects []models.Project, project *models.Project, tasks []models.T
 templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, backlogSort string, completedSort string, menuStates ...map[string]components.TaskCardMergeMenuState) {
 	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
 		@layout.PageTitle("Tasks")
-		<div class="flex items-center justify-between mb-6 flex-shrink-0">
+		<div data-page-header class="flex items-center justify-between mb-6 flex-shrink-0">
 			<h2 class="text-2xl font-bold">Tasks</h2>
 			<a class="btn btn-primary btn-sm" href={ templ.URL("/tasks/new?project_id=" + getProjectID(project, nil)) } hx-get={ "/tasks/new?project_id=" + getProjectID(project, nil) } hx-target="#main-content" hx-push-url="true">
 				+ Add Task

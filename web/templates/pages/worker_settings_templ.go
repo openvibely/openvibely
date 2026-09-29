@@ -154,7 +154,7 @@ func workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int,
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<h2 class=\"text-2xl font-bold mb-6\">Workers</h2><div class=\"card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0 max-w-full flex-none h-auto\"><div class=\"card-body min-w-0\"><h3 class=\"card-title text-lg\">Worker Capacity &amp; Utilization</h3><p class=\"text-sm opacity-60 mb-4\">Global and per-project worker limits shown together. Click a limit value to edit it.</p><div class=\"worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto\"><table class=\"table table-sm worker-stats-table w-full min-w-max h-auto\"><thead><tr><th>Scope</th><th>Name</th><th>Running</th><th>Queue</th><th>Limit</th><th>Status</th></tr></thead>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<h2 data-page-header class=\"text-2xl font-bold mb-6\">Workers</h2><div class=\"card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0 max-w-full flex-none h-auto\"><div class=\"card-body min-w-0\"><h3 class=\"card-title text-lg\">Worker Capacity &amp; Utilization</h3><p class=\"text-sm opacity-60 mb-4\">Global and per-project worker limits shown together. Click a limit value to edit it.</p><div class=\"worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto\"><table class=\"table table-sm worker-stats-table w-full min-w-max h-auto\"><thead><tr><th>Scope</th><th>Name</th><th>Running</th><th>Queue</th><th>Limit</th><th>Status</th></tr></thead>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
