@@ -416,7 +416,14 @@ func ensureCompletionsRequestFits(messages []completionsMessage, tools []map[str
 	if err != nil {
 		return err
 	}
-	tokens := tokenestimate.FromByteCount(len(encoded))
+	imageTokens := 2000 // Compatible-provider fallback; not a billing estimate.
+	if opts.FirstPartyOpenAI {
+		imageTokens = 1844
+	}
+	tokens, err := tokenestimate.FromMessagesJSON(encoded, "image_url", imageTokens)
+	if err != nil {
+		return err
+	}
 	if tokens <= safe {
 		return nil
 	}

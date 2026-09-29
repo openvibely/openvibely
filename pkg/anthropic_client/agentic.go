@@ -1239,7 +1239,10 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	if err != nil {
 		return err
 	}
-	tokens := tokenestimate.FromByteCount(len(encoded))
+	tokens, err := tokenestimate.FromMessagesJSON(encoded, "image", 2000)
+	if err != nil {
+		return err
+	}
 	if tokens <= safe {
 		return nil
 	}
