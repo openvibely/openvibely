@@ -17,11 +17,14 @@ func TestProjectTabsAccentContour(t *testing.T) {
 	}
 	for _, want := range []string{
 		`--project-tab-accent: oklch(var(--p))`,
+		`color-mix(in oklch, oklch(var(--bc)) 70%, white)`,
+		`color-mix(in oklch, oklch(var(--bc)) 70%, black)`,
+		`font-weight: 600`,
 		`border-bottom: 1px solid var(--project-tab-accent)`,
 		`margin-bottom: -1px`,
-		`inset 1px 1px 0 var(--project-tab-accent)`,
-		`inset -1px 0 0 var(--project-tab-accent)`,
-		`transparent 9px, var(--project-tab-accent) 9.5px`,
+		`inset 2px 2px 0 var(--project-tab-accent)`,
+		`inset -2px 0 0 var(--project-tab-accent)`,
+		`transparent 8px, var(--project-tab-accent) 8.5px`,
 	} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing active-tab contour: %s", want)
