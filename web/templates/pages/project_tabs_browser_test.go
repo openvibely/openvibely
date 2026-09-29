@@ -380,6 +380,13 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				runComposerFocusCDP(t, chrome, server.URL+"/chat", "project-tabs-restart", func(browser *composerFocusCDP) {
 					browser.waitFor("active page restored after fresh startup", `location.pathname + location.search`, "/schedule?project_id=p00")
 					browser.waitFor("opened tabs restored in saved order after restart", `Array.from(document.querySelectorAll('[data-project-tab]')).map(tab=>tab.dataset.projectTab).join(',')`, expected)
+					browser.evaluate(`(function(){document.querySelector('[data-project-tab="p02"]').click();return 'selected';})()`)
+					browser.waitFor("select tab to keep", `document.getElementById('project-selector').value`, "p02")
+					browser.waitFor("selected tab navigation", `location.search`, "?project_id=p02")
+					browser.evaluate(`(function(){var ids=Array.from(document.querySelectorAll('[data-close-project]')).map(button=>button.dataset.closeProject).filter(id=>id!=='p02');ids.forEach(id=>document.querySelector('[data-close-project="'+id+'"]').click());return 'closed';})()`)
+					browser.waitFor("last tab cannot close", `String(document.querySelectorAll('[data-project-tab]').length === 1 && document.querySelector('[data-close-project]').disabled)`, "true")
+					browser.evaluate(`(function(){document.querySelector('[data-close-project]').click(); document.querySelector('[data-project-tab]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete', bubbles: true}));return 'attempted';})()`)
+					browser.waitFor("last tab survives click and Delete", `String(document.querySelectorAll('[data-project-tab]').length === 1)`, "true")
 				})
 			}
 			mu.Lock()
