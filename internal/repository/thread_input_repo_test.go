@@ -731,6 +731,31 @@ func TestThreadInputRepo_CreateSteeringNotifiesActiveExecutionSubscriber(t *test
 	}
 }
 
+func TestThreadInputRepo_SubscribeSteeringWakeupsSeedsExistingPendingInput(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, NewExecutionRepo(db).Create(ctx, active))
+
+	steering := &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID,
+		AgentConfigID: agent.ID, ExpectedTurnID: active.ID, Content: "already waiting",
+	}
+	require.NoError(t, repo.CreateSteeringForActiveExecution(ctx, steering, active.ID))
+
+	wakeup, unsubscribe := repo.SubscribeSteeringWakeups(active.ID)
+	defer unsubscribe()
+	select {
+	case <-wakeup:
+	default:
+		t.Fatal("subscription did not seed a wakeup for existing pending steering")
+	}
+}
+
 func TestThreadInputRepo_ProviderOwnedSteeringIsNeverLocallyClaimed(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

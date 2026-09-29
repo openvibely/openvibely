@@ -1406,6 +1406,22 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
 			return formatSteeringInstruction(combinedSteeringContent(inputs)), nil
 		})
+		callCtx = llmcontracts.WithLocalSteeringCallback(callCtx, func(callbackCtx context.Context) (llmcontracts.LocalSteeringInput, error) {
+			inputs, steeringErr := s.threadInputRepo.PreparePendingSteering(callbackCtx, exec.ID, exec.ID)
+			if steeringErr != nil || len(inputs) == 0 {
+				return llmcontracts.LocalSteeringInput{}, steeringErr
+			}
+			preparedSteering = append(preparedSteering, inputs...)
+			attachments, steeringErr := s.hydrateTaskSteeringAttachments(inputs)
+			if steeringErr != nil {
+				return llmcontracts.LocalSteeringInput{}, steeringErr
+			}
+			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
+			return llmcontracts.LocalSteeringInput{
+				Text:        formatSteeringInstruction(combinedSteeringContent(inputs)),
+				Attachments: attachments,
+			}, nil
+		})
 		callCtx = llmcontracts.WithSteeringRetryResetCallback(callCtx, func(callbackCtx context.Context) error {
 			if len(preparedSteering) == 0 {
 				return nil
@@ -1852,6 +1868,71 @@ func combinedSteeringContent(inputs []models.ThreadInput) string {
 
 func formatSteeringInstruction(steeringMessage string) string {
 	return strings.TrimSpace(steeringMessage)
+}
+
+func (s *LLMService) hydrateTaskSteeringAttachments(inputs []models.ThreadInput) ([]models.Attachment, error) {
+	uploadsRoot := "uploads"
+	if s.taskSvc != nil && strings.TrimSpace(s.taskSvc.uploadsDir) != "" {
+		uploadsRoot = s.taskSvc.uploadsDir
+	}
+	var attachments []models.Attachment
+	for i := range inputs {
+		sessionID := strings.TrimSpace(inputs[i].AttachmentSessionID)
+		if sessionID == "" {
+			continue
+		}
+		dir := filepath.Join(uploadsRoot, "chat", "pending", sessionID)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, fmt.Errorf("reading steering attachments %s: %w", sessionID, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			info, err := entry.Info()
+			if err != nil {
+				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
+			}
+			if taskSteeringImageMediaType(entry.Name()) != "" {
+				attachments = append(attachments, models.Attachment{
+					FileName: entry.Name(), FilePath: path,
+					MediaType: taskSteeringImageMediaType(entry.Name()), FileSize: info.Size(),
+				})
+				continue
+			}
+			if info.Size() > 100*1024 {
+				inputs[i].Content = combineProjectInstructions(inputs[i].Content,
+					fmt.Sprintf("File: %s (attached, %d bytes - too large to include inline)", entry.Name(), info.Size()))
+				continue
+			}
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("reading steering attachment %s: %w", entry.Name(), err)
+			}
+			inputs[i].Content = combineProjectInstructions(inputs[i].Content,
+				fmt.Sprintf("--- Attached Files ---\nFile: %s\n```\n%s\n```", entry.Name(), string(content)))
+		}
+	}
+	return attachments, nil
+}
+
+func taskSteeringImageMediaType(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	default:
+		return ""
+	}
 }
 
 func (s *LLMService) SummarizeWorktreeCommitDiffForAgentID(ctx context.Context, worktreePath string, agentID string, commitCtx WorktreeCommitMessageContext) string {
@@ -2459,21 +2540,38 @@ func trackLifecycleCompletionUserMessage(ctx context.Context, fallback string) (
 		return latest
 	}
 	steering := llmcontracts.SteeringCallbackFromContext(ctx)
-	if steering == nil {
+	localSteering := llmcontracts.LocalSteeringCallbackFromContext(ctx)
+	if steering == nil && localSteering == nil {
 		return ctx, current
 	}
-	tracked := func(callbackCtx context.Context) (string, error) {
-		message, err := steering(callbackCtx)
-		if err == nil {
-			if latestMessage := strings.TrimSpace(message); latestMessage != "" {
-				mu.Lock()
-				latest = latestMessage
-				mu.Unlock()
-			}
+	setLatest := func(message string) {
+		if latestMessage := strings.TrimSpace(message); latestMessage != "" {
+			mu.Lock()
+			latest = latestMessage
+			mu.Unlock()
 		}
-		return message, err
 	}
-	return llmcontracts.WithSteeringCallback(ctx, tracked), current
+	if steering != nil {
+		tracked := func(callbackCtx context.Context) (string, error) {
+			message, err := steering(callbackCtx)
+			if err == nil {
+				setLatest(message)
+			}
+			return message, err
+		}
+		ctx = llmcontracts.WithSteeringCallback(ctx, tracked)
+	}
+	if localSteering != nil {
+		tracked := func(callbackCtx context.Context) (llmcontracts.LocalSteeringInput, error) {
+			input, err := localSteering(callbackCtx)
+			if err == nil {
+				setLatest(input.Text)
+			}
+			return input, err
+		}
+		ctx = llmcontracts.WithLocalSteeringCallback(ctx, tracked)
+	}
+	return ctx, current
 }
 
 // statusOrNil returns a stringified status for logging, or "<nil>" when the
