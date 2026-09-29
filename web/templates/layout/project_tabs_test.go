@@ -23,7 +23,8 @@ func TestProjectTabsCleanSelectedShape(t *testing.T) {
 		`color-mix(in oklch, oklch(var(--bc)) 70%, white)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, black)`,
 		`--project-tab-contour: oklch(var(--b1))`,
-		`border-bottom: 1px solid var(--project-tab-contour)`,
+		`box-shadow: inset 0 -2px var(--project-tab-contour)`,
+		`border: 2px solid var(--project-tab-contour); border-bottom: 0`,
 	} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("missing active-tab contour: %s", want)
