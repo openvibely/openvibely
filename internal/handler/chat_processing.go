@@ -104,9 +104,8 @@ type streamingResponseParams struct {
 	// can schedule a fresh audit.
 	RepublishOpenPRAfterStartupSync bool
 
-	steeringHistoryStarted bool
-	steeringOutputCursor   string
-	lifecycleUserMessage   string
+	steeringOutputCursor string
+	lifecycleUserMessage string
 
 	// Tests that inspect steering recovery before a later queued turn starts
 	// suppress the asynchronous promotion launched during finalization.
@@ -632,78 +631,20 @@ modelLoop:
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
 		requestCtx = llmcontracts.WithRetrySourceExecutionID(requestCtx, params.RetrySourceExecutionID)
 		requestCtx = service.WithDirectUsageProject(requestCtx, params.ProjectID)
+		requestCtx = llmcontracts.WithMidTurnSteeringWakeup(requestCtx, steeringWakeup)
 		if params.lifecycleUserMessage != "" {
 			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
 		}
-		// Codex-style steering is owned by the local turn runner. A new input
-		// interrupts the active model call, then the normal loop resumes with the
-		// durable steering row as its next user input. Provider response.steer is
-		// deliberately not part of this path.
-		modelCallCtx, cancelModelCall := context.WithCancel(requestCtx)
-		modelCallDone := make(chan struct{})
-		modelCallWatcherDone := make(chan struct{})
-		steeringInterrupted := make(chan struct{}, 1)
-		if steeringWakeup != nil {
-			go func() {
-				defer close(modelCallWatcherDone)
-				select {
-				case <-modelCallDone:
-					return
-				case <-modelCallCtx.Done():
-					return
-				case <-steeringWakeup:
-				}
-				inputs, listErr := h.threadInputRepo.ListPendingSteering(
-					context.WithoutCancel(requestCtx), params.ExecID, params.ExecID,
-				)
-				if listErr != nil {
-					applog.Infof("[handler] processStreamingResponse exec=%s error checking steering interrupt: %v", params.ExecID, listErr)
-					return
-				}
-				if len(inputs) == 0 {
-					return
-				}
-				steeringInterrupted <- struct{}{}
-				cancelModelCall()
-			}()
-		} else {
-			close(modelCallWatcherDone)
-		}
+		// Codex-style steering is owned by the active agentic turn. The provider
+		// adapter preempts only model sampling; the outer call and any tools that
+		// already started keep their original context and run to completion.
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
-			modelCallCtx, params.Message, requestImageAttachments, params.Agent,
+			requestCtx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,
 			params.WorkDir, agentDef, params.IsTaskFollowup,
 		)
-		close(modelCallDone)
-		cancelModelCall()
-		<-modelCallWatcherDone
-		wasSteeringInterrupted := false
-		select {
-		case <-steeringInterrupted:
-			wasSteeringInterrupted = true
-		default:
-		}
 		steeringCallbackParams = nil
 		attemptSteering = preparedSteeringBatch{}
-		if wasSteeringInterrupted && ctx.Err() == nil {
-			partialOutput := ""
-			if current, loadErr := h.execRepo.GetByID(context.WithoutCancel(ctx), params.ExecID); loadErr != nil {
-				err = fmt.Errorf("loading interrupted steering output: %w", loadErr)
-				break
-			} else if current != nil {
-				partialOutput = current.Output
-			}
-			interruptedBatch, steeringErr := h.preparePendingSteeringInputs(ctx, &params, partialOutput)
-			if steeringErr != nil {
-				err = fmt.Errorf("preparing interrupted steering: %w", steeringErr)
-				break
-			}
-			if interruptedBatch.count() > 0 {
-				pendingSteering.inputs = append(pendingSteering.inputs, interruptedBatch.inputs...)
-				applog.Infof("[handler] processStreamingResponse exec=%s interrupted model call for %d local steering inputs", params.ExecID, interruptedBatch.count())
-				continue modelLoop
-			}
-		}
 		if err != nil || ctx.Err() != nil {
 			h.requeuePendingSteeringForExecution(ctx, params.ExecID)
 			pendingSteering = preparedSteeringBatch{}
@@ -719,7 +660,7 @@ modelLoop:
 			return
 		}
 		pendingSteering = preparedSteeringBatch{}
-		preparedAfter, steeringErr := h.preparePendingTextSteeringInputs(ctx, &params, result.Output)
+		preparedAfter, steeringErr := h.preparePendingSteeringInputs(ctx, &params, result.Output)
 		if steeringErr != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after model call: %v", params.ExecID, steeringErr)
 		}
@@ -914,11 +855,9 @@ func (h *Handler) waitForFinalSteeringInputs(ctx context.Context, params *stream
 	poll := time.NewTicker(finalSteeringPollInterval)
 	defer poll.Stop()
 	for {
-		// Once an outer provider call has returned, attachment-bearing steering can no
-		// longer be represented as a separate user attachment on this execution. Only
-		// text steering may continue the current turn; attachment steering is requeued
-		// by the deferred-completion path and processed as the next normal message.
-		prepared, err := h.preparePendingTextSteeringInputs(ctx, params, previousAssistantOutput)
+		// The provider call is idle here, so attachment-bearing input can safely
+		// become the next request in the same active turn.
+		prepared, err := h.preparePendingSteeringInputs(ctx, params, previousAssistantOutput)
 		if prepared.count() > 0 || err != nil {
 			return prepared, err
 		}
@@ -1034,12 +973,9 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 			})
 		}
 		params.Message = steeringInstruction
-	} else if !params.steeringHistoryStarted {
-		params.Message = combineActivePromptWithSteering(params.Message, steeringInstruction)
 	} else {
-		params.Message = steeringInstruction
+		params.Message = combineActivePromptWithSteering(params.Message, steeringInstruction)
 	}
-	params.steeringHistoryStarted = true
 	params.steeringOutputCursor = previousAssistantOutput
 	return batch, nil
 }

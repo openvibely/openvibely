@@ -477,6 +477,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			ExtraTools:       runtimeOpenAITools(rt, false), ToolExecutor: composeRuntimeToolExecutor(nil, rt),
 			ToolFilter:                     llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate)),
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+			LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 			EnableAstraConfigurationUpdate: true,
 			SkipDefaultTools:               rt.SkipDefaultTools})
 		if err != nil {
@@ -573,6 +574,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !inThinking {
@@ -703,6 +705,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnAsyncToolDelivered:           asyncCallbacks.onDelivered,
 		OnAsyncToolRejected:            asyncCallbacks.onRejected,
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
+		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
 			if !chatInThinking {
