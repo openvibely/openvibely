@@ -270,8 +270,11 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					t.Fatal("tab typography must match sidebar and plus must use label inset with a compact icon", got)
 				}
 
-				// A fullscreen-sized content viewport must retain the same visible bar.
-				// Native macOS fullscreen transitions require separate Wails verification.
+					if got := browser.evaluate(`(function(){return String(Array.from(document.querySelectorAll('.desktop-project-tab')).filter(function(tab){return !tab.querySelector('[aria-selected="true"]');}).every(function(tab){var separator=getComputedStyle(tab,'::after'),rect=tab.getBoundingClientRect(),close=tab.querySelector('[data-close-project]').getBoundingClientRect();return Math.abs(rect.top+parseFloat(separator.top)-(close.top+close.bottom)/2)<0.5;}));})()`); got != "true" {
+						t.Fatal("inactive separators must share the close buttons' vertical center", got)
+					}
+
+					// A fullscreen-sized content viewport must retain the same visible bar.				// Native macOS fullscreen transitions require separate Wails verification.
 				browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1920, "height": 1080, "deviceScaleFactor": 1, "mobile": false}, nil)
 				if got := browser.evaluate(`(function(){var tab=document.querySelector('.desktop-project-tab').getBoundingClientRect();return String(tab.top>=5 && tab.bottom<=46);})()`); got != "true" {
 					t.Fatal("fullscreen-sized viewport lost window controls or tabs", got)
