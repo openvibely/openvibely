@@ -10,6 +10,16 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestProjectTabsPlusHoverHidesInactiveSeparator(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `.desktop-project-tab:not(:has([aria-selected="true"])):has(+ [data-project-selector] #project-selector-trigger:hover)::after { opacity: 0; }`) {
+		t.Error("plus hover must hide only the neighboring inactive separator, not the selected tab curve")
+	}
+}
+
 func TestProjectTabsCleanSelectedShape(t *testing.T) {
 	var buf bytes.Buffer
 	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
