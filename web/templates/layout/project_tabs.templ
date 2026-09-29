@@ -225,6 +225,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    list.addEventListener('pointerdown', function(event) {
     var tab = event.target.closest('[data-project-tab]');
     if (!tab || event.button !== 0 || !event.isPrimary) return;
+    if (!switchProject(tab.dataset.projectTab)) return;
     drag = {pointer: event.pointerId, startX: event.clientX, grabOffset: event.clientX - tab.parentElement.getBoundingClientRect().left, x: event.clientX, wrapper: tab.parentElement, started: false};
    });
    document.addEventListener('pointermove', function(event) {
@@ -307,7 +308,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      return;
     }
     var tab = event.target.closest('[data-project-tab]');
-    if (tab) { switchProject(tab.dataset.projectTab); return; }
+    // Pointer activation already happened on press; retain keyboard activation.
+    if (tab) { if (event.detail === 0) switchProject(tab.dataset.projectTab); return; }
     var close = event.target.closest('[data-close-project]');
     if (!close) return;
     var index = ids.indexOf(close.dataset.closeProject);

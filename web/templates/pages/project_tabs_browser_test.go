@@ -128,6 +128,17 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`getComputedStyle(document.activeElement).outlineStyle`); got != "solid" {
 					t.Fatal("keyboard tab navigation must retain a focus outline", got)
 				}
+				// Selection happens on press, before release or drag movement.
+				for _, id := range []string{"p01", "p00"} {
+					var point struct{ X, Y float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('[data-project-tab="`+id+`"] ').getBoundingClientRect();return {X:r.x+80,Y:r.y+15};})())`)), &point); err != nil {
+						t.Fatal(err)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": point.X, "y": point.Y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+					browser.waitFor("activate tab before mouse release", `document.querySelector('[data-project-tab][aria-selected="true"]').dataset.projectTab`, id)
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": point.X, "y": point.Y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
+					browser.waitFor("project navigation after press", `new URLSearchParams(location.search).get('project_id')`, id)
+				}
 				// Reorder with real mouse input, in both directions, without navigation.
 				if got := browser.evaluate(`getComputedStyle(document.querySelector('[data-project-tab="p02"]').parentElement,'::after').width`); got != "2px" {
 					t.Fatal("missing background tab separator", got)
