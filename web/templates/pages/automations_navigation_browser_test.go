@@ -710,14 +710,12 @@ func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T
 		`data-automation-live-header-actions`,
 		`data-automation-live-edit`,
 		`data-automation-live-menu`,
-		`class="mt-1 text-sm opacity-60"`,
-		`>A standard Automation description.</p>`,
 	} {
 		if !strings.Contains(header, want) {
 			t.Errorf("expected standard Live header to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`class="mb-5 min-w-0"`, `text-base-content/65`} {
+	for _, forbidden := range []string{`>A standard Automation description.</p>`, `class="mb-5 min-w-0"`, `text-base-content/65`} {
 		if strings.Contains(header, forbidden) {
 			t.Errorf("expected standard Live header to omit legacy styling %q", forbidden)
 		}
