@@ -10,6 +10,16 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestProjectBrandIsNonSelectableDragRegion(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `.project-bar-brand { cursor: default; -webkit-user-select: none; user-select: none; --wails-draggable: drag;`) {
+		t.Error("app name must be a non-selectable native drag region, including WebKit")
+	}
+}
+
 func TestProjectTabsReserveSidebarWidth(t *testing.T) {
 	var buf bytes.Buffer
 	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
