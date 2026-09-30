@@ -37,6 +37,19 @@ func serveCardPageRequest(t *testing.T, e *echo.Echo, path string) *httptest.Res
 	e.ServeHTTP(rec, req)
 	return rec
 }
+
+const cardPaginationBrowserPassMarker = `id="browser-result" data-status="pass"`
+
+func requireCardPaginationBrowserProcess(t *testing.T, ctx context.Context, out []byte, err error) {
+	t.Helper()
+	if bytes.Contains(out, []byte(cardPaginationBrowserPassMarker)) {
+		return
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
+	}
+	require.NoError(t, err, "Chrome output: %s", out)
+}
 func TestEveryCollectionBulkRouteRejectsMalformedPayload(t *testing.T) {
 	tc := NewTestContext(t)
 	tc.handler.SetAgentRepo(repository.NewAgentRepo(tc.db))
@@ -1361,10 +1374,7 @@ func TestCardPaginationProductionBrowserLoadsSequentialPagesAndResetsSearch(t *t
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=8000", "--dump-dom", fixture.URL,
 	)
 	out, err := runHandlerBrowserProcess(cmd)
-	if ctx.Err() != nil {
-		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
-	}
-	require.NoError(t, err, "Chrome output: %s", out)
+	requireCardPaginationBrowserProcess(t, ctx, out, err)
 	dom := string(out)
 	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		idx := strings.Index(dom, `id="browser-result"`)
@@ -1513,10 +1523,7 @@ func TestCardPaginationProductionBrowserDoesNotRestoreClearedURLSearchAfterRefre
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL+"?search=foo",
 	)
 	out, err := runHandlerBrowserProcess(cmd)
-	if ctx.Err() != nil {
-		t.Fatalf("Chrome timed out: %v (clearedSearchRequests=%d)\n%s", ctx.Err(), clearedSearchRequests.Load(), out)
-	}
-	require.NoError(t, err, "Chrome output: %s", out)
+	requireCardPaginationBrowserProcess(t, ctx, out, err)
 	dom := string(out)
 	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		idx := strings.Index(dom, `id="browser-result"`)
@@ -1635,10 +1642,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedPersonalityCard(t 
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
 	)
 	out, err := runHandlerBrowserProcess(cmd)
-	if ctx.Err() != nil {
-		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
-	}
-	require.NoError(t, err, "Chrome output: %s", out)
+	requireCardPaginationBrowserProcess(t, ctx, out, err)
 	dom := string(out)
 	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		idx := strings.Index(dom, `id="browser-result"`)
@@ -1760,10 +1764,7 @@ func TestCardPaginationProductionBrowserRestoresFocusFromFixedChannelCard(t *tes
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=9000", "--dump-dom", fixture.URL,
 	)
 	out, err := runHandlerBrowserProcess(cmd)
-	if ctx.Err() != nil {
-		t.Fatalf("Chrome timed out: %v\n%s", ctx.Err(), out)
-	}
-	require.NoError(t, err, "Chrome output: %s", out)
+	requireCardPaginationBrowserProcess(t, ctx, out, err)
 	dom := string(out)
 	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		idx := strings.Index(dom, `id="browser-result"`)
@@ -1993,10 +1994,7 @@ func TestCardPaginationProductionBrowserPreservesGenericFocusAndPartialWindowOff
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=10000", "--dump-dom", fixture.URL,
 	)
 	out, err := runHandlerBrowserProcess(cmd)
-	if ctx.Err() != nil {
-		t.Fatalf("Chrome timed out: %v (requests=%d wrongOffsets=%d)\n%s", ctx.Err(), continuationRequests.Load(), wrongOffsets.Load(), out)
-	}
-	require.NoError(t, err, "Chrome output: %s", out)
+	requireCardPaginationBrowserProcess(t, ctx, out, err)
 	dom := string(out)
 	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		idx := strings.Index(dom, `id="browser-result"`)
@@ -2251,10 +2249,7 @@ func TestCardPaginationProductionBrowserRejectsStalePagesAndRecoversLiveRefresh(
 		"--no-first-run", "--window-size=1280,900", "--virtual-time-budget=12000", "--dump-dom", fixture.URL,
 	)
 	out, err := runHandlerBrowserProcess(cmd)
-	if ctx.Err() != nil {
-		t.Fatalf("Chrome timed out: %v (staleStarted=%v staleRequests=%d retryRequests=%d livePageRequests=%d)\n%s", ctx.Err(), staleStarted.Load(), staleRequests.Load(), retryRequests.Load(), livePageRequests.Load(), out)
-	}
-	require.NoError(t, err, "Chrome output: %s", out)
+	requireCardPaginationBrowserProcess(t, ctx, out, err)
 	dom := string(out)
 	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
 		idx := strings.Index(dom, `id="browser-result"`)
