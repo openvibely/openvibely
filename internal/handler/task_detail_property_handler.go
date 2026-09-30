@@ -46,6 +46,10 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 		if _, err := h.resolvePrimaryAgentDefinition(ctx, task.ProjectID, value); err != nil {
 			return err
 		}
+	case "auto_merge", "auto_merge_on_goal_achieved":
+		if value != "true" && value != "false" {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid auto-merge setting")
+		}
 	case "priority":
 		n, err := strconv.Atoi(value)
 		if err != nil || n < 1 || n > 4 {
@@ -96,6 +100,14 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 		if err = h.taskRepo.UpdateDetailProperty(ctx, task.ID, field, value); err != nil {
 			return err
 		}
+	}
+	if field == "auto_merge" || field == "auto_merge_on_goal_achieved" {
+		if field == "auto_merge" {
+			task.AutoMerge = value == "true"
+		} else {
+			task.AutoMergeOnGoalAchieved = value == "true"
+		}
+		return render(c, http.StatusOK, pages.TaskAutoMergePanel(task))
 	}
 	if field == "prompt" {
 		task.Prompt = value

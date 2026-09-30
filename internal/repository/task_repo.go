@@ -1083,6 +1083,10 @@ func (r *TaskRepo) UpdateDetailProperty(ctx context.Context, id, field, value st
 		query = "UPDATE tasks SET priority = ?, updated_at = datetime('now') WHERE id = ?"
 	case "tag":
 		query = "UPDATE tasks SET tag = ?, updated_at = datetime('now') WHERE id = ?"
+	case "auto_merge":
+		query = "UPDATE tasks SET auto_merge = (? = 'true'), updated_at = datetime('now') WHERE id = ?"
+	case "auto_merge_on_goal_achieved":
+		query = "UPDATE tasks SET auto_merge_on_goal_achieved = (? = 'true'), updated_at = datetime('now') WHERE id = ?"
 	case "prompt":
 		query = "UPDATE tasks SET prompt = ?, updated_at = datetime('now') WHERE id = ?"
 	default:

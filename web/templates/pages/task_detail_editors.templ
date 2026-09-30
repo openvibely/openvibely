@@ -14,6 +14,16 @@ templ TaskPropertyRow(label, field, value, text string) {
  </button>
 }
 
+templ TaskAutoMergePanel(task *models.Task) {
+ <section id="task-auto-merge-panel" class="mb-6 space-y-2">
+  <h3 class="text-sm font-semibold">Auto-merge</h3>
+  @TaskPropertyRow("On completion", "auto_merge", fmt.Sprint(task.AutoMerge), autoMergeLabel(task.AutoMerge))
+  @TaskPropertyRow("On goal achieved", "auto_merge_on_goal_achieved", fmt.Sprint(task.AutoMergeOnGoalAchieved), autoMergeLabel(task.AutoMergeOnGoalAchieved))
+ </section>
+}
+
+func autoMergeLabel(enabled bool) string { if enabled { return "Enabled" }; return "Disabled" }
+
 templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []repository.AgentTaskUIOption) {
  <div id="task-property-picker" popover="auto" role="dialog" aria-label="Choose task property" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-lg p-2">
   <input type="search" aria-label="Search options" placeholder="Search…" class="input input-bordered input-sm w-full mb-2"/>
@@ -42,6 +52,12 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ fmt.Sprint(i+1) } class="btn btn-ghost btn-sm w-full justify-start">{ label }</button>
     }
    </div>
+   for _, field := range []string{"auto_merge", "auto_merge_on_goal_achieved"} {
+    <div data-options={ field }>
+     <button type="button" data-value="false" class="btn btn-ghost btn-sm w-full justify-start">Disabled</button>
+     <button type="button" data-value="true" class="btn btn-ghost btn-sm w-full justify-start">Enabled</button>
+    </div>
+   }
    <div data-options="tag">
     for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
      <button type="button" data-value={ option.Value } class="btn btn-ghost btn-sm w-full justify-start">{ option.Label }</button>
@@ -109,7 +125,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    var html = await response.text();
    var editInput = root.querySelector('#task-detail-edit [name="' + name + '"]');
    if (editInput) editInput.value = value;
-   var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : '#task-detail-metrics');
+   var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : name.startsWith('auto_merge') ? '#task-auto-merge-panel' : '#task-detail-metrics');
    if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }
   }
   // Capture before native popover light-dismiss closes the picker on pointerup.

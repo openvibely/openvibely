@@ -24,6 +24,12 @@ func TestTaskDetailPropertyIsScopedAndPreservesOtherFields(t *testing.T) {
 		field, value, project string
 		status                int
 	}{
+		{"auto_merge", "true", p.ID, 200},
+		{"auto_merge_on_goal_achieved", "true", p.ID, 200},
+		{"auto_merge", "false", p.ID, 200},
+		{"auto_merge", "true", p.ID, 200},
+		{"auto_merge", "invalid", p.ID, 400},
+		{"auto_merge", "false", other.ID, 400},
 		{"priority", "4", p.ID, 200}, {"tag", "bug", p.ID, 200},
 		{"priority", "99", p.ID, 400}, {"status", "running", p.ID, 400},
 		{"agent_id", "missing", p.ID, 400}, {"prompt", "", p.ID, 400},
@@ -46,7 +52,7 @@ func TestTaskDetailPropertyIsScopedAndPreservesOtherFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Priority != 4 || got.Tag != "bug" || got.Title != task.Title || got.Prompt != task.Prompt || got.Status != task.Status {
+	if !got.AutoMerge || !got.AutoMergeOnGoalAchieved || got.Priority != 4 || got.Tag != "bug" || got.Title != task.Title || got.Prompt != task.Prompt || got.Status != task.Status {
 		t.Fatalf("unexpected task changes: %+v", got)
 	}
 }

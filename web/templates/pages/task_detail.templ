@@ -185,6 +185,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                         } else {
                             <section class="mb-6 space-y-2"><h3 class="text-sm font-semibold">Worktree</h3><p class="text-sm opacity-60">No worktree created for this task.</p></section>
 						}
+                        @TaskAutoMergePanel(task)
 						<!-- Delete Confirmation Modal -->
 						<dialog id="delete-task-modal" class="modal">
 							<div class="modal-box">
