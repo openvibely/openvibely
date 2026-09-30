@@ -265,6 +265,9 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.typeText("Implement this feature")
 		b.click("#task-details-opener")
 		b.waitFor("draft inspector", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1100, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("breadcrumb and panel toggle do not overlap", `(function(){var caret=document.getElementById('task-resource-selector-button').getBoundingClientRect(),toggle=document.getElementById('task-details-opener').getBoundingClientRect();return String(caret.right+8<=toggle.left)})()`, "true")
+
 		b.click(`[data-tab="schedules"]`)
 		b.click(`input[name="add_schedule"]`)
 		b.evaluate(`document.querySelector('input[name="run_at"]').value='2035-01-02T09:30'; document.querySelector('select[name="repeat_type"]').value='weekly'; 'configured'`)
