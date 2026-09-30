@@ -830,11 +830,30 @@ func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor
 	}
 
 	var fallbackID string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM agent_configs ORDER BY created_at ASC, name ASC LIMIT 1`).Scan(&fallbackID); err != nil {
-		if err == sql.ErrNoRows {
-			return nil
-		}
+	rows, err := tx.QueryContext(ctx, `SELECT id, provider, model FROM agent_configs ORDER BY created_at ASC, name ASC`)
+	if err != nil {
 		return fmt.Errorf("selecting fallback default model: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, model string
+		var provider models.LLMProvider
+		if err := rows.Scan(&id, &provider, &model); err != nil {
+			return err
+		}
+		if models.BuiltInModelSupported(provider, model) {
+			fallbackID = id
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if fallbackID == "" {
+		return nil // Keep unsupported saved configs, but do not promote one.
 	}
 
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_configs SET is_default = 1, updated_at = datetime('now') WHERE id = ?`, fallbackID); err != nil {
@@ -1313,6 +1332,17 @@ func (r *LLMConfigRepo) TransferDefaultAndDelete(ctx context.Context, deleteID, 
 		return fmt.Errorf("begin transfer default tx: %w", err)
 	}
 	defer cleanup()
+	if deleteID == newDefaultID {
+		return fmt.Errorf("replacement model must differ from deleted model")
+	}
+	var provider models.LLMProvider
+	var model string
+	if err := tx.QueryRowContext(ctx, `SELECT provider, model FROM agent_configs WHERE id = ?`, newDefaultID).Scan(&provider, &model); err != nil {
+		return fmt.Errorf("reading replacement model: %w", err)
+	}
+	if !models.BuiltInModelSupported(provider, model) {
+		return fmt.Errorf("model %q is no longer supported; select a supported model", model)
+	}
 
 	// Set the new default (unsets all others first)
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_configs SET is_default = 0`); err != nil {
