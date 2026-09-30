@@ -2258,7 +2258,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				}, 100);
 				})();
 
-				// Refresh the action buttons (Run Now / Edit / Delete) via the lightweight
+				// Refresh the action buttons (Run Now / Delete) via the lightweight
 				// /tasks/:id/detail-actions fragment endpoint.  Called both from the polling
 				// afterSettle handler (up to 3s after completion) and from the SSE task-event
 				// listener below (fires immediately on task_status_changed events).
@@ -2453,9 +2453,9 @@ func taskDetailActionMetadata(task *models.Task) *models.TaskDetailActionMetadat
 	return &models.TaskDetailActionMetadata{ID: task.ID, Status: task.Status}
 }
 
-// TaskDetailActions renders the action buttons (Run Now / Edit / Delete) for the details tab.
+// TaskDetailActions renders the action buttons (Run Now / Delete) for the details tab.
 // This fragment is independently refreshable via GET /tasks/:taskId/detail-actions so that
-// action button state (disabled Run Now, hidden Edit) updates in real time when a task finishes.
+// action button state (disabled Run Now) updates in real time when a task finishes.
 templ TaskDetailActions(task *models.TaskDetailActionMetadata) {
 	<div id="task-detail-actions" class="flex gap-2">
 		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
@@ -2474,15 +2474,6 @@ templ TaskDetailActions(task *models.TaskDetailActionMetadata) {
 				hx-on::after-request={ templ.ComponentScript{Call: fmt.Sprintf("if(event.detail.successful) { window._openTaskThreadAfterRun && window._openTaskThreadAfterRun('%s'); }", task.ID)} }
 			>
 				Run Now
-			</button>
-		}
-		if task.Status != models.StatusRunning {
-			<button
-				class="btn btn-outline btn-sm ov-secondary-action"
-				data-task-detail-edit
-				onclick="document.getElementById('task-detail-view').classList.add('hidden'); document.getElementById('task-detail-edit').classList.remove('hidden')"
-			>
-				Edit
 			</button>
 		}
 		<button type="button" class="btn btn-outline btn-error btn-sm" onclick="document.getElementById('delete-task-modal').showModal()">Delete</button>

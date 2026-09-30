@@ -126,6 +126,17 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    dialog.showModal(); dialog.querySelector('textarea').focus();
   });
   search.addEventListener('input', function() { picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = !option.textContent.toLowerCase().includes(search.value.toLowerCase()); }); });
+  picker.addEventListener('keydown', function(event) {
+   if (busy || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+   var options = Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(option) { return !option.disabled; });
+   if (!options.length) return;
+   event.preventDefault();
+   var index = options.indexOf(document.activeElement);
+   if (event.key === 'Enter') { (options[index] || options[0]).click(); return; }
+   index = index < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length;
+   options[index].focus();
+   options[index].scrollIntoView({block:'nearest'});
+  });
   picker.addEventListener('click', async function(event) {
    var option = event.target.closest('button[data-value]'); if (!option || busy) return;
    var name = field, value = option.dataset.value, label = option.textContent;
