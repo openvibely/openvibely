@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 const (
@@ -41,29 +42,15 @@ const MinCompactionThreshold = 50000
 // NativeCompactionStrategy instead of assuming every Claude model supports it.
 const CompactionStrategyCompact20260112 = "compact_20260112"
 
-var nativeCompactionStrategies = map[string]string{
-	"claude-fable-5":        CompactionStrategyCompact20260112,
-	"claude-fable-5-1":      CompactionStrategyCompact20260112,
-	"claude-mythos-5":       CompactionStrategyCompact20260112,
-	"claude-mythos-5-1":     CompactionStrategyCompact20260112,
-	"claude-mythos-preview": CompactionStrategyCompact20260112,
-	"claude-opus-4-6":       CompactionStrategyCompact20260112,
-	"claude-opus-4-7":       CompactionStrategyCompact20260112,
-	"claude-opus-4-8":       CompactionStrategyCompact20260112,
-	"claude-opus-5":         CompactionStrategyCompact20260112,
-	"claude-opus-5-5":       CompactionStrategyCompact20260112,
-	"claude-sonnet-4-6":     CompactionStrategyCompact20260112,
-	"claude-sonnet-5":       CompactionStrategyCompact20260112,
-}
-
 // NativeCompactionStrategy returns the provider strategy supported by model.
 // Unknown models fail closed so newly added Claude models do not receive beta
 // request fields until their compatibility is known.
 func NativeCompactionStrategy(model string) (string, bool) {
-	model = strings.ToLower(strings.TrimSpace(model))
-	model = strings.TrimSuffix(model, "[1m]")
-	strategy, ok := nativeCompactionStrategies[model]
-	return strategy, ok
+	spec, ok := models.LookupModel(models.ProviderAnthropic, model)
+	if !ok || !spec.SupportsNativeCompaction || spec.NativeCompactionStrategy == "" {
+		return "", false
+	}
+	return spec.NativeCompactionStrategy, true
 }
 
 // SupportsNativeCompaction reports whether model has a known native strategy.
@@ -156,34 +143,7 @@ type AgenticOptions struct {
 // Unsupported models and model/effort combinations return an empty string so
 // callers preserve the provider default instead of sending an invalid request.
 func NormalizeEffort(model, value string) string {
-	effort := strings.ToLower(strings.TrimSpace(value))
-	switch effort {
-	case "low", "medium", "high", "xhigh", "max":
-	default:
-		return ""
-	}
-
-	m := strings.ToLower(strings.TrimSpace(model))
-	switch {
-	case strings.Contains(m, "claude-opus-5"),
-		strings.Contains(m, "claude-sonnet-5"),
-		strings.Contains(m, "claude-fable-5"),
-		strings.Contains(m, "claude-mythos-5"),
-		strings.Contains(m, "claude-opus-4-8"),
-		strings.Contains(m, "claude-opus-4-7"):
-		return effort
-	case strings.Contains(m, "claude-mythos-preview"),
-		strings.Contains(m, "claude-opus-4-6"),
-		strings.Contains(m, "claude-sonnet-4-6"):
-		if effort != "xhigh" {
-			return effort
-		}
-	case strings.Contains(m, "claude-opus-4-5"):
-		if effort == "low" || effort == "medium" || effort == "high" {
-			return effort
-		}
-	}
-	return ""
+	return models.NormalizeModelEffort(models.ProviderAnthropic, model, value)
 }
 
 // AgenticResponse is the result of an agentic send.
@@ -1157,16 +1117,13 @@ const CompactionBetaHeader = "compact-2026-01-12"
 const ContextManagementBetaHeader = CompactionBetaHeader
 
 func requiresAdaptiveThinking(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(m, "claude-opus-5") ||
-		strings.Contains(m, "claude-sonnet-5") ||
-		strings.Contains(m, "fable-5") ||
-		strings.Contains(m, "mythos-5")
+	spec, ok := models.LookupModel(models.ProviderAnthropic, model)
+	return ok && spec.RequiresAdaptiveThinking
 }
 
 func usesAdaptiveThinking(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(m, "opus") || requiresAdaptiveThinking(m)
+	spec, ok := models.LookupModel(models.ProviderAnthropic, model)
+	return ok && spec.UsesAdaptiveThinking
 }
 
 // sendAgenticTurn sends a single streaming request and returns parsed content blocks.
@@ -1229,7 +1186,11 @@ func ensureAnthropicAgenticRequestFits(messages []agenticMessage, tools []ToolDe
 	}
 	window := opts.ContextWindow
 	if window <= 0 {
-		window = defaultAnthropicContextWindow
+		if spec, ok := models.LookupModel(models.ProviderAnthropic, opts.Model); ok && spec.ContextWindow > 0 {
+			window = spec.ContextWindow
+		} else {
+			window = defaultAnthropicContextWindow
+		}
 	}
 	reserved := opts.MaxTokens
 	if reserved <= 0 {

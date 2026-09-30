@@ -30,6 +30,19 @@ func TestCodexPromptMatchesSnapshot(t *testing.T) {
 	}
 }
 
+func TestEveryCatalogCodexPromptProfileIsEmbedded(t *testing.T) {
+	seen := map[models.PromptProfile]bool{}
+	for _, spec := range models.ProviderModels(models.ProviderOpenAI) {
+		if seen[spec.PromptProfile] {
+			continue
+		}
+		seen[spec.PromptProfile] = true
+		if _, err := codexPrompts.ReadFile(string(spec.PromptProfile)); err != nil {
+			t.Errorf("model %s prompt profile %q is not embedded: %v", spec.ID, spec.PromptProfile, err)
+		}
+	}
+}
+
 func TestCodexPromptContextAndModes(t *testing.T) {
 	base := CodexSystemPrompt("gpt-6-astra")
 	got := BuildCodexAgentSystemPrompt("gpt-6-astra", "PROJECT_CONTEXT", "/tmp/.worktrees/task_123")

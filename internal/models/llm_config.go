@@ -116,8 +116,11 @@ func ModelSupportsTemperature(provider LLMProvider, model string) bool {
 	switch provider {
 	case ProviderMixture:
 		return false
-	case ProviderOpenAI:
-		return normalizedModel != "gpt-6-astra" && normalizedModel != "gpt-6.1-sol"
+	case ProviderOpenAI, ProviderAnthropic:
+		if spec, ok := LookupModel(provider, normalizedModel); ok {
+			return spec.SupportsTemperature
+		}
+		return true
 	case ProviderOpenAICompatible:
 		return !strings.HasPrefix(normalizedModel, "kimi-")
 	default:

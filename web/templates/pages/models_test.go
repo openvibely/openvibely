@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -83,7 +84,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		}
 	}
 
-	// JS modelOptionsByProvider entries
+	// The browser receives the same catalog as escaped JSON in a data attribute.
 	for _, model := range []string{
 		"gpt-6-astra",
 		"gpt-6.1-sol",
@@ -106,7 +107,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		"claude-opus-4-7",
 		"claude-sonnet-4-6",
 	} {
-		if !strings.Contains(out, `'`+model+`'`) {
+		if !strings.Contains(out, `&#34;value&#34;:&#34;`+model+`&#34;`) {
 			t.Errorf("expected JS model option for %s", model)
 		}
 	}
@@ -143,7 +144,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		}
 	}
 	assertModelOrder("HTML selector", `value="%s"`)
-	assertModelOrder("JavaScript catalog", `{ value: '%s'`)
+	assertModelOrder("JavaScript catalog", `&#34;value&#34;:&#34;%s&#34;`)
 
 	if strings.Contains(out, "defaultMaxTokens") {
 		t.Error("expected browser catalog not to expose internal output-token defaults")
@@ -199,34 +200,25 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "Matches Claude Code effort: low, medium, high, xhigh, or max. Availability varies by model.") {
 		t.Error("expected Claude effort behavior to be explained")
 	}
-	if !strings.Contains(out, "{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Sonnet 5 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'claude-opus-5-5', label: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Opus 5.5 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Opus 5 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'claude-fable-5-1', label: 'Claude Fable 5.1', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Fable 5.1 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected GPT-5.6 Sol effort options")
-	}
-	if !strings.Contains(out, "{ value: 'gpt-6-astra', label: 'gpt-6-astra', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected GPT-6 Astra effort options without unsupported none")
-	}
-	if !strings.Contains(out, "{ value: 'gpt-6.1-sol', label: 'gpt-6.1-sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected GPT-6.1 Sol effort options without unsupported none")
-	}
-	if !strings.Contains(out, "normalizedModel !== 'gpt-6-astra' && normalizedModel !== 'gpt-6.1-sol'") {
-		t.Error("expected GPT-6.1 Sol temperature control to be disabled")
-	}
-	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
-		if !strings.Contains(out, "{ value: '"+model+"', label: '"+model+"', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {
-			t.Errorf("expected %s effort options", model)
+	allEfforts := []string{"low", "medium", "high", "xhigh", "max"}
+	noneEfforts := []string{"none", "low", "medium", "high", "xhigh", "max"}
+	for model, want := range map[string][]string{
+		"claude-sonnet-5": allEfforts, "claude-opus-5-5": allEfforts,
+		"claude-opus-5": allEfforts, "claude-fable-5-1": allEfforts,
+		"gpt-5.6-sol": noneEfforts, "gpt-6-astra": allEfforts,
+		"gpt-6.1-sol": allEfforts, "gpt-6-sol": noneEfforts, "gpt-6-luna": noneEfforts,
+	} {
+		provider := models.ProviderOpenAI
+		if strings.HasPrefix(model, "claude-") {
+			provider = models.ProviderAnthropic
 		}
+		spec, ok := models.LookupModel(provider, model)
+		if !ok || !slices.Equal(spec.ReasoningEfforts, want) {
+			t.Errorf("catalog efforts for %s = %v, want %v", model, spec.ReasoningEfforts, want)
+		}
+	}
+	if models.ModelSupportsTemperature(models.ProviderOpenAI, "gpt-6.1-sol") {
+		t.Error("expected GPT-6.1 Sol temperature control to be disabled")
 	}
 	for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"} {
 		if !strings.Contains(out, "{ value: '"+model+"'") {
@@ -253,20 +245,11 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "GLM Reasoning Effort") {
 		t.Error("expected GLM reasoning effort label")
 	}
-	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Fable 5 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'claude-mythos-5-1', label: 'Claude Mythos 5.1', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Mythos 5.1 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Mythos 5 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Opus 4.7 effort options")
-	}
-	if !strings.Contains(out, "{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
-		t.Error("expected Claude Opus 4.8 effort options")
+	for _, model := range []string{"claude-fable-5", "claude-mythos-5-1", "claude-mythos-5", "claude-opus-4-7", "claude-opus-4-8"} {
+		spec, ok := models.LookupModel(models.ProviderAnthropic, model)
+		if !ok || !slices.Equal(spec.ReasoningEfforts, allEfforts) {
+			t.Errorf("catalog efforts for %s = %v, want %v", model, spec.ReasoningEfforts, allEfforts)
+		}
 	}
 }
 
@@ -290,17 +273,9 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 		t.Fatal("expected claude-opus-5-5 to be the default Anthropic HTML option")
 	}
 
-	jsAnthropicIdx := strings.Index(out, "anthropic: [")
-	if jsAnthropicIdx < 0 {
-		t.Fatal("expected JS anthropic catalog block to be present")
-	}
-	jsCatalog := out[jsAnthropicIdx:]
-	if nextProvider := strings.Index(jsCatalog, "openai: ["); nextProvider > 0 {
-		jsCatalog = jsCatalog[:nextProvider]
-	}
-	firstEntry := strings.Index(jsCatalog, "{ value:")
-	if firstEntry < 0 || !strings.HasPrefix(jsCatalog[firstEntry:], "{ value: 'claude-opus-5-5'") {
-		t.Fatal("expected claude-opus-5-5 to be the default Anthropic JS catalog entry")
+	options := models.ProviderModels(models.ProviderAnthropic)
+	if len(options) == 0 || options[0].ID != "claude-opus-5-5" {
+		t.Fatal("expected claude-opus-5-5 to be the default Anthropic catalog entry")
 	}
 }
 
@@ -666,7 +641,7 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 		`id="model_temperature_field"`,
 		`function modelSupportsTemperature(provider, model)`,
 		`provider === 'openai'`,
-		`normalizedModel !== 'gpt-6-astra'`,
+		`option.temperature !== false`,
 		`indexOf('kimi-') !== 0`,
 		`function updateTemperatureField(provider, model)`,
 		`field.classList.toggle('hidden', !supported);`,
@@ -754,13 +729,14 @@ func TestModelsContentOmitsRetiredOpenAIOptions(t *testing.T) {
 	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
+	visible := models.ProviderModels(models.ProviderOpenAI)
 	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.3-codex-spark"} {
-		if strings.Contains(buf.String(), "value: '"+model+"'") {
+		if slices.ContainsFunc(visible, func(spec models.ModelSpec) bool { return spec.ID == model }) {
 			t.Errorf("retired model %s remains selectable", model)
 		}
 	}
-	if !strings.Contains(buf.String(), "value: 'gpt-6-astra'") {
-		t.Fatal("current OpenAI model missing")
+	if !slices.ContainsFunc(visible, func(spec models.ModelSpec) bool { return spec.ID == "gpt-6-astra" }) {
+		t.Fatal("current OpenAI model missing from catalog")
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
@@ -453,16 +454,13 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 }
 
 func isGPT6SolOrLuna(model string) bool {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-6-sol", "gpt-6-luna":
-		return true
-	default:
-		return false
-	}
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	return ok && spec.ChatCompletionsReasoningMode == models.ChatCompletionsReasoningWhenToolFree
 }
 
 func isGPT61Sol(model string) bool {
-	return strings.EqualFold(strings.TrimSpace(model), "gpt-6.1-sol")
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	return ok && spec.ChatCompletionsReasoningMode == models.ChatCompletionsReasoningRequired
 }
 
 func completionsReasoningEffort(model, value string, hasTools bool) string {

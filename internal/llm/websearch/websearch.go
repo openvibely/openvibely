@@ -7,7 +7,11 @@
 // future schema revisions only need updating in one place.
 package websearch
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
 
 // --- Provider-native tool names (canonical) ---
 
@@ -70,29 +74,8 @@ func MapProviderSearchToolName(name string) string {
 // supports the native web search tool. Based on models_cache.json metadata
 // where supports_search_tool=true.
 func OpenAIModelSupportsSearch(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	switch {
-	// GPT-6 family
-	case strings.HasPrefix(m, "gpt-6-astra"),
-		strings.HasPrefix(m, "gpt-6.1-sol"),
-		strings.HasPrefix(m, "gpt-6-sol"),
-		strings.HasPrefix(m, "gpt-6-luna"):
-		return true
-	// gpt-5.5 family
-	case strings.HasPrefix(m, "gpt-5.5"):
-		return true
-	// gpt-5.4 family
-	case strings.HasPrefix(m, "gpt-5.4"):
-		return true
-	// gpt-5.3-codex family
-	case strings.HasPrefix(m, "gpt-5.3"):
-		return true
-	// gpt-5.2 family
-	case strings.HasPrefix(m, "gpt-5.2"):
-		return true
-	default:
-		return false
-	}
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	return ok && spec.SupportsResponsesWebSearch
 }
 
 // OpenAIWebSearchToolPayload returns the tool object to include in the

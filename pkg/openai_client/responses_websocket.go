@@ -17,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 var errResponsesWebsocketTransport = errors.New("Responses websocket transport error")
@@ -115,21 +116,13 @@ const (
 )
 
 func isResponsesLiteWebsocketModel(model string) bool {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
-		return true
-	default:
-		return false
-	}
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	return ok && spec.ResponsesLiteWebsocket
 }
 
 func isGPT6WorkflowModel(model string) bool {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-6-astra", "gpt-6-sol", "gpt-6-luna":
-		return true
-	default:
-		return false
-	}
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	return ok && spec.GPT6Workflow
 }
 
 func responsesLiteDefaultReasoningEffort(model string) string {
