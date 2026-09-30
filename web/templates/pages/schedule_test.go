@@ -463,10 +463,7 @@ func TestBuildTaskOccurrenceMap_ShowsTodayAfterExecution(t *testing.T) {
 	}
 }
 
-// TestBuildTaskOccurrenceMap_PastWeek verifies that daily tasks show on all 7 days
-// when viewing a past week, even when RunAt/NextRun is in the future.
-// This was a bug where ComputeNextRun (anchored to RunAt) would jump directly
-// to RunAt, skipping all intermediate days in the past week.
+// Weeks before the configured start must not contain invented occurrences.
 func TestBuildTaskOccurrenceMap_PastWeek(t *testing.T) {
 	// Viewing previous week (Feb 15-21)
 	startOfWeek := time.Date(2026, 2, 15, 0, 0, 0, 0, time.Local) // Sunday
@@ -496,13 +493,13 @@ func TestBuildTaskOccurrenceMap_PastWeek(t *testing.T) {
 
 	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
 
-	// Verify all 7 days of the previous week have occurrences at 11 PM local
+	// No day of the previous week is eligible to run.
 	for i := 0; i < 7; i++ {
 		dayTime := time.Date(2026, 2, 15+i, 23, 0, 0, 0, time.Local)
 		key := fmt.Sprintf("%s-%02d", dayTime.Format("2006-01-02"), dayTime.Hour())
 		occurrences := occurrenceMap[key]
-		if len(occurrences) != 1 {
-			t.Errorf("Day %d (%s): expected 1 occurrence, got %d", i, key, len(occurrences))
+		if len(occurrences) != 0 {
+			t.Errorf("Day %d (%s): expected no occurrences, got %d", i, key, len(occurrences))
 			if len(occurrenceMap) < 10 {
 				for k, v := range occurrenceMap {
 					t.Logf("  Found: %s (%d items)", k, len(v))
@@ -511,13 +508,47 @@ func TestBuildTaskOccurrenceMap_PastWeek(t *testing.T) {
 		}
 	}
 
-	// Verify total count is exactly 7
+	// Verify there are no occurrences at other times either.
 	total := 0
 	for _, v := range occurrenceMap {
 		total += len(v)
 	}
-	if total != 7 {
-		t.Errorf("Expected 7 total occurrences for the week, got %d", total)
+	if total != 0 {
+		t.Errorf("Expected no occurrences before RunAt, got %d", total)
+	}
+}
+
+func TestBuildTaskOccurrenceMap_ThursdayStart(t *testing.T) {
+	startOfWeek := time.Date(2026, 9, 27, 0, 0, 0, 0, time.Local)
+	runAt := time.Date(2026, 10, 1, 3, 0, 0, 0, time.Local).UTC()
+	for _, advanced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("advanced=%t", advanced), func(t *testing.T) {
+			nextRun := runAt
+			var lastRun *time.Time
+			if advanced {
+				nextRun = runAt.Local().AddDate(0, 0, 8).UTC()
+				lastRun = &runAt
+			}
+			task := repository.TaskWithSchedule{
+				Task: models.Task{ID: "daily", CreatedAt: startOfWeek},
+				Schedule: &models.Schedule{RunAt: runAt, NextRun: &nextRun, LastRun: lastRun,
+					RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true},
+			}
+			got := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
+			if len(got) != 3 {
+				t.Fatalf("expected only Thursday–Saturday, got %#v", got)
+			}
+			for day := 0; day < 7; day++ {
+				at := startOfWeek.AddDate(0, 0, day).Add(3 * time.Hour)
+				want := 0
+				if day >= 4 {
+					want = 1
+				}
+				if entries := got[localKey(at)]; len(entries) != want {
+					t.Errorf("%s: got %d occurrences, want %d", at, len(entries), want)
+				}
+			}
+		})
 	}
 }
 
@@ -656,10 +687,10 @@ func TestBuildTaskOccurrenceMap_WeeklyPastWeek(t *testing.T) {
 	// Viewing the week of Feb 8-14
 	startOfWeek := time.Date(2026, 2, 8, 0, 0, 0, 0, time.Local)
 
-	// Weekly task on Wednesday at 3 PM local
-	runAt := time.Date(2026, 2, 25, 15, 0, 0, 0, time.Local) // Future Wednesday
+	// Weekly task started before this week; NextRun has advanced beyond it.
+	runAt := time.Date(2026, 2, 4, 15, 0, 0, 0, time.Local)
 	runAtUTC := runAt.UTC()
-	nextRunUTC := runAtUTC
+	nextRunUTC := time.Date(2026, 2, 25, 15, 0, 0, 0, time.Local).UTC()
 
 	task := repository.TaskWithSchedule{
 		Task: models.Task{
@@ -781,11 +812,11 @@ func TestBuildTaskOccurrenceMap_ProductionData(t *testing.T) {
 	}
 
 	// Expected for local time (EST = UTC-5):
-	// "dail" run_at=Feb 27 04:01 UTC = Feb 26 11:01 PM EST → daily at 11 PM, all 7 days
+	// "dail" run_at=Feb 27 04:01 UTC = Feb 26 11:01 PM EST → Thu–Sat at 11 PM
 	// "week" next_run=Mar 2 17:00 UTC = Mar 2 12:00 PM EST → rewind to Feb 23 12 PM (Mon)
 	// "one" run_at=Feb 24 04:30 UTC = Feb 23 11:30 PM EST → Mon at 11 PM
 	// "Run Tests" next_run=Feb 27 02:05 UTC = Feb 26 9:05 PM EST → sub-daily from Thu 9 PM
-	// "Interval" next_run=Feb 28 02:26 UTC = Feb 27 9:26 PM EST → Mon/Wed/Fri at 9 PM
+	// "Interval" next_run=Feb 28 02:26 UTC = Feb 27 9:26 PM EST → Wed/Fri at 9 PM
 
 	// Check "week" is on the correct day
 	weekLocalTime := weekNextRun.Local() // Mar 2 local
@@ -807,7 +838,7 @@ func TestBuildTaskOccurrenceMap_ProductionData(t *testing.T) {
 		}
 	}
 
-	// Check "dail" has 7 occurrences (one per day at 11 PM)
+	// Check "dail" has 3 occurrences (from Thursday onward at 11 PM)
 	dailLocal := dailRunAt.Local()
 	dailCount := 0
 	for day := 22; day <= 28; day++ {
@@ -819,8 +850,8 @@ func TestBuildTaskOccurrenceMap_ProductionData(t *testing.T) {
 			}
 		}
 	}
-	if dailCount != 7 {
-		t.Errorf("DAIL: expected 7 daily occurrences, got %d", dailCount)
+	if dailCount != 3 {
+		t.Errorf("DAIL: expected 3 daily occurrences, got %d", dailCount)
 	}
 
 	// Check "one" appears once at its RunAt time
@@ -867,7 +898,7 @@ func TestBuildTaskOccurrenceMap_ProductionData(t *testing.T) {
 	}
 	t.Logf("Run Tests: Thu=%d, Fri=%d, Sat=%d entries", rtThuCount, rtFriCount, rtSatCount)
 
-	// Check "Interval" has 3 occurrences (every 2 days)
+	// Check "Interval" has 2 occurrences (every 2 days from Wednesday)
 	intCount := 0
 	for day := 22; day <= 28; day++ {
 		for hour := 0; hour < 24; hour++ {
@@ -881,15 +912,14 @@ func TestBuildTaskOccurrenceMap_ProductionData(t *testing.T) {
 			}
 		}
 	}
-	if intCount != 3 {
-		t.Errorf("INTERVAL: expected 3 occurrences (every 2 days), got %d", intCount)
+	if intCount != 2 {
+		t.Errorf("INTERVAL: expected 2 occurrences (every 2 days), got %d", intCount)
 	}
 }
 
 // TestBuildTaskOccurrenceMap_SubDailyWithLastRun verifies that a sub-daily schedule
-// that has been active (LastRun is set) shows entries for the entire week, not just
-// from NextRun onwards. This was the root cause of the display bug where hourly tasks
-// only appeared on some days of the week.
+// that has been active (LastRun is set) shows entries from RunAt, including
+// eligible hours before NextRun but excluding days before the schedule started.
 func TestBuildTaskOccurrenceMap_SubDailyWithLastRun(t *testing.T) {
 	// Week of Feb 22-28, 2026
 	startOfWeek := time.Date(2026, 2, 22, 0, 0, 0, 0, time.Local)
@@ -920,8 +950,7 @@ func TestBuildTaskOccurrenceMap_SubDailyWithLastRun(t *testing.T) {
 
 	occurrenceMap := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, startOfWeek)
 
-	// With LastRun set, sub-daily tasks should have entries starting from the
-	// beginning of the week (Sun Feb 22), not from NextRun (Thu)
+	// LastRun must not create occurrences before the Tuesday start.
 	sunCount := 0
 	monCount := 0
 	thuCount := 0
@@ -955,12 +984,11 @@ func TestBuildTaskOccurrenceMap_SubDailyWithLastRun(t *testing.T) {
 		}
 	}
 
-	// All days should have 24 entries (one per hour)
-	if sunCount != 24 {
-		t.Errorf("Sun: expected 24 hourly entries, got %d (should show full week with LastRun set)", sunCount)
+	if sunCount != 0 {
+		t.Errorf("Sun: expected no entries before RunAt, got %d", sunCount)
 	}
-	if monCount != 24 {
-		t.Errorf("Mon: expected 24 hourly entries, got %d", monCount)
+	if monCount != 0 {
+		t.Errorf("Mon: expected no entries before RunAt, got %d", monCount)
 	}
 	if thuCount != 24 {
 		t.Errorf("Thu: expected 24 hourly entries, got %d", thuCount)
@@ -1103,7 +1131,7 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryTwoHours(t *testing.T) {
 		}
 	}
 
-	// Check a full day (Sunday Feb 22 — should have entries since LastRun is set)
+	// Sunday precedes RunAt, even though LastRun is set.
 	sunCount := 0
 	for hour := 0; hour < 24; hour++ {
 		sunKey := fmt.Sprintf("2026-02-22-%02d", hour)
@@ -1117,8 +1145,8 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryTwoHours(t *testing.T) {
 		}
 	}
 
-	if sunCount != 12 {
-		t.Errorf("Sun: expected 12 entries (every 2 hours), got %d", sunCount)
+	if sunCount != 0 {
+		t.Errorf("Sun: expected no entries before RunAt, got %d", sunCount)
 	}
 
 	// Also check another day
@@ -1136,7 +1164,7 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryTwoHours(t *testing.T) {
 		t.Errorf("Wed: expected 12 entries (every 2 hours), got %d", wedCount)
 	}
 
-	// Verify total across the week: 12 per day * 7 days = 84
+	// Monday has 8 entries from 9 AM; Tuesday–Saturday each have 12.
 	totalCount := 0
 	for _, occs := range occurrenceMap {
 		for _, occ := range occs {
@@ -1145,8 +1173,8 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryTwoHours(t *testing.T) {
 			}
 		}
 	}
-	if totalCount != 84 {
-		t.Errorf("Total: expected 84 entries (12/day * 7 days), got %d", totalCount)
+	if totalCount != 68 {
+		t.Errorf("Total: expected 68 entries from RunAt onward, got %d", totalCount)
 	}
 }
 

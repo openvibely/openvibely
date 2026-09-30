@@ -153,18 +153,25 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 					currentRun = task.Schedule.RunAt.Local()
 				}
 
-				// Rewind to find the first occurrence at or after startOfWeek.
+				// Rewind for historical weeks, but never invent occurrences before RunAt.
+				firstRun := startOfWeek
+				if anchor.After(firstRun) {
+					firstRun = anchor
+				}
+				if currentRun.Before(anchor) {
+					currentRun = anchor
+				}
 				// Uses AddDate for DST-aware calendar day arithmetic (not fixed 24h durations).
-				for !currentRun.Before(startOfWeek) {
+				for !currentRun.Before(firstRun) {
 					prevRun := schedPrevOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
-					if prevRun.Before(startOfWeek) {
+					if prevRun.Before(firstRun) {
 						break
 					}
 					currentRun = prevRun
 				}
 
 				// Fast-forward to the first occurrence in the week if still before it
-				for currentRun.Before(startOfWeek) {
+				for currentRun.Before(firstRun) {
 					currentRun = schedNextOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
 				}
 
@@ -238,16 +245,7 @@ func addSubDailyOccurrences(tasksByDateTime map[string][]TaskOccurrence, task re
 	// Determine the schedule's reference time for when entries start appearing.
 	// Use RunAt (the schedule's configured start time), not NextRun (which advances
 	// continuously and would hide entries for earlier days in the week).
-	// If the schedule has been active (LastRun is set), show entries for the entire
-	// week since sub-daily tasks run continuously.
-	var refTime time.Time
-	if task.Schedule.LastRun != nil {
-		// Schedule has been active — show entries for the entire week
-		refTime = startOfWeek
-	} else {
-		// New schedule — show from RunAt onwards
-		refTime = task.Schedule.RunAt.Local()
-	}
+	refTime := task.Schedule.RunAt.Local()
 
 	// For RepeatHours with interval > 1, we need to check hour alignment
 	// against the schedule's RunAt anchor to only show at correct intervals.
