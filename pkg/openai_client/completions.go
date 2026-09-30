@@ -461,7 +461,17 @@ func isGPT6SolOrLuna(model string) bool {
 	}
 }
 
+func isGPT61Sol(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), "gpt-6.1-sol")
+}
+
 func completionsReasoningEffort(model, value string, hasTools bool) string {
+	if isGPT61Sol(model) {
+		if effort := normalizeReasoningEffort(value); effort != "" && effort != "none" {
+			return effort
+		}
+		return "medium"
+	}
 	if !isGPT6SolOrLuna(model) {
 		return ""
 	}
@@ -472,6 +482,13 @@ func completionsReasoningEffort(model, value string, hasTools bool) string {
 		return effort
 	}
 	return "medium"
+}
+
+func completionsSupportsTemperature(model, reasoningEffort string) bool {
+	if isGPT61Sol(model) {
+		return false
+	}
+	return !isGPT6SolOrLuna(model) || reasoningEffort == "none"
 }
 
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
@@ -487,7 +504,7 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 	if effort != "" {
 		payload["reasoning_effort"] = effort
 	}
-	if !math.IsNaN(opts.Temperature) && (!opts.FirstPartyOpenAI || !isGPT6SolOrLuna(opts.Model) || effort == "none") {
+	if !math.IsNaN(opts.Temperature) && (!opts.FirstPartyOpenAI || completionsSupportsTemperature(opts.Model, effort)) {
 		payload["temperature"] = opts.Temperature
 	}
 

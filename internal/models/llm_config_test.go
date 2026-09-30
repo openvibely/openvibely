@@ -14,6 +14,7 @@ func TestModelSupportsTemperature(t *testing.T) {
 	}{
 		{name: "Astra", provider: ProviderOpenAI, model: "gpt-6-astra", want: false},
 		{name: "Astra normalized", provider: ProviderOpenAI, model: " GPT-6-ASTRA ", want: false},
+		{name: "GPT-6.1 Sol", provider: ProviderOpenAI, model: "gpt-6.1-sol", want: false},
 		{name: "other OpenAI", provider: ProviderOpenAI, model: "gpt-5.6-sol", want: true},
 		{name: "Kimi", provider: ProviderOpenAICompatible, model: "kimi-k3", want: false},
 		{name: "other compatible", provider: ProviderOpenAICompatible, model: "glm-5.2", want: true},

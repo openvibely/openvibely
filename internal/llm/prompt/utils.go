@@ -15,6 +15,7 @@ const CodexDefaultModel = "gpt-5.6-sol"
 
 var CodexSupportedReasoningEffortsByModel = map[string][]string{
 	"gpt-6-astra":      {"low", "medium", "high", "xhigh", "max"},
+	"gpt-6.1-sol":      {"low", "medium", "high", "xhigh", "max"},
 	"gpt-6-sol":        {"none", "low", "medium", "high", "xhigh", "max"},
 	"gpt-6-luna":       {"none", "low", "medium", "high", "xhigh", "max"},
 	"gpt-5.6-sol":      {"none", "low", "medium", "high", "xhigh", "max"},
@@ -68,7 +69,7 @@ func CodexReasoningEffort(model, configuredEffort string) string {
 
 func CodexDefaultReasoningEffort(model string) string {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 		"gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini":
 		return "medium"
 	case "gpt-5.3-codex-spark":

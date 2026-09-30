@@ -86,6 +86,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	// JS modelOptionsByProvider entries
 	for _, model := range []string{
 		"gpt-6-astra",
+		"gpt-6.1-sol",
 		"gpt-6-sol",
 		"gpt-6-luna",
 		"gpt-5.6-sol",
@@ -215,6 +216,12 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 	if !strings.Contains(out, "{ value: 'gpt-6-astra', label: 'gpt-6-astra', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected GPT-6 Astra effort options without unsupported none")
+	}
+	if !strings.Contains(out, "{ value: 'gpt-6.1-sol', label: 'gpt-6.1-sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max']") {
+		t.Error("expected GPT-6.1 Sol effort options without unsupported none")
+	}
+	if !strings.Contains(out, "normalizedModel !== 'gpt-6-astra' && normalizedModel !== 'gpt-6.1-sol'") {
+		t.Error("expected GPT-6.1 Sol temperature control to be disabled")
 	}
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		if !strings.Contains(out, "{ value: '"+model+"', label: '"+model+"', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {

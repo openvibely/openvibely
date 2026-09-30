@@ -74,6 +74,7 @@ func OpenAIModelSupportsSearch(model string) bool {
 	switch {
 	// GPT-6 family
 	case strings.HasPrefix(m, "gpt-6-astra"),
+		strings.HasPrefix(m, "gpt-6.1-sol"),
 		strings.HasPrefix(m, "gpt-6-sol"),
 		strings.HasPrefix(m, "gpt-6-luna"):
 		return true

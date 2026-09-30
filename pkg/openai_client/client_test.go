@@ -438,7 +438,7 @@ func TestResponsesLiteWebSocketModels(t *testing.T) {
 			t.Errorf("isResponsesLiteWebsocketModel(%q) = false, want true", model)
 		}
 	}
-	for _, model := range []string{"gpt-5.5", "gpt-5.4", ""} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-5.5", "gpt-5.4", ""} {
 		if isResponsesLiteWebsocketModel(model) {
 			t.Errorf("isResponsesLiteWebsocketModel(%q) = true, want false", model)
 		}
@@ -451,7 +451,7 @@ func TestGPT6WorkflowModels(t *testing.T) {
 			t.Errorf("isGPT6WorkflowModel(%q) = false, want true", model)
 		}
 	}
-	for _, model := range []string{"gpt-5.6-sol", "gpt-5.5", "gpt-6", ""} {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-5.6-sol", "gpt-5.5", "gpt-6", ""} {
 		if isGPT6WorkflowModel(model) {
 			t.Errorf("isGPT6WorkflowModel(%q) = true, want false", model)
 		}

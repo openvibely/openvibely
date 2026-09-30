@@ -8,6 +8,7 @@ func TestOpenAIModelSupportsSearch(t *testing.T) {
 		expected bool
 	}{
 		{"gpt-6-astra", true},
+		{"gpt-6.1-sol", true},
 		{"GPT-6-ASTRA", true},
 		{"gpt-6-sol", true},
 		{"GPT-6-LUNA", true},

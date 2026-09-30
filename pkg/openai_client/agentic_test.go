@@ -3996,6 +3996,14 @@ func TestOpenAIAutoCompactionTokenLimit_GPT6AstraUsesFullContext(t *testing.T) {
 	}
 }
 
+func TestOpenAIAutoCompactionTokenLimit_GPT61SolUsesStandardEffectiveContext(t *testing.T) {
+	got := openAIAutoCompactionTokenLimit("gpt-6.1-sol")
+	want := (272000 * 90) / 100
+	if got != want {
+		t.Fatalf("openAIAutoCompactionTokenLimit(gpt-6.1-sol) = %d, want %d", got, want)
+	}
+}
+
 func TestOpenAIAutoCompactionTokenLimit_GPT6SolLunaUseCodexEffectiveContext(t *testing.T) {
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
@@ -4465,6 +4473,7 @@ func TestOpenAIModelSupportsWebSearch(t *testing.T) {
 		expected bool
 	}{
 		{"gpt-6-astra", true},
+		{"gpt-6.1-sol", true},
 		{"gpt-6-sol", true},
 		{"gpt-6-luna", true},
 		{"gpt-5.6-sol", true},
