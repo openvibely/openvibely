@@ -1417,7 +1417,23 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 				return llmcontracts.LocalSteeringInput{}, steeringErr
 			}
 			s.publishTaskThreadInputAppliedEvents(exec.ID, inputs)
-			return llmcontracts.LocalSteeringInput{Messages: messages}, nil
+			return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
+				if err := s.threadInputRepo.CommitLocalSteering(commitCtx, exec.ID, threadInputIDs(inputs), history); err != nil {
+					return err
+				}
+				consumed := make(map[string]bool, len(inputs))
+				for _, input := range inputs {
+					consumed[input.ID] = true
+				}
+				remaining := preparedSteering[:0]
+				for _, input := range preparedSteering {
+					if !consumed[input.ID] {
+						remaining = append(remaining, input)
+					}
+				}
+				preparedSteering = remaining
+				return nil
+			}}, nil
 		})
 		callCtx = llmcontracts.WithSteeringRetryResetCallback(callCtx, func(callbackCtx context.Context) error {
 			if len(preparedSteering) == 0 {

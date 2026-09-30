@@ -1718,6 +1718,8 @@ func TestLLMService_ExecuteTaskWithAgent_DrainsLocalSteering(t *testing.T) {
 			input, err := callback(req.Ctx)
 			require.Len(t, input.Messages, 1)
 			require.Equal(t, "change direction", input.Messages[0].Text)
+			require.NotNil(t, input.Commit)
+			require.NoError(t, input.Commit(req.Ctx, []any{map[string]any{"type": "message", "role": "user", "content": "change direction"}}))
 			if err != nil {
 				return llmcontracts.AgentResult{}, err
 			}

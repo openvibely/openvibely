@@ -600,7 +600,25 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		attemptSteering.inputs = append(attemptSteering.inputs, batch.inputs...)
 		text := formatSteeringInstruction(combinedSteeringContent(batch.inputs))
 		steeringCallbackParams.lifecycleUserMessage = text
-		return llmcontracts.LocalSteeringInput{Messages: messages}, nil
+		attachmentsCommitted := false
+		return llmcontracts.LocalSteeringInput{Messages: messages, Commit: func(commitCtx context.Context, history []any) error {
+			if !attachmentsCommitted {
+				for _, input := range batch.inputs {
+					if input.AttachmentSessionID != "" {
+						if _, _, _, err := h.processAttachmentsWithReturn(commitCtx, input.AttachmentSessionID, params.ExecID); err != nil {
+							return err
+						}
+					}
+				}
+				attachmentsCommitted = true
+			}
+			if err := h.threadInputRepo.CommitLocalSteering(commitCtx, params.ExecID, preparedSteeringInputIDs(batch), history); err != nil {
+				return err
+			}
+			pendingSteering = removePreparedSteeringInputs(pendingSteering, batch)
+			attemptSteering = removePreparedSteeringInputs(attemptSteering, batch)
+			return nil
+		}}, nil
 	}
 	start := time.Now()
 	finalizeLifecycle := func(runErr error, chatContext llmcontracts.ChatContext) {
@@ -616,9 +634,11 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 	}
+	firstModelCall := true
 modelLoop:
 	for {
-		if pendingSteering.count() == 0 {
+		// Codex samples fresh input before draining an early steer.
+		if pendingSteering.count() == 0 && !(firstModelCall && params.Agent.Provider == models.ProviderOpenAI) {
 			preparedBefore, steeringErr := h.preparePendingSteeringInputs(ctx, &params, "")
 			if steeringErr != nil {
 				applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering before model call: %v", params.ExecID, steeringErr)
@@ -667,6 +687,7 @@ modelLoop:
 			params.ExecID, params.ChatHistory, params.SystemContext,
 			params.WorkDir, agentDef, params.IsTaskFollowup,
 		)
+		firstModelCall = false
 		steeringCallbackParams = nil
 		attemptSteering = preparedSteeringBatch{}
 		if err != nil || ctx.Err() != nil {
