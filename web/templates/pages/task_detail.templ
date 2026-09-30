@@ -2482,12 +2482,7 @@ templ TaskDetailActions(task *models.TaskDetailActionMetadata) {
 				Edit
 			</button>
 		}
-        <details class="dropdown dropdown-end">
-         <summary class="btn btn-ghost btn-sm" aria-label="More task actions">More</summary>
-         <ul class="dropdown-content menu bg-base-100 rounded-box border border-base-300 z-10 w-40 p-2">
-          <li><button type="button" class="text-error" onclick="this.closest('details').open = false; document.getElementById('delete-task-modal').showModal()">Delete task</button></li>
-         </ul>
-        </details>
+		<button type="button" class="btn btn-outline btn-error btn-sm" onclick="document.getElementById('delete-task-modal').showModal()">Delete</button>
 	</div>
 }
 
