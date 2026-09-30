@@ -1355,10 +1355,10 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 
 				function updateStickyHeaders() {
 					ticking = false;
-					var scroller = document.getElementById("main-content");
-					var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
 					var viewer = document.getElementById("diff-viewer") || document;
 					viewer.querySelectorAll(".diff-file-header").forEach(function(header) {
+						var scroller = header.closest("#tab-changes") || document.getElementById("main-content");
+						var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
 						var sentinel = header.previousElementSibling;
 						if (!sentinel || sentinel.getAttribute("data-diff-sticky-sentinel") !== "1") return;
 						if (sentinel.getBoundingClientRect().top <= rootTop + 1) {
@@ -1391,8 +1391,8 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 			window._wireDiffStickyHeaders();
 			if (!window._diffStickyHeadersScrollRegistered) {
 				window._diffStickyHeadersScrollRegistered = true;
-				var diffScroller = document.getElementById("main-content");
-				if (diffScroller) diffScroller.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true });
+				// Capture nested workspace scrolling, including after HTMX replaces it.
+				document.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true, capture: true });
 				window.addEventListener("resize", window._wireDiffStickyHeaders);
 				document.body.addEventListener("htmx:afterSettle", window._wireDiffStickyHeaders);
 			}
@@ -2111,10 +2111,10 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 
 				function updateStickyHeaders() {
 					ticking = false;
-					var scroller = document.getElementById("main-content");
-					var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
 					var viewer = document.getElementById("diff-viewer") || document;
 					viewer.querySelectorAll(".diff-file-header").forEach(function(header) {
+						var scroller = header.closest("#tab-changes") || document.getElementById("main-content");
+						var rootTop = scroller ? scroller.getBoundingClientRect().top : 0;
 						var sentinel = header.previousElementSibling;
 						if (!sentinel || sentinel.getAttribute("data-diff-sticky-sentinel") !== "1") return;
 						if (sentinel.getBoundingClientRect().top <= rootTop + 1) {
@@ -2147,8 +2147,8 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 			window._wireDiffStickyHeaders();
 			if (!window._diffStickyHeadersScrollRegistered) {
 				window._diffStickyHeadersScrollRegistered = true;
-				var diffScroller = document.getElementById("main-content");
-				if (diffScroller) diffScroller.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true });
+				// Capture nested workspace scrolling, including after HTMX replaces it.
+				document.addEventListener("scroll", window._wireDiffStickyHeaders, { passive: true, capture: true });
 				window.addEventListener("resize", window._wireDiffStickyHeaders);
 				document.body.addEventListener("htmx:afterSettle", window._wireDiffStickyHeaders);
 			}

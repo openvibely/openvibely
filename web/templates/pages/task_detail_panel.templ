@@ -17,6 +17,8 @@ templ TaskDetailPanel() {
 		#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }
 		#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }
 		#tab-changes { overflow:auto; }
+		/* Changes owns its scrollport; no page-padding offset is needed. */
+		#tab-changes .diff-file-header { top:0; }
 		#task-detail-content[data-inspector-docked="true"] { padding-right:var(--task-panel-reserved-width); }
 			#task-detail-content[data-inspector-overlay="true"] #task-details-opener { position:fixed; top:var(--task-panel-top,0px); right:0; z-index:61; }
 			#task-details-panel[data-overlay="true"] > [role="tablist"] { padding-right:2.5rem; }
