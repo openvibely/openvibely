@@ -796,6 +796,7 @@ func TestStart_NormalizesAppStorageDefaults(t *testing.T) {
 func TestMigrateLegacyStorageMovesDefaultDatabaseSidecarsAndRepos(t *testing.T) {
 	t.Setenv("DATABASE_PATH", "")
 	t.Setenv("PROJECT_REPO_ROOT", "")
+	t.Setenv("OPENVIBELY_APP_DATA_DIR", "")
 	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "")
 	tmpDir := t.TempDir()
 	oldWD, err := os.Getwd()
@@ -854,6 +855,7 @@ func TestMigrateLegacyStorageMovesDefaultDatabaseSidecarsAndRepos(t *testing.T) 
 func TestMigrateLegacyStoragePreservesExistingTargetDatabaseAndRepos(t *testing.T) {
 	t.Setenv("DATABASE_PATH", "")
 	t.Setenv("PROJECT_REPO_ROOT", "")
+	t.Setenv("OPENVIBELY_APP_DATA_DIR", "")
 	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "")
 	tmpDir := t.TempDir()
 	oldWD, err := os.Getwd()
@@ -961,6 +963,7 @@ func TestMigrateLegacyStoragePreservesExistingTargetDatabaseAndRepos(t *testing.
 func TestMigrateLegacyStorageMigratesOverEmptyOrInvalidTargets(t *testing.T) {
 	t.Setenv("DATABASE_PATH", "")
 	t.Setenv("PROJECT_REPO_ROOT", "")
+	t.Setenv("OPENVIBELY_APP_DATA_DIR", "")
 	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "")
 	tmpDir := t.TempDir()
 	oldWD, err := os.Getwd()
@@ -1031,6 +1034,7 @@ func TestMigrateLegacyStorageMigratesOverEmptyOrInvalidTargets(t *testing.T) {
 func TestMigrateLegacyStorageMovesUploadsIntoAppData(t *testing.T) {
 	t.Setenv("DATABASE_PATH", "")
 	t.Setenv("PROJECT_REPO_ROOT", "")
+	t.Setenv("OPENVIBELY_APP_DATA_DIR", "")
 	t.Setenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION", "")
 	tmpDir := t.TempDir()
 	oldWD, err := os.Getwd()
