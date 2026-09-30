@@ -3950,8 +3950,8 @@ func TestCreateModel_OpenAI_GPT54(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OpenAI_GPT6SolLunaPreservesExactModel(t *testing.T) {
-	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
+func TestCreateModel_OpenAI_GPT6SolModelsPreserveExactModel(t *testing.T) {
+	for _, model := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			_, e, llmConfigRepo := setupTestHandler(t)
 			form := url.Values{}
@@ -3988,39 +3988,41 @@ func TestCreateModel_OpenAI_GPT6SolLunaPreservesExactModel(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OpenAI_AstraClearsTemperature(t *testing.T) {
-	_, e, llmConfigRepo := setupTestHandler(t)
+func TestCreateModel_OpenAI_UnsupportedTemperatureIsCleared(t *testing.T) {
+	for _, model := range []string{"gpt-6-astra", "gpt-6.1-sol"} {
+		t.Run(model, func(t *testing.T) {
+			_, e, llmConfigRepo := setupTestHandler(t)
+			form := url.Values{}
+			form.Set("name", "OpenAI "+model)
+			form.Set("provider", "openai")
+			form.Set("openai_auth_type", "api_key")
+			form.Set("model", model)
+			form.Set("api_key", "sk-openai-test")
+			form.Set("temperature", "0.8")
+			form.Set("reasoning_effort", "medium")
 
-	form := url.Values{}
-	form.Set("name", "OpenAI GPT-6 Astra")
-	form.Set("provider", "openai")
-	form.Set("openai_auth_type", "api_key")
-	form.Set("model", "gpt-6-astra")
-	form.Set("api_key", "sk-openai-test")
-	form.Set("temperature", "0.8")
-	form.Set("reasoning_effort", "medium")
-
-	req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
-	}
-	configs, err := llmConfigRepo.List(context.Background())
-	if err != nil {
-		t.Fatalf("list error: %v", err)
-	}
-	for _, config := range configs {
-		if config.Name == "OpenAI GPT-6 Astra" {
-			if config.Temperature != 0 {
-				t.Fatalf("temperature = %v, want 0 for Astra", config.Temperature)
+			req := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 			}
-			return
-		}
+			configs, err := llmConfigRepo.List(context.Background())
+			if err != nil {
+				t.Fatalf("list error: %v", err)
+			}
+			for _, config := range configs {
+				if config.Name == "OpenAI "+model {
+					if config.Temperature != 0 {
+						t.Fatalf("temperature = %v, want 0 for %s", config.Temperature, model)
+					}
+					return
+				}
+			}
+			t.Fatalf("created %s model not found", model)
+		})
 	}
-	t.Fatal("created Astra model not found")
 }
 
 func TestNormalizeOpenAIModel(t *testing.T) {
@@ -4029,6 +4031,7 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		want  string
 	}{
 		{"gpt-6-astra", "gpt-6-astra"},
+		{"gpt-6.1-sol", "gpt-6.1-sol"},
 		{"gpt-6-sol", "gpt-6-sol"},
 		{"gpt-6-luna", "gpt-6-luna"},
 		{"gpt-5.6-sol", "gpt-5.6-sol"},
@@ -4086,6 +4089,8 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 	}{
 		{"openai astra max", models.ProviderOpenAI, "gpt-6-astra", "max", "max"},
 		{"openai astra rejects none", models.ProviderOpenAI, "gpt-6-astra", "none", ""},
+		{"openai gpt-6.1 sol max", models.ProviderOpenAI, "gpt-6.1-sol", "max", "max"},
+		{"openai gpt-6.1 sol rejects none", models.ProviderOpenAI, "gpt-6.1-sol", "none", ""},
 		{"openai gpt-6 sol none", models.ProviderOpenAI, "gpt-6-sol", "none", "none"},
 		{"openai gpt-6 luna max", models.ProviderOpenAI, "gpt-6-luna", "max", "max"},
 		{"openai none", models.ProviderOpenAI, "gpt-5.6-sol", "none", "none"},

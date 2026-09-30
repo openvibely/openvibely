@@ -202,6 +202,8 @@ func TestSendCompletionsGPT6SolLunaReasoningCompatibility(t *testing.T) {
 		wantTemperature bool
 	}{
 		{name: "sol reasoning omits sampling", model: "gpt-6-sol", effort: "high", disableTools: true, wantEffort: "high"},
+		{name: "6.1 sol reasoning omits sampling", model: "gpt-6.1-sol", effort: "high", disableTools: true, wantEffort: "high"},
+		{name: "6.1 sol rejects none", model: "gpt-6.1-sol", effort: "none", disableTools: true, wantEffort: "medium"},
 		{name: "luna none permits sampling", model: "gpt-6-luna", effort: "none", disableTools: true, wantEffort: "none", wantTemperature: true},
 		{name: "sol tools constrain chat completions", model: "gpt-6-sol", effort: "max", wantEffort: "none", wantTemperature: true},
 	}

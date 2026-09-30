@@ -53,6 +53,12 @@ func TestCodexReasoningEffort_NewModelLevels(t *testing.T) {
 	if got := CodexReasoningEffort("gpt-6-astra", "max"); got != "max" {
 		t.Fatalf("expected Astra to preserve max, got %q", got)
 	}
+	if got := CodexReasoningEffort("gpt-6.1-sol", "none"); got != "high" {
+		t.Fatalf("expected GPT-6.1 Sol to reject none and use a supported fallback, got %q", got)
+	}
+	if got := CodexReasoningEffort("gpt-6.1-sol", "max"); got != "max" {
+		t.Fatalf("expected GPT-6.1 Sol to preserve max, got %q", got)
+	}
 	if got := CodexReasoningEffort("gpt-5.6-sol", "none"); got != "none" {
 		t.Fatalf("expected Sol to preserve none, got %q", got)
 	}
@@ -79,6 +85,7 @@ func TestCodexReasoningEffort_NewModelDefaults(t *testing.T) {
 		want  string
 	}{
 		{model: "gpt-6-astra", want: "medium"},
+		{model: "gpt-6.1-sol", want: "medium"},
 		{model: "gpt-6-sol", want: "medium"},
 		{model: "gpt-6-luna", want: "medium"},
 		{model: "gpt-5.6-sol", want: "medium"},

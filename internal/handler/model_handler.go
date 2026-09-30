@@ -1781,7 +1781,7 @@ func supportedOpenAIModel(value string, auth models.AuthMethod) bool {
 		return false
 	}
 	switch model {
-	case "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro", "gpt-5.3-codex", "gpt-5-codex-mini":
+	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro", "gpt-5.3-codex", "gpt-5-codex-mini":
 		return true
 	}
 	return false
@@ -1794,6 +1794,7 @@ func normalizeOpenAIModel(value string) string {
 	}
 	switch trimmed {
 	case "gpt-6-astra",
+		"gpt-6.1-sol",
 		"gpt-6-sol",
 		"gpt-6-luna",
 		"gpt-5.6-sol",

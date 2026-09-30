@@ -14,7 +14,7 @@ Why this matters:
 
 ## Recommended Setup
 
-**Start with Codex `gpt-5.6-sol` at `medium` reasoning effort.** This remains OpenVibely's default model and the setup it is tuned against. Choose `gpt-6-astra` for the hardest end-to-end work, `gpt-6-sol` for strong coding and agentic workflows, or `gpt-6-luna` for efficient high-volume work when those models are available to your OpenAI account.
+**Start with Codex `gpt-5.6-sol` at `medium` reasoning effort.** This remains OpenVibely's default model and the setup it is tuned against. Choose `gpt-6-astra` for the hardest end-to-end work, `gpt-6.1-sol` for near-Astra performance at lower cost, or `gpt-6-luna` for efficient high-volume work when those models are available to your OpenAI account.
 
 For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.6-luna`. Increase effort to `high`, `xhigh`, or `max` only when representative tasks show a useful quality gain. Use `none` or `low` for latency-sensitive work.
 
@@ -61,6 +61,7 @@ OpenVibely currently budgets Anthropic requests with a 200k context window. Clau
 | Model | Reasoning Efforts | Notes |
 |---|---|---|
 | gpt-6-astra | low / medium / high / xhigh / max | OpenAI's most capable model for complex coding, computer use, and research. 1.05M context, 128k max output. Temperature is unsupported. Availability depends on OpenAI account rollout. |
+| gpt-6.1-sol | low / medium / high / xhigh / max | Near-Astra performance for complex coding and agentic work at lower cost. OpenVibely uses the standard 272k effective context budget. Temperature is unsupported. Use Responses for tool calling; Chat Completions supports text generation without tools. Availability depends on OpenAI account and client rollout. |
 | gpt-6-sol | none / low / medium / high / xhigh / max | Strong reasoning for coding and agentic workflows. 1.05M context, 128k max output. |
 | gpt-6-luna | none / low / medium / high / xhigh / max | Efficient tier for focused, high-volume work. 1.05M context, 128k max output. |
 | gpt-5.6-sol | none / low / medium / high / xhigh / max | Default flagship tier. 1.05M context, 128k max output. |
@@ -75,7 +76,7 @@ OpenVibely currently budgets Anthropic requests with a 200k context window. Clau
 
 The retired `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, and `gpt-5-codex` models are no longer offered. OpenAI shut down their API access on July 23, 2026. See [OpenAI's deprecation notices](https://developers.openai.com/api/docs/deprecations).
 
-The GPT-6 catalog advertises a 1.05M API context window. OpenVibely currently mirrors Codex's 272k effective context budget for GPT-6 preflight checks and automatic compaction. OpenAI applies long-context pricing above 272k input tokens, so the published base token price should not be treated as flat pricing for larger histories.
+The GPT-6 catalog advertises a separate 1.05M API context mode. OpenVibely does not enable that mode here; it mirrors Codex's standard 272k effective context budget for GPT-6 preflight checks and automatic compaction. OpenAI applies long-context pricing above 272k input tokens, so the published base token price should not be treated as flat pricing for larger histories.
 
 ### Output Token Caps
 
@@ -94,11 +95,11 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 ### OpenAI
 
 - Auth options include API key and OAuth.
-- For supported Codex models, `Codex Reasoning Effort` is available. GPT-6 Astra supports `low`, `medium`, `high`, `xhigh`, and `max` (not `none`); GPT-6 Sol/Luna and GPT-5.6 also support `none`. OpenVibely uses `medium` by default for these models.
-- GPT-6 Astra does not support configurable temperature. OpenVibely hides the field and discards submitted or stale values for Astra configurations.
+- For supported Codex models, `Codex Reasoning Effort` is available. GPT-6 Astra and GPT-6.1 Sol support `low`, `medium`, `high`, `xhigh`, and `max` (not `none`); GPT-6 Sol/Luna and GPT-5.6 also support `none`. OpenVibely uses `medium` by default for these models.
+- GPT-6 Astra and GPT-6.1 Sol do not support configurable temperature. OpenVibely hides the field and discards submitted or stale values for those configurations.
 - First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
 - GPT-6 Sol/Luna use Responses for tool-using reasoning workflows. Their Chat Completions fallback constrains function-tool calls to `reasoning_effort: none`; without tools it preserves the selected effort. Sampling parameters are omitted whenever their Chat Completions reasoning effort is above `none`.
-- OpenVibely exposes its existing native web-search integration for GPT-6 Sol/Luna. Other server-side tools, regional endpoint controls, and image generation are outside this model-support change.
+- GPT-6.1 Sol uses the standard Responses path for tool calling; its Chat Completions support is text-only. OpenVibely exposes its existing native web-search integration for GPT-6.1 Sol and GPT-6 Sol/Luna. Other server-side tools, regional endpoint controls, and image generation are outside this model-support change.
 
 #### GPT-6 Workflow Controls
 
