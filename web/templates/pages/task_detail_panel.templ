@@ -26,6 +26,7 @@ templ TaskDetailPanel() {
 		#task-details-panel[hidden] { display:none; }
 		#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }
 		#task-panel-divider:focus-visible { outline:2px solid currentColor; }
+		#task-panel-divider[data-pointer-focus] { outline:none; }
 		#task-detail-metrics { grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr)); }
 		#task-detail-metrics > div { display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; min-width:0; }
 		#task-detail-metrics .badge { margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; }
