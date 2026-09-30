@@ -20,16 +20,14 @@ import (
 func TestBrowserFunctional_TaskMetadataBadgesAtMinimumPanelWidth(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	agentID := "long-agent"
-	task := &models.Task{ID: "badge-task", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: 2, AgentDefinitionID: &agentID}
+	task := &models.Task{ID: "badge-task", Status: models.StatusRunning, Category: models.CategoryActive, Priority: 2, AgentDefinitionID: &agentID}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, `<!doctype html><html><head><link rel="stylesheet" href="%s"><link rel="stylesheet" href="%s"></head><body>`, static.URL("app.css"), static.URL("app-utilities.css"))
-		if err := TaskDetailPanel().Render(r.Context(), w); err != nil {
-			t.Error(err)
-		}
+		// The polled fragment must retain its layout without panel-shell styles.
 		fmt.Fprint(w, `<main style="width:340px;padding:12px">`)
 		if err := TaskDetailMetrics(task, models.TaskExecutionMetrics{LatestDurationMs: 229000}, nil, "An exceptionally long agent label with several words").Render(r.Context(), w); err != nil {
 			t.Error(err)
