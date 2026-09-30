@@ -65,7 +65,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
  <style>
   #task-property-picker { position:fixed; margin:0; width:280px; max-width:calc(100vw - 24px); }
   #task-property-picker [hidden] { display:none; }
-  #task-property-picker [aria-pressed="true"] { font-weight:600; background:color-mix(in srgb,currentColor 8%,transparent); }
+  #task-property-picker button[data-value] { outline:none; }
+  #task-property-picker button[data-active], #task-property-picker button[data-value]:hover { background:color-mix(in srgb,currentColor 8%,transparent); }
+  .task-property-row[data-picker-return-focus] { outline:none; }
  </style>
  <script>
  (function() {
@@ -74,7 +76,29 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var current = null, field = '', busy = false, revision = 0;
   root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });
   var taskID = root.dataset.taskId, projectID = root.dataset.projectId;
-  var search = picker.querySelector('input');
+  var search = picker.querySelector('input'), activeOption = null;
+  function visibleOptions() { return Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(option) { return !option.disabled; }); }
+  function highlight(option) {
+   activeOption = option;
+   picker.querySelectorAll('button[data-value]').forEach(function(item) { item.toggleAttribute('data-active', item === option); });
+  }
+  function returnToRow(row) {
+   if (!row) return;
+   row.setAttribute('data-picker-return-focus', '');
+   row.focus({preventScroll:true});
+   row.addEventListener('blur', function() { row.removeAttribute('data-picker-return-focus'); }, {once:true});
+  }
+  root.addEventListener('keydown', function(event) {
+   var row = event.target.closest('[data-detail-property]');
+   if (row) row.removeAttribute('data-picker-return-focus');
+  });
+  picker.addEventListener('pointermove', function(event) {
+   var option = event.target.closest('button[data-value]');
+   if (option && !option.disabled) highlight(option);
+  });
+  picker.addEventListener('focusin', function(event) {
+   if (event.target.matches('button[data-value]')) highlight(event.target);
+  });
   function composerModel(value, label) {
    var input = root.querySelector('#task-thread-form-agent-id'), button = root.querySelector('#task-thread-form-agent-select');
    if (input) input.value = value || 'auto';
@@ -106,12 +130,13 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    var row = event.target.closest('[data-detail-property]');
    if (row) {
     if (row === dismissRow || (row === current && picker.matches(':popover-open'))) {
-     picker.hidePopover(); row.focus({preventScroll:true}); return;
+     picker.hidePopover(); returnToRow(row); return;
     }
     current = row; field = row.dataset.detailProperty;
     picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
     picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = false; option.setAttribute('aria-pressed', String(option.dataset.value === row.dataset.value)); });
     picker.querySelector('[data-property-error]').textContent = ''; search.value = '';
+    highlight(visibleOptions().find(function(option) { return option.dataset.value === row.dataset.value; }) || visibleOptions()[0]);
     picker.showPopover(); var rect = row.getBoundingClientRect();
     picker.style.left = Math.max(12, Math.min(rect.left, innerWidth - picker.offsetWidth - 12)) + 'px';
     picker.style.top = Math.max(12, Math.min(rect.bottom, innerHeight - picker.offsetHeight - 12)) + 'px';
@@ -125,13 +150,13 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    dialog.querySelector('[data-editor-error]').textContent = '';
    dialog.showModal(); dialog.querySelector('textarea').focus();
   });
-  search.addEventListener('input', function() { picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = !option.textContent.toLowerCase().includes(search.value.toLowerCase()); }); });
+  search.addEventListener('input', function() { picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = !option.textContent.toLowerCase().includes(search.value.toLowerCase()); }); var options = visibleOptions(); if (!options.includes(activeOption)) highlight(options[0]); });
   picker.addEventListener('keydown', function(event) {
    if (busy || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
-   var options = Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(option) { return !option.disabled; });
+   var options = visibleOptions();
    if (!options.length) return;
    event.preventDefault();
-   var index = options.indexOf(document.activeElement);
+   var index = options.indexOf(activeOption);
    if (event.key === 'Enter') { (options[index] || options[0]).click(); return; }
    index = index < 0 ? (event.key === 'ArrowDown' ? 0 : options.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length;
    options[index].focus();
@@ -148,7 +173,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      current.dataset.value = value; current.querySelector('[data-property-label]').textContent = label;
     }
     if (name === 'agent_id') composerModel(value, label);
-    picker.hidePopover(); var row = root.querySelector('[data-detail-property="' + name + '"]'); if (row) row.focus({preventScroll:true});
+    picker.hidePopover(); var row = root.querySelector('[data-detail-property="' + name + '"]'); returnToRow(row);
    } catch (error) { picker.querySelector('[data-property-error]').textContent = error.message; }
    finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }
   });
