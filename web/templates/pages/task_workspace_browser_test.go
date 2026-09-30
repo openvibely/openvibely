@@ -119,6 +119,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		assertFooter()
 		for _, width := range []int{340, 420, 720} {
 			b.evaluate(fmt.Sprintf(`document.getElementById('task-detail-content').style.setProperty('--task-panel-width','%dpx'); document.querySelector('#task-detail-view [data-property-label]').textContent='long-model-name-'.repeat(30); 'sized'`, width))
+			b.waitFor("auto-merge label and value spacing", `(function(){return String(Array.from(document.querySelectorAll('#task-auto-merge-panel .task-property-row')).every(function(row){var label=row.children[0].getBoundingClientRect(),value=row.children[1].getBoundingClientRect(),arrow=row.children[2].getBoundingClientRect();return value.left-label.right>=11 && arrow.left-value.right>=11 && getComputedStyle(row).display==='grid'}))})()`, "true")
 			b.waitFor("Details fits horizontally", `(function(){return String(['task-details-panel','task-inspector-body','tab-details','task-detail-view'].every(function(id){var el=document.getElementById(id);return el.scrollWidth<=el.clientWidth}) && Array.from(document.querySelectorAll('#task-detail-view .task-property-row')).every(function(row){var r=row.getBoundingClientRect(),v=document.getElementById('task-detail-view').getBoundingClientRect();return r.left>=v.left && r.right<=v.right}))})()`, "true")
 		}
 		b.evaluate(`var content=document.getElementById('task-detail-view'),filler=document.createElement('div'); filler.style.height='2000px'; content.appendChild(filler); content.scrollTop=content.scrollHeight; 'scrolled'`)

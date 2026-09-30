@@ -2492,7 +2492,9 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 		data-task-status={ string(task.Status) }
 	>
 		<style>
-  #task-detail-metrics .task-property-row { display:grid; grid-template-columns:7rem minmax(0,1fr) 1rem; align-items:baseline; gap:0.75rem; width:calc(100% + 24px); margin-inline:-12px; text-align:left; padding:4px 12px; border-radius:8px; }
+  .task-property-row { display:grid; grid-template-columns:7rem minmax(0,1fr) 1rem; align-items:baseline; gap:0.75rem; width:calc(100% + 24px); margin-inline:-12px; text-align:left; padding:4px 12px; border-radius:8px; }
+  #task-auto-merge-panel .task-property-row { grid-template-columns:minmax(0,1fr) auto 1rem; }
+  #task-auto-merge-panel .task-property-row > :first-child { min-width:0; overflow-wrap:anywhere; }
   .task-property-row [data-property-label] { min-width:0; overflow-wrap:anywhere; }
   .task-property-row:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
 			#task-detail-metrics { grid-template-columns:minmax(0,1fr); }
