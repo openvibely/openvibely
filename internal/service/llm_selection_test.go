@@ -137,9 +137,36 @@ func TestSelectLLM_NoConfigs(t *testing.T) {
 	}
 }
 
+func TestAutomaticSelectionSkipsRetiredModels(t *testing.T) {
+	retired := models.LLMConfig{ID: "retired", Provider: models.ProviderAnthropic, Model: "claude-3-opus", AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
+	supported := models.LLMConfig{ID: "supported", Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodAPIKey}
+	configs := []models.LLMConfig{retired, supported}
+	for _, vision := range []bool{false, true} {
+		result := SelectLLMWithVision(ComplexityResult{Level: ComplexityComplex}, configs, vision)
+		if result == nil || result.LLMConfig.ID != supported.ID {
+			t.Fatalf("vision=%v: selected %v", vision, result)
+		}
+		if got := SelectLLMWithVision(ComplexityResult{}, configs[:1], vision); got != nil {
+			t.Fatal("selected retired-only configuration")
+		}
+	}
+	if id, _ := selectTaskCreationAgent(TaskCreationRequest{}, configs[:1]); id != "" {
+		t.Fatal("single retired model selected")
+	}
+	if id, _ := selectTaskCreationAgent(TaskCreationRequest{}, configs); id != supported.ID {
+		t.Fatal("task did not select supported model")
+	}
+	if id, _ := selectTaskCreationAgent(TaskCreationRequest{AgentID: retired.ID}, configs); id != retired.ID {
+		t.Fatal("explicit selection must remain available for runtime error")
+	}
+	if configs[0] != retired {
+		t.Fatal("saved selection input was modified")
+	}
+}
+
 func TestSelectLLM_SingleConfig(t *testing.T) {
 	configs := []models.LLMConfig{
-		{ID: "1", Name: "Only Model", Model: "claude-3-sonnet", Provider: models.ProviderAnthropic},
+		{ID: "1", Name: "Only Model", Model: "claude-sonnet-5", Provider: models.ProviderAnthropic},
 	}
 	complexity := ComplexityResult{Level: ComplexityComplex, Score: 80}
 	result := SelectLLM(complexity, configs)
@@ -156,9 +183,9 @@ func TestSelectLLM_SingleConfig(t *testing.T) {
 
 func TestSelectLLM_ComplexTaskSelectsOpus(t *testing.T) {
 	configs := []models.LLMConfig{
-		{ID: "1", Name: "Haiku", Model: "claude-3-haiku", Provider: models.ProviderAnthropic},
-		{ID: "2", Name: "Sonnet", Model: "claude-3-sonnet", Provider: models.ProviderAnthropic},
-		{ID: "3", Name: "Opus", Model: "claude-3-opus", Provider: models.ProviderAnthropic},
+		{ID: "1", Name: "Haiku", Model: "claude-haiku-4-5-20251001", Provider: models.ProviderAnthropic},
+		{ID: "2", Name: "Sonnet", Model: "claude-sonnet-5", Provider: models.ProviderAnthropic},
+		{ID: "3", Name: "Opus", Model: "claude-opus-5", Provider: models.ProviderAnthropic},
 	}
 	complexity := ComplexityResult{Level: ComplexityComplex, Score: 85}
 	result := SelectLLM(complexity, configs)
@@ -172,9 +199,9 @@ func TestSelectLLM_ComplexTaskSelectsOpus(t *testing.T) {
 
 func TestSelectLLM_SimpleTaskSelectsHaiku(t *testing.T) {
 	configs := []models.LLMConfig{
-		{ID: "1", Name: "Haiku", Model: "claude-3-haiku", Provider: models.ProviderAnthropic},
-		{ID: "2", Name: "Sonnet", Model: "claude-3-sonnet", Provider: models.ProviderAnthropic},
-		{ID: "3", Name: "Opus", Model: "claude-3-opus", Provider: models.ProviderAnthropic},
+		{ID: "1", Name: "Haiku", Model: "claude-haiku-4-5-20251001", Provider: models.ProviderAnthropic},
+		{ID: "2", Name: "Sonnet", Model: "claude-sonnet-5", Provider: models.ProviderAnthropic},
+		{ID: "3", Name: "Opus", Model: "claude-opus-5", Provider: models.ProviderAnthropic},
 	}
 	complexity := ComplexityResult{Level: ComplexitySimple, Score: 20}
 	result := SelectLLM(complexity, configs)
@@ -188,9 +215,9 @@ func TestSelectLLM_SimpleTaskSelectsHaiku(t *testing.T) {
 
 func TestSelectLLM_ModerateTaskSelectsSonnet(t *testing.T) {
 	configs := []models.LLMConfig{
-		{ID: "1", Name: "Haiku", Model: "claude-3-haiku", Provider: models.ProviderAnthropic},
-		{ID: "2", Name: "Sonnet", Model: "claude-3-sonnet", Provider: models.ProviderAnthropic},
-		{ID: "3", Name: "Opus", Model: "claude-3-opus", Provider: models.ProviderAnthropic},
+		{ID: "1", Name: "Haiku", Model: "claude-haiku-4-5-20251001", Provider: models.ProviderAnthropic},
+		{ID: "2", Name: "Sonnet", Model: "claude-sonnet-5", Provider: models.ProviderAnthropic},
+		{ID: "3", Name: "Opus", Model: "claude-opus-5", Provider: models.ProviderAnthropic},
 	}
 	complexity := ComplexityResult{Level: ComplexityModerate, Score: 50}
 	result := SelectLLM(complexity, configs)
@@ -205,8 +232,8 @@ func TestSelectLLM_ModerateTaskSelectsSonnet(t *testing.T) {
 func TestSelectLLM_FallbackToDefault(t *testing.T) {
 	// Configs with model names that don't match any tier keywords
 	configs := []models.LLMConfig{
-		{ID: "1", Name: "Custom A", Model: "custom-model-a", Provider: models.ProviderAnthropic},
-		{ID: "2", Name: "Custom B", Model: "custom-model-b", Provider: models.ProviderAnthropic, IsDefault: true},
+		{ID: "1", Name: "Custom A", Model: "custom-model-a", Provider: models.ProviderOpenAICompatible},
+		{ID: "2", Name: "Custom B", Model: "custom-model-b", Provider: models.ProviderOpenAICompatible, IsDefault: true},
 	}
 	// Both configs classify as "moderate" (default), so for a complex task,
 	// findLLMByTier for "complex" returns nil, then it tries "moderate" and finds the first one
@@ -223,9 +250,9 @@ func TestSelectLLM_FallbackToDefault(t *testing.T) {
 
 func TestSelectLLM_GPTModels(t *testing.T) {
 	configs := []models.LLMConfig{
-		{ID: "1", Name: "GPT-3.5", Model: "gpt-3.5-turbo", Provider: models.ProviderOpenAI},
-		{ID: "2", Name: "GPT-4", Model: "gpt-4-turbo", Provider: models.ProviderOpenAI},
-		{ID: "3", Name: "GPT-4o", Model: "gpt-4o", Provider: models.ProviderOpenAI},
+		{ID: "1", Name: "GPT-3.5", Model: "gpt-3.5-turbo", Provider: models.ProviderOpenAICompatible},
+		{ID: "2", Name: "GPT-4", Model: "gpt-4-turbo", Provider: models.ProviderOpenAICompatible},
+		{ID: "3", Name: "GPT-4o", Model: "gpt-4o", Provider: models.ProviderOpenAICompatible},
 	}
 
 	// Complex -> gpt-4o
@@ -274,7 +301,7 @@ func TestFormatSelectionSummary(t *testing.T) {
 	result := &LLMSelectionResult{
 		LLMConfig: &models.LLMConfig{
 			Name:  "Claude Opus",
-			Model: "claude-3-opus",
+			Model: "claude-opus-5",
 		},
 		Complexity: ComplexityResult{
 			Level:   ComplexityComplex,
@@ -352,7 +379,7 @@ func TestSelectLLMWithVision_FiltersNonAnthropicProviders(t *testing.T) {
 			ID:         "anthropic-sonnet",
 			Name:       "Claude Sonnet",
 			Provider:   models.ProviderAnthropic,
-			Model:      "claude-3-5-sonnet-20241022",
+			Model:      "claude-sonnet-5",
 			AuthMethod: models.AuthMethodAPIKey,
 		},
 		{
@@ -360,7 +387,7 @@ func TestSelectLLMWithVision_FiltersNonAnthropicProviders(t *testing.T) {
 			Name:       "Claude Max unsupported auth",
 			Provider:   models.ProviderAnthropic,
 			AuthMethod: "unsupported",
-			Model:      "claude-max",
+			Model:      "claude-opus-5",
 		},
 	}
 
@@ -395,7 +422,7 @@ func TestSelectLLMWithVision_NoAnthropicProvidersAvailable(t *testing.T) {
 			Name:       "Claude Max unsupported auth",
 			Provider:   models.ProviderAnthropic,
 			AuthMethod: "unsupported",
-			Model:      "claude-max",
+			Model:      "claude-opus-5",
 		},
 	}
 
@@ -417,14 +444,14 @@ func TestSelectLLMWithVision_NoVisionRequired(t *testing.T) {
 			ID:       "anthropic-sonnet",
 			Name:     "Claude Sonnet",
 			Provider: models.ProviderAnthropic,
-			Model:    "claude-3-5-sonnet-20241022",
+			Model:    "claude-sonnet-5",
 		},
 		{
 			ID:         "claude-max",
 			Name:       "Claude Max unsupported auth",
 			Provider:   models.ProviderAnthropic,
 			AuthMethod: "unsupported",
-			Model:      "claude-max",
+			Model:      "claude-opus-5",
 		},
 	}
 

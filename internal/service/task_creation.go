@@ -50,6 +50,7 @@ func selectTaskCreationAgent(req TaskCreationRequest, availableAgents []models.L
 	if requestedAgentID != "" {
 		return requestedAgentID, ""
 	}
+	availableAgents = supportedSelectionConfigs(availableAgents)
 	if len(availableAgents) > 1 {
 		complexity := AnalyzeComplexity(req.Prompt)
 		if result := SelectLLM(complexity, availableAgents); result != nil {
@@ -143,6 +144,10 @@ func ExecuteTaskCreationsWithIndexedReturnAndPersistence(ctx context.Context, re
 		req.Title = strings.TrimSpace(req.Title)
 		req.Prompt = strings.TrimSpace(req.Prompt)
 		selectedAgentID, selectionInfo := selectTaskCreationAgent(req, availableAgents)
+		if strings.TrimSpace(req.AgentID) == "" && len(availableAgents) > 0 && selectedAgentID == "" {
+			failed = append(failed, fmt.Sprintf("- %q: no supported models configured; select a supported model in Models", req.Title))
+			continue
+		}
 		if req.AgentID == "" && len(availableAgents) == 1 {
 			applog.Infof("[task-creation] only one agent available, using %s", selectedAgentID)
 		}

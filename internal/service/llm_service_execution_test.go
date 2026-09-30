@@ -3460,13 +3460,13 @@ func TestLLMService_ExecuteTaskWithAgent_VisionAwareAgentOverride(t *testing.T) 
 		Name:       "Anthropic Sonnet",
 		Provider:   models.ProviderAnthropic,
 		AuthMethod: models.AuthMethodAPIKey,
-		Model:      "claude-sonnet-4-20250514",
+		Model:      "claude-sonnet-5",
 	}
 	unsupportedAgent := models.LLMConfig{
 		Name:       "Unsupported auth",
 		Provider:   models.ProviderAnthropic,
 		AuthMethod: "unsupported",
-		Model:      "claude-sonnet-4-5",
+		Model:      "claude-sonnet-5",
 	}
 
 	complexity := AnalyzeComplexity("What do you see?")
@@ -3539,7 +3539,7 @@ func TestLLMService_ExecuteTaskWithAgent_NoOverrideForTextAttachments(t *testing
 func TestLLMService_CallAgentDirectStreaming_VisionAwareOverride(t *testing.T) {
 
 	unsupportedOnly := []models.LLMConfig{
-		{Name: "Unsupported auth", Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude-sonnet-4-5"},
+		{Name: "Unsupported auth", Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude-sonnet-5"},
 	}
 	complexity := AnalyzeComplexity("What do you see?")
 	result := SelectLLMWithVision(complexity, unsupportedOnly, true)
@@ -3548,7 +3548,7 @@ func TestLLMService_CallAgentDirectStreaming_VisionAwareOverride(t *testing.T) {
 	}
 
 	withAnthropic := append(unsupportedOnly, models.LLMConfig{
-		Name: "Anthropic", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-20250514",
+		Name: "Anthropic", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-5",
 	})
 	result = SelectLLMWithVision(complexity, withAnthropic, true)
 	if result == nil {

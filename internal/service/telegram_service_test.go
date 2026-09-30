@@ -3583,7 +3583,7 @@ func TestTelegramService_HandleChatMessageSniffsOctetStreamImageForVisionModel(t
 		Provider:   models.ProviderAnthropic,
 		AuthMethod: models.AuthMethodAPIKey,
 		APIKey:     "test-key",
-		Model:      "claude-3-5-sonnet-20241022",
+		Model:      "claude-sonnet-5",
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
 

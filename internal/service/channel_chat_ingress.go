@@ -229,6 +229,10 @@ func selectChannelChatAgentOptions(ctx context.Context, repo *repository.LLMConf
 	if len(agents) == 0 {
 		return nil, fmt.Errorf("no agents configured")
 	}
+	agents = supportedSelectionConfigs(agents)
+	if len(agents) == 0 {
+		return nil, fmt.Errorf("no supported models configured; select a supported model in Models")
+	}
 
 	complexity := AnalyzeComplexity(message)
 	var selected models.LLMConfig

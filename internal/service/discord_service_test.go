@@ -867,7 +867,7 @@ func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(
 	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
 		t.Fatalf("create default agent: %v", err)
 	}
-	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-3-5-sonnet-20241022", APIKey: "key"}
+	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-5", APIKey: "key"}
 	if err := agentRepo.Create(ctx, visionAgent); err != nil {
 		t.Fatalf("create vision agent: %v", err)
 	}
@@ -1391,7 +1391,7 @@ func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *test
 	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
 		t.Fatalf("create default agent: %v", err)
 	}
-	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-3-5-sonnet-20241022", APIKey: "key"}
+	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-5", APIKey: "key"}
 	if err := agentRepo.Create(ctx, visionAgent); err != nil {
 		t.Fatalf("create vision agent: %v", err)
 	}

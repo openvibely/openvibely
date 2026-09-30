@@ -3,10 +3,13 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,11 +18,54 @@ import (
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
+	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	"github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
+
+func TestOpenAIProviderAdapterCanonicalizesModelOverrides(t *testing.T) {
+	var gotModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			http.Error(w, "websocket unavailable", http.StatusUpgradeRequired)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(400)
+			return
+		}
+		gotModel, _ = body["model"].(string)
+		response := `{"id":"response-test","status":"completed","output":[]}`
+		if body["stream"] == true {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":%s}\n\n", response)
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, response)
+		}
+	}))
+	defer server.Close()
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = server.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+	adapter := &openAIProviderAdapter{adapter: llmopenai.New(nil, nil, nil)}
+	_, err := adapter.Call(llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationDirect, Message: "hello", RawDirectPrompt: true, DisableTools: true,
+		Agent:           models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.5", AuthMethod: models.AuthMethodAPIKey, APIKey: "test", BaseURL: server.URL + "/v1"},
+		AgentDefinition: &models.Agent{Model: " GPT-6-SOL "},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotModel != "gpt-6-sol" {
+		t.Fatalf("wire model = %q", gotModel)
+	}
+}
 
 func TestUnsupportedCatalogModel(t *testing.T) {
 	tests := []struct {
