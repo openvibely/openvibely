@@ -13,6 +13,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAnthropicSteeringRecoveryPreservesOversizedSuccessfulSummary(t *testing.T) {
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "original task",
+		Agent:               models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-4-6", ContextWindow: 10000},
+		ProjectInstructions: strings.Repeat("policy ", 1500),
+		ChatHistory:         []models.Execution{{PromptSent: "old", Output: "old answer", Status: models.ExecCompleted}}}
+	summary := "FILE_ALREADY_WRITTEN " + strings.Repeat("completion ", 1400)
+	calls := 0
+	adapter := providerAdapterFunc(func(r llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		calls++
+		switch calls {
+		case 1:
+			return llmcontracts.AgentResult{}, &anthropicclient.ConversationError{
+				Err:          llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "test", errors.New("too many tokens")),
+				MessagesJSON: `[{"role":"user","content":"original task"},{"role":"assistant","content":"FILE_ALREADY_WRITTEN"},{"role":"user","content":"actually only review"}]`,
+			}
+		case 2:
+			require.Equal(t, llmcontracts.OperationDirect, r.Operation)
+			return llmcontracts.AgentResult{Output: summary}, nil
+		default:
+			t.Fatal("must not resume generation after dropping an oversized summary")
+		}
+		return llmcontracts.AgentResult{}, nil
+	})
+	svc := &LLMService{}
+	_, err := svc.callProviderWithCompaction(adapter, req)
+	require.Error(t, err)
+	require.True(t, recognizedContextLengthError(err))
+	require.Equal(t, 2, calls)
+
+	// Compaction itself must preserve the entire summary and retained prompt;
+	// the subsequent request-budget check, not silent deletion, stops the turn.
+	compacted, err := svc.compactRequestHistoryWithLocalSummary(providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		return llmcontracts.AgentResult{Output: summary}, nil
+	}), req)
+	require.NoError(t, err)
+	require.Len(t, compacted.ChatHistory, 2)
+	require.Equal(t, "old", compacted.ChatHistory[0].PromptSent)
+	require.Equal(t, compactedHistorySummaryPrefix+"\n\n"+strings.TrimSpace(summary), compacted.ChatHistory[1].Output)
+	require.Error(t, ensureRequestFitsWithBudget(compacted, calculateRequestBudget(compacted), "compacted retry"))
+}
+
 func TestAnthropicSteeringRecoveryStopsWithoutTruncatingToolResults(t *testing.T) {
 	for _, summarySucceeds := range []bool{false, true} {
 		t.Run(map[bool]string{false: "summary fails", true: "compacted retry overflows"}[summarySucceeds], func(t *testing.T) {
