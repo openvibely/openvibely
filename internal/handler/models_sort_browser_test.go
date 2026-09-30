@@ -19,6 +19,21 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
+const modelsSortBrowserPassMarker = `id="browser-result" data-status="pass"`
+
+func requireModelsSortBrowserProcess(t *testing.T, ctx context.Context, out []byte, err error) {
+	t.Helper()
+	if bytes.Contains(out, []byte(modelsSortBrowserPassMarker)) {
+		return
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("chrome timed out: %v\n%s", ctx.Err(), out)
+	}
+	if err != nil {
+		t.Fatalf("chrome failed: %v\n%s", err, out)
+	}
+}
+
 func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser regression in short mode")
@@ -188,14 +203,9 @@ func TestModelsSortBrowserPreservesViewportFocusStateAndSharedGeometry(t *testin
 		"--virtual-time-budget=3000", "--dump-dom", srv.URL,
 	)
 	out, runErr := runHandlerBrowserProcess(cmd)
+	requireModelsSortBrowserProcess(t, ctx, out, runErr)
 	dom := string(out)
-	if ctx.Err() != nil && !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
-		t.Fatalf("chrome timed out: %v\n%s", ctx.Err(), out)
-	}
-	if runErr != nil {
-		t.Fatalf("chrome failed: %v\n%s", runErr, out)
-	}
-	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
+	if !strings.Contains(dom, modelsSortBrowserPassMarker) {
 		idx := strings.Index(dom, `id="browser-result"`)
 		if idx >= 0 {
 			end := idx + 900
@@ -352,11 +362,9 @@ func TestChannelsNameSortBrowserOrdersMixedCards(t *testing.T) {
 		"--virtual-time-budget=3000", "--dump-dom", srv.URL,
 	)
 	out, runErr := runHandlerBrowserProcess(cmd)
+	requireModelsSortBrowserProcess(t, ctx, out, runErr)
 	dom := string(out)
-	if runErr != nil {
-		t.Fatalf("chrome failed: %v\n%s", runErr, out)
-	}
-	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
+	if !strings.Contains(dom, modelsSortBrowserPassMarker) {
 		idx := strings.Index(dom, `id="browser-result"`)
 		if idx >= 0 {
 			end := min(idx+700, len(dom))

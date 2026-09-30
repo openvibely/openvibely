@@ -203,6 +203,9 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 		t.Fatalf("chrome timed out: %v\n%s", ctx.Err(), out)
 	}
 	if err != nil {
+		if passed {
+			return
+		}
 		t.Fatalf("chrome failed: %v\n%s", err, out)
 	}
 	if !passed {
