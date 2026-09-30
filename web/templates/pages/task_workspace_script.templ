@@ -23,6 +23,12 @@ templ TaskWorkspaceScript() {
 		if (tabNames.indexOf(saved) >= 0) selected = saved;
 		function on(el, name, fn) { el.addEventListener(name, fn, {signal: signal}); }
 		var titlebar = null;
+		function alignActions() {
+			var button = root.querySelector('#task-thread-form-primary-action button, #task-thread-form .chat-send-button');
+			if (button && button.getClientRects().length && thread.getClientRects().length) {
+				root.style.setProperty('--task-actions-bottom', Math.max(12, window.innerHeight - button.getBoundingClientRect().bottom) + 'px');
+			}
+		}
 		function resize(value) {
 			var currentTitlebar = document.getElementById('desktop-project-titlebar');
 			if (currentTitlebar !== titlebar) {
@@ -49,6 +55,7 @@ templ TaskWorkspaceScript() {
 			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
 			if (overlay && !panel.hidden) panel.setAttribute('aria-modal', 'true');
 			else panel.removeAttribute('aria-modal');
+			requestAnimationFrame(alignActions);
 			thread.inert = overlay && !panel.hidden;
 			changes.inert = overlay && !panel.hidden;
 		}
@@ -174,6 +181,7 @@ templ TaskWorkspaceScript() {
 		on(window, 'sse-task-event', invalidation);
 		on(window, 'sse-live-connected', scheduleSummary);
 		on(document, 'htmx:afterSettle', renderSummary);
+		on(document, 'htmx:afterSettle', alignActions);
 		window.addEventListener('popstate', function(event) {
 			if (location.pathname === '/tasks/' + taskID) { event.stopImmediatePropagation(); applyURL(); }
 		}, {signal:signal, capture:true});

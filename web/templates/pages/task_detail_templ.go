@@ -1968,7 +1968,7 @@ func TaskDetailActions(task *models.TaskDetailActionMetadata) templ.Component {
 			templ_7745c5c3_Var98 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "<div id=\"task-detail-actions\" class=\"flex flex-shrink-0 justify-end gap-2 pt-3\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 198, "<div id=\"task-detail-actions\" class=\"flex flex-shrink-0 justify-start gap-2 pt-3\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
