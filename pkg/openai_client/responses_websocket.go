@@ -16,6 +16,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 var errResponsesWebsocketTransport = errors.New("Responses websocket transport error")
@@ -94,6 +95,11 @@ func shouldFallbackResponsesWebsocket(ctx context.Context, err error) bool {
 func doResponsesStreamTurn[T any](ctx context.Context, c *Client, _ string, policy httpretry.StreamTurnPolicy, fn func(context.Context) (T, error)) (T, error) {
 	state := c.responsesTransportState
 	result, err := httpretry.DoStreamTurn(ctx, policy, fn)
+	// Recovery failures end the turn even when their underlying cause is a
+	// retryable transport error. HTTP fallback must not resume generation.
+	if llmcontracts.ErrorIs(err, llmcontracts.ErrorMidTurnCompactionFailed) {
+		return result, err
+	}
 	if err == nil || ctx.Err() != nil || !c.supportsResponsesWebsockets || state.websocketDisabled.Load() ||
 		!(isRetryableResponsesTransportError(err) || httpretry.IsRetryableError(err)) {
 		return result, err
