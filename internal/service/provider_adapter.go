@@ -306,7 +306,8 @@ func providerSupportsNativeCompaction(agent models.LLMConfig) bool {
 	case models.ProviderAnthropic:
 		// Anthropic context management is a Messages capability. A transport
 		// override denotes a different concrete protocol and must not inherit it.
-		return strings.TrimSpace(agent.Transport) == "" && anthropicclient.SupportsNativeCompaction(agent.Model)
+		spec, ok := models.LookupModel(models.ProviderAnthropic, agent.Model)
+		return strings.TrimSpace(agent.Transport) == "" && ok && spec.SupportsNativeCompaction
 	default:
 		return false
 	}
@@ -336,12 +337,10 @@ func providerTransport(req llmcontracts.AgentRequest) string {
 	}
 	switch req.Agent.Provider {
 	case models.ProviderOpenAI:
-		switch strings.ToLower(strings.TrimSpace(req.Agent.Model)) {
-		case "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
-			return "responses_websocket_http_fallback"
-		default:
-			return "responses_http"
+		if spec, ok := models.LookupModel(models.ProviderOpenAI, req.Agent.Model); ok && spec.Transport != "" {
+			return spec.Transport
 		}
+		return "responses_http"
 	case models.ProviderAnthropic:
 		return "anthropic_messages_http"
 	case models.ProviderOllama:
@@ -421,7 +420,11 @@ func compactionLimitsForAgent(agent models.LLMConfig) compactionLimits {
 		case models.ProviderOpenAI:
 			window = openAIContextWindow(agent.Model)
 		case models.ProviderAnthropic:
-			window = defaultAnthropicContextWindow
+			if spec, ok := models.LookupModel(models.ProviderAnthropic, agent.Model); ok && spec.ContextWindow > 0 {
+				window = spec.ContextWindow
+			} else {
+				window = defaultAnthropicContextWindow
+			}
 		case models.ProviderOpenAICompatible:
 			window = defaultOpenAICompatibleContextWindow
 		case models.ProviderOllama:
@@ -710,23 +713,10 @@ func ensureRequestFitsWithBudget(req llmcontracts.AgentRequest, budget requestBu
 }
 
 func openAIContextWindow(model string) int {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna":
-		return 272000
-	case "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna":
-		return 272000
-	case "gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5-codex-mini":
-		// Keep this in sync with pkg/openai_client.openAIModelContextWindow.
-		return 272000
-	case "gpt-5.3-codex-spark":
-		return 128000
-	case "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano":
-		return 1047576
-	case "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-5", "gpt-5-mini", "gpt-5-nano":
-		return 128000
-	default:
-		return defaultOpenAIContextWindow
+	if spec, ok := models.LookupModel(models.ProviderOpenAI, model); ok && spec.ContextWindow > 0 {
+		return spec.ContextWindow
 	}
+	return defaultOpenAIContextWindow
 }
 
 func shouldTriggerContextCompaction(req llmcontracts.AgentRequest) (bool, compactionLimits, int) {

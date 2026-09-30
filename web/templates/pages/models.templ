@@ -191,6 +191,30 @@ func mixtureModelOptionsJSON(agents []models.LLMConfig) string {
 	return string(b)
 }
 
+func builtInModelOptionsJSON() string {
+	type modelOption struct {
+		Value       string   `json:"value"`
+		Label       string   `json:"label"`
+		Efforts     []string `json:"efforts"`
+		Temperature bool     `json:"temperature"`
+		OAuth       bool     `json:"oauth"`
+	}
+	data := map[string][]modelOption{}
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAI} {
+		for _, spec := range models.ProviderModels(provider) {
+			data[string(provider)] = append(data[string(provider)], modelOption{
+				Value: spec.ID, Label: spec.Label, Efforts: spec.ReasoningEfforts,
+				Temperature: spec.SupportsTemperature, OAuth: spec.SupportsOAuth,
+			})
+		}
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
 func mixtureAggregatorSummary(agent models.LLMConfig, agents []models.LLMConfig) string {
 	if agent.MixtureAggregatorLabel != "" {
 		return agent.MixtureAggregatorLabel
@@ -237,7 +261,7 @@ templ providerIcon(provider models.LLMProvider) {
 }
 
 templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, oauthConnections []models.OAuthConnection, modelWorkerStats map[string]int, desktopMode bool, hasMore bool, state CardListState) {
-		<div id="models-container" data-search-container hx-history="false" data-card-pagination-root data-card-pagination-url={ CardListURL("models", state) } data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
+		<div id="models-container" data-search-container hx-history="false" data-built-in-models={ builtInModelOptionsJSON() } data-card-pagination-root data-card-pagination-url={ CardListURL("models", state) } data-card-pagination-list="#models-card-list" data-card-pagination-card-selector="[data-model-id]" data-card-pagination-key="data-model-id" data-card-pagination-page-size="20" data-card-pagination-has-more={ cardPaginationHasMoreAttribute(hasMore) }>
 		@layout.PageTitle("Models")
 	<div data-page-header class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Models</h2>
@@ -541,19 +565,9 @@ for _, agent := range modelOptions {
 						<div id="model_field" class="form-control mb-3">
 							<label class="label"><span class="label-text">Model</span></label>
 							<select name="model" id="model_id" class="select select-bordered" onchange="handleModelChange()">
-							<option value="claude-opus-5-5">Claude Opus 5.5</option>
-							<option value="claude-fable-5-1">Claude Fable 5.1</option>
-							<option value="claude-mythos-5-1">Claude Mythos 5.1</option>
-							<option value="claude-fable-5">Claude Fable 5</option>
-							<option value="claude-mythos-5">Claude Mythos 5</option>
-							<option value="claude-opus-5">Claude Opus 5</option>
-							<option value="claude-sonnet-5">Claude Sonnet 5</option>
-							<option value="claude-opus-4-8">Claude Opus 4.8</option>
-							<option value="claude-opus-4-7">Claude Opus 4.7</option>
-							<option value="claude-opus-4-6">Claude Opus 4.6</option>
-							<option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-							<option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
-							<option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+							for _, spec := range models.ProviderModels(models.ProviderAnthropic) {
+								<option value={ spec.ID }>{ spec.Label }</option>
+							}
 						</select>
 					</div>
 							<div id="reasoning_effort_field" class="form-control mb-3 hidden">
@@ -1021,36 +1035,10 @@ for _, agent := range modelOptions {
 					xhigh: 'XHigh',
 					max: 'Max'
 				};
+			var builtInModelOptions = JSON.parse(document.getElementById('models-container').dataset.builtInModels || '{}');
 			var modelOptionsByProvider = {
-					anthropic: [
-						{ value: 'claude-opus-5-5', label: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-fable-5-1', label: 'Claude Fable 5.1', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-mythos-5-1', label: 'Claude Mythos 5.1', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-						{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: [] },
-						{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },
-				],				openai: [
-					{ value: 'gpt-6-astra', label: 'gpt-6-astra', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-6.1-sol', label: 'gpt-6.1-sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-6-sol', label: 'gpt-6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-6-luna', label: 'gpt-6-luna', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.5', label: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5.5-pro', label: 'gpt-5.5-pro', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5.4-mini', label: 'gpt-5.4-mini', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini', efforts: ['low', 'medium', 'high'] }
-					],
+					anthropic: builtInModelOptions.anthropic || [],
+					openai: builtInModelOptions.openai || [],
 						openai_compatible: [
 							{ value: 'local-model', label: 'Local/custom model', efforts: [] }
 						],
@@ -1196,7 +1184,7 @@ for _, agent := range modelOptions {
 				function modelOptionsForProvider(provider) {
 					var options = modelOptionsByProvider[provider] || modelOptionsByProvider[canonicalProvider(provider)] || [];
 					if (canonicalProvider(provider) === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth') {
-						return options.filter(function(option) { return option.value !== 'gpt-5.4' && option.value !== 'gpt-5.4-mini'; });
+						return options.filter(function(option) { return option.oauth === true; });
 					}
 					return options;
 				}
@@ -1325,7 +1313,10 @@ for _, agent := range modelOptions {
 				function modelSupportsTemperature(provider, model) {
 					var normalizedModel = (model || '').trim().toLowerCase();
 					if (provider === 'mixture') return false;
-					if (provider === 'openai') return normalizedModel !== 'gpt-6-astra' && normalizedModel !== 'gpt-6.1-sol';
+					if (provider === 'openai' || provider === 'anthropic') {
+						var option = selectedModelOption(provider, normalizedModel);
+						return !option || option.temperature !== false;
+					}
 					if (!isOpenAICompatibleProvider(provider)) return true;
 					return normalizedModel.indexOf('kimi-') !== 0;
 				}

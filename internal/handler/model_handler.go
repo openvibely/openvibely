@@ -22,7 +22,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
-	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -1300,7 +1299,7 @@ func normalizeProviderReasoningEffort(provider models.LLMProvider, model, value 
 	case models.ProviderOpenAI:
 		return normalizeOpenAIReasoningEffort(model, value)
 	case models.ProviderAnthropic:
-		return anthropicclient.NormalizeEffort(model, value)
+		return models.NormalizeModelEffort(models.ProviderAnthropic, model, value)
 	case models.ProviderOpenAICompatible:
 		if effort := normalizeKimiReasoningEffort(model, value); effort != "" {
 			return effort
@@ -1780,11 +1779,8 @@ func supportedOpenAIModel(value string, auth models.AuthMethod) bool {
 	if auth != models.AuthMethodOAuth {
 		return false
 	}
-	switch model {
-	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro", "gpt-5.3-codex", "gpt-5-codex-mini":
-		return true
-	}
-	return false
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	return ok && spec.Visible && spec.SupportsOAuth
 }
 
 func normalizeOpenAIModel(value string) string {
@@ -1792,22 +1788,8 @@ func normalizeOpenAIModel(value string) string {
 	if trimmed == "" {
 		return ""
 	}
-	switch trimmed {
-	case "gpt-6-astra",
-		"gpt-6.1-sol",
-		"gpt-6-sol",
-		"gpt-6-luna",
-		"gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna",
-		"gpt-5.5",
-		"gpt-5.5-pro",
-		"gpt-5.4",
-		"gpt-5.4-mini",
-		"gpt-5.3-codex",
-		"gpt-5-codex-mini":
-		return trimmed
-	default:
-		return ""
+	if spec, ok := models.LookupModel(models.ProviderOpenAI, trimmed); ok && spec.Visible {
+		return spec.ID
 	}
+	return ""
 }

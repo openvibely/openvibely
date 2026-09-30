@@ -33,32 +33,10 @@ type claudeCodeOutputBudget struct {
 // applyAgentToSystemPrompt prepends the agent definition's system prompt and
 // skill contents to the base system context string.
 func claudeCodeOutputBudgetForModel(model string) claudeCodeOutputBudget {
-	m := strings.ToLower(strings.TrimSpace(model))
-	switch {
-	case strings.Contains(m, "claude-opus-5-5"):
-		return claudeCodeOutputBudget{Default: 128000, UpperLimit: 128000}
-	case strings.Contains(m, "claude-opus-5"), strings.Contains(m, "claude-sonnet-5"):
-		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
-	case strings.Contains(m, "claude-fable-5"), strings.Contains(m, "claude-mythos-5"):
-		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
-	case strings.Contains(m, "claude-opus-4-8"), strings.Contains(m, "claude-opus-4-7"), strings.Contains(m, "claude-opus-4-6"):
-		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
-	case strings.Contains(m, "claude-sonnet-4-6"):
-		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 64000}
-	case strings.Contains(m, "claude-opus-4-5"), strings.Contains(m, "claude-sonnet-4-5"),
-		strings.Contains(m, "claude-sonnet-4-0"), strings.Contains(m, "claude-haiku-4-5"),
-		strings.Contains(m, "claude-3-7-sonnet"):
-		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 64000}
-	case strings.Contains(m, "claude-opus-4-1"), strings.Contains(m, "claude-opus-4-0"):
-		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 32000}
-	case strings.Contains(m, "claude-3-5-sonnet"), strings.Contains(m, "claude-3-5-haiku"),
-		strings.Contains(m, "claude-3-sonnet"):
-		return claudeCodeOutputBudget{Default: 8192, UpperLimit: 8192}
-	case strings.Contains(m, "claude-3-opus"), strings.Contains(m, "claude-3-haiku"):
-		return claudeCodeOutputBudget{Default: 4096, UpperLimit: 4096}
-	default:
-		return claudeCodeOutputBudget{Default: 32000, UpperLimit: 128000}
+	if spec, ok := models.LookupModel(models.ProviderAnthropic, model); ok && spec.DefaultOutputTokens > 0 && spec.MaxOutputTokens > 0 {
+		return claudeCodeOutputBudget{Default: spec.DefaultOutputTokens, UpperLimit: spec.MaxOutputTokens}
 	}
+	return claudeCodeOutputBudget{Default: 32000, UpperLimit: 128000}
 }
 
 func claudeCodeMaxOutputTokens(model string) int {

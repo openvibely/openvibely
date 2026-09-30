@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/llm/tokenestimate"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -1293,31 +1294,10 @@ func openAIAutoCompactionTokenLimit(model string) int {
 }
 
 func openAIModelContextWindow(model string) (int, bool) {
-	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna":
-		return 272000, true
-	case "gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna":
-		return 272000, true
-	case "gpt-5.5",
-		"gpt-5.5-pro",
-		"gpt-5.4",
-		"gpt-5.4-mini",
-		"gpt-5.3-codex",
-		"gpt-5.2-codex",
-		"gpt-5.1-codex-max",
-		"gpt-5.1-codex",
-		"gpt-5.1-codex-mini",
-		"gpt-5-codex",
-		"gpt-5-codex-mini":
-		// Mirrors Codex model metadata currently shipped in codex-rs/core/models.json.
-		return 272000, true
-	case "gpt-5.3-codex-spark":
-		return 128000, true
-	default:
-		return 0, false
+	if spec, ok := models.LookupModel(models.ProviderOpenAI, model); ok && spec.ContextWindow > 0 {
+		return spec.ContextWindow, true
 	}
+	return 0, false
 }
 
 func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) ([]any, string, error) {
@@ -1325,8 +1305,9 @@ func (c *Client) compactAgenticInputItems(ctx context.Context, inputItems []any,
 		return nil, "", fmt.Errorf("cannot compact empty conversation transcript")
 	}
 
+	spec, _ := models.LookupModel(models.ProviderOpenAI, opts.Model)
 	useRemoteV2 := strings.TrimSpace(opts.CompactionPrompt) == "" &&
-		(isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) || strings.HasPrefix(strings.ToLower(strings.TrimSpace(opts.Model)), "gpt-5.5"))
+		(isChatGPTOAuth || isResponsesLiteWebsocketModel(opts.Model) || spec.RemoteCompactionV2)
 	instructions := compactionInstructions(opts)
 	if useRemoteV2 {
 		instructions = openAICompactionV2Instructions(opts, isChatGPTOAuth)
@@ -2760,18 +2741,8 @@ func providerNativeOutputItemKey(item map[string]any, outputIndex int) string {
 // web_search tool. Based on models_cache.json supports_search_tool
 // field; gpt-5.2+ families support it.
 func openAIModelSupportsWebSearch(model string) bool {
-	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.HasPrefix(m, "gpt-6-astra") ||
-		strings.HasPrefix(m, "gpt-6.1-sol") ||
-		strings.HasPrefix(m, "gpt-6-sol") ||
-		strings.HasPrefix(m, "gpt-6-luna") ||
-		strings.HasPrefix(m, "gpt-5.6-sol") ||
-		strings.HasPrefix(m, "gpt-5.6-terra") ||
-		strings.HasPrefix(m, "gpt-5.6-luna") ||
-		strings.HasPrefix(m, "gpt-5.5") ||
-		strings.HasPrefix(m, "gpt-5.4") ||
-		strings.HasPrefix(m, "gpt-5.3") ||
-		strings.HasPrefix(m, "gpt-5.2")
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	return ok && spec.SupportsWebSearch
 }
 
 // isProviderNativeOutputItem returns true if the output item type is a

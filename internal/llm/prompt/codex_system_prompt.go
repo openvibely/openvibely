@@ -19,15 +19,11 @@ func CodexSystemPrompt(model string) string {
 }
 
 func codexSnapshot(model string) string {
-	name := "gpt-reserve"
-	model = strings.ToLower(strings.TrimSpace(model))
-	for _, candidate := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5"} {
-		if model == candidate {
-			name = candidate
-			break
-		}
+	profile := models.PromptProfileCodexReserve
+	if spec, ok := models.LookupModel(models.ProviderOpenAI, model); ok && spec.PromptProfile != "" {
+		profile = spec.PromptProfile
 	}
-	data, err := codexPrompts.ReadFile("codex/" + name + ".md")
+	data, err := codexPrompts.ReadFile(string(profile))
 	if err != nil {
 		panic(err)
 	}
