@@ -21,6 +21,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	project := models.Project{ID: "details-project", Name: "Details"}
 	agents := []models.LLMConfig{{ID: "model-1", Name: "Example model"}}
+	var autoMerge atomic.Bool
 	var priority atomic.Int32
 	priority.Store(2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +29,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		task := &models.Task{ID: "details-task", ProjectID: project.ID, Title: "Task", Prompt: "Original prompt", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: int(priority.Load())}
+		task := &models.Task{ID: "details-task", ProjectID: project.ID, Title: "Task", Prompt: "Original prompt", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: int(priority.Load()), AutoMerge: autoMerge.Load()}
 		var component templ.Component
 		switch r.URL.Path {
 		case "/tasks/new":
@@ -42,6 +43,10 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 				priority.Store(4)
 				task.Priority = 4
 				component = TaskDetailMetrics(task, models.TaskExecutionMetrics{}, agents, "")
+			} else if r.FormValue("field") == "auto_merge" {
+				autoMerge.Store(r.FormValue("value") == "true")
+				task.AutoMerge = autoMerge.Load()
+				component = TaskAutoMergePanel(task)
 			} else if r.FormValue("field") == "prompt" {
 				task.Prompt = r.FormValue("value")
 				component = TaskPromptPanel(task)
@@ -117,9 +122,18 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			b.waitFor("actions aligned with composer bottom and panel left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect(),composer=document.getElementById('task-thread-form').getBoundingClientRect();return String(Math.abs(first.bottom-composer.bottom)<1 && Math.abs(first.left-panel.left-13)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
 		}
 		assertFooter()
+		b.click("#task-auto-merge-panel summary")
+		b.click(`#task-auto-merge-panel input[name="auto_merge"]`)
+		b.waitFor("auto merge saved with advanced options still open", `String(document.querySelector('#task-auto-merge-panel').open && document.querySelector('#task-auto-merge-panel input[name="auto_merge"]').hasAttribute("checked") && !document.querySelector('#task-auto-merge-panel input').disabled)`, "true")
+		if !autoMerge.Load() {
+			t.Fatal("auto merge switch was not saved")
+		}
+		b.click(`#task-auto-merge-panel input[name="auto_merge"]`)
+		b.waitFor("auto merge disabled", `String(!document.querySelector('#task-auto-merge-panel input[name="auto_merge"]').hasAttribute("checked") && !document.querySelector('#task-auto-merge-panel input').disabled)`, "true")
+
 		for _, width := range []int{340, 420, 720} {
 			b.evaluate(fmt.Sprintf(`document.getElementById('task-detail-content').style.setProperty('--task-panel-width','%dpx'); document.querySelector('#task-detail-view [data-property-label]').textContent='long-model-name-'.repeat(30); 'sized'`, width))
-			b.waitFor("auto-merge label and value spacing", `(function(){return String(Array.from(document.querySelectorAll('#task-auto-merge-panel .task-property-row')).every(function(row){var label=row.children[0].getBoundingClientRect(),value=row.children[1].getBoundingClientRect(),arrow=row.children[2].getBoundingClientRect();return value.left-label.right>=11 && arrow.left-value.right>=11 && getComputedStyle(row).display==='grid'}))})()`, "true")
+
 			b.waitFor("Details fits horizontally", `(function(){return String(['task-details-panel','task-inspector-body','tab-details','task-detail-view'].every(function(id){var el=document.getElementById(id);return el.scrollWidth<=el.clientWidth}) && Array.from(document.querySelectorAll('#task-detail-view .task-property-row')).every(function(row){var r=row.getBoundingClientRect(),v=document.getElementById('task-detail-view').getBoundingClientRect();return r.left>=v.left && r.right<=v.right}))})()`, "true")
 		}
 		b.evaluate(`var content=document.getElementById('task-detail-view'),filler=document.createElement('div'); filler.style.height='2000px'; content.appendChild(filler); content.scrollTop=content.scrollHeight; 'scrolled'`)
