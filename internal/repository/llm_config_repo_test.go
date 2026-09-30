@@ -1353,7 +1353,7 @@ func TestLLMConfigRepo_ListVisionSelectionOptionsUsesBoundedProjection(t *testin
 		Name:              "Anthropic OAuth",
 		Provider:          models.ProviderAnthropic,
 		AuthMethod:        models.AuthMethodOAuth,
-		Model:             "claude-opus-5-20250929",
+		Model:             "claude-opus-5",
 		OAuthAccessToken:  "oauth-secret",
 		OAuthRefreshToken: "oauth-refresh-secret",
 	}

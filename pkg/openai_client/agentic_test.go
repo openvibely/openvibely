@@ -1882,12 +1882,7 @@ func TestSendAgentic_ResponsesLiteReusesConnectionAndSendsIncrementalTurn(t *tes
 }
 
 func TestSendAgentic_OAuthModelsReplayEncryptedReasoningWithStoreFalse(t *testing.T) {
-	models := []string{
-		"gpt-5.5", "gpt-5.5-pro", "gpt-5.4", "gpt-5.4-mini",
-		"gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2-codex",
-		"gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini",
-		"gpt-5-codex", "gpt-5-codex-mini",
-	}
+	models := []string{"gpt-5.5", "gpt-5.5-pro", "gpt-5.3-codex", "gpt-5-codex-mini"}
 	requests := make(chan map[string]any, len(models)*2)
 	var turns atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4016,14 +4011,6 @@ func TestOpenAIAutoCompactionTokenLimit_GPT6SolLunaUseCodexEffectiveContext(t *t
 	}
 }
 
-func TestOpenAIAutoCompactionTokenLimit_SparkUses128KContext(t *testing.T) {
-	got := openAIAutoCompactionTokenLimit("gpt-5.3-codex-spark")
-	want := (128000 * 90) / 100
-	if got != want {
-		t.Fatalf("openAIAutoCompactionTokenLimit = %d, want %d", got, want)
-	}
-}
-
 func TestNormalizedCompactionThresholdForModel_CapsToModelLimit(t *testing.T) {
 	modelLimit := openAIAutoCompactionTokenLimit("gpt-5.3-codex")
 	got := normalizedCompactionThresholdForModel(modelLimit+50000, "gpt-5.3-codex")
@@ -4483,9 +4470,9 @@ func TestOpenAIModelSupportsWebSearch(t *testing.T) {
 		{"gpt-5.4-mini", true},
 		{"GPT-5.4", true},
 		{"gpt-5.3-codex", true},
-		{"gpt-5.3", true},
-		{"gpt-5.2", true},
-		{"gpt-5.2-mini", true},
+		{"gpt-5.3", false},
+		{"gpt-5.2", false},
+		{"gpt-5.2-mini", false},
 		{"gpt-4o", false},
 		{"gpt-4o-mini", false},
 		{"gpt-4.1", false},

@@ -4,11 +4,9 @@ import (
 	"testing"
 )
 
-func TestCodexModelOrDefaultRetiredModels(t *testing.T) {
-	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex"} {
-		if got := CodexModelOrDefault(model); got != CodexDefaultModel {
-			t.Errorf("retired model %s resolved to %s", model, got)
-		}
+func TestCodexModelOrDefaultUnknownModel(t *testing.T) {
+	if got := CodexModelOrDefault("unknown-model"); got != CodexDefaultModel {
+		t.Errorf("unknown model resolved to %s", got)
 	}
 }
 
@@ -28,7 +26,7 @@ func TestCodexReasoningEffort_EnvOverride(t *testing.T) {
 
 func TestCodexReasoningEffort_ModelSpecificFallback(t *testing.T) {
 	t.Setenv("OPENVIBELY_CODEX_REASONING_EFFORT", "xhigh")
-	if got := CodexReasoningEffort("gpt-5-codex", ""); got != "high" {
+	if got := CodexReasoningEffort("unknown-model", ""); got != "high" {
 		t.Errorf("expected fallback effort %q for unsupported xhigh, got %q", "high", got)
 	}
 }
