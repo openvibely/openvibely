@@ -105,7 +105,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div data-page-header class=\"flex items-center gap-2 mb-6 flex-shrink-0 min-w-0\"><nav class=\"flex min-w-0 flex-1 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\"><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div data-page-header class=\"flex items-center gap-2 mb-6 flex-shrink-0 min-w-0\"><nav class=\"flex min-w-0 flex-1 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-page-header><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
