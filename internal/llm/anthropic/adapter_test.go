@@ -269,7 +269,7 @@ func TestCallDirectOperationUsesRuntimeToolsAndDefaultFraming(t *testing.T) {
 	if result.Output != "direct result" || result.Usage.InputTokens != 8 || result.Usage.OutputTokens != 3 {
 		t.Fatalf("result = %#v", result)
 	}
-	if system := fmt.Sprint(gotBody["system"]); !strings.Contains(system, "project rules") || !strings.Contains(system, "expert software engineer") {
+	if system := fmt.Sprint(gotBody["system"]); !strings.Contains(system, "project rules") || !strings.Contains(system, llmprompt.AnthropicAgentSystemPrompt) {
 		t.Fatalf("direct call omitted default system framing: %#v", gotBody["system"])
 	}
 	if !strings.Contains(fmt.Sprint(gotBody["messages"]), "solve it") {
@@ -601,7 +601,7 @@ func TestCallDirectLifecycleHookDropsCodingAgentFraming(t *testing.T) {
 	if !strings.Contains(system, "AGENT OWN PROMPT") {
 		t.Fatalf("lifecycle hook must keep its own agent prompt, got %s", system)
 	}
-	if strings.Contains(system, "expert software engineer") {
+	if strings.Contains(system, "expert software engineer") || strings.Contains(system, "You are an interactive agent") {
 		t.Fatalf("lifecycle hook must not receive the coding-agent system prompt, got %s", system)
 	}
 
@@ -686,6 +686,9 @@ func TestCallStreamingUsesAgenticStreamCallbacksAndRuntimeTools(t *testing.T) {
 	if !strings.Contains(payload, "Finish task") || !strings.Contains(payload, "project rules") || !strings.Contains(payload, "create_task") {
 		t.Fatalf("request body missing prompt/system/runtime tools: %#v", gotBody)
 	}
+	if !strings.Contains(fmt.Sprint(gotBody["system"]), llmprompt.AnthropicAgentSystemPrompt) {
+		t.Fatal("task request omitted Anthropic base prompt")
+	}
 	if !strings.Contains(payload, "If you recovered and completed the requested outcome, report success") ||
 		!strings.Contains(payload, "[STATUS: FAILED | <describe what prevented completion>]") {
 		t.Fatalf("task request missing provider-neutral outcome status contract: %#v", gotBody["messages"])
@@ -743,7 +746,7 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 		t.Fatalf("usage = %#v", usage)
 	}
 	payload := fmt.Sprint(gotBody)
-	for _, want := range []string{"What next?", "Earlier question", "Earlier answer", "CHAT_SYSTEM_SENTINEL", "list_tasks"} {
+	for _, want := range []string{"What next?", "Earlier question", "Earlier answer", "CHAT_SYSTEM_SENTINEL", "list_tasks", llmprompt.AnthropicAgentSystemPrompt} {
 		if !strings.Contains(payload, want) {
 			t.Fatalf("request body missing %q: %#v", want, gotBody)
 		}
