@@ -1671,10 +1671,10 @@ func unsupportedModelTransport(provider models.LLMProvider, authMethod models.Au
 }
 
 func unsupportedCatalogModel(agent models.LLMConfig) error {
-	if models.BuiltInModelSupported(agent.Provider, agent.Model) {
+	if models.BuiltInModelSupportedForAuth(agent.Provider, agent.Model, agent.AuthMethod) {
 		return nil
 	}
-	return fmt.Errorf("%s model %q is no longer supported; select a supported model in Models", agent.Provider, agent.Model)
+	return fmt.Errorf("%s model %q is no longer supported for this connection; select a supported model in Models", agent.Provider, agent.Model)
 }
 
 func (a *anthropicProviderAdapter) callSupportedOperation(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {

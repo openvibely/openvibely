@@ -69,6 +69,23 @@ func TestLookupModelRejectsSettingsEncodedInModelID(t *testing.T) {
 	}
 }
 
+func TestBuiltInModelSupportedForAuth(t *testing.T) {
+	for _, spec := range ProviderModels(ProviderOpenAI) {
+		if !BuiltInModelSupportedForAuth(spec.Provider, spec.ID, AuthMethodAPIKey) {
+			t.Errorf("API key rejected for %s", spec.ID)
+		}
+		if got := BuiltInModelSupportedForAuth(spec.Provider, spec.ID, AuthMethodOAuth); got != spec.SupportsOAuth {
+			t.Errorf("OAuth support for %s = %v", spec.ID, got)
+		}
+	}
+	if BuiltInModelSupportedForAuth(ProviderOpenAI, "gpt-5.3-codex", AuthMethodOAuth) {
+		t.Fatal("GPT-5.3-Codex must not be offered for ChatGPT sign-in")
+	}
+	if !BuiltInModelSupportedForAuth(ProviderOpenAICompatible, "custom", AuthMethodOAuth) {
+		t.Fatal("custom provider OAuth was restricted")
+	}
+}
+
 func TestProviderModelsReturnsDefensiveEffortCopies(t *testing.T) {
 	models := ProviderModels(ProviderOpenAI)
 	if len(models) == 0 || len(models[0].ReasoningEfforts) == 0 {

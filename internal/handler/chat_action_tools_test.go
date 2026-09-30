@@ -1414,7 +1414,7 @@ func assertCreateTaskRuntimeUsesCompactModelSelection(t *testing.T, statements [
 		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
 			t.Fatalf("create_task used full model list query: %s", raw)
 		}
-		if projection == "select id, name, provider, model, is_default, auto_start_tasks" && strings.Contains(stmt, "order by is_default desc, name asc") {
+		if projection == "select id, name, provider, model, is_default, auto_start_tasks, auth_method" && strings.Contains(stmt, "order by is_default desc, name asc") {
 			compactQueries++
 		}
 	}
