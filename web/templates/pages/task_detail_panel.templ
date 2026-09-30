@@ -34,6 +34,12 @@ templ TaskDetailPanel() {
 		#task-panel-divider:hover::after, #task-panel-divider[data-resizing]::after, #task-panel-divider:focus-visible:not([data-pointer-focus])::after { opacity:.45; }
 		#task-detail-actions { margin-bottom:max(0px, calc(var(--task-actions-bottom, 24px) - 12px)); }
 		#task-inspector-body > .task-tab-panel { min-height:0; }
+		/* Keep the row highlight gutters inside the Details scrollport. */
+		#task-inspector-body:has(#tab-details:not(.hidden) #task-detail-view) { padding-inline:0; overflow-x:hidden; }
+		#task-detail-view { min-width:0; padding-inline:12px; overflow-x:hidden; overflow-wrap:anywhere; }
+		#tab-details { min-width:0; }
+		#tab-details #task-detail-actions { margin-inline:12px; flex-wrap:wrap; }
+
 		#task-details-panel[data-overlay="true"] { box-shadow:0 8px 30px #0003; }
 		#task-detail-content[data-has-changes="true"] [data-task-terminal-status] { display:none; }
 		@media(max-width:640px) {
