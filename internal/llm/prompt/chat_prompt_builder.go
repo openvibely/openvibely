@@ -8,7 +8,9 @@ import (
 
 // TaskFollowupSystemPrompt extends AgentSystemPrompt with task-followup-specific
 // execution constraints. Mutations are available only through request-scoped tools.
-const TaskFollowupSystemPrompt = AgentSystemPrompt + `
+const TaskFollowupSystemPrompt = AgentSystemPrompt + taskFollowupConstraints
+
+const taskFollowupConstraints = `
 # Task Follow-up Constraints
 
 - Treat each follow-up message as an instruction to execute: read files, edit code, run commands, and make the requested changes
@@ -134,10 +136,15 @@ func containsToolName(names []string, target string) bool {
 // BuildChatSystemPrompt constructs the provider-neutral prompt for Chat or task
 // follow-up requests. Provider adapters append the concrete runtime capability.
 func BuildChatSystemPrompt(isTaskFollowup bool, chatMode models.ChatMode, chatSystemContext string, restrictTools bool) string {
+	return buildChatSystemPrompt(AgentSystemPrompt, isTaskFollowup, chatMode, chatSystemContext, restrictTools)
+}
+
+func buildChatSystemPrompt(base string, isTaskFollowup bool, chatMode models.ChatMode, chatSystemContext string, restrictTools bool) string {
 	var sb strings.Builder
 
 	if isTaskFollowup {
-		sb.WriteString(TaskFollowupSystemPrompt)
+		sb.WriteString(base)
+		sb.WriteString(taskFollowupConstraints)
 	} else if chatMode == models.ChatModePlan {
 		sb.WriteString(ChatPlanModeSystemPrompt)
 	} else {

@@ -69,8 +69,12 @@ const AgentSystemPrompt = `You are an expert software engineer acting as a codin
 // It combines the shared agent system prompt with optional managed project
 // instructions from selected skills/memory and additional context.
 func BuildAgentSystemPrompt(projectInstructions string, workDir ...string) string {
+	return buildAgentSystemPrompt(AgentSystemPrompt, projectInstructions, workDir...)
+}
+
+func buildAgentSystemPrompt(base, projectInstructions string, workDir ...string) string {
 	var sb strings.Builder
-	sb.WriteString(AgentSystemPrompt)
+	sb.WriteString(base)
 
 	worktreePath := ""
 	if len(workDir) > 0 {

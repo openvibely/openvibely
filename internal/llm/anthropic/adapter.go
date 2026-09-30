@@ -456,7 +456,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		systemPrompt = projectInstructions
 	default:
 		fullPrompt = llmprompt.BuildTaskPromptHeader() + prompt
-		systemPrompt = llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir)
+		systemPrompt = llmprompt.BuildAnthropicAgentSystemPrompt(projectInstructions, workDir)
 		webSearchEnabled = true
 	}
 	compactionSummary := ""
@@ -518,7 +518,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	}
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr := llmprompt.BuildAnthropicChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
@@ -650,7 +650,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		Effort:                    agent.ReasoningEffort,
 		EnableThinking:            true,
 		SkipDefaultTools:          skipDefaultTools,
-		System:                    llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		System:                    llmprompt.BuildAnthropicAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
