@@ -1496,7 +1496,11 @@ func TestCreateModel_MixtureRejectsRecursiveAndDuplicateSlots(t *testing.T) {
 func TestCreateModel_MixtureRejectsNestedSlots(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
-	callable := &models.LLMConfig{Name: "Callable API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"}
+	defaultModel, ok := models.DefaultModel(models.ProviderOpenAI)
+	if !ok {
+		t.Fatal("OpenAI catalog has no default model")
+	}
+	callable := &models.LLMConfig{Name: "Callable API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: defaultModel.ID}
 	nestedAggregator := &models.LLMConfig{Name: "Nested aggregator", Provider: models.ProviderMixture, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5-codex"}
 	nestedReference := &models.LLMConfig{Name: "Nested reference", Provider: models.ProviderMixture, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet"}
 	for _, cfg := range []*models.LLMConfig{callable, nestedAggregator, nestedReference} {

@@ -1319,16 +1319,16 @@ func TestHandler_GetTaskDetailActions(t *testing.T) {
 		return rec
 	}
 
-	// Pending task: Run Now is enabled (hx-post present), Edit visible
+	// Pending task: Run Now is enabled and Delete is available.
 	rec := makeRequest(task.ID)
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, `id="task-detail-actions"`)
 	assertContains(t, rec, "Run Now")
 	assertContains(t, rec, `hx-post`)
-	assertContains(t, rec, "Edit")
+	assertContains(t, rec, "Delete")
 	assertNotContains(t, rec, "disabled")
 
-	// Running task: Run Now disabled (no hx-post), Edit hidden
+	// Running task: Run Now disabled (no hx-post), Delete remains available.
 	task.Status = models.StatusRunning
 	if err := h.taskSvc.Update(ctx, task); err != nil {
 		t.Fatalf("failed to update task: %v", err)
@@ -1336,16 +1336,16 @@ func TestHandler_GetTaskDetailActions(t *testing.T) {
 	rec2 := makeRequest(task.ID)
 	assertContains(t, rec2, "disabled")
 	assertNotContains(t, rec2, `hx-post`)
-	assertNotContains(t, rec2, `btn btn-secondary btn-sm`) // Edit hidden when running
+	assertContains(t, rec2, "Delete")
 
-	// Completed task: Run Now re-enabled (hx-post back), Edit visible
+	// Completed task: Run Now re-enabled (hx-post back), Delete available.
 	task.Status = models.StatusCompleted
 	if err := h.taskSvc.Update(ctx, task); err != nil {
 		t.Fatalf("failed to update task: %v", err)
 	}
 	rec3 := makeRequest(task.ID)
 	assertContains(t, rec3, `hx-post`)
-	assertContains(t, rec3, "Edit")
+	assertContains(t, rec3, "Delete")
 	assertNotContains(t, rec3, "disabled")
 
 	// Not found: expect 404
@@ -6018,7 +6018,8 @@ func TestSidebar_ProjectSelectorSearchTriggerAndFocusVisible(t *testing.T) {
 		`function position(root)`,
 		`oninput="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
 		`onsearch="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
-		`event.target.matches('[data-searchable-selector-search]')`,
+		`event.target.matches('[data-searchable-selector-trigger]')`,
+		`state.button.setAttribute('data-selector-return-focus', '')`,
 	}
 	for _, snippet := range required {
 		if !strings.Contains(body, snippet) {
