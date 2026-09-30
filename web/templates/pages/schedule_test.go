@@ -1252,6 +1252,50 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryThreeHoursNewSchedule(t *testing.T)
 	}
 }
 
+func TestBuildTaskOccurrenceMap_CalendarDSTGap(t *testing.T) {
+	previousLocal := time.Local
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Local = loc
+	t.Cleanup(func() { time.Local = previousLocal })
+	for _, repeat := range []models.RepeatType{models.RepeatDaily, models.RepeatWeekly} {
+		for _, advanced := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/advanced=%t", repeat, advanced), func(t *testing.T) {
+				anchor := time.Date(2026, 3, 1, 2, 30, 0, 0, loc)
+				nextRun := anchor.UTC()
+				if advanced {
+					nextRun = time.Date(2026, 3, 22, 2, 30, 0, 0, loc).UTC()
+				}
+				schedule := &models.Schedule{RunAt: anchor.UTC(), NextRun: &nextRun, RepeatType: repeat, RepeatInterval: 1, Enabled: true}
+				for _, weekDay := range []int{1, 8, 15} {
+					week := time.Date(2026, 3, weekDay, 0, 0, 0, 0, loc)
+					got := buildTaskOccurrenceMap([]repository.TaskWithSchedule{{Schedule: schedule}}, week)
+					count := 7
+					if repeat == models.RepeatWeekly {
+						count = 1
+					}
+					if len(got) != count {
+						t.Fatalf("week %s: got %d cells, want %d", week, len(got), count)
+					}
+					for day := weekDay; day < weekDay+count; day++ {
+						hour := 2
+						if day == 8 {
+							hour = 3
+						}
+						want := time.Date(2026, 3, day, hour, 30, 0, 0, loc)
+						entries := got[localKey(want)]
+						if len(entries) != 1 || !entries[0].OccurrenceTime.Equal(want) {
+							t.Errorf("want %s, got %#v", want, entries)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestBuildTaskOccurrenceMap_SubDailyElapsedIntervals(t *testing.T) {
 	originalLocation := time.Local
 	loc, err := time.LoadLocation("America/New_York")
