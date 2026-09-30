@@ -19,6 +19,9 @@ func TestTaskDetailsToggleUsesRightSidebarIcon(t *testing.T) {
 	}
 	_, toggle, _ := strings.Cut(buf.String(), `id="task-details-opener"`)
 	toggle, _, _ = strings.Cut(toggle, "</button>")
+	if !strings.Contains(toggle, `class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square"`) {
+		t.Error("details toggle must share sidebar toggle color and hover styling")
+	}
 	for _, want := range []string{`<rect x="3" y="3" width="18" height="18" rx="2"`, `<line x1="15" y1="3" x2="15" y2="21"`} {
 		if !strings.Contains(toggle, want) {
 			t.Errorf("missing mirrored sidebar icon geometry %q", want)

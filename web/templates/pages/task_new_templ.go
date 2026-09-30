@@ -139,7 +139,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</nav><button id=\"task-workspace-back\" type=\"button\" hidden></button> <button id=\"task-details-opener\" type=\"button\" class=\"btn btn-ghost btn-sm btn-square\" aria-label=\"Open details panel\" aria-controls=\"task-details-panel\" aria-expanded=\"false\" onclick=\"window.taskWorkspace.togglePanel()\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect><line x1=\"15\" y1=\"3\" x2=\"15\" y2=\"21\"></line></svg></button></div><div id=\"task-workspaces\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</nav><button id=\"task-workspace-back\" type=\"button\" hidden></button> <button id=\"task-details-opener\" type=\"button\" class=\"sidebar-toggle-btn btn btn-ghost btn-sm btn-square\" aria-label=\"Open details panel\" aria-controls=\"task-details-panel\" aria-expanded=\"false\" onclick=\"window.taskWorkspace.togglePanel()\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"></rect><line x1=\"15\" y1=\"3\" x2=\"15\" y2=\"21\"></line></svg></button></div><div id=\"task-workspaces\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
