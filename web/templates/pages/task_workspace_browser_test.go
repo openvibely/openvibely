@@ -69,6 +69,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/new?tab=details", "detail-properties", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("draft details", `String(document.getElementById('task-details-panel') && !document.getElementById('task-details-panel').hidden)`, "true")
+		b.waitFor("property highlight inset", `(function(){var row=document.querySelector('[data-detail-property="priority"]'),text=row.firstElementChild;return String(Math.abs(text.getBoundingClientRect().left-row.getBoundingClientRect().left-12)<1 && getComputedStyle(row).paddingRight==='12px')})()`, "true")
 		b.click(`[data-detail-property="priority"]`)
 		b.click(`[data-options="priority"] [data-value="4"]`)
 		b.waitFor("draft priority", `document.querySelector('[data-draft-property="priority"]').value`, "4")

@@ -117,7 +117,13 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!current) fail('missing current breadcrumb selection');
     {
       if (!current.hasAttribute('data-selector-active')) fail('breadcrumb did not highlight current selection');
+      var returnFocusSuppressed = false;
+      button().addEventListener('focus', function() {
+        returnFocusSuppressed = this.hasAttribute('data-selector-return-focus');
+      }, {once:true});
       key(input(), 'Enter');
+      if (!returnFocusSuppressed) fail('breadcrumb focus restored before outline suppression');
+      if (getComputedStyle(button()).outlineStyle !== 'none') fail('breadcrumb return outline');
       if (dialog().open || !route('task', 'task-one')) fail('immediate Enter changed breadcrumb selection');
       button().click();
       await waitFor(function(){ return dialog().open && options().length>0; }, 'breadcrumb reopen');
