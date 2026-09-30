@@ -1381,7 +1381,12 @@ func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapt
 			compacted.NativeCompactionStateJSON = ""
 			compacted.ForceNativeCompaction = false
 			compacted.Agent.ForceNativeCompaction = false
-			compacted.ChatHistory = historyWithinRequestBudget(compacted, compacted.ChatHistory)
+			// Claude retries with the successful summary intact. Let request
+			// preflight reject an oversized retry rather than erase its summary
+			// (and the completed-work context it is the only remaining record of).
+			if compacted.Agent.Provider != models.ProviderAnthropic {
+				compacted.ChatHistory = historyWithinRequestBudget(compacted, compacted.ChatHistory)
+			}
 			compacted.Ctx = llmcontracts.WithNativeCompactionStateJSON(compacted.Ctx, "")
 			return compacted, nil
 		}
