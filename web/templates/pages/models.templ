@@ -1291,10 +1291,11 @@ for _, agent := range modelOptions {
 				}
 
 				if (selectedModel && !hasSelected) {
+					var builtInProvider = canonicalProvider(provider) === 'openai' || canonicalProvider(provider) === 'anthropic';
 					var customOpt = document.createElement('option');
 					customOpt.value = selectedModel;
-					customOpt.textContent = selectedModel + (canonicalProvider(provider) === 'openai' ? ' (unavailable — select another model)' : ' (custom)');
-					customOpt.disabled = canonicalProvider(provider) === 'openai';
+					customOpt.textContent = selectedModel + (builtInProvider ? ' (unavailable — select another model)' : ' (custom)');
+					customOpt.disabled = builtInProvider;
 					modelSelect.appendChild(customOpt);
 				}
 
