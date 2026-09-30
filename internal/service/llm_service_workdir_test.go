@@ -473,7 +473,7 @@ func TestLLMService_ExecuteTaskWithAgent_UsesProjectRepoPathAsWorkDir(t *testing
 	}
 }
 
-func TestLLMService_CallClaudeCLI_SetsWorkDir(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_UsesProjectWorkDir(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	execRepo := repository.NewExecutionRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -527,7 +527,7 @@ func TestLLMService_CallClaudeCLI_SetsWorkDir(t *testing.T) {
 	}
 }
 
-func TestLLMService_CallClaudeCLI_NoWorkDirWhenProjectHasNoRepoPath(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_NoWorkDirWhenProjectHasNoRepoPath(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	execRepo := repository.NewExecutionRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -572,7 +572,7 @@ func TestLLMService_CallClaudeCLI_NoWorkDirWhenProjectHasNoRepoPath(t *testing.T
 	}
 }
 
-func TestLLMService_CallCodexCLI_SetsWorkDir(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_SetsWorkDir(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	execRepo := repository.NewExecutionRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)

@@ -125,7 +125,7 @@ func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactAggregate(t *testing.T) {
 
 	for i, cfg := range []*models.LLMConfig{
 		{Name: "Anthropic API Key", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet"},
-		{Name: "OpenAI CLI Legacy", Provider: models.ProviderOpenAI, AuthMethod: "cli", Model: "gpt-test"},
+		{Name: "OpenAI API key", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test"},
 		{Name: "Ollama OAuth Unsupported", Provider: models.ProviderOllama, AuthMethod: models.AuthMethodOAuth, Model: "llama3"},
 	} {
 		if err := repo.Create(ctx, cfg); err != nil {
@@ -1327,11 +1327,11 @@ func TestLLMConfigRepo_ListVisionSelectionOptionsUsesBoundedProjection(t *testin
 	}
 
 	largeBody := strings.Repeat("x", 64*1024)
-	legacyCLI := &models.LLMConfig{
-		Name:       "Legacy CLI",
+	unconfiguredAPI := &models.LLMConfig{
+		Name:       "Unconfigured API",
 		Provider:   models.ProviderAnthropic,
-		AuthMethod: "cli",
-		Model:      "claude-cli",
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "claude-sonnet",
 	}
 	apiKey := &models.LLMConfig{
 		Name:                 "Anthropic API",
@@ -1364,7 +1364,7 @@ func TestLLMConfigRepo_ListVisionSelectionOptionsUsesBoundedProjection(t *testin
 		Model:      "gpt-5",
 		APIKey:     "openai-secret",
 	}
-	for _, cfg := range []*models.LLMConfig{legacyCLI, apiKey, oauth, otherProvider} {
+	for _, cfg := range []*models.LLMConfig{unconfiguredAPI, apiKey, oauth, otherProvider} {
 		if err := repo.Create(ctx, cfg); err != nil {
 			t.Fatalf("create %s: %v", cfg.Name, err)
 		}
@@ -1396,11 +1396,11 @@ func TestLLMConfigRepo_ListVisionSelectionOptionsUsesBoundedProjection(t *testin
 	for _, option := range selection {
 		byID[option.ID] = option
 	}
-	legacySelection := byID[legacyCLI.ID]
+	unconfiguredSelection := byID[unconfiguredAPI.ID]
 	apiSelection := byID[apiKey.ID]
 	oauthSelection := byID[oauth.ID]
-	if !(!legacySelection.IsCallableMixtureSlot()) {
-		t.Fatalf("legacy CLI selection row should remain CLI-only: %#v", legacySelection)
+	if unconfiguredSelection.APIKey != "" || unconfiguredSelection.OAuthAccessToken != "" {
+		t.Fatalf("unconfigured selection row must not report credentials: %#v", unconfiguredSelection)
 	}
 	if apiSelection.APIKey != "present" || apiSelection.OAuthAccessToken != "" || (!apiSelection.IsCallableMixtureSlot()) {
 		t.Fatalf("API-key presence was not preserved as a non-secret sentinel: %#v", apiSelection)

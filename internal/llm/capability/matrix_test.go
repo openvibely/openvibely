@@ -12,10 +12,10 @@ func TestForAgent_Vision(t *testing.T) {
 		agent    models.LLMConfig
 		visionOK bool
 	}{
-		{"anthropic cli", models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: "cli"}, false},
+		{"anthropic unsupported", models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: "unsupported"}, false},
 		{"anthropic apikey", models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey}, true},
 		{"openai oauth", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}, true},
-		{"openai cli-like", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: "cli"}, false},
+		{"openai unsupported", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: "unsupported"}, false},
 		{"ollama", models.LLMConfig{Provider: models.ProviderOllama}, true},
 	}
 

@@ -293,11 +293,11 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 		t.Fatalf("clear model configs: %v", err)
 	}
 
-	legacyCLI := &models.LLMConfig{
-		Name:       "Legacy CLI Default",
-		Provider:   models.ProviderAnthropic,
-		AuthMethod: "cli",
-		Model:      "claude-opus-5-20250929",
+	textOnlyDefault := &models.LLMConfig{
+		Name:       "Text-only Default",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		Model:      "text-only",
 		IsDefault:  true,
 	}
 	apiComplex := &models.LLMConfig{
@@ -326,7 +326,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 		Model:         "claude-haiku-4-5-20250929",
 		ExtraBodyJSON: `{"selected":"api-simple"}`,
 	}
-	for _, cfg := range []*models.LLMConfig{legacyCLI, apiComplex, oauthModerate, apiSimple} {
+	for _, cfg := range []*models.LLMConfig{textOnlyDefault, apiComplex, oauthModerate, apiSimple} {
 		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
 			t.Fatalf("create %s: %v", cfg.Name, err)
 		}
@@ -763,7 +763,7 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 
 	// Verify the selected agent supports vision
 	if !visionDecision.Agent.IsCallableMixtureSlot() {
-		t.Error("BUG REPRODUCED: Selected agent is still a non-vision legacy CLI config")
+		t.Error("BUG REPRODUCED: Selected agent is still a non-vision unsupported auth config")
 	}
 
 	// Success: Agent was properly switched to vision-capable agent

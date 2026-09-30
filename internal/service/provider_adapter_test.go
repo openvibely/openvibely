@@ -271,7 +271,7 @@ func TestAnthropicProviderAdapter_ForwardsSupportedOperations(t *testing.T) {
 	}
 }
 
-func TestAnthropicProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
+func TestAnthropicProviderAdapter_RejectsUnsupportedAuthTransport(t *testing.T) {
 	for _, operation := range []llmcontracts.Operation{
 		llmcontracts.OperationDirect,
 		llmcontracts.OperationStreaming,
@@ -286,13 +286,13 @@ func TestAnthropicProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
 				Message:   "generate JSON",
 				Agent: models.LLMConfig{
 					Provider:   models.ProviderAnthropic,
-					AuthMethod: "cli",
+					AuthMethod: "unsupported",
 					Model:      "claude-sonnet-4",
 				},
-				WorkDir: "/work/retired-cli",
+				WorkDir: "/work/retired-unsupported",
 			})
 			if err == nil {
-				t.Fatal("expected error for retired Anthropic CLI transport")
+				t.Fatal("expected error for unsupported Anthropic authentication transport")
 			}
 			if !strings.Contains(err.Error(), "no longer supported") {
 				t.Fatalf("unexpected error: %v", err)
@@ -324,7 +324,7 @@ func TestAnthropicProviderAdapter_RejectsUnknownOperationWithoutProviderCall(t *
 	}
 }
 
-func TestOpenAIProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
+func TestOpenAIProviderAdapter_RejectsUnsupportedAuthTransport(t *testing.T) {
 	adapter := &openAIProviderAdapter{svc: &LLMService{}}
 	_, err := adapter.Call(llmcontracts.AgentRequest{
 		Ctx:          context.Background(),
@@ -333,12 +333,12 @@ func TestOpenAIProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
 		DisableTools: true,
 		Agent: models.LLMConfig{
 			Provider:   models.ProviderOpenAI,
-			AuthMethod: "cli",
+			AuthMethod: "unsupported",
 			Model:      "gpt-5.3-codex",
 		},
 	})
 	if err == nil {
-		t.Fatal("expected error for retired OpenAI CLI transport")
+		t.Fatal("expected error for unsupported OpenAI authentication transport")
 	}
 	if !strings.Contains(err.Error(), "no longer supported") {
 		t.Fatalf("unexpected error: %v", err)
@@ -376,8 +376,8 @@ func TestNativeCompactionCapabilityRequiresConcreteSupportedConfiguration(t *tes
 	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodAPIKey, Transport: "chat_completions"}) {
 		t.Fatal("incompatible Anthropic transport must not advertise context management")
 	}
-	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: "cli"}) {
-		t.Fatal("retired CLI auth must not advertise native compaction")
+	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: "unsupported"}) {
+		t.Fatal("unsupported authentication must not advertise native compaction")
 	}
 	for _, model := range []string{"claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929", "claude-unknown"} {
 		if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: model, AuthMethod: models.AuthMethodOAuth}) {

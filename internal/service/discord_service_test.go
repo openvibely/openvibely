@@ -439,7 +439,7 @@ func TestDiscordSendToTaskUsesConfiguredChannelTaskRunner(t *testing.T) {
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderAnthropic, Model: "claude-test", AuthMethod: "cli", IsDefault: true}
+	agent := &models.LLMConfig{Name: "Test Agent", Provider: models.ProviderAnthropic, Model: "claude-test", AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create model config: %v", err)
 	}
@@ -863,7 +863,7 @@ func TestDiscordProcessIncomingMessageDownloadsPersistsAndPassesImageAttachment(
 		t.Fatalf("set responses: %v", err)
 	}
 	agentRepo := repository.NewLLMConfigRepo(db)
-	defaultAgent := &models.LLMConfig{Name: "text-cli", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet-4-5", IsDefault: true}
+	defaultAgent := &models.LLMConfig{Name: "text-only", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "text-only", IsDefault: true}
 	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
 		t.Fatalf("create default agent: %v", err)
 	}
@@ -1387,7 +1387,7 @@ func TestDiscordQueueChatInputSelectsVisionAgentFromDownloadedAttachment(t *test
 		t.Fatalf("create project: %v", err)
 	}
 	agentRepo := repository.NewLLMConfigRepo(db)
-	defaultAgent := &models.LLMConfig{Name: "text-cli", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet-4-5", IsDefault: true}
+	defaultAgent := &models.LLMConfig{Name: "text-only", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "text-only", IsDefault: true}
 	if err := agentRepo.Create(ctx, defaultAgent); err != nil {
 		t.Fatalf("create default agent: %v", err)
 	}

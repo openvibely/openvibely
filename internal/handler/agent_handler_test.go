@@ -1529,7 +1529,7 @@ func TestHandler_ListAgents_IncludesDefaultOffPluginText(t *testing.T) {
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
 		IsDefault:  false,
-		AuthMethod: "cli",
+		AuthMethod: models.AuthMethodAPIKey,
 	}
 	if err := llmConfigRepo.Create(context.Background(), anthropicConfig); err != nil {
 		t.Fatalf("create anthropic model: %v", err)

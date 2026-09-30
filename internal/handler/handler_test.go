@@ -64,7 +64,7 @@ func createProjectTB(t testing.TB, h *Handler, name string) *models.Project {
 }
 
 // createAgent creates a test LLM config with sensible defaults.
-// Uses ProviderTest so tests never hit real APIs or spawn CLI subprocesses.
+// Uses ProviderTest so tests never call real providers.
 func createAgent(t *testing.T, repo *repository.LLMConfigRepo, opts ...func(*models.LLMConfig)) *models.LLMConfig {
 	return createAgentTB(t, repo, opts...)
 }

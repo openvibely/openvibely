@@ -3489,17 +3489,17 @@ func TestHandler_ChatSend_WithImageAttachment_AnthropicAgent(t *testing.T) {
 	assert.Contains(t, body, "Attachments", "attachment section should be in response")
 }
 
-// TestHandler_ChatSend_WithImageAttachment_CLIAgentOnly verifies that sending a message
-// with an image attachment still works (falls back gracefully) when only a Claude CLI
+// TestHandler_ChatSend_WithImageAttachment_TextOnlyAgent verifies that sending a message
+// with an image attachment still works (falls back gracefully) when only a text-only test
 // agent is available. This test catches the regression where the handler returned 400
 // instead of falling back to the available agent.
-func TestHandler_ChatSend_WithImageAttachment_CLIAgentOnly(t *testing.T) {
+func TestHandler_ChatSend_WithImageAttachment_TextOnlyAgent(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	// Create ONLY a Claude CLI agent (no vision support)
+	// Create ONLY a text-only test agent (no vision support)
 	agent := &models.LLMConfig{
-		Name:        "Claude Max CLI",
+		Name:        "Text-only test agent",
 		Provider:    models.ProviderTest,
 		Model:       "claude-sonnet-4-20250514",
 		MaxTokens:   4096,
@@ -3532,7 +3532,7 @@ func TestHandler_ChatSend_WithImageAttachment_CLIAgentOnly(t *testing.T) {
 
 	// Must return 200 OK — NOT 400. The handler should fall back to the available
 	// agent rather than rejecting the request.
-	assert.Equal(t, http.StatusOK, rec.Code, "should fall back to CLI agent, not return 400")
+	assert.Equal(t, http.StatusOK, rec.Code, "should fall back to available test agent, not return 400")
 
 	body := rec.Body.String()
 	// User message must be displayed
@@ -3548,7 +3548,7 @@ func TestHandler_ChatSend_WithTextAttachment(t *testing.T) {
 	ctx := context.Background()
 
 	agent := &models.LLMConfig{
-		Name:        "Claude Max CLI",
+		Name:        "Text-only test agent",
 		Provider:    models.ProviderTest,
 		Model:       "claude-sonnet-4-20250514",
 		MaxTokens:   4096,

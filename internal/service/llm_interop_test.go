@@ -201,7 +201,7 @@ func TestProviderInterop_RequestNormalization(t *testing.T) {
 		Name:       "Test Agent",
 		Provider:   models.ProviderTest,
 		Model:      "test-model",
-		AuthMethod: "cli",
+		AuthMethod: models.AuthMethodAPIKey,
 		MaxTokens:  1000,
 	}
 

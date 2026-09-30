@@ -41,8 +41,8 @@ func TestLLMConfig_IsOAuth(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:     "ClaudeMax with CLI",
-			config:   LLMConfig{Provider: ProviderAnthropic, AuthMethod: "cli"},
+			name:     "ClaudeMax with unsupported auth",
+			config:   LLMConfig{Provider: ProviderAnthropic, AuthMethod: "unsupported"},
 			expected: false,
 		},
 		{
@@ -126,10 +126,10 @@ func TestLLMConfig_HasValidOAuthToken(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "CLI auth method (not OAuth)",
+			name: "unsupported authentication method (not OAuth)",
 			config: LLMConfig{
 				Provider:         ProviderAnthropic,
-				AuthMethod:       "cli",
+				AuthMethod:       "unsupported",
 				OAuthAccessToken: "some-token",
 				OAuthExpiresAt:   futureExpiry,
 			},
@@ -163,13 +163,13 @@ func TestLLMConfigIsCallableMixtureSlot(t *testing.T) {
 	}{
 		{name: "openai api key", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodAPIKey}, want: true},
 		{name: "openai oauth", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "openai cli", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: "cli"}, want: false},
+		{name: "openai unsupported", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: "unsupported"}, want: false},
 		{name: "anthropic api key", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodAPIKey}, want: true},
 		{name: "anthropic oauth", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "anthropic cli", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: "cli"}, want: false},
+		{name: "anthropic unsupported", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: "unsupported"}, want: false},
 		{name: "openai compatible api key", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodAPIKey}, want: true},
 		{name: "openai compatible oauth", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "openai compatible cli", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: "cli"}, want: false},
+		{name: "openai compatible unsupported", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: "unsupported"}, want: false},
 		{name: "ollama", cfg: LLMConfig{Provider: ProviderOllama}, want: true},
 		{name: "test", cfg: LLMConfig{Provider: ProviderTest}, want: true},
 		{name: "mixture", cfg: LLMConfig{Provider: ProviderMixture}, want: false},

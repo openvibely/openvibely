@@ -42,7 +42,7 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	agent := &models.LLMConfig{Name: "Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: "cli", IsDefault: true}
+	agent := &models.LLMConfig{Name: "Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(
 	inputRepo := repository.NewThreadInputRepo(db)
 	project := &models.Project{Name: "follow-up before task claim"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agent := &models.LLMConfig{Name: "Reverse Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: "cli", IsDefault: true}
+	agent := &models.LLMConfig{Name: "Reverse Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	task := &models.Task{ProjectID: project.ID, Title: "Fresh ordinary task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt", AgentID: &agent.ID}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -224,7 +224,7 @@ func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {
 		Provider:   models.ProviderTest,
 		Model:      "test-model",
 		MaxTokens:  4096,
-		AuthMethod: "cli",
+		AuthMethod: models.AuthMethodAPIKey,
 		IsDefault:  true,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
