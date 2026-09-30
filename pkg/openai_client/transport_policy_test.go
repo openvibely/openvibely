@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -13,7 +14,30 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
+
+func TestTerminalCompactionFailureDoesNotFallBackToHTTP(t *testing.T) {
+	for _, cause := range []error{io.ErrUnexpectedEOF, errResponsesWebsocketTransport, &httpretry.ResponseError{StatusCode: http.StatusServiceUnavailable, Err: errors.New("unavailable")}} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			client := NewWithAPIKey("test")
+			calls := 0
+			terminal := fmt.Errorf("overflow recovery: %w", llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "compaction", cause))
+			_, err := doResponsesStreamTurn(context.Background(), client, "gpt-5.3-codex", httpretry.StreamTurnPolicy{
+				Recover: func(error) (bool, error) { return false, terminal },
+			}, func(context.Context) (int, error) {
+				calls++
+				if calls == 1 {
+					return 0, ErrContextLengthExceeded
+				}
+				return 1, nil
+			})
+			if calls != 1 || !errors.Is(err, terminal) || client.responsesTransportState.websocketDisabled.Load() {
+				t.Fatalf("terminal failure bypassed: calls=%d HTTP fallback=%v err=%v", calls, client.responsesTransportState.websocketDisabled.Load(), err)
+			}
+		})
+	}
+}
 
 func TestStandardWebSearchPermission(t *testing.T) {
 	for _, oauth := range []bool{false, true} {
