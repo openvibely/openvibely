@@ -169,7 +169,7 @@ func SelectLLM(complexity ComplexityResult, configs []models.LLMConfig) *LLMSele
 func supportedSelectionConfigs(configs []models.LLMConfig) []models.LLMConfig {
 	result := make([]models.LLMConfig, 0, len(configs))
 	for _, cfg := range configs {
-		if models.BuiltInModelSupported(cfg.Provider, cfg.Model) {
+		if models.BuiltInModelSupportedForAuth(cfg.Provider, cfg.Model, cfg.AuthMethod) {
 			result = append(result, cfg)
 		}
 	}

@@ -109,7 +109,7 @@ func modelCardShowsTemperature(agent models.LLMConfig) bool {
 }
 
 func modelCardUnsupported(agent models.LLMConfig) bool {
-	return !models.BuiltInModelSupported(agent.Provider, agent.Model)
+	return !models.BuiltInModelSupportedForAuth(agent.Provider, agent.Model, agent.AuthMethod)
 }
 
 func oauthStatusText(agent models.LLMConfig) string {

@@ -76,7 +76,7 @@ var modelCatalog = []ModelSpec{
 	{Provider: ProviderOpenAI, ID: "gpt-5.5-pro", Label: "gpt-5.5-pro", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_http", RemoteCompactionV2: true},
 	{Provider: ProviderOpenAI, ID: "gpt-5.4", Label: "gpt-5.4", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsNativeCompaction: true, Transport: "responses_http"},
 	{Provider: ProviderOpenAI, ID: "gpt-5.4-mini", Label: "gpt-5.4-mini", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsNativeCompaction: true, Transport: "responses_http"},
-	{Provider: ProviderOpenAI, ID: "gpt-5.3-codex", Label: "gpt-5.3-codex", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "high", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_http"},
+	{Provider: ProviderOpenAI, ID: "gpt-5.3-codex", Label: "gpt-5.3-codex", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "high", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsNativeCompaction: true, Transport: "responses_http"},
 	{Provider: ProviderOpenAI, ID: "gpt-5-codex-mini", Label: "gpt-5-codex-mini", ReasoningEfforts: efforts("low", "medium", "high"), DefaultReasoningEffort: "high", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_http"},
 
 	// Anthropic models. ContextWindow is always the
@@ -150,6 +150,18 @@ func BuiltInModelSupported(provider LLMProvider, id string) bool {
 	default:
 		return true
 	}
+}
+
+// BuiltInModelSupportedForAuth additionally checks availability for ChatGPT sign-in.
+func BuiltInModelSupportedForAuth(provider LLMProvider, id string, auth AuthMethod) bool {
+	if !BuiltInModelSupported(provider, id) {
+		return false
+	}
+	if (provider == ProviderOpenAI || provider == ProviderAnthropic) && auth == AuthMethodOAuth {
+		spec, _ := LookupModel(provider, id)
+		return spec.SupportsOAuth
+	}
+	return true
 }
 
 // NormalizeModelEffort returns value when the selected model supports it.

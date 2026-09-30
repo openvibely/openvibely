@@ -8,14 +8,14 @@ func startHandlerBrowserProcess(cmd *exec.Cmd) error {
 	return cmd.Start()
 }
 
-func runHandlerBrowserProcess(cmd *exec.Cmd) ([]byte, error) {
-	return cmd.CombinedOutput()
-}
-
-func stopHandlerBrowserProcess(cmd *exec.Cmd) {
+func killHandlerBrowserProcess(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
 	_ = cmd.Process.Kill()
+}
+
+func stopHandlerBrowserProcess(cmd *exec.Cmd) {
+	killHandlerBrowserProcess(cmd)
 	_ = cmd.Wait()
 }

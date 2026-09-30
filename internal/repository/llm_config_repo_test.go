@@ -1281,7 +1281,7 @@ func TestLLMConfigRepo_ListChatSelectionOptionsUsesBoundedProjection(t *testing.
 		byID[option.ID] = option
 	}
 	custom := byID[alpha.ID]
-	if custom.Name != "Chat Selection Alpha" || custom.Provider != models.ProviderOpenAICompatible || custom.Model != "alpha-model" {
+	if custom.Name != "Chat Selection Alpha" || custom.Provider != models.ProviderOpenAICompatible || custom.Model != "alpha-model" || custom.AuthMethod != models.AuthMethodOAuth {
 		t.Fatalf("selection context fields not preserved: %#v", custom)
 	}
 	if custom.APIKey != "" || custom.OAuthAccessToken != "" || custom.OAuthRefreshToken != "" ||
@@ -1507,7 +1507,7 @@ func TestLLMConfigRepo_ListTaskCreationSelectionOptionsUsesBoundedProjection(t *
 		byID[option.ID] = option
 	}
 	custom := byID[alpha.ID]
-	if custom.Name != "Task Creation Alpha" || custom.Provider != models.ProviderOpenAICompatible || custom.Model != "alpha-model" || !custom.AutoStartTasks {
+	if custom.Name != "Task Creation Alpha" || custom.Provider != models.ProviderOpenAICompatible || custom.Model != "alpha-model" || !custom.AutoStartTasks || custom.AuthMethod != models.AuthMethodOAuth {
 		t.Fatalf("task creation selection fields not preserved: %#v", custom)
 	}
 	assertTaskCreationSelectionProjectionOmitsConfigBlobs(t, custom)
@@ -1563,7 +1563,7 @@ func BenchmarkTaskCreationModelSelectionProjection(b *testing.B) {
 
 func assertTaskCreationSelectionProjectionOmitsConfigBlobs(tb testing.TB, cfg models.LLMConfig) {
 	tb.Helper()
-	if cfg.AuthMethod != "" || cfg.APIKey != "" || cfg.OAuthAccessToken != "" || cfg.OAuthRefreshToken != "" ||
+	if cfg.APIKey != "" || cfg.OAuthAccessToken != "" || cfg.OAuthRefreshToken != "" ||
 		cfg.OAuthClientID != "" || cfg.OAuthClientSecret != "" || cfg.OAuthAuthorizeURL != "" || cfg.OAuthTokenURL != "" ||
 		cfg.OAuthScopes != "" || cfg.OllamaBaseURL != "" || cfg.BaseURL != "" || cfg.Transport != "" || cfg.PresetSlug != "" ||
 		cfg.ModelsURL != "" || cfg.AuthHeaderName != "" || cfg.AuthHeaderValuePrefix != "" || cfg.ExtraHeadersJSON != "" ||
@@ -1577,7 +1577,7 @@ func assertTaskCreationSelectionStatement(tb testing.TB, raw string) {
 	tb.Helper()
 	stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
 	projection := strings.Split(stmt, " from agent_configs ")[0]
-	if projection != "select id, name, provider, model, is_default, auto_start_tasks" {
+	if projection != "select id, name, provider, model, is_default, auto_start_tasks, auth_method" {
 		tb.Fatalf("task creation selection projection = %q, want compact selection fields in %s", projection, raw)
 	}
 	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "worker_timeout", "max_workers"} {
@@ -2806,6 +2806,36 @@ func TestLLMConfigRepo_TransferDefaultAndDelete(t *testing.T) {
 	}
 	if !newDefault.IsDefault {
 		t.Error("expected new default IsDefault=true")
+	}
+}
+
+func TestLLMConfigRepo_OAuthRetiredDefaultReplacement(t *testing.T) {
+	repo := NewLLMConfigRepo(testutil.NewTestDB(t))
+	ctx := context.Background()
+	original, err := repo.GetDefault(ctx)
+	if err != nil || original == nil {
+		t.Fatalf("default: %v", err)
+	}
+	retired := &models.LLMConfig{Name: "A OAuth retired", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth}
+	api := &models.LLMConfig{Name: "Z API supported", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey}
+	for _, cfg := range []*models.LLMConfig{retired, api} {
+		if err := repo.Create(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.TransferDefaultAndDelete(ctx, original.ID, retired.ID); err == nil {
+		t.Fatal("OAuth-retired replacement accepted")
+	}
+	if err := repo.Delete(ctx, original.ID); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := repo.GetDefault(ctx)
+	if err != nil || selected == nil || selected.ID != api.ID {
+		t.Fatalf("default = %v, err = %v", selected, err)
+	}
+	preserved, err := repo.GetByID(ctx, retired.ID)
+	if err != nil || preserved == nil || preserved.Model != retired.Model || preserved.AuthMethod != models.AuthMethodOAuth {
+		t.Fatal("saved OAuth config changed")
 	}
 }
 

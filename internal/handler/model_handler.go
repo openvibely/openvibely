@@ -739,7 +739,7 @@ func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
 			return repository.ErrLLMConfigModelRequired
 		}
 	}
-	if !models.BuiltInModelSupported(agent.Provider, agent.Model) {
+	if !models.BuiltInModelSupportedForAuth(agent.Provider, agent.Model, agent.AuthMethod) {
 		return fmt.Errorf("model %q is no longer supported; select a supported model", agent.Model)
 	}
 	return nil
@@ -1146,7 +1146,7 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 		applog.Infof("[handler] SetDefaultModel not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
-	if !models.BuiltInModelSupported(agent.Provider, agent.Model) {
+	if !models.BuiltInModelSupportedForAuth(agent.Provider, agent.Model, agent.AuthMethod) {
 		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("%s model %q is no longer supported; select a supported model", agent.Provider, agent.Model))
 	}
 
@@ -1241,7 +1241,7 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 				applog.Infof("[handler] DeleteModel rejected: invalid new default id=%s", newDefaultID)
 				return echo.NewHTTPError(http.StatusBadRequest, "Invalid new default model selection.")
 			}
-			if !models.BuiltInModelSupported(newDefault.Provider, newDefault.Model) {
+			if !models.BuiltInModelSupportedForAuth(newDefault.Provider, newDefault.Model, newDefault.AuthMethod) {
 				return echo.NewHTTPError(http.StatusBadRequest, "This model is no longer supported. Select a supported model.")
 			}
 			if err := h.llmConfigRepo.TransferDefaultAndDelete(ctx, id, newDefaultID); err != nil {

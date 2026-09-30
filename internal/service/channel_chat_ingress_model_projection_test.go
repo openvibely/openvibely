@@ -519,14 +519,14 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 	assertChannelVisionCompactStatement(t, modelStatements)
 }
 
-func TestChannelChatAgentSelectionSkipsRetiredDefault(t *testing.T) {
+func TestChannelChatAgentSelectionSkipsOAuthRetiredDefault(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
 		t.Fatal(err)
 	}
-	retired := &models.LLMConfig{Name: "Retired", Provider: models.ProviderOpenAI, Model: "gpt-5.2-codex", IsDefault: true}
+	retired := &models.LLMConfig{Name: "Retired", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, IsDefault: true}
 	if err := repo.Create(ctx, retired); err != nil {
 		t.Fatal(err)
 	}
@@ -811,7 +811,7 @@ func assertChannelCompactStatement(t *testing.T, statements []string) {
 	compact := 0
 	for _, statement := range statements {
 		projection := strings.Split(statement, " from agent_configs ")[0]
-		if projection == "select id, name, provider, model, is_default" {
+		if projection == "select id, name, provider, model, is_default, auth_method" {
 			compact++
 			continue
 		}

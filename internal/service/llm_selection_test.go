@@ -137,6 +137,20 @@ func TestSelectLLM_NoConfigs(t *testing.T) {
 	}
 }
 
+func TestAutomaticSelectionSkipsOAuthRetiredModels(t *testing.T) {
+	configs := []models.LLMConfig{
+		{ID: "oauth", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, IsDefault: true},
+		{ID: "api", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey},
+	}
+	result := SelectLLM(ComplexityResult{}, configs)
+	if result == nil || result.LLMConfig.ID != "api" {
+		t.Fatalf("selection = %v", result)
+	}
+	if SelectLLM(ComplexityResult{}, configs[:1]) != nil {
+		t.Fatal("OAuth-retired model selected")
+	}
+}
+
 func TestAutomaticSelectionSkipsRetiredModels(t *testing.T) {
 	retired := models.LLMConfig{ID: "retired", Provider: models.ProviderAnthropic, Model: "claude-3-opus", AuthMethod: models.AuthMethodAPIKey, IsDefault: true}
 	supported := models.LLMConfig{ID: "supported", Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodAPIKey}

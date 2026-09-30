@@ -2906,7 +2906,7 @@ func TestUpdateModel_SwitchAnthropicOAuthToOpenAIOAuthClearsStaleOAuthState(t *t
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "subscription")
 	form.Set("auth_method", "oauth")
-	form.Set("model", "gpt-5.3-codex")
+	form.Set("model", "gpt-5.6-sol")
 	form.Set("temperature", "0")
 
 	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
@@ -2947,7 +2947,7 @@ func TestUpdateModel_SwitchOpenAIOAuthToAnthropicOAuthClearsStaleOAuthState(t *t
 	agent := &models.LLMConfig{
 		Name:              "OpenAI OAuth",
 		Provider:          models.ProviderOpenAI,
-		Model:             "gpt-5.3-codex",
+		Model:             "gpt-5.6-sol",
 		AuthMethod:        models.AuthMethodOAuth,
 		OAuthAccessToken:  "openai-access-token",
 		OAuthRefreshToken: "openai-refresh-token",
@@ -3451,7 +3451,7 @@ func TestUpdateModel_OpenAIOAuthPreservesStoredConfigWhenFormOmitsFields(t *test
 	agent := &models.LLMConfig{
 		Name:              "OpenAI OAuth Preserve",
 		Provider:          models.ProviderOpenAI,
-		Model:             "gpt-5.3-codex",
+		Model:             "gpt-5.6-sol",
 		AuthMethod:        models.AuthMethodOAuth,
 		MaxTokens:         4096,
 		IsDefault:         true,
@@ -3475,7 +3475,7 @@ func TestUpdateModel_OpenAIOAuthPreservesStoredConfigWhenFormOmitsFields(t *test
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "subscription")
 	form.Set("auth_method", "oauth")
-	form.Set("model", "gpt-5.3-codex")
+	form.Set("model", "gpt-5.6-sol")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
 
@@ -3788,7 +3788,7 @@ func TestCreateModel_OpenAIOAuthEmptyAuthMethod(t *testing.T) {
 	form.Set("name", "OpenAI OAuth Empty AuthMethod")
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "oauth")
-	form.Set("model", "gpt-5.3-codex")
+	form.Set("model", "gpt-5.6-sol")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
 
@@ -3828,7 +3828,7 @@ func TestCreateModel_OpenAIOAuthAPI(t *testing.T) {
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "oauth")
 	form.Set("auth_method", "oauth")
-	form.Set("model", "gpt-5.3-codex")
+	form.Set("model", "gpt-5.6-sol")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
 
@@ -3872,7 +3872,7 @@ func TestCreateModel_OpenAIOAuthUnsupportedAuthNormalizesOAuth(t *testing.T) {
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "oauth")
 	form.Set("auth_method", "unsupported")
-	form.Set("model", "gpt-5.3-codex")
+	form.Set("model", "gpt-5.6-sol")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
 
@@ -4120,7 +4120,7 @@ func TestSupportedOpenAIModelByConnection(t *testing.T) {
 				t.Errorf("%s allowed with %s", model, auth)
 			}
 		}
-		for _, model := range []string{"gpt-5.4", "gpt-5.4-mini"} {
+		for _, model := range []string{"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"} {
 			if supportedOpenAIModel(model, auth) != (auth == models.AuthMethodAPIKey) {
 				t.Errorf("wrong retirement for %s with %s", model, auth)
 			}

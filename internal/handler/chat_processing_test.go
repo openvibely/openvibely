@@ -7137,7 +7137,7 @@ func assertAutoSelectionQueryShape(t *testing.T, statements []string, hasImages 
 			t.Fatalf("vision auto-selection projection = %q, want %q", projection, wantProjection)
 		}
 	} else {
-		wantProjection := "select id, name, provider, model, is_default"
+		wantProjection := "select id, name, provider, model, is_default, auth_method"
 		projection := strings.Split(catalog, " from agent_configs ")[0]
 		if projection != wantProjection {
 			t.Fatalf("chat auto-selection projection = %q, want %q", projection, wantProjection)

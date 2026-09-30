@@ -67,6 +67,18 @@ func TestOpenAIProviderAdapterCanonicalizesModelOverrides(t *testing.T) {
 	}
 }
 
+func TestOpenAIProviderAdapterRejectsOAuthRetiredOverride(t *testing.T) {
+	adapter := &openAIProviderAdapter{}
+	_, err := adapter.Call(llmcontracts.AgentRequest{
+		Ctx: context.Background(), Operation: llmcontracts.OperationDirect,
+		Agent:           models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6-sol", AuthMethod: models.AuthMethodOAuth},
+		AgentDefinition: &models.Agent{Model: "gpt-5.3-codex"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no longer supported for this connection") {
+		t.Fatalf("OAuth override error = %v", err)
+	}
+}
+
 func TestUnsupportedCatalogModel(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -74,6 +86,8 @@ func TestUnsupportedCatalogModel(t *testing.T) {
 		wantErr bool
 	}{
 		{"current OpenAI", models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6-astra"}, false},
+		{"OAuth retired", models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth}, true},
+		{"API key still supported", models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey}, false},
 		{"retired OpenAI", models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.2-codex"}, true},
 		{"retired Anthropic", models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-4-5"}, true},
 		{"custom compatible", models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "gpt-5.2-codex"}, false},

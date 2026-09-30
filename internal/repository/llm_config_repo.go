@@ -62,7 +62,7 @@ const llmConfigPickerColumns = `id, name, model`
 // llmConfigChatSelectionColumns is the compact API Chat auto-selection and
 // prompt-context projection. It preserves model identity, provider display, and
 // default-marker semantics while excluding credentials and large provider JSON.
-const llmConfigChatSelectionColumns = `id, name, provider, model, is_default`
+const llmConfigChatSelectionColumns = `id, name, provider, model, is_default, auth_method`
 
 // llmConfigVisionSelectionColumns is the compact image-routing projection. It
 // preserves only the fields used by SelectLLMWithVision and non-secret
@@ -77,7 +77,7 @@ const llmConfigVisionSelectionColumns = `id, name, provider, model, auth_method,
 // selection/category projection. It adds auto_start_tasks to the Chat selection
 // fields while deliberately excluding credentials, endpoint settings, request
 // JSON, custom-auth state, and full mixture definitions.
-const llmConfigTaskCreationSelectionColumns = `id, name, provider, model, is_default, auto_start_tasks`
+const llmConfigTaskCreationSelectionColumns = `id, name, provider, model, is_default, auto_start_tasks, auth_method`
 
 // llmConfigBadgeColumns is the minimal projection for task-card model badges
 // and the chat-thread composer label. The model slug is included because the
@@ -540,7 +540,7 @@ func (r *LLMConfigRepo) ListChatSelectionOptions(ctx context.Context) ([]models.
 	var configs []models.LLMConfig
 	for rows.Next() {
 		var a models.LLMConfig
-		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AuthMethod); err != nil {
 			return nil, fmt.Errorf("scanning chat model selection option: %w", err)
 		}
 		configs = append(configs, a)
@@ -600,7 +600,7 @@ func (r *LLMConfigRepo) ListTaskCreationSelectionOptions(ctx context.Context) ([
 	var configs []models.LLMConfig
 	for rows.Next() {
 		var a models.LLMConfig
-		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AutoStartTasks); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AutoStartTasks, &a.AuthMethod); err != nil {
 			return nil, fmt.Errorf("scanning task creation model selection option: %w", err)
 		}
 		configs = append(configs, a)
@@ -830,7 +830,7 @@ func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor
 	}
 
 	var fallbackID string
-	rows, err := tx.QueryContext(ctx, `SELECT id, provider, model FROM agent_configs ORDER BY created_at ASC, name ASC`)
+	rows, err := tx.QueryContext(ctx, `SELECT id, provider, model, auth_method FROM agent_configs ORDER BY created_at ASC, name ASC`)
 	if err != nil {
 		return fmt.Errorf("selecting fallback default model: %w", err)
 	}
@@ -838,10 +838,11 @@ func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor
 	for rows.Next() {
 		var id, model string
 		var provider models.LLMProvider
-		if err := rows.Scan(&id, &provider, &model); err != nil {
+		var auth models.AuthMethod
+		if err := rows.Scan(&id, &provider, &model, &auth); err != nil {
 			return err
 		}
-		if models.BuiltInModelSupported(provider, model) {
+		if models.BuiltInModelSupportedForAuth(provider, model, auth) {
 			fallbackID = id
 			break
 		}
@@ -1337,10 +1338,11 @@ func (r *LLMConfigRepo) TransferDefaultAndDelete(ctx context.Context, deleteID, 
 	}
 	var provider models.LLMProvider
 	var model string
-	if err := tx.QueryRowContext(ctx, `SELECT provider, model FROM agent_configs WHERE id = ?`, newDefaultID).Scan(&provider, &model); err != nil {
+	var auth models.AuthMethod
+	if err := tx.QueryRowContext(ctx, `SELECT provider, model, auth_method FROM agent_configs WHERE id = ?`, newDefaultID).Scan(&provider, &model, &auth); err != nil {
 		return fmt.Errorf("reading replacement model: %w", err)
 	}
-	if !models.BuiltInModelSupported(provider, model) {
+	if !models.BuiltInModelSupportedForAuth(provider, model, auth) {
 		return fmt.Errorf("model %q is no longer supported; select a supported model", model)
 	}
 
