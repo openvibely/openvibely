@@ -1388,6 +1388,7 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.NativeCompactionStateJSON = ""
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
 	summaryReq.Ctx = llmcontracts.WithInitialSteeringCommit(summaryReq.Ctx, nil)
+	summaryReq.Ctx = llmcontracts.WithSteeringPendingCheck(summaryReq.Ctx, nil)
 	summaryReq.Ctx = llmcontracts.WithLocalSteeringCallback(summaryReq.Ctx, func(context.Context) (llmcontracts.LocalSteeringInput, error) {
 		return llmcontracts.LocalSteeringInput{}, nil
 	})

@@ -12,6 +12,19 @@ type midTurnSteeringWakeupKey struct{}
 type localSteeringCallbackKey struct{}
 type initialSteeringCommitKey struct{}
 type historyContinuationKey struct{}
+type steeringPendingCheckKey struct{}
+
+func WithSteeringPendingCheck(ctx context.Context, check func(context.Context) (bool, error)) context.Context {
+	return context.WithValue(ctx, steeringPendingCheckKey{}, check)
+}
+
+func SteeringPendingCheckFromContext(ctx context.Context) func(context.Context) (bool, error) {
+	if ctx == nil {
+		return nil
+	}
+	check, _ := ctx.Value(steeringPendingCheckKey{}).(func(context.Context) (bool, error))
+	return check
+}
 
 func WithHistoryContinuation(ctx context.Context) context.Context {
 	return context.WithValue(ctx, historyContinuationKey{}, true)
