@@ -751,19 +751,46 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 }
 
 func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
+	agentPrompt := func() string {
+		switch req.Agent.Provider {
+		case models.ProviderOpenAI:
+			return llmprompt.BuildCodexAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
+		case models.ProviderAnthropic:
+			return llmprompt.BuildAnthropicAgentSystemPrompt(req.ProjectInstructions, req.WorkDir)
+		default:
+			return llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, req.WorkDir)
+		}
+	}
 	switch req.Operation {
 	case llmcontracts.OperationStreaming:
 		if req.Followup || req.ChatHistory != nil || req.ChatMode == models.ChatModeOrchestrate || req.ChatMode == models.ChatModePlan {
-			return estimatedUTF8Tokens(llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false))
+			base := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
+			switch req.Agent.Provider {
+			case models.ProviderOpenAI:
+				base = llmprompt.BuildCodexChatSystemPrompt(req.Agent.Model, req.Followup, req.ChatMode, req.ChatSystemContext, false)
+				if !req.Followup && req.Agent.IsOpenAIOAuth() {
+					base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
+				}
+			case models.ProviderAnthropic:
+				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
+			}
+			return estimatedUTF8Tokens(llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir))
 		}
-		return estimatedUTF8Tokens(llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, req.WorkDir))
+		return estimatedUTF8Tokens(agentPrompt())
 	case llmcontracts.OperationTask:
-		return estimatedUTF8Tokens(llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, req.WorkDir))
+		return estimatedUTF8Tokens(agentPrompt())
 	case llmcontracts.OperationDirect:
 		if req.RawDirectPrompt {
 			return 0
 		}
-		return estimatedUTF8Tokens(llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, req.WorkDir))
+		if req.LifecycleHookCall {
+			base := req.ProjectInstructions
+			if req.Agent.IsOpenAIOAuth() {
+				base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
+			}
+			return estimatedUTF8Tokens(base)
+		}
+		return estimatedUTF8Tokens(agentPrompt())
 	default:
 		return 0
 	}

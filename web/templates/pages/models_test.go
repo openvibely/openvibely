@@ -748,7 +748,7 @@ func TestModelsContentOmitsRetiredOpenAIOptions(t *testing.T) {
 	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex"} {
+	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.3-codex-spark"} {
 		if strings.Contains(buf.String(), "value: '"+model+"'") {
 			t.Errorf("retired model %s remains selectable", model)
 		}

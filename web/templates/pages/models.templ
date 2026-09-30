@@ -1048,7 +1048,6 @@ for _, agent := range modelOptions {
 					{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.4-mini', label: 'gpt-5.4-mini', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
-					{ value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini', efforts: ['low', 'medium', 'high'] }
 					],
 						openai_compatible: [
@@ -1194,7 +1193,11 @@ for _, agent := range modelOptions {
 				}
 
 				function modelOptionsForProvider(provider) {
-					return modelOptionsByProvider[provider] || modelOptionsByProvider[canonicalProvider(provider)] || [];
+					var options = modelOptionsByProvider[provider] || modelOptionsByProvider[canonicalProvider(provider)] || [];
+					if (canonicalProvider(provider) === 'openai' && document.getElementById('model_openai_auth_type').value === 'oauth') {
+						return options.filter(function(option) { return option.value !== 'gpt-5.4' && option.value !== 'gpt-5.4-mini'; });
+					}
+					return options;
 				}
 
 				function selectedModelOption(provider, model) {				var options = modelOptionsForProvider(provider);
@@ -1288,7 +1291,8 @@ for _, agent := range modelOptions {
 				if (selectedModel && !hasSelected) {
 					var customOpt = document.createElement('option');
 					customOpt.value = selectedModel;
-					customOpt.textContent = selectedModel + ' (custom)';
+					customOpt.textContent = selectedModel + (canonicalProvider(provider) === 'openai' ? ' (unavailable — select another model)' : ' (custom)');
+					customOpt.disabled = canonicalProvider(provider) === 'openai';
 					modelSelect.appendChild(customOpt);
 				}
 
@@ -2271,6 +2275,7 @@ for _, agent := range modelOptions {
 
 			function toggleOpenAIAuthFields() {
 				var authType = document.getElementById('model_openai_auth_type').value;
+				setModelOptions('openai', document.getElementById('model_id').value);
 				var apiKeyField = document.getElementById('api_key_field');
 				var apiKeyInput = document.getElementById('model_api_key');
 				var openaiConnectionMethodField = document.getElementById('openai_connection_method_field');

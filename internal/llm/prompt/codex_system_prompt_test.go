@@ -21,7 +21,7 @@ func TestCodexPromptMatchesSnapshot(t *testing.T) {
 		"gpt-5.5":           "3d7984a1671ad1c65f6bd7732f03b69eb96b616cd7fa7390eb5e5ca04d06cf49",
 		"codex-auto-review": "0972574f9d43b6c30321624b9ba5eec3a47db32251b7ba6d94807bf5295170e3",
 	} {
-		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(CodexSystemPrompt(model)))); got != want {
+		if got := fmt.Sprintf("%x", sha256.Sum256([]byte(codexSnapshot(model)))); got != want {
 			t.Errorf("%s: prompt differs from Codex snapshot: %s", model, got)
 		}
 	}
@@ -49,5 +49,16 @@ func TestCodexPromptContextAndModes(t *testing.T) {
 	}
 	if BuildAgentSystemPrompt("") != AgentSystemPrompt {
 		t.Fatal("other providers changed")
+	}
+}
+
+func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
+	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5", "gpt-5.6-sol"} {
+		prompt := CodexSystemPrompt(model)
+		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async"} {
+			if strings.Contains(prompt, unavailable) {
+				t.Errorf("%s references unavailable %s", model, unavailable)
+			}
+		}
 	}
 }
