@@ -91,10 +91,22 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : '#task-detail-metrics');
    if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }
   }
+  // Capture before native popover light-dismiss closes the picker on pointerup.
+  var closingRow = null;
+  root.addEventListener('pointerdown', function(event) {
+   var row = event.target.closest('[data-detail-property]');
+   closingRow = row && row === current && picker.matches(':popover-open') ? row : null;
+  });
+  root.addEventListener('pointercancel', function() { closingRow = null; });
   root.addEventListener('click', function(event) {
+   var dismissRow = closingRow;
+   closingRow = null;
    if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }
    var row = event.target.closest('[data-detail-property]');
    if (row) {
+    if (row === dismissRow || (row === current && picker.matches(':popover-open'))) {
+     picker.hidePopover(); row.focus({preventScroll:true}); return;
+    }
     current = row; field = row.dataset.detailProperty;
     picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
     picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = false; option.setAttribute('aria-pressed', String(option.dataset.value === row.dataset.value)); });
