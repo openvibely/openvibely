@@ -2604,6 +2604,12 @@ func taskDetailTagLabel(tag models.TaskTag) string {
  if tag == "" { return "None" }; return components.TagLabel(tag)
 }
 
+func taskDetailTextPreview(value string) string {
+ text := []rune(value)
+ if len(text) > 240 { return string(text[:240]) + "…" }
+ return value
+}
+
 templ TaskPromptPanel(task *models.Task) {
  <section id="task-prompt-panel" class="mb-6 space-y-2">
   <div class="flex items-center justify-between"><h3 class="text-sm font-semibold">Prompt</h3>
@@ -2613,10 +2619,8 @@ templ TaskPromptPanel(task *models.Task) {
   </div>
   if task.ID == "" {
    <p class="text-sm opacity-60">Set by your first message.</p>
-  } else if len([]rune(task.Prompt)) > 240 {
-   <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ string([]rune(task.Prompt)[:240]) + "…" }</p>
   } else if task.Prompt != "" {
-   <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ task.Prompt }</p>
+   <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ taskDetailTextPreview(task.Prompt) }</p>
   } else {
    <p class="text-sm opacity-60">No prompt set</p>
   }
@@ -2642,7 +2646,7 @@ templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
                 </button>
 			</div>
 			if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-				<div class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ goal.Objective }</div>
+				<div class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ taskDetailTextPreview(goal.Objective) }</div>
                 <span class="text-xs opacity-60">{ goalStatusLabel(goal) }</span>
 				if goal.Reason != "" {
 					<p class="text-xs opacity-60">Reason: { goal.Reason }</p>
