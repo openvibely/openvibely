@@ -4,6 +4,14 @@ import (
 	"testing"
 )
 
+func TestCodexModelOrDefaultRetiredModels(t *testing.T) {
+	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex"} {
+		if got := CodexModelOrDefault(model); got != CodexDefaultModel {
+			t.Errorf("retired model %s resolved to %s", model, got)
+		}
+	}
+}
+
 func TestCodexReasoningEffort_DefaultHigh(t *testing.T) {
 	t.Setenv("OPENVIBELY_CODEX_REASONING_EFFORT", "")
 	if got := CodexReasoningEffort("gpt-5.3-codex", ""); got != "high" {

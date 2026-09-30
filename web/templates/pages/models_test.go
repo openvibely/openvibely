@@ -743,6 +743,21 @@ func TestModelsContent_MixtureEditHydratesSavedReferenceOrderLazily(t *testing.T
 	}
 }
 
+func TestModelsContentOmitsRetiredOpenAIOptions(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex"} {
+		if strings.Contains(buf.String(), "value: '"+model+"'") {
+			t.Errorf("retired model %s remains selectable", model)
+		}
+	}
+	if !strings.Contains(buf.String(), "value: 'gpt-6-astra'") {
+		t.Fatal("current OpenAI model missing")
+	}
+}
+
 func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 	agents := []models.LLMConfig{
 		{ID: "api-openai", Name: "OpenAI API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"},

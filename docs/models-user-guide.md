@@ -72,10 +72,9 @@ OpenVibely currently budgets Anthropic requests with a 200k context window. Clau
 | gpt-5.4-mini | low / medium / high / xhigh | Smaller, faster variant. |
 | gpt-5.3-codex | low / medium / high / xhigh | Legacy. |
 | gpt-5.3-codex-spark | low / medium / high / xhigh | Fast research preview. |
-| gpt-5.2-codex | low / medium / high / xhigh | Legacy. |
-| gpt-5.1-codex-max | low / medium / high / xhigh | Legacy. |
-| gpt-5.1-codex / mini | low / medium / high | Legacy. |
-| gpt-5-codex / mini | low / medium / high | Legacy. |
+| gpt-5-codex-mini | low / medium / high | Legacy. |
+
+The retired `gpt-5.2-codex`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, and `gpt-5-codex` models are no longer offered. OpenAI shut down their API access on July 23, 2026. See [OpenAI's deprecation notices](https://developers.openai.com/api/docs/deprecations).
 
 The GPT-6 catalog advertises a 1.05M API context window. OpenVibely currently mirrors Codex's 272k effective context budget for GPT-6 preflight checks and automatic compaction. OpenAI applies long-context pricing above 272k input tokens, so the published base token price should not be treated as flat pricing for larger histories.
 
