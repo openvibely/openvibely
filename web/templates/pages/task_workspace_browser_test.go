@@ -157,8 +157,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		for _, field := range []string{"goal", "prompt"} {
 			b.click(`[data-detail-editor="` + field + `"]`)
 			b.evaluate(`document.querySelector('#task-detail-text-editor textarea').value='Discard this edit'; 'edited'`)
-			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": 5, "y": 5, "button": "left", "clickCount": 1}, nil)
-			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": 5, "y": 5, "button": "left", "clickCount": 1}, nil)
+			b.click(`#task-detail-text-editor .modal-backdrop button`)
 			b.waitFor("backdrop dismisses "+field, `String(document.getElementById('task-detail-text-editor').open)`, "false")
 			b.click(`[data-detail-editor="` + field + `"]`)
 			want := "Saved goal"
