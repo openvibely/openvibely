@@ -125,7 +125,7 @@ func TestLLMConfigRepo_OAuthProviderPresenceUsesCompactAggregate(t *testing.T) {
 
 	for i, cfg := range []*models.LLMConfig{
 		{Name: "Anthropic API Key", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet"},
-		{Name: "OpenAI CLI Legacy", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodCLI, Model: "gpt-test"},
+		{Name: "OpenAI CLI Legacy", Provider: models.ProviderOpenAI, AuthMethod: "cli", Model: "gpt-test"},
 		{Name: "Ollama OAuth Unsupported", Provider: models.ProviderOllama, AuthMethod: models.AuthMethodOAuth, Model: "llama3"},
 	} {
 		if err := repo.Create(ctx, cfg); err != nil {
@@ -1330,7 +1330,7 @@ func TestLLMConfigRepo_ListVisionSelectionOptionsUsesBoundedProjection(t *testin
 	legacyCLI := &models.LLMConfig{
 		Name:       "Legacy CLI",
 		Provider:   models.ProviderAnthropic,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		Model:      "claude-cli",
 	}
 	apiKey := &models.LLMConfig{
@@ -1399,13 +1399,13 @@ func TestLLMConfigRepo_ListVisionSelectionOptionsUsesBoundedProjection(t *testin
 	legacySelection := byID[legacyCLI.ID]
 	apiSelection := byID[apiKey.ID]
 	oauthSelection := byID[oauth.ID]
-	if !legacySelection.IsAnthropicCLI() {
+	if !(!legacySelection.IsCallableMixtureSlot()) {
 		t.Fatalf("legacy CLI selection row should remain CLI-only: %#v", legacySelection)
 	}
-	if apiSelection.APIKey != "present" || apiSelection.OAuthAccessToken != "" || apiSelection.IsAnthropicCLI() {
+	if apiSelection.APIKey != "present" || apiSelection.OAuthAccessToken != "" || (!apiSelection.IsCallableMixtureSlot()) {
 		t.Fatalf("API-key presence was not preserved as a non-secret sentinel: %#v", apiSelection)
 	}
-	if oauthSelection.OAuthAccessToken != "present" || oauthSelection.APIKey != "" || oauthSelection.IsAnthropicCLI() {
+	if oauthSelection.OAuthAccessToken != "present" || oauthSelection.APIKey != "" || (!oauthSelection.IsCallableMixtureSlot()) {
 		t.Fatalf("OAuth presence was not preserved as a non-secret sentinel: %#v", oauthSelection)
 	}
 	for _, option := range selection {

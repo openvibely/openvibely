@@ -1056,7 +1056,7 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		model := &models.LLMConfig{
 			Name:            "Test Claude CLI",
 			Provider:        models.ProviderAnthropic,
-			AuthMethod:      models.AuthMethodCLI,
+			AuthMethod:      "cli",
 			Model:           "claude-3.5-sonnet",
 			Temperature:     0.7,
 			ReasoningEffort: "medium",
@@ -1800,7 +1800,7 @@ func TestHandler_OAuthStatus(t *testing.T) {
 		model := &models.LLMConfig{
 			Name:            "Test Claude CLI",
 			Provider:        models.ProviderAnthropic,
-			AuthMethod:      models.AuthMethodCLI,
+			AuthMethod:      "cli",
 			Model:           "claude-3.5-sonnet",
 			Temperature:     0.7,
 			ReasoningEffort: "medium",

@@ -286,7 +286,7 @@ func TestAnthropicProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
 				Message:   "generate JSON",
 				Agent: models.LLMConfig{
 					Provider:   models.ProviderAnthropic,
-					AuthMethod: models.AuthMethodCLI,
+					AuthMethod: "cli",
 					Model:      "claude-sonnet-4",
 				},
 				WorkDir: "/work/retired-cli",
@@ -333,7 +333,7 @@ func TestOpenAIProviderAdapter_RejectsRetiredCLITransport(t *testing.T) {
 		DisableTools: true,
 		Agent: models.LLMConfig{
 			Provider:   models.ProviderOpenAI,
-			AuthMethod: models.AuthMethodCLI,
+			AuthMethod: "cli",
 			Model:      "gpt-5.3-codex",
 		},
 	})
@@ -376,7 +376,7 @@ func TestNativeCompactionCapabilityRequiresConcreteSupportedConfiguration(t *tes
 	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodAPIKey, Transport: "chat_completions"}) {
 		t.Fatal("incompatible Anthropic transport must not advertise context management")
 	}
-	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodCLI}) {
+	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: "cli"}) {
 		t.Fatal("retired CLI auth must not advertise native compaction")
 	}
 	for _, model := range []string{"claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929", "claude-unknown"} {

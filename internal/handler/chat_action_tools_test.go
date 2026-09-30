@@ -90,7 +90,7 @@ func TestSupportsChatActionTools(t *testing.T) {
 			name: "openai cli does not support runtime action tools",
 			agent: models.LLMConfig{
 				Provider:   models.ProviderOpenAI,
-				AuthMethod: models.AuthMethodCLI,
+				AuthMethod: "cli",
 			},
 			want: false,
 		},
@@ -136,8 +136,8 @@ func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
 		{name: "anthropic oauth", provider: models.ProviderAnthropic, authMethod: models.AuthMethodOAuth, want: true},
 		{name: "openai compatible api key", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodAPIKey, want: true},
 		{name: "openai compatible oauth", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodOAuth, want: true},
-		{name: "openai cli", provider: models.ProviderOpenAI, authMethod: models.AuthMethodCLI, want: false},
-		{name: "anthropic cli", provider: models.ProviderAnthropic, authMethod: models.AuthMethodCLI, want: false},
+		{name: "openai cli", provider: models.ProviderOpenAI, authMethod: "cli", want: false},
+		{name: "anthropic cli", provider: models.ProviderAnthropic, authMethod: "cli", want: false},
 		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: false},
 	}
 

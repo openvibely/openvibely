@@ -1125,7 +1125,7 @@ func TestUpdateModelRetiredDoesNotSilentlySwitch(t *testing.T) {
 	form.Set("openai_auth_type", "api_key")
 	form.Set("model", agent.Model)
 	rec := postForm(e, "/models/"+agent.ID, form)
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "retired") {
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unsupported") {
 		t.Fatalf("expected explicit retirement error, got %d: %s", rec.Code, rec.Body.String())
 	}
 	got, err := repo.GetByID(ctx, agent.ID)
@@ -1497,8 +1497,8 @@ func TestCreateModel_MixtureRejectsNonCallableSlots(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 	callable := &models.LLMConfig{Name: "Callable API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"}
-	cliOpenAI := &models.LLMConfig{Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodCLI, Model: "gpt-5-codex"}
-	cliAnthropic := &models.LLMConfig{Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet"}
+	cliOpenAI := &models.LLMConfig{Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: "cli", Model: "gpt-5-codex"}
+	cliAnthropic := &models.LLMConfig{Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet"}
 	for _, cfg := range []*models.LLMConfig{callable, cliOpenAI, cliAnthropic} {
 		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
 			t.Fatalf("create %s: %v", cfg.Name, err)
@@ -3347,7 +3347,7 @@ func TestUpdateModel_ChangeAuthMethod_LegacyCLIToOAuth(t *testing.T) {
 		Name:       "Sonnet CLI",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxTokens:  4096,
 		IsDefault:  true,
 	}
@@ -3520,7 +3520,7 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 		Name:       "Dup Auth Test",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxTokens:  4096,
 		IsDefault:  true,
 	}
@@ -4080,16 +4080,16 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-5.4", "gpt-5.4"},
 		{"gpt-5.4-mini", "gpt-5.4-mini"},
 		{"gpt-5.3-codex", "gpt-5.3-codex"},
-		{"gpt-5.3-codex-spark", "gpt-5.6-sol"},
-		{"gpt-5.2-codex", "gpt-5.6-sol"},
-		{"gpt-5.1-codex-max", "gpt-5.6-sol"},
-		{"gpt-5.1-codex", "gpt-5.6-sol"},
-		{"gpt-5.1-codex-mini", "gpt-5.6-sol"},
-		{"gpt-5-codex", "gpt-5.6-sol"},
+		{"gpt-5.3-codex-spark", ""},
+		{"gpt-5.2-codex", ""},
+		{"gpt-5.1-codex-max", ""},
+		{"gpt-5.1-codex", ""},
+		{"gpt-5.1-codex-mini", ""},
+		{"gpt-5-codex", ""},
 		{"gpt-5-codex-mini", "gpt-5-codex-mini"},
-		{"", ""},                         // empty stays empty for form validation
-		{"invalid-model", "gpt-5.6-sol"}, // unknown defaults to latest
-		{"  gpt-5.5  ", "gpt-5.5"},       // whitespace trimmed
+		{"", ""},                   // empty stays empty for form validation
+		{"invalid-model", ""},      // unknown is rejected
+		{"  gpt-5.5  ", "gpt-5.5"}, // whitespace trimmed
 	}
 
 	for _, tt := range tests {
@@ -4102,15 +4102,15 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 	}
 }
 
-func TestRetiredOpenAIModelByConnection(t *testing.T) {
+func TestSupportedOpenAIModelByConnection(t *testing.T) {
 	for _, auth := range []models.AuthMethod{models.AuthMethodAPIKey, models.AuthMethodOAuth} {
 		for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.3-codex-spark"} {
-			if !retiredOpenAIModel(model, auth) {
+			if supportedOpenAIModel(model, auth) {
 				t.Errorf("%s allowed with %s", model, auth)
 			}
 		}
 		for _, model := range []string{"gpt-5.4", "gpt-5.4-mini"} {
-			if retiredOpenAIModel(model, auth) != (auth == models.AuthMethodOAuth) {
+			if supportedOpenAIModel(model, auth) != (auth == models.AuthMethodAPIKey) {
 				t.Errorf("wrong retirement for %s with %s", model, auth)
 			}
 		}
@@ -4250,7 +4250,7 @@ func TestUpdateModel_SwitchFromSubscriptionToAPIKey(t *testing.T) {
 		Name:       "Sub to API",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxTokens:  4096,
 		IsDefault:  true,
 	}

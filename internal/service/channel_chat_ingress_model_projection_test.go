@@ -471,7 +471,7 @@ func TestChannelChatIngressImageSelectionExcludesLegacyAnthropicCLI(t *testing.T
 		Name:       "Legacy Anthropic CLI",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-cli",
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 	}
 	vision := seedChannelRichModel(t, ctx, db, repo, "Anthropic Vision", models.ProviderAnthropic, models.AuthMethodAPIKey, true)
 	if err := repo.Create(ctx, legacy); err != nil {

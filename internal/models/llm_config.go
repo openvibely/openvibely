@@ -20,7 +20,6 @@ const (
 type AuthMethod string
 
 const (
-	AuthMethodCLI    AuthMethod = "cli"     // Legacy value for retired CLI auth.
 	AuthMethodOAuth  AuthMethod = "oauth"   // Use OAuth tokens (Claude Max or OpenAI)
 	AuthMethodAPIKey AuthMethod = "api_key" // Use API key directly (OpenAI)
 )
@@ -135,11 +134,6 @@ func (c *LLMConfig) IsOAuth() bool {
 // IsAnthropicAPIKey returns true if this is an Anthropic config using API key authentication.
 func (c *LLMConfig) IsAnthropicAPIKey() bool {
 	return c.Provider == ProviderAnthropic && (c.AuthMethod == AuthMethodAPIKey || c.APIKey != "")
-}
-
-// IsAnthropicCLI returns true if this is an Anthropic config using CLI authentication.
-func (c *LLMConfig) IsAnthropicCLI() bool {
-	return c.Provider == ProviderAnthropic && c.AuthMethod == AuthMethodCLI && c.APIKey == "" && c.OAuthAccessToken == ""
 }
 
 // HasValidOAuthToken returns true if the OAuth token is present and not expired.

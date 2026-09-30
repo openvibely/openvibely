@@ -296,7 +296,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 	legacyCLI := &models.LLMConfig{
 		Name:       "Legacy CLI Default",
 		Provider:   models.ProviderAnthropic,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		Model:      "claude-opus-5-20250929",
 		IsDefault:  true,
 	}
@@ -762,7 +762,7 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 	}
 
 	// Verify the selected agent supports vision
-	if visionDecision.Agent.IsAnthropicCLI() {
+	if !visionDecision.Agent.IsCallableMixtureSlot() {
 		t.Error("BUG REPRODUCED: Selected agent is still a non-vision legacy CLI config")
 	}
 

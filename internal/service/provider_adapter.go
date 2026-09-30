@@ -294,7 +294,7 @@ func nativeCompactionUnsupportedError(err error) bool {
 }
 
 func providerSupportsNativeCompaction(agent models.LLMConfig) bool {
-	if strings.TrimSpace(agent.Model) == "" || agent.AuthMethod == models.AuthMethodCLI {
+	if strings.TrimSpace(agent.Model) == "" {
 		return false
 	}
 	if agent.AuthMethod != "" && agent.AuthMethod != models.AuthMethodAPIKey && agent.AuthMethod != models.AuthMethodOAuth {

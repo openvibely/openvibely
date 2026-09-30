@@ -42,7 +42,7 @@ func TestLLMConfig_IsOAuth(t *testing.T) {
 		},
 		{
 			name:     "ClaudeMax with CLI",
-			config:   LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodCLI},
+			config:   LLMConfig{Provider: ProviderAnthropic, AuthMethod: "cli"},
 			expected: false,
 		},
 		{
@@ -129,7 +129,7 @@ func TestLLMConfig_HasValidOAuthToken(t *testing.T) {
 			name: "CLI auth method (not OAuth)",
 			config: LLMConfig{
 				Provider:         ProviderAnthropic,
-				AuthMethod:       AuthMethodCLI,
+				AuthMethod:       "cli",
 				OAuthAccessToken: "some-token",
 				OAuthExpiresAt:   futureExpiry,
 			},
@@ -163,13 +163,13 @@ func TestLLMConfigIsCallableMixtureSlot(t *testing.T) {
 	}{
 		{name: "openai api key", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodAPIKey}, want: true},
 		{name: "openai oauth", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "openai cli", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodCLI}, want: false},
+		{name: "openai cli", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: "cli"}, want: false},
 		{name: "anthropic api key", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodAPIKey}, want: true},
 		{name: "anthropic oauth", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "anthropic cli", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodCLI}, want: false},
+		{name: "anthropic cli", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: "cli"}, want: false},
 		{name: "openai compatible api key", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodAPIKey}, want: true},
 		{name: "openai compatible oauth", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "openai compatible cli", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodCLI}, want: false},
+		{name: "openai compatible cli", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: "cli"}, want: false},
 		{name: "ollama", cfg: LLMConfig{Provider: ProviderOllama}, want: true},
 		{name: "test", cfg: LLMConfig{Provider: ProviderTest}, want: true},
 		{name: "mixture", cfg: LLMConfig{Provider: ProviderMixture}, want: false},
