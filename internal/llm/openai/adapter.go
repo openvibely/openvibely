@@ -654,22 +654,8 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	defer releaseTransport()
 
-	if a.execRepo != nil {
-		ids := make([]string, 0, len(chatHistory))
-		for _, execution := range chatHistory {
-			ids = append(ids, execution.ID)
-		}
-		replays, err := a.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
-		if err != nil {
-			return "", llmusage.FromTotal(0), err
-		}
-		chatHistory = append([]models.Execution(nil), chatHistory...)
-		for i := range chatHistory {
-			if replay := replays[chatHistory[i].ID]; len(replay) > 0 {
-				chatHistory[i].ReplayMessages = replay
-			}
-		}
-	}
+	// Replay must be loaded before service-level budgeting and compaction.
+	// Reloading it here would undo an intentionally trimmed request.
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
@@ -1143,6 +1129,15 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.ResponsesInput) > 0 {
 				messages = []openaiclient.Message{{ResponsesInputItems: saved.ResponsesInput}}
 				checkpoint = true
+			} else if checkpoint {
+				// Text continuations after the native checkpoint are newer history,
+				// not part of the prefix replaced by that checkpoint.
+				if replay.UserContent != "" {
+					messages = append(messages, openaiclient.Message{Role: "user", Content: replay.UserContent})
+				}
+				if replay.AssistantContent != "" {
+					messages = append(messages, openaiclient.Message{Role: "assistant", Content: replay.AssistantContent})
+				}
 			}
 		}
 		if checkpoint {

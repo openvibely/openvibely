@@ -399,6 +399,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		return compactedItems, nil
 	}
 
+	recoveredAsyncDeliveries := appendRecoveredAsyncToolResults(&inputItems, opts.InitialAsyncToolResults, toolOutputTokenLimit)
+	inputItems = repairInterruptedToolCalls(inputItems)
 	if len(inputItems) > 0 {
 		var err error
 		sessionEstimate := 0
@@ -416,7 +418,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// without re-establishing it afterward.
 		inputItems = upsertTrailingConfigurationUpdate(inputItems, astraConfigurationUpdateEffort)
 	}
-	recoveredAsyncDeliveries := appendRecoveredAsyncToolResults(&inputItems, opts.InitialAsyncToolResults, toolOutputTokenLimit)
 
 	// Add current prompt with optional attachments
 	if len(opts.Attachments) > 0 {
@@ -659,6 +660,13 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				deliveryRecords = append(deliveryRecords, exec.record)
 			}
 		}
+		// Preserve completed tool results even when cancellation or compaction
+		// prevents the next model request from starting.
+		if persistSteeringHistory != nil {
+			if err := persistSteeringHistory(context.WithoutCancel(ctx), inputItems); err != nil {
+				return nil, err
+			}
+		}
 		generationBeforeCompaction := compactionGeneration
 		compactedItems, err := compactIfNeeded(inputItems, tokenLedger.projectedTokens(localItemsAfterResponse), false)
 		if err != nil {
@@ -795,17 +803,28 @@ func appendRecoveredAsyncToolResults(inputItems *[]any, results []AsyncToolResul
 		if arguments == "" {
 			arguments = "{}"
 		}
-		*inputItems = append(*inputItems, agenticInputItem{
-			"type":      "function_call",
-			"call_id":   callID,
-			"name":      name,
-			"arguments": arguments,
-		})
-		*inputItems = append(*inputItems, agenticInputItem{
-			"type":    "function_call_output",
-			"call_id": callID,
-			"output":  truncateToolOutputForModelInput(result.Output, toolOutputTokenLimit),
-		})
+		// A steering checkpoint may already contain this durable async call.
+		// Reuse it instead of replaying a duplicate call_id on recovery.
+		hasCall, hasOutput := false, false
+		for _, raw := range *inputItems {
+			item, ok := raw.(map[string]any)
+			if !ok || stringFromAny(item["call_id"]) != callID {
+				continue
+			}
+			hasCall = hasCall || item["type"] == "function_call"
+			hasOutput = hasOutput || item["type"] == "function_call_output"
+		}
+		if !hasCall {
+			*inputItems = append(*inputItems, agenticInputItem{
+				"type": "function_call", "call_id": callID, "name": name, "arguments": arguments,
+			})
+		}
+		if !hasOutput {
+			*inputItems = append(*inputItems, agenticInputItem{
+				"type": "function_call_output", "call_id": callID,
+				"output": truncateToolOutputForModelInput(result.Output, toolOutputTokenLimit),
+			})
+		}
 		deliveries = append(deliveries, record)
 	}
 	return deliveries
