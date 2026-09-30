@@ -182,7 +182,16 @@ templ TaskWorkspaceScript() {
 		on(window, 'sse-file-change-event', invalidation);
 		on(window, 'sse-task-event', invalidation);
 		on(window, 'sse-live-connected', scheduleSummary);
-		on(document, 'htmx:afterSettle', renderSummary);
+		on(document, 'htmx:afterSettle', function(event) {
+			var target = event.detail && event.detail.target;
+			// HTMX restores incoming class attributes after scripts initialize.
+			// Reconcile the selected panel after a whole-page navigation settles.
+			if (root.isConnected && (target === root || (target && target.contains(root)))) {
+				selectTab(selected, false);
+				resize(width);
+			}
+			renderSummary();
+		});
 		window.addEventListener('popstate', function(event) {
 			if (location.pathname === '/tasks/' + taskID) { event.stopImmediatePropagation(); applyURL(); }
 		}, {signal:signal, capture:true});

@@ -529,6 +529,10 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		if !strings.HasPrefix(r.URL.Path, "/tasks/") || strings.Contains(strings.TrimPrefix(r.URL.Path, "/tasks/"), "/") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		project := models.Project{ID: r.URL.Query().Get("project_id"), Name: "Project"}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.URL.Path == "/tasks/new" {
@@ -538,7 +542,17 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 			return
 		}
 		task := &models.Task{ID: strings.TrimPrefix(r.URL.Path, "/tasks/"), ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
-		if err := TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(r.Context(), w); err != nil {
+		tab := r.URL.Query().Get("tab")
+		if tab == "" {
+			tab = "chat"
+		}
+		if r.Header.Get("HX-Request") == "true" {
+			if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, tab, nil).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		if err := TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, tab, nil).Render(r.Context(), w); err != nil {
 			t.Error(err)
 		}
 	}))
@@ -551,6 +565,11 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 			b.call("Page.navigate", map[string]any{"url": server.URL + path}, nil)
 			b.waitFor("navigation ready", `location.pathname + location.search + ':' + (document.getElementById('task-detail-content')?.dataset.projectId || '')`, path+":"+strings.Split(strings.Split(path, "project_id=")[1], "&")[0])
 			b.waitFor("restored panel", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, expected)
+		}
+		for _, path := range []string{"/tasks/other?project_id=one&tab=details", "/tasks/two?project_id=two", "/tasks/one?project_id=one&tab=details"} {
+			b.evaluate(`window.panelSwapSettled = false; window.openVibelyNavigate('` + path + `').then(function(){setTimeout(function(){window.panelSwapSettled=true},100)}); 'started'`)
+			b.waitFor("task swap settled", `String(window.panelSwapSettled)`, "true")
+			b.waitFor("Details content visible after task/project swap", `String(!document.getElementById('task-details-panel').hidden && !document.getElementById('tab-details').classList.contains('hidden') && document.querySelector('[data-detail-property=priority]').checkVisibility() && document.getElementById('task-detail-view').getBoundingClientRect().height > 100)`, "true")
 		}
 		navigate("/tasks/two?project_id=two", "true")
 		navigate("/tasks/new?project_id=three", "true")
