@@ -125,10 +125,16 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 	}
 
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+		visionModel, ok := models.VisionDefaultModel(models.ProviderAnthropic)
+		if !ok {
+			decision.Reason = "vision_config_lookup_failed"
+			decision.Detail = "Anthropic catalog has no vision fallback model"
+			return decision
+		}
 		decision.Agent = models.LLMConfig{
 			Name:      "Anthropic API (auto-vision)",
 			Provider:  models.ProviderAnthropic,
-			Model:     "claude-sonnet-4-5-20250929",
+			Model:     visionModel.ID,
 			APIKey:    apiKey,
 			MaxTokens: 4096,
 		}

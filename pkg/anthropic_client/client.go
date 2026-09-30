@@ -28,6 +28,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // AnthropicAPIHost is the base URL for the Anthropic Messages API.
@@ -48,15 +49,23 @@ const (
 	OAuthBetaHeader     = "oauth-2025-04-20"
 	// ClaudeCodeVersion identifies the compatible Claude Code request shape used
 	// for Anthropic subscription OAuth billing attribution.
-	ClaudeCodeVersion = "2.1.280"
-	DefaultModel      = "claude-sonnet-4-20250514"
-
+	ClaudeCodeVersion          = "2.1.280"
 	defaultModelRequestTimeout = 10 * time.Minute
 
 	oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 	oauthScope    = "user:profile user:inference user:sessions:claude_code user:mcp_servers"
 	tokenFileName = ".claude-max-client.json"
 )
+
+var DefaultModel = catalogDefaultModel()
+
+func catalogDefaultModel() string {
+	spec, ok := models.DefaultModel(models.ProviderAnthropic)
+	if !ok {
+		panic("Anthropic catalog has no default model")
+	}
+	return spec.ID
+}
 
 // defaultHTTPClient is a shared HTTP client with connection pooling.
 // Reusing a single client avoids repeated TCP/TLS handshakes across API calls.

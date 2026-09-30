@@ -20,12 +20,20 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
-const (
-	// DefaultModel is the fallback model when no model is provided.
-	DefaultModel = "gpt-5.6-sol"
+var DefaultModel = catalogDefaultModel()
 
+func catalogDefaultModel() string {
+	spec, ok := models.DefaultModel(models.ProviderOpenAI)
+	if !ok {
+		panic("OpenAI catalog has no default model")
+	}
+	return spec.ID
+}
+
+const (
 	defaultModelRequestTimeout = 10 * time.Minute
 
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"

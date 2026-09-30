@@ -49,7 +49,7 @@ func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 			ctx = llmcontracts.WithLocalSteeringCallback(ctx, func(context.Context) (llmcontracts.LocalSteeringInput, error) {
 				return llmcontracts.LocalSteeringInput{Text: "new steer", Commit: func(context.Context, []any) error { return nil }}, nil
 			})
-			req := llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, ExecID: "active", Message: "late steer", Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", ContextWindow: 272000}, ChatHistory: []models.Execution{{PromptSent: "old history", Status: models.ExecCompleted}}}
+			req := llmcontracts.AgentRequest{Ctx: ctx, Operation: llmcontracts.OperationStreaming, ExecID: "active", Message: "late steer", Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6-sol", ContextWindow: 272000}, ChatHistory: []models.Execution{{PromptSent: "old history", Status: models.ExecCompleted}}}
 			calls := 0
 			adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 				calls++

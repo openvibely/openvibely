@@ -302,7 +302,8 @@ func providerSupportsNativeCompaction(agent models.LLMConfig) bool {
 	}
 	switch agent.Provider {
 	case models.ProviderOpenAI:
-		return true
+		spec, ok := models.LookupModel(models.ProviderOpenAI, agent.Model)
+		return ok && spec.SupportsNativeCompaction
 	case models.ProviderAnthropic:
 		// Anthropic context management is a Messages capability. A transport
 		// override denotes a different concrete protocol and must not inherit it.

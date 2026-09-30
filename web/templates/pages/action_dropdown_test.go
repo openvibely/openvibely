@@ -28,10 +28,19 @@ func TestCardActionDropdownMenusRenderSharedShellAndLocalActions(t *testing.T) {
 		{
 			name: "models",
 			render: func(t *testing.T) string {
-				modelsList := []models.LLMConfig{{ID: "model-1", Name: "Claude", Provider: models.ProviderAnthropic, Model: "claude-sonnet", AuthMethod: models.AuthMethodAPIKey}}
+				modelsList := []models.LLMConfig{{ID: "model-1", Name: "Claude", Provider: models.ProviderAnthropic, Model: "claude-sonnet-5", AuthMethod: models.AuthMethodAPIKey}}
 				return renderActionDropdownComponent(t, ModelsContent(modelsList, nil, false))
 			},
 			required: []string{`aria-label="More actions for Claude"`, `onclick="handleDropdownToggle(event)"`, `Edit`, `Set as Default`, `Delete`, `setDefaultModel(this)`, `deleteModel(this)`},
+		},
+		{
+			name: "retired model",
+			render: func(t *testing.T) string {
+				modelsList := []models.LLMConfig{{ID: "model-1", Name: "Retired Claude", Provider: models.ProviderAnthropic, Model: "claude-opus-4-5", AuthMethod: models.AuthMethodAPIKey}}
+				return renderActionDropdownComponent(t, ModelsContent(modelsList, nil, false))
+			},
+			required:  []string{`aria-label="More actions for Retired Claude"`, `Edit`, `Delete`, `This model is no longer supported`},
+			forbidden: []string{`Set as Default`, `setDefaultModel(this)`},
 		},
 		{
 			name: "skills",

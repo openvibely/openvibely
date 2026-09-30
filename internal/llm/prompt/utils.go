@@ -11,7 +11,15 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-const CodexDefaultModel = "gpt-5.6-sol"
+var CodexDefaultModel = catalogDefaultModel()
+
+func catalogDefaultModel() string {
+	spec, ok := models.DefaultModel(models.ProviderOpenAI)
+	if !ok {
+		panic("OpenAI catalog has no default model")
+	}
+	return spec.ID
+}
 
 func CodexModelOrDefault(model string) string {
 	model = strings.TrimSpace(model)

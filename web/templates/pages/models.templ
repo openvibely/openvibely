@@ -322,7 +322,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 										<button onclick="event.stopPropagation(); editModelFromData(this.closest('[data-model-id]'))">
 											Edit
 										</button>										</li>
-										if !agent.IsDefault {
+										if !agent.IsDefault && !modelCardUnsupported(agent) {
 											<li>
 											<button
 												data-model-set-default-url={ fmt.Sprintf("/models/%s/set-default", agent.ID) }
