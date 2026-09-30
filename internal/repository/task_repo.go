@@ -1071,6 +1071,27 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 	return nil
 }
 
+// UpdateDetailProperty changes only the selected metadata column, never execution state.
+func (r *TaskRepo) UpdateDetailProperty(ctx context.Context, id, field, value string) error {
+	var query string
+	switch field {
+	case "agent_id":
+		query = "UPDATE tasks SET agent_id = NULLIF(?, ''), updated_at = datetime('now') WHERE id = ?"
+	case "agent_definition_id":
+		query = "UPDATE tasks SET agent_definition_id = NULLIF(?, ''), updated_at = datetime('now') WHERE id = ?"
+	case "priority":
+		query = "UPDATE tasks SET priority = ?, updated_at = datetime('now') WHERE id = ?"
+	case "tag":
+		query = "UPDATE tasks SET tag = ?, updated_at = datetime('now') WHERE id = ?"
+	case "prompt":
+		query = "UPDATE tasks SET prompt = ?, updated_at = datetime('now') WHERE id = ?"
+	default:
+		return fmt.Errorf("unsupported task property %q", field)
+	}
+	_, err := execBoundSQLite(ctx, r.db, query, value, id)
+	return err
+}
+
 func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	autoMerge := 0
 	if t.AutoMerge {

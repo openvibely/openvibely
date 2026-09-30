@@ -179,7 +179,7 @@ templ TaskWorkspaceScript() {
 		}, {signal:signal, capture:true});
 		on(panel, 'click', function(event) { var tab = event.target.closest('[role="tab"]'); if (tab) selectTab(tab.dataset.tab, true); });
 		on(document, 'keydown', function(event) {
-			if (event.key === 'Escape' && !event.defaultPrevented && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open]')) {
+			if (event.key === 'Escape' && !event.defaultPrevented && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open], [popover]:popover-open')) {
 				event.preventDefault();
 				closePanel();
 			}
@@ -207,13 +207,14 @@ templ TaskWorkspaceScript() {
 		});
 		on(divider, 'dblclick', function() { resize(420); });
 		on(divider, 'keydown', function(event) {
+            if (event.altKey || event.ctrlKey || event.metaKey || ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) < 0) return;
 			delete divider.dataset.pointerFocus;
 			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize(width + (event.key === 'ArrowLeft' ? 20 : -20)); }
 			if (event.key === 'Home') { event.preventDefault(); resize(340); }
 			if (event.key === 'End') { event.preventDefault(); resize(720); }
 		});
 		var drag = null;
-		on(divider, 'blur', function() { delete divider.dataset.pointerFocus; });
+		on(document, 'keydown', function(event) { if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey) delete divider.dataset.pointerFocus; });
 		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.dataset.pointerFocus = 'true'; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
 		on(divider, 'pointermove', function(event) { if (drag) resize(drag.width + drag.x - event.clientX); });
 		on(divider, 'pointerup', function() { drag = null; });

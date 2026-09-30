@@ -17,6 +17,93 @@ import (
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
+func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	project := models.Project{ID: "details-project", Name: "Details"}
+	agents := []models.LLMConfig{{ID: "model-1", Name: "Example model"}}
+	var priority atomic.Int32
+	priority.Store(2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		task := &models.Task{ID: "details-task", ProjectID: project.ID, Title: "Task", Prompt: "Original prompt", Status: models.StatusCompleted, Category: models.CategoryCompleted, Priority: int(priority.Load())}
+		var component templ.Component
+		switch r.URL.Path {
+		case "/tasks/new":
+			component = NewTask([]models.Project{project}, &project, agents, nil)
+		case "/tasks/details-task":
+			component = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, agents, nil, nil, "details", nil)
+		case "/tasks/details-task/detail-status":
+			component = TaskDetailMetrics(task, models.TaskExecutionMetrics{}, agents, "")
+		case "/tasks/details-task/details/property":
+			if r.FormValue("field") == "priority" {
+				priority.Store(4)
+				task.Priority = 4
+				component = TaskDetailMetrics(task, models.TaskExecutionMetrics{}, agents, "")
+			} else if r.FormValue("field") == "prompt" {
+				task.Prompt = r.FormValue("value")
+				component = TaskPromptPanel(task)
+			} else {
+				http.Error(w, "invalid field", 400)
+				return
+			}
+		case "/tasks/details-task/goal":
+			component = TaskGoalPanel(task.ID, &models.TaskGoal{Objective: r.FormValue("goal"), Status: models.TaskGoalStatusActive})
+		case "/tasks/details-task/thread":
+			fmt.Fprint(w, `<form id="task-thread-form"><textarea name="message">Retained draft</textarea></form>`)
+			return
+		case "/tasks/details-task/changes/summary":
+			fmt.Fprint(w, `{"files":0}`)
+			return
+		default:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := component.Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/new?tab=details", "detail-properties", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("draft details", `String(document.getElementById('task-details-panel') && !document.getElementById('task-details-panel').hidden)`, "true")
+		b.click(`[data-detail-property="priority"]`)
+		b.click(`[data-options="priority"] [data-value="4"]`)
+		b.waitFor("draft priority", `document.querySelector('[data-draft-property="priority"]').value`, "4")
+		b.click(`[data-detail-property="agent_id"]`)
+		b.typeText("Example")
+		b.click(`[data-options="agent_id"] [data-value="model-1"]`)
+		b.waitFor("composer synchronized", `document.getElementById('task-thread-form-agent-id').value`, "model-1")
+		b.click(`[data-detail-editor="goal"]`)
+		b.typeText("A draft goal")
+		b.click(`#task-detail-text-editor [type="submit"]`)
+		b.waitFor("draft goal", `document.querySelector('[data-draft-property="goal"]').value`, "A draft goal")
+		b.click("#task-panel-divider")
+		b.evaluate(`var d=document.getElementById('task-panel-divider'); d.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',ctrlKey:true,bubbles:true})); d.dispatchEvent(new KeyboardEvent('keydown',{key:'Alt',altKey:true,bubbles:true})); d.blur(); window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')); d.focus(); 'returned'`)
+		b.waitFor("pointer outline stays hidden on return", `getComputedStyle(document.getElementById('task-panel-divider')).outlineStyle`, "none")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowLeft"}, nil)
+		b.waitFor("keyboard focus remains visible", `String(!document.getElementById('task-panel-divider').hasAttribute('data-pointer-focus'))`, "true")
+		b.call("Page.navigate", map[string]any{"url": server.URL + "/tasks/details-task?tab=details"}, nil)
+		b.waitFor("saved details ready", `String(Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
+		b.evaluate(`window.retainedThread=document.getElementById('task-thread-form'); 'saved'`)
+		b.click(`[data-detail-property="priority"]`)
+		b.click(`[data-options="priority"] [data-value="4"]`)
+		b.waitFor("saved priority", `document.querySelector('[data-detail-property="priority"]').dataset.value`, "4")
+		b.waitFor("mounted thread preserved", `String(window.retainedThread===document.getElementById('task-thread-form'))`, "true")
+		b.click(`[data-detail-editor="prompt"]`)
+		b.evaluate(`document.querySelector('#task-detail-text-editor textarea').value='Updated prompt'; 'edited'`)
+		b.click(`#task-detail-text-editor [type="submit"]`)
+		b.waitFor("prompt saved", `document.querySelector('[data-detail-editor="prompt"]').dataset.value`, "Updated prompt")
+		b.waitFor("no prompt expander", `String(!document.querySelector('#task-prompt-panel details'))`, "true")
+		b.click(`[data-detail-editor="goal"]`)
+		b.typeText("Saved goal")
+		b.click(`#task-detail-text-editor [type="submit"]`)
+		b.waitFor("saved goal", `document.querySelector('[data-detail-editor="goal"]').dataset.value`, "Saved goal")
+	})
+}
+
 func TestBrowserFunctional_TaskMetadataBadgesAtMinimumPanelWidth(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	agentID := "long-agent"

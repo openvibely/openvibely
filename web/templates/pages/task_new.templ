@@ -30,7 +30,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
   <div id="task-workspaces">
    @TaskDetailPanel() {
     <div id="tab-details" class="task-tab-panel hidden">
-     @NewTaskOptions(agents, agentDefs)
+     @NewTaskDetails(agents, agentDefs)
     </div>
     <div id="tab-attachments" class="task-tab-panel hidden">
      <label class="label" for="new-task-files">Attachments</label>
@@ -62,13 +62,13 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     })
    </div>
   </div>
+  @TaskDetailEditors(&models.Task{}, agents, agentDefs)
   @TaskWorkspaceScript()
   <script>
    (function() {
     var root = document.getElementById('task-detail-content');
     root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {
-     if (input.name === 'agent_id' || input.name === 'category') { input.disabled = true; input.closest('.form-control').hidden = true; }
-     else input.setAttribute('form', 'task-thread-form');
+     input.setAttribute('form', 'task-thread-form');
     });
     var form = document.getElementById('task-thread-form');
     form.addEventListener('htmx:afterRequest', function(event) {
@@ -141,7 +141,11 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
 									<option value="bug">Bug</option>
 								</select>
 							</div>
-								<div class="card bg-base-200/50 border border-base-300 mt-3">
+								 @NewTaskAdvancedOptions()
+}
+
+templ NewTaskAdvancedOptions() {
+<div class="card bg-base-200/50 border border-base-300 mt-3">
 									<div class="card-body p-3 space-y-3">
 										<label class="label cursor-pointer justify-start gap-2 p-0">
 											<input type="checkbox" name="swarm_mode" id="create-task-swarm-mode-toggle" onchange="document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)" class="toggle toggle-sm toggle-primary"/>
@@ -189,4 +193,22 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
 										<span class="label-text">Auto-merge to target branch when goal is achieved</span>
 									</label>
 								</div>
+
+}
+
+templ NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
+ <div class="min-w-0">
+  @TaskDetailMetrics(&models.Task{Category:models.CategoryActive, Priority:2}, models.TaskExecutionMetrics{}, agents, "")
+  for _, field := range []struct{ Name, Value string }{{"agent_definition_id",""},{"category","active"},{"priority","2"},{"tag",""},{"goal",""}} {
+   <input type="hidden" name={ field.Name } value={ field.Value } data-draft-property={ field.Name } form="task-thread-form"/>
+  }
+  <section class="mb-6 space-y-2">
+   <div class="flex items-center justify-between"><h3 class="text-sm font-semibold">Goal</h3><button type="button" class="btn btn-ghost btn-xs" data-detail-editor="goal" aria-label="Edit goal">+</button></div>
+   <p class="text-sm whitespace-pre-wrap break-words" data-draft-goal>No goal set</p>
+  </section>
+  @TaskPromptPanel(&models.Task{})
+  <section class="mb-6 space-y-2"><h3 class="text-sm font-semibold">Worktree</h3><p class="text-sm opacity-60">Created when this task runs.</p></section>
+  <p class="text-xs opacity-60 mb-4">Settings apply when you send your first message. Sending starts the task in Active.</p>
+  <details><summary class="text-sm cursor-pointer">Advanced options</summary>@NewTaskAdvancedOptions()</details>
+ </div>
 }

@@ -180,8 +180,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
 								@TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, taskAgentLabelFromDefinitions(task, agentDefs))
 							@SwarmContextPanel(task)
-							@TaskPromptPanel(task)
-						@TaskGoalPanel(task.ID, goal)
+                        @TaskGoalPanel(task.ID, goal)
+                        @TaskPromptPanel(task)
 						// Worktree info panel (shown when task has worktree or is in a git project)
 						if task.WorktreeBranch != "" || task.WorktreePath != "" {
 							<div
@@ -193,6 +193,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							>
 								@WorktreeInfoPanel(task, nil)
 							</div>
+                        } else {
+                            <section class="mb-6 space-y-2"><h3 class="text-sm font-semibold">Worktree</h3><p class="text-sm opacity-60">No worktree created for this task.</p></section>
 						}
 						@TaskDetailActions(taskDetailActionMetadata(task))
 						<!-- Delete Confirmation Modal -->
@@ -2442,6 +2444,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				});
 			}
 		</script>
+        @TaskDetailEditors(task, agents, agentDefs)
 		@TaskWorkspaceScript()
 	</div>
 }
@@ -2499,59 +2502,48 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 	<div
 		id="task-detail-metrics"
 		class="grid gap-3 mb-6 text-sm"
-		hx-get={ fmt.Sprintf("/tasks/%s/detail-status", task.ID) }
-		hx-trigger="every 3s"
+		if task.ID != "" {
+            hx-get={ fmt.Sprintf("/tasks/%s/detail-status", task.ID) }
+            hx-trigger="every 3s"
+        }
 		hx-target="#task-detail-metrics"
 		hx-swap="morph:outerHTML"
 		data-task-status={ string(task.Status) }
 	>
 		<style>
+  #task-detail-metrics .task-property-row { display:grid; grid-template-columns:7rem minmax(0,1fr) 1rem; align-items:baseline; gap:0.75rem; width:100%; text-align:left; padding:4px 0; border-radius:4px; }
+  .task-property-row [data-property-label] { min-width:0; overflow-wrap:anywhere; }
+  .task-property-row:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
 			#task-detail-metrics { grid-template-columns:minmax(0,1fr); }
 			#task-detail-metrics > div { display:grid; grid-template-columns:7rem minmax(0,1fr); align-items:baseline; gap:0.75rem; min-width:0; }
 			#task-detail-metrics > div > span:last-child { min-width:0; overflow-wrap:anywhere; }
 			#task-detail-metrics .badge { justify-self:start; margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; flex-shrink:0; line-height:1.4; }
 		</style>
-		<div>
-			<span class="text-sm opacity-60">Category:</span>
-			<span class="min-w-0">{ string(task.Category) }</span>
-		</div>
-		// Only show status badge if it provides meaningful information beyond category
-		// For backlog/scheduled tasks with pending status, the category badge is sufficient
-		if !(task.Status == models.StatusPending && (task.Category == models.CategoryBacklog || task.Category == models.CategoryScheduled)) {
-			<div>
-				<span class="text-sm opacity-60">Status:</span>
-				<span class={ "ml-2 badge badge-sm", components.StatusBadgeClass(task.Status) }>{ components.StatusLabelForTask(task.Status, task.Category) }</span>
-			</div>
-		}
-		<div>
-			<span class="text-sm opacity-60">Tag:</span>
-			if task.Tag != "" {
-				<span class="min-w-0">{ components.TagLabel(task.Tag) }</span>
-			} else {
-				<span class="min-w-0">None</span>
-			}
-		</div>
-		if components.PriorityLabel(task.Priority) != "" {
-			<div>
-				<span class="text-sm opacity-60">Priority:</span>
-				<span class="min-w-0">{ components.PriorityLabel(task.Priority) }</span>
-			</div>
-		}
-		<div>
-			<span class="text-sm opacity-60">Model:</span>
-			<span class="min-w-0">{ taskModelLabel(task, agents) }</span>
-		</div>
-		<div>
-			<span class="text-sm opacity-60">Agent:</span>
-			<span class="min-w-0">{ taskAgentLabel(task, agentLabel) }</span>
-		</div>
+        <h3 class="text-sm font-semibold">Task</h3>
+        @TaskPropertyRow("Model", "agent_id", detailPointerValue(task.AgentID), taskModelLabel(task, agents))
+        @TaskPropertyRow("Agent", "agent_definition_id", detailPointerValue(task.AgentDefinitionID), taskAgentLabel(task, agentLabel))
+        @TaskPropertyRow("Category", "category", string(task.Category), string(task.Category))
+        @TaskPropertyRow("Priority", "priority", fmt.Sprint(task.Priority), components.PriorityLabel(task.Priority))
+        @TaskPropertyRow("Tag", "tag", string(task.Tag), taskDetailTagLabel(task.Tag))
+        <h3 class="text-sm font-semibold mt-4">Execution</h3>
+        <div>
+            <span class="text-sm opacity-60">Status:</span>
+            if task.ID == "" {
+                <span>Not started</span>
+            } else {
+                <span class={ "ml-2 badge badge-sm", components.StatusBadgeClass(task.Status) }>{ components.StatusLabelForTask(task.Status, task.Category) }</span>
+            }
+        </div>
 		if task.Status == models.StatusRunning && metrics.LatestStartedAt != nil {
 			<div>
 				<span class="text-sm opacity-60">Elapsed:</span>
 				<span class="min-w-0">{ components.FormatElapsedTime(*metrics.LatestStartedAt) }</span>
 			</div>
 		}
-		if (task.Status == models.StatusCompleted || task.Status == models.StatusFailed) && metrics.LatestDurationMs > 0 {
+        if !(task.Status == models.StatusRunning && metrics.LatestStartedAt != nil) && metrics.LatestDurationMs <= 0 {
+            <div><span class="text-sm opacity-60">Duration:</span><span>—</span></div>
+        }
+		if task.Status != models.StatusRunning && metrics.LatestDurationMs > 0 {
 			if dur := components.FormatDuration(metrics.LatestDurationMs); dur != "" {
 				<div>
 					<span class="text-sm opacity-60">Duration:</span>
@@ -2608,22 +2600,23 @@ templ SwarmContextPanel(task *models.Task) {
 	}
 }
 
+func taskDetailTagLabel(tag models.TaskTag) string {
+ if tag == "" { return "None" }; return components.TagLabel(tag)
+}
+
 templ TaskPromptPanel(task *models.Task) {
  <section id="task-prompt-panel" class="mb-6 space-y-2">
-  <h3 class="text-sm font-semibold">Prompt</h3>
-  if task.Prompt != "" {
-   if len([]rune(task.Prompt)) > 240 {
-    <details id="task-prompt-expanded" class="group">
-     <summary class="cursor-pointer text-sm list-none">
-      <span class="block whitespace-pre-wrap break-words leading-relaxed group-open:hidden">{ string([]rune(task.Prompt)[:240]) + "…" }</span>
-      <span class="link text-xs opacity-60 group-open:hidden">Show more</span>
-      <span class="link text-xs opacity-60 hidden group-open:inline">Show less</span>
-     </summary>
-     <div class="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{ task.Prompt }</div>
-    </details>
-   } else {
-    <div class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ task.Prompt }</div>
+  <div class="flex items-center justify-between"><h3 class="text-sm font-semibold">Prompt</h3>
+   if task.ID != "" {
+    <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="prompt" data-value={ task.Prompt }>Edit</button>
    }
+  </div>
+  if task.ID == "" {
+   <p class="text-sm opacity-60">Set by your first message.</p>
+  } else if len([]rune(task.Prompt)) > 240 {
+   <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ string([]rune(task.Prompt)[:240]) + "…" }</p>
+  } else if task.Prompt != "" {
+   <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ task.Prompt }</p>
   } else {
    <p class="text-sm opacity-60">No prompt set</p>
   }
@@ -2640,12 +2633,17 @@ templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
 						<div class="text-sm opacity-60">No goal set</div>
 					}
 				</div>
-				if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-					<span class="badge badge-outline">{ goalStatusLabel(goal) }</span>
-				}
+                <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="goal" data-value={ goalValue(goal) } aria-label="Edit goal">
+                    if goalValue(goal) == "" {
+                        +
+                    } else {
+                        Edit
+                    }
+                </button>
 			</div>
 			if goal != nil && goal.Status != models.TaskGoalStatusCleared {
 				<div class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ goal.Objective }</div>
+                <span class="text-xs opacity-60">{ goalStatusLabel(goal) }</span>
 				if goal.Reason != "" {
 					<p class="text-xs opacity-60">Reason: { goal.Reason }</p>
 				}

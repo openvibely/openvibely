@@ -159,7 +159,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = NewTaskOptions(agents, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = NewTaskDetails(agents, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -208,11 +208,15 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
+		templ_7745c5c3_Err = TaskDetailEditors(&models.Task{}, agents, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
 		templ_7745c5c3_Err = TaskWorkspaceScript().Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     if (input.name === 'agent_id' || input.name === 'category') { input.disabled = true; input.closest('.form-control').hidden = true; }\n     else input.setAttribute('form', 'task-thread-form');\n    });\n    var form = document.getElementById('task-thread-form');\n    form.addEventListener('htmx:afterRequest', function(event) {\n     if (!event.detail.successful) document.getElementById('new-task-error').textContent = event.detail.xhr.responseText;\n    });\n   })();\n  </script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     input.setAttribute('form', 'task-thread-form');\n    });\n    var form = document.getElementById('task-thread-form');\n    form.addEventListener('htmx:afterRequest', function(event) {\n     if (!event.detail.successful) document.getElementById('new-task-error').textContent = event.detail.xhr.responseText;\n    });\n   })();\n  </script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -405,7 +409,138 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div></div><div class=\"form-control mt-3\"><label class=\"label\"><span class=\"label-text\">Tag</span></label> <select name=\"tag\" class=\"select select-bordered\"><option value=\"\">None</option> <option value=\"feature\">Feature</option> <option value=\"bug\">Bug</option></select></div><div class=\"card bg-base-200/50 border border-base-300 mt-3\"><div class=\"card-body p-3 space-y-3\"><label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_mode\" id=\"create-task-swarm-mode-toggle\" onchange=\"document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text font-medium\">Swarm mode</span></label><div id=\"create-task-swarm-options\" class=\"hidden space-y-3\"><p class=\"text-xs opacity-70\">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max workers</span></label> <input type=\"number\" name=\"swarm_max_workers\" class=\"input input-bordered\" min=\"1\" max=\"8\" value=\"3\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Worker isolation</span></label> <select name=\"swarm_worker_isolation\" class=\"select select-bordered\"><option value=\"worktree\" selected>Worktree</option> <option value=\"read_only\">Read only</option> <option value=\"shared\">Shared</option></select></div></div><div class=\"flex flex-wrap gap-4\"><input type=\"hidden\" name=\"swarm_reviewer_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_reviewer_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Reviewer enabled</span></label> <input type=\"hidden\" name=\"swarm_merger_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_merger_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Merger enabled</span></label></div></div></div></div><!-- Git Worktree: Automatic merge triggers --><div class=\"form-control mt-3 space-y-2\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"auto_merge\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text\">Auto-merge to target branch on successful completion</span></label> <label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"auto_merge_on_goal_achieved\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text\">Auto-merge to target branch when goal is achieved</span></label></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</select></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Priority</span></label> <select name=\"priority\" class=\"select select-bordered\"><option value=\"1\">Low</option> <option value=\"2\" selected>Normal</option> <option value=\"3\">High</option> <option value=\"4\">Urgent</option></select></div></div><div class=\"form-control mt-3\"><label class=\"label\"><span class=\"label-text\">Tag</span></label> <select name=\"tag\" class=\"select select-bordered\"><option value=\"\">None</option> <option value=\"feature\">Feature</option> <option value=\"bug\">Bug</option></select></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = NewTaskAdvancedOptions().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func NewTaskAdvancedOptions() templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var18 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var18 == nil {
+			templ_7745c5c3_Var18 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"card bg-base-200/50 border border-base-300 mt-3\"><div class=\"card-body p-3 space-y-3\"><label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_mode\" id=\"create-task-swarm-mode-toggle\" onchange=\"document.getElementById('create-task-swarm-options').classList.toggle('hidden', !this.checked)\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text font-medium\">Swarm mode</span></label><div id=\"create-task-swarm-options\" class=\"hidden space-y-3\"><p class=\"text-xs opacity-70\">Swarm planning starts when the parent task becomes Active. Choose Backlog to defer the planner until you run the task or move it to Active.</p><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max workers</span></label> <input type=\"number\" name=\"swarm_max_workers\" class=\"input input-bordered\" min=\"1\" max=\"8\" value=\"3\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Worker isolation</span></label> <select name=\"swarm_worker_isolation\" class=\"select select-bordered\"><option value=\"worktree\" selected>Worktree</option> <option value=\"read_only\">Read only</option> <option value=\"shared\">Shared</option></select></div></div><div class=\"flex flex-wrap gap-4\"><input type=\"hidden\" name=\"swarm_reviewer_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_reviewer_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Reviewer enabled</span></label> <input type=\"hidden\" name=\"swarm_merger_enabled\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2 p-0\"><input type=\"checkbox\" name=\"swarm_merger_enabled\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Merger enabled</span></label></div></div></div></div><!-- Git Worktree: Automatic merge triggers --><div class=\"form-control mt-3 space-y-2\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"auto_merge\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text\">Auto-merge to target branch on successful completion</span></label> <label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"auto_merge_on_goal_achieved\" class=\"toggle toggle-sm toggle-primary\"> <span class=\"label-text\">Auto-merge to target branch when goal is achieved</span></label></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		return nil
+	})
+}
+
+func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var19 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var19 == nil {
+			templ_7745c5c3_Var19 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<div class=\"min-w-0\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = TaskDetailMetrics(&models.Task{Category: models.CategoryActive, Priority: 2}, models.TaskExecutionMetrics{}, agents, "").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		for _, field := range []struct{ Name, Value string }{{"agent_definition_id", ""}, {"category", "active"}, {"priority", "2"}, {"tag", ""}, {"goal", ""}} {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<input type=\"hidden\" name=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var20 string
+			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(field.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 203, Col: 41}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var21 string
+			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(field.Value)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 203, Col: 63}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" data-draft-property=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var22 string
+			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(field.Name)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 203, Col: 98}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\" form=\"task-thread-form\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<section class=\"mb-6 space-y-2\"><div class=\"flex items-center justify-between\"><h3 class=\"text-sm font-semibold\">Goal</h3><button type=\"button\" class=\"btn btn-ghost btn-xs\" data-detail-editor=\"goal\" aria-label=\"Edit goal\">+</button></div><p class=\"text-sm whitespace-pre-wrap break-words\" data-draft-goal>No goal set</p></section>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = TaskPromptPanel(&models.Task{}).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<section class=\"mb-6 space-y-2\"><h3 class=\"text-sm font-semibold\">Worktree</h3><p class=\"text-sm opacity-60\">Created when this task runs.</p></section><p class=\"text-xs opacity-60 mb-4\">Settings apply when you send your first message. Sending starts the task in Active.</p><details><summary class=\"text-sm cursor-pointer\">Advanced options</summary>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = NewTaskAdvancedOptions().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</details></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
