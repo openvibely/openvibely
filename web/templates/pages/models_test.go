@@ -761,8 +761,8 @@ func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 	agents := []models.LLMConfig{
 		{ID: "api-openai", Name: "OpenAI API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"},
 		{ID: "oauth-anthropic", Name: "Claude OAuth", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 9999999999999, Model: "claude-sonnet"},
-		{ID: "cli-openai", Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodCLI, Model: "gpt-5-codex"},
-		{ID: "cli-anthropic", Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet"},
+		{ID: "cli-openai", Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: "cli", Model: "gpt-5-codex"},
+		{ID: "cli-anthropic", Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet"},
 		{ID: "mixture", Name: "Existing Mixture", Provider: models.ProviderMixture, Model: "default"},
 		{ID: "internal", Name: "Internal", Provider: models.LLMProvider("internal"), AuthMethod: models.AuthMethodAPIKey, Model: "internal"},
 	}

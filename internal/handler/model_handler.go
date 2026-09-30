@@ -775,8 +775,8 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 
 	agent.Model = c.FormValue("model")
 	if agent.Provider == models.ProviderOpenAI {
-		if retiredOpenAIModel(agent.Model, agent.AuthMethod) {
-			return fmt.Errorf("model %q is retired for this connection; select a supported model before saving", agent.Model)
+		if strings.TrimSpace(agent.Model) != "" && !supportedOpenAIModel(agent.Model, agent.AuthMethod) {
+			return fmt.Errorf("model %q is unsupported for this connection; select a supported model before saving", agent.Model)
 		}
 		agent.Model = normalizeOpenAIModel(agent.Model)
 	}
@@ -1769,12 +1769,20 @@ func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 	return c.JSON(http.StatusOK, models)
 }
 
-func retiredOpenAIModel(value string, auth models.AuthMethod) bool {
-	switch strings.TrimSpace(value) {
-	case "gpt-5.2-codex", "gpt-5.1-codex-max", "gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.3-codex-spark":
+func supportedOpenAIModel(value string, auth models.AuthMethod) bool {
+	model := normalizeOpenAIModel(value)
+	if model == "" {
+		return false
+	}
+	if auth == models.AuthMethodAPIKey {
 		return true
-	case "gpt-5.4", "gpt-5.4-mini":
-		return auth == models.AuthMethodOAuth || auth == models.AuthMethodCLI
+	}
+	if auth != models.AuthMethodOAuth {
+		return false
+	}
+	switch model {
+	case "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.5-pro", "gpt-5.3-codex", "gpt-5-codex-mini":
+		return true
 	}
 	return false
 }
@@ -1799,6 +1807,6 @@ func normalizeOpenAIModel(value string) string {
 		"gpt-5-codex-mini":
 		return trimmed
 	default:
-		return "gpt-5.6-sol"
+		return ""
 	}
 }

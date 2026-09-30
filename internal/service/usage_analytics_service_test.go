@@ -406,7 +406,7 @@ func TestRecordUsageFromResult_PersistsAnthropicAndOpenAIDetails(t *testing.T) {
 
 	RecordUsageFromResult(ctx, repo, UsageCapture{Operation: "task", Status: "completed", LatencyMs: 100, OccurredAt: time.Now().UTC()}, anthropic, llmcontracts.AgentResult{Usage: llmusage.FromAnthropic(50, 25, 11, 7)})
 	RecordUsageFromResult(ctx, repo, UsageCapture{Operation: "streaming", Status: "completed", LatencyMs: 200, OccurredAt: time.Now().UTC()}, openai, llmcontracts.AgentResult{Usage: llmusage.FromOpenAI(80, 20, 30, 4)})
-	RecordUsageFromResult(ctx, repo, UsageCapture{ExecutionID: "exec-cli", Operation: "task", Status: "completed", LatencyMs: 1, OccurredAt: time.Now().UTC()}, models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude"}, llmcontracts.AgentResult{Usage: llmusage.FromTotal(999)})
+	RecordUsageFromResult(ctx, repo, UsageCapture{ExecutionID: "exec-cli", Operation: "task", Status: "completed", LatencyMs: 1, OccurredAt: time.Now().UTC()}, models.LLMConfig{Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude"}, llmcontracts.AgentResult{Usage: llmusage.FromTotal(999)})
 
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM llm_usage_events`).Scan(&count); err != nil {

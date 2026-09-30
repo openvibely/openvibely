@@ -349,16 +349,17 @@ func containsString(s, substr string) bool {
 func TestSelectLLMWithVision_FiltersNonAnthropicProviders(t *testing.T) {
 	configs := []models.LLMConfig{
 		{
-			ID:       "anthropic-sonnet",
-			Name:     "Claude Sonnet",
-			Provider: models.ProviderAnthropic,
-			Model:    "claude-3-5-sonnet-20241022",
+			ID:         "anthropic-sonnet",
+			Name:       "Claude Sonnet",
+			Provider:   models.ProviderAnthropic,
+			Model:      "claude-3-5-sonnet-20241022",
+			AuthMethod: models.AuthMethodAPIKey,
 		},
 		{
 			ID:         "claude-max",
 			Name:       "Claude Max CLI",
 			Provider:   models.ProviderAnthropic,
-			AuthMethod: models.AuthMethodCLI,
+			AuthMethod: "cli",
 			Model:      "claude-max",
 		},
 	}
@@ -393,7 +394,7 @@ func TestSelectLLMWithVision_NoAnthropicProvidersAvailable(t *testing.T) {
 			ID:         "claude-max",
 			Name:       "Claude Max CLI",
 			Provider:   models.ProviderAnthropic,
-			AuthMethod: models.AuthMethodCLI,
+			AuthMethod: "cli",
 			Model:      "claude-max",
 		},
 	}
@@ -422,7 +423,7 @@ func TestSelectLLMWithVision_NoVisionRequired(t *testing.T) {
 			ID:         "claude-max",
 			Name:       "Claude Max CLI",
 			Provider:   models.ProviderAnthropic,
-			AuthMethod: models.AuthMethodCLI,
+			AuthMethod: "cli",
 			Model:      "claude-max",
 		},
 	}

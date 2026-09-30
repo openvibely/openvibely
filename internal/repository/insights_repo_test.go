@@ -733,7 +733,7 @@ func TestInsightsRepo_GetFailedTaskPatterns(t *testing.T) {
 		Name:       "test-agent",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-3",
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		IsDefault:  true,
 	}
 	if err := llmRepo.Create(ctx, agent); err != nil {
@@ -848,7 +848,7 @@ func TestInsightsRepo_GetSlowExecutions(t *testing.T) {
 		Name:       "slow-agent",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-3",
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		IsDefault:  true,
 	}
 	if err := llmRepo.Create(ctx, agent); err != nil {

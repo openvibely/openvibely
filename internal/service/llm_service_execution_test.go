@@ -3495,7 +3495,7 @@ func TestLLMService_ExecuteTaskWithAgent_VisionAwareAgentOverride(t *testing.T) 
 	cliAgent := models.LLMConfig{
 		Name:       "Claude Max",
 		Provider:   models.ProviderAnthropic,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		Model:      "claude-sonnet-4-5",
 	}
 
@@ -3569,7 +3569,7 @@ func TestLLMService_ExecuteTaskWithAgent_NoOverrideForTextAttachments(t *testing
 func TestLLMService_CallAgentDirectStreaming_VisionAwareOverride(t *testing.T) {
 
 	cliOnly := []models.LLMConfig{
-		{Name: "Claude Max", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet-4-5"},
+		{Name: "Claude Max", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet-4-5"},
 	}
 	complexity := AnalyzeComplexity("What do you see?")
 	result := SelectLLMWithVision(complexity, cliOnly, true)
@@ -3652,7 +3652,7 @@ func TestLLMService_CallAgentDirectStreaming_NoOverrideWithoutImages(t *testing.
 func TestLLMService_CallAgentDirectStreaming_VisionEnvVarFallback(t *testing.T) {
 
 	cliOnly := []models.LLMConfig{
-		{Name: "Claude Max", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodCLI, Model: "claude-sonnet-4-5"},
+		{Name: "Claude Max", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet-4-5"},
 		{Name: "Ollama Local", Provider: models.ProviderOllama, Model: "llama3"},
 	}
 	complexity := AnalyzeComplexity("What do you see?")

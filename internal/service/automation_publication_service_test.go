@@ -470,7 +470,7 @@ func TestAutomationQueuedRootClaimsReplacementDispatchStateAtomically(t *testing
 
 	llmConfigRepo := repository.NewLLMConfigRepo(h.db)
 	agent := &models.LLMConfig{Name: "Atomic dispatch agent", Provider: models.ProviderTest, Model: "test-model",
-		MaxTokens: 4096, AuthMethod: models.AuthMethodCLI, IsDefault: true}
+		MaxTokens: 4096, AuthMethod: "cli", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	execRepo := repository.NewExecutionRepo(h.db)
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, h.taskRepo, repository.NewProjectRepo(h.db), h.scheduleRepo, repository.NewAttachmentRepo(h.db))

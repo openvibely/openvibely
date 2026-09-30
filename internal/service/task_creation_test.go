@@ -3089,7 +3089,7 @@ func TestAutoStartTasks_EnabledInModel(t *testing.T) {
 		Model:          "test-model",
 		MaxTokens:      4096,
 		Temperature:    0.0,
-		AuthMethod:     models.AuthMethodCLI,
+		AuthMethod:     "cli",
 		AutoStartTasks: true,
 	}
 	agent.Provider = models.ProviderAnthropic // Set to valid provider for DB constraint
@@ -3146,7 +3146,7 @@ func TestAutoStartTasks_DisabledInModel(t *testing.T) {
 		Model:          "test-model",
 		MaxTokens:      4096,
 		Temperature:    0.0,
-		AuthMethod:     models.AuthMethodCLI,
+		AuthMethod:     "cli",
 		AutoStartTasks: false,
 	}
 	agent.Provider = models.ProviderAnthropic // Set to valid provider for DB constraint
@@ -3325,7 +3325,7 @@ func TestAutoStartTasks_ExplicitCategoryOverrides(t *testing.T) {
 		Model:          "test-model",
 		MaxTokens:      4096,
 		Temperature:    0.0,
-		AuthMethod:     models.AuthMethodCLI,
+		AuthMethod:     "cli",
 		AutoStartTasks: true,
 	}
 	agent.Provider = models.ProviderAnthropic // Set to valid provider for DB constraint

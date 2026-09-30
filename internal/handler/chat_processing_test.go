@@ -6988,7 +6988,7 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 	ctx := context.Background()
 	clearModelConfigs(t, db)
 
-	legacyCLI := richAutoSelectionConfig("Anthropic CLI", models.ProviderAnthropic, models.AuthMethodCLI, "claude-opus-legacy-cli", false)
+	legacyCLI := richAutoSelectionConfig("Anthropic CLI", models.ProviderAnthropic, "cli", "claude-opus-legacy-cli", false)
 	apiKey := richAutoSelectionConfig("Anthropic API", models.ProviderAnthropic, models.AuthMethodAPIKey, "claude-3-haiku", false)
 	oauth := richAutoSelectionConfig("Anthropic OAuth", models.ProviderAnthropic, models.AuthMethodOAuth, "claude-opus-5-20250929", false)
 	for _, cfg := range []*models.LLMConfig{legacyCLI, apiKey, oauth} {
@@ -7007,7 +7007,7 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 	if selected.ID != oauth.ID {
 		t.Fatalf("selected ID = %s, want OAuth vision-capable model %s", selected.ID, oauth.ID)
 	}
-	if selected.IsAnthropicCLI() {
+	if !selected.IsCallableMixtureSlot() {
 		t.Fatalf("selected legacy CLI model for image request: %#v", selected)
 	}
 	if selected.OAuthAccessToken != "oauth-secret" || selected.OAuthRefreshToken != "oauth-refresh-secret" {
@@ -7088,7 +7088,7 @@ func richAutoSelectionConfig(name string, provider models.LLMProvider, authMetho
 		WorkerTimeout:        90,
 		IsDefault:            isDefault,
 	}
-	if authMethod == models.AuthMethodCLI {
+	if authMethod == "cli" {
 		cfg.APIKey = ""
 		cfg.OAuthAccessToken = ""
 		cfg.OAuthRefreshToken = ""

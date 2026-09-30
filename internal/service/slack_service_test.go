@@ -2668,7 +2668,7 @@ func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForImageAttachmen
 	require.NotNil(t, got)
 	require.Len(t, got.ImageAttachments, 1)
 	require.Equal(t, visionAgent.ID, got.Agent.ID)
-	require.False(t, got.Agent.IsAnthropicCLI())
+	require.False(t, (!got.Agent.IsCallableMixtureSlot()))
 }
 
 func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForIDOnlyFileInfoImage(t *testing.T) {
@@ -2744,7 +2744,7 @@ func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForIDOnlyFileInfo
 	require.Len(t, got.ImageAttachments, 1)
 	require.Equal(t, "id-only-shot.png", got.ImageAttachments[0].FileName)
 	require.Equal(t, visionAgent.ID, got.Agent.ID)
-	require.False(t, got.Agent.IsAnthropicCLI())
+	require.False(t, (!got.Agent.IsCallableMixtureSlot()))
 	require.Equal(t, 1, fileInfoCalls)
 }
 
@@ -2823,7 +2823,7 @@ func TestSlackService_ProcessIncomingMessage_SniffsUnknownTypeImageWhenFileInfoF
 	require.Len(t, got.ImageAttachments, 1)
 	require.Equal(t, "image/png", got.ImageAttachments[0].MediaType)
 	require.Equal(t, visionAgent.ID, got.Agent.ID)
-	require.False(t, got.Agent.IsAnthropicCLI())
+	require.False(t, (!got.Agent.IsCallableMixtureSlot()))
 	persistedExec, err := execRepo.GetByID(ctx, got.ExecID)
 	require.NoError(t, err)
 	require.NotNil(t, persistedExec)

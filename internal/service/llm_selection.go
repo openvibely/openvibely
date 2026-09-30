@@ -177,8 +177,7 @@ func SelectLLMWithVision(complexity ComplexityResult, configs []models.LLMConfig
 	var filteredConfigs []models.LLMConfig
 	if requiresVision {
 		for _, cfg := range configs {
-			// Vision requires multimodal API access (API key or OAuth), not CLI
-			if cfg.Provider == models.ProviderAnthropic && !cfg.IsAnthropicCLI() {
+			if cfg.Provider == models.ProviderAnthropic && (cfg.IsAnthropicAPIKey() || cfg.IsOAuth()) {
 				filteredConfigs = append(filteredConfigs, cfg)
 			}
 		}

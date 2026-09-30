@@ -178,7 +178,7 @@ func TestWorkerService_ModelSlotEnforcesLimit(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 2,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -232,7 +232,7 @@ func TestWorkerService_ModelSlotWorkerIsolation(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 1,
 	}
 	agentB := &models.LLMConfig{
@@ -240,7 +240,7 @@ func TestWorkerService_ModelSlotWorkerIsolation(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-opus-4-6",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 1,
 		IsDefault:  false,
 	}
@@ -294,7 +294,7 @@ func TestWorkerService_ModelSlotNoLimitWhenZero(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 0,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -350,7 +350,7 @@ func TestWorkerService_ModelSlotConcurrentAccess(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 5,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -408,7 +408,7 @@ func TestWorkerService_ResolveAgentConfigID(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		IsDefault:  true,
 	}
 	if err := llmConfigRepo.Create(ctx, defaultAgent); err != nil {
@@ -421,7 +421,7 @@ func TestWorkerService_ResolveAgentConfigID(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-opus-4-6",
 		MaxTokens:  8192,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 	}
 	if err := llmConfigRepo.Create(ctx, specificAgent); err != nil {
 		t.Fatalf("Create specific agent: %v", err)
@@ -590,7 +590,7 @@ func TestWorkerService_AcquireModelSlotBlocking(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 1,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -641,7 +641,7 @@ func TestWorkerService_AcquireModelSlotBlocksAndUnblocks(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 1,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -723,7 +723,7 @@ func TestWorkerService_GetModelWorkerTimeout(t *testing.T) {
 		Provider:      models.ProviderAnthropic,
 		Model:         "claude-sonnet-4-5-20250929",
 		MaxTokens:     4096,
-		AuthMethod:    models.AuthMethodCLI,
+		AuthMethod:    "cli",
 		WorkerTimeout: 120,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -736,7 +736,7 @@ func TestWorkerService_GetModelWorkerTimeout(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-opus-4-6",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 	}
 	if err := llmConfigRepo.Create(ctx, agentNoTimeout); err != nil {
 		t.Fatalf("Create agent: %v", err)
@@ -792,7 +792,7 @@ func TestLLMConfigRepo_MaxWorkers(t *testing.T) {
 		Provider:      models.ProviderAnthropic,
 		Model:         "claude-sonnet-4-5-20250929",
 		MaxTokens:     4096,
-		AuthMethod:    models.AuthMethodCLI,
+		AuthMethod:    "cli",
 		MaxWorkers:    3,
 		WorkerTimeout: 300,
 	}
@@ -843,7 +843,7 @@ func TestLLMConfigRepo_MaxWorkersDefaultZero(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 	}
 	if err := repo.Create(ctx, config); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -1293,7 +1293,7 @@ func TestWorkerService_HasModelCapacity(t *testing.T) {
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 1,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -1529,7 +1529,7 @@ func TestWorkerService_DispatchNextPromotesQueuedTasks(t *testing.T) {
 		Provider:   models.ProviderTest,
 		Model:      "test-model",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		IsDefault:  true,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -1677,7 +1677,7 @@ func TestWorkerService_ProjectLimitIncreaseDispatchesQueued(t *testing.T) {
 		Provider:   models.ProviderTest,
 		Model:      "test-model",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		IsDefault:  true,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
@@ -1778,7 +1778,7 @@ func TestWorkerService_UnlimitedGlobalAndProjectDispatchQueuedTask(t *testing.T)
 		Provider:   models.ProviderTest,
 		Model:      "test-model",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		IsDefault:  true,
 		MaxWorkers: 0,
 	}
@@ -2037,7 +2037,7 @@ func TestWorkerService_ReleasesSlotsAfterTaskFailure(t *testing.T) {
 		Provider:   models.ProviderTest,
 		Model:      "test-model",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 1,
 		IsDefault:  true,
 	}
@@ -2101,7 +2101,7 @@ func TestWorkerService_ReleasesSlotsAfterTaskPanic(t *testing.T) {
 		Provider:   models.ProviderTest,
 		Model:      "test-model",
 		MaxTokens:  4096,
-		AuthMethod: models.AuthMethodCLI,
+		AuthMethod: "cli",
 		MaxWorkers: 1,
 		IsDefault:  true,
 	}
