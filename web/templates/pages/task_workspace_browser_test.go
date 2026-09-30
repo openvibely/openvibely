@@ -76,6 +76,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("model picker open", `String(document.getElementById('task-property-picker').matches(':popover-open'))`, "true")
 		b.click(`[data-detail-property="agent_id"]`)
 		b.waitFor("same row closes model picker", `String(document.getElementById('task-property-picker').matches(':popover-open'))`, "false")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "a"}, nil)
+		b.waitFor("unrelated key does not outline closed row", `getComputedStyle(document.querySelector('[data-detail-property="agent_id"]')).outlineStyle`, "none")
 		b.click(`[data-detail-property="agent_id"]`)
 		b.typeText("Example")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowDown"}, nil)

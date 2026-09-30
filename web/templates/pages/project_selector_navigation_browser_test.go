@@ -134,6 +134,12 @@ window.addEventListener('DOMContentLoaded', function() {
     key(trigger, 'Enter');
     if (!dialog.open) fail('Enter did not open the project selector');
     if (document.activeElement !== search) fail('opening the selector did not focus search');
+    if (document.querySelector('[data-selector-active]').getAttribute('aria-selected') !== 'true') fail('current project is not the initial keyboard selection');
+    trigger.setAttribute('data-pointer-over', '');
+    key(search, 'Enter');
+    if (dialog.open || document.getElementById('project-selector').value !== 'default') fail('immediate Enter did not keep the current project');
+    if (trigger.hasAttribute('data-pointer-over') || getComputedStyle(trigger).outlineStyle !== 'none') fail('project trigger retained its selection highlight');
+    key(trigger, 'Enter');
     var triggerRect = trigger.getBoundingClientRect();
     var dialogRect = dialog.getBoundingClientRect();
     if (dialogRect.right > window.innerWidth + 1 || dialogRect.left < -1) fail('selector is not contained on the mobile viewport');
@@ -213,10 +219,13 @@ window.addEventListener('DOMContentLoaded', function() {
     if (Math.abs(dialogRect.bottom - (triggerRect.top - 4)) > 2) fail('cleared upward selector detached from its trigger');
     if (visibleOptions().length !== 29) fail('clearing after upward placement did not restore project results');
 
+    key(search, 'Escape');
+    trigger.click();
     key(search, 'ArrowDown');
-    if (document.activeElement.dataset.projectId !== 'default') fail('ArrowDown did not focus the first project result');
-    key(document.activeElement, 'ArrowDown');
-    if (document.activeElement.dataset.projectId !== 'payments-api') fail('ArrowDown did not move through project results');
+    if (document.activeElement.dataset.projectId !== 'payments-api') fail('ArrowDown did not advance from the current project');
+    if (!document.activeElement.hasAttribute('data-selector-active') || getComputedStyle(document.activeElement).outlineStyle !== 'none') fail('keyboard result did not use hover highlight');
+    key(document.activeElement, 'ArrowUp');
+    if (document.activeElement.dataset.projectId !== 'default') fail('ArrowDown did not move through project results');
     key(document.activeElement, 'Escape');
     if (dialog.open || document.activeElement !== trigger) fail('Escape did not close the selector and restore trigger focus');
 
@@ -249,8 +258,10 @@ window.addEventListener('DOMContentLoaded', function() {
     confirmed.id = 'confirmed-dialog';
     confirmed.setAttribute('open', '');
     document.body.appendChild(confirmed);
-    document.querySelector('[data-project-id="payments-api"]').click();
+    key(search, 'ArrowDown');
+    key(document.activeElement, 'Enter');
     await wait(0);
+    if (trigger.hasAttribute('data-pointer-over') || getComputedStyle(trigger).outlineStyle !== 'none') fail('keyboard project selection left trigger highlighted');
     if (select.value !== 'payments-api' || trigger.textContent.trim() !== 'Payments API') fail('confirmed project switch did not update the selected project');
     if (confirmed.hasAttribute('open') || navigations[navigations.length - 1] !== '/analytics?project_id=payments-api&view=models&range=7d' || preferences !== 1) fail('confirmed project switch must retain the analytics tab and period, but clear project-specific filters');
     var retarget = window.sidebarSSERetargets && window.sidebarSSERetargets[window.sidebarSSERetargets.length - 1];
