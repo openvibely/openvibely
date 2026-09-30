@@ -242,52 +242,46 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 // For RepeatHours with interval > 1 (e.g. every 2 hours), only places cards at hours
 // aligned with the schedule's RunAt anchor.
 func addSubDailyOccurrences(tasksByDateTime map[string][]TaskOccurrence, task repository.TaskWithSchedule, startOfWeek, endOfWeek time.Time) {
-	// Determine the schedule's reference time for when entries start appearing.
-	// Use RunAt (the schedule's configured start time), not NextRun (which advances
-	// continuously and would hide entries for earlier days in the week).
-	refTime := task.Schedule.RunAt.Local()
-
-	// For RepeatHours with interval > 1, we need to check hour alignment
-	// against the schedule's RunAt anchor to only show at correct intervals.
-	anchorHour := task.Schedule.RunAt.Local().Hour()
-	checkHourAlignment := task.Schedule.RepeatType == models.RepeatHours && task.Schedule.RepeatInterval > 1
-
-	// For each day in the week, add one card per hour where the task would be running
-	currentDay := startOfWeek
-	for !currentDay.After(endOfWeek) {
-		for hour := 0; hour < 24; hour++ {
-			hourStart := time.Date(currentDay.Year(), currentDay.Month(), currentDay.Day(), hour, 0, 0, 0, currentDay.Location())
-			if hourStart.After(endOfWeek) {
-				break
-			}
-			if hourStart.Before(startOfWeek) {
-				continue
-			}
-
-			// Only show cards for hours at or after the schedule's start time
-			if hourStart.Before(time.Date(refTime.Year(), refTime.Month(), refTime.Day(), refTime.Hour(), 0, 0, 0, refTime.Location())) {
-				continue
-			}
-
-			// For multi-hour intervals, only show at aligned hours
-			// e.g. every 2 hours starting at 9 AM → 9, 11, 13, 15, ...
-			if checkHourAlignment {
-				diff := hour - anchorHour
-				if diff < 0 {
-					diff += 24
-				}
-				if diff%task.Schedule.RepeatInterval != 0 {
-					continue
-				}
-			}
-
-			dateTimeKey := fmt.Sprintf("%s-%02d", hourStart.Format("2006-01-02"), hour)
-			tasksByDateTime[dateTimeKey] = append(tasksByDateTime[dateTimeKey], TaskOccurrence{
-				Task:           task,
-				OccurrenceTime: hourStart,
+	if models.ValidateScheduleRepeatInterval(task.Schedule.RepeatInterval) != nil {
+		return
+	}
+	unit := time.Second
+	switch task.Schedule.RepeatType {
+	case models.RepeatMinutes:
+		unit = time.Minute
+	case models.RepeatHours:
+		unit = time.Hour
+	}
+	interval := time.Duration(task.Schedule.RepeatInterval) * unit
+	anchor := task.Schedule.RunAt.Local()
+	// Use elapsed time from RunAt, just as the scheduler does. Jump directly
+	// into the visible week without iterating through old occurrences.
+	atOrAfter := func(boundary time.Time) time.Time {
+		if !boundary.After(anchor) {
+			return anchor
+		}
+		elapsed := boundary.Sub(anchor)
+		steps := elapsed / interval
+		if elapsed%interval != 0 {
+			steps++
+		}
+		return anchor.Add(steps * interval)
+	}
+	seen := make(map[string]bool)
+	for next := atOrAfter(startOfWeek); !next.After(endOfWeek); {
+		key := fmt.Sprintf("%s-%02d", next.Format("2006-01-02"), next.Hour())
+		// The fall-back DST hour has two instants but only one calendar cell.
+		if !seen[key] {
+			seen[key] = true
+			tasksByDateTime[key] = append(tasksByDateTime[key], TaskOccurrence{
+				Task: task, OccurrenceTime: next,
 			})
 		}
-		currentDay = currentDay.AddDate(0, 0, 1)
+		// Group frequent runs by hour, retaining the first actual run time.
+		// Subtract the local minute/second offset so this also handles zones
+		// with fractional-hour UTC offsets and both instances of a DST hour.
+		hourStart := next.Add(-time.Duration(next.Minute())*time.Minute - time.Duration(next.Second())*time.Second - time.Duration(next.Nanosecond()))
+		next = atOrAfter(hourStart.Add(time.Hour))
 	}
 }
 
