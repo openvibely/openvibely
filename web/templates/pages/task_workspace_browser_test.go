@@ -483,3 +483,34 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		}
 	})
 }
+
+func TestBrowserFunctional_TaskChangesStickyHeadersStayInsideWorkspace(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	project := models.Project{ID: "sticky-project", Name: "Sticky"}
+	task := &models.Task{ID: "sticky-task", ProjectID: project.ID, Title: "Sticky headers", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+	diff := "diff --git a/example.go b/example.go\n--- a/example.go\n+++ b/example.go\n@@ -1,100 +1,100 @@\n" + strings.Repeat(" unchanged line\n", 100)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/tasks/sticky-task":
+			_ = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "changes", nil).Render(r.Context(), w)
+		case "/tasks/sticky-task/changes":
+			_ = components.DiffViewerWithReview(diff, task.ID, nil).Render(r.Context(), w)
+		case "/tasks/sticky-task/changes/summary":
+			fmt.Fprint(w, `{"files":1}`)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/sticky-task?tab=changes", "sticky-diff", func(b *composerFocusCDP) {
+		b.waitFor("diff loaded", `String(!!document.querySelector('.diff-file-header'))`, "true")
+		b.waitFor("scroll diff workspace", `(function(){var s=document.getElementById('tab-changes');s.scrollTop=300;return String(s.scrollTop>0)})()`, "true")
+		b.waitFor("whole pinned header visible", `(function(){var s=document.getElementById('tab-changes').getBoundingClientRect(),h=document.querySelector('.diff-file-header'),r=h.getBoundingClientRect();return String(Math.abs(r.top-s.top)<1 && r.bottom<=s.bottom && h.dataset.stuck==='1')})()`, "true")
+		b.waitFor("reset scrolling", `(function(){document.getElementById('tab-changes').scrollTop=0;return 'done'})()`, "done")
+		b.waitFor("rounded header restored", `String(!document.querySelector('.diff-file-header').hasAttribute('data-stuck'))`, "true")
+	})
+}
