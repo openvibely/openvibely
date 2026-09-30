@@ -305,7 +305,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 		Provider:      models.ProviderAnthropic,
 		AuthMethod:    models.AuthMethodAPIKey,
 		APIKey:        "api-complex-key",
-		Model:         "claude-opus-5-20250929",
+		Model:         "claude-opus-5",
 		ExtraBodyJSON: `{"selected":"api-complex"}`,
 		BaseURL:       "https://anthropic.example/api-complex",
 	}
@@ -315,7 +315,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 		AuthMethod:        models.AuthMethodOAuth,
 		OAuthAccessToken:  "oauth-moderate-access",
 		OAuthRefreshToken: "oauth-moderate-refresh",
-		Model:             "claude-sonnet-5-20250929",
+		Model:             "claude-sonnet-5",
 		ExtraBodyJSON:     `{"selected":"oauth-moderate"}`,
 	}
 	apiSimple := &models.LLMConfig{
@@ -323,7 +323,7 @@ func TestLLMService_ImageAttachments_VisionRoutingPreservesCompactSelectionSeman
 		Provider:      models.ProviderAnthropic,
 		AuthMethod:    models.AuthMethodAPIKey,
 		APIKey:        "api-simple-key",
-		Model:         "claude-haiku-4-5-20250929",
+		Model:         "claude-haiku-4-5-20251001",
 		ExtraBodyJSON: `{"selected":"api-simple"}`,
 	}
 	for _, cfg := range []*models.LLMConfig{textOnlyDefault, apiComplex, oauthModerate, apiSimple} {
@@ -534,7 +534,7 @@ func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfi
 		OAuthAccessToken:     "task-oauth-access",
 		OAuthRefreshToken:    "task-oauth-refresh",
 		OAuthClientSecret:    "task-client-secret",
-		Model:                "claude-opus-5-20250929",
+		Model:                "claude-opus-5",
 		BaseURL:              "https://anthropic.example/v1",
 		ExtraBodyJSON:        `{"task_setting":"body"}`,
 		CustomAuthConfigJSON: `{"task_secret":"config"}`,

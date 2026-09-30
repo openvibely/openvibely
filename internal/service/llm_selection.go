@@ -165,10 +165,21 @@ func SelectLLM(complexity ComplexityResult, configs []models.LLMConfig) *LLMSele
 	return SelectLLMWithVision(complexity, configs, false)
 }
 
-// SelectLLMWithVision picks the best model config for the given complexity from the available configs.
-// If requiresVision is true, only Anthropic API providers (which support vision) are considered.
-// Returns nil if no suitable config is found (caller should fall back to default).
+// supportedSelectionConfigs excludes unsupported built-in models without changing saved configs.
+func supportedSelectionConfigs(configs []models.LLMConfig) []models.LLMConfig {
+	result := make([]models.LLMConfig, 0, len(configs))
+	for _, cfg := range configs {
+		if models.BuiltInModelSupported(cfg.Provider, cfg.Model) {
+			result = append(result, cfg)
+		}
+	}
+	return result
+}
+
+// SelectLLMWithVision picks a supported model for the given complexity and vision requirements.
+// It returns nil if no suitable config is found.
 func SelectLLMWithVision(complexity ComplexityResult, configs []models.LLMConfig, requiresVision bool) *LLMSelectionResult {
+	configs = supportedSelectionConfigs(configs)
 	if len(configs) == 0 {
 		return nil
 	}

@@ -1727,6 +1727,9 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 	if err := unsupportedCatalogModel(req.Agent); err != nil {
 		return llmcontracts.AgentResult{}, err
 	}
+	if spec, ok := models.LookupModel(models.ProviderOpenAI, req.Agent.Model); ok {
+		req.Agent.Model = spec.ID
+	}
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {
 		case llmcontracts.OperationDirect:

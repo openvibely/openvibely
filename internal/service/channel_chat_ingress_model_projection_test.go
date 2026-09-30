@@ -519,6 +519,34 @@ func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 	assertChannelVisionCompactStatement(t, modelStatements)
 }
 
+func TestChannelChatAgentSelectionSkipsRetiredDefault(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		t.Fatal(err)
+	}
+	retired := &models.LLMConfig{Name: "Retired", Provider: models.ProviderOpenAI, Model: "gpt-5.2-codex", IsDefault: true}
+	if err := repo.Create(ctx, retired); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selectChannelChatAgentOptions(ctx, repo, "hello", false); err == nil || !strings.Contains(err.Error(), "no supported models") {
+		t.Fatalf("retired-only selection error = %v", err)
+	}
+	supported := &models.LLMConfig{Name: "Custom", Provider: models.ProviderOpenAICompatible, Model: "custom"}
+	if err := repo.Create(ctx, supported); err != nil {
+		t.Fatal(err)
+	}
+	// Requiring vision exercises the channel's default/first-model fallback.
+	selection, err := selectChannelChatAgentOptions(ctx, repo, "hello", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Agent == nil || selection.Agent.ID != supported.ID {
+		t.Fatalf("selected %v, want supported model %s", selection, supported.ID)
+	}
+}
+
 func TestChannelChatAgentSelectionWithNoModelsUsesCompactQuery(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
@@ -731,6 +759,9 @@ func seedChannelRichModel(tb testing.TB, ctx context.Context, db *sql.DB, repo *
 		CustomAuthStateJSON:  `{"token":"channel-custom-state"}`,
 		MixtureConfigJSON:    `{"large":"` + largePayload + `"}`,
 		IsDefault:            isDefault,
+	}
+	if provider == models.ProviderAnthropic {
+		model.Model = "claude-sonnet-5"
 	}
 	if err := repo.Create(ctx, model); err != nil {
 		tb.Fatalf("create rich model: %v", err)

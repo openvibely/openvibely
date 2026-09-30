@@ -14,6 +14,15 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestExecuteTaskCreationsRejectsRetiredOnlyAutomaticSelection(t *testing.T) {
+	configs := []models.LLMConfig{{ID: "retired", Provider: models.ProviderOpenAI, Model: "gpt-5.2-codex", IsDefault: true}}
+	// No service is needed: rejection must happen before any task is persisted.
+	summary := ExecuteTaskCreations(context.Background(), []TaskCreationRequest{{Title: "Test", Prompt: "Do work"}}, "project", nil, configs)
+	if !strings.Contains(summary, "no supported models configured") || strings.Contains(summary, "Created 1") {
+		t.Fatalf("unexpected summary: %s", summary)
+	}
+}
+
 func TestExecuteTaskCreations(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -3380,7 +3389,7 @@ func TestAutoStartTasks_SingleAgentAvailable(t *testing.T) {
 	agent := &models.LLMConfig{
 		Name:           "Claude Sonnet",
 		Provider:       models.ProviderAnthropic,
-		Model:          "claude-sonnet-4",
+		Model:          "claude-sonnet-5",
 		AutoStartTasks: true,
 	}
 	if err := llmConfigRepo.Create(ctx, agent); err != nil {
