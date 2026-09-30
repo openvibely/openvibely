@@ -45,7 +45,6 @@ templ TaskWorkspaceScript() {
 			var main = root.closest('#main-content');
 			var gutter = main ? root.getBoundingClientRect().left - main.getBoundingClientRect().left : 24;
 			root.style.setProperty('--task-panel-reserved-width', Math.max(0, displayedWidth - (window.innerWidth - root.getBoundingClientRect().right) + gutter) + 'px');
-			opener.querySelector('path').setAttribute('d', panel.hidden ? 'm15 6-6 6 6 6' : 'm9 6 6 6-6 6');
 			opener.setAttribute('aria-label', panel.hidden ? 'Open details panel' : 'Collapse details panel');
 			panel.setAttribute('role', overlay ? 'dialog' : 'complementary');
 			if (overlay && !panel.hidden) panel.setAttribute('aria-modal', 'true');

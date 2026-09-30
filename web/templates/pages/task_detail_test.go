@@ -11,6 +11,21 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+func TestTaskDetailsToggleUsesRightSidebarIcon(t *testing.T) {
+	var buf bytes.Buffer
+	task := &models.Task{ID: "task", ProjectID: "project", Title: "Task"}
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	_, toggle, _ := strings.Cut(buf.String(), `id="task-details-opener"`)
+	toggle, _, _ = strings.Cut(toggle, "</button>")
+	for _, want := range []string{`<rect x="3" y="3" width="18" height="18" rx="2"`, `<line x1="15" y1="3" x2="15" y2="21"`} {
+		if !strings.Contains(toggle, want) {
+			t.Errorf("missing mirrored sidebar icon geometry %q", want)
+		}
+	}
+}
+
 func TestTaskPanelMatchesPageSurfaceAndInsetsTabs(t *testing.T) {
 	var buf bytes.Buffer
 	if err := TaskDetailPanel().Render(context.Background(), &buf); err != nil {
