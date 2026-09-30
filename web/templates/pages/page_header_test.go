@@ -39,6 +39,16 @@ func TestAutomationEditorActionsShareCompactHeaderRow(t *testing.T) {
 	}
 }
 
+func TestNewTaskBreadcrumbUsesSharedTypography(t *testing.T) {
+	source, err := os.ReadFile("task_new.templ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), `aria-label="Breadcrumb" data-page-header>`) {
+		t.Fatal("nested new-task breadcrumb must apply shared typography to its direct links, separator, and title input")
+	}
+}
+
 func TestPageHeaderSubtitlesRemoved(t *testing.T) {
 	for _, page := range []string{"chat", "history", "upcoming", "analytics"} {
 		source, err := os.ReadFile(page + ".templ")
