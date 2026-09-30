@@ -371,6 +371,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	compactionThreshold := normalizedCompactionThresholdForModel(opts.CompactionTokenThreshold, opts.Model)
 	tokenLedger := &agenticSessionTokenLedger{}
 	compactionGeneration := 0
+	completedSampling := false
 	toolOutputTokenLimit := normalizedToolOutputTokenLimit(opts.ToolOutputTokenLimit)
 	compactIfNeeded := func(items []any, sessionTokenEstimate int, force bool) ([]any, error) {
 		if !opts.AutoCompaction {
@@ -387,6 +388,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		compactedItems, summary, err := c.compactAgenticInputItems(ctx, items, tools, opts, isChatGPTOAuth)
 		if err != nil {
+			if completedSampling {
+				// Codex ends the turn on mid-turn compaction failure. Retrying the
+				// original request can repeat tools whose results exist only here.
+				return nil, llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "OpenAI mid-turn compaction", err)
+			}
 			return nil, err
 		}
 
@@ -517,6 +523,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			}
 			return nil, providerErr
 		}
+		completedSampling = true
 		if localSteering.empty() {
 			for _, record := range pendingAsyncDeliveries {
 				if opts.OnAsyncToolDelivered != nil {

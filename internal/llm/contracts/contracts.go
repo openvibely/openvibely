@@ -26,10 +26,12 @@ const (
 	ErrorPendingInputInfeasible      ErrorCategory = "pending_input_infeasible"
 	ErrorNativeCompactionUnsupported ErrorCategory = "native_compaction_unsupported"
 	ErrorNativeCompactionFailed      ErrorCategory = "native_compaction_failed"
-	ErrorCompactionInputInfeasible   ErrorCategory = "compaction_input_infeasible"
-	ErrorLocalCompactionFailed       ErrorCategory = "local_compaction_failed"
-	ErrorTransportFailure            ErrorCategory = "transport_failure"
-	ErrorOutputTokenLimitReached     ErrorCategory = "output_token_limit_reached"
+	// A completed sampling step makes restarting the original request unsafe.
+	ErrorMidTurnCompactionFailed   ErrorCategory = "mid_turn_compaction_failed"
+	ErrorCompactionInputInfeasible ErrorCategory = "compaction_input_infeasible"
+	ErrorLocalCompactionFailed     ErrorCategory = "local_compaction_failed"
+	ErrorTransportFailure          ErrorCategory = "transport_failure"
+	ErrorOutputTokenLimitReached   ErrorCategory = "output_token_limit_reached"
 )
 
 // CategorizedError retains the provider error while exposing stable policy semantics.
