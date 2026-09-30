@@ -2809,6 +2809,55 @@ func TestLLMConfigRepo_TransferDefaultAndDelete(t *testing.T) {
 	}
 }
 
+func TestLLMConfigRepo_RetiredDefaultReplacement(t *testing.T) {
+	for _, hasSupported := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supported=%v", hasSupported), func(t *testing.T) {
+			repo := NewLLMConfigRepo(testutil.NewTestDB(t))
+			ctx := context.Background()
+			original, err := repo.GetDefault(ctx)
+			if err != nil || original == nil {
+				t.Fatalf("default: %v", err)
+			}
+			retired := &models.LLMConfig{Name: "A Retired", Provider: models.ProviderAnthropic, Model: "retired-test-model"}
+			if err := repo.Create(ctx, retired); err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.TransferDefaultAndDelete(ctx, original.ID, retired.ID); err == nil {
+				t.Fatal("retired replacement accepted")
+			}
+			current, err := repo.GetDefault(ctx)
+			if err != nil || current == nil || current.ID != original.ID {
+				t.Fatal("failed transfer changed default")
+			}
+			var replacement *models.LLMConfig
+			if hasSupported {
+				spec, _ := models.DefaultModel(models.ProviderAnthropic)
+				replacement = &models.LLMConfig{Name: "Z Supported", Provider: models.ProviderAnthropic, Model: spec.ID}
+				if err := repo.Create(ctx, replacement); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := repo.Delete(ctx, original.ID); err != nil {
+				t.Fatal(err)
+			}
+			current, err = repo.GetDefault(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasSupported && (current == nil || current.ID != replacement.ID) {
+				t.Fatal("supported replacement not selected")
+			}
+			if !hasSupported && current != nil {
+				t.Fatal("retired model auto-promoted")
+			}
+			preserved, err := repo.GetByID(ctx, retired.ID)
+			if err != nil || preserved == nil || preserved.Model != retired.Model {
+				t.Fatal("retired configuration not preserved")
+			}
+		})
+	}
+}
+
 func TestLLMConfigRepo_Delete_DefaultAutoReassigns(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

@@ -1415,7 +1415,7 @@ func modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, o
 			return templ_7745c5c3_Err
 		}
 		for _, agent := range modelOptions {
-			if !agent.IsDefault {
+			if !agent.IsDefault && !modelCardUnsupported(agent) {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 82, "<option value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err

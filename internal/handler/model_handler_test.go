@@ -1062,6 +1062,51 @@ func TestCreateModel_RejectsBlankRunnableModelSlugWithoutInsert(t *testing.T) {
 	}
 }
 
+func TestDeleteModel_RejectsRetiredReplacement(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	original, err := repo.GetDefault(ctx)
+	if err != nil || original == nil {
+		t.Fatalf("default: %v", err)
+	}
+	retired := &models.LLMConfig{Name: "Retired Replacement", Provider: models.ProviderAnthropic, Model: "retired-test-model"}
+	if err := repo.Create(ctx, retired); err != nil {
+		t.Fatal(err)
+	}
+	rec := htmxDelete(e, "/models/"+original.ID+"?new_default_id="+retired.ID)
+	assertCode(t, rec, http.StatusBadRequest)
+	if !strings.Contains(rec.Body.String(), "no longer supported") {
+		t.Fatalf("response: %s", rec.Body.String())
+	}
+	current, err := repo.GetDefault(ctx)
+	if err != nil || current == nil || current.ID != original.ID {
+		t.Fatal("rejected replacement changed or deleted default")
+	}
+}
+
+func TestCreateModel_NormalizesAnthropicCatalogID(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	form := modelValidationForm("Canonical Anthropic")
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", " CLAUDE-SONNET-5 ")
+	rec := htmxPost(e, "/models", form)
+	assertCode(t, rec, http.StatusOK)
+	configs, err := repo.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cfg := range configs {
+		if cfg.Name == "Canonical Anthropic" {
+			if cfg.Model != "claude-sonnet-5" {
+				t.Fatalf("saved model = %q", cfg.Model)
+			}
+			return
+		}
+	}
+	t.Fatal("created model missing")
+}
+
 func TestCreateModel_HTMXRejectsDuplicateNormalizedNameWithoutInsert(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

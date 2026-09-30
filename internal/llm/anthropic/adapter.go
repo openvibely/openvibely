@@ -377,6 +377,13 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		}
 	}
 
+	if spec, ok := models.LookupModel(models.ProviderAnthropic, agent.Model); ok {
+		agent.Model = spec.ID
+		req.Agent = agent
+	} else {
+		return llmcontracts.AgentResult{}, fmt.Errorf("Anthropic model %q is no longer supported; select a supported model", agent.Model)
+	}
+
 	extraTools, toolExecutor, toolFilter, cleanupRuntime := buildAnthropicRuntime(ctx, workDir, req.AgentDefinition)
 	defer cleanupRuntime()
 	agentSkipDefaults := agentSkipDefaultTools(req.AgentDefinition)
