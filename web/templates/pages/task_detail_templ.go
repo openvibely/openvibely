@@ -355,7 +355,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-automation-url-base=\"/automations/\">Tasks</a> <span class=\"text-2xl text-base-content/30 flex-shrink-0\">/</span><div class=\"min-w-0 flex-1\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-automation-url-base=\"/automations/\">Tasks</a> <span class=\"text-2xl text-base-content/30 flex-shrink-0\">/</span><div class=\"-ml-1 min-w-0 flex-1\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
