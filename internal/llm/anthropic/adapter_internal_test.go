@@ -11,6 +11,17 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAnthropicWebSearchUsesCatalog(t *testing.T) {
+	for _, spec := range models.ProviderModels(models.ProviderAnthropic) {
+		if got := anthropicModelSupportsWebSearch(spec.ID); got != spec.SupportsWebSearch {
+			t.Errorf("%s web search = %v, want %v", spec.ID, got, spec.SupportsWebSearch)
+		}
+	}
+	if anthropicModelSupportsWebSearch("unknown-model") {
+		t.Fatal("uncataloged model must not receive web search tools")
+	}
+}
+
 func TestAnthropicAgentResultPreservesNativeCompactionState(t *testing.T) {
 	usage := llmcontracts.Usage{
 		NativeCompactionStateJSON: `{"type":"compaction","content":"opaque native checkpoint"}`,

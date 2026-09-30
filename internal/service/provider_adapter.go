@@ -747,7 +747,7 @@ func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
 		case models.ProviderOpenAI:
 			return llmprompt.BuildCodexAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
 		case models.ProviderAnthropic:
-			return llmprompt.BuildAnthropicAgentSystemPrompt(req.ProjectInstructions, req.WorkDir)
+			return llmprompt.BuildAnthropicAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
 		default:
 			return llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, req.WorkDir)
 		}
@@ -763,7 +763,7 @@ func estimateProviderSystemPromptTokens(req llmcontracts.AgentRequest) int {
 					base = llmprompt.BuildOpenAIOAuthSystemPrompt(base)
 				}
 			case models.ProviderAnthropic:
-				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
+				base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, req.Followup, req.ChatMode, req.ChatSystemContext, false)
 			}
 			base = llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir)
 			if req.ChatMode == models.ChatModeOrchestrate && (req.Agent.Provider == models.ProviderOpenAI || req.Agent.Provider == models.ProviderAnthropic) {
