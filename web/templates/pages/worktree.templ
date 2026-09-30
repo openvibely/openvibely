@@ -10,8 +10,8 @@ import (
 
 // WorktreeInfoPanel renders the worktree information panel for a task detail page.
 templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat) {
-	<div id="worktree-info-panel" class="card bg-base-200/50 border border-base-300 mb-4">
-		<div class="card-body p-4 gap-3">
+	<div id="worktree-info-panel" class="mb-6">
+		<div class="flex flex-col gap-2">
 			<div class="flex items-center justify-between gap-3">
 				<h4 class="text-sm font-semibold flex items-center gap-2">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -27,7 +27,7 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 			</div>
 
 			if task.WorktreeBranch != "" {
-				<div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm mb-3">
+				<div class="flex flex-col gap-2 text-sm mb-3 break-words">
 					<div>
 						<span class="opacity-60">Branch:</span>
 						<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs">{ task.WorktreeBranch }</code>
@@ -39,9 +39,9 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 						</div>
 					}
 					if task.WorktreePath != "" {
-						<div class="col-span-2">
+						<div class="min-w-0">
 							<span class="opacity-60">Path:</span>
-							<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs truncate">{ task.WorktreePath }</code>
+							<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs break-all">{ task.WorktreePath }</code>
 						</div>
 					}
 				</div>
