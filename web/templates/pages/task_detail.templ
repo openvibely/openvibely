@@ -2510,6 +2510,11 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 		hx-swap="morph:outerHTML"
 		data-task-status={ string(task.Status) }
 	>
+		<style>
+			#task-detail-metrics { grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr)); }
+			#task-detail-metrics > div { display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; min-width:0; }
+			#task-detail-metrics .badge { margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; flex-shrink:0; line-height:1.4; }
+		</style>
 		<div>
 			<span class="text-sm opacity-60">Category:</span>
 			<span class="ml-2 badge badge-sm badge-outline">{ string(task.Category) }</span>
