@@ -55,7 +55,7 @@ func TestCodexPromptContextAndModes(t *testing.T) {
 func TestCodexPromptUsesOpenVibelyTools(t *testing.T) {
 	for _, model := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.5", "gpt-5.6-sol"} {
 		prompt := CodexSystemPrompt(model)
-		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async"} {
+		for _, unavailable := range []string{"apply_patch", "functions.exec", "exec_command", "request_user_input_async", "send_user_message_async", "multi_tool_use.parallel"} {
 			if strings.Contains(prompt, unavailable) {
 				t.Errorf("%s references unavailable %s", model, unavailable)
 			}

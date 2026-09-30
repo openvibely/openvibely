@@ -1069,7 +1069,8 @@ func TestLLMService_LifecycleDirectCallExternalizesOversizedInput(t *testing.T) 
 	svc.SetGlobalSkillRoot(root)
 	ctx := llmcontracts.WithArtifactExecutionID(context.Background(), "lifecycle-exec-oversized")
 	original := strings.Repeat("oversized lifecycle transcript ", 2000)
-	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 4096}
+	// Fit the coding prompt while keeping the full transcript over budget.
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 16384}
 
 	if _, _, err := svc.CallAgentDirect(ctx, original, nil, agent, t.TempDir()); err != nil {
 		t.Fatalf("CallAgentDirect: %v", err)

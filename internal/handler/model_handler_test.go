@@ -2452,12 +2452,16 @@ func TestCreateModel_SubscriptionUnsupportedAuthNormalizesOAuth(t *testing.T) {
 func TestCreateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
+			model := "claude-sonnet-4-5-20250929"
+			if provider == models.ProviderOpenAI {
+				model = "gpt-6-astra"
+			}
 			_, e, repo := setupTestHandler(t)
 			ctx := context.Background()
 			existing := &models.LLMConfig{
 				Name:              string(provider) + " existing account",
 				Provider:          provider,
-				Model:             "existing-model",
+				Model:             model,
 				AuthMethod:        models.AuthMethodOAuth,
 				OAuthAccessToken:  "existing-access",
 				OAuthRefreshToken: "existing-refresh",
@@ -2472,7 +2476,7 @@ func TestCreateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
 			form.Set("provider", string(provider))
 			form.Set("auth_method", "oauth")
 			form.Set("oauth_connection_id", existing.OAuthConnectionID)
-			form.Set("model", "linked-model")
+			form.Set("model", model)
 			if provider == models.ProviderAnthropic {
 				form.Set("anthropic_auth_type", "subscription")
 			} else {
@@ -2511,12 +2515,16 @@ func TestCreateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
 func TestUpdateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
 	for _, provider := range []models.LLMProvider{models.ProviderOpenAI, models.ProviderAnthropic} {
 		t.Run(string(provider), func(t *testing.T) {
+			model := "claude-sonnet-4-5-20250929"
+			if provider == models.ProviderOpenAI {
+				model = "gpt-6-astra"
+			}
 			_, e, repo := setupTestHandler(t)
 			ctx := context.Background()
 			healthy := &models.LLMConfig{
 				Name:              string(provider) + " healthy account",
 				Provider:          provider,
-				Model:             "healthy-model",
+				Model:             model,
 				AuthMethod:        models.AuthMethodOAuth,
 				OAuthAccessToken:  "healthy-access",
 				OAuthRefreshToken: "healthy-refresh",
@@ -2525,7 +2533,7 @@ func TestUpdateModel_SelectsExistingSharedOAuthAccount(t *testing.T) {
 			legacy := &models.LLMConfig{
 				Name:              string(provider) + " legacy private model",
 				Provider:          provider,
-				Model:             "legacy-model",
+				Model:             model,
 				AuthMethod:        models.AuthMethodOAuth,
 				OAuthAccessToken:  "stale-access",
 				OAuthRefreshToken: "stale-refresh",
