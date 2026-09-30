@@ -98,6 +98,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.click(`#task-detail-text-editor [type="submit"]`)
 		b.waitFor("draft goal", `document.querySelector('[data-draft-property="goal"]').value`, "A draft goal")
 		b.click("#task-panel-divider")
+		b.waitFor("thin tab baseline and stronger selected underline", `(function(){var row=document.querySelector('#task-details-panel [role="tablist"]'),active=getComputedStyle(row.querySelector('[aria-selected="true"]')),inactive=getComputedStyle(row.querySelector('[aria-selected="false"]'));return String(getComputedStyle(row).boxShadow.includes('0px -1px') && active.borderBottomWidth==='2px' && active.borderBottomColor===active.color && inactive.borderBottomColor==='rgba(0, 0, 0, 0)')})()`, "true")
 		b.waitFor("muted resize hover line", `getComputedStyle(document.getElementById('task-panel-divider'),'::after').opacity`, "0.45")
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 10, "y": 10}, nil)
 		b.waitFor("resize line fades after leaving", `getComputedStyle(document.getElementById('task-panel-divider'),'::after').opacity`, "0")

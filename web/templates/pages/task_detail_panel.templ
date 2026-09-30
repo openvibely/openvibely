@@ -22,8 +22,9 @@ templ TaskDetailPanel() {
 			#task-details-panel[data-overlay="true"] > [role="tablist"] { padding-right:2.5rem; }
 			#task-details-panel { position:fixed; right:0; top:var(--task-panel-top,0px); bottom:0; z-index:40; display:flex; flex-direction:column; width:var(--task-panel-width,420px); min-height:0; max-width:100%; border-width:0 0 0 1px; border-radius:0; }
 		[data-theme="light"] #task-details-panel { background-color:var(--ov-l-surface); }
-		#task-details-panel > [role="tablist"] { flex-shrink:0; margin:8px 12px 16px; }
-		#task-details-panel > [role="tablist"] > .tab { height:auto; padding-top:10px; padding-bottom:10px; }
+		#task-details-panel > [role="tablist"] { flex-shrink:0; margin:8px 12px 16px; box-shadow:inset 0 -1px color-mix(in srgb, currentColor 20%, transparent); }
+		#task-details-panel > [role="tablist"] > .tab { height:auto; padding-top:10px; padding-bottom:10px; border-bottom:2px solid transparent !important; }
+		#task-details-panel > [role="tablist"] > .tab[aria-selected="true"] { border-bottom-color:currentColor !important; }
 		#task-details-panel[hidden] { display:none; }
 		#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }
 		#task-panel-divider:focus { outline:none; }
