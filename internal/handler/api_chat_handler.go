@@ -167,13 +167,12 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "no agents available"})
 	}
 	complexity := service.AnalyzeComplexity(message)
+	availableModels = service.SupportedSelectionConfigs(availableModels)
 	result := service.SelectLLM(complexity, availableModels)
-	var selectedModel *models.LLMConfig
-	if result != nil {
-		selectedModel = result.LLMConfig
-	} else {
-		selectedModel = &availableModels[0]
+	if result == nil || result.LLMConfig == nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "no supported models configured; select a supported model in Models"})
 	}
+	selectedModel := result.LLMConfig
 
 	// Note: Interactive chat intentionally bypasses task worker capacity checks.
 	// Task worker limits (per-project/per-model) only gate task execution, not chat.

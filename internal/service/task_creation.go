@@ -50,7 +50,7 @@ func selectTaskCreationAgent(req TaskCreationRequest, availableAgents []models.L
 	if requestedAgentID != "" {
 		return requestedAgentID, ""
 	}
-	availableAgents = supportedSelectionConfigs(availableAgents)
+	availableAgents = SupportedSelectionConfigs(availableAgents)
 	if len(availableAgents) > 1 {
 		complexity := AnalyzeComplexity(req.Prompt)
 		if result := SelectLLM(complexity, availableAgents); result != nil {

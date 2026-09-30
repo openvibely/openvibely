@@ -165,8 +165,8 @@ func SelectLLM(complexity ComplexityResult, configs []models.LLMConfig) *LLMSele
 	return SelectLLMWithVision(complexity, configs, false)
 }
 
-// supportedSelectionConfigs excludes unsupported built-in models without changing saved configs.
-func supportedSelectionConfigs(configs []models.LLMConfig) []models.LLMConfig {
+// SupportedSelectionConfigs excludes unsupported built-in models without changing saved configs.
+func SupportedSelectionConfigs(configs []models.LLMConfig) []models.LLMConfig {
 	result := make([]models.LLMConfig, 0, len(configs))
 	for _, cfg := range configs {
 		if models.BuiltInModelSupportedForAuth(cfg.Provider, cfg.Model, cfg.AuthMethod) {
@@ -179,7 +179,7 @@ func supportedSelectionConfigs(configs []models.LLMConfig) []models.LLMConfig {
 // SelectLLMWithVision picks a supported model for the given complexity and vision requirements.
 // It returns nil if no suitable config is found.
 func SelectLLMWithVision(complexity ComplexityResult, configs []models.LLMConfig, requiresVision bool) *LLMSelectionResult {
-	configs = supportedSelectionConfigs(configs)
+	configs = SupportedSelectionConfigs(configs)
 	if len(configs) == 0 {
 		return nil
 	}
