@@ -83,7 +83,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 10;
+			var controllerVersion = 11;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -191,17 +191,20 @@ templ searchableSelectorScript() {
 				});
 			}
 			function close(root, restore) {
-				var state = nodes(root); if (state.dialog && state.dialog.open) state.dialog.close();
+				var state = nodes(root);
+                // Native dialog closure restores focus synchronously. Suppress the
+                // return outline before that focus event, not afterward.
+                if (state.button && root.__selectorKeyboard) {
+                    state.button.removeAttribute('data-pointer-over');
+                    state.button.setAttribute('data-selector-return-focus', '');
+                }
+                if (state.dialog && state.dialog.open) state.dialog.close();
 				if (root) {
 					delete root.__openVibelySearchableSelectorAnchorX;
 					if (root.__openVibelySearchableSelectorRefreshTimer) clearTimeout(root.__openVibelySearchableSelectorRefreshTimer);
 					delete root.__openVibelySearchableSelectorRefreshTimer;
 				}
 				if (state.button) state.button.setAttribute('aria-expanded', 'false');
-				if (state.button && root.__selectorKeyboard) {
-                    state.button.removeAttribute('data-pointer-over');
-                    state.button.setAttribute('data-selector-return-focus', '');
-                }
                 if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
 			}
 			function open(root, event) {
