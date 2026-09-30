@@ -1503,6 +1503,7 @@ func retainedUserMessageHistory(history []models.Execution, tokenBudget int) []m
 	if tokenBudget <= 0 {
 		return nil
 	}
+	history = llmopenai.UserMessageHistory(history)
 	retained := make([]models.Execution, 0, len(history))
 	remaining := tokenBudget
 	for i := len(history) - 1; i >= 0; i-- {

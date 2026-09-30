@@ -39,11 +39,16 @@ func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 					require.Nil(t, llmcontracts.InitialSteeringCommitFromContext(req.Ctx), "summarization must not consume live steering")
 					require.Contains(t, req.Message, "file already written")
 					require.Contains(t, req.Message, "new steer")
-					return llmcontracts.AgentResult{Output: "file already written; follow new steer"}, nil
+					// Deliberately omit both user instructions from the summary.
+					return llmcontracts.AgentResult{Output: "file already written"}, nil
 				case 3:
 					require.Empty(t, req.Message, "do not replay the consumed prompt")
 					require.True(t, llmcontracts.HistoryContinuationFromContext(req.Ctx))
 					require.Contains(t, buildLocalSummaryCompactionPrompt(req.ChatHistory), "new steer")
+					require.Len(t, req.ChatHistory, 3)
+					require.Equal(t, "late steer", req.ChatHistory[0].PromptSent)
+					require.Equal(t, "new steer", req.ChatHistory[1].PromptSent)
+					require.NotContains(t, req.ChatHistory[2].Output, "steer")
 					if secondOverflow {
 						commit := llmcontracts.InitialSteeringCommitFromContext(req.Ctx)
 						require.NoError(t, commit(req.Ctx, []any{map[string]any{"type": "message", "role": "assistant", "content": "retry progress"}}))
