@@ -370,7 +370,15 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	agent := req.Agent
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
 	if llmcontracts.HistoryContinuationFromContext(ctx) {
-		ctx = context.WithValue(ctx, recoveryMessagesKey{}, buildRecoveryHistory(req.ChatHistory))
+		messages := buildRecoveryHistory(req.ChatHistory)
+		// Service-side compaction stores its final summary as execution output.
+		// Claude reintroduces that summary as user context, not an assistant
+		// prefill (which Claude 4.6+ rejects). Keep ordinary history unchanged.
+		if n := len(messages); n > 0 && messages[n-1].Role == "assistant" {
+			summary := messages[n-1].Content
+			messages = appendMergedMessage(messages[:n-1], "user", summary)
+		}
+		ctx = context.WithValue(ctx, recoveryMessagesKey{}, messages)
 	}
 
 	// API paths only (OAuth or API key).
