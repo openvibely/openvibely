@@ -3,8 +3,10 @@ package openaiclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -119,5 +121,49 @@ func TestSteeringReplayUsesRecoveredAsyncOutputBeforeRepair(t *testing.T) {
 		items = repairInterruptedToolCalls(items)
 		require.Len(t, items, 2, "recovery must not duplicate the checkpoint's call")
 		require.Equal(t, "real output", items[1].(map[string]any)["output"])
+	}
+}
+
+func TestInitialSteeringCommitPrecedesSampling(t *testing.T) {
+	for _, failCommit := range []bool{false, true} {
+		name := "model failure after commit"
+		if failCommit {
+			name = "commit failure prevents request"
+		}
+		t.Run(name, func(t *testing.T) {
+			var committed atomic.Bool
+			var requests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				require.True(t, committed.Load(), "commit must precede provider sampling")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"error":{"message":"terminal model failure","type":"invalid_request_error"}}`))
+			}))
+			defer srv.Close()
+			previousURL := OpenAIAPIBaseURL
+			OpenAIAPIBaseURL = srv.URL + "/"
+			t.Cleanup(func() { OpenAIAPIBaseURL = previousURL })
+			client := newHTTPTestAPIKeyClient("test-key")
+			var saved []any
+			_, err := client.SendAgentic(context.Background(), "late steer", &AgenticOptions{
+				Model: "gpt-test", DisableTools: true,
+				InitialInputCommit: func(ctx context.Context, history []any) error {
+					if failCommit {
+						return errors.New("checkpoint failure")
+					}
+					saved = append([]any(nil), history...)
+					committed.Store(true)
+					return nil
+				},
+			})
+			require.Error(t, err)
+			if failCommit {
+				require.ErrorContains(t, err, "checkpoint failure")
+				require.Zero(t, requests.Load())
+			} else {
+				require.EqualValues(t, 1, requests.Load())
+				require.Equal(t, "late steer", saved[len(saved)-1].(map[string]any)["content"])
+			}
+		})
 	}
 }
