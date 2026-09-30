@@ -1782,7 +1782,8 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 		t.Fatalf("expected 200 HTMX response, got %d", rec.Code)
 	}
 	assertSchedulesTaskDetailFragment(t, rec.Body.String())
-	if !strings.Contains(rec.Body.String(), `Disabled`) || !strings.Contains(rec.Body.String(), `Resume`) {
+	if !strings.Contains(rec.Body.String(), `class="badge badge-warning badge-xs ml-2">Disabled</span>`) ||
+		!strings.Contains(rec.Body.String(), `aria-label="Resume schedule">`) {
 		t.Fatalf("expected refreshed paused schedule fragment, body=%s", rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "/schedules/"+s.ID+"/toggle?project_id="+project.ID) {
@@ -1805,7 +1806,8 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 HTMX resume response, got %d", rec.Code)
 	}
-	if strings.Contains(rec.Body.String(), `Disabled`) || !strings.Contains(rec.Body.String(), `Pause`) {
+	if strings.Contains(rec.Body.String(), `class="badge badge-warning badge-xs ml-2">Disabled</span>`) ||
+		!strings.Contains(rec.Body.String(), `aria-label="Pause schedule">`) {
 		t.Fatalf("expected refreshed enabled schedule fragment, body=%s", rec.Body.String())
 	}
 	trigger = struct {
