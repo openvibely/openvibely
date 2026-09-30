@@ -131,6 +131,9 @@ type AgenticOptions struct {
 	// and drains it in core/session/turn.rs before the next model request.
 	// This boundary is shared by HTTP, standard WebSocket, and Responses Lite.
 	OnLocalSteering func(ctx context.Context) (LocalSteeringInput, error)
+	// InitialInputCommit persists a prepared late steer before sampling and
+	// continues recording its tool/results history throughout this invocation.
+	InitialInputCommit func(context.Context, []any) error
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
 	// wait-style tools. Model sampling itself is not preempted by local steering.
 	LocalSteeringWakeup <-chan struct{}
@@ -449,7 +452,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	var allText strings.Builder
-	var persistSteeringHistory func(context.Context, []any) error
+	persistSteeringHistory := opts.InitialInputCommit
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		if persistSteeringHistory != nil {

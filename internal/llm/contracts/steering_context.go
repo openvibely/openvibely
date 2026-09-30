@@ -10,6 +10,23 @@ type steeringCallbackKey struct{}
 type steeringRetryResetCallbackKey struct{}
 type midTurnSteeringWakeupKey struct{}
 type localSteeringCallbackKey struct{}
+type initialSteeringCommitKey struct{}
+
+// InitialSteeringCommit records a late steer already prepared as the next
+// request's prompt, using the provider's fully reconstructed native history.
+type InitialSteeringCommit func(context.Context, []any) error
+
+func WithInitialSteeringCommit(ctx context.Context, commit InitialSteeringCommit) context.Context {
+	return context.WithValue(ctx, initialSteeringCommitKey{}, commit)
+}
+
+func InitialSteeringCommitFromContext(ctx context.Context) InitialSteeringCommit {
+	if ctx == nil {
+		return nil
+	}
+	commit, _ := ctx.Value(initialSteeringCommitKey{}).(InitialSteeringCommit)
+	return commit
+}
 
 // SteeringCallback returns raw steering text to inject before the next provider/tool-loop model request.
 type SteeringCallback func(context.Context) (string, error)

@@ -643,6 +643,9 @@ modelLoop:
 			preparedBefore, steeringErr := h.preparePendingSteeringInputs(ctx, &params, "")
 			if steeringErr != nil {
 				applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering before model call: %v", params.ExecID, steeringErr)
+				h.requeuePendingSteeringForExecution(ctx, params.ExecID)
+				err = steeringErr
+				break modelLoop
 			}
 			if preparedBefore.count() > 0 {
 				applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs before model call", params.ExecID, preparedBefore.count())
@@ -675,6 +678,18 @@ modelLoop:
 			break
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
+		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
+			batch := pendingSteering
+			commit := h.preparedSteeringCommit(params, batch)
+			requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, func(commitCtx context.Context, history []any) error {
+				if err := commit(commitCtx, history); err != nil {
+					return err
+				}
+				pendingSteering = removePreparedSteeringInputs(pendingSteering, batch)
+				return nil
+			})
+		}
 		requestCtx = llmcontracts.WithRetrySourceExecutionID(requestCtx, params.RetrySourceExecutionID)
 		requestCtx = service.WithDirectUsageProject(requestCtx, params.ProjectID)
 		requestCtx = llmcontracts.WithMidTurnSteeringWakeup(requestCtx, steeringWakeup)
@@ -717,11 +732,17 @@ modelLoop:
 		preparedAfter, steeringErr := h.preparePendingSteeringInputs(ctx, &params, result.Output)
 		if steeringErr != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after model call: %v", params.ExecID, steeringErr)
+			h.requeuePendingSteeringForExecution(ctx, params.ExecID)
+			err = steeringErr
+			break modelLoop
 		}
 		if preparedAfter.count() == 0 {
 			latePrepared, lateErr := h.waitForFinalSteeringInputs(ctx, &params, result.Output)
 			if lateErr != nil {
 				applog.Infof("[handler] processStreamingResponse exec=%s error preparing final steering before completion: %v", params.ExecID, lateErr)
+				h.requeuePendingSteeringForExecution(ctx, params.ExecID)
+				err = lateErr
+				break modelLoop
 			}
 			if latePrepared.count() == 0 {
 				break modelLoop
@@ -812,6 +833,7 @@ modelLoop:
 		prepared, steeringErr := h.preparePendingTextSteeringInputsFromPersistedReplay(ctx, &params, output)
 		if steeringErr != nil {
 			finalizeLifecycle(steeringErr, result.ChatContext)
+			h.requeuePendingSteeringForExecution(ctx, params.ExecID)
 			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after deferred completion: %v", params.ExecID, steeringErr)
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, steeringErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 			h.finalizeStreamingTurn(params, output)
@@ -1316,6 +1338,23 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 				HasAttachments: input.AttachmentSessionID != "",
 			})
 		}
+	}
+}
+
+func (h *Handler) preparedSteeringCommit(params streamingResponseParams, batch preparedSteeringBatch) llmcontracts.InitialSteeringCommit {
+	attachmentsCommitted := false
+	return func(ctx context.Context, history []any) error {
+		if !attachmentsCommitted {
+			for _, input := range batch.inputs {
+				if input.AttachmentSessionID != "" {
+					if _, _, _, err := h.processAttachmentsWithReturn(ctx, input.AttachmentSessionID, params.ExecID); err != nil {
+						return err
+					}
+				}
+			}
+			attachmentsCommitted = true
+		}
+		return h.threadInputRepo.CommitLocalSteering(ctx, params.ExecID, preparedSteeringInputIDs(batch), history)
 	}
 }
 
