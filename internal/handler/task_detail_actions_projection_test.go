@@ -56,7 +56,7 @@ func TestHandlerGetTaskDetailActionsUsesCompactTaskMetadata(t *testing.T) {
 			assertCode(t, rec, http.StatusOK)
 			assertContains(t, rec, `id="task-detail-actions"`)
 			assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/run"`)
-			assertContains(t, rec, "Edit")
+			assertContains(t, rec, "Delete")
 			assertNotContains(t, rec, "disabled")
 		})
 	}
@@ -66,7 +66,7 @@ func TestHandlerGetTaskDetailActionsUsesCompactTaskMetadata(t *testing.T) {
 		assertCode(t, rec, http.StatusOK)
 		assertContains(t, rec, "disabled")
 		assertNotContains(t, rec, `hx-post="/tasks/`+task.ID+`/run"`)
-		assertContains(t, rec, "Edit")
+		assertContains(t, rec, "Delete")
 	})
 
 	t.Run("running", func(t *testing.T) {
