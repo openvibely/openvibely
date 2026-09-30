@@ -1251,6 +1251,11 @@ func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, ori
 }
 
 func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapter, req llmcontracts.AgentRequest, cause error) (llmcontracts.AgentResult, error) {
+	// Claude ends the turn when compaction recovery fails or is exhausted.
+	// Dropping tool results and resuming generation can repeat completed work.
+	if req.Agent.Provider == models.ProviderAnthropic {
+		return llmcontracts.AgentResult{}, cause
+	}
 	req = restoreCurrentSteeringForRecovery(req)
 	budget := calculateRequestBudget(req)
 	truncated, externalized, cleanupArtifact, prepErr := s.preparePendingInputWithBudget(req, budget)
