@@ -495,7 +495,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									<span class="label-text-alt text-base-content/50">Max 10MB per file. Add new files to attach.</span>
 								</label>
 							</div>
-							<div class="flex gap-2">
+							<div class="flex flex-wrap items-center gap-2">
 								<button type="submit" class="btn btn-primary btn-sm">
 									Save Changes
 								</button>
@@ -2482,12 +2482,12 @@ templ TaskDetailActions(task *models.TaskDetailActionMetadata) {
 				Edit
 			</button>
 		}
-		<button
-			class="btn btn-sm btn-error btn-outline"
-			onclick="document.getElementById('delete-task-modal').showModal()"
-		>
-			Delete
-		</button>
+        <details class="dropdown dropdown-end">
+         <summary class="btn btn-ghost btn-sm" aria-label="More task actions">More</summary>
+         <ul class="dropdown-content menu bg-base-100 rounded-box border border-base-300 z-10 w-40 p-2">
+          <li><button type="button" class="text-error" onclick="this.closest('details').open = false; document.getElementById('delete-task-modal').showModal()">Delete task</button></li>
+         </ul>
+        </details>
 	</div>
 }
 
@@ -2503,7 +2503,7 @@ func taskExecutionMetricsValue(metrics *models.TaskExecutionMetrics) models.Task
 templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentLabel string) {
 	<div
 		id="task-detail-metrics"
-		class="grid gap-4 mb-6"
+		class="grid gap-3 mb-6 text-sm"
 		hx-get={ fmt.Sprintf("/tasks/%s/detail-status", task.ID) }
 		hx-trigger="every 3s"
 		hx-target="#task-detail-metrics"
@@ -2511,13 +2511,14 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 		data-task-status={ string(task.Status) }
 	>
 		<style>
-			#task-detail-metrics { grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr)); }
-			#task-detail-metrics > div { display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; min-width:0; }
-			#task-detail-metrics .badge { margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; flex-shrink:0; line-height:1.4; }
+			#task-detail-metrics { grid-template-columns:minmax(0,1fr); }
+			#task-detail-metrics > div { display:grid; grid-template-columns:7rem minmax(0,1fr); align-items:baseline; gap:0.75rem; min-width:0; }
+			#task-detail-metrics > div > span:last-child { min-width:0; overflow-wrap:anywhere; }
+			#task-detail-metrics .badge { justify-self:start; margin-left:0; max-width:100%; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; flex-shrink:0; line-height:1.4; }
 		</style>
 		<div>
 			<span class="text-sm opacity-60">Category:</span>
-			<span class="ml-2 badge badge-sm badge-outline">{ string(task.Category) }</span>
+			<span class="min-w-0">{ string(task.Category) }</span>
 		</div>
 		// Only show status badge if it provides meaningful information beyond category
 		// For backlog/scheduled tasks with pending status, the category badge is sufficient
@@ -2530,36 +2531,36 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 		<div>
 			<span class="text-sm opacity-60">Tag:</span>
 			if task.Tag != "" {
-				<span class="ml-2 badge badge-sm badge-outline inline-flex items-center">{ components.TagLabel(task.Tag) }</span>
+				<span class="min-w-0">{ components.TagLabel(task.Tag) }</span>
 			} else {
-				<span class="ml-2 badge badge-sm badge-outline opacity-70">None</span>
+				<span class="min-w-0">None</span>
 			}
 		</div>
 		if components.PriorityLabel(task.Priority) != "" {
 			<div>
 				<span class="text-sm opacity-60">Priority:</span>
-				<span class="ml-2 badge badge-sm badge-outline">{ components.PriorityLabel(task.Priority) }</span>
+				<span class="min-w-0">{ components.PriorityLabel(task.Priority) }</span>
 			</div>
 		}
 		<div>
 			<span class="text-sm opacity-60">Model:</span>
-			<span class="ml-2 badge badge-sm badge-outline">{ taskModelLabel(task, agents) }</span>
+			<span class="min-w-0">{ taskModelLabel(task, agents) }</span>
 		</div>
 		<div>
 			<span class="text-sm opacity-60">Agent:</span>
-			<span class="ml-2 badge badge-sm badge-outline">{ taskAgentLabel(task, agentLabel) }</span>
+			<span class="min-w-0">{ taskAgentLabel(task, agentLabel) }</span>
 		</div>
 		if task.Status == models.StatusRunning && metrics.LatestStartedAt != nil {
 			<div>
 				<span class="text-sm opacity-60">Elapsed:</span>
-				<span class="ml-2 badge badge-warning">{ components.FormatElapsedTime(*metrics.LatestStartedAt) }</span>
+				<span class="min-w-0">{ components.FormatElapsedTime(*metrics.LatestStartedAt) }</span>
 			</div>
 		}
 		if (task.Status == models.StatusCompleted || task.Status == models.StatusFailed) && metrics.LatestDurationMs > 0 {
 			if dur := components.FormatDuration(metrics.LatestDurationMs); dur != "" {
 				<div>
 					<span class="text-sm opacity-60">Duration:</span>
-					<span class="ml-2 badge badge-sm badge-outline">{ dur }</span>
+					<span class="min-w-0">{ dur }</span>
 				</div>
 			}
 		}
@@ -2613,21 +2614,30 @@ templ SwarmContextPanel(task *models.Task) {
 }
 
 templ TaskPromptPanel(task *models.Task) {
-	<div id="task-prompt-panel" class="card bg-base-200/50 border border-base-300 mb-4">
-		<div class="card-body p-4 gap-3">
-			<div class="text-sm font-semibold">Prompt</div>
-			if task.Prompt != "" {
-				<div class="textarea textarea-bordered textarea-sm w-full min-h-32 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed">{ task.Prompt }</div>
-			} else {
-				<p class="text-sm opacity-60">No prompt set</p>
-			}
-		</div>
-	</div>
+ <section id="task-prompt-panel" class="mb-6 space-y-2">
+  <h3 class="text-sm font-semibold">Prompt</h3>
+  if task.Prompt != "" {
+   if len([]rune(task.Prompt)) > 240 {
+    <details id="task-prompt-expanded" class="group">
+     <summary class="cursor-pointer text-sm list-none">
+      <span class="block whitespace-pre-wrap break-words leading-relaxed group-open:hidden">{ string([]rune(task.Prompt)[:240]) + "…" }</span>
+      <span class="link text-xs opacity-60 group-open:hidden">Show more</span>
+      <span class="link text-xs opacity-60 hidden group-open:inline">Show less</span>
+     </summary>
+     <div class="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{ task.Prompt }</div>
+    </details>
+   } else {
+    <div class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ task.Prompt }</div>
+   }
+  } else {
+   <p class="text-sm opacity-60">No prompt set</p>
+  }
+ </section>
 }
 
 templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
-	<div id="task-goal-panel" class="card bg-base-200/50 border border-base-300 mb-4" data-task-id={ taskID }>
-		<div class="card-body p-4 gap-3">
+	<div id="task-goal-panel" class="mb-6" data-task-id={ taskID }>
+		<div class="flex flex-col gap-2">
 			<div class="flex items-center justify-between gap-3">
 				<div>
 					<div class="text-sm font-semibold">Goal</div>
@@ -2640,7 +2650,7 @@ templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
 				}
 			</div>
 			if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-				<div class="textarea textarea-bordered textarea-sm w-full min-h-20 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed">{ goal.Objective }</div>
+				<div class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ goal.Objective }</div>
 				if goal.Reason != "" {
 					<p class="text-xs opacity-60">Reason: { goal.Reason }</p>
 				}

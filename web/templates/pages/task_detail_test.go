@@ -11,6 +11,31 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+func TestTaskDetailsUsesSimpleSections(t *testing.T) {
+	task := &models.Task{ID: "simple", Status: models.StatusCompleted, Prompt: strings.Repeat("Long prompt ", 80)}
+	var buf bytes.Buffer
+	if err := TaskDetailMetrics(task, models.TaskExecutionMetrics{}, nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "badge-outline") || !strings.Contains(buf.String(), "grid-template-columns:7rem minmax(0,1fr)") {
+		t.Fatal("metadata should use plain label/value rows, with only status badged")
+	}
+	buf.Reset()
+	if err := TaskPromptPanel(task).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "textarea-bordered") || !strings.Contains(buf.String(), "Show more") || !strings.Contains(buf.String(), "<details") {
+		t.Fatal("prompt should be an unboxed, collapsed preview")
+	}
+	buf.Reset()
+	if err := TaskGoalPanel(task.ID, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "card-body") {
+		t.Fatal("goal should be unboxed")
+	}
+}
+
 func TestTaskDetailsToggleUsesRightSidebarIcon(t *testing.T) {
 	var buf bytes.Buffer
 	task := &models.Task{ID: "task", ProjectID: "project", Title: "Task"}
@@ -407,7 +432,7 @@ func TestTaskDetailContent_LifecycleTabFillsRemainingHeight(t *testing.T) {
 	}
 }
 
-func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *testing.T) {
+func TestTaskDetailContent_DetailsTabRendersScrollablePlainSections(t *testing.T) {
 	task := &models.Task{
 		ID:                      "task-layout-1",
 		Title:                   "Task",
@@ -456,12 +481,13 @@ func TestTaskDetailContent_DetailsTabRendersScrollableMatchedSectionCards(t *tes
 		}
 		lastIndex = idx
 	}
-	if got := strings.Count(output, `class="card bg-base-200/50 border border-base-300 mb-4"`); got < 3 {
-		t.Fatalf("expected prompt, goal, and worktree cards to share section styling, got %d matching cards", got)
+	if strings.Contains(output, `class="card bg-base-200/50 border border-base-300 mb-4"`) {
+		t.Fatal("details sections should not have nested cards")
 	}
-	if !strings.Contains(output, `class="textarea textarea-bordered textarea-sm w-full min-h-32 h-auto cursor-default whitespace-pre-wrap overflow-x-auto font-sans text-sm leading-relaxed"`) {
-		t.Fatal("expected prompt content box to match the goal textarea styling")
+	if !strings.Contains(output, `whitespace-pre-wrap break-words text-sm leading-relaxed`) {
+		t.Fatal("expected plain readable prompt content")
 	}
+
 	if strings.Contains(output, `flex-1 min-h-0 flex flex-col mb-6`) {
 		t.Fatal("prompt should not render as an uncontained flex filler")
 	}
@@ -509,8 +535,8 @@ func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
 		}
 	}
 	for _, requiredClass := range []string{
-		`<span class="ml-2 badge badge-sm badge-outline">backlog</span>`,
-		`<span class="ml-2 badge badge-sm badge-outline opacity-70">None</span>`,
+		`<span class="min-w-0">backlog</span>`,
+		`<span class="min-w-0">None</span>`,
 	} {
 		if !strings.Contains(output, requiredClass) {
 			t.Fatalf("expected neutral metadata badge class %q, got: %s", requiredClass, output)
