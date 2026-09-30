@@ -131,6 +131,9 @@ type AgenticOptions struct {
 	// and drains it in core/session/turn.rs before the next model request.
 	// This boundary is shared by HTTP, standard WebSocket, and Responses Lite.
 	OnLocalSteering func(ctx context.Context) (LocalSteeringInput, error)
+	// HasPendingSteering peeks without claiming input so compaction can finish
+	// before the pending queue is drained, as in Codex.
+	HasPendingSteering func(context.Context) (bool, error)
 	// InitialInputCommit persists a prepared late steer before sampling and
 	// continues recording its tool/results history throughout this invocation.
 	InitialInputCommit func(context.Context, []any) error
@@ -561,14 +564,30 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		// If no tool calls, we're done
 		if len(turnResult.toolCalls) == 0 {
+			if opts.HasPendingSteering != nil {
+				pending, checkErr := opts.HasPendingSteering(ctx)
+				if checkErr != nil {
+					return nil, fmt.Errorf("check pending steering: %w", checkErr)
+				}
+				if !pending {
+					break
+				}
+				inputItems, err = compactIfNeeded(inputItems, tokenLedger.projectedTokens(nil), false)
+				if err != nil {
+					return nil, fmt.Errorf("turn %d compaction: %w", turn+1, err)
+				}
+			}
 			localSteering, err = claimLocalSteeringAtBoundary(ctx, opts, false)
 			if err != nil {
 				return nil, fmt.Errorf("turn %d claim local steering: %w", turn+1, err)
 			}
 			if !localSteering.empty() {
-				inputItems, err = compactIfNeeded(inputItems, tokenLedger.projectedTokens(nil), false)
-				if err != nil {
-					return nil, fmt.Errorf("turn %d compaction: %w", turn+1, err)
+				// Legacy standalone callers may not supply a non-consuming peek.
+				if opts.HasPendingSteering == nil {
+					inputItems, err = compactIfNeeded(inputItems, tokenLedger.projectedTokens(nil), false)
+					if err != nil {
+						return nil, fmt.Errorf("turn %d compaction: %w", turn+1, err)
+					}
 				}
 				tools, err = refreshAgenticToolsAtSteeringBoundary(ctx, opts, tools, useStandaloneWebSearch)
 				if err != nil {

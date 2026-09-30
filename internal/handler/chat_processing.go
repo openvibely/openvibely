@@ -658,6 +658,11 @@ modelLoop:
 		attemptSteering = preparedSteeringBatch{}
 		ctx = llmcontracts.WithSteeringCallback(ctx, steeringCallback)
 		ctx = llmcontracts.WithLocalSteeringCallback(ctx, localSteeringCallback)
+		if h.threadInputRepo != nil {
+			ctx = llmcontracts.WithSteeringPendingCheck(ctx, func(checkCtx context.Context) (bool, error) {
+				return h.threadInputRepo.HasPendingSteering(checkCtx, params.ExecID)
+			})
+		}
 		ctx = llmcontracts.WithSteeringRetryResetCallback(ctx, func(callbackCtx context.Context) error {
 			if attemptSteering.count() == 0 || h.threadInputRepo == nil {
 				return nil

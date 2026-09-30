@@ -1397,6 +1397,9 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		steeringWakeup, unsubscribe := s.threadInputRepo.SubscribeSteeringWakeups(exec.ID)
 		unsubscribeSteeringWakeup = unsubscribe
 		callCtx = llmcontracts.WithMidTurnSteeringWakeup(callCtx, steeringWakeup)
+		callCtx = llmcontracts.WithSteeringPendingCheck(callCtx, func(checkCtx context.Context) (bool, error) {
+			return s.threadInputRepo.HasPendingSteering(checkCtx, exec.ID)
+		})
 		callCtx = llmcontracts.WithSteeringCallback(callCtx, func(callbackCtx context.Context) (string, error) {
 			inputs, steeringErr := s.threadInputRepo.PreparePendingTextSteering(callbackCtx, exec.ID, exec.ID)
 			if steeringErr != nil || len(inputs) == 0 {
