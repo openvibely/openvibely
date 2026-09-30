@@ -208,12 +208,14 @@ templ TaskWorkspaceScript() {
 		});
 		on(divider, 'dblclick', function() { resize(420); });
 		on(divider, 'keydown', function(event) {
+			delete divider.dataset.pointerFocus;
 			if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); resize(width + (event.key === 'ArrowLeft' ? 20 : -20)); }
 			if (event.key === 'Home') { event.preventDefault(); resize(340); }
 			if (event.key === 'End') { event.preventDefault(); resize(720); }
 		});
 		var drag = null;
-		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
+		on(divider, 'blur', function() { delete divider.dataset.pointerFocus; });
+		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.dataset.pointerFocus = 'true'; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
 		on(divider, 'pointermove', function(event) { if (drag) resize(drag.width + drag.x - event.clientX); });
 		on(divider, 'pointerup', function() { drag = null; });
 		on(divider, 'pointercancel', function() { drag = null; });

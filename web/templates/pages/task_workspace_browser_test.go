@@ -263,6 +263,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			t.Fatal(err)
 		}
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1}, nil)
+		b.waitFor("pointer resize has no outline", `getComputedStyle(document.getElementById('task-panel-divider')).outlineStyle`, "none")
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x - 60, "y": y, "button": "left", "buttons": 1}, nil)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": x - 60, "y": y, "button": "left", "buttons": 0, "clickCount": 1}, nil)
 		b.waitFor("pointer resize persisted", `localStorage.getItem('task-inspector-width')`, "500")
