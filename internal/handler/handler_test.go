@@ -1798,7 +1798,7 @@ func TestHandler_CreateModel_Normalization(t *testing.T) {
 		wantReasoning string
 	}{
 		{"openai_preserves_gpt54", "openai", "gpt-5.4", "xhigh", "gpt-5.4", "xhigh"},
-		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.6-sol", "high"},
+		{"openai_rejects_unknown", "openai", "unknown-model", "high", "", ""},
 		{"non_openai_preserves", "anthropic", "claude-opus-4-6", "xhigh", "claude-opus-4-6", ""},
 		{"anthropic_preserves_mythos51", "anthropic", "claude-mythos-5-1", "xhigh", "claude-mythos-5-1", "xhigh"},
 	}
@@ -1816,6 +1816,22 @@ func TestHandler_CreateModel_Normalization(t *testing.T) {
 			form.Set("temperature", "0")
 
 			rec := postForm(e, "/models", form)
+			if tc.wantModel == "" {
+				assertCode(t, rec, http.StatusBadRequest)
+				if !strings.Contains(rec.Body.String(), "unsupported") {
+					t.Fatalf("expected unsupported-model error, got %s", rec.Body.String())
+				}
+				agents, err := llmConfigRepo.List(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, agent := range agents {
+					if agent.Name == "Model "+tc.name {
+						t.Fatal("rejected model was persisted")
+					}
+				}
+				return
+			}
 			assertCode(t, rec, http.StatusSeeOther)
 
 			agents, _ := llmConfigRepo.List(ctx)
