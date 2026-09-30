@@ -54,19 +54,8 @@ script removeEditAttachment(attID string) {
 templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment, initialThread ...templ.Component) {
 	<div id="task-detail-content" class="h-full flex flex-col" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-initial-tab={ defaultTab }>
 		@layout.PageTitle(task.Title)
-		<!-- Compact task navigation; leave other page headers unchanged. -->
-		<style>
-			#main-content:has(> #task-detail-content) { padding-top: 0; }
-			#task-breadcrumb-toolbar { min-height: 40px; padding: 4px 0; margin-bottom: 0; }
-			#task-breadcrumb-toolbar > a,
-			#task-breadcrumb-toolbar > span,
-			#task-breadcrumb-toolbar [data-breadcrumb-selector-button] { font-size: 16px; line-height: 22px; font-weight: 400; }
-			#task-breadcrumb-toolbar [data-breadcrumb-selector-button] { font-weight: 500; }
-			#task-breadcrumb-toolbar > button { height: 32px; min-height: 32px; }
-			#task-details-opener { width: 32px; padding: 0; }
-		</style>
 		<!-- Breadcrumb navigation -->
-		<div id="task-breadcrumb-toolbar" class="flex items-center gap-2 flex-shrink-0 min-w-0">
+		<div id="task-breadcrumb-toolbar" data-page-header class="flex items-center gap-2 flex-shrink-0 min-w-0">
 			<a
 				id="task-automations-back-btn"
 				href={ templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", task.ProjectID)) }
