@@ -4037,7 +4037,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			return templ_7745c5c3_Err
 		}
 		if automationBuilderUsesEditShell(page) {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 311, "<div class=\"mb-6 min-w-0 shrink-0\" data-automation-builder-header><div class=\"flex flex-wrap items-start justify-between gap-3\"><div class=\"min-w-0 flex-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 311, "<div class=\"mb-6 min-w-0 shrink-0\" data-automation-builder-header><div class=\"flex flex-wrap items-center justify-between gap-3\" data-page-header><div class=\"min-w-0 flex-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

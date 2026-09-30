@@ -29,6 +29,16 @@ func TestPageHeadersUseCompactShellStyle(t *testing.T) {
 	}
 }
 
+func TestAutomationEditorActionsShareCompactHeaderRow(t *testing.T) {
+	source, err := os.ReadFile("automations.templ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(source), `<div class="flex flex-wrap items-center justify-between gap-3" data-page-header>`) {
+		t.Fatal("automation editor breadcrumb and actions must share the centered compact header row")
+	}
+}
+
 func TestPageHeaderSubtitlesRemoved(t *testing.T) {
 	for _, page := range []string{"chat", "history", "upcoming", "analytics"} {
 		source, err := os.ReadFile(page + ".templ")
