@@ -978,6 +978,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 	}
 	logContextDecisionWithBudget(originalHistory, req, compactionStrategy, externalized, nil, budget)
 	res, err := adapter.Call(req)
+	recordAnthropicRecovery(req, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(req, err, budget)
@@ -1233,6 +1234,7 @@ func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, ori
 	}
 	logContextDecisionWithBudget(originalReq.ChatHistory, prepared, "local_summary_retry", externalized, trigger, budget)
 	res, err := adapter.Call(prepared)
+	recordAnthropicRecovery(prepared, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(prepared, err, budget)
@@ -1277,6 +1279,7 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 	logContextDecisionWithBudget(req.ChatHistory, truncated, "last_resort", externalized, cause, budget)
 	applog.Infof("[agent-svc] using token-budgeted last-resort truncation provider=%s model=%s failure_category=%s", req.Agent.Provider, req.Agent.Model, contextFailureCategory(cause))
 	res, err := adapter.Call(truncated)
+	recordAnthropicRecovery(truncated, err)
 	err = categorizeProviderError(err)
 	if err != nil {
 		logContextFailureWithBudget(truncated, err, budget)
@@ -1394,6 +1397,7 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq.NativeCompactionStateJSON = ""
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
 	summaryReq.Ctx = llmcontracts.WithInitialSteeringCommit(summaryReq.Ctx, nil)
+	summaryReq.Ctx = llmcontracts.WithoutHistoryContinuation(summaryReq.Ctx)
 	summaryReq.Ctx = llmcontracts.WithSteeringPendingCheck(summaryReq.Ctx, nil)
 	summaryReq.Ctx = llmcontracts.WithLocalSteeringCallback(summaryReq.Ctx, func(context.Context) (llmcontracts.LocalSteeringInput, error) {
 		return llmcontracts.LocalSteeringInput{}, nil

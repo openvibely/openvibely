@@ -358,10 +358,20 @@ func anthropicAgentResult(output, textOnly string, usage llmcontracts.Usage, err
 	return res
 }
 
+type recoveryMessagesKey struct{}
+
+func recoveryMessages(ctx context.Context) []anthropicclient.Message {
+	messages, _ := ctx.Value(recoveryMessagesKey{}).([]anthropicclient.Message)
+	return messages
+}
+
 // Call handles Anthropic LLM requests.
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string, w *llmstream.Writer) (llmcontracts.AgentResult, error) {
 	agent := req.Agent
 	ctx = llmcontracts.WithNativeCompactionStateJSON(ctx, req.NativeCompactionStateJSON)
+	if llmcontracts.HistoryContinuationFromContext(ctx) {
+		ctx = context.WithValue(ctx, recoveryMessagesKey{}, buildRecoveryHistory(req.ChatHistory))
+	}
 
 	// API paths only (OAuth or API key).
 	if !agent.IsOAuth() && !agent.IsAnthropicAPIKey() {
@@ -460,6 +470,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		ToolExecutor:              toolExecutor,
 		ToolFilter:                toolFilter,
 		OnToolBoundarySteering:    llmcontracts.SteeringCallbackFromContext(ctx),
+		RecoveryMessages:          recoveryMessages(ctx),
 		OnCompaction: func(summary string) {
 			compactionSummary = strings.TrimSpace(summary)
 			applog.Infof("[anthropic] callDirect context compacted, summary_len=%d", len(summary))
@@ -537,6 +548,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {
 			if !chatInThinking {
 				chatInThinking = true
@@ -640,6 +652,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
+		RecoveryMessages:       recoveryMessages(ctx),
 		OnThinking: func(text string) {
 			if !inThinking {
 				inThinking = true
@@ -754,6 +767,15 @@ func anthropicContextUsage(resp *anthropicclient.AgenticResponse) llmcontracts.U
 }
 
 func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Message {
+	messages := buildRecoveryHistory(chatHistory)
+	if len(messages) > 0 && messages[len(messages)-1].Role == "user" {
+		messages = messages[:len(messages)-1]
+	}
+	return messages
+}
+
+// Recovery has no new prompt to replace a trailing user message.
+func buildRecoveryHistory(chatHistory []models.Execution) []anthropicclient.Message {
 	var messages []anthropicclient.Message
 	for _, exec := range chatHistory {
 		if exec.PromptSent != "" {
@@ -762,9 +784,6 @@ func buildClientHistory(chatHistory []models.Execution) []anthropicclient.Messag
 		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
 			messages = appendMergedMessage(messages, "assistant", replay)
 		}
-	}
-	if len(messages) > 0 && messages[len(messages)-1].Role == "user" {
-		messages = messages[:len(messages)-1]
 	}
 	return messages
 }

@@ -30,6 +30,10 @@ func WithHistoryContinuation(ctx context.Context) context.Context {
 	return context.WithValue(ctx, historyContinuationKey{}, true)
 }
 
+func WithoutHistoryContinuation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, historyContinuationKey{}, false)
+}
+
 func HistoryContinuationFromContext(ctx context.Context) bool {
 	if ctx == nil {
 		return false

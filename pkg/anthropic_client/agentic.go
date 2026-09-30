@@ -147,7 +147,9 @@ type AgenticOptions struct {
 	OnToolResult func(name string, output string, isError bool) // called when a tool completes
 	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
-	OnCompaction           func(summary string) // called when context is compacted
+	// RecoveryMessages replaces history and prompt after service-side compaction.
+	RecoveryMessages []Message
+	OnCompaction     func(summary string) // called when context is compacted
 }
 
 // NormalizeEffort returns an API-supported effort for the selected model.
@@ -496,6 +498,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	result := &AgenticResponse{Model: opts.Model}
+	if opts.RecoveryMessages != nil {
+		messages = nil
+		for _, msg := range opts.RecoveryMessages {
+			messages = append(messages, agenticMessage{Role: msg.Role, Content: msg.Content})
+		}
+	}
 	var allText strings.Builder
 	hasDurableCompactionState := false
 
@@ -515,7 +523,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			return c.sendAgenticTurn(attemptCtx, messages, tools, opts)
 		})
 		if err != nil {
-			return nil, categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err))
+			return nil, conversationError(categorizeAnthropicProviderError(fmt.Errorf("turn %d: %w", turn+1, err)), messages)
 		}
 
 		result.InputTokens += resp.billedInputTokens
