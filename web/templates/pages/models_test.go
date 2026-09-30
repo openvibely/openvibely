@@ -716,6 +716,50 @@ func TestModelsContentKeepsRetiredConfigurationWithError(t *testing.T) {
 	}
 }
 
+func TestBrowserFunctional_ModelEditorRetiredOptionsInChrome(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the rendered dropdown function without unrelated page lifecycle code.
+	source := rendered.String()
+	start := strings.Index(source, "function setModelOptions(provider, selectedModel)")
+	end := strings.Index(source, "function handleModelChange()")
+	if start < 0 || end <= start {
+		t.Fatal("model dropdown function missing")
+	}
+	fixture := `<main id="reconnect-result"></main><select id="model_id"></select><script>
+var catalog = ` + builtInModelOptionsJSON() + `;
+function canonicalProvider(provider) { return provider; }
+function isOpenAICompatibleProvider(provider) { return provider === 'openai_compatible'; }
+function modelOptionsForProvider(provider) { return catalog[provider] || []; }
+` + source[start:end] + `
+try {
+  [
+    ['anthropic', 'claude-opus-4-5', true],
+    ['openai', 'gpt-5.2-codex', true],
+    ['anthropic', catalog.anthropic[0].value, false],
+    ['openai', catalog.openai[0].value, false],
+    ['openai_compatible', 'custom-model', false],
+    ['ollama', 'local-model', false]
+  ].forEach(function(test) {
+    setModelOptions(test[0], test[1]);
+    var select = document.getElementById('model_id');
+    var option = select.selectedOptions[0];
+    if (!option || option.value !== test[1]) throw new Error('saved model lost: ' + test[1]);
+    if (option.disabled !== test[2]) throw new Error('wrong availability: ' + test[1]);
+    if (test[2] && option.textContent.indexOf('unavailable') < 0) throw new Error('missing warning: ' + test[1]);
+  });
+  document.getElementById('reconnect-result').setAttribute('data-test-result', 'pass');
+} catch (error) {
+  var result = document.getElementById('reconnect-result');
+  result.setAttribute('data-test-result', 'fail');
+  result.setAttribute('data-test-error', String(error));
+}
+</script>`
+	runReconnectChromeFixture(t, fixture)
+}
+
 func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 	agents := []models.LLMConfig{
 		{ID: "api-openai", Name: "OpenAI API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-astra"},
