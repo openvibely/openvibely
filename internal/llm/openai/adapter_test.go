@@ -864,7 +864,7 @@ func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
 
 	payload, _ := json.Marshal(gotBody)
 	body := string(payload)
-	for _, want := range []string{"SENTINEL_AGENT_PROMPT", "expert software engineer"} {
+	for _, want := range []string{"SENTINEL_AGENT_PROMPT", "You are Codex"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("ordinary direct call missing %q: %s", want, body)
 		}

@@ -456,9 +456,9 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	} else if lifecycleHookCall {
 		systemPrompt = projectInstructions
 	} else {
-		systemPrompt = llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir)
+		systemPrompt = llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir)
 	}
-	if !rawDirectPrompt {
+	if !rawDirectPrompt && lifecycleHookCall {
 		systemPrompt = applyOpenAIOAuthSystemPrompt(systemPrompt, agent)
 	}
 
@@ -564,7 +564,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		Model:                     agent.Model,
 		ContextWindow:             agent.ContextWindow,
 		MaxOutputTokens:           openAIAgenticOutputBudget,
-		System:                    applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
+		System:                    llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
 		ReasoningEffort:           reasoningEffort(agent.Model, agent.ReasoningEffort),
 		ReasoningSummary:          "auto",
 		AutoCompaction:            !agent.DisableNativeCompaction,
@@ -665,9 +665,11 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	// Reloading it here would undo an intentionally trimmed request.
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
+	if !isTaskFollowup {
+		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
+	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 
 	oaAttachments, err := convertAttachments(attachments)
@@ -832,7 +834,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 		Temperature:      agent.Temperature,
 		ContextWindow:    agent.ContextWindow,
 		MaxOutputTokens:  openAIAgenticOutputBudget,
-		System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
+		System:           llmprompt.BuildCodexAgentSystemPrompt(agent.Model, projectInstructions, effectiveWorkDir),
 		WorkDir:          effectiveWorkDir,
 		Attachments:      oaAttachments,
 		ExtraTools:       extraTools,
@@ -883,9 +885,11 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr := llmprompt.BuildCodexChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
+	if !isTaskFollowup {
+		systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
+	}
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 
 	oaAttachments, err := convertAttachments(attachments)
