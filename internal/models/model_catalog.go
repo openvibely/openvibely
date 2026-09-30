@@ -28,9 +28,11 @@ const (
 // ModelSpec is the single source of truth for built-in OpenAI and Anthropic
 // models. A routine model release should require only one entry here.
 type ModelSpec struct {
-	Provider LLMProvider
-	ID       string
-	Label    string
+	Provider      LLMProvider
+	ID            string
+	Label         string
+	Default       bool
+	VisionDefault bool
 
 	ReasoningEfforts       []string
 	DefaultReasoningEffort string
@@ -67,7 +69,7 @@ var modelCatalog = []ModelSpec{
 	{Provider: ProviderOpenAI, ID: "gpt-6.1-sol", Label: "gpt-6.1-sol", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ChatCompletionsReasoningMode: ChatCompletionsReasoningRequired},
 	{Provider: ProviderOpenAI, ID: "gpt-6-sol", Label: "gpt-6-sol", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Sol, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
 	{Provider: ProviderOpenAI, ID: "gpt-6-luna", Label: "gpt-6-luna", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT6Luna, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true, GPT6Workflow: true, ChatCompletionsReasoningMode: ChatCompletionsReasoningWhenToolFree},
-	{Provider: ProviderOpenAI, ID: "gpt-5.6-sol", Label: "gpt-5.6-sol", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
+	{Provider: ProviderOpenAI, ID: "gpt-5.6-sol", Label: "gpt-5.6-sol", Default: true, ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
 	{Provider: ProviderOpenAI, ID: "gpt-5.6-terra", Label: "gpt-5.6-terra", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
 	{Provider: ProviderOpenAI, ID: "gpt-5.6-luna", Label: "gpt-5.6-luna", ReasoningEfforts: efforts("none", "low", "medium", "high", "xhigh", "max"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexReserve, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, Transport: "responses_websocket_http_fallback", ResponsesLiteWebsocket: true},
 	{Provider: ProviderOpenAI, ID: "gpt-5.5", Label: "gpt-5.5", ReasoningEfforts: efforts("low", "medium", "high", "xhigh"), DefaultReasoningEffort: "medium", ContextWindow: standardOpenAIContext, PromptProfile: PromptProfileCodexGPT55, SupportsTemperature: true, SupportsWebSearch: true, SupportsResponsesWebSearch: true, SupportsOAuth: true, Transport: "responses_http", RemoteCompactionV2: true},
@@ -90,22 +92,37 @@ var modelCatalog = []ModelSpec{
 	{Provider: ProviderAnthropic, ID: "claude-opus-4-7", Label: "Claude Opus 4.7", ReasoningEfforts: efforts("low", "medium", "high", "xhigh", "max"), ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, NativeCompactionStrategy: anthropicCompaction, UsesAdaptiveThinking: true, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "anthropic_messages_http"},
 	{Provider: ProviderAnthropic, ID: "claude-opus-4-6", Label: "Claude Opus 4.6", ReasoningEfforts: efforts("low", "medium", "high", "max"), ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, NativeCompactionStrategy: anthropicCompaction, UsesAdaptiveThinking: true, DefaultOutputTokens: 64000, MaxOutputTokens: 128000, Transport: "anthropic_messages_http"},
 	{Provider: ProviderAnthropic, ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", ReasoningEfforts: efforts("low", "medium", "high", "max"), ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, SupportsNativeCompaction: true, NativeCompactionStrategy: anthropicCompaction, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
-	{Provider: ProviderAnthropic, ID: "claude-sonnet-4-5-20250929", Label: "Claude Sonnet 4.5", ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
+	{Provider: ProviderAnthropic, ID: "claude-sonnet-4-5-20250929", Label: "Claude Sonnet 4.5", Default: true, VisionDefault: true, ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
 	{Provider: ProviderAnthropic, ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", ContextWindow: standardAnthropicContext, PromptProfile: PromptProfileClaudeCode, SupportsTemperature: true, SupportsWebSearch: true, SupportsOAuth: true, DefaultOutputTokens: 32000, MaxOutputTokens: 64000, Transport: "anthropic_messages_http"},
 }
 
 func efforts(values ...string) []string { return values }
 
-// LookupModel finds a supported catalog model. The Anthropic [1m] suffix is a
-// context option, not a separate model.
+// LookupModel finds an exact supported catalog model.
 func LookupModel(provider LLMProvider, id string) (ModelSpec, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(id))
-	if provider == ProviderAnthropic {
-		normalized = strings.TrimSuffix(normalized, "[1m]")
-	}
 	for i := range modelCatalog {
 		spec := modelCatalog[i]
 		if spec.Provider == provider && normalized == spec.ID {
+			return cloneModelSpec(spec), true
+		}
+	}
+	return ModelSpec{}, false
+}
+
+// DefaultModel returns the provider's catalog-owned fallback model.
+func DefaultModel(provider LLMProvider) (ModelSpec, bool) {
+	return catalogModelByRole(provider, func(spec ModelSpec) bool { return spec.Default })
+}
+
+// VisionDefaultModel returns the provider's catalog-owned vision fallback.
+func VisionDefaultModel(provider LLMProvider) (ModelSpec, bool) {
+	return catalogModelByRole(provider, func(spec ModelSpec) bool { return spec.VisionDefault })
+}
+
+func catalogModelByRole(provider LLMProvider, matches func(ModelSpec) bool) (ModelSpec, bool) {
+	for _, spec := range modelCatalog {
+		if spec.Provider == provider && matches(spec) {
 			return cloneModelSpec(spec), true
 		}
 	}

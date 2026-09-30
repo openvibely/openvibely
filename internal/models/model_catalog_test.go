@@ -4,6 +4,8 @@ import "testing"
 
 func TestModelCatalogEntriesAreCompleteAndUnique(t *testing.T) {
 	seen := map[string]bool{}
+	defaults := map[LLMProvider]int{}
+	visionDefaults := map[LLMProvider]int{}
 	for _, provider := range []LLMProvider{ProviderOpenAI, ProviderAnthropic} {
 		for _, spec := range ProviderModels(provider) {
 			key := string(provider) + "/" + spec.ID
@@ -11,6 +13,12 @@ func TestModelCatalogEntriesAreCompleteAndUnique(t *testing.T) {
 				t.Errorf("duplicate model %s", key)
 			}
 			seen[key] = true
+			if spec.Default {
+				defaults[provider]++
+			}
+			if spec.VisionDefault {
+				visionDefaults[provider]++
+			}
 			if spec.Label == "" {
 				t.Errorf("%s has no label", key)
 			}
@@ -26,6 +34,12 @@ func TestModelCatalogEntriesAreCompleteAndUnique(t *testing.T) {
 				}
 			}
 		}
+		if defaults[provider] != 1 {
+			t.Errorf("%s has %d default models, want 1", provider, defaults[provider])
+		}
+	}
+	if visionDefaults[ProviderAnthropic] != 1 {
+		t.Errorf("Anthropic has %d vision defaults, want 1", visionDefaults[ProviderAnthropic])
 	}
 }
 
@@ -46,17 +60,9 @@ func TestRetiredBuiltInModelsAreUnsupported(t *testing.T) {
 	}
 }
 
-func TestLookupModelAcceptsAnthropicContextSuffixOnly(t *testing.T) {
-	want, ok := LookupModel(ProviderAnthropic, "claude-opus-5-5")
-	if !ok {
-		t.Fatal("base model missing")
-	}
-	got, found := LookupModel(ProviderAnthropic, "claude-opus-5-5[1m]")
-	if !found || got.ID != want.ID {
-		t.Errorf("1m lookup = (%q, %v), want %q", got.ID, found, want.ID)
-	}
-	if got.ContextWindow != 200000 {
-		t.Errorf("1m lookup context = %d, want standard 200000", got.ContextWindow)
+func TestLookupModelRejectsSettingsEncodedInModelID(t *testing.T) {
+	if _, found := LookupModel(ProviderAnthropic, "claude-opus-5-5[1m]"); found {
+		t.Error("context setting encoded in model ID must not inherit support")
 	}
 	if _, found := LookupModel(ProviderAnthropic, "claude-opus-5-5-retired"); found {
 		t.Error("uncataloged model suffix must not inherit support")

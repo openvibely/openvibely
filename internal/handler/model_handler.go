@@ -1141,6 +1141,9 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 		applog.Infof("[handler] SetDefaultModel not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
+	if !models.BuiltInModelSupported(agent.Provider, agent.Model) {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("%s model %q is no longer supported; select a supported model", agent.Provider, agent.Model))
+	}
 
 	agent.IsDefault = true
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {

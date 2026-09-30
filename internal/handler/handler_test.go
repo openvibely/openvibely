@@ -2592,6 +2592,31 @@ func TestHandler_SetDefaultModel_NotFound(t *testing.T) {
 	assertCode(t, rec, http.StatusNotFound)
 }
 
+func TestHandler_SetDefaultModel_RejectsRetiredModel(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	original, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil || original == nil {
+		t.Fatalf("GetDefault() = (%v, %v), want seeded default", original, err)
+	}
+	retired := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Retired"
+		a.Provider = models.ProviderOpenAI
+		a.Model = "gpt-5.2-codex"
+		a.IsDefault = false
+	})
+
+	rec := htmxPost(e, "/models/"+retired.ID+"/set-default", nil)
+	assertCode(t, rec, http.StatusBadRequest)
+	if !strings.Contains(rec.Body.String(), "no longer supported") {
+		t.Fatalf("response = %q, want retirement error", rec.Body.String())
+	}
+	stillDefault, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil || stillDefault == nil || stillDefault.ID != original.ID {
+		t.Fatalf("default = (%v, %v), want original %q", stillDefault, err, original.ID)
+	}
+}
+
 func TestHandler_CreateModel_PreservesExistingDefault(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

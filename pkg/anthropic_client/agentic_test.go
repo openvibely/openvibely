@@ -54,7 +54,6 @@ func TestNativeCompactionStrategy(t *testing.T) {
 		"claude-fable-5",
 		"claude-mythos-5-1",
 		"claude-mythos-5",
-		"claude-opus-5-5[1m]",
 	}
 	for _, model := range supported {
 		strategy, ok := NativeCompactionStrategy(model)
@@ -68,6 +67,7 @@ func TestNativeCompactionStrategy(t *testing.T) {
 		"claude-sonnet-4-5-20250929",
 		"claude-opus-4-5-20251101",
 		"claude-future-model",
+		"claude-opus-5-5[1m]",
 		"",
 	}
 	for _, model := range unsupported {

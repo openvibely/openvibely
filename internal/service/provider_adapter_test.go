@@ -45,6 +45,45 @@ func TestUnsupportedCatalogModel(t *testing.T) {
 	}
 }
 
+func TestProviderAdaptersRejectRetiredModelsBeforeProviderCall(t *testing.T) {
+	t.Run("Anthropic", func(t *testing.T) {
+		lowLevel := &recordingAnthropicAdapter{}
+		adapter := &anthropicProviderAdapter{adapter: lowLevel}
+		_, err := adapter.Call(llmcontracts.AgentRequest{
+			Ctx:       context.Background(),
+			Operation: llmcontracts.OperationDirect,
+			Agent: models.LLMConfig{
+				Provider:   models.ProviderAnthropic,
+				Model:      "claude-opus-4-5",
+				AuthMethod: models.AuthMethodAPIKey,
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "no longer supported") {
+			t.Fatalf("error = %v, want retirement error", err)
+		}
+		if lowLevel.callCount != 0 {
+			t.Fatalf("low-level call count = %d, want 0", lowLevel.callCount)
+		}
+	})
+
+	t.Run("OpenAI", func(t *testing.T) {
+		// A nil low-level adapter proves rejection happens before a provider call.
+		adapter := &openAIProviderAdapter{}
+		_, err := adapter.Call(llmcontracts.AgentRequest{
+			Ctx:       context.Background(),
+			Operation: llmcontracts.OperationDirect,
+			Agent: models.LLMConfig{
+				Provider:   models.ProviderOpenAI,
+				Model:      "gpt-5.2-codex",
+				AuthMethod: models.AuthMethodAPIKey,
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "no longer supported") {
+			t.Fatalf("error = %v, want retirement error", err)
+		}
+	})
+}
+
 func TestProviderAdapter_TestProvider_UsesCanonicalRequest(t *testing.T) {
 	svc := &LLMService{}
 	mock := testutil.NewMockLLMCaller()
@@ -393,8 +432,11 @@ func TestRequestUsesChatStreamingTreatsFirstTurnChatAsChat(t *testing.T) {
 }
 
 func TestNativeCompactionCapabilityRequiresConcreteSupportedConfiguration(t *testing.T) {
-	if !providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol", AuthMethod: models.AuthMethodAPIKey}) {
-		t.Fatal("supported OpenAI configuration was rejected")
+	if !providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6-sol", AuthMethod: models.AuthMethodAPIKey}) {
+		t.Fatal("compaction-capable OpenAI configuration was rejected")
+	}
+	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol", AuthMethod: models.AuthMethodAPIKey}) {
+		t.Fatal("OpenAI model without catalog compaction support advertised it")
 	}
 	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "", AuthMethod: models.AuthMethodAPIKey}) {
 		t.Fatal("blank model must not advertise native compaction")
@@ -942,7 +984,7 @@ func TestProviderContextCompactionFallback_NativeProvidersReceiveProactiveThresh
 		got = req
 		return llmcontracts.AgentResult{Output: "ok"}, nil
 	})
-	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "small pending", Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test", ContextWindow: 10000, CompactionThreshold: 12000}, ChatHistory: []models.Execution{{PromptSent: strings.Repeat("old", 8000), Output: "done"}}}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Operation: llmcontracts.OperationStreaming, Message: "small pending", Agent: models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6-sol", ContextWindow: 10000, CompactionThreshold: 12000}, ChatHistory: []models.Execution{{PromptSent: strings.Repeat("old", 8000), Output: "done"}}}
 	if _, err := svc.callProviderWithContextCompactionFallback(adapter, req); err != nil {
 		t.Fatalf("callProviderWithContextCompactionFallback: %v", err)
 	}
@@ -1068,7 +1110,7 @@ func TestProviderSessionState_PersistsWithoutReplacingCompactionCheckpoint(t *te
 }
 
 func TestProviderContextCompactionFallback_NativeFailureFallsBackAndCachesUnsupported(t *testing.T) {
-	model := "native-unsupported-test"
+	model := "gpt-6-sol"
 	knownUnsupportedNativeCompaction.Delete(nativeCompactionSessionKey(models.LLMConfig{Provider: models.ProviderOpenAI, Model: model}))
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	var requests []llmcontracts.AgentRequest
@@ -1809,7 +1851,7 @@ func TestContextRecoveryDispatchesEmitCompleteStructuredDecisions(t *testing.T) 
 	log.SetOutput(&logs)
 	defer log.SetOutput(previous)
 
-	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodAPIKey, APIKey: "fixture", ContextWindow: 50000}
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6.1-sol", AuthMethod: models.AuthMethodAPIKey, APIKey: "fixture", ContextWindow: 50000}
 	knownUnsupportedNativeCompaction.Delete(nativeCompactionSessionKey(agent))
 	defer knownUnsupportedNativeCompaction.Delete(nativeCompactionSessionKey(agent))
 	calls := 0
@@ -1852,7 +1894,7 @@ func TestContextRecoveryDispatchesEmitCompleteStructuredDecisions(t *testing.T) 
 			}
 		}
 	}
-	for _, field := range []string{"transport=responses_http", "context_window=50000", "safe_input_limit=", "fixed_tokens=", "history_tokens=", "pending_tokens=", "attachment_tokens=", "reserved_output_tokens=", "safety_margin=", "externalized=false", "history_retained=", "history_removed=", "retry_source_execution_id=failed-source"} {
+	for _, field := range []string{"transport=responses_websocket_http_fallback", "context_window=50000", "safe_input_limit=", "fixed_tokens=", "history_tokens=", "pending_tokens=", "attachment_tokens=", "reserved_output_tokens=", "safety_margin=", "externalized=false", "history_retained=", "history_removed=", "retry_source_execution_id=failed-source"} {
 		if !strings.Contains(got, field) {
 			t.Fatalf("recovery observability missing %q: %s", field, got)
 		}
