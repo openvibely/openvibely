@@ -1278,7 +1278,7 @@ func buildInputItems(history []Message, attachments []*FileAttachment) ([]any, e
 		})
 	}
 
-	return items, nil
+	return repairInterruptedToolCalls(items), nil
 }
 
 func roleForMessage(role string) string {

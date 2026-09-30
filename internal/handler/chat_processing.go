@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -1174,7 +1175,11 @@ func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params strea
 	if err != nil {
 		return fmt.Errorf("load current replay history: %w", err)
 	}
-	if currentReplay := currentReplayByID[params.ExecID]; len(currentReplay) > 0 {
+	currentReplay := currentReplayByID[params.ExecID]
+	// A continuation without another locally consumed steer leaves the old
+	// checkpoint unchanged. It does not contain this call's prompt or answer.
+	previousReplay := steeringHistory[len(steeringHistory)-1].ReplayMessages
+	if len(currentReplay) > 0 && !slices.Equal(currentReplay, previousReplay) {
 		replay = append(replay, currentReplay...)
 		for _, message := range currentReplay {
 			reasoning.WriteString(message.ReasoningContent)

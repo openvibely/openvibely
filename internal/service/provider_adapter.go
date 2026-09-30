@@ -860,6 +860,11 @@ func resolveProviderRequestForBudget(req llmcontracts.AgentRequest) llmcontracts
 
 func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	req = resolveProviderRequestForBudget(req)
+	var replayErr error
+	req, replayErr = s.loadOpenAIReplayHistory(req)
+	if replayErr != nil {
+		return llmcontracts.AgentResult{}, replayErr
+	}
 	// Mixture is virtual. Its adapter resolves concrete reference and aggregator
 	// models, then re-enters this budget boundary for each pinned route.
 	if req.Agent.Provider == models.ProviderMixture {
@@ -1263,6 +1268,34 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 		s.persistNativeCompactionCheckpoint(truncated, res)
 	}
 	return res, err
+}
+
+// Hydrate once at the budget boundary, never after history has been trimmed.
+func (s *LLMService) loadOpenAIReplayHistory(req llmcontracts.AgentRequest) (llmcontracts.AgentRequest, error) {
+	if req.Agent.Provider != models.ProviderOpenAI || s == nil || s.execRepo == nil || len(req.ChatHistory) == 0 {
+		return req, nil
+	}
+	ids := make([]string, 0, len(req.ChatHistory))
+	for _, execution := range req.ChatHistory {
+		if execution.ReplayMessages == nil {
+			ids = append(ids, execution.ID)
+		}
+	}
+	ctx := req.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	replays, err := s.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
+	if err != nil {
+		return req, err
+	}
+	req.ChatHistory = append([]models.Execution(nil), req.ChatHistory...)
+	for i := range req.ChatHistory {
+		if req.ChatHistory[i].ReplayMessages == nil {
+			req.ChatHistory[i].ReplayMessages = replays[req.ChatHistory[i].ID]
+		}
+	}
+	return req, nil
 }
 
 func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.Execution) []models.Execution {
