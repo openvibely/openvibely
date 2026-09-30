@@ -2833,6 +2833,10 @@ func (h *Handler) autoSelectAgent(ctx context.Context, message string, hasImages
 	if len(agents) == 0 {
 		return nil, fmt.Errorf("no agents configured - please add at least one agent/model in settings")
 	}
+	agents = service.SupportedSelectionConfigs(agents)
+	if len(agents) == 0 {
+		return nil, fmt.Errorf("no supported models configured; select a supported model in Models")
+	}
 
 	selectedID := agents[0].ID
 	complexity := service.AnalyzeComplexity(message)
