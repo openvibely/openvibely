@@ -596,7 +596,7 @@ func TestHandler_PersonalityPage_HeaderAlignsAddButtonWithOtherManagementPages(t
 	assert.Contains(t, body, `<div id="personality-container">`)
 	assert.Contains(t, body, `<div id="personality-section"`)
 	assert.Contains(t, body, `data-selected-personality=""`)
-	assert.Contains(t, body, `<div class="flex items-center justify-between mb-6">`)
+	assert.Contains(t, body, `<div data-page-header class="flex items-center justify-between mb-6">`)
 	assert.Contains(t, body, `<h2 class="text-2xl font-bold">Personality</h2>`)
 	assert.Contains(t, body, `<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">`)
 	assert.Contains(t, body, `+ Add Personality`)
