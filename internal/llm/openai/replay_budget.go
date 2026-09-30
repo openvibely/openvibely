@@ -29,6 +29,12 @@ func EffectiveReplayHistory(history []models.Execution) []models.Execution {
 // EstimateHistoryTokens budgets exactly the history representation built for
 // OpenAI, including checkpoint replacement and image-specific token estimates.
 func EstimateHistoryTokens(history []models.Execution) int {
+	return openaiclient.EstimateResponsesInputTokens(HistoryInputItems(history))
+}
+
+// HistoryInputItems is the canonical replay representation for chat and task
+// recovery requests alike.
+func HistoryInputItems(history []models.Execution) []any {
 	var items []any
 	for _, message := range buildClientHistory(history) {
 		if len(message.ResponsesInputItems) > 0 {
@@ -37,5 +43,5 @@ func EstimateHistoryTokens(history []models.Execution) int {
 			items = append(items, map[string]any{"type": "message", "role": message.Role, "content": message.Content})
 		}
 	}
-	return openaiclient.EstimateResponsesInputTokens(items)
+	return items
 }
