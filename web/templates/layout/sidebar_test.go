@@ -122,7 +122,7 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`No projects match your search.`,
 		`oninput="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
 		`onsearch="window.openVibelySearchableSelector && window.openVibelySearchableSelector.filter(this.closest('[data-searchable-selector]'))"`,
-		`event.target.matches('[data-searchable-selector-search]')`,
+		`list.indexOf(root.__selectorActive)`,
 		`function position(root)`,
 		`data-searchable-selector-pointer-x-anchor`,
 		`var anchorLeft = isFinite(pointerAnchor) ? pointerAnchor`,

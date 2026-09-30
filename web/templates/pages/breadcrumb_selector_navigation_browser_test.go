@@ -113,6 +113,15 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function(){ return document.activeElement===input(); }, 'Task selector search focus');
     await waitFor(function(){ return options().length>0; }, 'Task selector initial results');
 
+    var current = options().find(function(option){ return option.getAttribute('aria-selected')==='true'; });
+    if (!current) fail('missing current breadcrumb selection');
+    {
+      if (!current.hasAttribute('data-selector-active')) fail('breadcrumb did not highlight current selection');
+      key(input(), 'Enter');
+      if (dialog().open || !route('task', 'task-one')) fail('immediate Enter changed breadcrumb selection');
+      button().click();
+      await waitFor(function(){ return dialog().open && options().length>0; }, 'breadcrumb reopen');
+    }
     setSearch('slow');
     await waitCount('taskSlow', 1, 'slow search request');
     setSearch('two');

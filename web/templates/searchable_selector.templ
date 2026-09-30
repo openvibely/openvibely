@@ -74,9 +74,16 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 }
 
 templ searchableSelectorScript() {
+ <style>
+ [data-searchable-selector-option] { outline: none !important; }
+ [data-searchable-selector-option][data-selector-active],
+ [data-searchable-selector-option]:hover { background-color: oklch(var(--bc) / .1) !important; }
+ [data-searchable-selector-trigger][data-selector-return-focus] { outline: none !important; }
+ #desktop-project-titlebar #project-selector-trigger[data-selector-return-focus] { background: transparent; }
+ </style>
 	<script>
 		(function() {
-			var controllerVersion = 9;
+			var controllerVersion = 10;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -111,6 +118,14 @@ templ searchableSelectorScript() {
 			}
 			function options(root) { return root ? Array.prototype.slice.call(root.querySelectorAll('[data-searchable-selector-option]')) : []; }
 			function visibleOptions(root) { return options(root).filter(function(option) { return !option.hidden && !option.classList.contains('hidden'); }); }
+            function highlight(root, option) {
+                root.__selectorActive = option;
+                options(root).forEach(function(item) { item.toggleAttribute('data-selector-active', item === option); });
+            }
+            function reconcileHighlight(root, reset) {
+                var list = visibleOptions(root);
+                if (reset || !list.includes(root.__selectorActive)) highlight(root, list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list[0]);
+            }
 			function position(root) {
 				var state = nodes(root), dialog = state.dialog, button = state.button;
 				if (!dialog || !dialog.open || !button) return;
@@ -147,6 +162,7 @@ templ searchableSelectorScript() {
 				var empty = root.querySelector('[data-searchable-selector-no-match]'); if (empty) empty.hidden = !query || matchCount > 0;
 				var status = root.querySelector('[data-searchable-selector-status]');
 				if (status) status.textContent = query && matchCount === 0 ? 'No ' + root.getAttribute('data-searchable-selector-kind') + 's match your search.' : (query ? 'Matching results updated.' : 'All results shown.');
+                reconcileHighlight(root, false);
 				position(root);
 			}
 			function syncLocal(root, value) {
@@ -182,7 +198,11 @@ templ searchableSelectorScript() {
 					delete root.__openVibelySearchableSelectorRefreshTimer;
 				}
 				if (state.button) state.button.setAttribute('aria-expanded', 'false');
-				if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
+				if (state.button && root.__selectorKeyboard) {
+                    state.button.removeAttribute('data-pointer-over');
+                    state.button.setAttribute('data-selector-return-focus', '');
+                }
+                if (restore && state.button && state.button.isConnected) state.button.focus({preventScroll: true});
 			}
 			function open(root, event) {
 				var state = nodes(root); if (!state.button || !state.dialog || !state.search || state.button.disabled || state.dialog.open) return;
@@ -190,7 +210,8 @@ templ searchableSelectorScript() {
 				else delete root.__openVibelySearchableSelectorAnchorX;
 				state.dialog.showModal(); state.button.setAttribute('aria-expanded', 'true');
 				if (root.hasAttribute('data-searchable-selector-local')) syncLocal(root, state.value && state.value.value);
-				position(root); state.search.focus(); state.search.select();
+				reconcileHighlight(root, true);
+                position(root); state.search.focus(); state.search.select();
 				if (!root.hasAttribute('data-searchable-selector-local') && window.htmx) htmx.trigger(state.search, 'search');
 			}
 			listen(document, 'click', function(event) {
@@ -202,7 +223,9 @@ templ searchableSelectorScript() {
 						var state = nodes(root), id = option.getAttribute('data-searchable-selector-id'); close(root, true);
 						if (state.value && id && id !== state.value.value) { state.value.value = id; state.value.dispatchEvent(new Event('change', {bubbles: true})); }
 					} else if (option.matches('a[href]')) {
-						event.preventDefault(); close(root, false); window.openVibelyNavigate(option.getAttribute('href'));
+						event.preventDefault();
+                        if (option.getAttribute('aria-selected') === 'true') close(root, true);
+                        else { close(root, false); window.openVibelyNavigate(option.getAttribute('href')); }
 					}
 					return;
 				}
@@ -210,15 +233,38 @@ templ searchableSelectorScript() {
 			});
 			listen(document, 'keydown', function(event) {
 				var root = rootFor(event.target); if (!root) return; var state = nodes(root);
+                root.__selectorKeyboard = true;
 				if (event.target === state.button && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) { event.preventDefault(); open(root); return; }
 				if (!state.dialog || !state.dialog.open) return;
 				if (event.key === 'Escape') { event.preventDefault(); close(root, true); return; }
 				var list = visibleOptions(root);
-				if (event.target.matches('[data-searchable-selector-search]') && (event.key === 'ArrowDown' || event.key === 'ArrowUp') && list.length) { event.preventDefault(); list[event.key === 'ArrowDown' ? 0 : list.length - 1].focus(); return; }
-				var index = list.indexOf(event.target);
-				if (index >= 0 && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.target.click(); return; }
-				if (index >= 0 && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); list[(index + (event.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length].focus(); }
+                var index = list.indexOf(root.__selectorActive);
+                if (event.key === 'Enter' || (event.key === ' ' && event.target !== state.search)) {
+                    event.preventDefault();
+                    if (list.length) (list[index < 0 ? 0 : index]).click();
+                    return;
+                }
+                if (list.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                    event.preventDefault();
+                    index = index < 0 ? (event.key === 'ArrowDown' ? 0 : list.length - 1) : (index + (event.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length;
+                    highlight(root, list[index]); list[index].focus();
+                }
 			});
+            listen(document, 'pointerdown', function(event) { var root = rootFor(event.target); if (root) root.__selectorKeyboard = false; });
+            listen(document, 'pointermove', function(event) {
+                var root = rootFor(event.target); if (!root) return;
+                var option = event.target.closest('[data-searchable-selector-option]');
+                if (option) highlight(root, option);
+                var button = nodes(root).button;
+                if (button && button.contains(event.target)) button.removeAttribute('data-selector-return-focus');
+            });
+            listen(document, 'focusin', function(event) {
+                var root = rootFor(event.target);
+                if (root && event.target.matches('[data-searchable-selector-option]')) highlight(root, event.target);
+            });
+            listen(document, 'focusout', function(event) {
+                if (event.target.matches('[data-searchable-selector-trigger]')) event.target.removeAttribute('data-selector-return-focus');
+            });
 			listen(document, 'cancel', function(event) { var root = rootFor(event.target); if (!root || event.target !== nodes(root).dialog) return; event.preventDefault(); close(root, true); }, true);
 			listen(document, 'close', function(event) { var root = rootFor(event.target), button = nodes(root).button; if (button) button.setAttribute('aria-expanded', 'false'); }, true);
 			listen(document, 'htmx:responseError', function(event) {
@@ -230,6 +276,7 @@ templ searchableSelectorScript() {
 			listen(document, 'htmx:afterSwap', function(event) {
 				var root = rootFor(event.detail && event.detail.target); if (!root) return;
 				var status = root.querySelector('[data-searchable-selector-status]');
+				reconcileHighlight(root, false);
 				if (status && !root.hasAttribute('data-searchable-selector-local')) status.textContent = root.querySelector('[data-searchable-selector-empty]') ? 'No results.' : 'Search results updated.';
 				position(root);
 			});

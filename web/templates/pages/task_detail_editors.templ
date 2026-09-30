@@ -88,10 +88,6 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    row.focus({preventScroll:true});
    row.addEventListener('blur', function() { row.removeAttribute('data-picker-return-focus'); }, {once:true});
   }
-  root.addEventListener('keydown', function(event) {
-   var row = event.target.closest('[data-detail-property]');
-   if (row) row.removeAttribute('data-picker-return-focus');
-  });
   picker.addEventListener('pointermove', function(event) {
    var option = event.target.closest('button[data-value]');
    if (option && !option.disabled) highlight(option);
