@@ -38,6 +38,8 @@ func adaptCodexTools(base string) string {
 	lines := strings.Split(base, "\n")
 	for i, line := range lines {
 		switch {
+		case strings.Contains(line, "multi_tool_use.parallel"):
+			lines[i] = strings.ReplaceAll(line, "You use `multi_tool_use.parallel` for that parallelism, and only that.", "Call the tools supplied with this request directly; run independent calls in parallel when supported.")
 		case strings.Contains(line, "functions.exec"):
 			lines[i] = "- Call the tools supplied with this request directly. Run independent calls in parallel when supported; keep dependent calls sequential."
 		case strings.Contains(line, "request_user_input_async"):
