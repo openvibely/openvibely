@@ -38,13 +38,15 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 							<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs">{ task.MergeTargetBranch }</code>
 						</div>
 					}
+                    </div>
+                    <details>
+                    <summary class="cursor-pointer text-sm opacity-60 mb-2">Show worktree details</summary>
 					if task.WorktreePath != "" {
-						<div class="min-w-0">
+						<div class="min-w-0 mb-3">
 							<span class="opacity-60">Path:</span>
 							<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs break-all">{ task.WorktreePath }</code>
 						</div>
 					}
-				</div>
 
 				// File change summary
 				if len(fileStats) > 0 {
@@ -104,6 +106,7 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 						</button>
 					}
 				</div>
+                </details>
 			} else {
 				<p class="text-sm opacity-50">No worktree created for this task.</p>
 				<p class="text-xs opacity-40 mt-1">A worktree will be created automatically when this task starts executing in a project with a git repository.</p>

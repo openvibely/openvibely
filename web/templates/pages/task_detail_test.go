@@ -11,6 +11,42 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+func TestTaskDividerPreservesPointerFocusAcrossWindowBlur(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskWorkspaceScript().Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "on(divider, 'blur', function() { delete divider.dataset.pointerFocus;") {
+		t.Fatal("window blur must not turn pointer focus into a keyboard outline")
+	}
+}
+
+func TestTaskDetailsPropertiesAreConsistentBeforeAndAfterCreation(t *testing.T) {
+	var draft, saved bytes.Buffer
+	if err := NewTaskDetails(nil, nil).Render(context.Background(), &draft); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ID: "saved", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2}
+	if err := TaskDetailMetrics(task, models.TaskExecutionMetrics{LatestDurationMs: 1000}, nil, "").Render(context.Background(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"agent_id", "agent_definition_id", "category", "priority", "tag"} {
+		for _, output := range []string{draft.String(), saved.String()} {
+			if !strings.Contains(output, `data-detail-property="`+field+`"`) {
+				t.Errorf("missing shared row %s", field)
+			}
+		}
+	}
+	if strings.Contains(draft.String(), `hx-get="/tasks//detail-status"`) {
+		t.Fatal("unsaved details must not poll")
+	}
+	for _, label := range []string{"Not started", "Duration:", "Set by your first message.", "Created when this task runs."} {
+		if !strings.Contains(draft.String(), label) {
+			t.Errorf("missing draft placeholder %q", label)
+		}
+	}
+}
+
 func TestTaskDetailsUsesSimpleSections(t *testing.T) {
 	task := &models.Task{ID: "simple", Status: models.StatusCompleted, Prompt: strings.Repeat("Long prompt ", 80)}
 	var buf bytes.Buffer
@@ -24,8 +60,8 @@ func TestTaskDetailsUsesSimpleSections(t *testing.T) {
 	if err := TaskPromptPanel(task).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(buf.String(), "textarea-bordered") || !strings.Contains(buf.String(), "Show more") || !strings.Contains(buf.String(), "<details") {
-		t.Fatal("prompt should be an unboxed, collapsed preview")
+	if strings.Contains(buf.String(), "<details") || !strings.Contains(buf.String(), `data-detail-editor="prompt"`) {
+		t.Fatal("prompt should use a fixed preview and focused editor, not an expander")
 	}
 	buf.Reset()
 	if err := TaskGoalPanel(task.ID, nil).Render(context.Background(), &buf); err != nil {
@@ -178,16 +214,16 @@ func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 		expectedStatusText string
 	}{
 		{
-			name:             "backlog pending hides status badge",
+			name:             "backlog pending shows status badge",
 			status:           models.StatusPending,
 			category:         models.CategoryBacklog,
-			shouldShowStatus: false,
+			shouldShowStatus: true,
 		},
 		{
-			name:             "scheduled pending hides status badge",
+			name:             "scheduled pending shows status badge",
 			status:           models.StatusPending,
 			category:         models.CategoryScheduled,
-			shouldShowStatus: false,
+			shouldShowStatus: true,
 		},
 		{
 			name:               "active pending shows status badge",
@@ -469,7 +505,7 @@ func TestTaskDetailContent_DetailsTabRendersScrollablePlainSections(t *testing.T
 	if !strings.Contains(output, `id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1"`) {
 		t.Fatal("expected Details view to be the scroll container")
 	}
-	sectionIDs := []string{`id="task-prompt-panel"`, `id="task-goal-panel"`, `id="worktree-info-panel"`}
+	sectionIDs := []string{`id="task-goal-panel"`, `id="task-prompt-panel"`, `id="worktree-info-panel"`}
 	lastIndex := -1
 	for _, id := range sectionIDs {
 		idx := strings.Index(output, id)
@@ -477,7 +513,7 @@ func TestTaskDetailContent_DetailsTabRendersScrollablePlainSections(t *testing.T
 			t.Fatalf("expected details section card %s", id)
 		}
 		if idx <= lastIndex {
-			t.Fatalf("expected details sections in Prompt, Goal, Git Worktree order; %s rendered out of order", id)
+			t.Fatalf("expected details sections in Goal, Prompt, Git Worktree order; %s rendered out of order", id)
 		}
 		lastIndex = idx
 	}
@@ -535,8 +571,8 @@ func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
 		}
 	}
 	for _, requiredClass := range []string{
-		`<span class="min-w-0">backlog</span>`,
-		`<span class="min-w-0">None</span>`,
+		`<span data-property-label>backlog</span>`,
+		`<span data-property-label>None</span>`,
 	} {
 		if !strings.Contains(output, requiredClass) {
 			t.Fatalf("expected neutral metadata badge class %q, got: %s", requiredClass, output)

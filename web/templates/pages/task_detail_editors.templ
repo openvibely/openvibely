@@ -1,0 +1,155 @@
+package pages
+
+import (
+ "fmt"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/internal/repository"
+)
+
+func detailPointerValue(value *string) string { if value == nil { return "" }; return *value }
+
+templ TaskPropertyRow(label, field, value, text string) {
+ <button type="button" class="task-property-row" data-detail-property={ field } data-value={ value } aria-haspopup="dialog">
+  <span class="opacity-60">{ label + ":" }</span><span data-property-label>{ text }</span><span aria-hidden="true">›</span>
+ </button>
+}
+
+templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []repository.AgentTaskUIOption) {
+ <div id="task-property-picker" popover="auto" role="dialog" aria-label="Choose task property" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-lg p-2">
+  <input type="search" aria-label="Search options" placeholder="Search…" class="input input-bordered input-sm w-full mb-2"/>
+  <div class="overflow-y-auto" style="max-height:240px">
+   <div data-options="agent_id">
+    <button type="button" data-value="" class="btn btn-ghost btn-sm w-full justify-start">Default model</button>
+    for _, model := range agents {
+     <button type="button" data-value={ model.ID } class="btn btn-ghost btn-sm w-full justify-start">{ model.Name }</button>
+    }
+   </div>
+   <div data-options="agent_definition_id">
+    <button type="button" data-value="" class="btn btn-ghost btn-sm w-full justify-start">No agent</button>
+    for _, agent := range definitions {
+     if agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
+      <button type="button" data-value={ agent.ID } class="btn btn-ghost btn-sm w-full justify-start">{ agent.Name }</button>
+     }
+    }
+   </div>
+   <div data-options="category">
+    for _, category := range models.SelectableCategories {
+     <button type="button" data-value={ string(category) } class="btn btn-ghost btn-sm w-full justify-start">{ string(category) }</button>
+    }
+   </div>
+   <div data-options="priority">
+    for i, label := range []string{"Low", "Normal", "High", "Urgent"} {
+     <button type="button" data-value={ fmt.Sprint(i+1) } class="btn btn-ghost btn-sm w-full justify-start">{ label }</button>
+    }
+   </div>
+   <div data-options="tag">
+    for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
+     <button type="button" data-value={ option.Value } class="btn btn-ghost btn-sm w-full justify-start">{ option.Label }</button>
+    }
+   </div>
+  </div>
+  <p data-property-error role="alert" class="text-error text-sm"></p>
+ </div>
+ <dialog id="task-detail-text-editor" class="modal">
+  <div class="modal-box">
+   @ModalCloseButton("document.getElementById('task-detail-text-editor')", "Close task property editor")
+   <h3 class="font-semibold mb-3 pr-10" data-editor-title></h3>
+   <form method="post">
+    <textarea aria-label="Value" class="textarea textarea-bordered w-full h-48" required></textarea>
+    <p data-editor-error role="alert" class="text-error text-sm"></p>
+    <div class="modal-action"><button type="button" class="btn btn-ghost" data-editor-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+   </form>
+  </div>
+ </dialog>
+ <style>
+  #task-property-picker { position:fixed; margin:0; width:280px; max-width:calc(100vw - 24px); }
+  #task-property-picker [hidden] { display:none; }
+  #task-property-picker [aria-pressed="true"] { font-weight:600; background:color-mix(in srgb,currentColor 8%,transparent); }
+ </style>
+ <script>
+ (function() {
+  var root = document.getElementById('task-detail-content');
+  var picker = root.querySelector('#task-property-picker'), dialog = root.querySelector('#task-detail-text-editor');
+  var current = null, field = '', busy = false, revision = 0;
+  root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });
+  var taskID = root.dataset.taskId, projectID = root.dataset.projectId;
+  var search = picker.querySelector('input');
+  function composerModel(value, label) {
+   var input = root.querySelector('#task-thread-form-agent-id'), button = root.querySelector('#task-thread-form-agent-select');
+   if (input) input.value = value || 'auto';
+   if (button) { button.dataset.currentValue = value || 'auto'; var text = button.querySelector('.chat-custom-select-label'); if (text) text.textContent = label; }
+  }
+  async function save(name, value) {
+   revision++;
+   var path = name === 'goal' ? '/goal' : '/details/property';
+   var body = new URLSearchParams(name === 'goal' ? {goal:value} : {field:name,value:value});
+   var response = await fetch('/tasks/' + encodeURIComponent(taskID) + path + '?project_id=' + encodeURIComponent(projectID), {method:name === 'goal' ? 'POST' : 'PATCH',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
+   if (!response.ok) { var error = await response.text(); try { error = JSON.parse(error).message || error; } catch (_) {} throw new Error(error); }
+   var html = await response.text();
+   var editInput = root.querySelector('#task-detail-edit [name="' + name + '"]');
+   if (editInput) editInput.value = value;
+   var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : '#task-detail-metrics');
+   if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }
+  }
+  root.addEventListener('click', function(event) {
+   if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }
+   var row = event.target.closest('[data-detail-property]');
+   if (row) {
+    current = row; field = row.dataset.detailProperty;
+    picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
+    picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = false; option.setAttribute('aria-pressed', String(option.dataset.value === row.dataset.value)); });
+    picker.querySelector('[data-property-error]').textContent = ''; search.value = '';
+    picker.showPopover(); var rect = row.getBoundingClientRect();
+    picker.style.left = Math.max(12, Math.min(rect.left, innerWidth - picker.offsetWidth - 12)) + 'px';
+    picker.style.top = Math.max(12, Math.min(rect.bottom, innerHeight - picker.offsetHeight - 12)) + 'px';
+    search.focus(); return;
+   }
+   var editor = event.target.closest('[data-detail-editor]');
+   if (!editor) return;
+   current = editor; field = editor.dataset.detailEditor;
+   dialog.querySelector('[data-editor-title]').textContent = field === 'goal' ? 'Goal' : 'Prompt';
+   dialog.querySelector('textarea').value = editor.dataset.value || '';
+   dialog.querySelector('[data-editor-error]').textContent = '';
+   dialog.showModal(); dialog.querySelector('textarea').focus();
+  });
+  search.addEventListener('input', function() { picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = !option.textContent.toLowerCase().includes(search.value.toLowerCase()); }); });
+  picker.addEventListener('click', async function(event) {
+   var option = event.target.closest('button[data-value]'); if (!option || busy) return;
+   var name = field, value = option.dataset.value, label = option.textContent;
+   busy = true; picker.querySelectorAll('button').forEach(function(button) { button.disabled = true; });
+   try {
+    if (taskID) await save(name, value);
+    else {
+     var input = root.querySelector('[data-draft-property="' + name + '"]'); if (input) input.value = value;
+     current.dataset.value = value; current.querySelector('[data-property-label]').textContent = label;
+    }
+    if (name === 'agent_id') composerModel(value, label);
+    picker.hidePopover(); var row = root.querySelector('[data-detail-property="' + name + '"]'); if (row) row.focus({preventScroll:true});
+   } catch (error) { picker.querySelector('[data-property-error]').textContent = error.message; }
+   finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }
+  });
+  dialog.querySelector('[data-editor-cancel]').onclick = function() { dialog.close(); };
+  dialog.querySelector('form').addEventListener('submit', async function(event) {
+   event.preventDefault(); if (busy) return; busy = true;
+   var button = dialog.querySelector('[type="submit"]'); button.disabled = true;
+   try {
+    var value = dialog.querySelector('textarea').value;
+    if (taskID) await save(field, value);
+    else { root.querySelector('[data-draft-property="goal"]').value = value; current.dataset.value = value; current.textContent = 'Edit'; root.querySelector('[data-draft-goal]').textContent = value; }
+    dialog.close();
+    var trigger = root.querySelector('[data-detail-editor="' + field + '"]'); if (trigger) trigger.focus({preventScroll:true});
+   } catch (error) { dialog.querySelector('[data-editor-error]').textContent = error.message; }
+   finally { busy = false; button.disabled = false; }
+  });
+  // Do not replace rows underneath an open picker; the following poll reconciles them.
+  root.addEventListener('htmx:beforeSwap', function(event) { if (event.detail.target.id === 'task-detail-metrics' && (picker.matches(':popover-open') || busy || event.detail.xhr.detailRevision !== revision)) event.preventDefault(); });
+  root.addEventListener('chat-select-change', function(event) {
+   if (!taskID && event.target.id === 'task-thread-form-agent-select') {
+    var row = root.querySelector('[data-detail-property="agent_id"]'), value = event.detail.value;
+    var option = Array.from(picker.querySelectorAll('[data-options="agent_id"] button')).find(function(item) { return item.dataset.value === value; });
+    row.dataset.value = option ? value : ''; row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Default model';
+   }
+  });
+ })();
+ </script>
+}

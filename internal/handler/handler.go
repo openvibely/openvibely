@@ -827,6 +827,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/:taskId/goal/resume", h.ResumeTaskGoal)
 	e.POST("/tasks/:taskId/goal/clear", h.ClearTaskGoal)
 	e.GET("/tasks/:taskId", h.GetTask)
+	e.PATCH("/tasks/:taskId/details/property", h.UpdateTaskDetailProperty)
 	e.PUT("/tasks/:taskId", h.UpdateTask)
 	e.DELETE("/tasks/:taskId", h.DeleteTask)
 	e.POST("/tasks/:taskId/run", h.RunTask)
