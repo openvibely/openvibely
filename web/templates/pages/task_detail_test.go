@@ -1316,3 +1316,18 @@ func TestTaskDetailScheduleSurfacesDefaultAndHydrateClearContext(t *testing.T) {
 		t.Fatal("disabled persisted schedule must render unchecked")
 	}
 }
+
+func TestTaskGoalPanelTruncatesPreviewButPreservesEditorValue(t *testing.T) {
+	objective := strings.Repeat("界", 260)
+	var buf bytes.Buffer
+	if err := TaskGoalPanel("task", &models.TaskGoal{Objective: objective, Status: models.TaskGoalStatusActive}).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, ">"+strings.Repeat("界", 240)+"…</div>") {
+		t.Fatal("expected bounded goal preview")
+	}
+	if !strings.Contains(output, `data-value="`+objective+`"`) {
+		t.Fatal("editor must retain full goal")
+	}
+}

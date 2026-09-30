@@ -60,6 +60,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
     <div class="modal-action"><button type="button" class="btn btn-ghost" data-editor-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
    </form>
   </div>
+  <form method="dialog" class="modal-backdrop"><button type="submit" aria-label="Dismiss task property editor">close</button></form>
  </dialog>
  <style>
   #task-property-picker { position:fixed; margin:0; width:280px; max-width:calc(100vw - 24px); }
@@ -147,7 +148,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    try {
     var value = dialog.querySelector('textarea').value;
     if (taskID) await save(field, value);
-    else { root.querySelector('[data-draft-property="goal"]').value = value; current.dataset.value = value; current.textContent = 'Edit'; root.querySelector('[data-draft-goal]').textContent = value; }
+    else { root.querySelector('[data-draft-property="goal"]').value = value; current.dataset.value = value; current.textContent = 'Edit'; var preview = Array.from(value); root.querySelector('[data-draft-goal]').textContent = preview.length > 240 ? preview.slice(0, 240).join('') + '…' : value; }
     dialog.close();
     var trigger = root.querySelector('[data-detail-editor="' + field + '"]'); if (trigger) trigger.focus({preventScroll:true});
    } catch (error) { dialog.querySelector('[data-editor-error]').textContent = error.message; }
