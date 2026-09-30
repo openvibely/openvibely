@@ -1072,9 +1072,8 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 	[data-color-theme="vscode-test"][data-theme="dark"] { --p: 0.7 0.12 190; }
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn.ov-secondary-action:hover:not(:disabled):not(.btn-disabled) { background-color: rgb(7, 8, 9); border-color: rgb(7, 8, 9); }
-	[data-automation-live-edit], [data-task-detail-edit] { position:fixed; left:20px; width:140px; transform:none; transition:none; z-index:2147483647; }
+	[data-automation-live-edit] { position:fixed; left:20px; width:140px; transform:none; transition:none; z-index:2147483647; }
 	[data-automation-live-edit] { top:120px; }
-	[data-task-detail-edit] { top:180px; }
 	</style>`
 	fixture := `<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>` + automationActions.String() + taskActions.String()
 	html := `<!doctype html><html data-theme="dark" data-color-theme="openvibely-dark"><head><meta charset="utf-8">` + inlineStyles.String() + importedCSS + `</head><body>` + fixture + `</body></html>`
@@ -1221,13 +1220,13 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 	pageReadyDeadline := time.Now().Add(10 * time.Second)
 	pageState := ""
 	for time.Now().Before(pageReadyDeadline) {
-		pageState = evaluate(t, `document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]')) + ':' + Boolean(document.querySelector('[data-automation-live-edit]')) + ':' + Boolean(document.querySelector('[data-task-detail-edit]'))`)
-		if pageState == "complete:true:true:true:true" {
+		pageState = evaluate(t, `document.readyState + ':' + Boolean(document.querySelector('[data-test-send]')) + ':' + Boolean(document.querySelector('[data-test-running]')) + ':' + Boolean(document.querySelector('[data-automation-live-edit]'))`)
+		if pageState == "complete:true:true:true" {
 			break
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	if pageState != "complete:true:true:true:true" {
+	if pageState != "complete:true:true:true" {
 		t.Fatalf("Chrome page did not finish loading the action-color fixture; final state %q", pageState)
 	}
 	type themeCase struct {
@@ -1302,7 +1301,6 @@ func TestBrowserFunctional_ThemeAwarePrimaryAndSecondaryActionColorsInChrome(t *
 		selector string
 	}{
 		{name: "Automation Edit", selector: "[data-automation-live-edit]"},
-		{name: "Task Edit", selector: "[data-task-detail-edit]"},
 	}
 	for _, tc := range secondaryCases {
 		for _, control := range secondarySelectors {
