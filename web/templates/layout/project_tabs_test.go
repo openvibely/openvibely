@@ -234,3 +234,13 @@ func TestWebProjectBarResponsiveShell(t *testing.T) {
 		t.Error("web must not render native window controls")
 	}
 }
+
+func TestProjectTabSeparatorDoesNotAnimateSelection(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "transition: opacity") {
+		t.Fatal("separator must disappear immediately when adjacent selection changes")
+	}
+}

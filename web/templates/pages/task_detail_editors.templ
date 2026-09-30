@@ -14,15 +14,27 @@ templ TaskPropertyRow(label, field, value, text string) {
  </button>
 }
 
-templ TaskAutoMergePanel(task *models.Task) {
- <section id="task-auto-merge-panel" class="mb-6 space-y-2">
-  <h3 class="text-sm font-semibold">Auto-merge</h3>
-  @TaskPropertyRow("On completion", "auto_merge", fmt.Sprint(task.AutoMerge), autoMergeLabel(task.AutoMerge))
-  @TaskPropertyRow("On goal achieved", "auto_merge_on_goal_achieved", fmt.Sprint(task.AutoMergeOnGoalAchieved), autoMergeLabel(task.AutoMergeOnGoalAchieved))
- </section>
+templ TaskAutoMergeSwitches(task *models.Task) {
+ <div class="form-control mt-3 space-y-2">
+  for _, option := range []struct{ Name, Label string; Checked bool }{
+   {"auto_merge", "Auto-merge on successful completion", task.AutoMerge},
+   {"auto_merge_on_goal_achieved", "Auto-merge when goal is achieved", task.AutoMergeOnGoalAchieved},
+  } {
+   <label class="label cursor-pointer justify-start gap-2">
+    <input type="checkbox" name={ option.Name } class="toggle toggle-sm toggle-primary shrink-0" checked?={ option.Checked } data-auto-merge-toggle/>
+    <span class="label-text">{ option.Label }</span>
+   </label>
+  }
+ </div>
 }
 
-func autoMergeLabel(enabled bool) string { if enabled { return "Enabled" }; return "Disabled" }
+templ TaskAutoMergePanel(task *models.Task) {
+ <details id="task-auto-merge-panel" class="mb-6">
+  <summary class="text-sm cursor-pointer">Advanced options</summary>
+  @TaskAutoMergeSwitches(task)
+  <p data-auto-merge-error role="alert" class="text-error text-sm"></p>
+ </details>
+}
 
 templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []repository.AgentTaskUIOption) {
  <div id="task-property-picker" popover="auto" role="dialog" aria-label="Choose task property" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-lg p-2">
@@ -52,12 +64,6 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      <button type="button" data-value={ fmt.Sprint(i+1) } class="btn btn-ghost btn-sm w-full justify-start">{ label }</button>
     }
    </div>
-   for _, field := range []string{"auto_merge", "auto_merge_on_goal_achieved"} {
-    <div data-options={ field }>
-     <button type="button" data-value="false" class="btn btn-ghost btn-sm w-full justify-start">Disabled</button>
-     <button type="button" data-value="true" class="btn btn-ghost btn-sm w-full justify-start">Enabled</button>
-    </div>
-   }
    <div data-options="tag">
     for _, option := range []struct{ Value, Label string }{{"", "None"}, {"feature", "Feature"}, {"bug", "Bug"}} {
      <button type="button" data-value={ option.Value } class="btn btn-ghost btn-sm w-full justify-start">{ option.Label }</button>
@@ -126,8 +132,20 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    var editInput = root.querySelector('#task-detail-edit [name="' + name + '"]');
    if (editInput) editInput.value = value;
    var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : name.startsWith('auto_merge') ? '#task-auto-merge-panel' : '#task-detail-metrics');
-   if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }
+   if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; if (target.id === "task-auto-merge-panel") replacement.open = target.open; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }
   }
+  root.addEventListener('change', async function(event) {
+   var input = event.target.closest('[data-auto-merge-toggle]');
+   if (!input || !taskID) return;
+   if (busy) { input.checked = !input.checked; return; }
+   var panel = input.closest('#task-auto-merge-panel');
+   busy = true;
+   panel.querySelector('[data-auto-merge-error]').textContent = '';
+   panel.querySelectorAll('input').forEach(function(control) { control.disabled = true; });
+   try { await save(input.name, String(input.checked)); }
+   catch (error) { input.checked = !input.checked; panel.querySelector('[data-auto-merge-error]').textContent = error.message; }
+   finally { busy = false; panel.querySelectorAll('input').forEach(function(control) { control.disabled = false; }); }
+  });
   // Capture before native popover light-dismiss closes the picker on pointerup.
   var closingRow = null;
   root.addEventListener('pointerdown', function(event) {

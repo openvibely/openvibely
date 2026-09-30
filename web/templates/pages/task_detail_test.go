@@ -542,11 +542,11 @@ func TestTaskDetailContent_DetailsTabRendersScrollablePlainSections(t *testing.T
 	}
 	viewOnly := output[viewStart:editStart]
 	for _, field := range []string{"auto_merge", "auto_merge_on_goal_achieved"} {
-		if !strings.Contains(viewOnly, `data-detail-property="`+field+`" data-value="true"`) {
+		if !strings.Contains(viewOnly, `name="`+field+`" class="toggle toggle-sm toggle-primary shrink-0" checked`) {
 			t.Fatalf("expected enabled auto-merge control %s in visible Details", field)
 		}
 	}
-	for _, forbidden := range []string{"Add goal", "Pause", "Resume", "Clear", "Auto-merge to target branch on successful completion", "Auto-merge to target branch when goal is achieved", `name="auto_merge"`, `name="auto_merge_on_goal_achieved"`} {
+	for _, forbidden := range []string{"Add goal", "Pause", "Resume", "Clear"} {
 		if strings.Contains(viewOnly, forbidden) {
 			t.Fatalf("read-only details view should not include edit/configuration control %q", forbidden)
 		}
