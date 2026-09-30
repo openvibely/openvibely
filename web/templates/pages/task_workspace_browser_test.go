@@ -58,6 +58,9 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		var view templ.Component
 		switch r.URL.Path {
+		case "/ui/preferences":
+			w.WriteHeader(http.StatusNoContent)
+			return
 		case "/tasks":
 			if r.Method == http.MethodPost {
 				if err := r.ParseForm(); err != nil {
@@ -190,6 +193,8 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
+		case "/ui/preferences":
+			w.WriteHeader(http.StatusNoContent)
 		case "/events/live":
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, ": connected\n\n")
@@ -237,18 +242,17 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.click("#task-details-opener")
 		b.waitFor("panel opened", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
-		b.waitFor("inspector flush with viewport", `(function(){var r=document.getElementById('task-details-panel').getBoundingClientRect();return [Math.round(r.top),Math.round(innerWidth-r.right),Math.round(innerHeight-r.bottom)].join(':')})()`, "0:0:0")
+		b.waitFor("inspector below project titlebar and flush with viewport", `(function(){var r=document.getElementById('task-details-panel').getBoundingClientRect();return [Math.round(r.top),Math.round(innerWidth-r.right),Math.round(innerHeight-r.bottom)].join(':')})()`, "46:0:0")
 		b.waitFor("single toggle and no panel heading", `String(document.querySelector('#task-details-panel h2')===null && document.querySelector('#task-details-panel [aria-label="Collapse details panel"]')===null && document.querySelector('#task-details-opener line').getAttribute('x1')==='15')`, "true")
 		b.waitFor("symmetric thread gutters", `(function(){var chat=document.getElementById('tab-chat').getBoundingClientRect(),main=document.getElementById('main-content').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(Math.abs((panel.left-chat.right)-(chat.left-main.left))<1)})()`, "true")
 		b.waitFor("reference tab vertical spacing", `(function(){var row=getComputedStyle(document.querySelector('#task-details-panel [role="tablist"]')),tab=getComputedStyle(document.getElementById('inspector-tab-details'));return [row.marginTop,row.marginBottom,tab.paddingTop,tab.paddingBottom].join(':')})()`, "8px:16px:10px:10px")
-		b.evaluate(`var bar=document.createElement('header');bar.id='desktop-project-titlebar';bar.style.cssText='position:fixed;top:0;left:0;right:0;height:46px';document.body.prepend(bar); 'desktop'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1100, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("desktop windowed panel below titlebar and docked", `(function(){var p=document.getElementById('task-details-panel'),r=p.getBoundingClientRect(),chat=document.getElementById('tab-chat').getBoundingClientRect();return String(r.top===46 && r.bottom===innerHeight && p.dataset.overlay==='false' && chat.right<r.left)})()`, "true")
 		b.evaluate(`document.getElementById('desktop-project-titlebar').style.height='54px'; 'resized'`)
 		b.waitFor("desktop titlebar height tracked", `String(document.getElementById('task-details-panel').getBoundingClientRect().top)`, "54")
-		b.evaluate(`document.getElementById('desktop-project-titlebar').remove(); 'web'`)
+		b.evaluate(`document.getElementById('desktop-project-titlebar').style.height=''; 'restored'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
-		b.waitFor("web offset restored", `String(document.getElementById('task-details-panel').getBoundingClientRect().top)`, "0")
+		b.waitFor("titlebar offset restored", `String(document.getElementById('task-details-panel').getBoundingClientRect().top)`, "46")
 		b.click("#task-panel-divider")
 		key := func(key string) {
 			b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": key}, nil)
@@ -292,11 +296,9 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("thread retained", `(window.savedThread===document.getElementById('task-thread-view'))+':'+(window.savedSources===window._threadEventSources)`, "true:true")
 		b.click("#task-details-opener")
 		b.waitFor("diff inspector docked without covering changes", `(function(){var p=document.getElementById('task-details-panel'),diff=document.getElementById('tab-changes');return String(p.dataset.overlay==='false' && !diff.inert && diff.getBoundingClientRect().right<p.getBoundingClientRect().left)})()`, "true")
-		b.evaluate(`var bar=document.createElement('header');bar.id='desktop-project-titlebar';bar.style.cssText='position:fixed;top:0;height:46px';document.body.prepend(bar); 'desktop'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1100, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("windowed desktop diff inspector docked below titlebar", `(function(){var p=document.getElementById('task-details-panel'),r=p.getBoundingClientRect(),diff=document.getElementById('tab-changes');return String(r.top===46 && p.dataset.overlay==='false' && !diff.inert && diff.getBoundingClientRect().right<r.left)})()`, "true")
 		b.click("#task-details-opener")
-		b.evaluate(`document.getElementById('desktop-project-titlebar').remove(); 'web'`)
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.click("#task-workspace-back")
 		b.waitFor("draft and exact scroll restored", `(window.savedComposer===document.getElementById('task-message-input'))+':'+document.getElementById('task-message-input').value+':'+(document.getElementById('task-thread-messages').scrollTop===window.savedScroll)`, "true:Keep this draft:true")
@@ -323,6 +325,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		t.Fatal("full diff never loaded")
 	}
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/workspace-task?tab=changes", "task-workspace-deep-links", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 600, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("direct diff lazy load", `String(document.getElementById('diff-viewer')&&document.getElementById('diff-viewer').textContent)`, "Authoritative full diff")
 		b.waitFor("background thread mounted", `String(Boolean(document.getElementById('task-message-input')))`, "true")
 		for _, tab := range []string{"chat", "thread", "history", "details", "schedules", "chaining", "attachments", "lifecycle"} {
