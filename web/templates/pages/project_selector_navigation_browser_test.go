@@ -125,7 +125,8 @@ window.addEventListener('DOMContentLoaded', function() {
     ['select', 'select-bordered', 'select-sm', 'w-full', 'sidebar-project-select'].forEach(function(className) {
       if (!trigger.classList.contains(className)) fail('collapsed selector lost its prior visual class: ' + className);
     });
-    if (trigger.querySelector('svg') || trigger.hasAttribute('data-project-selector-caret') || trigger.classList.contains('bg-none')) fail('collapsed selector replaced the original select arrow');
+    if (!trigger.querySelector(':scope > svg.project-selector-plus') || trigger.querySelectorAll(':scope > svg').length !== 1) fail('collapsed selector lost its project opener icon');
+    if (trigger.hasAttribute('data-project-selector-caret') || trigger.classList.contains('bg-none')) fail('collapsed selector replaced the original select arrow');
     if (document.querySelectorAll('[data-project-selector-option]').length !== 29) fail('all identity-only project options are not rendered');
 
     trigger.focus();

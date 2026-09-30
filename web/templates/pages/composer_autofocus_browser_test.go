@@ -155,23 +155,26 @@ func (c *composerFocusCDP) waitForTimeout(label, expression, want string, timeou
 
 func (c *composerFocusCDP) click(selector string) {
 	c.t.Helper()
-	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';el.scrollIntoView({block:'center',inline:'center'});var r=el.getBoundingClientRect();var x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);return JSON.stringify({x:x,y:y,hit:hit&&(hit.id||hit.tagName),owns:!!(hit&&(hit===el||el.contains(hit))),visibility:getComputedStyle(el).visibility,active:document.activeElement&&(document.activeElement.id||document.activeElement.tagName)});})()`, selector))
+	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';el.scrollIntoView({block:'center',inline:'center'});var r=el.getBoundingClientRect(),fractions=[.5,.25,.75],x,y,hit,owns=false;for(var yi=0;yi<fractions.length&&!owns;yi++){for(var xi=0;xi<fractions.length&&!owns;xi++){x=r.left+r.width*fractions[xi];y=r.top+r.height*fractions[yi];hit=document.elementFromPoint(x,y);owns=!!(hit&&(hit===el||el.contains(hit)));}}return JSON.stringify({x:x,y:y,hit:hit&&(hit.id||hit.tagName),hitHTML:hit&&hit.outerHTML.slice(0,180),targetRect:[r.left,r.top,r.right,r.bottom],hitRect:hit&&function(){var h=hit.getBoundingClientRect();return [h.left,h.top,h.right,h.bottom]}(),owns:owns,visibility:getComputedStyle(el).visibility,active:document.activeElement&&(document.activeElement.id||document.activeElement.tagName)});})()`, selector))
 	if coordinates == "missing" {
 		c.t.Fatalf("native click target %s is missing", selector)
 	}
 	var point struct {
-		X          float64 `json:"x"`
-		Y          float64 `json:"y"`
-		Hit        string  `json:"hit"`
-		Owns       bool    `json:"owns"`
-		Visibility string  `json:"visibility"`
-		Active     string  `json:"active"`
+		X          float64   `json:"x"`
+		Y          float64   `json:"y"`
+		Hit        string    `json:"hit"`
+		HitHTML    string    `json:"hitHTML"`
+		TargetRect []float64 `json:"targetRect"`
+		HitRect    []float64 `json:"hitRect"`
+		Owns       bool      `json:"owns"`
+		Visibility string    `json:"visibility"`
+		Active     string    `json:"active"`
 	}
 	if err := json.Unmarshal([]byte(coordinates), &point); err != nil {
 		c.t.Fatalf("decode click coordinates for %s: %v", selector, err)
 	}
 	if !point.Owns {
-		c.t.Fatalf("native click target %s was covered by %s (target visibility %s, focus on %s)", selector, point.Hit, point.Visibility, point.Active)
+		c.t.Fatalf("native click target %s was covered by %s (target visibility %s, focus on %s, target rect %v, hit rect %v): %s", selector, point.Hit, point.Visibility, point.Active, point.TargetRect, point.HitRect, point.HitHTML)
 	}
 	for _, params := range []map[string]any{
 		{"type": "mouseMoved", "x": point.X, "y": point.Y},
@@ -346,6 +349,8 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
+		case "/ui/preferences":
+			w.WriteHeader(http.StatusNoContent)
 		case "/chat":
 			isHTMX := r.Header.Get("HX-Request") == "true"
 			if isHTMX {
@@ -417,7 +422,7 @@ func TestBrowserFunctional_ComposerAutoFocusProductionNavigationInChrome(t *test
 		// The shell now survives history restoration. Explicitly leave the
 		// intentional shell focus owner before expecting composer autofocus;
 		// history must not steal focus from a still-focused shell control.
-		browser.click("#sidebar .sidebar-header h1")
+		browser.evaluate(`document.activeElement.blur(); 'blurred'`)
 		browser.navigateHistory(1)
 		browser.waitFor("real Forward history composer focus", `location.pathname+':'+(document.activeElement&&document.activeElement.id)+':'+window._historyRestoreFocusRequests`, "/chat:message-input:1")
 		expectedHistoryDraft := browser.evaluate(`(function(){var input=document.getElementById('message-input');return input.value.slice(0,input.selectionStart)+' history'+input.value.slice(input.selectionEnd);})()`)
