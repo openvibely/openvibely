@@ -11,6 +11,18 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+func TestTaskPanelMatchesPageSurfaceAndInsetsTabs(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskDetailPanel().Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`class="bg-base-200 border border-base-300"`, `[data-theme="light"] #task-details-panel { background-color:var(--ov-l-surface); }`, `margin:8px 12px 16px;`} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("missing panel styling %q", want)
+		}
+	}
+}
+
 func TestTaskInspectorSectionsHaveNoOuterCards(t *testing.T) {
 	var buf bytes.Buffer
 	task := &models.Task{ID: "task", ProjectID: "project", Title: "Task"}
