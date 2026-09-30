@@ -192,7 +192,15 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 				return !option.hidden && !option.classList.contains('hidden') && option.getClientRects().length > 0;
 			});
 		}
+		function optionStates() {
+			return Array.prototype.slice.call(document.querySelectorAll('[data-project-selector-option]')).map(function(option) {
+				return option.dataset.projectId + ':' + option.dataset.projectName + ':hidden=' + option.hidden + ':classHidden=' + option.classList.contains('hidden') + ':rects=' + option.getClientRects().length;
+			}).join(',');
+		}
 		try {
+			if (document.readyState !== 'complete') {
+				await new Promise(function(resolve) { window.addEventListener('load', resolve, {once:true}); });
+			}
 			var trigger = document.querySelector('[data-project-selector] [data-searchable-selector-trigger]');
 			var dialog = document.querySelector('[data-project-selector-dialog]');
 			var search = document.querySelector('[data-project-selector-search]');
@@ -202,7 +210,7 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 			if (!document.execCommand('insertText', false, 'default')) fail('browser text insertion was not supported');
 			await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
 			var visible = visibleOptions();
-			if (visible.length !== 1 || visible[0].dataset.projectId !== 'default') fail('production project search did not paint only the matching current project');
+			if (visible.length !== 1 || visible[0].dataset.projectId !== 'default') fail('production project search did not paint only the matching current project: query=' + JSON.stringify(search.value) + ', options=' + optionStates() + ', dialog=' + JSON.stringify(dialog.getBoundingClientRect().toJSON()));
 			if (visible[0].getAttribute('aria-selected') !== 'true' || visible[0].querySelector('[data-project-selector-current]').textContent.trim() !== '✓') fail('production matching current project was not shown as selected');
 			search.value = '';
 			search.dispatchEvent(new Event('input', {bubbles:true}));
@@ -210,7 +218,7 @@ func TestProjectSelectorSearchesOnProductionRenderedPageInChrome(t *testing.T) {
 			await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
 			visible = visibleOptions();
 			if (search.value !== 'swarm') fail('production project search did not receive typed text');
-			if (visible.length !== 1) fail('production project search painted ' + visible.length + ' rows instead of the sole match');
+			if (visible.length !== 1) fail('production project search painted ' + visible.length + ' rows instead of the sole match: query=' + JSON.stringify(search.value) + ', options=' + optionStates());
 			if (visible[0].dataset.projectName !== 'Swarm Workspace') fail('production project search did not paint only Swarm Workspace: ' + visible.map(function(option) { return option.dataset.projectName; }).join(','));
 			if (visible.some(function(option) { return option.dataset.projectName === 'Unrelated Workspace'; })) fail('production project search retained an unrelated row');
 			search.value = '';
