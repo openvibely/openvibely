@@ -136,10 +136,14 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 			if task.Schedule.RepeatType != models.RepeatOnce {
 				// Sub-daily schedules (seconds, minutes, hours): add one card per hour
 				// to keep the calendar clean instead of flooding with hundreds of entries.
-				if task.Schedule.RepeatType.IsSubDaily() {
-					addSubDailyOccurrences(tasksByDateTime, task, startOfWeek, endOfWeek)
-					continue
-				}
+					if task.Schedule.RepeatType.IsSubDaily() {
+						addSubDailyOccurrences(tasksByDateTime, task, startOfWeek, endOfWeek)
+						continue
+					}
+					if task.Schedule.RepeatType == models.RepeatDaily || task.Schedule.RepeatType == models.RepeatWeekly {
+						addCalendarDayOccurrences(tasksByDateTime, task, startOfWeek, endOfWeek)
+						continue
+					}
 
 				// Convert reference time to local for DST-aware calendar placement.
 				// DB stores UTC; calendar grid uses local dates/hours.
@@ -234,6 +238,26 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 	}
 
 	return tasksByDateTime
+}
+
+// addCalendarDayOccurrences uses the scheduler's original wall-clock anchor.
+// A missing local time shifts only that occurrence, not subsequent runs.
+func addCalendarDayOccurrences(tasksByDateTime map[string][]TaskOccurrence, task repository.TaskWithSchedule, startOfWeek, endOfWeek time.Time) {
+	if models.ValidateScheduleRepeatInterval(task.Schedule.RepeatInterval) != nil {
+		return
+	}
+	next := task.Schedule.RunAt
+	if next.Before(startOfWeek) {
+		next = *task.Schedule.ComputeNextRun(startOfWeek.Add(-time.Nanosecond))
+	}
+	for !next.After(endOfWeek) {
+		local := next.Local()
+		key := fmt.Sprintf("%s-%02d", local.Format("2006-01-02"), local.Hour())
+		tasksByDateTime[key] = append(tasksByDateTime[key], TaskOccurrence{
+			Task: task, OccurrenceTime: local,
+		})
+		next = *task.Schedule.ComputeNextRun(next)
+	}
 }
 
 // addSubDailyOccurrences adds one card per hour for sub-daily schedules (seconds/minutes/hours).
