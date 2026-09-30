@@ -1027,6 +1027,13 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 	if err != nil || batch.count() == 0 {
 		return batch, err
 	}
+	// Record the completed continuation before another late steer takes its
+	// history snapshot. Otherwise both continuations inherit the same old replay.
+	if params.Agent.Provider == models.ProviderOpenAI && previousAssistantOutput != "" && hasNativeSteeringReplay(steeringContextHistory(*params)) {
+		if err := h.persistSteeringReplayHistory(ctx, *params, previousAssistantOutput); err != nil {
+			return batch, err
+		}
+	}
 	steeringMessage := combinedSteeringContent(batch.inputs)
 	steeringInstruction := formatSteeringInstruction(steeringMessage)
 	params.lifecycleUserMessage = steeringInstruction
@@ -1067,6 +1074,9 @@ func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *stre
 		params.Message = combineActivePromptWithSteering(params.Message, steeringInstruction)
 	}
 	params.steeringOutputCursor = previousAssistantOutput
+	if params.Agent.Provider == models.ProviderOpenAI && hasNativeSteeringReplay(steeringContextHistory(*params)) {
+		collapseSteeringContextsCoveredByLatestReplay(params)
+	}
 	return batch, nil
 }
 
@@ -1139,6 +1149,20 @@ func steeringContextHistory(params streamingResponseParams) []models.Execution {
 		}
 	}
 	return history
+}
+
+func hasNativeSteeringReplay(history []models.Execution) bool {
+	for _, execution := range history {
+		for _, replay := range execution.ReplayMessages {
+			var checkpoint struct {
+				Input []json.RawMessage `json:"responses_input"`
+			}
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &checkpoint) == nil && len(checkpoint.Input) > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params streamingResponseParams, finalOutput string) error {

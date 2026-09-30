@@ -51,3 +51,17 @@ func TestOpenAIReplayLoadedBeforeBudgetAndTrimming(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, compatible.ChatHistory[0].ReplayMessages, "compatible providers keep their existing history path")
 }
+
+func TestOpenAIRequestBudgetUsesEffectiveReplay(t *testing.T) {
+	latest := models.Execution{ID: "latest", PromptSent: strings.Repeat("duplicate", 10000), ReplayMessages: []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"current"},{"type":"input_image","detail":"auto","image_url":"data:image/png;base64,` + strings.Repeat("A", 1000000) + `"}]}]}`}}}
+	req := llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: models.ProviderOpenAI, ContextWindow: 20000}, Message: "follow up", ChatHistory: []models.Execution{{PromptSent: strings.Repeat("obsolete", 10000)}, latest}}
+	budget := calculateRequestBudget(req)
+	require.InDelta(t, 1844, budget.HistoryTokens, 100)
+	canonical := req
+	canonical.ChatHistory = []models.Execution{latest}
+	require.Equal(t, budget, calculateRequestBudget(canonical))
+	require.Equal(t, estimateModelVisibleRequestTokens(req), estimateModelVisibleRequestTokens(canonical))
+	trimmed := historyWithinRequestBudget(req, req.ChatHistory)
+	require.Len(t, trimmed, 1)
+	require.Equal(t, latest, trimmed[0], "do not truncate an image checkpoint that fits")
+}
