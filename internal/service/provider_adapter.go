@@ -215,6 +215,9 @@ func contextCompactionFallbackDisabled(ctx context.Context) bool {
 }
 
 func recognizedContextLengthError(err error) bool {
+	if llmcontracts.ErrorIs(err, llmcontracts.ErrorMidTurnCompactionFailed) {
+		return false
+	}
 	if err == nil {
 		return false
 	}
@@ -247,6 +250,9 @@ func recognizedContextLengthError(err error) bool {
 }
 
 func nativeCompactionFailure(err error) bool {
+	if llmcontracts.ErrorIs(err, llmcontracts.ErrorMidTurnCompactionFailed) {
+		return false
+	}
 	if err == nil {
 		return false
 	}

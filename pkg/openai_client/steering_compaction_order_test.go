@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 )
 
 func TestWebsocketCompactionFailureLeavesSteeringQueued(t *testing.T) {
@@ -57,10 +58,13 @@ func TestWebsocketCompactionFailureLeavesSteeringQueued(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "compaction") {
 		t.Fatalf("expected compaction failure, got %v", err)
 	}
+	if !llmcontracts.ErrorIs(err, llmcontracts.ErrorMidTurnCompactionFailed) {
+		t.Fatalf("mid-turn failure must prevent stale service fallback: %v", err)
+	}
 	if claims != 0 || !pending || compactions.Load() != 1 {
 		t.Fatalf("steering consumed before compaction: claims=%d pending=%v compactions=%d", claims, pending, compactions.Load())
 	}
-	// Recovery must still be able to claim and sample the original steer.
+	// A separately started turn must still be able to claim the queued steer.
 	opts.AutoCompaction = false
 	if _, err := NewWithAPIKey("test").SendAgentic(ctx, "retry", opts); err != nil {
 		t.Fatal(err)

@@ -3,12 +3,44 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMidTurnCompactionFailureDoesNotRestartSteeringTurn(t *testing.T) {
+	for _, cause := range []string{"compaction response returned 0 compaction items", "context length exceeded", "compaction unsupported"} {
+		t.Run(cause, func(t *testing.T) {
+			req := llmcontracts.AgentRequest{
+				Ctx: context.Background(), Operation: llmcontracts.OperationStreaming,
+				Message: "perform the task", ExecID: "active",
+				Agent:       models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", ContextWindow: 272000},
+				ChatHistory: []models.Execution{{PromptSent: "old history", Status: models.ExecCompleted}},
+			}
+			failure := fmt.Errorf("openai API call: %w", llmcontracts.NewCategorizedError(llmcontracts.ErrorMidTurnCompactionFailed, "compaction", errors.New(cause)))
+			calls := 0
+			adapter := providerAdapterFunc(func(llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+				calls++
+				return llmcontracts.AgentResult{}, failure
+			})
+			svc := &LLMService{}
+			_, err := svc.callProviderWithCompaction(adapter, req)
+			require.ErrorIs(t, err, failure)
+			require.Equal(t, 1, calls, "must not summarize/restart without the current turn's tool results")
+			require.False(t, recognizedContextLengthError(err))
+			require.False(t, nativeCompactionFailure(err))
+			// The same terminal policy applies if failure occurs during an
+			// otherwise safe pre-turn compaction fallback's model retry.
+			calls = 0
+			_, err = svc.callCompactedRetryOrLastResort(adapter, req, req, errors.New("pre-turn compaction"))
+			require.ErrorIs(t, err, failure)
+			require.Equal(t, 1, calls)
+		})
+	}
+}
 
 func TestSteeringCompactionFallbackUsesCurrentConversation(t *testing.T) {
 	for _, secondOverflow := range []bool{false, true} {
