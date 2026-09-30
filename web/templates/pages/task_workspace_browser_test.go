@@ -52,7 +52,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		case "/tasks/details-task/goal":
 			component = TaskGoalPanel(task.ID, &models.TaskGoal{Objective: r.FormValue("goal"), Status: models.TaskGoalStatusActive})
 		case "/tasks/details-task/thread":
-			fmt.Fprint(w, `<form id="task-thread-form"><textarea name="message">Retained draft</textarea></form>`)
+			fmt.Fprint(w, `<div style="display:flex;flex-direction:column;flex:1;min-height:0"><form id="task-thread-form" style="margin-top:auto;padding:16px"><textarea name="message">Retained draft</textarea></form></div>`)
 			return
 		case "/tasks/details-task/changes/summary":
 			fmt.Fprint(w, `{"files":0}`)
@@ -114,7 +114,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.call("Page.navigate", map[string]any{"url": server.URL + "/tasks/details-task?tab=details"}, nil)
 		b.waitFor("saved details ready", `String(Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
 		assertFooter := func() {
-			b.waitFor("actions anchored bottom right", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),box=actions.getBoundingClientRect(),last=actions.lastElementChild.getBoundingClientRect();return String(Math.abs(panel.bottom-box.bottom-12)<1 && Math.abs(panel.right-last.right-12)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
+			b.waitFor("actions aligned with composer bottom and panel left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect(),composer=document.getElementById('task-thread-form').getBoundingClientRect();return String(Math.abs(first.bottom-composer.bottom)<1 && Math.abs(first.left-panel.left-13)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
 		}
 		assertFooter()
 		b.evaluate(`var content=document.getElementById('task-detail-view'),filler=document.createElement('div'); filler.style.height='2000px'; content.appendChild(filler); content.scrollTop=content.scrollHeight; 'scrolled'`)
