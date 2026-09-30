@@ -739,6 +739,9 @@ func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
 			return repository.ErrLLMConfigModelRequired
 		}
 	}
+	if !models.BuiltInModelSupported(agent.Provider, agent.Model) {
+		return fmt.Errorf("model %q is no longer supported; select a supported model", agent.Model)
+	}
 	return nil
 }
 
@@ -1773,14 +1776,14 @@ func supportedOpenAIModel(value string, auth models.AuthMethod) bool {
 	if model == "" {
 		return false
 	}
+	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
+	if !ok {
+		return false
+	}
 	if auth == models.AuthMethodAPIKey {
 		return true
 	}
-	if auth != models.AuthMethodOAuth {
-		return false
-	}
-	spec, ok := models.LookupModel(models.ProviderOpenAI, model)
-	return ok && spec.Visible && spec.SupportsOAuth
+	return auth == models.AuthMethodOAuth && spec.SupportsOAuth
 }
 
 func normalizeOpenAIModel(value string) string {
@@ -1788,7 +1791,7 @@ func normalizeOpenAIModel(value string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if spec, ok := models.LookupModel(models.ProviderOpenAI, trimmed); ok && spec.Visible {
+	if spec, ok := models.LookupModel(models.ProviderOpenAI, trimmed); ok {
 		return spec.ID
 	}
 	return ""

@@ -2627,7 +2627,7 @@ func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForImageAttachmen
 		Provider:   models.ProviderAnthropic,
 		AuthMethod: models.AuthMethodAPIKey,
 		APIKey:     "test-key",
-		Model:      "claude-3-5-sonnet-20241022",
+		Model:      "claude-sonnet-4-5-20250929",
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
 
@@ -2693,7 +2693,7 @@ func TestSlackService_ProcessIncomingMessage_SelectsVisionAgentForIDOnlyFileInfo
 		Provider:   models.ProviderAnthropic,
 		AuthMethod: models.AuthMethodAPIKey,
 		APIKey:     "test-key",
-		Model:      "claude-3-5-sonnet-20241022",
+		Model:      "claude-sonnet-4-5-20250929",
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
 
@@ -2770,7 +2770,7 @@ func TestSlackService_ProcessIncomingMessage_SniffsUnknownTypeImageWhenFileInfoF
 		Provider:   models.ProviderAnthropic,
 		AuthMethod: models.AuthMethodAPIKey,
 		APIKey:     "test-key",
-		Model:      "claude-3-5-sonnet-20241022",
+		Model:      "claude-sonnet-4-5-20250929",
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))
 

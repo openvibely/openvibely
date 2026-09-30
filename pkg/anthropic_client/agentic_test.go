@@ -54,7 +54,6 @@ func TestNativeCompactionStrategy(t *testing.T) {
 		"claude-fable-5",
 		"claude-mythos-5-1",
 		"claude-mythos-5",
-		"claude-mythos-preview",
 		"claude-opus-5-5[1m]",
 	}
 	for _, model := range supported {
@@ -2216,7 +2215,7 @@ func TestNormalizeEffortRejectsUnsupportedModelCombinations(t *testing.T) {
 		{"claude-opus-4-7", "xhigh", "xhigh"},
 		{"claude-opus-4-6", "xhigh", ""},
 		{"claude-sonnet-4-6", "max", "max"},
-		{"claude-opus-4-5-20251101", "high", "high"},
+		{"claude-opus-4-5-20251101", "high", ""},
 		{"claude-opus-4-5-20251101", "xhigh", ""},
 		{"claude-opus-4-5-20251101", "max", ""},
 		{"claude-sonnet-4-5-20250929", "low", ""},

@@ -108,6 +108,10 @@ func modelCardShowsTemperature(agent models.LLMConfig) bool {
 	return models.ModelSupportsTemperature(agent.Provider, agent.Model)
 }
 
+func modelCardUnsupported(agent models.LLMConfig) bool {
+	return !models.BuiltInModelSupported(agent.Provider, agent.Model)
+}
+
 func oauthStatusText(agent models.LLMConfig) string {
 	if !agent.IsOAuth() {
 		return ""
@@ -380,6 +384,9 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 											{ string(agent.Provider) } / { agent.Model }
 										}
 									</p>
+									if modelCardUnsupported(agent) {
+										<p class="mt-2 text-sm font-medium text-error">This model is no longer supported. Select a supported model.</p>
+									}
 									if agent.Provider == models.ProviderMixture {
 										<p class="text-sm opacity-60">Aggregator: { mixtureAggregatorSummary(agent, modelOptions) }</p>
 										<p class="text-sm opacity-60">References: { fmt.Sprintf("%d", mixtureReferenceCount(agent)) }</p>

@@ -156,21 +156,11 @@ func TestClaudeCodeMaxOutputTokens(t *testing.T) {
 		{"fable 5", "claude-fable-5", 64000},
 		{"mythos 5", "claude-mythos-5", 64000},
 		{"opus 4.8", "claude-opus-4-8", 64000},
-		{"opus 4.7", "claude-opus-4-7-20260514", 64000},
-		{"opus 4.6", "claude-opus-4-6-20260401", 64000},
-		{"sonnet 4.6", "claude-sonnet-4-6-20260514", 32000},
-		{"opus 4.5", "claude-opus-4-5-20251101", 32000},
+		{"opus 4.7", "claude-opus-4-7", 64000},
+		{"opus 4.6", "claude-opus-4-6", 64000},
+		{"sonnet 4.6", "claude-sonnet-4-6", 32000},
 		{"sonnet 4.5", "claude-sonnet-4-5-20250929", 32000},
-		{"sonnet 4.0", "claude-sonnet-4-0-20250514", 32000},
 		{"haiku 4.5", "claude-haiku-4-5-20251001", 32000},
-		{"opus 4.1", "claude-opus-4-1-20250805", 32000},
-		{"opus 4.0", "claude-opus-4-0-20250514", 32000},
-		{"3.7 sonnet", "claude-3-7-sonnet-20250219", 32000},
-		{"3.5 sonnet", "claude-3-5-sonnet-20241022", 8192},
-		{"3.5 haiku", "claude-3-5-haiku-20241022", 8192},
-		{"3 sonnet", "claude-3-sonnet-20240229", 8192},
-		{"3 opus", "claude-3-opus-20240229", 4096},
-		{"3 haiku", "claude-3-haiku-20240307", 4096},
 		{"fallback", "claude-future-model", 32000},
 	}
 
@@ -207,14 +197,11 @@ func TestClaudeCodeMaxOutputTokensOverrideClampsToUpperLimit(t *testing.T) {
 	if got := claudeCodeMaxOutputTokens("claude-mythos-5"); got != 128000 {
 		t.Fatalf("mythos 5 override = %d, want 128000", got)
 	}
-	if got := claudeCodeMaxOutputTokens("claude-opus-4-7-20260514"); got != 128000 {
+	if got := claudeCodeMaxOutputTokens("claude-opus-4-7"); got != 128000 {
 		t.Fatalf("opus 4.7 override = %d, want 128000", got)
 	}
-	if got := claudeCodeMaxOutputTokens("claude-sonnet-4-6-20260514"); got != 64000 {
+	if got := claudeCodeMaxOutputTokens("claude-sonnet-4-6"); got != 64000 {
 		t.Fatalf("sonnet 4.6 override = %d, want 64000", got)
-	}
-	if got := claudeCodeMaxOutputTokens("claude-3-5-sonnet-20241022"); got != 8192 {
-		t.Fatalf("3.5 sonnet override = %d, want 8192", got)
 	}
 }
 
@@ -244,7 +231,7 @@ func TestClaudeCodeMaxOutputTokensOverrideUsesParseIntSemantics(t *testing.T) {
 
 func TestClaudeCodeMaxOutputTokensInvalidOverrideUsesDefault(t *testing.T) {
 	t.Setenv(claudeCodeMaxOutputTokensEnv, "not-a-number")
-	if got := claudeCodeMaxOutputTokens("claude-opus-4-7-20260514"); got != 64000 {
+	if got := claudeCodeMaxOutputTokens("claude-opus-4-7"); got != 64000 {
 		t.Fatalf("invalid override = %d, want default 64000", got)
 	}
 }

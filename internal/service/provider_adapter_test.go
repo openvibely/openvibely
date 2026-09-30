@@ -21,6 +21,30 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestUnsupportedCatalogModel(t *testing.T) {
+	tests := []struct {
+		name    string
+		agent   models.LLMConfig
+		wantErr bool
+	}{
+		{"current OpenAI", models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6-astra"}, false},
+		{"retired OpenAI", models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.2-codex"}, true},
+		{"retired Anthropic", models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-4-5"}, true},
+		{"custom compatible", models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "gpt-5.2-codex"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := unsupportedCatalogModel(tt.agent)
+			if tt.wantErr && (err == nil || !strings.Contains(err.Error(), "no longer supported")) {
+				t.Fatalf("error = %v, want retirement error", err)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestProviderAdapter_TestProvider_UsesCanonicalRequest(t *testing.T) {
 	svc := &LLMService{}
 	mock := testutil.NewMockLLMCaller()
@@ -231,6 +255,7 @@ func TestAnthropicProviderAdapter_ForwardsSupportedOperations(t *testing.T) {
 				Message:   "preserve this request",
 				Agent: models.LLMConfig{
 					Provider:         models.ProviderAnthropic,
+					Model:            "claude-opus-5",
 					AuthMethod:       tt.authMethod,
 					APIKey:           tt.apiKey,
 					OAuthAccessToken: tt.oauthAccessToken,
@@ -287,7 +312,7 @@ func TestAnthropicProviderAdapter_RejectsUnsupportedAuthTransport(t *testing.T) 
 				Agent: models.LLMConfig{
 					Provider:   models.ProviderAnthropic,
 					AuthMethod: "unsupported",
-					Model:      "claude-sonnet-4",
+					Model:      "claude-opus-5",
 				},
 				WorkDir: "/work/retired-unsupported",
 			})
@@ -312,6 +337,7 @@ func TestAnthropicProviderAdapter_RejectsUnknownOperationWithoutProviderCall(t *
 		Operation: llmcontracts.Operation("unknown"),
 		Agent: models.LLMConfig{
 			Provider:   models.ProviderAnthropic,
+			Model:      "claude-opus-5",
 			AuthMethod: models.AuthMethodAPIKey,
 			APIKey:     "test-key",
 		},
@@ -1755,9 +1781,9 @@ func TestNativeCheckpointRequiresCompleteCompatibilityIdentity(t *testing.T) {
 	}
 }
 
-func TestProviderContextWindowsIncludeSparkAndConservativeOllamaDefault(t *testing.T) {
-	if got := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex-spark"}).ContextWindow; got != 128000 {
-		t.Fatalf("spark context window = %d, want 128000", got)
+func TestProviderContextWindowsUseCatalogAndConservativeOllamaDefault(t *testing.T) {
+	if got := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex"}).ContextWindow; got != 272000 {
+		t.Fatalf("OpenAI context window = %d, want 272000", got)
 	}
 	if got := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOllama, Model: "arbitrary-local"}).ContextWindow; got != llmollama.DefaultContextWindow {
 		t.Fatalf("default Ollama context window = %d, want %d", got, llmollama.DefaultContextWindow)

@@ -1669,6 +1669,13 @@ func unsupportedModelTransport(provider models.LLMProvider, authMethod models.Au
 	return fmt.Errorf("%s model auth method %q is no longer supported; reconfigure the model to use OAuth or an API key", provider, authMethod)
 }
 
+func unsupportedCatalogModel(agent models.LLMConfig) error {
+	if models.BuiltInModelSupported(agent.Provider, agent.Model) {
+		return nil
+	}
+	return fmt.Errorf("%s model %q is no longer supported; select a supported model in Models", agent.Provider, agent.Model)
+}
+
 func (a *anthropicProviderAdapter) callSupportedOperation(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	if anthropicAdapterEnabled(req.Agent) {
 		return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
@@ -1677,6 +1684,9 @@ func (a *anthropicProviderAdapter) callSupportedOperation(req llmcontracts.Agent
 }
 
 func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	if err := unsupportedCatalogModel(req.Agent); err != nil {
+		return llmcontracts.AgentResult{}, err
+	}
 	if !req.ProviderRuntimeResolved {
 		req = resolveProviderRequestForBudget(req)
 	}
@@ -1712,6 +1722,9 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		if req.AgentDefinition.Model != "" && req.AgentDefinition.Model != "inherit" {
 			req.Agent.Model = req.AgentDefinition.Model
 		}
+	}
+	if err := unsupportedCatalogModel(req.Agent); err != nil {
+		return llmcontracts.AgentResult{}, err
 	}
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {

@@ -6990,7 +6990,7 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 
 	textOnly := richAutoSelectionConfig("Text-only model", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "text-only", false)
 	apiKey := richAutoSelectionConfig("Anthropic API", models.ProviderAnthropic, models.AuthMethodAPIKey, "claude-3-haiku", false)
-	oauth := richAutoSelectionConfig("Anthropic OAuth", models.ProviderAnthropic, models.AuthMethodOAuth, "claude-opus-5-20250929", false)
+	oauth := richAutoSelectionConfig("Anthropic OAuth", models.ProviderAnthropic, models.AuthMethodOAuth, "claude-opus-5", false)
 	for _, cfg := range []*models.LLMConfig{textOnly, apiKey, oauth} {
 		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
 			t.Fatalf("create %s: %v", cfg.Name, err)

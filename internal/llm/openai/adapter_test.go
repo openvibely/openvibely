@@ -444,7 +444,7 @@ func TestReasoningEffortUsesModelDefaults(t *testing.T) {
 		{model: "gpt-5.6-sol", value: "max", want: "max"},
 		{model: "gpt-5.4-mini", value: "max", want: "medium"},
 		{model: "gpt-5.4-mini", value: "xhigh", want: "xhigh"},
-		{model: "gpt-5.3-codex-spark", value: "xhigh", want: "high"},
+		{model: "unknown-model", value: "xhigh", want: "high"},
 	} {
 		if got := reasoningEffort(tc.model, tc.value); got != tc.want {
 			t.Errorf("reasoningEffort(%q, %q) = %q, want %q", tc.model, tc.value, got, tc.want)

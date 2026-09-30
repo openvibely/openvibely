@@ -162,12 +162,14 @@ func TestLLMConfigIsCallableMixtureSlot(t *testing.T) {
 		cfg  LLMConfig
 		want bool
 	}{
-		{name: "openai api key", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodAPIKey}, want: true},
-		{name: "openai oauth", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "openai unsupported", cfg: LLMConfig{Provider: ProviderOpenAI, AuthMethod: "unsupported"}, want: false},
-		{name: "anthropic api key", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodAPIKey}, want: true},
-		{name: "anthropic oauth", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: AuthMethodOAuth}, want: true},
-		{name: "anthropic unsupported", cfg: LLMConfig{Provider: ProviderAnthropic, AuthMethod: "unsupported"}, want: false},
+		{name: "openai api key", cfg: LLMConfig{Provider: ProviderOpenAI, Model: "gpt-6-astra", AuthMethod: AuthMethodAPIKey}, want: true},
+		{name: "openai oauth", cfg: LLMConfig{Provider: ProviderOpenAI, Model: "gpt-6-astra", AuthMethod: AuthMethodOAuth}, want: true},
+		{name: "openai unsupported auth", cfg: LLMConfig{Provider: ProviderOpenAI, Model: "gpt-6-astra", AuthMethod: "unsupported"}, want: false},
+		{name: "openai retired model", cfg: LLMConfig{Provider: ProviderOpenAI, Model: "retired-model", AuthMethod: AuthMethodAPIKey}, want: false},
+		{name: "anthropic api key", cfg: LLMConfig{Provider: ProviderAnthropic, Model: "claude-opus-5", AuthMethod: AuthMethodAPIKey}, want: true},
+		{name: "anthropic oauth", cfg: LLMConfig{Provider: ProviderAnthropic, Model: "claude-opus-5", AuthMethod: AuthMethodOAuth}, want: true},
+		{name: "anthropic unsupported auth", cfg: LLMConfig{Provider: ProviderAnthropic, Model: "claude-opus-5", AuthMethod: "unsupported"}, want: false},
+		{name: "anthropic retired model", cfg: LLMConfig{Provider: ProviderAnthropic, Model: "retired-model", AuthMethod: AuthMethodAPIKey}, want: false},
 		{name: "openai compatible api key", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodAPIKey}, want: true},
 		{name: "openai compatible oauth", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: AuthMethodOAuth}, want: true},
 		{name: "openai compatible unsupported", cfg: LLMConfig{Provider: ProviderOpenAICompatible, AuthMethod: "unsupported"}, want: false},

@@ -740,12 +740,32 @@ func TestModelsContentOmitsRetiredOpenAIOptions(t *testing.T) {
 	}
 }
 
+func TestModelsContentKeepsRetiredConfigurationWithError(t *testing.T) {
+	agent := models.LLMConfig{
+		ID:       "retired-model",
+		Name:     "Old Claude",
+		Provider: models.ProviderAnthropic,
+		Model:    "claude-opus-4-5",
+	}
+	var buf bytes.Buffer
+	if err := ModelsContent([]models.LLMConfig{agent}, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	card := renderedModelCard(t, buf.String(), agent.ID)
+	if !strings.Contains(card, agent.Model) {
+		t.Fatal("retired saved model was not rendered")
+	}
+	if !strings.Contains(card, "This model is no longer supported") {
+		t.Fatal("retired saved model has no unsupported error")
+	}
+}
+
 func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 	agents := []models.LLMConfig{
-		{ID: "api-openai", Name: "OpenAI API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"},
-		{ID: "oauth-anthropic", Name: "Claude OAuth", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 9999999999999, Model: "claude-sonnet"},
-		{ID: "unsupported-openai", Name: "Codex unsupported auth", Provider: models.ProviderOpenAI, AuthMethod: "unsupported", Model: "gpt-5-codex"},
-		{ID: "unsupported-anthropic", Name: "Claude unsupported auth", Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude-sonnet"},
+		{ID: "api-openai", Name: "OpenAI API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-astra"},
+		{ID: "oauth-anthropic", Name: "Claude OAuth", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 9999999999999, Model: "claude-opus-5"},
+		{ID: "unsupported-openai", Name: "Codex unsupported auth", Provider: models.ProviderOpenAI, AuthMethod: "unsupported", Model: "gpt-6-astra"},
+		{ID: "unsupported-anthropic", Name: "Claude unsupported auth", Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude-opus-5"},
 		{ID: "mixture", Name: "Existing Mixture", Provider: models.ProviderMixture, Model: "default"},
 		{ID: "internal", Name: "Internal", Provider: models.LLMProvider("internal"), AuthMethod: models.AuthMethodAPIKey, Model: "internal"},
 	}

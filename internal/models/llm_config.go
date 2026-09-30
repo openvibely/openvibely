@@ -179,9 +179,9 @@ func (c *LLMConfig) IsOpenAICompatibleAPIKey() bool {
 func (c *LLMConfig) IsCallableMixtureSlot() bool {
 	switch c.Provider {
 	case ProviderOpenAI:
-		return c.IsOpenAIAPIKey() || c.IsOpenAIOAuth()
+		return BuiltInModelSupported(c.Provider, c.Model) && (c.IsOpenAIAPIKey() || c.IsOpenAIOAuth())
 	case ProviderAnthropic:
-		return c.IsAnthropicAPIKey() || c.IsOAuth()
+		return BuiltInModelSupported(c.Provider, c.Model) && (c.IsAnthropicAPIKey() || c.IsOAuth())
 	case ProviderOpenAICompatible:
 		return c.IsOpenAICompatibleAPIKey() || c.IsOAuth()
 	case ProviderOllama, ProviderTest:
