@@ -167,3 +167,21 @@ func TestInitialSteeringCommitPrecedesSampling(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoryContinuationDoesNotAppendConsumedPrompt(t *testing.T) {
+	var received map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&received))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(buildSSE([]string{`{"type":"response.completed","response":{"id":"continued","status":"completed","output":[]}}`})))
+	}))
+	defer srv.Close()
+	previousURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	t.Cleanup(func() { OpenAIAPIBaseURL = previousURL })
+	client := newHTTPTestAPIKeyClient("test-key")
+	client.History = []Message{{Role: "user", Content: "recorded steer"}, {Role: "assistant", Content: "recorded result"}}
+	_, err := client.SendAgentic(context.Background(), "", &AgenticOptions{Model: "gpt-test", DisableTools: true, ContinueFromHistory: true})
+	require.NoError(t, err)
+	require.Len(t, received["input"].([]any), 2, "do not append an empty user message when resuming recorded history")
+}

@@ -864,6 +864,7 @@ func resolveProviderRequestForBudget(req llmcontracts.AgentRequest) llmcontracts
 
 func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
 	req = resolveProviderRequestForBudget(req)
+	req = trackSteeringRecovery(req)
 	var replayErr error
 	req, replayErr = s.loadOpenAIReplayHistory(req)
 	if replayErr != nil {
@@ -986,6 +987,7 @@ func (s *LLMService) callProviderWithCompaction(adapter ProviderAdapter, req llm
 		req.ChatHistory = uncompactedReq.ChatHistory
 		req.NativeCompactionStateJSON = ""
 	}
+	req = restoreCurrentSteeringForRecovery(req)
 	if locallyCompactedBeforeProvider && recognizedContextLengthError(err) {
 		applog.Infof("[agent-svc] compacted provider retry exceeded context; failure_category=%s", contextFailureCategory(err))
 		return s.callProviderWithLastResortTruncation(adapter, lastResortBaseReq, err)
@@ -1241,6 +1243,7 @@ func (s *LLMService) callCompactedRetryOrLastResort(adapter ProviderAdapter, ori
 }
 
 func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapter, req llmcontracts.AgentRequest, cause error) (llmcontracts.AgentResult, error) {
+	req = restoreCurrentSteeringForRecovery(req)
 	budget := calculateRequestBudget(req)
 	truncated, externalized, cleanupArtifact, prepErr := s.preparePendingInputWithBudget(req, budget)
 	if prepErr != nil {
@@ -1256,6 +1259,9 @@ func (s *LLMService) callProviderWithLastResortTruncation(adapter ProviderAdapte
 	truncated.DisableNativeCompaction = true
 	truncated.Agent.DisableNativeCompaction = true
 	truncated.ChatHistory = historyWithinRequestBudget(truncated, llmprompt.LimitChatHistory(req.ChatHistory))
+	if llmcontracts.HistoryContinuationFromContext(req.Ctx) && len(truncated.ChatHistory) == 0 {
+		return llmcontracts.AgentResult{}, llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "steering recovery", fmt.Errorf("current conversation cannot fit without discarding consumed steering and tool results: %w", cause))
+	}
 	budget = calculateRequestBudget(truncated)
 	if err := ensureRequestFitsWithBudget(truncated, budget, "last-resort request"); err != nil {
 		combined := llmcontracts.NewCategorizedError(llmcontracts.ErrorContextWindowExceeded, "last-resort request", fmt.Errorf("%v; original recovery error: %w", err, cause))
@@ -1338,6 +1344,7 @@ func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.
 }
 
 func (s *LLMService) compactRequestHistoryWithLocalSummary(adapter ProviderAdapter, req llmcontracts.AgentRequest, triggerErrors ...error) (llmcontracts.AgentRequest, error) {
+	req = restoreCurrentSteeringForRecovery(req)
 	history := append([]models.Execution(nil), req.ChatHistory...)
 	var trigger error
 	if len(triggerErrors) > 0 {
@@ -1380,6 +1387,11 @@ func (s *LLMService) localSummaryCompaction(adapter ProviderAdapter, req llmcont
 	summaryReq := req
 	summaryReq.NativeCompactionStateJSON = ""
 	summaryReq.Ctx = llmcontracts.WithoutRuntimeTools(withoutContextCompactionFallback(req.Ctx))
+	summaryReq.Ctx = llmcontracts.WithInitialSteeringCommit(summaryReq.Ctx, nil)
+	summaryReq.Ctx = llmcontracts.WithLocalSteeringCallback(summaryReq.Ctx, func(context.Context) (llmcontracts.LocalSteeringInput, error) {
+		return llmcontracts.LocalSteeringInput{}, nil
+	})
+	summaryReq.Ctx = llmcontracts.WithSteeringCallback(summaryReq.Ctx, func(context.Context) (string, error) { return "", nil })
 	summaryReq.Ctx = llmcontracts.WithNativeCompactionStateJSON(summaryReq.Ctx, "")
 	summaryReq.Operation = llmcontracts.OperationDirect
 	summaryReq.Message = buildLocalSummaryCompactionPrompt(history)
@@ -1640,6 +1652,15 @@ type openAIProviderAdapter struct {
 }
 
 func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+	// Task/direct adapters do not take ChatHistory. Supply the same recovered
+	// conversation through their native input field without changing tool mode.
+	if llmcontracts.HistoryContinuationFromContext(req.Ctx) && !requestUsesChatStreaming(req) && !req.RawDirectPrompt {
+		raw, err := json.Marshal(llmopenai.HistoryInputItems(req.ChatHistory))
+		if err != nil {
+			return llmcontracts.AgentResult{}, err
+		}
+		req.NativeCompactionStateJSON = string(raw)
+	}
 	req.Ctx = llmcontracts.WithNativeCompactionStateJSON(req.Ctx, req.NativeCompactionStateJSON)
 	req.Ctx = llmcontracts.WithProviderSessionStateJSON(req.Ctx, req.ProviderSessionStateJSON)
 	req = prepareAgentRuntimeRequest(req)

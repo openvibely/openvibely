@@ -134,6 +134,8 @@ type AgenticOptions struct {
 	// InitialInputCommit persists a prepared late steer before sampling and
 	// continues recording its tool/results history throughout this invocation.
 	InitialInputCommit func(context.Context, []any) error
+	// ContinueFromHistory resumes an already recorded prompt after compaction.
+	ContinueFromHistory bool
 	// LocalSteeringWakeup is retained for callers that also use it to interrupt
 	// wait-style tools. Model sampling itself is not preempted by local steering.
 	LocalSteeringWakeup <-chan struct{}
@@ -443,7 +445,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			"role":    "user",
 			"content": content,
 		})
-	} else {
+	} else if !opts.ContinueFromHistory {
 		inputItems = append(inputItems, agenticInputItem{
 			"type":    "message",
 			"role":    "user",

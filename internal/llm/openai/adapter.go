@@ -481,6 +481,8 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 			OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 			OnLocalSteering:                openAILocalSteeringCallback(ctx),
 			InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
+			InitialInputItems:              nativeCompactionInputItems(ctx),
+			ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 			LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 			EnableAstraConfigurationUpdate: true,
 			SkipDefaultTools:               rt.SkipDefaultTools})
@@ -584,6 +586,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
+		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {
@@ -723,6 +726,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		OnToolBoundarySteering:         llmcontracts.SteeringCallbackFromContext(ctx),
 		OnLocalSteering:                openAILocalSteeringCallback(ctx),
 		InitialInputCommit:             llmcontracts.InitialSteeringCommitFromContext(ctx),
+		ContinueFromHistory:            llmcontracts.HistoryContinuationFromContext(ctx),
 		LocalSteeringWakeup:            llmcontracts.MidTurnSteeringWakeupFromContext(ctx),
 		EnableAstraConfigurationUpdate: true,
 		OnThinking: func(text string) {

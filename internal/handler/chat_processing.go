@@ -680,7 +680,7 @@ modelLoop:
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
 		requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, nil)
 		if params.Agent.Provider == models.ProviderOpenAI && pendingSteering.count() > 0 {
-			batch := pendingSteering
+			batch := preparedSteeringBatch{inputs: append([]models.ThreadInput(nil), pendingSteering.inputs...)}
 			commit := h.preparedSteeringCommit(params, batch)
 			requestCtx = llmcontracts.WithInitialSteeringCommit(requestCtx, func(commitCtx context.Context, history []any) error {
 				if err := commit(commitCtx, history); err != nil {

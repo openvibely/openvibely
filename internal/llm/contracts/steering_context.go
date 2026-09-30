@@ -11,6 +11,19 @@ type steeringRetryResetCallbackKey struct{}
 type midTurnSteeringWakeupKey struct{}
 type localSteeringCallbackKey struct{}
 type initialSteeringCommitKey struct{}
+type historyContinuationKey struct{}
+
+func WithHistoryContinuation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, historyContinuationKey{}, true)
+}
+
+func HistoryContinuationFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, _ := ctx.Value(historyContinuationKey{}).(bool)
+	return value
+}
 
 // InitialSteeringCommit records a late steer already prepared as the next
 // request's prompt, using the provider's fully reconstructed native history.
