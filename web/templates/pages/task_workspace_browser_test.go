@@ -514,3 +514,46 @@ func TestBrowserFunctional_TaskChangesStickyHeadersStayInsideWorkspace(t *testin
 		b.waitFor("rounded header restored", `String(!document.querySelector('.diff-file-header').hasAttribute('data-stuck'))`, "true")
 	})
 }
+
+func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/thread") || strings.HasSuffix(r.URL.Path, "/changes/summary") {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		project := models.Project{ID: r.URL.Query().Get("project_id"), Name: "Project"}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/tasks/new" {
+			if err := NewTask([]models.Project{project}, &project, nil, nil).Render(r.Context(), w); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		task := &models.Task{ID: strings.TrimPrefix(r.URL.Path, "/tasks/"), ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+		if err := TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/one?project_id=one", "panel-preference", func(b *composerFocusCDP) {
+		b.waitFor("initially closed", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, "false")
+		b.click("#task-details-opener")
+		b.waitFor("open preference saved", `localStorage.getItem('task-inspector-open')`, "true")
+		navigate := func(path, expected string) {
+			b.call("Page.navigate", map[string]any{"url": server.URL + path}, nil)
+			b.waitFor("navigation ready", `location.pathname + location.search + ':' + (document.getElementById('task-detail-content')?.dataset.projectId || '')`, path+":"+strings.Split(strings.Split(path, "project_id=")[1], "&")[0])
+			b.waitFor("restored panel", `String(document.getElementById('task-details-opener')?.getAttribute('aria-expanded'))`, expected)
+		}
+		navigate("/tasks/two?project_id=two", "true")
+		navigate("/tasks/new?project_id=three", "true")
+		b.click("#task-details-opener")
+		b.waitFor("closed preference saved", `localStorage.getItem('task-inspector-open')`, "false")
+		navigate("/tasks/one?project_id=one", "false")
+		navigate("/tasks/two?project_id=two&tab=details", "true")
+		navigate("/tasks/one?project_id=one", "false")
+	})
+}
