@@ -215,10 +215,13 @@ templ TaskWorkspaceScript() {
 		});
 		var drag = null;
 		on(document, 'keydown', function(event) { if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey) delete divider.dataset.pointerFocus; });
-		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.dataset.pointerFocus = 'true'; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
+		on(divider, 'pointerdown', function(event) { if (event.button !== 0) return; divider.dataset.pointerFocus = 'true'; divider.dataset.resizing = 'true'; divider.focus({preventScroll:true}); drag = {x:event.clientX, width:width}; divider.setPointerCapture(event.pointerId); event.preventDefault(); });
 		on(divider, 'pointermove', function(event) { if (drag) resize(drag.width + drag.x - event.clientX); });
-		on(divider, 'pointerup', function() { drag = null; });
-		on(divider, 'pointercancel', function() { drag = null; });
+		function endResize() { drag = null; delete divider.dataset.resizing; }
+		on(divider, 'pointerup', endResize);
+		on(divider, 'pointercancel', endResize);
+		on(divider, 'lostpointercapture', endResize);
+		on(window, 'blur', endResize);
 		var observer = new ResizeObserver(function() { resize(width); });
 		observer.observe(root);
 		function destroy() { abort.abort(); clearTimeout(timer); observer.disconnect(); }

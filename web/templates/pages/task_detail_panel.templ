@@ -26,8 +26,9 @@ templ TaskDetailPanel() {
 		#task-details-panel > [role="tablist"] > .tab { height:auto; padding-top:10px; padding-bottom:10px; }
 		#task-details-panel[hidden] { display:none; }
 		#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }
-		#task-panel-divider:focus-visible { outline:2px solid currentColor; }
-		#task-panel-divider[data-pointer-focus] { outline:none; }
+		#task-panel-divider:focus { outline:none; }
+		#task-panel-divider::after { content:""; position:absolute; top:0; bottom:0; left:6px; width:2px; background:color-mix(in srgb, currentColor 60%, transparent); opacity:0; transition:opacity .12s; pointer-events:none; }
+		#task-panel-divider:hover::after, #task-panel-divider[data-resizing]::after, #task-panel-divider:focus-visible:not([data-pointer-focus])::after { opacity:.45; }
 		#task-inspector-body > .task-tab-panel { min-height:0; }
 		#task-details-panel[data-overlay="true"] { box-shadow:0 8px 30px #0003; }
 		#task-detail-content[data-has-changes="true"] [data-task-terminal-status] { display:none; }
