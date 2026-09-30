@@ -30,8 +30,11 @@ type claudeCodeOutputBudget struct {
 	UpperLimit int
 }
 
-// applyAgentToSystemPrompt prepends the agent definition's system prompt and
-// skill contents to the base system context string.
+func anthropicModelSupportsWebSearch(model string) bool {
+	spec, ok := models.LookupModel(models.ProviderAnthropic, model)
+	return ok && spec.SupportsWebSearch
+}
+
 func claudeCodeOutputBudgetForModel(model string) claudeCodeOutputBudget {
 	if spec, ok := models.LookupModel(models.ProviderAnthropic, model); ok && spec.DefaultOutputTokens > 0 && spec.MaxOutputTokens > 0 {
 		return claudeCodeOutputBudget{Default: spec.DefaultOutputTokens, UpperLimit: spec.MaxOutputTokens}
@@ -434,8 +437,8 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		systemPrompt = projectInstructions
 	default:
 		fullPrompt = llmprompt.BuildTaskPromptHeader() + prompt
-		systemPrompt = llmprompt.BuildAnthropicAgentSystemPrompt(projectInstructions, workDir)
-		webSearchEnabled = true
+		systemPrompt = llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir)
+		webSearchEnabled = anthropicModelSupportsWebSearch(agent.Model)
 	}
 	compactionSummary := ""
 	opts := &anthropicclient.AgenticOptions{
@@ -496,7 +499,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	}
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	systemPromptStr := llmprompt.BuildAnthropicChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr := llmprompt.BuildAnthropicChatSystemPrompt(agent.Model, isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
@@ -530,7 +533,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
 		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
 		CompactionTokenThreshold:  agent.CompactionThreshold,
-		WebSearchEnabled:          true,
+		WebSearchEnabled:          anthropicModelSupportsWebSearch(agent.Model),
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),
@@ -628,13 +631,13 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		Effort:                    agent.ReasoningEffort,
 		EnableThinking:            true,
 		SkipDefaultTools:          skipDefaultTools,
-		System:                    llmprompt.BuildAnthropicAgentSystemPrompt(projectInstructions, workDir),
+		System:                    llmprompt.BuildAnthropicAgentSystemPrompt(agent.Model, projectInstructions, workDir),
 		WorkDir:                   workDir,
 		Attachments:               mcAttachments,
 		AutoCompaction:            !agent.DisableNativeCompaction && anthropicclient.SupportsNativeCompaction(agent.Model),
 		NativeCompactionStateJSON: llmcontracts.NativeCompactionStateJSONFromContext(ctx),
 		CompactionTokenThreshold:  agent.CompactionThreshold,
-		WebSearchEnabled:          true,
+		WebSearchEnabled:          anthropicModelSupportsWebSearch(agent.Model),
 		ExtraTools:                extraTools, ToolExecutor: toolExecutor,
 		ToolFilter:             toolFilter,
 		OnToolBoundarySteering: llmcontracts.SteeringCallbackFromContext(ctx),

@@ -8,7 +8,7 @@ import (
 )
 
 func TestAnthropicAgentSystemPrompt(t *testing.T) {
-	got := BuildAnthropicAgentSystemPrompt("PROJECT_CONTEXT", "/tmp/.worktrees/task_123")
+	got := BuildAnthropicAgentSystemPrompt("claude-sonnet-5", "PROJECT_CONTEXT", "/tmp/.worktrees/task_123")
 	for _, want := range []string{
 		AnthropicAgentSystemPrompt,
 		"check with the user before proceeding",
@@ -33,15 +33,29 @@ func TestAnthropicAgentSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestEveryCatalogAnthropicPromptProfileIsEmbedded(t *testing.T) {
+	for _, spec := range models.ProviderModels(models.ProviderAnthropic) {
+		data, err := anthropicPrompts.ReadFile(string(spec.PromptProfile))
+		if err != nil {
+			t.Errorf("%s prompt profile %q: %v", spec.ID, spec.PromptProfile, err)
+			continue
+		}
+		got := BuildAnthropicAgentSystemPrompt(spec.ID, "")
+		if !strings.Contains(got, string(data)) {
+			t.Errorf("%s does not use its catalog prompt", spec.ID)
+		}
+	}
+}
+
 func TestAnthropicChatSystemPrompt(t *testing.T) {
-	got := BuildAnthropicChatSystemPrompt(true, models.ChatModeOrchestrate, "FOLLOWUP_CONTEXT", false)
+	got := BuildAnthropicChatSystemPrompt("claude-sonnet-5", true, models.ChatModeOrchestrate, "FOLLOWUP_CONTEXT", false)
 	want := AnthropicAgentSystemPrompt + taskFollowupConstraints + "\nFOLLOWUP_CONTEXT"
 	if got != want {
 		t.Fatal("follow-up must use Anthropic base and preserve application constraints and context")
 	}
 	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
 		for _, restrict := range []bool{false, true} {
-			got := BuildAnthropicChatSystemPrompt(false, mode, "CHAT_CONTEXT", restrict)
+			got := BuildAnthropicChatSystemPrompt("claude-sonnet-5", false, mode, "CHAT_CONTEXT", restrict)
 			want := BuildChatSystemPrompt(false, mode, "CHAT_CONTEXT", restrict)
 			if got != want {
 				t.Fatalf("non-coding chat changed for mode %s", mode)

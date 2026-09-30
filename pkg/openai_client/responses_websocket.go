@@ -126,6 +126,9 @@ func isGPT6WorkflowModel(model string) bool {
 }
 
 func responsesLiteDefaultReasoningEffort(model string) string {
+	if spec, ok := models.LookupModel(models.ProviderOpenAI, model); ok && spec.DefaultReasoningEffort != "" {
+		return spec.DefaultReasoningEffort
+	}
 	return "medium"
 }
 

@@ -3,6 +3,7 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"html"
 	"slices"
@@ -55,9 +56,7 @@ func TestCardPaginationCompletionIsSilent(t *testing.T) {
 	}
 }
 
-func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
-	// Render the models page and verify the new model versions appear in the
-	// HTML <option> elements and the JS modelOptionsByProvider catalog.
+func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
 	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
@@ -66,85 +65,26 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	}
 	out := buf.String()
 
-	// HTML <option> elements
-	for _, model := range []string{
-		"claude-opus-5-5",
-		"claude-sonnet-5",
-		"claude-opus-5",
-		"claude-fable-5-1",
-		"claude-mythos-5-1",
-		"claude-fable-5",
-		"claude-mythos-5",
-		"claude-opus-4-8",
-		"claude-opus-4-7",
-		"claude-sonnet-4-6",
-	} {
-		if !strings.Contains(out, `value="`+model+`"`) {
-			t.Errorf("expected HTML option for %s", model)
-		}
-	}
-
-	// The browser receives the same catalog as escaped JSON in a data attribute.
-	for _, model := range []string{
-		"gpt-6-astra",
-		"gpt-6.1-sol",
-		"gpt-6-sol",
-		"gpt-6-luna",
-		"gpt-5.6-sol",
-		"gpt-5.6-terra",
-		"gpt-5.6-luna",
-		"gpt-5.5",
-		"gpt-5.5-pro",
-		"gpt-5.4-mini",
-		"claude-opus-5-5",
-		"claude-sonnet-5",
-		"claude-opus-5",
-		"claude-fable-5-1",
-		"claude-mythos-5-1",
-		"claude-fable-5",
-		"claude-mythos-5",
-		"claude-opus-4-8",
-		"claude-opus-4-7",
-		"claude-sonnet-4-6",
-	} {
-		if !strings.Contains(out, `&#34;value&#34;:&#34;`+model+`&#34;`) {
-			t.Errorf("expected JS model option for %s", model)
-		}
-	}
-
-	anthropicOrder := []string{
-		"claude-opus-5-5",
-		"claude-fable-5-1",
-		"claude-mythos-5-1",
-		"claude-fable-5",
-		"claude-mythos-5",
-		"claude-opus-5",
-		"claude-sonnet-5",
-		"claude-opus-4-8",
-		"claude-opus-4-7",
-		"claude-opus-4-6",
-		"claude-sonnet-4-6",
-		"claude-sonnet-4-5-20250929",
-		"claude-haiku-4-5-20251001",
-	}
-	assertModelOrder := func(name, markerFormat string) {
-		t.Helper()
-		last := -1
-		for _, model := range anthropicOrder {
-			marker := fmt.Sprintf(markerFormat, model)
+	// Selector contents and order follow the catalog for both providers.
+	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAI} {
+		lastJSON, lastHTML := -1, -1
+		for _, spec := range models.ProviderModels(provider) {
+			marker := fmt.Sprintf(`&#34;value&#34;:&#34;%s&#34;`, spec.ID)
 			position := strings.Index(out, marker)
-			if position < 0 {
-				t.Errorf("%s missing model %s", name, model)
-				continue
+			if position < 0 || position <= lastJSON {
+				t.Errorf("JavaScript catalog missing or out of order: %s", spec.ID)
 			}
-			if position <= last {
-				t.Errorf("%s model %s is out of order", name, model)
+			lastJSON = position
+			// OpenAI options are populated by JavaScript.
+			if provider == models.ProviderAnthropic {
+				position = strings.Index(out, fmt.Sprintf(`value="%s"`, spec.ID))
+				if position < 0 || position <= lastHTML {
+					t.Errorf("HTML selector missing or out of order: %s", spec.ID)
+				}
+				lastHTML = position
 			}
-			last = position
 		}
 	}
-	assertModelOrder("HTML selector", `value="%s"`)
-	assertModelOrder("JavaScript catalog", `&#34;value&#34;:&#34;%s&#34;`)
 
 	if strings.Contains(out, "defaultMaxTokens") {
 		t.Error("expected browser catalog not to expose internal output-token defaults")
@@ -249,6 +189,22 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		spec, ok := models.LookupModel(models.ProviderAnthropic, model)
 		if !ok || !slices.Equal(spec.ReasoningEfforts, allEfforts) {
 			t.Errorf("catalog efforts for %s = %v, want %v", model, spec.ReasoningEfforts, allEfforts)
+		}
+	}
+}
+
+func TestBuiltInModelOptionsPreserveCatalogReasoningDefaults(t *testing.T) {
+	var options map[string][]struct {
+		Value         string `json:"value"`
+		DefaultEffort string `json:"defaultEffort"`
+	}
+	if err := json.Unmarshal([]byte(builtInModelOptionsJSON()), &options); err != nil {
+		t.Fatal(err)
+	}
+	for _, option := range options[string(models.ProviderOpenAI)] {
+		spec, ok := models.LookupModel(models.ProviderOpenAI, option.Value)
+		if !ok || option.DefaultEffort != spec.DefaultReasoningEffort {
+			t.Errorf("%s browser default %q differs from catalog %q", option.Value, option.DefaultEffort, spec.DefaultReasoningEffort)
 		}
 	}
 }

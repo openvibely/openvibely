@@ -435,8 +435,13 @@ func TestNativeCompactionCapabilityRequiresConcreteSupportedConfiguration(t *tes
 	if !providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-6-sol", AuthMethod: models.AuthMethodAPIKey}) {
 		t.Fatal("compaction-capable OpenAI configuration was rejected")
 	}
-	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-5.6-sol", AuthMethod: models.AuthMethodAPIKey}) {
-		t.Fatal("OpenAI model without catalog compaction support advertised it")
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.5", "gpt-5.3-codex"} {
+		if !providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: model, AuthMethod: models.AuthMethodAPIKey}) {
+			t.Errorf("existing compaction support lost for %s", model)
+		}
+	}
+	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "unknown-model", AuthMethod: models.AuthMethodAPIKey}) {
+		t.Fatal("unknown model advertised native compaction")
 	}
 	if providerSupportsNativeCompaction(models.LLMConfig{Provider: models.ProviderOpenAI, Model: "", AuthMethod: models.AuthMethodAPIKey}) {
 		t.Fatal("blank model must not advertise native compaction")

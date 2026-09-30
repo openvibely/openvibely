@@ -15,13 +15,13 @@ func TestProviderPromptBudgetUsesProviderBase(t *testing.T) {
 			req := llmcontracts.AgentRequest{Ctx: context.Background(), Agent: models.LLMConfig{Provider: provider, Model: "gpt-6-astra"}, Operation: llmcontracts.OperationTask, ProjectInstructions: "PROJECT", ChatSystemContext: "CHAT", WorkDir: "/tmp/.worktrees/task_123", Followup: followup}
 			want := llmprompt.BuildCodexAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
 			if provider == models.ProviderAnthropic {
-				want = llmprompt.BuildAnthropicAgentSystemPrompt(req.ProjectInstructions, req.WorkDir)
+				want = llmprompt.BuildAnthropicAgentSystemPrompt(req.Agent.Model, req.ProjectInstructions, req.WorkDir)
 			}
 			if followup {
 				req.Operation = llmcontracts.OperationStreaming
 				want = llmprompt.BuildCodexChatSystemPrompt(req.Agent.Model, true, req.ChatMode, req.ChatSystemContext, false)
 				if provider == models.ProviderAnthropic {
-					want = llmprompt.BuildAnthropicChatSystemPrompt(true, req.ChatMode, req.ChatSystemContext, false)
+					want = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, true, req.ChatMode, req.ChatSystemContext, false)
 				}
 				want = llmprompt.AppendWorktreeContextPrompt(want, req.WorkDir)
 			}
@@ -46,7 +46,7 @@ func TestProviderPromptBudgetIncludesRuntimeActionMode(t *testing.T) {
 						}
 						base := llmprompt.BuildCodexChatSystemPrompt(req.Agent.Model, followup, mode, req.ChatSystemContext, false)
 						if provider == models.ProviderAnthropic {
-							base = llmprompt.BuildAnthropicChatSystemPrompt(followup, mode, req.ChatSystemContext, false)
+							base = llmprompt.BuildAnthropicChatSystemPrompt(req.Agent.Model, followup, mode, req.ChatSystemContext, false)
 						}
 						base = llmprompt.AppendWorktreeContextPrompt(base, req.WorkDir)
 						if provider == models.ProviderOpenAI && auth == models.AuthMethodOAuth && !followup {

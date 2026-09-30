@@ -202,6 +202,7 @@ func builtInModelOptionsJSON() string {
 		Efforts     []string `json:"efforts"`
 		Temperature bool     `json:"temperature"`
 		OAuth       bool     `json:"oauth"`
+		DefaultEffort string `json:"defaultEffort"`
 	}
 	data := map[string][]modelOption{}
 	for _, provider := range []models.LLMProvider{models.ProviderAnthropic, models.ProviderOpenAI} {
@@ -209,6 +210,7 @@ func builtInModelOptionsJSON() string {
 			data[string(provider)] = append(data[string(provider)], modelOption{
 				Value: spec.ID, Label: spec.Label, Efforts: spec.ReasoningEfforts,
 				Temperature: spec.SupportsTemperature, OAuth: spec.SupportsOAuth,
+				DefaultEffort: spec.DefaultReasoningEffort,
 			})
 		}
 	}
@@ -1206,6 +1208,10 @@ for _, agent := range modelOptions {
 			}
 
 				function preferredReasoningEffort(supportedEfforts, provider, model) {
+					var option = selectedModelOption(provider, model);
+					if (option && option.defaultEffort && supportedEfforts.indexOf(option.defaultEffort) !== -1) {
+						return option.defaultEffort;
+					}
 					var normalizedModel = (model || '').trim().toLowerCase();
 					if (isOpenAICompatibleProvider(provider) && (normalizedModel === 'kimi-k3' || normalizedModel === 'glm-5.2') && supportedEfforts.indexOf('max') !== -1) {
 						return 'max';
