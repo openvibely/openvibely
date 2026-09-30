@@ -541,6 +541,11 @@ func TestTaskDetailContent_DetailsTabRendersScrollablePlainSections(t *testing.T
 		t.Fatal("expected task detail view before edit form")
 	}
 	viewOnly := output[viewStart:editStart]
+	for _, field := range []string{"auto_merge", "auto_merge_on_goal_achieved"} {
+		if !strings.Contains(viewOnly, `data-detail-property="`+field+`" data-value="true"`) {
+			t.Fatalf("expected enabled auto-merge control %s in visible Details", field)
+		}
+	}
 	for _, forbidden := range []string{"Add goal", "Pause", "Resume", "Clear", "Auto-merge to target branch on successful completion", "Auto-merge to target branch when goal is achieved", `name="auto_merge"`, `name="auto_merge_on_goal_achieved"`} {
 		if strings.Contains(viewOnly, forbidden) {
 			t.Fatalf("read-only details view should not include edit/configuration control %q", forbidden)
@@ -1259,10 +1264,10 @@ func TestTaskDetailContent_ScheduleEnabledState(t *testing.T) {
 			}
 			out := buf.String()
 
-			if tc.wantBadge != "" && !strings.Contains(out, tc.wantBadge) {
+			if tc.wantBadge != "" && !strings.Contains(out, `class="badge badge-warning badge-xs ml-2">`+tc.wantBadge+`</span>`) {
 				t.Errorf("expected %q badge, not found in output", tc.wantBadge)
 			}
-			if tc.wantNoBadge != "" && strings.Contains(out, tc.wantNoBadge) {
+			if tc.wantNoBadge != "" && strings.Contains(out, `class="badge badge-warning badge-xs ml-2">`+tc.wantNoBadge+`</span>`) {
 				t.Errorf("expected %q badge to be absent, but found in output", tc.wantNoBadge)
 			}
 			if !strings.Contains(out, tc.wantButton) {
