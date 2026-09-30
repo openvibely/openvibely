@@ -1252,6 +1252,61 @@ func TestBuildTaskOccurrenceMap_SubDailyEveryThreeHoursNewSchedule(t *testing.T)
 	}
 }
 
+func TestBuildTaskOccurrenceMap_SubDailyElapsedIntervals(t *testing.T) {
+	originalLocation := time.Local
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Local = loc
+	t.Cleanup(func() { time.Local = originalLocation })
+	for _, date := range []struct {
+		month time.Month
+		day   int
+	}{{time.September, 27}, {time.March, 8}, {time.November, 1}} {
+		week := time.Date(2026, date.month, date.day, 0, 0, 0, 0, loc)
+		for _, timing := range []struct {
+			repeat    models.RepeatType
+			unit      time.Duration
+			intervals []int
+		}{
+			{models.RepeatSeconds, time.Second, []int{1, 365}},
+			{models.RepeatMinutes, time.Minute, []int{5, 90, 365}},
+			{models.RepeatHours, time.Hour, []int{1, 5, 25, 365}},
+		} {
+			for _, n := range timing.intervals {
+				t.Run(fmt.Sprintf("%s/%s/%d", week.Format("2006-01-02"), timing.repeat, n), func(t *testing.T) {
+					// Start before the visible week with nonzero minutes and seconds.
+					anchor := week.AddDate(0, 0, -2).Add(9*time.Hour + 17*time.Minute + 13*time.Second)
+					schedule := &models.Schedule{RunAt: anchor.UTC(), RepeatType: timing.repeat, RepeatInterval: n, Enabled: true}
+					got := buildTaskOccurrenceMap([]repository.TaskWithSchedule{{Schedule: schedule}}, week)
+					// Independently enumerate real runs and retain the first in each
+					// calendar cell, including midnight and DST transitions.
+					want := make(map[string]time.Time)
+					for run := anchor; run.Before(week.AddDate(0, 0, 7)); run = run.Add(time.Duration(n) * timing.unit) {
+						if run.Before(week) {
+							continue
+						}
+						key := localKey(run)
+						if _, exists := want[key]; !exists {
+							want[key] = run
+						}
+					}
+					if len(got) != len(want) {
+						t.Fatalf("got %d cells, want %d", len(got), len(want))
+					}
+					for key, run := range want {
+						entries := got[key]
+						if len(entries) != 1 || !entries[0].OccurrenceTime.Equal(run) {
+							t.Errorf("%s: got %#v, want first run %s", key, entries, run)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
 // TestBuildTaskOccurrenceMap_ExcludesTasksWithoutSchedule verifies that tasks returned
 // by ListWithSchedulesByProject with category='scheduled' but no schedule entry (Schedule == nil)
 // are excluded from the occurrence map. This is critical for drag-and-drop: only tasks
