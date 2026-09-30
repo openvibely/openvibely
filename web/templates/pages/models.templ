@@ -452,7 +452,7 @@ templ modelsContent(agents []models.LLMConfig, modelOptions []models.LLMConfig, 
 					<label class="label"><span class="label-text">New Default Model</span></label>
 					<select id="reassign_default_select" class="select select-bordered w-full">
 for _, agent := range modelOptions {
-							if !agent.IsDefault {
+							if !agent.IsDefault && !modelCardUnsupported(agent) {
 								<option value={ agent.ID }>{ agent.Name }</option>
 							}
 						}

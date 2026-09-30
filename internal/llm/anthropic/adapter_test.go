@@ -257,7 +257,7 @@ func TestCallDirectOperationUsesRuntimeToolsAndDefaultFraming(t *testing.T) {
 		Agent: models.LLMConfig{
 			Name:            "Claude API",
 			Provider:        models.ProviderAnthropic,
-			Model:           "claude-opus-5",
+			Model:           " CLAUDE-OPUS-5 ",
 			ReasoningEffort: "low",
 			AuthMethod:      models.AuthMethodAPIKey,
 			APIKey:          "test-key",
@@ -268,6 +268,9 @@ func TestCallDirectOperationUsesRuntimeToolsAndDefaultFraming(t *testing.T) {
 	}
 	if result.Output != "direct result" || result.Usage.InputTokens != 8 || result.Usage.OutputTokens != 3 {
 		t.Fatalf("result = %#v", result)
+	}
+	if gotBody["model"] != "claude-opus-5" {
+		t.Fatalf("wire model = %v, want canonical ID", gotBody["model"])
 	}
 	if system := fmt.Sprint(gotBody["system"]); !strings.Contains(system, "project rules") || !strings.Contains(system, llmprompt.AnthropicAgentSystemPrompt) {
 		t.Fatalf("direct call omitted default system framing: %#v", gotBody["system"])
