@@ -782,6 +782,11 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 		}
 		agent.Model = normalizeOpenAIModel(agent.Model)
 	}
+	if agent.Provider == models.ProviderAnthropic {
+		if spec, ok := models.LookupModel(agent.Provider, agent.Model); ok {
+			agent.Model = spec.ID
+		}
+	}
 	agent.ReasoningEffort = normalizeProviderReasoningEffort(agent.Provider, agent.Model, c.FormValue("reasoning_effort"))
 	if agent.Provider == models.ProviderOpenAICompatible {
 		agent.Model = strings.TrimSpace(agent.Model)
@@ -1235,6 +1240,9 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 			if newDefault == nil || newDefaultID == id {
 				applog.Infof("[handler] DeleteModel rejected: invalid new default id=%s", newDefaultID)
 				return echo.NewHTTPError(http.StatusBadRequest, "Invalid new default model selection.")
+			}
+			if !models.BuiltInModelSupported(newDefault.Provider, newDefault.Model) {
+				return echo.NewHTTPError(http.StatusBadRequest, "This model is no longer supported. Select a supported model.")
 			}
 			if err := h.llmConfigRepo.TransferDefaultAndDelete(ctx, id, newDefaultID); err != nil {
 				applog.Infof("[handler] DeleteModel transfer+delete error: %v", err)
