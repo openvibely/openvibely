@@ -505,9 +505,7 @@ func calculateRequestBudget(req llmcontracts.AgentRequest) requestBudget {
 	}
 	budget.PendingTokens = estimatedUTF8Tokens(req.Message)
 	budget.NativeStateTokens = estimatedUTF8Tokens(req.NativeCompactionStateJSON)
-	for _, exec := range req.ChatHistory {
-		budget.HistoryTokens += estimateExecutionTokens(exec)
-	}
+	budget.HistoryTokens = estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	for _, att := range req.Attachments {
 		budget.AttachmentTokens += estimateAttachmentTokens(req.Agent.Provider, att)
 	}
@@ -544,6 +542,17 @@ func estimateExecutionTokens(exec models.Execution) int {
 	total := estimatedUTF8Tokens(exec.PromptSent) + estimatedUTF8Tokens(exec.Output) + estimatedUTF8Tokens(exec.ErrorMessage) + estimatedUTF8Tokens(exec.ReasoningContent)
 	for _, replay := range exec.ReplayMessages {
 		total += estimatedUTF8Tokens(replay.UserContent) + estimatedUTF8Tokens(replay.AssistantContent) + estimatedUTF8Tokens(replay.ReasoningContent) + estimatedUTF8Tokens(replay.TranscriptJSON)
+	}
+	return total
+}
+
+func estimateHistoryTokens(provider models.LLMProvider, history []models.Execution) int {
+	if provider == models.ProviderOpenAI {
+		return llmopenai.EstimateHistoryTokens(history)
+	}
+	total := 0
+	for _, exec := range history {
+		total += estimateExecutionTokens(exec)
 	}
 	return total
 }
@@ -731,12 +740,7 @@ func estimateModelVisibleRequestTokens(req llmcontracts.AgentRequest) int {
 	for _, att := range req.Attachments {
 		total += estimateAttachmentTokens(req.Agent.Provider, att)
 	}
-	for _, exec := range req.ChatHistory {
-		total += estimatedUTF8Tokens(exec.PromptSent) + estimatedUTF8Tokens(exec.Output) + estimatedUTF8Tokens(exec.ErrorMessage) + estimatedUTF8Tokens(exec.ReasoningContent)
-		for _, replay := range exec.ReplayMessages {
-			total += estimatedUTF8Tokens(replay.UserContent) + estimatedUTF8Tokens(replay.AssistantContent) + estimatedUTF8Tokens(replay.ReasoningContent) + estimatedUTF8Tokens(replay.TranscriptJSON)
-		}
-	}
+	total += estimateHistoryTokens(req.Agent.Provider, req.ChatHistory)
 	return total
 }
 
@@ -1299,6 +1303,9 @@ func (s *LLMService) loadOpenAIReplayHistory(req llmcontracts.AgentRequest) (llm
 }
 
 func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.Execution) []models.Execution {
+	if req.Agent.Provider == models.ProviderOpenAI {
+		history = llmopenai.EffectiveReplayHistory(history)
+	}
 	base := req
 	base.ChatHistory = nil
 	baseBudget := calculateRequestBudget(base)
@@ -1309,14 +1316,14 @@ func historyWithinRequestBudget(req llmcontracts.AgentRequest, history []models.
 	out := make([]models.Execution, 0, len(history))
 	for i := len(history) - 1; i >= 0 && remaining > 0; i-- {
 		exec := history[i]
-		tokens := estimateExecutionTokens(exec)
+		tokens := estimateHistoryTokens(req.Agent.Provider, []models.Execution{exec})
 		if tokens > remaining {
 			exec.Output = ""
 			exec.ErrorMessage = ""
 			exec.ReasoningContent = ""
 			exec.ReplayMessages = nil
 			exec.PromptSent = truncateMiddleByEstimatedTokens(exec.PromptSent, remaining)
-			tokens = estimateExecutionTokens(exec)
+			tokens = estimateHistoryTokens(req.Agent.Provider, []models.Execution{exec})
 		}
 		if tokens <= 0 || tokens > remaining {
 			continue

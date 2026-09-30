@@ -40,3 +40,37 @@ func TestSteeringReplayPreservesLateContinuation(t *testing.T) {
 	require.Equal(t, "another steer", saved[exec.ID][2].UserContent)
 	require.Equal(t, "another answer", saved[exec.ID][2].AssistantContent)
 }
+
+func TestConsecutiveLateSteeringRecordsEachContinuationBeforeNextRequest(t *testing.T) {
+	h, _, configs := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, configs)
+	agent.Provider = models.ProviderOpenAI
+	project := createProject(t, h, "Consecutive late steering")
+	task := createTask(t, h, project.ID, "steering")
+	exec := createExec(t, h, task.ID, agent.ID)
+	checkpoint := []models.ExecutionReplayMessage{{TranscriptJSON: `{"responses_input":[{"type":"message","role":"user","content":"original"}]}`}}
+	require.NoError(t, h.execRepo.ReplaceReasoningReplay(ctx, exec.ID, "", checkpoint))
+	params := streamingResponseParams{ExecID: exec.ID, TaskID: task.ID, Agent: *agent, Message: "original"}
+	for i, exchange := range []struct{ steer, priorAnswer string }{
+		{"late one", "original answer"},
+		{"late two", "first late answer"},
+		{"late three", "second late answer"},
+	} {
+		batch := preparedSteeringBatch{inputs: []models.ThreadInput{{Content: exchange.steer}}}
+		_, err := h.prepareClaimedSteeringInputs(ctx, &params, exchange.priorAnswer, batch, nil)
+		require.NoError(t, err)
+		latest := params.ChatHistory[len(params.ChatHistory)-1].ReplayMessages
+		// Exercise the real preparation path with no manual persistence between
+		// continuations. Every next request must already include the prior answer.
+		require.Len(t, latest, i+1)
+		if i > 0 {
+			require.Equal(t, exchange.priorAnswer, latest[len(latest)-1].AssistantContent)
+			require.Contains(t, latest[1].UserContent, "late one")
+		}
+	}
+	require.NoError(t, h.persistSteeringReplayHistory(ctx, params, "third late answer"))
+	saved, err := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+	require.NoError(t, err)
+	require.Equal(t, "third late answer", saved[exec.ID][len(saved[exec.ID])-1].AssistantContent)
+}

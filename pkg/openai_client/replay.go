@@ -1,5 +1,10 @@
 package openaiclient
 
+// EstimateResponsesInputTokens uses the same image-aware estimator as requests.
+func EstimateResponsesInputTokens(items []any) int {
+	return estimateInputItemsTokens(items)
+}
+
 // repairInterruptedToolCalls follows Codex's history normalization: an
 // interrupted call receives an "aborted" result, never another tool execution.
 // Run only on restored history, not while a live call is awaiting its result.
