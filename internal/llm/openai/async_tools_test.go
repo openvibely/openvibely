@@ -142,7 +142,7 @@ func TestOpenAIAsyncRuntimeToolsDisabledForResponsesLiteModels(t *testing.T) {
 		{name: "luna oauth", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, Model: " GPT-6-LUNA ", OAuthAccessToken: "tok"}},
 		{name: "non gpt6", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.6-sol", APIKey: "sk"}},
 		{name: "openai compatible", agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-6-astra", APIKey: "sk"}},
-		{name: "legacy cli", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: "cli", Model: "gpt-6-astra"}},
+		{name: "unsupported auth", agent: models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: "unsupported", Model: "gpt-6-astra"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

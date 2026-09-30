@@ -191,11 +191,11 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
-			name:           "anthropic subscription legacy cli normalizes to oauth",
+			name:           "anthropic subscription unsupported auth normalizes to oauth",
 			provider:       "anthropic",
 			anthropicAuth:  "subscription",
 			openaiAuth:     "",
-			authMethod:     "cli",
+			authMethod:     "unsupported",
 			wantProvider:   models.ProviderAnthropic,
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
@@ -236,11 +236,11 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
-			name:           "openai subscription legacy cli normalizes to oauth",
+			name:           "openai subscription unsupported auth normalizes to oauth",
 			provider:       "openai",
 			anthropicAuth:  "",
 			openaiAuth:     "subscription",
-			authMethod:     "cli",
+			authMethod:     "unsupported",
 			wantProvider:   models.ProviderOpenAI,
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
@@ -1493,13 +1493,13 @@ func TestCreateModel_MixtureRejectsRecursiveAndDuplicateSlots(t *testing.T) {
 	}
 }
 
-func TestCreateModel_MixtureRejectsNonCallableSlots(t *testing.T) {
+func TestCreateModel_MixtureRejectsNestedSlots(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 	callable := &models.LLMConfig{Name: "Callable API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"}
-	cliOpenAI := &models.LLMConfig{Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: "cli", Model: "gpt-5-codex"}
-	cliAnthropic := &models.LLMConfig{Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet"}
-	for _, cfg := range []*models.LLMConfig{callable, cliOpenAI, cliAnthropic} {
+	nestedAggregator := &models.LLMConfig{Name: "Nested aggregator", Provider: models.ProviderMixture, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5-codex"}
+	nestedReference := &models.LLMConfig{Name: "Nested reference", Provider: models.ProviderMixture, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet"}
+	for _, cfg := range []*models.LLMConfig{callable, nestedAggregator, nestedReference} {
 		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
 			t.Fatalf("create %s: %v", cfg.Name, err)
 		}
@@ -1511,8 +1511,8 @@ func TestCreateModel_MixtureRejectsNonCallableSlots(t *testing.T) {
 		refs         []string
 		want         string
 	}{
-		{name: "cli aggregator", aggregatorID: cliOpenAI.ID, refs: []string{callable.ID}, want: "Codex CLI"},
-		{name: "cli reference", aggregatorID: callable.ID, refs: []string{cliAnthropic.ID}, want: "Claude CLI"},
+		{name: "unsupported aggregator", aggregatorID: nestedAggregator.ID, refs: []string{callable.ID}, want: "aggregator cannot use a mixture model"},
+		{name: "unsupported reference", aggregatorID: callable.ID, refs: []string{nestedReference.ID}, want: "reference cannot use a mixture model"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2405,14 +2405,14 @@ func TestNormalizeBrowserModelFormCommonWorkerAndCheckboxSettings(t *testing.T) 
 	}
 }
 
-func TestCreateModel_SubscriptionLegacyCLINormalizesOAuth(t *testing.T) {
+func TestCreateModel_SubscriptionUnsupportedAuthNormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "My Legacy CLI Model")
+	form.Set("name", "My unsupported auth Model")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "subscription")
-	form.Set("auth_method", "cli")
+	form.Set("auth_method", "unsupported")
 	form.Set("model", "claude-sonnet-4-5-20250929")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
@@ -2433,7 +2433,7 @@ func TestCreateModel_SubscriptionLegacyCLINormalizesOAuth(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "My Legacy CLI Model" {
+		if configs[i].Name == "My unsupported auth Model" {
 			found = &configs[i]
 			break
 		}
@@ -3338,56 +3338,7 @@ func TestUpdateModel_SwitchFromAPIKeyToSubscription(t *testing.T) {
 	}
 }
 
-func TestUpdateModel_ChangeAuthMethod_LegacyCLIToOAuth(t *testing.T) {
-	_, e, llmConfigRepo := setupTestHandler(t)
-	ctx := context.Background()
-
-	// Create a historical subscription model with retired CLI auth method.
-	agent := &models.LLMConfig{
-		Name:       "Sonnet CLI",
-		Provider:   models.ProviderAnthropic,
-		Model:      "claude-sonnet-4-5-20250929",
-		AuthMethod: "cli",
-		MaxTokens:  4096,
-		IsDefault:  true,
-	}
-	if err := llmConfigRepo.Create(ctx, agent); err != nil {
-		t.Fatalf("create error: %v", err)
-	}
-
-	// Update: change auth_method from CLI to OAuth
-	form := url.Values{}
-	form.Set("name", "Sonnet CLI")
-	form.Set("provider", "anthropic")
-	form.Set("anthropic_auth_type", "subscription")
-	form.Set("auth_method", "oauth")
-	form.Set("model", "claude-sonnet-4-5-20250929")
-	form.Set("max_tokens", "4096")
-	form.Set("temperature", "0")
-
-	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("HX-Request", "true")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
-	if err != nil {
-		t.Fatalf("get error: %v", err)
-	}
-	if updated.Provider != models.ProviderAnthropic {
-		t.Errorf("provider = %q, want %q", updated.Provider, models.ProviderAnthropic)
-	}
-	if updated.AuthMethod != models.AuthMethodOAuth {
-		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodOAuth)
-	}
-}
-
-func TestUpdateModel_ChangeAuthMethod_OAuthStaleCLIFormNormalizesOAuth(t *testing.T) {
+func TestUpdateModel_ChangeAuthMethod_OAuthUnsupportedAuthFormNormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -3404,12 +3355,12 @@ func TestUpdateModel_ChangeAuthMethod_OAuthStaleCLIFormNormalizesOAuth(t *testin
 		t.Fatalf("create error: %v", err)
 	}
 
-	// Update: a stale CLI value from a subscription form normalizes back to OAuth.
+	// Update: a stale unsupported auth value from a subscription form normalizes back to OAuth.
 	form := url.Values{}
 	form.Set("name", "Sonnet OAuth")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "subscription")
-	form.Set("auth_method", "cli")
+	form.Set("auth_method", "unsupported")
 	form.Set("model", "claude-sonnet-4-5-20250929")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
@@ -3510,7 +3461,7 @@ func TestUpdateModel_OpenAIOAuthPreservesStoredConfigWhenFormOmitsFields(t *test
 // one for OpenAI). When both are enabled, the browser sends both values and Go's
 // FormValue returns the first one. The UI prevents this via toggleProviderFields(),
 // which disables the inactive provider's select so only the active provider's value
-// is submitted. The handler also defaults to OAuth (not CLI) when auth_method is
+// is submitted. The handler also defaults to OAuth (not unsupported auth) when auth_method is
 // absent or unrecognized for OAuth auth types, providing an additional safety net.
 func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
@@ -3520,7 +3471,7 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 		Name:       "Dup Auth Test",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
-		AuthMethod: "cli",
+		AuthMethod: models.AuthMethodOAuth,
 		MaxTokens:  4096,
 		IsDefault:  true,
 	}
@@ -3529,9 +3480,9 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 	}
 
 	// Simulate the browser bug: two auth_method values sent.
-	// The hidden OpenAI select sends "cli" first, then the Anthropic select sends "oauth".
+	// The hidden OpenAI select sends "unsupported" first, then the Anthropic select sends "oauth".
 	// Go's FormValue returns the first value, so without the JS fix,
-	// the server receives "cli" instead of "oauth".
+	// the server receives "unsupported" instead of "oauth".
 	form := url.Values{
 		"name":                {"Dup Auth Test"},
 		"provider":            {"anthropic"},
@@ -3539,7 +3490,7 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 		"model":               {"claude-sonnet-4-5-20250929"},
 		"max_tokens":          {"4096"},
 		"temperature":         {"0"},
-		"auth_method":         {"cli", "oauth"}, // first=hidden OpenAI, second=visible Anthropic
+		"auth_method":         {"unsupported", "oauth"}, // first=hidden OpenAI, second=visible Anthropic
 	}
 
 	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
@@ -3557,8 +3508,8 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 		t.Fatalf("get error: %v", err)
 	}
 
-	// With duplicate form fields, Go's FormValue returns the first value ("cli").
-	// The handler normalizes stale subscription CLI values back to OAuth.
+	// With duplicate form fields, Go's FormValue returns the first value ("unsupported").
+	// The handler normalizes stale subscription unsupported auth values back to OAuth.
 	if updated.AuthMethod != models.AuthMethodOAuth {
 		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodOAuth)
 	}
@@ -3584,10 +3535,10 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "anthropic oauth with legacy cli connection normalizes to oauth",
+			name:           "anthropic oauth with unsupported auth connection normalizes to oauth",
 			provider:       "anthropic",
 			anthropicAuth:  "oauth",
-			authMethod:     "cli",
+			authMethod:     "unsupported",
 			wantProvider:   models.ProviderAnthropic,
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
@@ -3608,10 +3559,10 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "openai oauth with legacy cli connection normalizes to oauth",
+			name:           "openai oauth with unsupported auth connection normalizes to oauth",
 			provider:       "openai",
 			openaiAuth:     "oauth",
-			authMethod:     "cli",
+			authMethod:     "unsupported",
 			wantProvider:   models.ProviderOpenAI,
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
@@ -3638,14 +3589,14 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OAuthLegacyCLINormalizesOAuth(t *testing.T) {
+func TestCreateModel_OAuthUnsupportedAuthNormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "My OAuth Legacy CLI Model")
+	form.Set("name", "My OAuth unsupported auth Model")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "oauth")
-	form.Set("auth_method", "cli")
+	form.Set("auth_method", "unsupported")
 	form.Set("model", "claude-sonnet-4-5-20250929")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
@@ -3666,7 +3617,7 @@ func TestCreateModel_OAuthLegacyCLINormalizesOAuth(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "My OAuth Legacy CLI Model" {
+		if configs[i].Name == "My OAuth unsupported auth Model" {
 			found = &configs[i]
 			break
 		}
@@ -3728,7 +3679,7 @@ func TestCreateModel_OAuthAPI(t *testing.T) {
 
 // TestCreateModel_AnthropicOAuthEmptyAuthMethod verifies that submitting an Anthropic
 // OAuth form without an auth_method field (e.g. if the JS disabled the select and the
-// browser omitted it) correctly defaults to OAuth — not CLI.
+// browser omitted it) correctly defaults to OAuth — not unsupported auth.
 func TestCreateModel_AnthropicOAuthEmptyAuthMethod(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
@@ -3771,7 +3722,7 @@ func TestCreateModel_AnthropicOAuthEmptyAuthMethod(t *testing.T) {
 
 // TestCreateModel_OpenAIOAuthEmptyAuthMethod verifies that submitting an OpenAI
 // OAuth form without an auth_method field (e.g. if the JS disabled the select and the
-// browser omitted it) correctly defaults to OAuth — not CLI.
+// browser omitted it) correctly defaults to OAuth — not unsupported auth.
 func TestCreateModel_OpenAIOAuthEmptyAuthMethod(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
@@ -3856,14 +3807,14 @@ func TestCreateModel_OpenAIOAuthAPI(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OpenAIOAuthLegacyCLINormalizesOAuth(t *testing.T) {
+func TestCreateModel_OpenAIOAuthUnsupportedAuthNormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "OpenAI OAuth Legacy CLI Model")
+	form.Set("name", "OpenAI OAuth unsupported auth Model")
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "oauth")
-	form.Set("auth_method", "cli")
+	form.Set("auth_method", "unsupported")
 	form.Set("model", "gpt-5.3-codex")
 	form.Set("max_tokens", "4096")
 	form.Set("temperature", "0")
@@ -3884,7 +3835,7 @@ func TestCreateModel_OpenAIOAuthLegacyCLINormalizesOAuth(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "OpenAI OAuth Legacy CLI Model" {
+		if configs[i].Name == "OpenAI OAuth unsupported auth Model" {
 			found = &configs[i]
 			break
 		}
@@ -4245,12 +4196,12 @@ func TestUpdateModel_SwitchFromSubscriptionToAPIKey(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	// Create a historical subscription model with retired CLI auth method.
+	// Create a subscription model using OAuth.
 	agent := &models.LLMConfig{
 		Name:       "Sub to API",
 		Provider:   models.ProviderAnthropic,
 		Model:      "claude-sonnet-4-5-20250929",
-		AuthMethod: "cli",
+		AuthMethod: models.AuthMethodOAuth,
 		MaxTokens:  4096,
 		IsDefault:  true,
 	}

@@ -3431,7 +3431,7 @@ func newEmailAttachmentTestService(t *testing.T) (*EmailService, *repository.Cha
 	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
 	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
 	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
-	defaultAgent := &models.LLMConfig{Name: "text-cli", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet-4-5", IsDefault: true}
+	defaultAgent := &models.LLMConfig{Name: "text-only", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "text-only", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, defaultAgent))
 	visionAgent := &models.LLMConfig{Name: "vision", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-3-5-sonnet-20241022", APIKey: "key"}
 	require.NoError(t, llmConfigRepo.Create(ctx, visionAgent))

@@ -1054,9 +1054,9 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 	t.Run("returns error for non-oauth model", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
 		model := &models.LLMConfig{
-			Name:            "Test Claude CLI",
+			Name:            "Test Claude API key",
 			Provider:        models.ProviderAnthropic,
-			AuthMethod:      "cli",
+			AuthMethod:      models.AuthMethodAPIKey,
 			Model:           "claude-3.5-sonnet",
 			Temperature:     0.7,
 			ReasoningEffort: "medium",
@@ -1793,14 +1793,14 @@ func TestHandler_OAuthManualComplete(t *testing.T) {
 }
 
 func TestHandler_OAuthStatus(t *testing.T) {
-	t.Run("returns not_configured for CLI model", func(t *testing.T) {
+	t.Run("returns not_configured for API key model", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
 
-		// Create a CLI model
+		// Create an API key model
 		model := &models.LLMConfig{
-			Name:            "Test Claude CLI",
+			Name:            "Test Claude API key",
 			Provider:        models.ProviderAnthropic,
-			AuthMethod:      "cli",
+			AuthMethod:      models.AuthMethodAPIKey,
 			Model:           "claude-3.5-sonnet",
 			Temperature:     0.7,
 			ReasoningEffort: "medium",

@@ -460,22 +460,22 @@ func TestChannelChatIngressQueuesUsingCompactModelIDWithoutHydration(t *testing.
 	assertChannelCompactStatement(t, modelStatements)
 }
 
-func TestChannelChatIngressImageSelectionExcludesLegacyAnthropicCLI(t *testing.T) {
+func TestChannelChatIngressImageSelectionExcludesTextOnlyModels(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := repository.NewLLMConfigRepo(db)
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
 		t.Fatalf("clear model configs: %v", err)
 	}
-	legacy := &models.LLMConfig{
-		Name:       "Legacy Anthropic CLI",
-		Provider:   models.ProviderAnthropic,
-		Model:      "claude-cli",
-		AuthMethod: "cli",
+	textOnly := &models.LLMConfig{
+		Name:       "Text-only model",
+		Provider:   models.ProviderOpenAICompatible,
+		Model:      "text-only",
+		AuthMethod: models.AuthMethodAPIKey,
 	}
 	vision := seedChannelRichModel(t, ctx, db, repo, "Anthropic Vision", models.ProviderAnthropic, models.AuthMethodAPIKey, true)
-	if err := repo.Create(ctx, legacy); err != nil {
-		t.Fatalf("create legacy model: %v", err)
+	if err := repo.Create(ctx, textOnly); err != nil {
+		t.Fatalf("create text-only model: %v", err)
 	}
 	counter.SetEnabled(true)
 

@@ -14,8 +14,8 @@ func TestOpenAIDirectClientEnabled(t *testing.T) {
 	if !openAIDirectClientEnabled(models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}) {
 		t.Fatal("expected oauth to enable direct client")
 	}
-	if openAIDirectClientEnabled(models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: "cli"}) {
-		t.Fatal("expected cli auth to disable direct client")
+	if openAIDirectClientEnabled(models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: "unsupported"}) {
+		t.Fatal("expected unsupported auth to disable direct client")
 	}
 }
 

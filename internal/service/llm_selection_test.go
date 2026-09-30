@@ -357,9 +357,9 @@ func TestSelectLLMWithVision_FiltersNonAnthropicProviders(t *testing.T) {
 		},
 		{
 			ID:         "claude-max",
-			Name:       "Claude Max CLI",
+			Name:       "Claude Max unsupported auth",
 			Provider:   models.ProviderAnthropic,
-			AuthMethod: "cli",
+			AuthMethod: "unsupported",
 			Model:      "claude-max",
 		},
 	}
@@ -369,7 +369,7 @@ func TestSelectLLMWithVision_FiltersNonAnthropicProviders(t *testing.T) {
 		Score: 30,
 	}
 
-	// With vision required, should only select Anthropic API key/OAuth provider (not CLI)
+	// With vision required, should only select Anthropic API key/OAuth provider (not unsupported auth)
 	result := SelectLLMWithVision(complexity, configs, true)
 	if result == nil {
 		t.Fatal("expected result, got nil")
@@ -392,9 +392,9 @@ func TestSelectLLMWithVision_NoAnthropicProvidersAvailable(t *testing.T) {
 	configs := []models.LLMConfig{
 		{
 			ID:         "claude-max",
-			Name:       "Claude Max CLI",
+			Name:       "Claude Max unsupported auth",
 			Provider:   models.ProviderAnthropic,
-			AuthMethod: "cli",
+			AuthMethod: "unsupported",
 			Model:      "claude-max",
 		},
 	}
@@ -404,7 +404,7 @@ func TestSelectLLMWithVision_NoAnthropicProvidersAvailable(t *testing.T) {
 		Score: 30,
 	}
 
-	// With vision required but only CLI providers (no vision support), should return nil
+	// With vision required but only unsupported auth providers (no vision support), should return nil
 	result := SelectLLMWithVision(complexity, configs, true)
 	if result != nil {
 		t.Errorf("expected nil when no vision-capable providers available, got %+v", result)
@@ -421,9 +421,9 @@ func TestSelectLLMWithVision_NoVisionRequired(t *testing.T) {
 		},
 		{
 			ID:         "claude-max",
-			Name:       "Claude Max CLI",
+			Name:       "Claude Max unsupported auth",
 			Provider:   models.ProviderAnthropic,
-			AuthMethod: "cli",
+			AuthMethod: "unsupported",
 			Model:      "claude-max",
 		},
 	}

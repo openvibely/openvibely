@@ -1274,37 +1274,6 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PropagatesAgentDefinition(t
 	}
 }
 
-func TestLLMService_CallClaudeCLI_EnvFiltering(t *testing.T) {
-
-	os.Setenv("CLAUDECODE", "test-value")
-	defer os.Unsetenv("CLAUDECODE")
-
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
-			filtered = append(filtered, e)
-		}
-	}
-
-	for _, e := range filtered {
-		if strings.HasPrefix(e, "CLAUDECODE=") {
-			t.Error("CLAUDECODE should be filtered from env")
-		}
-	}
-
-	found := false
-	for _, e := range env {
-		if strings.HasPrefix(e, "CLAUDECODE=") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("CLAUDECODE should be in original env")
-	}
-}
-
 func TestLLMService_ExecuteTaskWithAgent_SkipsNonPendingTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -3492,15 +3461,15 @@ func TestLLMService_ExecuteTaskWithAgent_VisionAwareAgentOverride(t *testing.T) 
 		AuthMethod: models.AuthMethodAPIKey,
 		Model:      "claude-sonnet-4-20250514",
 	}
-	cliAgent := models.LLMConfig{
-		Name:       "Claude Max",
+	unsupportedAgent := models.LLMConfig{
+		Name:       "Unsupported auth",
 		Provider:   models.ProviderAnthropic,
-		AuthMethod: "cli",
+		AuthMethod: "unsupported",
 		Model:      "claude-sonnet-4-5",
 	}
 
 	complexity := AnalyzeComplexity("What do you see?")
-	result := SelectLLMWithVision(complexity, []models.LLMConfig{cliAgent, anthropicAgent}, true)
+	result := SelectLLMWithVision(complexity, []models.LLMConfig{unsupportedAgent, anthropicAgent}, true)
 	if result == nil {
 		t.Fatal("expected vision-capable agent to be selected")
 	}
@@ -3568,16 +3537,16 @@ func TestLLMService_ExecuteTaskWithAgent_NoOverrideForTextAttachments(t *testing
 
 func TestLLMService_CallAgentDirectStreaming_VisionAwareOverride(t *testing.T) {
 
-	cliOnly := []models.LLMConfig{
-		{Name: "Claude Max", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet-4-5"},
+	unsupportedOnly := []models.LLMConfig{
+		{Name: "Unsupported auth", Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude-sonnet-4-5"},
 	}
 	complexity := AnalyzeComplexity("What do you see?")
-	result := SelectLLMWithVision(complexity, cliOnly, true)
+	result := SelectLLMWithVision(complexity, unsupportedOnly, true)
 	if result != nil {
 		t.Errorf("expected nil when no vision-capable agent available, got %+v", result.LLMConfig)
 	}
 
-	withAnthropic := append(cliOnly, models.LLMConfig{
+	withAnthropic := append(unsupportedOnly, models.LLMConfig{
 		Name: "Anthropic", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-20250514",
 	})
 	result = SelectLLMWithVision(complexity, withAnthropic, true)
@@ -3651,12 +3620,12 @@ func TestLLMService_CallAgentDirectStreaming_NoOverrideWithoutImages(t *testing.
 
 func TestLLMService_CallAgentDirectStreaming_VisionEnvVarFallback(t *testing.T) {
 
-	cliOnly := []models.LLMConfig{
-		{Name: "Claude Max", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet-4-5"},
+	unsupportedOnly := []models.LLMConfig{
+		{Name: "Unsupported auth", Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude-sonnet-4-5"},
 		{Name: "Ollama Local", Provider: models.ProviderOllama, Model: "llama3"},
 	}
 	complexity := AnalyzeComplexity("What do you see?")
-	result := SelectLLMWithVision(complexity, cliOnly, true)
+	result := SelectLLMWithVision(complexity, unsupportedOnly, true)
 	if result != nil {
 		t.Errorf("expected nil when no vision-capable agents, got %+v", result.LLMConfig)
 	}

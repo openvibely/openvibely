@@ -6835,7 +6835,7 @@ func TestCompleteWithFailure_WorksWithExpiredContext(t *testing.T) {
 	expiredCtx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately — this is what happens when the 5-min timeout fires
 
-	h.completeWithFailure(expiredCtx, exec.ID, task.ID, "claude CLI error: signal: killed", 300000)
+	h.completeWithFailure(expiredCtx, exec.ID, task.ID, "provider error: signal: killed", 300000)
 
 	// Verify everything still updated despite the expired context
 	failedExec, err := h.execRepo.GetByID(ctx, exec.ID)
@@ -6988,10 +6988,10 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 	ctx := context.Background()
 	clearModelConfigs(t, db)
 
-	legacyCLI := richAutoSelectionConfig("Anthropic CLI", models.ProviderAnthropic, "cli", "claude-opus-legacy-cli", false)
+	textOnly := richAutoSelectionConfig("Text-only model", models.ProviderOpenAICompatible, models.AuthMethodAPIKey, "text-only", false)
 	apiKey := richAutoSelectionConfig("Anthropic API", models.ProviderAnthropic, models.AuthMethodAPIKey, "claude-3-haiku", false)
 	oauth := richAutoSelectionConfig("Anthropic OAuth", models.ProviderAnthropic, models.AuthMethodOAuth, "claude-opus-5-20250929", false)
-	for _, cfg := range []*models.LLMConfig{legacyCLI, apiKey, oauth} {
+	for _, cfg := range []*models.LLMConfig{textOnly, apiKey, oauth} {
 		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
 			t.Fatalf("create %s: %v", cfg.Name, err)
 		}
@@ -7008,7 +7008,7 @@ func TestSelectAgent_AutoWithImagesUsesVisionCatalogAndHydratesEligibleModel(t *
 		t.Fatalf("selected ID = %s, want OAuth vision-capable model %s", selected.ID, oauth.ID)
 	}
 	if !selected.IsCallableMixtureSlot() {
-		t.Fatalf("selected legacy CLI model for image request: %#v", selected)
+		t.Fatalf("selected unsupported auth model for image request: %#v", selected)
 	}
 	if selected.OAuthAccessToken != "oauth-secret" || selected.OAuthRefreshToken != "oauth-refresh-secret" {
 		t.Fatalf("selected OAuth model was not fully hydrated: %#v", selected)
@@ -7087,11 +7087,6 @@ func richAutoSelectionConfig(name string, provider models.LLMProvider, authMetho
 		MaxWorkers:           3,
 		WorkerTimeout:        90,
 		IsDefault:            isDefault,
-	}
-	if authMethod == "cli" {
-		cfg.APIKey = ""
-		cfg.OAuthAccessToken = ""
-		cfg.OAuthRefreshToken = ""
 	}
 	return cfg
 }
@@ -8332,12 +8327,12 @@ func TestProcessStreamingResponse_ActionMarkerTextIsInert(t *testing.T) {
 	ctx := context.Background()
 
 	// ProviderTest deliberately returns false from supportsChatActionTools,
-	// mirroring the behavior of Claude CLI / Codex CLI / Ollama in production.
+	// mirroring providers that return output without streaming callbacks.
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Phantom Task Project")
 
 	// Mock a normal chat turn that emits an inert [CREATE_TASK] block, as a
-	// CLI-backed model might.
+	// non-streaming model might.
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = "I'll create that task for you.\n\n[CREATE_TASK]\n" +
 		`{"title": "Fix overlapping thinking and non-thinking content in task thread view", "prompt": "Investigate and fix the overlapping rendering."}` +

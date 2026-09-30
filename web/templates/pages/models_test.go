@@ -761,8 +761,8 @@ func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 	agents := []models.LLMConfig{
 		{ID: "api-openai", Name: "OpenAI API", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5"},
 		{ID: "oauth-anthropic", Name: "Claude OAuth", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "token", OAuthExpiresAt: 9999999999999, Model: "claude-sonnet"},
-		{ID: "cli-openai", Name: "Codex CLI", Provider: models.ProviderOpenAI, AuthMethod: "cli", Model: "gpt-5-codex"},
-		{ID: "cli-anthropic", Name: "Claude CLI", Provider: models.ProviderAnthropic, AuthMethod: "cli", Model: "claude-sonnet"},
+		{ID: "unsupported-openai", Name: "Codex unsupported auth", Provider: models.ProviderOpenAI, AuthMethod: "unsupported", Model: "gpt-5-codex"},
+		{ID: "unsupported-anthropic", Name: "Claude unsupported auth", Provider: models.ProviderAnthropic, AuthMethod: "unsupported", Model: "claude-sonnet"},
 		{ID: "mixture", Name: "Existing Mixture", Provider: models.ProviderMixture, Model: "default"},
 		{ID: "internal", Name: "Internal", Provider: models.LLMProvider("internal"), AuthMethod: models.AuthMethodAPIKey, Model: "internal"},
 	}
@@ -785,7 +785,7 @@ func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 			t.Fatalf("expected callable mixture option %q in rendered picker data: %s", allowed, pickerMarkup)
 		}
 	}
-	for _, blocked := range []string{"cli-openai", "cli-anthropic", "Codex CLI", "Claude CLI", "Existing Mixture", "internal"} {
+	for _, blocked := range []string{"unsupported-openai", "unsupported-anthropic", "Codex unsupported auth", "Claude unsupported auth", "Existing Mixture", "internal"} {
 		if strings.Contains(pickerMarkup, blocked) {
 			t.Fatalf("expected non-callable mixture option %q to be omitted from picker data: %s", blocked, pickerMarkup)
 		}
@@ -1194,26 +1194,26 @@ func balancedJavaScriptBraces(value string) error {
 	return nil
 }
 
-// TestModelsContent_NoCLIOptionInAuthSelects verifies that the rendered model
-// setup dialog no longer exposes the "CLI (OAuth via terminal)" option for
-// Anthropic or OpenAI connection-method selects.
-func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
+func TestModelsContent_ConnectionSelectsOnlyOfferOAuth(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
 
-	if strings.Contains(out, `value="cli">CLI`) {
-		t.Error("expected CLI option to be removed from auth/connection method selects, but found it in rendered HTML")
-	}
-	if strings.Contains(out, "CLI (OAuth via terminal)") {
-		t.Error("expected CLI (OAuth via terminal) label to be absent from rendered auth selects")
-	}
-
-	// Auth method selects should each have only the oauth option remaining
-	if !strings.Contains(out, `value="oauth">API (OAuth via web)`) {
-		t.Error("expected OAuth option to remain in auth/connection method select")
+	for _, id := range []string{"model_openai_connection_method", "model_auth_method"} {
+		start := strings.Index(out, `id="`+id+`"`)
+		if start < 0 {
+			t.Fatalf("missing select %s", id)
+		}
+		end := strings.Index(out[start:], "</select>")
+		if end < 0 {
+			t.Fatalf("unclosed select %s", id)
+		}
+		options := out[start : start+end]
+		if strings.Count(options, "<option") != 1 || !strings.Contains(options, `value="oauth"`) {
+			t.Errorf("%s must offer only OAuth: %s", id, options)
+		}
 	}
 }
 
