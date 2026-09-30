@@ -654,6 +654,22 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	}
 	defer releaseTransport()
 
+	if a.execRepo != nil {
+		ids := make([]string, 0, len(chatHistory))
+		for _, execution := range chatHistory {
+			ids = append(ids, execution.ID)
+		}
+		replays, err := a.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
+		if err != nil {
+			return "", llmusage.FromTotal(0), err
+		}
+		chatHistory = append([]models.Execution(nil), chatHistory...)
+		for i := range chatHistory {
+			if replay := replays[chatHistory[i].ID]; len(replay) > 0 {
+				chatHistory[i].ReplayMessages = replay
+			}
+		}
+	}
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
@@ -1119,6 +1135,19 @@ func (a *Adapter) taskTransportScope(ctx context.Context, execID string) string 
 func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
 	var messages []openaiclient.Message
 	for _, exec := range chatHistory {
+		checkpoint := false
+		for _, replay := range exec.ReplayMessages {
+			var saved struct {
+				ResponsesInput []any `json:"responses_input"`
+			}
+			if json.Unmarshal([]byte(replay.TranscriptJSON), &saved) == nil && len(saved.ResponsesInput) > 0 {
+				messages = []openaiclient.Message{{ResponsesInputItems: saved.ResponsesInput}}
+				checkpoint = true
+			}
+		}
+		if checkpoint {
+			continue
+		}
 		if exec.PromptSent != "" {
 			messages = append(messages, openaiclient.Message{Role: "user", Content: exec.PromptSent})
 		}
@@ -1234,7 +1263,7 @@ func convertLocalSteeringInput(input llmcontracts.LocalSteeringInput) (openaicli
 		}
 		messages = append(messages, openaiclient.LocalSteeringMessage{Text: message.Text, Attachments: messageAttachments})
 	}
-	return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments, Messages: messages}, nil
+	return openaiclient.LocalSteeringInput{Text: input.Text, Attachments: attachments, Messages: messages, Commit: input.Commit}, nil
 }
 
 func openAISteeringToolRefresh(

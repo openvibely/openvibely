@@ -477,6 +477,7 @@ func TestSendAgentic_WebsocketQueuesLocalSteeringUntilResponseCompletes(t *testi
 }
 
 func testWebsocketLocalSteering(t *testing.T, model string, oauth bool) {
+	var committed atomic.Bool
 	responseStarted := make(chan struct{})
 	releaseResponse := make(chan struct{})
 	secondRequest := make(chan map[string]any, 1)
@@ -519,6 +520,9 @@ func testWebsocketLocalSteering(t *testing.T, model string, oauth bool) {
 			return
 		}
 		secondRequest <- request
+		if !committed.Load() {
+			t.Error("steering was sent before its history was recorded")
+		}
 		for _, event := range []string{
 			`{"type":"response.output_text.delta","delta":" after steer"}`,
 			`{"type":"response.completed","response":{"id":"resp_second","status":"completed","model":"gpt-5.5"}}`,
@@ -539,7 +543,7 @@ func testWebsocketLocalSteering(t *testing.T, model string, oauth bool) {
 	var claimed atomic.Bool
 	client := NewWithAPIKey("sk-test")
 	if oauth {
-		client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(time.Hour).UnixMilli(), "org_test")
+		client = NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	}
 	defer client.responsesTransportState.Close()
 	done := make(chan struct {
@@ -553,7 +557,13 @@ func testWebsocketLocalSteering(t *testing.T, model string, oauth bool) {
 			SkipDefaultTools: true,
 			OnLocalSteering: func(context.Context) (LocalSteeringInput, error) {
 				if pending.Load() && claimed.CompareAndSwap(false, true) {
-					return LocalSteeringInput{Text: "new direction"}, nil
+					return LocalSteeringInput{Text: "new direction", Commit: func(_ context.Context, history []any) error {
+						if len(history) == 0 {
+							return errors.New("empty steering history")
+						}
+						committed.Store(true)
+						return nil
+					}}, nil
 				}
 				return LocalSteeringInput{}, nil
 			},

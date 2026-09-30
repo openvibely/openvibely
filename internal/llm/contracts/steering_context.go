@@ -24,6 +24,8 @@ type LocalSteeringMessage struct {
 // LocalSteeringInput mirrors Codex's ordered pending-input drain. Messages is
 // preferred; Text and Attachments retain compatibility with single-input callers.
 type LocalSteeringInput struct {
+	// Commit records consumed input and request history before sampling.
+	Commit      func(context.Context, []any) error
 	Text        string
 	Attachments []models.Attachment
 	Messages    []LocalSteeringMessage

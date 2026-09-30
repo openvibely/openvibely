@@ -209,6 +209,7 @@ type LocalSteeringMessage struct {
 // LocalSteeringInput is the ordered input drained at a Codex-style local turn
 // boundary. Messages is preferred; the other fields support single-input callers.
 type LocalSteeringInput struct {
+	Commit      func(context.Context, []any) error
 	Text        string
 	Attachments []*FileAttachment
 	Messages    []LocalSteeringMessage
@@ -323,6 +324,10 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	configurationIndex := 0
 	userHistoryIndex := 0
 	for _, msg := range c.History {
+		if len(msg.ResponsesInputItems) > 0 {
+			inputItems = append([]any(nil), msg.ResponsesInputItems...)
+			continue
+		}
 		role := roleForMessage(msg.Role)
 		if role == "user" {
 			for configurationIndex < len(astraConfigurationHistory) && astraConfigurationHistory[configurationIndex].UserHistoryIndex <= userHistoryIndex {
@@ -443,8 +448,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	}
 
 	var allText strings.Builder
+	var persistSteeringHistory func(context.Context, []any) error
 	pendingAsyncDeliveries := append([]AsyncToolCallRecord(nil), recoveredAsyncDeliveries...)
 	for turn := 0; turn < opts.MaxTurns; turn++ {
+		if persistSteeringHistory != nil {
+			if err := persistSteeringHistory(ctx, inputItems); err != nil {
+				return nil, err
+			}
+		}
 		if err := ensureOpenAIAgenticRequestFits(inputItems, tools, opts); err != nil {
 			if turn == 0 || !opts.AutoCompaction {
 				return nil, err
@@ -533,6 +544,11 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			outputItems = statelessOAuthOutputItems(outputItems)
 		}
 		inputItems = append(inputItems, outputItems...)
+		if persistSteeringHistory != nil {
+			if err := persistSteeringHistory(ctx, inputItems); err != nil {
+				return nil, err
+			}
+		}
 		if useStandaloneWebSearch {
 			standaloneSearchInput = append([]any(nil), inputItems...)
 		}
@@ -556,6 +572,12 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 				inputItems, appendErr = appendLocalSteeringInput(inputItems, localSteering)
 				if appendErr != nil {
 					return nil, fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr)
+				}
+				if localSteering.Commit != nil {
+					if err := localSteering.Commit(ctx, inputItems); err != nil {
+						return nil, fmt.Errorf("record consumed steering: %w", err)
+					}
+					persistSteeringHistory = localSteering.Commit
 				}
 				// A user follow-up does not consume the agentic tool-loop budget.
 				turn--
@@ -668,11 +690,21 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			if appendErr != nil {
 				return nil, fmt.Errorf("turn %d append local steering: %w", turn+1, appendErr)
 			}
-			// Pending user input extends the active turn even when the configured
-			// tool-loop budget would otherwise end here.
+			if localSteering.Commit != nil {
+				if err := localSteering.Commit(ctx, inputItems); err != nil {
+					return nil, fmt.Errorf("record consumed steering: %w", err)
+				}
+				persistSteeringHistory = localSteering.Commit
+			}
+			// Pending user input extends the active turn even at the tool-loop limit.
 			turn--
 		} else {
 			pendingAsyncDeliveries = append([]AsyncToolCallRecord(nil), deliveryRecords...)
+		}
+	}
+	if persistSteeringHistory != nil {
+		if err := persistSteeringHistory(ctx, inputItems); err != nil {
+			return nil, err
 		}
 	}
 	result.Text = allText.String()
