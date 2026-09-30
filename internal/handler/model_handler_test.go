@@ -1113,6 +1113,30 @@ func TestUpdateModel_PostRejectsBlankNameWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestUpdateModelRetiredDoesNotSilentlySwitch(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := &models.LLMConfig{Name: "Retired configuration", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.2-codex"}
+	if err := repo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	form := modelValidationForm("New name")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "api_key")
+	form.Set("model", agent.Model)
+	rec := postForm(e, "/models/"+agent.ID, form)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "retired") {
+		t.Fatalf("expected explicit retirement error, got %d: %s", rec.Code, rec.Body.String())
+	}
+	got, err := repo.GetByID(ctx, agent.ID)
+	if err != nil || got == nil {
+		t.Fatalf("load configuration: %v", err)
+	}
+	if got.Model != agent.Model || got.Name != agent.Name {
+		t.Fatal("rejected update changed saved configuration")
+	}
+}
+
 func TestUpdateModel_RejectsBlankRunnableModelSlugWithoutMutation(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -4056,7 +4080,7 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-5.4", "gpt-5.4"},
 		{"gpt-5.4-mini", "gpt-5.4-mini"},
 		{"gpt-5.3-codex", "gpt-5.3-codex"},
-		{"gpt-5.3-codex-spark", "gpt-5.3-codex-spark"},
+		{"gpt-5.3-codex-spark", "gpt-5.6-sol"},
 		{"gpt-5.2-codex", "gpt-5.6-sol"},
 		{"gpt-5.1-codex-max", "gpt-5.6-sol"},
 		{"gpt-5.1-codex", "gpt-5.6-sol"},
@@ -4075,6 +4099,21 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 				t.Errorf("NormalizeOpenAIModelForTest(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRetiredOpenAIModelByConnection(t *testing.T) {
+	for _, auth := range []models.AuthMethod{models.AuthMethodAPIKey, models.AuthMethodOAuth} {
+		for _, model := range []string{"gpt-5.2-codex", "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5-codex", "gpt-5.3-codex-spark"} {
+			if !retiredOpenAIModel(model, auth) {
+				t.Errorf("%s allowed with %s", model, auth)
+			}
+		}
+		for _, model := range []string{"gpt-5.4", "gpt-5.4-mini"} {
+			if retiredOpenAIModel(model, auth) != (auth == models.AuthMethodOAuth) {
+				t.Errorf("wrong retirement for %s with %s", model, auth)
+			}
+		}
 	}
 }
 
