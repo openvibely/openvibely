@@ -104,6 +104,13 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("keyboard focus remains visible", `String(!document.getElementById('task-panel-divider').hasAttribute('data-pointer-focus'))`, "true")
 		b.call("Page.navigate", map[string]any{"url": server.URL + "/tasks/details-task?tab=details"}, nil)
 		b.waitFor("saved details ready", `String(Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
+		assertFooter := func() {
+			b.waitFor("actions anchored bottom right", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),box=actions.getBoundingClientRect(),last=actions.lastElementChild.getBoundingClientRect();return String(Math.abs(panel.bottom-box.bottom-12)<1 && Math.abs(panel.right-last.right-12)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
+		}
+		assertFooter()
+		b.evaluate(`var content=document.getElementById('task-detail-view'),filler=document.createElement('div'); filler.style.height='2000px'; content.appendChild(filler); content.scrollTop=content.scrollHeight; 'scrolled'`)
+		assertFooter()
+		b.evaluate(`var content=document.getElementById('task-detail-view'); content.lastElementChild.remove(); content.scrollTop=0; 'restored'`)
 		b.waitFor("legacy Edit removed", `String(!document.querySelector('[data-task-detail-edit]'))`, "true")
 		b.evaluate(`window.retainedThread=document.getElementById('task-thread-form'); 'saved'`)
 		b.click(`[data-detail-property="priority"]`)
