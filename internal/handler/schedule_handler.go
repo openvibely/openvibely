@@ -87,6 +87,15 @@ func parseScheduleForm(c echo.Context, defaultRepeatType models.RepeatType) (sch
 	}, nil
 }
 
+// Panel edits may retain an existing recurring anchor, but a newly chosen start
+// must be in the future. Persisted overdue schedules still use scheduler catch-up.
+func validatePanelScheduleStart(runAt time.Time) error {
+	if !runAt.After(time.Now()) {
+		return echo.NewHTTPError(http.StatusBadRequest, "Run at must be in the future. Check the date and AM/PM.")
+	}
+	return nil
+}
+
 func scheduleFormHTTPError(err error) error {
 	var parseErr *time.ParseError
 	if errors.As(err, &parseErr) {
@@ -209,6 +218,12 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		return scheduleFormHTTPError(err)
 	}
 
+	if c.QueryParam("from") == "task-panel" {
+		if err := validatePanelScheduleStart(formValues.runAt); err != nil {
+			return err
+		}
+	}
+
 	clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
 
 	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c)); err != nil {
@@ -273,6 +288,12 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 			applog.Infof("[handler] UpdateSchedule invalid date: %v", err)
 		}
 		return scheduleFormHTTPError(err)
+	}
+
+	if c.QueryParam("from") == "task-panel" && !formValues.runAt.Equal(schedule.RunAt.Truncate(time.Minute)) {
+		if err := validatePanelScheduleStart(formValues.runAt); err != nil {
+			return err
+		}
 	}
 
 	var clearContextOnStart *bool

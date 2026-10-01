@@ -2090,3 +2090,55 @@ func TestDeleteSchedule_TaskPanelRestoresEmptyState(t *testing.T) {
 		t.Fatalf("delete failed: %v, %v", stored, err)
 	}
 }
+
+func TestTaskPanelScheduleRejectsPastStart(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	form := url.Values{"run_at": {time.Now().Add(-11 * time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {"weekly"}, "repeat_interval": {"1"}}
+	endpoint := "/tasks/" + task.ID + "/schedule?project_id=" + project.ID + "&from=task-panel"
+	rec := tc.HTTP().Post(endpoint).WithForm(form).Execute()
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "future") {
+		t.Fatalf("expected past-start rejection: %d %s", rec.Code, rec.Body.String())
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+	if err != nil || len(schedules) != 0 {
+		t.Fatalf("past schedule persisted: %v %v", schedules, err)
+	}
+	form.Set("run_at", time.Now().Add(time.Hour).Format("2006-01-02T15:04"))
+	rec = tc.HTTP().Post(endpoint).WithForm(form).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("future schedule rejected: %d %s", rec.Code, rec.Body.String())
+	}
+	due, err := tc.scheduleRepo.ListDue(context.Background(), time.Now())
+	if err != nil || len(due) != 0 {
+		t.Fatalf("future schedule is due: %v %v", due, err)
+	}
+}
+
+func TestTaskPanelScheduleEditPreservesNextRun(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	anchor := time.Now().Add(-7 * 24 * time.Hour).Truncate(time.Minute)
+	next := time.Now().Add(time.Hour).Truncate(time.Minute)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: anchor, NextRun: &next, RepeatType: models.RepeatWeekly, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	if err := tc.scheduleRepo.Create(context.Background(), schedule); err != nil {
+		t.Fatal(err)
+	}
+	endpoint := "/schedules/" + schedule.ID + "?project_id=" + project.ID + "&from=task-panel"
+	form := url.Values{"run_at": {anchor.Local().Format("2006-01-02T15:04")}, "repeat_type": {"weekly"}, "repeat_interval": {"1"}, "clear_context_on_start": {"false"}}
+	rec := tc.HTTP().Put(endpoint).WithForm(form).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("edit failed: %d %s", rec.Code, rec.Body.String())
+	}
+	saved, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	if err != nil || saved.NextRun == nil || !saved.NextRun.Equal(next) || saved.ClearContextOnStart {
+		t.Fatalf("edit reset occurrence: %v %v", saved, err)
+	}
+	form.Set("run_at", time.Now().Add(-11*time.Hour).Format("2006-01-02T15:04"))
+	rec = tc.HTTP().Put(endpoint).WithForm(form).Execute()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("past edit accepted: %d %s", rec.Code, rec.Body.String())
+	}
+}
