@@ -56,7 +56,7 @@ func AttachmentList(attachments []models.Attachment, projectID string, taskID st
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div><div class=\"flex items-center justify-between mb-3\"><h3 class=\"text-sm font-semibold\">Attachments</h3><button type=\"button\" id=\"add-attachment-btn\" class=\"btn btn-ghost btn-xs\" aria-label=\"Add attachments\" onclick=\"document.querySelector('#attachment-form input[type=file]').click()\">+</button></div><form method=\"post\" id=\"attachment-form\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div><div class=\"flex items-center justify-between mb-3\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Attachments</h3><button type=\"button\" id=\"add-attachment-btn\" class=\"btn btn-ghost btn-xs\" aria-label=\"Add attachments\" onclick=\"document.querySelector('#attachment-form input[type=file]').click()\">+</button></div><form method=\"post\" id=\"attachment-form\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

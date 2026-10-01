@@ -51,11 +51,18 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			runComposerFocusCDP(t, chrome, server.URL+path, "chain-panel", func(b *composerFocusCDP) {
 				b.waitFor("chain add visible", `String(!!document.querySelector('[data-chain-add]') && document.querySelector('[data-chain-add]').getClientRects().length>0)`, "true")
+				b.evaluate(`window.chainHeadingTop=document.querySelector('#task-chain-panel h3').getBoundingClientRect().top; 'saved'`)
+				for _, tab := range []struct{ key, heading string }{{"details", "#task-detail-metrics h3"}, {"schedules", "#task-schedule-panel h3"}, {"attachments", "#tab-attachments h3"}} {
+					b.click("#inspector-tab-" + tab.key)
+					b.waitFor("heading aligned with "+tab.key, `String(Math.abs(document.querySelector('`+tab.heading+`').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
+				}
+				b.click("#inspector-tab-chaining")
 				b.evaluate(`window.retainedThread=document.getElementById('tab-chat'); 'saved'`)
 				b.click(`[data-chain-add]`)
 				b.evaluate(`document.querySelector('[data-chain-form] [name="chain_child_category"]').value='backlog'; 'set'`)
 				b.click(`[data-chain-save]`)
 				b.waitFor("configured card", `String(!document.querySelector('[data-chain-card]').hidden && !document.getElementById('task-chain-editor').open && document.querySelector('[data-chain-category]').textContent.includes('backlog'))`, "true")
+				b.waitFor("configured heading keeps its position", `String(Math.abs(document.querySelector('#task-chain-panel h3').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
 				b.waitFor("thread retained", `String(window.retainedThread===document.getElementById('tab-chat'))`, "true")
 				b.click(`[data-chain-card] [data-chain-open]`)
 				b.evaluate(`document.querySelector('[data-chain-form] [name="chain_child_category"]').value='active'; 'set'`)

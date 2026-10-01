@@ -33,7 +33,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      @NewTaskDetails(agents, agentDefs)
     </div>
     <div id="tab-attachments" class="task-tab-panel hidden">
-     <div class="flex items-center justify-between mb-3"><h3 class="text-sm font-semibold">Attachments</h3>
+     <div class="flex items-center justify-between mb-3" style="height:20px"><h3 class="text-sm font-semibold">Attachments</h3>
      <button id="new-task-files" type="button" class="btn btn-ghost btn-xs" aria-label="Add attachments" onclick="document.getElementById('task-thread-form-file-input').click()">+</button></div>
      <div id="draft-panel-attachments" class="space-y-2" data-image-gallery-group=""><p class="text-sm opacity-60">No attachments</p></div>
      <script>
