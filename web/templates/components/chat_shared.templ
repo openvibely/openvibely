@@ -2339,6 +2339,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 				function handleMessageHistoryKeydown(e) {
 					if (!messageInput || !messageHistoryStorageKey) return false;
+					if (e.defaultPrevented || e.isComposing || e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return false;
 					if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'Escape') return false;
 					if (e.key === 'Escape') {
 						if (messageHistoryIndex === -1) return false;
