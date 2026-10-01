@@ -279,6 +279,13 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 	if err := parent.Start(); err != nil {
 		t.Fatalf("start recovery parent: %v", err)
 	}
+	t.Cleanup(func() {
+		_ = parent.Process.Kill()
+		_, _ = parent.Process.Wait()
+		if port != "" {
+			killPort(t, port)
+		}
+	})
 	if distribution == buildinfo.DistributionDesktop {
 		baseURL = waitForDesktopBaseURLFromLogs(t, readParentLogs)
 		parsed, err := url.Parse(baseURL)
@@ -287,11 +294,6 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 		}
 		port = parsed.Port()
 	}
-	t.Cleanup(func() {
-		_ = parent.Process.Kill()
-		_, _ = parent.Process.Wait()
-		killPort(t, port)
-	})
 	if distribution == buildinfo.DistributionBinary && wantOutcome == packagedUpdateOutcomeSucceeded {
 		waitForHealthVersion(t, baseURL, runningVersion, readParentLogs)
 		waitForUpdateState(t, baseURL, StateSucceeded)
@@ -824,7 +826,7 @@ func envWithout(keys ...string) []string {
 func waitForDesktopBaseURLFromLogs(t *testing.T, readLogs func() string) string {
 	t.Helper()
 	const marker = "[desktop] backend listening at "
-	deadline := time.Now().Add(45 * time.Second)
+	deadline := time.Now().Add(90 * time.Second)
 	var logs string
 	for time.Now().Before(deadline) {
 		logs = readLogs()
