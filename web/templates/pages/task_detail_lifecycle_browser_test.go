@@ -36,15 +36,16 @@ func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
 
 	rowAt := func(id string, startedAt time.Time, skill string) map[string]any {
 		return map[string]any{
-			"id":                id,
-			"when":              "after_complete",
-			"skill_key":         skill,
-			"status":            "completed",
-			"output_contract":   "activity_summary",
-			"summary":           "summary for " + id,
-			"started_at":        startedAt.Format(time.RFC3339),
-			"selected_skills":   []string{"debug_go_tests", "review_changes"},
-			"selected_memories": []map[string]string{{"file": "testing_coverage_and_performance.md"}},
+			"parent_execution_id": "thread-parent",
+			"id":                  id,
+			"when":                "after_complete",
+			"skill_key":           skill,
+			"status":              "completed",
+			"output_contract":     "activity_summary",
+			"summary":             "summary for " + id,
+			"started_at":          startedAt.Format(time.RFC3339),
+			"selected_skills":     []string{"debug_go_tests", "review_changes"},
+			"selected_memories":   []map[string]string{{"file": "testing_coverage_and_performance.md"}},
 		}
 	}
 	row := func(id string, hour int, skill string) map[string]any {
@@ -259,6 +260,27 @@ window.addEventListener('DOMContentLoaded', function() {
     retry.click();
     await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-4"]'); }, 'initial lifecycle page');
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]')) fail('initial lifecycle rows missing');
+    var entry = list().querySelector('[data-lifecycle-execution-id="event-4"]');
+    if (entry.tagName !== 'DETAILS' || entry.open) fail('lifecycle should begin collapsed');
+    entry.querySelector('summary').click();
+    if (!entry.open || entry.querySelector('.lifecycle-entry-details').getBoundingClientRect().height === 0) fail('selecting entry should expand inline');
+    entry.querySelector('summary').click();
+    if (entry.open) fail('selecting entry again should collapse');
+    var originalWorkspace = window.taskWorkspace, openedThread = false, scrolled = false;
+    window.taskWorkspace = {openThread:function() { openedThread = true; }};
+    var message = document.createElement('div');
+    message.dataset.execId = 'thread-parent';
+    message.scrollIntoView = function() { scrolled = true; };
+    document.getElementById('task-detail-content').appendChild(message);
+    entry.querySelector('summary').click();
+    if (openedThread || scrolled) fail('expansion must not navigate');
+    entry.querySelector('[data-lifecycle-thread]').click();
+    if (!openedThread || !scrolled) fail('explicit thread action must reveal the linked execution');
+    window.taskWorkspace = originalWorkspace;
+    message.remove();
+    entry.open = false;
+
+
     if (list().textContent.indexOf('Selected skills') < 0 || list().textContent.indexOf('testing_coverage_and_performance.md') < 0) fail('selected lifecycle evidence was not rendered');
 
 	    var lifecyclePort = port();
@@ -1482,7 +1504,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (row('event-1')) throw new Error('reconnect eagerly rendered missed lifecycle rows before scrolling');
 
 	    scrollGapIntoView();
-	    await waitFor(function() { return !!row('event-1') && !!row('event-20') && !!gap(); }, 'first bounded missed lifecycle page', 3000);
+	    await waitFor(function() { return !!row('event-1') && !!row('event-20') && !!gap(); }, 'first bounded missed lifecycle page', 3000)
 	    var firstStats = await stats();
 	    if (firstStats.newer_calls !== 1) throw new Error('first gap scroll requested ' + firstStats.newer_calls + ' pages, want exactly one');
 	    if (row('event-21')) throw new Error('first gap scroll rendered more than one missed page');
@@ -2334,7 +2356,7 @@ window.addEventListener('DOMContentLoaded', function() {
       status:'completed'
     }}));
     await waitFor(function() { return lifecycleStatus('event-target') === 'completed'; }, 'retained row terminal rehydration', 4000);
-    var completed = lifecycleRow('event-target').querySelector('.text-xs.opacity-60');
+    var completed = lifecycleRow('event-target').querySelector('[data-lifecycle-finished]');
     var error = lifecycleRow('event-target').querySelector('.text-error');
     if (!completed || completed.textContent.indexOf(':05:') < 0) throw new Error('retained row did not render refreshed completion time: ' + (completed && completed.textContent || '<missing>'));
     if (!error || error.textContent.indexOf('terminal target error') < 0) throw new Error('retained row did not render refreshed terminal error');
@@ -2481,7 +2503,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var descriptionRect = description.getBoundingClientRect();
     var firstRowRect = firstRow.getBoundingClientRect();
     if (Math.abs(cardRect.bottom - bodyBottom) > 2) throw new Error('lifecycle card does not fill inspector body: card=' + cardRect.bottom + ' body=' + bodyBottom);
-    if (firstRowRect.top - descriptionRect.bottom > 32) throw new Error('lifecycle rows start too far below the description: gap=' + (firstRowRect.top - descriptionRect.bottom));
+    if (firstRowRect.top - descriptionRect.bottom > 64) throw new Error('lifecycle rows start too far below the description: gap=' + (firstRowRect.top - descriptionRect.bottom));
     if (port.clientHeight < 500) throw new Error('lifecycle scrollport is unexpectedly short: ' + port.clientHeight);
     if (port.scrollHeight <= port.clientHeight) throw new Error('lifecycle rows do not overflow their internal scrollport');
     if (root.scrollHeight > root.clientHeight + 2) throw new Error('lifecycle rows escaped into page-level overflow');

@@ -550,11 +550,23 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				<div class="flex flex-col min-w-0 flex-1 min-h-0">
 					<div class="flex flex-col gap-2 flex-1 min-h-0">
 						<div class="flex items-center justify-between mb-3 flex-shrink-0">
-							<h4 class="text-lg font-bold">Lifecycle Activity</h4>
+							<h4 class="text-sm font-semibold">Lifecycle</h4>
 							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 						</div>
-						<div data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</div>
-						<div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="flex-1 min-h-0 overflow-y-auto pr-1">
+						<div data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0">Routing, preparation, and completion activity.</div>
+						<style>
+                            .lifecycle-entry summary { display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:10px 12px; border-radius:8px; }
+                            .lifecycle-entry summary::-webkit-details-marker { display:none; }
+                            .lifecycle-entry summary:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+                            .lifecycle-entry summary > span:first-child { min-width:0; overflow-wrap:anywhere; }
+                            .lifecycle-subtitle { display:block; font-size:12px; opacity:.6; margin-top:4px; }
+                            .lifecycle-entry[open] .lifecycle-chevron { transform:rotate(90deg); }
+                            .lifecycle-entry-details { padding:8px 12px 16px; overflow-wrap:anywhere; }
+                            .lifecycle-entry-details dl { display:grid; grid-template-columns:5rem minmax(0,1fr); gap:8px; }
+                            .lifecycle-entry-details dt { opacity:.6; }
+                            .lifecycle-entry-details p { margin-top:8px; }
+                        </style>
+                        <div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="flex-1 min-h-0 overflow-y-auto pr-1">
 							<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
 								<p class="text-sm opacity-50">Loading lifecycle activity...</p>
 							</div>
@@ -737,22 +749,19 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						sortRecords(state);
 						}
 
-						function rowMarkup(row) {
-							var selectedSkills = renderBadgeRow('Selected skills', row.selected_skills);
-							var selectedMemories = renderBadgeRow('Selected memories', memoryLabels(row.selected_memories));
-							var hasStructuredRoute = selectedSkills || selectedMemories;
-							var summary = row.summary && !hasStructuredRoute ? '<p class="text-sm mt-1">' + escapeText(row.summary) + '</p>' : '';
-							var error = row.error ? '<p class="text-xs text-error mt-1">' + escapeText(row.error) + '</p>' : '';
-							var when = row.completed_at ? displayTime(row.completed_at) : displayTime(row.started_at);
-							return '<div data-lifecycle-execution-id="' + escapeAttribute(row.id) + '" class="border border-base-300 rounded-lg p-3">' +
-								'<div class="flex items-center justify-between flex-wrap gap-2">' +
-								'<div class="flex items-center gap-2 flex-wrap">' +
-								'<span class="font-mono text-xs opacity-70">' + escapeText(row.when || '') + '</span>' +
-								'<span class="text-sm font-medium">' + escapeText(row.skill_key || '') + '</span>' +
-								statusBadge(row.status || '') +
-								'</div><span class="text-xs opacity-60">' + escapeText(when) + '</span></div>' +
-								summary + selectedSkills + selectedMemories + error + '</div>';
-						}
+                        function rowMarkup(row) {
+                            var end = timestamp(row.completed_at), start = timestamp(row.started_at);
+                            var seconds = Math.max(0, Math.floor(((end || Date.now()) - start) / 1000));
+                            var duration = start && (end || row.status === 'running') ? Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's' : '—';
+                            var phase = {before_run:'Before run', after_complete:'After completion', before_plan:'Before planning', after_plan:'After planning'}[row.when] || String(row.when || '').replaceAll('_', ' ');
+                            var details = '<dl class="text-sm"><dt>Started</dt><dd>' + escapeText(displayTime(row.started_at)) + '</dd><dt>Finished</dt><dd data-lifecycle-finished>' + escapeText(end ? displayTime(row.completed_at) : '—') + '</dd><dt>Duration</dt><dd>' + escapeText(duration) + '</dd></dl>';
+                            if (row.agent_id) details += '<p class="text-sm">Agent: ' + escapeText(row.agent_id) + '</p>';
+                            if (row.summary) details += '<p class="text-sm">' + escapeText(row.summary) + '</p>';
+                            details += renderBadgeRow('Selected skills', row.selected_skills) + renderBadgeRow('Selected memories', memoryLabels(row.selected_memories));
+                            if (row.error) details += '<p class="text-sm text-error">' + escapeText(row.error) + '</p>';
+                            if (row.parent_execution_id) details += '<button type="button" class="btn btn-ghost btn-sm" data-lifecycle-thread="' + escapeAttribute(row.parent_execution_id) + '">View in thread →</button>';
+                            return '<details data-lifecycle-execution-id="' + escapeAttribute(row.id) + '" class="lifecycle-entry"><summary><span><span class="text-sm font-semibold">' + escapeText(row.skill_key || phase || 'Lifecycle activity') + '</span> ' + statusBadge(row.status || '') + '<span class="lifecycle-subtitle">' + escapeText(phase) + ' · ' + escapeText(displayTime(row.started_at)) + ' · ' + escapeText(duration) + '</span></span><span class="lifecycle-chevron" aria-hidden="true">›</span></summary><div class="lifecycle-entry-details">' + details + '</div></details>';
+                        }
 
 						function gapMarkup(gap) {
 							var content = '<button type="button" data-lifecycle-load-gap="' + escapeAttribute(gap.id) + '" class="btn btn-ghost btn-sm">Load missed lifecycle activity</button>';
@@ -784,7 +793,16 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									html = '<p data-lifecycle-empty class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
 								}
 								} else {
-									state.order.forEach(function(id) {
+									var lastDay = "";
+                                    state.order.forEach(function(id) {
+                                        var date = new Date(state.records[id].started_at), today = new Date(), yesterday = new Date();
+                                        yesterday.setDate(today.getDate() - 1);
+                                        var day = date.toDateString();
+                                        if (day !== lastDay) {
+                                            var label = day === today.toDateString() ? "Today" : day === yesterday.toDateString() ? "Yesterday" : date.toLocaleDateString();
+                                            html += '<h5 data-lifecycle-day style="margin:0;padding:8px 12px;font-size:12px;line-height:16px;opacity:.6">' + escapeText(label) + '</h5>';
+                                            lastDay = day;
+                                        }
 										state.gaps.forEach(function(gap) {
 											if (gap.boundaryID === id) html += gapMarkup(gap);
 										});
@@ -803,7 +821,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									if (state.refreshError) html += '<p data-lifecycle-refresh-error class="text-xs text-error">' + escapeText(state.refreshError) + ' <button type="button" data-lifecycle-retry="refresh" class="btn btn-ghost btn-xs">Retry</button></p>';
 									if (state.newerLoading) html += '<p data-lifecycle-loading-newer class="text-xs opacity-50 text-center py-2">Checking for new lifecycle activity...</p>';								if (state.newerError) html += '<p data-lifecycle-newer-error class="text-xs text-error text-center py-2">' + escapeText(state.newerError) + ' <button type="button" data-lifecycle-retry="newer" class="btn btn-ghost btn-xs">Retry</button></p>';
 							}
-							container.innerHTML = html;
+							var expanded = Array.from(container.querySelectorAll('details[open][data-lifecycle-execution-id]')).map(function(el) { return el.dataset.lifecycleExecutionId; });
+                            container.innerHTML = html;
+                            container.querySelectorAll('details[data-lifecycle-execution-id]').forEach(function(el) { el.open = expanded.includes(el.dataset.lifecycleExecutionId); });
 							var renderID = ++state.restoreSerial;
 							if (!preservePosition) return;
 							var apply = function() {
@@ -1292,6 +1312,29 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 
 						function handleClick(event) {
 							var target = event.target;
+                            var threadButton = target && target.closest && target.closest('[data-lifecycle-thread]');
+                            if (threadButton) {
+                                event.preventDefault();
+                                var root = document.getElementById('task-detail-content');
+                                var id = threadButton.dataset.lifecycleThread;
+                                if (window.taskWorkspace) window.taskWorkspace.openThread();
+                                threadButton.disabled = true;
+                                (async function() {
+                                    try {
+                                        while (root && root.isConnected) {
+                                            var message = Array.from(root.querySelectorAll('[data-exec-id]')).find(function(el) { return el.dataset.execId === id; });
+                                            if (message) { message.scrollIntoView({block:'center'}); return; }
+                                            var loader = root.querySelector('[data-earlier-loader]');
+                                            if (!loader || !window.htmx) break;
+                                            await htmx.ajax('GET', loader.getAttribute('hx-get'), {target:loader, swap:loader.getAttribute('hx-swap') || 'outerHTML'});
+                                            if (loader.isConnected) break;
+                                        }
+                                        threadButton.textContent = 'Execution is not available in the thread';
+                                    } finally { threadButton.disabled = false; }
+                                })();
+                                return;
+                            }
+
 							var gapButton = target && target.closest && target.closest('[data-lifecycle-load-gap], [data-lifecycle-retry-gap]');
 							if (gapButton) {
 								event.preventDefault();

@@ -389,14 +389,15 @@ func (h *Handler) GetLifecycleExecutionEvents(c echo.Context) error {
 // includes raw_output_text, prompt overrides, or input snapshots.
 func toLifecycleExecutionView(e models.LifecycleExecution) viewmodels.LifecycleExecutionView {
 	v := viewmodels.LifecycleExecutionView{
-		ID:             e.ID,
-		When:           string(e.When),
-		AgentID:        e.AgentID,
-		SkillKey:       e.SkillKey,
-		Status:         string(e.Status),
-		OutputContract: string(e.OutputContract),
-		Error:          truncateLifecycleDisplay(e.Error),
-		StartedAt:      e.StartedAt, CompletedAt: e.CompletedAt,
+		ID:                e.ID,
+		ParentExecutionID: e.ParentExecID,
+		When:              string(e.When),
+		AgentID:           e.AgentID,
+		SkillKey:          e.SkillKey,
+		Status:            string(e.Status),
+		OutputContract:    string(e.OutputContract),
+		Error:             truncateLifecycleDisplay(e.Error),
+		StartedAt:         e.StartedAt, CompletedAt: e.CompletedAt,
 	}
 	if e.OutputJSON != "" {
 		v.Summary = extractStructuredSummary(e.OutputContract, e.OutputJSON)

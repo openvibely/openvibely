@@ -1024,3 +1024,11 @@ func TestHandler_GetTaskLifecycleExecutions_BoundsPromptSafeDetailPayload(t *tes
 		t.Fatalf("lifecycle detail page payload is too large: %d bytes", len(rec.Body.Bytes()))
 	}
 }
+
+func TestLifecycleViewPreservesParentExecutionLink(t *testing.T) {
+	id := "parent-execution"
+	view := toLifecycleExecutionView(models.LifecycleExecution{ID: "hook", ParentExecID: &id})
+	if view.ParentExecutionID == nil || *view.ParentExecutionID != id {
+		t.Fatal("missing parent execution link")
+	}
+}
