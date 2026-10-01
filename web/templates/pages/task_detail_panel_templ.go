@@ -34,7 +34,7 @@ func TaskDetailPanel() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		for _, tab := range []struct{ Key, Label string }{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Attachments"}, {"lifecycle", "Lifecycle"}} {
+		for _, tab := range []struct{ Key, Label string }{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Files"}, {"lifecycle", "Lifecycle"}} {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<button type=\"button\" role=\"tab\" class=\"tab\" id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
