@@ -145,6 +145,82 @@ templ TaskWorkspaceScript() {
 			else if (read('task-inspector-open') === 'true') openPanel(selected, false, false);
 			else closePanel(false, false);
 		}
+		// Session-local task visits are separate from the server's breadcrumb ordering.
+		var shortcutKey = 'task-shortcuts-' + root.dataset.projectId;
+		var visits = {};
+		try { visits = JSON.parse(sessionStorage.getItem(shortcutKey)) || {}; } catch (_) {}
+		function saveVisits() { try { sessionStorage.setItem(shortcutKey, JSON.stringify(visits)); } catch (_) {} }
+		if (taskID && visits.current !== taskID) {
+			visits.previous = visits.current;
+			visits.previousURL = visits.currentURL;
+			if (visits.expected !== taskID) visits.items = null;
+			visits.current = taskID;
+		}
+		if (taskID) visits.currentURL = location.href;
+		delete visits.expected;
+		saveVisits();
+		var navigating = false;
+		var breadcrumb = root.querySelector('[data-breadcrumb-selector][data-searchable-selector-kind="Task"]');
+		var breadcrumbButton = breadcrumb && breadcrumb.querySelector('[data-breadcrumb-selector-button]');
+		var apple = /Mac|iPhone|iPad/.test(navigator.platform);
+		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
+		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: Alt+↑/↓; last visited: Alt+L';
+		function navigateTask(url, cycling) {
+			var destination = new URL(url, location.href);
+			if (destination.origin !== location.origin) return;
+			if (cycling) visits.expected = decodeURIComponent(destination.pathname.split('/').pop());
+			else visits.items = null;
+			saveVisits();
+			return window.openVibelyNavigate(destination.href);
+		}
+		async function stepRecent(direction) {
+			if (navigating || !breadcrumb || !taskID) return;
+			navigating = true;
+			try {
+				if (!Array.isArray(visits.items)) {
+					var search = breadcrumb.querySelector('[data-breadcrumb-selector-search]');
+					var url = new URL(search.getAttribute('hx-get'), location.href);
+					breadcrumb.querySelectorAll('input[type="hidden"][name]').forEach(function(input) { url.searchParams.set(input.name, input.value); });
+					var response = await fetch(url, {signal:signal});
+					if (!response.ok) throw new Error('Task list unavailable');
+					var html = await response.text();
+					if (signal.aborted || !root.isConnected) return;
+					var parsed = new DOMParser().parseFromString(html, 'text/html');
+					visits.items = Array.from(parsed.querySelectorAll('[data-breadcrumb-selector-option]')).map(function(link) { return link.getAttribute('href'); });
+				}
+				var index = visits.items.findIndex(function(url) { return new URL(url, location.href).pathname === location.pathname; });
+				var next = index + direction;
+				if (index >= 0 && next >= 0 && next < visits.items.length) await navigateTask(visits.items[next], true);
+			} catch (error) {
+				if (!signal.aborted && window.showToast) window.showToast('Could not load recent tasks', 'error');
+			} finally { navigating = false; }
+		}
+		on(document, 'keydown', function(event) {
+			if (event.defaultPrevented || event.isComposing || event.repeat || !root.isConnected || document.querySelector('dialog[open]')) return;
+			var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+			if (command && !event.altKey && event.shiftKey && event.code === 'KeyB') {
+				event.preventDefault();
+				var active = document.activeElement;
+				if (panel.hidden) openPanel(null, true, false);
+				else closePanel(true, false);
+				if (panel.hidden && panel.contains(active)) opener.focus({preventScroll:true});
+			} else if (command && !event.altKey && !event.shiftKey && event.code === 'KeyK' && breadcrumbButton) {
+				event.preventDefault();
+				breadcrumbButton.click();
+			} else if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+				if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+				if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
+					event.preventDefault();
+					stepRecent(event.code === 'ArrowUp' ? -1 : 1);
+				} else if (event.code === 'KeyL' && visits.previousURL) {
+					event.preventDefault();
+					if (!navigating) {
+						navigating = true;
+						Promise.resolve(navigateTask(visits.previousURL, false)).catch(function() {}).finally(function() { navigating = false; });
+					}
+				}
+			}
+		});
 		function renderSummary() {
 			var bar = root.querySelector('#task-change-activity');
 			if (!bar || !summary) return;

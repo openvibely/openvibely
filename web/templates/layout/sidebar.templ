@@ -517,8 +517,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					// Update accessibility attributes based on collapsed state
 					function updateSidebarToggleA11y(isCollapsed) {
 						btn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
-						btn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
-						btn.setAttribute('title', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
+						var shortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘B' : 'Ctrl+B';
+						btn.setAttribute('aria-label', (isCollapsed ? 'Expand' : 'Collapse') + ' sidebar (' + shortcut + ')');
+						btn.setAttribute('title', btn.getAttribute('aria-label'));
 						btn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
 						if (document.body) document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed);
 					}
@@ -545,10 +546,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar
 					document.addEventListener('keydown', function(e) {
-						if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
-							// Don't toggle if user is typing in an input/textarea
-							var tag = document.activeElement && document.activeElement.tagName;
-							if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+						if (!e.defaultPrevented && !e.isComposing && !e.repeat && !e.altKey && !e.shiftKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
 							e.preventDefault();
 							toggleSidebarCollapsed();
 						}
