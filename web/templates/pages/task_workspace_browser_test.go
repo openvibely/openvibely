@@ -74,6 +74,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/new?tab=details", "detail-properties", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("draft details", `String(document.getElementById('task-details-panel') && !document.getElementById('task-details-panel').hidden)`, "true")
+		b.waitFor("property highlight clears panel edges", `(function(){var row=document.querySelector('[data-detail-property="priority"]').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
 		b.waitFor("property highlight inset", `(function(){var row=document.querySelector('[data-detail-property="priority"]'),text=row.firstElementChild;return String(Math.abs(text.getBoundingClientRect().left-row.getBoundingClientRect().left-12)<1 && getComputedStyle(row).paddingRight==='12px')})()`, "true")
 		b.click(`[data-detail-property="priority"]`)
 		b.click(`[data-options="priority"] [data-value="4"]`)
@@ -119,7 +120,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.call("Page.navigate", map[string]any{"url": server.URL + "/tasks/details-task?tab=details"}, nil)
 		b.waitFor("saved details ready", `String(Boolean(document.querySelector('#task-detail-content[data-task-id="details-task"]') && document.querySelector('#task-thread-form textarea')))`, "true")
 		assertFooter := func() {
-			b.waitFor("actions aligned with composer bottom and panel left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect(),composer=document.getElementById('task-thread-form').getBoundingClientRect();return String(Math.abs(first.bottom-composer.bottom)<1 && Math.abs(first.left-panel.left-13)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
+			b.waitFor("actions aligned with composer bottom and panel left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect(),composer=document.getElementById('task-thread-form').getBoundingClientRect();return String(Math.abs(first.bottom-composer.bottom)<1 && Math.abs(first.left-panel.left-25)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
 		}
 		assertFooter()
 		b.click(`#task-auto-merge-panel input[name="auto_merge"]`)
@@ -652,6 +653,7 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/schedule-task?tab=schedules", "schedule-modal", func(b *composerFocusCDP) {
 		b.waitFor("schedule card", `String(!!document.getElementById('schedule-card-saved'))`, "true")
+		b.waitFor("schedule highlight clears panel edges", `(function(){var row=document.querySelector('.task-schedule-edit').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
 		b.waitFor("schedule text shares heading gutter", `(function(){var heading=document.querySelector('#task-schedule-panel h3').getBoundingClientRect(),text=document.querySelector('.task-schedule-edit .font-semibold').getBoundingClientRect();return String(Math.abs(heading.left-text.left)<1)})()`, "true")
 		b.waitFor("schedule arrow centered", `(function(){var button=document.querySelector('.task-schedule-edit').getBoundingClientRect(),arrow=document.querySelector('.task-schedule-edit > [aria-hidden]').getBoundingClientRect();return String(Math.abs((button.top+button.bottom-arrow.top-arrow.bottom)/2)<1)})()`, "true")
 		b.click("#inspector-tab-details")
