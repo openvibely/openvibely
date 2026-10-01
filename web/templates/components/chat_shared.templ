@@ -104,6 +104,7 @@ type ChatInputFormConfig struct {
 	ShowModeSelector       bool
 	ChatMode               models.ChatMode // default when not persisted
 	TaskID                 string
+	DiscardDraftOnLeave    bool // new-task composers must not restore previous unsaved tasks
 	IsRunning              bool
 	ActiveTurnID           string
 	StopEndpoint           string // non-empty turns the send button into a stop button while IsRunning
@@ -127,6 +128,7 @@ func chatMessageHistoryStorageKey(config ChatInputFormConfig) string {
 	return "openvibely-chat-message-history"
 }
 func chatAttachmentStateKey(config ChatInputFormConfig) string {
+	if config.DiscardDraftOnLeave { return "" }
 	if config.TaskID != "" {
 		return "openvibely-task-thread-attachments-" + config.TaskID
 	}

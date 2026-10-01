@@ -35,11 +35,15 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     <div id="tab-attachments" class="task-tab-panel hidden">
      <div class="flex items-center justify-between mb-3"><h3 class="text-sm font-semibold">Attachments</h3>
      <button id="new-task-files" type="button" class="btn btn-ghost btn-xs" aria-label="Add attachments" onclick="document.getElementById('task-thread-form-file-input').click()">+</button></div>
-     <div id="draft-panel-attachments" data-image-gallery-group=""><p class="text-sm opacity-60">No attachments</p></div>
+     <div id="draft-panel-attachments" class="space-y-2" data-image-gallery-group=""><p class="text-sm opacity-60">No attachments</p></div>
      <script>
       (()=>{
        const panel=document.getElementById('draft-panel-attachments'),root=panel.closest('#task-detail-content');
-       const update=()=>{const list=root.querySelector('[id$="-attachments-list"]');if(!list)return;panel.replaceChildren(...Array.from(list.children).map(row=>{const clone=row.cloneNode(true);clone.removeAttribute('id');return clone;}));if(!panel.children.length)panel.innerHTML='<p class="text-sm opacity-60">No attachments</p>';};
+       const update=()=>{const list=root.querySelector('[id$="-attachments-list"]');if(!list)return;panel.replaceChildren(...Array.from(list.children).map(row=>{const clone=row.cloneNode(true);clone.removeAttribute('id');
+        clone.className='attachment-gallery-row';
+        const link=clone.querySelector('a'),size=clone.querySelector(':scope > span:last-child');
+        if(link){link.className='attachment-gallery-open';const name=link.querySelector('span');const text=document.createElement('span');text.className='min-w-0';name.className='block text-sm break-all';text.appendChild(name);if(size){size.className='block text-xs opacity-60';text.appendChild(size);}link.appendChild(text);}
+        return clone;}));if(!panel.children.length)panel.innerHTML='<p class="text-sm opacity-60">No attachments</p>';};
        const observer=new MutationObserver(()=>{if(!root.isConnected){observer.disconnect();return;}update();});
        requestAnimationFrame(()=>{const list=root.querySelector('[id$="-attachments-list"]');if(list){observer.observe(list,{childList:true,subtree:true});update();}});
        document.body.addEventListener('htmx:beforeCleanupElement',function cleanup(e){if(e.detail.elt===root){observer.disconnect();document.body.removeEventListener('htmx:beforeCleanupElement',cleanup);}});
@@ -61,7 +65,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     @components.ChatInputForm(components.ChatInputFormConfig{
      FormID: "task-thread-form", InputID: "task-message-input",
      PostEndpoint: fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", project.ID),
-     TargetID: "task-thread-messages", Agents: agents, ShowModelSelector: true,
+     TargetID: "task-thread-messages", DiscardDraftOnLeave: true, Agents: agents, ShowModelSelector: true,
     })
    </div>
   </div>
@@ -74,6 +78,21 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      input.setAttribute('form', 'task-thread-form');
     });
     var form = document.getElementById('task-thread-form');
+    // Do not cache an abandoned creation draft in HTMX history.
+    function discardDraft(event) {
+     if(event.type==='htmx:beforeCleanupElement' && event.detail.elt!==root) return;
+     form.reset();
+     var clear=window[form.getAttribute('data-clear-func-name')];
+     if(clear) clear();
+     root.querySelector('#task-message-input').value='';
+     if(event.type==='htmx:beforeCleanupElement') {
+      document.body.removeEventListener('htmx:beforeHistorySave',discardDraft);
+      document.body.removeEventListener('htmx:beforeCleanupElement',discardDraft);
+     }
+    }
+    document.body.addEventListener('htmx:beforeHistorySave',discardDraft);
+    document.body.addEventListener('htmx:beforeCleanupElement',discardDraft);
+
     form.addEventListener('htmx:afterRequest', function(event) {
      if (!event.detail.successful) document.getElementById('new-task-error').textContent = event.detail.xhr.responseText;
     });
