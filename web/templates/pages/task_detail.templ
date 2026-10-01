@@ -171,7 +171,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							@SwarmContextPanel(task)
                         @TaskGoalPanel(task.ID, goal)
                         @TaskPromptPanel(task)
-						// Worktree info panel (shown when task has worktree or is in a git project)
+                        @TaskAutoMergePanel(task)
+						// Worktree information exists only after a worktree has been created.
 						if task.WorktreeBranch != "" || task.WorktreePath != "" {
 							<div
 								id="worktree-info-wrapper"
@@ -182,10 +183,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							>
 								@WorktreeInfoPanel(task, nil)
 							</div>
-                        } else {
-                            <section class="mb-6 space-y-2"><h3 class="text-sm font-semibold">Worktree</h3><p class="text-sm opacity-60">No worktree created for this task.</p></section>
+
 						}
-                        @TaskAutoMergePanel(task)
 						<!-- Delete Confirmation Modal -->
 						<dialog id="delete-task-modal" class="modal">
 							<div class="modal-box">
@@ -2482,7 +2481,7 @@ func taskExecutionMetricsValue(metrics *models.TaskExecutionMetrics) models.Task
 templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentLabel string) {
 	<div
 		id="task-detail-metrics"
-		class="grid gap-3 mb-6 text-sm"
+		class="grid gap-1 mb-4 text-sm"
 		if task.ID != "" {
             hx-get={ fmt.Sprintf("/tasks/%s/detail-status", task.ID) }
             hx-trigger="every 3s"
@@ -2506,14 +2505,11 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
         @TaskPropertyRow("Category", "category", string(task.Category), string(task.Category))
         @TaskPropertyRow("Priority", "priority", fmt.Sprint(task.Priority), components.PriorityLabel(task.Priority))
         @TaskPropertyRow("Tag", "tag", string(task.Tag), taskDetailTagLabel(task.Tag))
+        if task.ID != "" && (metrics.LatestStartedAt != nil || metrics.LatestDurationMs > 0 || task.Status == models.StatusRunning || task.Status == models.StatusCompleted || task.Status == models.StatusFailed) {
         <h3 class="text-sm font-semibold mt-4">Execution</h3>
         <div>
             <span class="text-sm opacity-60">Status:</span>
-            if task.ID == "" {
-                <span>Not started</span>
-            } else {
-                <span class={ "ml-2 badge badge-sm", components.StatusBadgeClass(task.Status) }>{ components.StatusLabelForTask(task.Status, task.Category) }</span>
-            }
+            <span class={ "ml-2 badge badge-sm", components.StatusBadgeClass(task.Status) }>{ components.StatusLabelForTask(task.Status, task.Category) }</span>
         </div>
 		if task.Status == models.StatusRunning && metrics.LatestStartedAt != nil {
 			<div>
@@ -2532,6 +2528,7 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 				</div>
 			}
 		}
+        }
 	</div>
 }
 
@@ -2585,61 +2582,31 @@ func taskDetailTagLabel(tag models.TaskTag) string {
  if tag == "" { return "None" }; return components.TagLabel(tag)
 }
 
-func taskDetailTextPreview(value string) string {
- text := []rune(value)
- if len(text) > 240 { return string(text[:240]) + "…" }
- return value
-}
-
 templ TaskPromptPanel(task *models.Task) {
- <section id="task-prompt-panel" class="mb-6 space-y-2">
-  <div class="flex items-center justify-between"><h3 class="text-sm font-semibold">Prompt</h3>
-   if task.ID != "" {
-    <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="prompt" data-value={ task.Prompt }>Edit</button>
-   }
-  </div>
-  if task.ID == "" {
-   <p class="text-sm opacity-60">Set by your first message.</p>
-  } else if task.Prompt != "" {
-   <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ taskDetailTextPreview(task.Prompt) }</p>
-  } else {
-   <p class="text-sm opacity-60">No prompt set</p>
-  }
+ if task.ID != "" {
+ <section id="task-prompt-panel" class="mb-4 flex items-center justify-between gap-3">
+  <h3 class="text-sm font-semibold">Original prompt</h3>
+  <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="prompt" data-value={ task.Prompt }>Edit</button>
  </section>
+ }
 }
 
 templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
-	<div id="task-goal-panel" class="mb-6" data-task-id={ taskID }>
-		<div class="flex flex-col gap-2">
-			<div class="flex items-center justify-between gap-3">
-				<div>
-					<div class="text-sm font-semibold">Goal</div>
-					if goal == nil || goal.Status == models.TaskGoalStatusCleared {
-						<div class="text-sm opacity-60">No goal set</div>
-					}
-				</div>
-                <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="goal" data-value={ goalValue(goal) } aria-label="Edit goal">
-                    if goalValue(goal) == "" {
-                        +
-                    } else {
-                        Edit
-                    }
-                </button>
-			</div>
-			if goal != nil && goal.Status != models.TaskGoalStatusCleared {
-				<div class="whitespace-pre-wrap break-words text-sm leading-relaxed">{ taskDetailTextPreview(goal.Objective) }</div>
-                <span class="text-xs opacity-60">{ goalStatusLabel(goal) }</span>
-				if goal.Reason != "" {
-					<p class="text-xs opacity-60">Reason: { goal.Reason }</p>
-				}
-				if goal.LastCheckedAt != nil {
-					<p class="text-xs opacity-60">Last checked: { goal.LastCheckedAt.Local().Format("Jan 2, 2006 3:04 PM") }</p>
-				} else {
-					<p class="text-xs opacity-60">Last checked: not yet</p>
-				}
-			}
-		</div>
-	</div>
+ <div id="task-goal-panel" class="mb-4 flex items-center justify-between gap-3" data-task-id={ taskID }>
+  <div class="flex items-center gap-3 min-w-0">
+   <h3 class="text-sm font-semibold">Goal</h3>
+   if goalValue(goal) != "" {
+    <span class="text-xs opacity-60">{ goalStatusLabel(goal) }</span>
+   }
+  </div>
+  <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="goal" data-value={ goalValue(goal) } aria-label="Edit goal">
+   if goalValue(goal) == "" {
+    +
+   } else {
+    Edit
+   }
+  </button>
+ </div>
 }
 
 func goalValue(goal *models.TaskGoal) string {

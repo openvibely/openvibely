@@ -41,8 +41,8 @@ func TestTaskDetailsPropertiesAreConsistentBeforeAndAfterCreation(t *testing.T) 
 		t.Fatal("unsaved details must not poll")
 	}
 	for _, label := range []string{"Not started", "Duration:", "Set by your first message.", "Created when this task runs."} {
-		if !strings.Contains(draft.String(), label) {
-			t.Errorf("missing draft placeholder %q", label)
+		if strings.Contains(draft.String(), label) {
+			t.Errorf("unexpected draft placeholder %q", label)
 		}
 	}
 }
@@ -211,23 +211,23 @@ func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 		expectedStatusText string
 	}{
 		{
-			name:             "backlog pending shows status badge",
+			name:             "backlog pending hides execution",
 			status:           models.StatusPending,
 			category:         models.CategoryBacklog,
-			shouldShowStatus: true,
+			shouldShowStatus: false,
 		},
 		{
-			name:             "scheduled pending shows status badge",
+			name:             "scheduled pending hides execution",
 			status:           models.StatusPending,
 			category:         models.CategoryScheduled,
-			shouldShowStatus: true,
+			shouldShowStatus: false,
 		},
 		{
-			name:               "active pending shows status badge",
+			name:               "active pending hides execution",
 			status:             models.StatusPending,
 			category:           models.CategoryActive,
-			shouldShowStatus:   true,
-			expectedStatusText: "Queued",
+			shouldShowStatus:   false,
+			expectedStatusText: "",
 		},
 		{
 			name:               "backlog running shows status badge",
@@ -517,8 +517,8 @@ func TestTaskDetailContent_DetailsTabRendersScrollablePlainSections(t *testing.T
 	if strings.Contains(output, `class="card bg-base-200/50 border border-base-300 mb-4"`) {
 		t.Fatal("details sections should not have nested cards")
 	}
-	if !strings.Contains(output, `whitespace-pre-wrap break-words text-sm leading-relaxed`) {
-		t.Fatal("expected plain readable prompt content")
+	if !strings.Contains(output, `Original prompt</h3>`) {
+		t.Fatal("expected compact original prompt editor row")
 	}
 
 	if strings.Contains(output, `flex-1 min-h-0 flex flex-col mb-6`) {
@@ -1319,15 +1319,15 @@ func TestTaskDetailScheduleSurfacesDefaultAndHydrateClearContext(t *testing.T) {
 	}
 }
 
-func TestTaskGoalPanelTruncatesPreviewButPreservesEditorValue(t *testing.T) {
+func TestTaskGoalPanelOmitsPreviewButPreservesEditorValue(t *testing.T) {
 	objective := strings.Repeat("界", 260)
 	var buf bytes.Buffer
 	if err := TaskGoalPanel("task", &models.TaskGoal{Objective: objective, Status: models.TaskGoalStatusActive}).Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
 	output := buf.String()
-	if !strings.Contains(output, ">"+strings.Repeat("界", 240)+"…</div>") {
-		t.Fatal("expected bounded goal preview")
+	if strings.Contains(output, ">"+strings.Repeat("界", 240)) {
+		t.Fatal("goal should not render objective preview")
 	}
 	if !strings.Contains(output, `data-value="`+objective+`"`) {
 		t.Fatal("editor must retain full goal")

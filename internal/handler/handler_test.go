@@ -986,7 +986,9 @@ func TestHandler_GetTaskDetailStatus(t *testing.T) {
 	assertContains(t, rec, `id="task-detail-metrics"`)
 	assertContains(t, rec, "hx-trigger")
 	assertContains(t, rec, "/detail-status")
-	assertContains(t, rec, "Queued")
+	if strings.Contains(rec.Body.String(), "Status:") {
+		t.Fatal("never-run task should not show execution information")
+	}
 
 	// Test 2: Running task shows running status and elapsed time
 	createExec(t, h, task.ID, agent.ID)

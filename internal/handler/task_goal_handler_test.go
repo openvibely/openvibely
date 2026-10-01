@@ -56,7 +56,7 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("clear goal status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "No goal set") || strings.Contains(rec.Body.String(), "All checks pass") {
+	if !strings.Contains(rec.Body.String(), `data-value=""`) || strings.Contains(rec.Body.String(), "All checks pass") {
 		t.Fatalf("clear goal body missing refreshed empty panel: %s", rec.Body.String())
 	}
 

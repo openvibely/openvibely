@@ -122,9 +122,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			b.waitFor("actions aligned with composer bottom and panel left", `(function(){var panel=document.getElementById('task-details-panel').getBoundingClientRect(),actions=document.getElementById('task-detail-actions'),first=actions.firstElementChild.getBoundingClientRect(),composer=document.getElementById('task-thread-form').getBoundingClientRect();return String(Math.abs(first.bottom-composer.bottom)<1 && Math.abs(first.left-panel.left-13)<1 && !document.getElementById('task-detail-view').contains(actions))})()`, "true")
 		}
 		assertFooter()
-		b.click("#task-auto-merge-panel summary")
 		b.click(`#task-auto-merge-panel input[name="auto_merge"]`)
-		b.waitFor("auto merge saved with advanced options still open", `String(document.querySelector('#task-auto-merge-panel').open && document.querySelector('#task-auto-merge-panel input[name="auto_merge"]').hasAttribute("checked") && !document.querySelector('#task-auto-merge-panel input').disabled)`, "true")
+		b.waitFor("auto merge saved and directly visible", `String(document.querySelector('#task-auto-merge-panel').tagName === 'SECTION' && document.querySelector('#task-auto-merge-panel input[name="auto_merge"]').hasAttribute("checked") && !document.querySelector('#task-auto-merge-panel input').disabled)`, "true")
 		if !autoMerge.Load() {
 			t.Fatal("auto merge switch was not saved")
 		}
