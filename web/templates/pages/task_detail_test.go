@@ -342,7 +342,7 @@ func TestTaskDetailContent_TabsRemainScrollableOnMobile(t *testing.T) {
 	if !strings.Contains(output, `aria-label="Task details" class="tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap"`) {
 		t.Fatal("expected inspector tabs to scroll horizontally")
 	}
-	for _, label := range []string{"Details", "Schedules", "Chaining", "Attachments", "Lifecycle"} {
+	for _, label := range []string{"Details", "Schedule", "Chaining", "Attachments", "Lifecycle"} {
 		if !strings.Contains(output, ">"+label+"</button>") {
 			t.Fatalf("expected %s tab to remain rendered", label)
 		}
