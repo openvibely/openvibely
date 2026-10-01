@@ -14,6 +14,10 @@ func taskPanelScheduleLabel(s models.Schedule) string {
 
 templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
  <div id="task-schedule-panel" data-task-schedule-panel data-draft={ fmt.Sprint(task.ID == "") }>
+  <style>
+   .task-schedule-edit { text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
+   .task-schedule-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+  </style>
   <div class="flex items-center justify-between mb-4">
    <h3 class="text-sm font-semibold">Schedule</h3>
    if len(schedules) == 0 {
@@ -24,7 +28,7 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
    <p class="text-sm opacity-60" data-schedule-empty>No schedule configured.</p>
    if task.ID == "" {
     <div data-draft-schedule-card hidden class="rounded-lg bg-base-200 p-4">
-     <button type="button" class="text-left w-full" data-schedule-open="task-schedule-new"><span class="flex justify-between"><span class="text-sm font-semibold" data-draft-schedule-title></span><span aria-hidden="true">›</span></span><span class="block text-sm opacity-60" data-draft-schedule-time></span><span class="block text-sm opacity-60" data-draft-schedule-context></span></button>
+     <button type="button" class="task-schedule-edit" data-schedule-open="task-schedule-new"><span class="flex justify-between"><span class="text-sm font-semibold" data-draft-schedule-title></span><span aria-hidden="true">›</span></span><span class="block text-sm opacity-60" data-draft-schedule-time></span><span class="block text-sm opacity-60" data-draft-schedule-context></span></button>
      <label class="label cursor-pointer justify-start gap-2 mt-2"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" data-draft-schedule-enabled checked/><span class="label-text">Enabled</span></label>
      <p class="text-xs opacity-60 mt-2">Saved when you create the task.</p>
     </div>
@@ -36,7 +40,7 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
   }
   for _, s := range schedules {
    <div class="rounded-lg bg-base-200 p-4 mb-3" id={ "schedule-card-" + s.ID } data-schedule-next-run={ exactTaskScheduleNextRun(s) }>
-    <button type="button" class="text-left w-full" data-schedule-open={ "task-schedule-" + s.ID }>
+    <button type="button" class="task-schedule-edit" data-schedule-open={ "task-schedule-" + s.ID }>
      <span class="flex justify-between gap-2"><span class="text-sm font-semibold">{ taskPanelScheduleLabel(s) }</span><span aria-hidden="true">›</span></span>
      <span class="block text-sm opacity-60 mt-1">
       if !s.Enabled {
