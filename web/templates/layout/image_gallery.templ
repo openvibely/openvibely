@@ -93,7 +93,7 @@ templ ImageGallery() {
    items=links.map(a=>({element:a,url:a.href||a.dataset.imageUrl,name:a.dataset.imageName||a.textContent.trim()}));
    dialog.showModal();observer.observe(document.body,{childList:true,subtree:true});show(links.indexOf(trigger));q('close').focus();
   });
-  document.addEventListener('htmx:beforeSwap',e=>{const target=e.detail.target;if(dialog.open&&target&&group&&(target===group||target.contains(group)))close();});
+  document.addEventListener('htmx:beforeSwap',e=>{const target=e.detail.target;if(e.detail.shouldSwap&&dialog.open&&target&&group&&(target===group||target.contains(group)))close();});
   const observer=new MutationObserver(()=>{if(dialog.open&&(!group||!group.isConnected||!opener.isConnected))close();});
   function refreshItem(element) {
    if (!dialog.open) return;
