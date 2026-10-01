@@ -17,6 +17,8 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
   <style>
    .task-schedule-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
    .task-schedule-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+   #task-schedule-panel .schedule-interval-input:focus { outline:none; box-shadow:none; }
+   #task-schedule-panel .schedule-interval-input:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:1px; }
   </style>
   <div class="flex items-center justify-between mb-3" style="height:20px">
    <h3 class="text-sm font-semibold">Schedule</h3>
@@ -99,7 +101,7 @@ if s.ID == "" {
       <option value={ choice.Value } selected?={ string(s.RepeatType) == choice.Value }>{ choice.Label }</option>
      }
     </select></label>
-    <label class="form-control mb-4" data-schedule-interval><span class="label">Repeat every</span><span class="flex items-center gap-2"><input type="number" name="repeat_interval" value={ fmt.Sprint(s.RepeatInterval) } min="1" max="365" step="1" class="input input-bordered input-sm w-20"/><span class="text-sm opacity-60" data-schedule-unit></span></span></label>
+    <label class="form-control mb-4" data-schedule-interval><span class="label">Repeat every</span><span class="flex items-center gap-2"><input type="number" name="repeat_interval" value={ fmt.Sprint(s.RepeatInterval) } min="1" max="365" step="1" class="input input-bordered input-xs w-20 schedule-interval-input"/><span class="text-sm opacity-60" data-schedule-unit></span></span></label>
     <input type="hidden" name="clear_context_on_start" value="false"/>
     <label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_context_on_start" value="true" class="toggle toggle-sm toggle-primary shrink-0" checked?={ s.ClearContextOnStart }/><span class="label-text">Clear context on start</span></label>
     <p class="text-xs opacity-60 mb-4">Start each scheduled run without prior model conversation context.</p>
