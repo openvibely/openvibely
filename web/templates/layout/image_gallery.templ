@@ -4,13 +4,16 @@ package layout
 templ ImageGallery() {
  <dialog id="image-gallery" class="bg-base-200 text-base-content" aria-label="Image preview">
   <div class="modal-box image-gallery-shell bg-base-200">
-   <header><span data-gallery-name></span><span data-gallery-count aria-live="polite"></span><a data-gallery-download class="btn btn-ghost btn-sm" download>Download</a><button type="button" data-gallery-close class="btn btn-circle btn-ghost btn-xs ov-modal-close" aria-label="Close image preview" title="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
+   <header><span data-gallery-name></span><span data-gallery-count aria-live="polite"></span><button type="button" data-gallery-close class="btn btn-circle btn-ghost btn-xs ov-modal-close" aria-label="Close image preview" title="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
    <div data-gallery-stage><img data-gallery-image alt="" draggable="false"/><p data-gallery-status role="status"></p></div>
    <footer>
     <button type="button" data-gallery-prev class="btn btn-ghost btn-sm" aria-label="Previous image">‹</button>
-    <button type="button" data-gallery-minus class="btn btn-ghost btn-sm" aria-label="Zoom out">−</button>
-    <button type="button" data-gallery-fit class="btn btn-ghost btn-sm">Fit</button>
-    <button type="button" data-gallery-plus class="btn btn-ghost btn-sm" aria-label="Zoom in">+</button>
+    <div class="image-gallery-tools" role="group" aria-label="Image controls">
+     <button type="button" data-gallery-minus aria-label="Zoom out" title="Zoom out"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.5"/><path d="m9 9 3 3M4.5 6h3"/></svg></button>
+     <button type="button" data-gallery-plus aria-label="Zoom in" title="Zoom in"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3.5"/><path d="m9 9 3 3M4.5 6h3M6 4.5v3"/></svg></button>
+     <button type="button" data-gallery-fit aria-label="Fit image" title="Fit image"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 4.5h3v-3m5 0v3h3m0 5h-3v3m-5 0v-3h-3"/></svg></button>
+     <a download data-gallery-download aria-label="Download image" title="Download image"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1v8m-3-3 3 3 3-3M2 8v4h10V8"/></svg></a>
+    </div>
     <button type="button" data-gallery-next class="btn btn-ghost btn-sm" aria-label="Next image">›</button>
    </footer>
   </div>
@@ -24,6 +27,10 @@ templ ImageGallery() {
  #image-gallery header [data-gallery-name] { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
  #image-gallery [data-gallery-count] { font-size:12px; opacity:.6; }
  #image-gallery footer { justify-content:center; }
+ #image-gallery .image-gallery-tools { display:flex; gap:4px; padding:8px; border-radius:999px; background:rgb(0 0 0 / .7); color:#eee; }
+ #image-gallery .image-gallery-tools > * { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border:0; border-radius:50%; background:transparent; color:inherit; cursor:pointer; }
+ #image-gallery .image-gallery-tools > *:hover { background:rgb(255 255 255 / .12); }
+ #image-gallery .image-gallery-tools svg { width:22px; height:22px; }
  #image-gallery [data-gallery-stage] { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; justify-content:center; align-items:center; touch-action:none; }
  #image-gallery img { max-width:100%; max-height:100%; object-fit:contain; user-select:none; flex-shrink:0; }
  #image-gallery [data-gallery-status] { position:absolute; pointer-events:none; }
@@ -43,7 +50,7 @@ templ ImageGallery() {
    const maxX=Math.max(0,(image.width*scale-stage.clientWidth)/2), maxY=Math.max(0,(image.height*scale-stage.clientHeight)/2);
    x=Math.max(-maxX,Math.min(maxX,x)); y=Math.max(-maxY,Math.min(maxY,y));
    image.style.transform=`translate(${x}px, ${y}px) scale(${scale})`; stage.style.cursor=scale>1?'grab':'default';
-   q('fit').textContent=scale===1?'Fit':Math.round(scale*100)+'%';
+   q('fit').title='Fit image ('+Math.round(scale*100)+'%)';
   }
   function zoom(value){ scale=Math.max(1,Math.min(8,value)); transform(); }
   function show(next){

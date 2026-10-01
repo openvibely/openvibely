@@ -37,7 +37,9 @@ templ AttachmentList(attachments []models.Attachment, projectID string, taskID s
    <input type="file" name="files" multiple class="hidden" aria-label="Select attachments" onchange="this.form.requestSubmit()"/>
    <span class="htmx-indicator text-sm" role="status">Uploading…</span>
   </form>
+  <div hx-get={ TaskAttachmentUploadURL(taskID, projectID) } hx-trigger="load, taskAttachmentsChanged from:body" hx-target="#attachment-list" hx-swap="outerHTML">
   @AttachmentListOnly(attachments, projectID)
+  </div>
  </div>
 }
 
@@ -53,7 +55,9 @@ templ ImageAttachmentRow(fileName string, fileSize int64, mediaType, downloadURL
    } else { <span aria-hidden="true">▤</span> }
    <span class="min-w-0"><span class="block text-sm break-all">{ fileName }</span><span class="block text-xs opacity-60">{ FormatFileSize(fileSize) }</span></span>
   </a>
+  if deleteURL != "" {
   <button type="button" class="btn btn-ghost btn-xs text-error shrink-0" aria-label={ "Remove " + fileName } hx-delete={ deleteURL } hx-target={ target } hx-swap="outerHTML">×</button>
+  }
  </div>
 }
 
@@ -80,15 +84,20 @@ templ AttachmentListRow(fileName string, fileSize int64, downloadURL string, del
 	</div>
 }
 
-templ AttachmentListOnly(attachments []models.Attachment, projectID string) {
+templ AttachmentListOnly(attachments []models.Attachment, projectID string, messageGroups ...[]models.ChatAttachment) {
 	<div id="attachment-list" class="space-y-2" data-image-gallery-group="">
-		if len(attachments) == 0 {
+		if len(attachments) == 0 && (len(messageGroups) == 0 || len(messageGroups[0]) == 0) {
 			<p class="text-sm opacity-50">No attachments</p>
 		} else {
 			for _, att := range attachments {
 				@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list")
 			}
 		}
+        for _, messages := range messageGroups {
+            for _, att := range messages {
+                @ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, ChatAttachmentDownloadURL(att.ID, projectID), "", "")
+            }
+        }
 	</div>
 }
 

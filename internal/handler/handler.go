@@ -853,6 +853,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.PATCH("/schedules/:scheduleId/reschedule", h.RescheduleTask)
 
 	// Attachments
+	e.GET("/tasks/:taskId/attachments", h.GetTaskAttachments)
 	e.POST("/tasks/:taskId/attachments", h.UploadAttachment)
 	e.GET("/attachments/:id/download", h.DownloadTaskAttachment)
 	e.DELETE("/attachments/:id", h.DeleteAttachment)

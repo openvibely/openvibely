@@ -3100,6 +3100,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							// Keep user draft intact for empty model-setup guard responses.
 							if (responseText.trim() !== '' || createdTaskID) {
 								accepted = true;
+                                document.body.dispatchEvent(new Event('taskAttachmentsChanged'));
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
