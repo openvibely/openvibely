@@ -64,7 +64,9 @@ These shortcuts apply while the image viewer is open.
 | Keys | Action |
 | --- | --- |
 | ← / → | Previous / next image |
-| + or = | Zoom in |
-| − | Zoom out |
+| `+` or `=` | Zoom in |
+| `-` | Zoom out |
 | 0 | Reset zoom |
 | Escape | Close the viewer |
+
+On a US keyboard, `+` and `=` share a key. Both are accepted so you can zoom in with or without Shift. Zoom out uses the unshifted `-` key; Shift+`-` produces `_`, which is not currently a zoom shortcut.
