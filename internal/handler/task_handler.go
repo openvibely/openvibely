@@ -3548,7 +3548,7 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 	}
 	pendingInputs = inputs
 	return render(c, http.StatusOK, components.ChatComposerQueuedInputRowsForTask(pendingInputs, func(input models.ThreadInput) string {
-		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
+		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer?expected_turn_id=%s", taskID, input.ID, input.RunExecutionID)
 	}, taskID))
 }
 

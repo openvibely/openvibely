@@ -38,7 +38,7 @@ func taskThreadActiveTurnID(executions []models.Execution) string {
 }
 
 func taskQueuedSteerEndpoint(input models.ThreadInput) string {
-	return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", input.TaskID, input.ID)
+	return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer?expected_turn_id=%s", input.TaskID, input.ID, input.RunExecutionID)
 }
 
 func GetScheduleEditTime(s models.Schedule) string {
@@ -958,7 +958,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						var directSteerClearTimer = null;					function taskQueuedSteerInputID(triggerEl) {
 						if (!triggerEl || !triggerEl.getAttribute) return '';
 						var hxPost = triggerEl.getAttribute('hx-post') || '';
-						var match = hxPost.match(/^\/tasks\/[^\/]+\/thread\/queued\/([^\/]+)\/steer$/);
+						var match = hxPost.match(/^\/tasks\/[^\/]+\/thread\/queued\/([^\/]+)\/steer(?:\?.*)?$/);
 						return match ? match[1] : '';
 					}
 						var queuedSteerBeforeRequestHandler = function(event) {
@@ -1156,7 +1156,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						var steerBtn = document.createElement('button');
 						steerBtn.type = 'button';
 						steerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium';
-						steerBtn.setAttribute('hx-post', '/tasks/' + encodeURIComponent(taskId) + '/thread/queued/' + data.pending_input_id + '/steer');
+						steerBtn.setAttribute('hx-post', '/tasks/' + encodeURIComponent(taskId) + '/thread/queued/' + encodeURIComponent(data.pending_input_id) + '/steer?expected_turn_id=' + encodeURIComponent(data.exec_id || ''));
 						steerBtn.setAttribute('hx-target', '#thread-input-' + data.pending_input_id);
 						steerBtn.setAttribute('hx-swap', 'outerHTML');
 						steerBtn.title = 'Convert queued follow-up to steering';

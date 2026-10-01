@@ -260,6 +260,9 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=10000",
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=15000",
 	)
+	if distribution == buildinfo.DistributionDesktop {
+		processEnv = append(processEnv, desktopTestEnvironment()...)
+	}
 	port := ""
 	baseURL := ""
 	parentStdout, parentStderr, readParentLogs := openCommandLogs(t, root, "recovery-parent")

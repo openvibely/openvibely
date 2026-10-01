@@ -719,6 +719,9 @@ func (r *ThreadInputRepo) listWithExecutor(ctx context.Context, exec queryExecut
 	return inputs, rows.Err()
 }
 
+// ConvertQueuedToSteering converts a queued input only when expectedTurnID is
+// still the scope's current active execution and the queued row remains guarded
+// by that same execution. The active-turn check and row update share one transaction.
 func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runExecutionID, expectedTurnID string) (*models.ThreadInput, error) {
 	if expectedTurnID == "" {
 		return nil, ErrExpectedTurnEmpty
@@ -732,14 +735,14 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 		if err != nil {
 			return fmt.Errorf("loading queued input guard: %w", err)
 		}
-		active, err := r.executionIsRunningForInput(ctx, tx, runExecutionID, &queued)
+		activeID, err := currentActiveExecutionIDForInput(ctx, tx, &queued)
 		if err != nil {
 			return err
 		}
-		if !active {
+		if activeID == "" {
 			return ErrNoActiveTurn
 		}
-		if expectedTurnID != runExecutionID {
+		if activeID != runExecutionID || expectedTurnID != activeID {
 			return ErrActiveTurnChanged
 		}
 		res, err := tx.ExecContext(ctx, `
@@ -1345,31 +1348,42 @@ func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID st
 	return nil
 }
 
-func (r *ThreadInputRepo) executionIsRunningForInput(ctx context.Context, exec sqlExecutor, executionID string, input *models.ThreadInput) (bool, error) {
-	if executionID == "" || input == nil {
-		return false, nil
+func currentActiveExecutionIDForInput(ctx context.Context, exec sqlExecutor, input *models.ThreadInput) (string, error) {
+	if input == nil {
+		return "", nil
 	}
-	query := `SELECT COUNT(*) FROM executions e JOIN tasks t ON t.id = e.task_id WHERE e.id = ? AND e.status = 'running'`
-	args := []interface{}{executionID}
+	var query string
+	var args []interface{}
 	switch input.Scope {
 	case models.ThreadInputScopeTask:
 		if input.TaskID == "" {
-			return false, nil
+			return "", nil
 		}
-		query += ` AND e.task_id = ?`
-		args = append(args, input.TaskID)
+		query = `SELECT e.id
+			FROM executions e
+			JOIN tasks t ON t.id = e.task_id
+			WHERE e.task_id = ? AND e.status = 'running'
+			  AND t.category IN ('active', 'scheduled') AND t.status IN ('queued', 'running')
+			ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`
+		args = []interface{}{input.TaskID}
 	case models.ThreadInputScopeChat:
 		if input.ProjectID == "" {
-			return false, nil
+			return "", nil
 		}
-		query += ` AND t.project_id = ? AND t.category = 'chat'`
-		args = append(args, input.ProjectID)
+		query = `SELECT e.id
+			FROM executions e
+			WHERE e.task_project_id = ? AND e.task_category = 'chat' AND e.status = 'running'
+			ORDER BY e.started_at DESC, e.history_order DESC LIMIT 1`
+		args = []interface{}{input.ProjectID}
 	default:
-		return false, nil
+		return "", nil
 	}
-	var count int
-	if err := exec.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
-		return false, fmt.Errorf("checking active execution: %w", err)
+	var activeID string
+	if err := exec.QueryRowContext(ctx, query, args...).Scan(&activeID); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("checking current active execution: %w", err)
 	}
-	return count > 0, nil
+	return activeID, nil
 }
