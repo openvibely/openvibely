@@ -240,7 +240,7 @@ func TestUpdateSchedule_WeeklyTimezoneRoundTrip(t *testing.T) {
 	}
 
 	// Simulate the schedule having run once
-	ranTime := time.Date(2026, 2, 22, 4, 5, 0, 0, time.UTC) // 5 seconds after due
+	ranTime := runAtLocal.Add(5 * time.Minute) // Five minutes after due in any timezone.
 	nextAfterRun := schedule.ComputeNextRun(ranTime)
 	if err := h.scheduleRepo.MarkRan(ctx, schedule.ID, ranTime, nextAfterRun); err != nil {
 		t.Fatalf("Failed to mark ran: %v", err)
@@ -290,12 +290,14 @@ func TestUpdateSchedule_WeeklyTimezoneRoundTrip(t *testing.T) {
 			nextRunLocal.Hour())
 	}
 
-	// NextRun = RunAt (the scheduler handles advancing to the next future occurrence).
-	// Verify it equals RunAt (Feb 21 23:00 local).
-	runAtExpected := updated.RunAt.Local()
-	if nextRunLocal.Format("2006-01-02T15:04") != runAtExpected.Format("2006-01-02T15:04") {
-		t.Errorf("NextRun should equal RunAt. RunAt: %s, NextRun: %s",
-			runAtExpected.Format("2006-01-02T15:04"), nextRunLocal.Format("2006-01-02T15:04"))
+	// Saving unchanged timing must preserve the next occurrence, not reset to
+	// the already-executed start and make the schedule immediately due again.
+	if !updated.RunAt.Equal(runAtLocal.UTC()) {
+		t.Errorf("RunAt changed: got %v, want %v", updated.RunAt, runAtLocal.UTC())
+	}
+	expectedNext := runAtLocal.AddDate(0, 0, 7)
+	if !updated.NextRun.Equal(expectedNext) {
+		t.Errorf("NextRun should preserve the next weekly occurrence: got %v, want %v", updated.NextRun, expectedNext)
 	}
 
 	// Verify NextRun is NOT the buggy value (e.g., 6:00 PM local which would indicate
