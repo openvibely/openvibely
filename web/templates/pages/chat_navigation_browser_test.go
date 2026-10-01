@@ -422,6 +422,28 @@ func TestBrowserFunctional_ChatActionsDropdownRuntimeInChrome(t *testing.T) {
 	}
 }
 
+func layoutStyleBlocks(t *testing.T, html string) string {
+	t.Helper()
+	var styles strings.Builder
+	for rest := html; ; {
+		start := strings.Index(rest, "<style>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(rest[start:], "</style>")
+		if end < 0 {
+			t.Fatal("could not find end of production layout CSS")
+		}
+		end += start + len("</style>")
+		styles.WriteString(rest[start:end])
+		rest = rest[end:]
+	}
+	if styles.Len() == 0 {
+		t.Fatal("could not isolate production layout CSS")
+	}
+	return styles.String()
+}
+
 func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, runtime string) {
 	t.Helper()
 
@@ -434,15 +456,7 @@ func runChatActionsDropdownInChrome(t *testing.T, chrome string, htmxJS []byte, 
 		t.Fatalf("render production layout: %v", err)
 	}
 	baseHTML := base.String()
-	styleStart := strings.Index(baseHTML, "<style>")
-	if styleStart < 0 {
-		t.Fatal("could not isolate production layout CSS")
-	}
-	styleEndOffset := strings.Index(baseHTML[styleStart:], "</style>")
-	if styleEndOffset < 0 {
-		t.Fatal("could not find end of production layout CSS")
-	}
-	productionStyle := baseHTML[styleStart : styleStart+styleEndOffset+len("</style>")]
+	productionStyle := layoutStyleBlocks(t, baseHTML)
 	navStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
 	if navStart < 0 {
 		t.Fatal("could not isolate production HTMX navigation helper")
