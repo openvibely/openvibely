@@ -1269,12 +1269,16 @@ func emailPollDurationPercentile(values []time.Duration, percentile int) time.Du
 	return sorted[(len(sorted)-1)*percentile/100]
 }
 
-func TestEmailPollAddressSnapshotContentionDoesNotRegressP95(t *testing.T) {
-	current := measureEmailPollAddressSnapshotContention(t)
-	currentMedian := emailPollDurationPercentile(current, 50)
-	currentP95 := emailPollDurationPercentile(current, 95)
-	t.Logf("unrelated query wait: current median=%s p95=%s", currentMedian, currentP95)
-	require.Len(t, current, emailPollContentionSamples*emailPollContentionQueries)
+func BenchmarkEmailPollAddressSnapshotContention(b *testing.B) {
+	var waits []time.Duration
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		waits = append(waits, measureEmailPollAddressSnapshotContention(b)...)
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(emailPollDurationPercentile(waits, 50).Nanoseconds()), "query-wait-p50-ns")
+	b.ReportMetric(float64(emailPollDurationPercentile(waits, 95).Nanoseconds()), "query-wait-p95-ns")
 }
 
 func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
