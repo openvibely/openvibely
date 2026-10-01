@@ -652,6 +652,13 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/schedule-task?tab=schedules", "schedule-modal", func(b *composerFocusCDP) {
 		b.waitFor("schedule card", `String(!!document.getElementById('schedule-card-saved'))`, "true")
+		b.waitFor("schedule text shares heading gutter", `(function(){var heading=document.querySelector('#task-schedule-panel h3').getBoundingClientRect(),text=document.querySelector('.task-schedule-edit .font-semibold').getBoundingClientRect();return String(Math.abs(heading.left-text.left)<1)})()`, "true")
+		b.waitFor("schedule arrow centered", `(function(){var button=document.querySelector('.task-schedule-edit').getBoundingClientRect(),arrow=document.querySelector('.task-schedule-edit > [aria-hidden]').getBoundingClientRect();return String(Math.abs((button.top+button.bottom-arrow.top-arrow.bottom)/2)<1)})()`, "true")
+		b.click("#inspector-tab-details")
+		b.evaluate(`window.detailsHeading=document.querySelector('#task-detail-metrics h3').getBoundingClientRect().top; window.detailsRow=document.querySelector('.task-property-row').getBoundingClientRect().top; 'measured'`)
+		b.click("#inspector-tab-schedules")
+		b.waitFor("schedule vertical alignment matches Details", `(function(){return String(Math.abs(document.querySelector('#task-schedule-panel h3').getBoundingClientRect().top-window.detailsHeading)<1 && Math.abs(document.querySelector('.task-schedule-edit').getBoundingClientRect().top-window.detailsRow)<1)})()`, "true")
+
 		b.click(`[data-schedule-open="task-schedule-saved"]`)
 		b.waitFor("schedule modal open", `String(document.getElementById('task-schedule-saved').open)`, "true")
 		b.evaluate(`document.querySelector('[data-schedule-editor] [name="repeat_interval"]').value='99'`)
@@ -667,11 +674,16 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 		b.waitFor("schedule paused", `String(document.getElementById('schedule-card-saved').textContent.includes('Paused'))`, "true")
 		b.waitFor("schedule card ready after pause", `(function(){var b=document.querySelector('[data-schedule-open="task-schedule-saved"]'),r=b.getBoundingClientRect();return String(b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)))})()`, "true")
 		b.click(`[data-schedule-open="task-schedule-saved"]`)
-		b.evaluate(`window.confirm=function(message){window.scheduleDeleteConfirmed=message; return true;}; 'ready'`)
+
 		b.waitFor("schedule delete ready", `(function(){var b=document.querySelector('[data-schedule-editor] [hx-delete]'),r=b.getBoundingClientRect();return String(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===b)})()`, "true")
 		b.click(`[data-schedule-editor] [hx-delete]`)
+		b.waitFor("standard delete confirmation", `String(document.querySelector('[data-destructive-confirm-dialog]').open && !!document.getElementById('schedule-card-saved'))`, "true")
+		b.click(`[data-destructive-confirm-dialog] .modal-action .btn:not(.btn-error)`)
+		b.waitFor("cancel keeps schedule", `String(!document.querySelector('[data-destructive-confirm-dialog]').open && !!document.getElementById('schedule-card-saved'))`, "true")
+		b.click(`[data-schedule-editor] [hx-delete]`)
+		b.click(`[data-destructive-confirm-dialog] .btn-error`)
 		b.waitFor("empty schedule restored", `JSON.stringify({add:!!document.querySelector('[aria-label="Add schedule"]'),card:!!document.getElementById('schedule-card-saved'),root:!!document.getElementById('task-schedule-panel')})`, `{"add":true,"card":false,"root":true}`)
-		b.waitFor("delete confirmation requested", `window.scheduleDeleteConfirmed`, "Delete this schedule?")
+
 		b.evaluate(`window.scheduleThread=document.getElementById('tab-chat'); 'retained'`)
 		b.click(`[aria-label="Add schedule"]`)
 		b.waitFor("once hides interval", `String(document.querySelector('[data-schedule-interval]').hidden)`, "true")

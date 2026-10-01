@@ -56,7 +56,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><style>\n   .task-schedule-edit { text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }\n   .task-schedule-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }\n  </style><div class=\"flex items-center justify-between mb-4\"><h3 class=\"text-sm font-semibold\">Schedule</h3>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><style>\n   .task-schedule-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }\n   .task-schedule-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }\n  </style><div class=\"flex items-center justify-between mb-3\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Schedule</h3>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -76,7 +76,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 				return templ_7745c5c3_Err
 			}
 			if task.ID == "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div data-draft-schedule-card hidden class=\"rounded-lg bg-base-200 p-4\"><button type=\"button\" class=\"task-schedule-edit\" data-schedule-open=\"task-schedule-new\"><span class=\"flex justify-between\"><span class=\"text-sm font-semibold\" data-draft-schedule-title></span><span aria-hidden=\"true\">›</span></span><span class=\"block text-sm opacity-60\" data-draft-schedule-time></span><span class=\"block text-sm opacity-60\" data-draft-schedule-context></span></button> <label class=\"label cursor-pointer justify-start gap-2 mt-2\"><input type=\"checkbox\" class=\"toggle toggle-sm toggle-primary shrink-0\" data-draft-schedule-enabled checked><span class=\"label-text\">Enabled</span></label><p class=\"text-xs opacity-60 mt-2\">Saved when you create the task.</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div data-draft-schedule-card hidden class=\"min-w-0\"><button type=\"button\" class=\"task-schedule-edit\" data-schedule-open=\"task-schedule-new\"><span><span class=\"block text-sm font-semibold\" data-draft-schedule-title></span><span class=\"block text-sm opacity-60\" data-draft-schedule-time></span><span class=\"block text-sm opacity-60\" data-draft-schedule-context></span></span><span aria-hidden=\"true\">›</span></button> <label class=\"label cursor-pointer justify-start gap-2 mt-2\"><input type=\"checkbox\" class=\"toggle toggle-sm toggle-primary shrink-0\" data-draft-schedule-enabled checked><span class=\"label-text\">Enabled</span></label><p class=\"text-xs opacity-60 mt-2\">Saved when you create the task.</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -136,14 +136,14 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 			}
 		}
 		for _, s := range schedules {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"rounded-lg bg-base-200 p-4 mb-3\" id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"min-w-0 mb-3\" id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue("schedule-card-" + s.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 42, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 42, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -156,7 +156,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(exactTaskScheduleNextRun(s))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 42, Col: 131}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 42, Col: 112}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 			if templ_7745c5c3_Err != nil {
@@ -175,20 +175,20 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"><span class=\"flex justify-between gap-2\"><span class=\"text-sm font-semibold\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"><span><span class=\"block text-sm font-semibold\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(taskPanelScheduleLabel(s))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 44, Col: 109}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 44, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span><span aria-hidden=\"true\">›</span></span> <span class=\"block text-sm opacity-60 mt-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span> <span class=\"block text-sm opacity-60 mt-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -232,7 +232,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</span></button><form method=\"post\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</span></span><span aria-hidden=\"true\">›</span></button><form method=\"post\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -503,6 +503,10 @@ func TaskScheduleEditor(task *models.Task, s models.Schedule, id string) templ.C
 			return templ_7745c5c3_Err
 		}
 		if s.ID != "" {
+			templ_7745c5c3_Err = templ.RenderScriptItems(ctx, templ_7745c5c3_Buffer, templ.ComponentScript{Call: "window.openDestructiveConfirmDialog('" + id + "-delete', '', '')"})
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<button type=\"button\" class=\"btn btn-sm btn-outline btn-error\" hx-delete=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -516,34 +520,67 @@ func TaskScheduleEditor(task *models.Task, s models.Schedule, id string) templ.C
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" hx-confirm=\"Delete this schedule?\" hx-target=\"#task-schedule-panel\" hx-swap=\"outerHTML settle:0\">Delete schedule</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "\" data-schedule-delete hx-trigger=\"schedule-delete-confirmed\" onclick=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var23 templ.ComponentScript = templ.ComponentScript{Call: "window.openDestructiveConfirmDialog('" + id + "-delete', '', '')"}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23.Call)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" hx-target=\"#task-schedule-panel\" hx-swap=\"outerHTML settle:0\">Delete schedule</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if task.ID == "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<button type=\"button\" class=\"btn btn-sm btn-outline btn-error\" data-draft-schedule-remove hidden>Remove schedule</button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<button type=\"button\" class=\"btn btn-sm btn-outline btn-error\" data-draft-schedule-remove hidden>Remove schedule</button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<button type=\"button\" class=\"btn btn-sm btn-ghost ml-auto\" data-schedule-cancel>Cancel</button> <button type=\"submit\" class=\"btn btn-primary btn-sm\" data-schedule-save>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<button type=\"button\" class=\"btn btn-sm btn-ghost ml-auto\" data-schedule-cancel>Cancel</button> <button type=\"submit\" class=\"btn btn-primary btn-sm\" data-schedule-save>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if s.ID == "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "Add")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "Add")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "Save")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "Save")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close schedule editor\">close</button></form></dialog>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close schedule editor\">close</button></form></dialog> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
+		}
+		if s.ID != "" {
+			templ_7745c5c3_Var24 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+				templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+				templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+				if !templ_7745c5c3_IsBuffer {
+					defer func() {
+						templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+						if templ_7745c5c3_Err == nil {
+							templ_7745c5c3_Err = templ_7745c5c3_BufErr
+						}
+					}()
+				}
+				ctx = templ.InitializeContext(ctx)
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<p>The task and its conversation will be kept. Future scheduled runs will be removed.</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				return nil
+			})
+			templ_7745c5c3_Err = DestructiveConfirmDialog(id+"-delete", "Close delete schedule confirmation", "Delete Schedule", "Are you sure you want to delete the schedule for ", "", task.Title, "? This action cannot be undone.", templ.ComponentScript{Call: "this.closest('dialog').close()"}, templ.ComponentScript{Call: "this.closest('dialog').dispatchEvent(new Event('confirm-schedule-delete'))"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var24), templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		}
 		return nil
 	})
@@ -565,12 +602,12 @@ func TaskSchedulePanelScript() templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var23 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var23 == nil {
-			templ_7745c5c3_Var23 = templ.NopComponent
+		templ_7745c5c3_Var25 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var25 == nil {
+			templ_7745c5c3_Var25 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<script>\n (function(){\n  var root=document.currentScript.closest('[data-task-schedule-panel]');\n  var draft=root.dataset.draft==='true';\n  function field(name){return root.querySelector('[data-draft-schedule-field=\"'+name+'\"]');}\n  function renderDraft(){\n   var exists=field('add_schedule').value==='on';\n   root.querySelector('[data-schedule-empty]').hidden=exists;\n   root.querySelector('[data-draft-schedule-card]').hidden=!exists;\n   root.querySelector('[aria-label=\"Add schedule\"]').hidden=exists;\n   var type=field('repeat_type').value, interval=field('repeat_interval').value;\n   var units={seconds:'seconds',minutes:'minutes',hours:'hours',daily:'days',weekly:'weeks',monthly:'months'};\n   root.querySelector('[data-draft-schedule-title]').textContent=type==='once'?'Run once':'Every '+interval+' '+units[type];\n   root.querySelector('[data-draft-schedule-time]').textContent=field('schedule_enabled').value==='false'?'Paused':'Starts at: '+field('run_at').value.replace('T',' ');\n   root.querySelector('[data-draft-schedule-context]').textContent=field('clear_context_on_start').value==='true'?'Fresh context each run':'Continue previous context';\n  }\n  root.querySelectorAll('[data-schedule-editor]').forEach(function(dialog){\n   var form=dialog.querySelector('[data-schedule-editor-form]');\n   function interval(){var type=form.elements.repeat_type.value; var input=form.elements.repeat_interval; form.querySelector('[data-schedule-interval]').hidden=type==='once'; input.disabled=type==='once'; input.required=type!=='once'; form.querySelector('[data-schedule-unit]').textContent=({seconds:'second(s)',minutes:'minute(s)',hours:'hour(s)',daily:'day(s)',weekly:'week(s)',monthly:'month(s)'})[type]||'';}\n   var runAt=form.elements.run_at;\n   var originalRunAt=runAt.defaultValue;\n   runAt.addEventListener('input',function(){runAt.setCustomValidity('');});\n   form.addEventListener('submit',function(event){\n    var changed=draft || !originalRunAt || runAt.value!==originalRunAt;\n    if(changed && new Date(runAt.value).getTime()<=Date.now()){\n     event.preventDefault(); event.stopImmediatePropagation();\n     runAt.setCustomValidity('Run at must be in the future. Check the date and AM/PM.');\n     runAt.reportValidity();\n    }\n   },true);\n   form.elements.repeat_type.addEventListener('change',interval); interval();\n   dialog.querySelector('[data-schedule-cancel]').onclick=function(){dialog.close();};\n   root.querySelectorAll('[data-schedule-open=\"'+dialog.id+'\"]').forEach(function(button){button.onclick=function(){\n    form.reset(); runAt.setCustomValidity(''); form.querySelector('[data-schedule-error]').textContent='';\n    if(draft){['run_at','repeat_type','repeat_interval'].forEach(function(name){form.elements[name].value=field(name).value;}); form.querySelector('[type=\"checkbox\"]').checked=field('clear_context_on_start').value==='true'; var exists=field('add_schedule').value==='on'; dialog.querySelector('[data-schedule-editor-title]').textContent=exists?'Edit schedule':'Add schedule'; dialog.querySelector('[data-schedule-save]').textContent=exists?'Save':'Add'; dialog.querySelector('[data-draft-schedule-remove]').hidden=!exists;}\n    interval(); dialog.showModal();\n   };});\n   if(draft){form.addEventListener('submit',function(event){event.preventDefault(); ['run_at','repeat_type','repeat_interval'].forEach(function(name){field(name).value=form.elements[name].value;}); if(form.elements.repeat_type.value==='once')field('repeat_interval').value='1'; field('clear_context_on_start').value=String(form.querySelector('[type=\"checkbox\"]').checked); field('add_schedule').value='on'; renderDraft(); dialog.close();});\n    dialog.querySelector('[data-draft-schedule-remove]').onclick=function(){field('add_schedule').value=''; renderDraft(); dialog.close();};\n   }\n  });\n  root.addEventListener('htmx:beforeRequest',function(event){if(!root.contains(event.target))return; var form=event.target.closest('form'); if(form)form.querySelectorAll('button, input[type=checkbox]').forEach(function(b){b.disabled=true;});});\n  root.addEventListener('htmx:afterRequest',function(event){var form=event.target.closest('form'); if(form){form.querySelectorAll('button, input[type=checkbox]').forEach(function(b){b.disabled=false;}); if(!event.detail.successful && !form.hasAttribute('data-schedule-editor-form')){var toggle=form.querySelector('input[type=checkbox]'); if(toggle) toggle.checked=toggle.defaultChecked;} var error=form.querySelector('[data-schedule-error]'); if(error && !event.detail.successful) error.textContent='Could not save the schedule. Please check the values and try again.';}});\n  if(draft){root.querySelector('[data-draft-schedule-enabled]').onchange=function(){field('schedule_enabled').value=String(this.checked);renderDraft();};}\n })();\n </script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<script>\n (function(){\n  var root=document.currentScript.closest('[data-task-schedule-panel]');\n  var draft=root.dataset.draft==='true';\n  function field(name){return root.querySelector('[data-draft-schedule-field=\"'+name+'\"]');}\n  function renderDraft(){\n   var exists=field('add_schedule').value==='on';\n   root.querySelector('[data-schedule-empty]').hidden=exists;\n   root.querySelector('[data-draft-schedule-card]').hidden=!exists;\n   root.querySelector('[aria-label=\"Add schedule\"]').hidden=exists;\n   var type=field('repeat_type').value, interval=field('repeat_interval').value;\n   var units={seconds:'seconds',minutes:'minutes',hours:'hours',daily:'days',weekly:'weeks',monthly:'months'};\n   root.querySelector('[data-draft-schedule-title]').textContent=type==='once'?'Run once':'Every '+interval+' '+units[type];\n   root.querySelector('[data-draft-schedule-time]').textContent=field('schedule_enabled').value==='false'?'Paused':'Starts at: '+field('run_at').value.replace('T',' ');\n   root.querySelector('[data-draft-schedule-context]').textContent=field('clear_context_on_start').value==='true'?'Fresh context each run':'Continue previous context';\n  }\n  root.querySelectorAll('[data-schedule-editor]').forEach(function(dialog){\n   var form=dialog.querySelector('[data-schedule-editor-form]');\n   var confirmation=document.getElementById(dialog.id+'-delete');\n   if(confirmation) confirmation.addEventListener('confirm-schedule-delete',function(){\n    confirmation.__openVibelyDestructiveTrigger=null; confirmation.close();\n    htmx.trigger(form.querySelector('[data-schedule-delete]'),'schedule-delete-confirmed');\n   });\n   function interval(){var type=form.elements.repeat_type.value; var input=form.elements.repeat_interval; form.querySelector('[data-schedule-interval]').hidden=type==='once'; input.disabled=type==='once'; input.required=type!=='once'; form.querySelector('[data-schedule-unit]').textContent=({seconds:'second(s)',minutes:'minute(s)',hours:'hour(s)',daily:'day(s)',weekly:'week(s)',monthly:'month(s)'})[type]||'';}\n   var runAt=form.elements.run_at;\n   var originalRunAt=runAt.defaultValue;\n   runAt.addEventListener('input',function(){runAt.setCustomValidity('');});\n   form.addEventListener('submit',function(event){\n    var changed=draft || !originalRunAt || runAt.value!==originalRunAt;\n    if(changed && new Date(runAt.value).getTime()<=Date.now()){\n     event.preventDefault(); event.stopImmediatePropagation();\n     runAt.setCustomValidity('Run at must be in the future. Check the date and AM/PM.');\n     runAt.reportValidity();\n    }\n   },true);\n   form.elements.repeat_type.addEventListener('change',interval); interval();\n   dialog.querySelector('[data-schedule-cancel]').onclick=function(){dialog.close();};\n   root.querySelectorAll('[data-schedule-open=\"'+dialog.id+'\"]').forEach(function(button){button.onclick=function(){\n    form.reset(); runAt.setCustomValidity(''); form.querySelector('[data-schedule-error]').textContent='';\n    if(draft){['run_at','repeat_type','repeat_interval'].forEach(function(name){form.elements[name].value=field(name).value;}); form.querySelector('[type=\"checkbox\"]').checked=field('clear_context_on_start').value==='true'; var exists=field('add_schedule').value==='on'; dialog.querySelector('[data-schedule-editor-title]').textContent=exists?'Edit schedule':'Add schedule'; dialog.querySelector('[data-schedule-save]').textContent=exists?'Save':'Add'; dialog.querySelector('[data-draft-schedule-remove]').hidden=!exists;}\n    interval(); dialog.showModal();\n   };});\n   if(draft){form.addEventListener('submit',function(event){event.preventDefault(); ['run_at','repeat_type','repeat_interval'].forEach(function(name){field(name).value=form.elements[name].value;}); if(form.elements.repeat_type.value==='once')field('repeat_interval').value='1'; field('clear_context_on_start').value=String(form.querySelector('[type=\"checkbox\"]').checked); field('add_schedule').value='on'; renderDraft(); dialog.close();});\n    dialog.querySelector('[data-draft-schedule-remove]').onclick=function(){field('add_schedule').value=''; renderDraft(); dialog.close();};\n   }\n  });\n  root.addEventListener('htmx:beforeRequest',function(event){if(!root.contains(event.target))return; var form=event.target.closest('form'); if(form)form.querySelectorAll('button, input[type=checkbox]').forEach(function(b){b.disabled=true;});});\n  root.addEventListener('htmx:afterRequest',function(event){var form=event.target.closest('form'); if(form){form.querySelectorAll('button, input[type=checkbox]').forEach(function(b){b.disabled=false;}); if(!event.detail.successful && !form.hasAttribute('data-schedule-editor-form')){var toggle=form.querySelector('input[type=checkbox]'); if(toggle) toggle.checked=toggle.defaultChecked;} var error=form.querySelector('[data-schedule-error]'); if(error && !event.detail.successful) error.textContent='Could not save the schedule. Please check the values and try again.';}});\n  if(draft){root.querySelector('[data-draft-schedule-enabled]').onchange=function(){field('schedule_enabled').value=String(this.checked);renderDraft();};}\n })();\n </script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
