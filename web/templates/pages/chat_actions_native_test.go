@@ -39,7 +39,7 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 		t.Fatalf("render production layout: %v", err)
 	}
 	baseHTML := base.String()
-	productionStyle := extractNativeChatStyle(t, baseHTML)
+	productionStyle := layoutStyleBlocks(t, baseHTML)
 	navigationScript := extractNativeChatNavigation(t, baseHTML)
 
 	var chat bytes.Buffer
@@ -176,19 +176,6 @@ func runNativeWailsHelper() error {
 		return fmt.Errorf("Wails did not create the native WebView window")
 	}
 	return app.Run()
-}
-
-func extractNativeChatStyle(t *testing.T, html string) string {
-	t.Helper()
-	start := strings.Index(html, "<style>")
-	if start < 0 {
-		t.Fatal("could not isolate production layout CSS")
-	}
-	endOffset := strings.Index(html[start:], "</style>")
-	if endOffset < 0 {
-		t.Fatal("could not find end of production layout CSS")
-	}
-	return html[start : start+endOffset+len("</style>")]
 }
 
 func extractNativeChatNavigation(t *testing.T, html string) string {
