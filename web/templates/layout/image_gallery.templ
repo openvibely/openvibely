@@ -7,8 +7,8 @@ templ ImageGallery() {
    <header><span data-gallery-name></span><span data-gallery-count aria-live="polite"></span><button type="button" data-gallery-close class="btn btn-circle btn-ghost btn-xs ov-modal-close" aria-label="Close image preview" title="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
    <div class="image-gallery-viewer">
    <div data-gallery-stage><img data-gallery-image alt="" draggable="false"/><p data-gallery-status role="status"></p></div>
-    <button type="button" data-gallery-prev class="image-gallery-arrow" aria-label="Previous image">‹</button>
-    <button type="button" data-gallery-next class="image-gallery-arrow" aria-label="Next image">›</button>
+    <button type="button" data-gallery-prev class="image-gallery-arrow" aria-label="Previous image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 6 9 12 15 18"/></svg></button>
+    <button type="button" data-gallery-next class="image-gallery-arrow" aria-label="Next image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 6 15 12 9 18"/></svg></button>
    </div>
    <footer>
     <div class="image-gallery-tools" role="group" aria-label="Image controls">
@@ -34,7 +34,8 @@ templ ImageGallery() {
  #image-gallery .image-gallery-tools > *:hover { background:rgb(255 255 255 / .12); }
  #image-gallery .image-gallery-tools svg { width:22px; height:22px; }
  #image-gallery .image-gallery-viewer { flex:1; min-height:0; position:relative; display:flex; }
- #image-gallery .image-gallery-arrow { position:absolute; top:50%; transform:translateY(-50%); z-index:1; display:flex; align-items:center; justify-content:center; width:44px; height:44px; border:0; border-radius:50%; background:rgb(0 0 0 / .7); color:#eee; font-size:32px; line-height:1; cursor:pointer; }
+ #image-gallery .image-gallery-arrow { position:absolute; top:50%; transform:translateY(-50%); z-index:1; display:flex; align-items:center; justify-content:center; width:44px; height:44px; border:0; border-radius:50%; background:rgb(0 0 0 / .7); color:#eee; padding:0; cursor:pointer; }
+ #image-gallery .image-gallery-arrow svg { display:block; width:24px; height:24px; flex-shrink:0; }
  #image-gallery .image-gallery-arrow:hover:not(:disabled) { background:rgb(0 0 0 / .9); }
  #image-gallery .image-gallery-arrow:disabled { opacity:.3; cursor:default; }
  #image-gallery [data-gallery-prev] { left:12px; }
