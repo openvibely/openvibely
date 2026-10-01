@@ -1,0 +1,95 @@
+package pages
+
+import (
+ "fmt"
+ "github.com/openvibely/openvibely/internal/models"
+)
+
+func taskPanelChain(task *models.Task) models.ChainConfiguration {
+ config, err := task.ParseChainConfig()
+ if err != nil || config == nil { return models.ChainConfiguration{} }
+ return *config
+}
+
+// TaskChainPanel shares the follow-up editor between unsaved and saved tasks.
+templ TaskChainPanel(task *models.Task, agents []models.LLMConfig) {
+ {{ config := taskPanelChain(task) }}
+ <div id="task-chain-panel" data-draft={ fmt.Sprint(task.ID == "") } data-configured={ fmt.Sprint(config.Enabled || config.Trigger != "") }>
+  <style>
+   .task-chain-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
+   .task-chain-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+  </style>
+  <div class="flex items-center justify-between mb-3" style="height:20px"><h3 class="text-sm font-semibold">Follow-up task</h3><button type="button" class="btn btn-ghost btn-xs" data-chain-open data-chain-add aria-label="Add follow-up task">+</button></div>
+  <p class="text-sm opacity-60" data-chain-empty>No follow-up configured.</p>
+  <div data-chain-card hidden>
+   <button type="button" class="task-chain-edit" data-chain-open aria-label="Edit follow-up task"><span><span class="block text-sm font-semibold" data-chain-trigger></span><span class="block text-sm opacity-60 mt-1" data-chain-model></span><span class="block text-sm opacity-60 mt-1" data-chain-category></span></span><span aria-hidden="true">›</span></button>
+   <label class="label cursor-pointer justify-start gap-2 mt-2"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" data-chain-toggle aria-label="Follow-up enabled"/><span class="label-text">Enabled</span></label>
+   if task.ID == "" {
+    <p class="text-xs opacity-60 mt-2">Saved when you create the task.</p>
+   }
+  </div>
+  <p role="alert" data-chain-error class="text-error text-sm"></p>
+  if task.ID == "" {
+   for _, name := range []string{"chain_enabled","chain_trigger","chain_child_category","chain_child_agent_id","chain_child_model"} {
+    <input type="hidden" name={ name } form="task-thread-form" data-chain-draft={ name }/>
+   }
+  }
+  <dialog id="task-chain-editor" class="modal" aria-labelledby="task-chain-title">
+   <div class="modal-box">
+    @ModalCloseButton("document.getElementById('task-chain-editor')", "Close follow-up editor")
+    <h3 id="task-chain-title" class="font-semibold text-lg mb-4 pr-10">Follow-up task</h3>
+    <form method="post" data-chain-form
+     if task.ID != "" {
+      hx-put={ fmt.Sprintf("/tasks/%s/chain?project_id=%s&from=task-panel",task.ID,task.ProjectID) } hx-target="#task-chain-panel" hx-swap="outerHTML settle:0"
+     }
+    >
+     <input type="hidden" name="chain_enabled" value={ fmt.Sprint(config.Enabled) }/>
+     <input type="hidden" name="chain_remove" value="false"/>
+     <label class="form-control mb-4"><span class="label">Trigger</span><select name="chain_trigger" class="select select-bordered select-sm"><option value="on_completion" selected?={ config.Trigger != "on_planning_complete" }>On task completion</option><option value="on_planning_complete" selected?={ config.Trigger == "on_planning_complete" }>On planning complete</option></select></label>
+     <label class="form-control mb-4"><span class="label">Child task category</span><select name="chain_child_category" class="select select-bordered select-sm"><option value="" selected?={ config.ChildCategory == "" }>Same as parent</option><option value="active" selected?={ config.ChildCategory == "active" }>Active (run immediately)</option><option value="backlog" selected?={ config.ChildCategory == "backlog" }>Backlog</option></select></label>
+     <label class="form-control mb-4"><span class="label">Child task model</span><select name="chain_child_agent_id" class="select select-bordered select-sm"><option value="">Use default model</option>
+      for _, agent := range agents {
+       <option value={ agent.ID } selected?={ config.ChildAgentID == agent.ID }>{ agent.Name }</option>
+      }
+     </select></label>
+     <label class="form-control mb-4"><span class="label">Child task model override</span><input type="text" name="chain_child_model" value={ config.ChildModel } class="input input-bordered input-sm" placeholder="Optional model override"/></label>
+     <p role="alert" data-chain-form-error class="text-error text-sm"></p>
+     <div class="flex items-center gap-2 mt-4"><button type="button" class="btn btn-sm btn-outline btn-error" data-chain-remove onclick="window.openDestructiveConfirmDialog('task-chain-delete', '', '')">Remove follow-up</button><button type="button" class="btn btn-sm btn-ghost ml-auto" onclick="this.closest('dialog').close()">Cancel</button><button type="submit" class="btn btn-primary btn-sm" data-chain-save>Save</button></div>
+    </form>
+   </div>
+   <form method="dialog" class="modal-backdrop"><button aria-label="Close follow-up editor">close</button></form>
+  </dialog>
+  @DestructiveConfirmDialog("task-chain-delete", "Close remove follow-up confirmation", "Remove follow-up", "Remove the follow-up configuration for ", "", task.Title, "?", templ.ComponentScript{Call:"this.closest('dialog').close()"}, templ.ComponentScript{Call:"this.closest('dialog').dispatchEvent(new Event('confirm-chain-remove'))"}) {
+   <p>Any waiting follow-up task will be removed. Tasks that have already started will be kept.</p>
+  }
+  @TaskChainPanelScript()
+ </div>
+}
+
+templ TaskChainPanelScript() {
+ <script>
+ (function(){
+  var root=document.currentScript.closest('#task-chain-panel'),draft=root.dataset.draft==='true',exists=root.dataset.configured==='true';
+  var dialog=root.querySelector('#task-chain-editor'),form=root.querySelector('[data-chain-form]'),toggle=root.querySelector('[data-chain-toggle]');
+  var names=['chain_enabled','chain_trigger','chain_child_category','chain_child_agent_id','chain_child_model'],values={};
+  names.forEach(function(name){values[name]=form.elements[name].value;});
+  function render(){
+   root.querySelector('[data-chain-add]').hidden=exists;root.querySelector('[data-chain-empty]').hidden=exists;root.querySelector('[data-chain-card]').hidden=!exists;
+   toggle.checked=values.chain_enabled==='true';
+   root.querySelector('[data-chain-trigger]').textContent=values.chain_trigger==='on_planning_complete'?'After planning completes':'After task completion';
+   var select=form.elements.chain_child_agent_id,option=Array.from(select.options).find(function(o){return o.value===values.chain_child_agent_id;});
+   root.querySelector('[data-chain-model]').textContent='Model: '+(option?option.textContent:'Use default model')+(values.chain_child_model?' · '+values.chain_child_model:'');
+   root.querySelector('[data-chain-category]').textContent='Category: '+(values.chain_child_category||'Same as parent');
+   if(draft)names.forEach(function(name){root.querySelector('[data-chain-draft="'+name+'"]').value=exists?values[name]:'';});
+  }
+  function populate(){names.forEach(function(name){form.elements[name].value=values[name];});form.elements.chain_remove.value='false';}
+  root.querySelectorAll('[data-chain-open]').forEach(function(button){button.onclick=function(){populate();if(!exists)form.elements.chain_enabled.value='true';root.querySelector('[data-chain-remove]').hidden=!exists;root.querySelector('[data-chain-save]').textContent=exists?'Save':'Add';root.querySelector('[data-chain-form-error]').textContent='';dialog.showModal();};});
+  if(draft)form.addEventListener('submit',function(event){event.preventDefault();exists=form.elements.chain_remove.value!=='true';names.forEach(function(name){values[name]=form.elements[name].value;});render();dialog.close();});
+  toggle.onchange=function(){populate();form.elements.chain_enabled.value=String(toggle.checked);form.requestSubmit();};
+  var confirmation=root.querySelector('#task-chain-delete');confirmation.addEventListener('confirm-chain-remove',function(){confirmation.__openVibelyDestructiveTrigger=null;confirmation.close();populate();form.elements.chain_remove.value='true';form.elements.chain_enabled.value='false';form.requestSubmit();});
+  root.addEventListener('htmx:beforeRequest',function(event){if(event.target!==form)return;root.querySelectorAll('button,input[type=checkbox]').forEach(function(el){el.disabled=true;});});
+  root.addEventListener('htmx:afterRequest',function(event){if(event.target!==form)return;root.querySelectorAll('button,input[type=checkbox]').forEach(function(el){el.disabled=false;});if(!event.detail.successful){toggle.checked=values.chain_enabled==='true';var message='Could not save the follow-up. Please try again.';root.querySelector('[data-chain-error]').textContent=message;root.querySelector('[data-chain-form-error]').textContent=message;}});
+  render();
+ })();
+ </script>
+}

@@ -488,7 +488,7 @@ func TaskScheduleEditor(task *models.Task, s models.Schedule, id string) templ.C
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" min=\"1\" max=\"365\" step=\"1\" class=\"input input-bordered input-xs w-20 schedule-interval-input\"><span class=\"text-sm opacity-60\" data-schedule-unit></span></span></label> <input type=\"hidden\" name=\"clear_context_on_start\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"clear_context_on_start\" value=\"true\" class=\"toggle toggle-sm toggle-primary shrink-0\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" min=\"1\" max=\"365\" step=\"1\" class=\"input input-bordered input-sm w-20 schedule-interval-input\"><span class=\"text-sm opacity-60\" data-schedule-unit></span></span></label> <input type=\"hidden\" name=\"clear_context_on_start\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"clear_context_on_start\" value=\"true\" class=\"toggle toggle-sm toggle-primary shrink-0\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -1013,6 +1013,16 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 	}
 
+	if c.FormValue("chain_trigger") != "" {
+		config, err := taskChainFormConfig(c, t)
+		if err != nil {
+			return err
+		}
+		if err := setTaskPanelChainConfig(t, config); err != nil {
+			return err
+		}
+	}
+
 	// Handle optional agent (LLM config) selection
 	if agentID := c.FormValue("agent_id"); agentID != "" && (!threadDraft || (agentID != "auto" && agentID != "default")) {
 		t.AgentID = &agentID
@@ -3006,6 +3016,56 @@ func (h *Handler) SetCompletedSort(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
 
+// Keep disabled configurations so the panel can resume them; removal is explicit.
+func setTaskPanelChainConfig(task *models.Task, config *models.ChainConfiguration) error {
+	if config == nil {
+		return task.SetChainConfig(nil)
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	task.ChainConfig = string(data)
+	return nil
+}
+
+// taskChainFormConfig preserves server-owned handoff fields while editing the panel's controls.
+func taskChainFormConfig(c echo.Context, task *models.Task) (*models.ChainConfiguration, error) {
+	if c.FormValue("chain_remove") == "true" {
+		return nil, nil
+	}
+	config, err := task.ParseChainConfig()
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid chain configuration")
+	}
+	config.Enabled = c.FormValue("chain_enabled") == "true"
+	config.Trigger = c.FormValue("chain_trigger")
+	if config.Trigger == "" {
+		config.Trigger = "on_completion"
+	}
+	config.ChildAgentID = c.FormValue("chain_child_agent_id")
+	config.ChildModel = c.FormValue("chain_child_model")
+	config.ChildCategory = c.FormValue("chain_child_category")
+	if config.Trigger != "on_completion" && config.Trigger != "on_planning_complete" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid chain trigger")
+	}
+	if config.ChildCategory != "" && config.ChildCategory != "active" && config.ChildCategory != "backlog" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid child category")
+	}
+	// Other clients can edit these fields; the compact panel must not erase them.
+	params, err := c.FormParams()
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := params["chain_child_title"]; ok {
+		config.ChildTitle = c.FormValue("chain_child_title")
+	}
+	if _, ok := params["chain_child_prompt_prefix"]; ok {
+		config.ChildPromptPrefix = c.FormValue("chain_child_prompt_prefix")
+	}
+	return config, nil
+}
+
 func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UpdateTaskChainConfig id=%s", taskID)
@@ -3020,30 +3080,14 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	// Parse chain configuration from form
-	enabled := c.FormValue("chain_enabled") == "true"
-	trigger := c.FormValue("chain_trigger")
-	childAgentID := c.FormValue("chain_child_agent_id")
-	childModel := c.FormValue("chain_child_model")
-	childCategory := c.FormValue("chain_child_category")
-	childTitle := c.FormValue("chain_child_title")
-	childPromptPrefix := c.FormValue("chain_child_prompt_prefix")
-
-	config := &models.ChainConfiguration{
-		Enabled:           enabled,
-		Trigger:           trigger,
-		ChildAgentID:      childAgentID,
-		ChildModel:        childModel,
-		ChildCategory:     childCategory,
-		ChildTitle:        childTitle,
-		ChildPromptPrefix: childPromptPrefix,
+	config, err := taskChainFormConfig(c, task)
+	if err != nil {
+		return err
 	}
-
-	applog.Infof("[handler] UpdateTaskChainConfig id=%s enabled=%v trigger=%s child_agent=%s child_model=%s child_category=%s",
-		taskID, enabled, trigger, childAgentID, childModel, childCategory)
+	enabled := config != nil && config.Enabled
 
 	// Update task with new chain config
-	if err := task.SetChainConfig(config); err != nil {
+	if err := setTaskPanelChainConfig(task, config); err != nil {
 		applog.Infof("[handler] UpdateTaskChainConfig error serializing config: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid chain configuration")
 	}
@@ -3089,6 +3133,14 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 	}
 
 	applog.Infof("[handler] UpdateTaskChainConfig success id=%s", taskID)
+
+	if c.QueryParam("from") == "task-panel" {
+		agents, err := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		return pages.TaskChainPanel(task, agents).Render(c.Request().Context(), c.Response().Writer)
+	}
 
 	// Return updated task detail content
 	if isHTMX(c) {

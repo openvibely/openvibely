@@ -533,13 +533,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
         </div>
 		<!-- Tab: Chaining -->
 		<div id="tab-chaining" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "chaining") }>
-			<div class="flex flex-col min-w-0">
-				<div class="flex flex-col gap-2 flex-1">
-					<h4 class="text-lg font-bold mb-3">Task Chaining</h4>
-					<p class="text-sm opacity-60 mb-4">Configure this task to automatically create a child task when it completes. For example, an Opus planning task can spawn a Sonnet implementation task.</p>
-					@components.TaskChainConfigPage(task, agents)
-				</div>
-			</div>
+            @TaskChainPanel(task, agents)
 		</div>
 		<!-- End Tab: Chaining -->
 		<!-- Tab: Attachments -->
