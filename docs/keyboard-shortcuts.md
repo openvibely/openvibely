@@ -70,3 +70,21 @@ These shortcuts apply while the image viewer is open.
 | Escape | Close the viewer |
 
 On a US keyboard, `+` and `=` share a key. Both are accepted so you can zoom in with or without Shift. Zoom out uses the unshifted `-` key; Shift+`-` produces `_`, which is not currently a zoom shortcut.
+
+## Other contextual controls
+
+| Context | Keys | Action |
+| --- | --- | --- |
+| Project tabs | ← / →, Home / End | Focus the previous/next or first/last project tab |
+| Project tab | Enter / Space | Activate the focused project |
+| Project tab | Delete | Close the project tab |
+| Project tab | Shift+F10 / Context Menu key | Open the tab menu |
+| Task-panel divider | Home / End | Set minimum / maximum panel width |
+| Automation graph node | Arrow keys | Move the node by 10 units |
+| Automation graph node or edge | Delete / Backspace | Remove the focused node or edge |
+| Automation connection handle | Enter / Space | Select an output, then connect to an input |
+| Automation YAML editor | Tab / Shift+Tab | Indent / unindent |
+| Diff comment editor | Enter / Shift+Enter | Submit comment / insert newline |
+| Diff comment editor | Escape | Cancel editing |
+
+Task-detail and project-tab navigation uses unmodified keys. Image-viewer controls ignore Command, Ctrl, and Option/Alt; Shift remains supported for `+`. Property-picker selection waits until text composition has finished. Escape in a foreground dialog or menu does not clear the card selection underneath it.
