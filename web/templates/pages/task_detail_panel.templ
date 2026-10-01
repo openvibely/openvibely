@@ -5,7 +5,7 @@ templ TaskDetailPanel() {
 	<aside id="task-details-panel" aria-label="Task details" class="bg-base-200 border border-base-300" hidden>
 		<div id="task-panel-divider" role="separator" aria-label="Resize details panel" aria-orientation="vertical" aria-valuemin="340" aria-valuemax="720" aria-valuenow="420" tabindex="0"></div>
 		<div role="tablist" aria-label="Task details" class="tabs tabs-bordered tabs-sm overflow-x-auto flex-nowrap">
-			for _, tab := range []struct{ Key, Label string }{{"details", "Details"}, {"schedules", "Schedules"}, {"chaining", "Chaining"}, {"attachments", "Attachments"}, {"lifecycle", "Lifecycle"}} {
+			for _, tab := range []struct{ Key, Label string }{{"details", "Details"}, {"schedules", "Schedule"}, {"chaining", "Chaining"}, {"attachments", "Attachments"}, {"lifecycle", "Lifecycle"}} {
 				<button type="button" role="tab" class="tab" id={ "inspector-tab-" + tab.Key } data-tab={ tab.Key } aria-controls={ "tab-" + tab.Key } aria-selected="false" tabindex="-1">{ tab.Label }</button>
 			}
 		</div>
