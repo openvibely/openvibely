@@ -4790,7 +4790,7 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 		Category:  models.CategoryActive,
 	}
 	execs := []models.Execution{{ID: "exec-running-task", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "running"}}
-	pending := []models.ThreadInput{{ID: "queued-task", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}}
+	pending := []models.ThreadInput{{ID: "queued-task", TaskID: task.ID, RunExecutionID: "exec-running-task", InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued"}}
 
 	var buf bytes.Buffer
 	if err := TaskThreadView(task, execs, nil, nil, nil, pending, false, 30).Render(context.Background(), &buf); err != nil {
@@ -4803,7 +4803,7 @@ func TestTaskThreadView_RunningThreadCanSteerFromPendingRowsOnly(t *testing.T) {
 	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) {
 		t.Fatal("task-thread composer must not expose direct steering controls")
 	}
-	if !strings.Contains(content, `id="pending-thread-inputs"`) || !strings.Contains(content, `hx-post="/tasks/task-steer-ui/thread/queued/queued-task/steer"`) || !strings.Contains(content, "Steer") {
+	if !strings.Contains(content, `id="pending-thread-inputs"`) || !strings.Contains(content, `hx-post="/tasks/task-steer-ui/thread/queued/queued-task/steer?expected_turn_id=exec-running-task"`) || !strings.Contains(content, "Steer") {
 		t.Fatal("task-thread composer queued row must expose Steer action")
 	}
 	if !strings.Contains(content, `id="pending-thread-inputs" class="space-y-1.5" data-task-id="task-steer-ui"`) || !strings.Contains(content, `data-thread-input-id="queued-task" data-task-id="task-steer-ui"`) {
