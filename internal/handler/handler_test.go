@@ -9140,3 +9140,26 @@ func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
 	}
 	b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
 }
+
+func TestHandler_NewTaskBacklogMessageDoesNotRun(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Backlog draft")
+	form := url.Values{"message": {"Do this later"}, "category": {"backlog"}, "priority": {"2"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assertCode(t, rec, http.StatusOK)
+	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, models.CategoryBacklog, tasks[0].Category)
+	require.Equal(t, models.StatusPending, tasks[0].Status)
+	require.Equal(t, "Do this later", tasks[0].Prompt)
+	executions, err := h.execRepo.ListByTask(context.Background(), tasks[0].ID)
+	require.NoError(t, err)
+	require.Empty(t, executions)
+	require.Equal(t, tasks[0].ID, rec.Header().Get("X-Created-Task-ID"))
+	require.Equal(t, "#main-content", rec.Header().Get("HX-Retarget"))
+}

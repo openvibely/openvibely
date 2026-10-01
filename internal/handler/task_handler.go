@@ -940,7 +940,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if message == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 		}
-		if _, err := h.selectAgent(c.Request().Context(), c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil {
+		if _, err := h.selectAgent(c.Request().Context(), c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil && c.FormValue("category") != string(models.CategoryBacklog) {
 			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
 		}
 	}
@@ -949,7 +949,11 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if category == "" {
 		category = models.CategoryActive
 	}
-	if threadDraft && !isSwarmTaskForm(c) {
+	startDraft := threadDraft && category == models.CategoryActive
+	if threadDraft && priority == 0 {
+		priority = 2
+	}
+	if startDraft && !isSwarmTaskForm(c) {
 		// The first composer send owns admission; do not also submit a worker run.
 		category = models.CategoryBacklog
 		if priority == 0 {
@@ -1068,7 +1072,14 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		c.SetParamNames("taskId")
 		c.SetParamValues(t.ID)
 		c.Set("newTaskThread", true)
-		return h.TaskThreadSend(c)
+		if startDraft {
+			return h.TaskThreadSend(c)
+		}
+		c.Response().Header().Set("X-Created-Task-ID", t.ID)
+		c.Response().Header().Set("HX-Retarget", "#main-content")
+		c.Response().Header().Set("HX-Reswap", "innerHTML")
+		c.Response().Header().Set("HX-Push-Url", "/tasks/"+t.ID+"?project_id="+url.QueryEscape(t.ProjectID))
+		return h.GetTaskThread(c)
 	}
 
 	// Handle optional file attachments (multiple files supported)

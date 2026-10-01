@@ -536,7 +536,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<p class=\"text-xs opacity-60 mb-4\">Settings apply when you send your first message. Sending starts the task in Active.</p><details><summary class=\"text-sm cursor-pointer\">Advanced options</summary>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<p class=\"text-xs opacity-60 mb-4\">Settings apply when you send your first message. Active tasks start immediately; Backlog tasks are saved without running.</p><details><summary class=\"text-sm cursor-pointer\">Advanced options</summary>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
