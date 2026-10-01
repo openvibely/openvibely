@@ -15,7 +15,7 @@ templ TaskPropertyRow(label, field, value, text string) {
 }
 
 templ TaskAutoMergeSwitches(task *models.Task) {
- <div class="form-control mt-3 space-y-2">
+ <div class="form-control mt-2">
   for _, option := range []struct{ Name, Label string; Checked bool }{
    {"auto_merge", "Auto-merge on successful completion", task.AutoMerge},
    {"auto_merge_on_goal_achieved", "Auto-merge when goal is achieved", task.AutoMergeOnGoalAchieved},
@@ -29,11 +29,11 @@ templ TaskAutoMergeSwitches(task *models.Task) {
 }
 
 templ TaskAutoMergePanel(task *models.Task) {
- <details id="task-auto-merge-panel" class="mb-6">
-  <summary class="text-sm cursor-pointer">Advanced options</summary>
+ <section id="task-auto-merge-panel" class="mb-4">
+  <h3 class="text-sm font-semibold">Auto-merge</h3>
   @TaskAutoMergeSwitches(task)
   <p data-auto-merge-error role="alert" class="text-error text-sm"></p>
- </details>
+ </section>
 }
 
 templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definitions []repository.AgentTaskUIOption) {
@@ -132,7 +132,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    var editInput = root.querySelector('#task-detail-edit [name="' + name + '"]');
    if (editInput) editInput.value = value;
    var target = root.querySelector(name === 'goal' ? '#task-goal-panel' : name === 'prompt' ? '#task-prompt-panel' : name.startsWith('auto_merge') ? '#task-auto-merge-panel' : '#task-detail-metrics');
-   if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; if (target.id === "task-auto-merge-panel") replacement.open = target.open; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }
+   if (target && root.isConnected) { var fragment = document.createElement('template'); fragment.innerHTML = html; var replacement = fragment.content.firstElementChild; target.replaceWith(replacement); if (window.htmx) htmx.process(replacement); }
   }
   root.addEventListener('change', async function(event) {
    var input = event.target.closest('[data-auto-merge-toggle]');
@@ -214,7 +214,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    try {
     var value = dialog.querySelector('textarea').value;
     if (taskID) await save(field, value);
-    else { root.querySelector('[data-draft-property="goal"]').value = value; current.dataset.value = value; current.textContent = 'Edit'; var preview = Array.from(value); root.querySelector('[data-draft-goal]').textContent = preview.length > 240 ? preview.slice(0, 240).join('') + '…' : value; }
+    else { root.querySelector('[data-draft-property="goal"]').value = value; current.dataset.value = value; current.textContent = value ? 'Edit' : '+'; }
     dialog.close();
     var trigger = root.querySelector('[data-detail-editor="' + field + '"]'); if (trigger) trigger.focus({preventScroll:true});
    } catch (error) { dialog.querySelector('[data-editor-error]').textContent = error.message; }
