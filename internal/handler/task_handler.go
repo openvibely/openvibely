@@ -1065,6 +1065,15 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			}
 			return err
 		}
+		if threadDraft && c.FormValue("schedule_enabled") == "false" {
+			if _, err := h.scheduleRepo.SetEnabledForTask(c.Request().Context(), sched.ID, t.ID, false); err != nil {
+				rollbackCtx := context.WithoutCancel(c.Request().Context())
+				if rollbackErr := h.taskRepo.Delete(rollbackCtx, t.ID); rollbackErr != nil {
+					return fmt.Errorf("pausing schedule: %w; rolling back task: %v", err, rollbackErr)
+				}
+				return err
+			}
+		}
 		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
 	}
 

@@ -1,0 +1,160 @@
+package pages
+
+import (
+ "fmt"
+ "github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/web/templates/components"
+)
+
+func taskPanelScheduleLabel(s models.Schedule) string {
+ if s.RepeatType == models.RepeatOnce { return "Run once" }
+ units := map[models.RepeatType]string{models.RepeatSeconds:"seconds",models.RepeatMinutes:"minutes",models.RepeatHours:"hours",models.RepeatDaily:"days",models.RepeatWeekly:"weeks",models.RepeatMonthly:"months"}
+ return fmt.Sprintf("Every %d %s",s.RepeatInterval,units[s.RepeatType])
+}
+
+templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
+ <div id="task-schedule-panel" data-task-schedule-panel data-draft={ fmt.Sprint(task.ID == "") }>
+  <div class="flex items-center justify-between mb-4">
+   <h3 class="text-sm font-semibold">Schedule</h3>
+   if len(schedules) == 0 {
+    <button type="button" class="btn btn-ghost btn-sm" aria-label="Add schedule" data-schedule-open="task-schedule-new">+</button>
+   }
+  </div>
+  if len(schedules) == 0 {
+   <p class="text-sm opacity-60" data-schedule-empty>No schedule configured.</p>
+   if task.ID == "" {
+    <div data-draft-schedule-card hidden class="rounded-lg bg-base-200 p-4">
+     <button type="button" class="text-left w-full" data-schedule-open="task-schedule-new"><span class="flex justify-between"><strong data-draft-schedule-title></strong><span aria-hidden="true">›</span></span><span class="block text-sm opacity-60" data-draft-schedule-time></span><span class="block text-sm opacity-60" data-draft-schedule-context></span></button>
+     <label class="label cursor-pointer mt-2"><span class="label-text">Enabled</span><input type="checkbox" class="toggle toggle-sm" data-draft-schedule-enabled checked/></label>
+     <p class="text-xs opacity-60 mt-2">Saved when you create the task.</p>
+    </div>
+    for _, field := range []struct{Name, Value string}{{"add_schedule",""},{"run_at",""},{"repeat_type","once"},{"repeat_interval","1"},{"clear_context_on_start","true"},{"schedule_enabled","true"}} {
+     <input type="hidden" name={ field.Name } value={ field.Value } form="task-thread-form" data-draft-schedule-field={ field.Name }/>
+    }
+   }
+   @TaskScheduleEditor(task, models.Schedule{RepeatType:models.RepeatOnce, RepeatInterval:1, ClearContextOnStart:true}, "task-schedule-new")
+  }
+  for _, s := range schedules {
+   <div class="rounded-lg bg-base-200 p-4 mb-3" id={ "schedule-card-" + s.ID } data-schedule-next-run={ exactTaskScheduleNextRun(s) }>
+    <button type="button" class="text-left w-full" data-schedule-open={ "task-schedule-" + s.ID }>
+     <span class="flex justify-between gap-2"><strong class="text-sm">{ taskPanelScheduleLabel(s) }</strong><span aria-hidden="true">›</span></span>
+     <span class="block text-sm opacity-60 mt-1">
+      if !s.Enabled {
+ Paused
+} else if s.NextRun != nil {
+ Next: { s.NextRun.Local().Format("Jan 2, 2006 at 3:04 PM") }
+} else {
+ No upcoming run
+}
+     </span>
+     <span class="block text-sm opacity-60 mt-1">
+if s.ClearContextOnStart {
+ Fresh context each run
+} else {
+ Continue previous context
+}
+</span>
+    </button>
+    <form method="post" hx-post={ fmt.Sprintf("/schedules/%s/toggle?project_id=%s&from=task-panel", s.ID, task.ProjectID) } hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0">
+     <label class="label cursor-pointer mt-2"><span class="label-text">Enabled</span><input type="checkbox" class="toggle toggle-sm" checked?={ s.Enabled } aria-label="Schedule enabled" onchange="if(event.isTrusted && !this.form.classList.contains('htmx-request')) this.form.requestSubmit()"/></label>
+     <p role="alert" data-schedule-error class="text-error text-sm"></p>
+    </form>
+   </div>
+   @TaskScheduleEditor(task, s, "task-schedule-" + s.ID)
+  }
+  @TaskSchedulePanelScript()
+ </div>
+}
+
+templ TaskScheduleEditor(task *models.Task, s models.Schedule, id string) {
+ <dialog id={ id } class="modal" data-schedule-editor aria-labelledby={ id + "-title" }>
+  <div class="modal-box">
+   @ModalCloseButton("document.getElementById('" + id + "')", "Close schedule editor")
+   <h3 class="font-semibold text-lg mb-4 pr-10" data-schedule-editor-title id={ id + "-title" }>
+if s.ID == "" {
+ Add schedule
+} else {
+ Edit schedule
+}
+</h3>
+   <form method="post" data-schedule-editor-form
+    if task.ID != "" {
+     if s.ID == "" {
+ hx-post={ fmt.Sprintf("/tasks/%s/schedule?project_id=%s&from=task-panel", task.ID, task.ProjectID) }
+} else {
+ hx-put={ fmt.Sprintf("/schedules/%s?project_id=%s&from=task-panel", s.ID, task.ProjectID) }
+}
+     hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0"
+    }
+   >
+    <label class="form-control mb-4"><span class="label">Run at</span><input type="datetime-local" name="run_at" data-run-at-picker if s.ID != "" {
+ value={ components.GetScheduleEditTime(s) }
+} required class="input input-bordered input-sm cursor-pointer w-full" onclick="if(this.showPicker) this.showPicker()"/></label>
+    <label class="form-control mb-4"><span class="label">Repeat</span><select name="repeat_type" class="select select-bordered select-sm">
+     for _, choice := range []struct{Value, Label string}{{"once","Once"},{"seconds","Every N Seconds"},{"minutes","Every N Minutes"},{"hours","Every N Hours"},{"daily","Daily"},{"weekly","Weekly"},{"monthly","Monthly"}} {
+      <option value={ choice.Value } selected?={ string(s.RepeatType) == choice.Value }>{ choice.Label }</option>
+     }
+    </select></label>
+    <label class="form-control mb-4" data-schedule-interval><span class="label">Repeat every</span><span class="flex items-center gap-2"><input type="number" name="repeat_interval" value={ fmt.Sprint(s.RepeatInterval) } min="1" max="365" step="1" class="input input-bordered input-sm w-20"/><span class="text-sm opacity-60" data-schedule-unit></span></span></label>
+    <input type="hidden" name="clear_context_on_start" value="false"/>
+    <label class="label cursor-pointer justify-start gap-3"><input type="checkbox" name="clear_context_on_start" value="true" class="toggle toggle-sm" checked?={ s.ClearContextOnStart }/><span class="label-text">Clear context on start</span></label>
+    <p class="text-xs opacity-60 mb-4">Start each scheduled run without prior model conversation context.</p>
+    <p role="alert" data-schedule-error class="text-error text-sm"></p>
+    <div class="flex items-center gap-2 mt-4">
+     if s.ID != "" {
+      <button type="button" class="btn btn-sm btn-outline btn-error" hx-delete={ fmt.Sprintf("/schedules/%s?project_id=%s&from=task-panel", s.ID, task.ProjectID) } hx-confirm="Delete this schedule?" hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0">Delete schedule</button>
+     } else if task.ID == "" {
+      <button type="button" class="btn btn-sm btn-outline btn-error" data-draft-schedule-remove hidden>Remove schedule</button>
+     }
+     <button type="button" class="btn btn-sm btn-ghost ml-auto" data-schedule-cancel>Cancel</button>
+     <button type="submit" class="btn btn-primary btn-sm" data-schedule-save>
+if s.ID == "" {
+ Add
+} else {
+ Save
+}
+</button>
+    </div>
+   </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button aria-label="Close schedule editor">close</button></form>
+ </dialog>
+}
+
+templ TaskSchedulePanelScript() {
+ <script>
+ (function(){
+  var root=document.currentScript.closest('[data-task-schedule-panel]');
+  var draft=root.dataset.draft==='true';
+  function field(name){return root.querySelector('[data-draft-schedule-field="'+name+'"]');}
+  function renderDraft(){
+   var exists=field('add_schedule').value==='on';
+   root.querySelector('[data-schedule-empty]').hidden=exists;
+   root.querySelector('[data-draft-schedule-card]').hidden=!exists;
+   root.querySelector('[aria-label="Add schedule"]').hidden=exists;
+   var type=field('repeat_type').value, interval=field('repeat_interval').value;
+   var units={seconds:'seconds',minutes:'minutes',hours:'hours',daily:'days',weekly:'weeks',monthly:'months'};
+   root.querySelector('[data-draft-schedule-title]').textContent=type==='once'?'Run once':'Every '+interval+' '+units[type];
+   root.querySelector('[data-draft-schedule-time]').textContent=field('schedule_enabled').value==='false'?'Paused':'Starts at: '+field('run_at').value.replace('T',' ');
+   root.querySelector('[data-draft-schedule-context]').textContent=field('clear_context_on_start').value==='true'?'Fresh context each run':'Continue previous context';
+  }
+  root.querySelectorAll('[data-schedule-editor]').forEach(function(dialog){
+   var form=dialog.querySelector('[data-schedule-editor-form]');
+   function interval(){var type=form.elements.repeat_type.value; var input=form.elements.repeat_interval; form.querySelector('[data-schedule-interval]').hidden=type==='once'; input.disabled=type==='once'; input.required=type!=='once'; form.querySelector('[data-schedule-unit]').textContent=({seconds:'second(s)',minutes:'minute(s)',hours:'hour(s)',daily:'day(s)',weekly:'week(s)',monthly:'month(s)'})[type]||'';}
+   form.elements.repeat_type.addEventListener('change',interval); interval();
+   dialog.querySelector('[data-schedule-cancel]').onclick=function(){dialog.close();};
+   root.querySelectorAll('[data-schedule-open="'+dialog.id+'"]').forEach(function(button){button.onclick=function(){
+    form.reset(); form.querySelector('[data-schedule-error]').textContent='';
+    if(draft){['run_at','repeat_type','repeat_interval'].forEach(function(name){form.elements[name].value=field(name).value;}); form.querySelector('[type="checkbox"]').checked=field('clear_context_on_start').value==='true'; var exists=field('add_schedule').value==='on'; dialog.querySelector('[data-schedule-editor-title]').textContent=exists?'Edit schedule':'Add schedule'; dialog.querySelector('[data-schedule-save]').textContent=exists?'Save':'Add'; dialog.querySelector('[data-draft-schedule-remove]').hidden=!exists;}
+    interval(); dialog.showModal();
+   };});
+   if(draft){form.addEventListener('submit',function(event){event.preventDefault(); ['run_at','repeat_type','repeat_interval'].forEach(function(name){field(name).value=form.elements[name].value;}); if(form.elements.repeat_type.value==='once')field('repeat_interval').value='1'; field('clear_context_on_start').value=String(form.querySelector('[type="checkbox"]').checked); field('add_schedule').value='on'; renderDraft(); dialog.close();});
+    dialog.querySelector('[data-draft-schedule-remove]').onclick=function(){field('add_schedule').value=''; renderDraft(); dialog.close();};
+   }
+  });
+  root.addEventListener('htmx:beforeRequest',function(event){if(!root.contains(event.target))return; var form=event.target.closest('form'); if(form)form.querySelectorAll('button, input[type=checkbox]').forEach(function(b){b.disabled=true;});});
+  root.addEventListener('htmx:afterRequest',function(event){var form=event.target.closest('form'); if(form){form.querySelectorAll('button, input[type=checkbox]').forEach(function(b){b.disabled=false;}); if(!event.detail.successful && !form.hasAttribute('data-schedule-editor-form')){var toggle=form.querySelector('input[type=checkbox]'); if(toggle) toggle.checked=toggle.defaultChecked;} var error=form.querySelector('[data-schedule-error]'); if(error && !event.detail.successful) error.textContent='Could not save the schedule. Please check the values and try again.';}});
+  if(draft){root.querySelector('[data-draft-schedule-enabled]').onchange=function(){field('schedule_enabled').value=String(this.checked);renderDraft();};}
+ })();
+ </script>
+}

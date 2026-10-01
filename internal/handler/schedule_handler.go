@@ -153,6 +153,20 @@ func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string)
 }
 
 func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID, taskLookupErrorLog string, taskLookupErrorsAsNotFound bool) error {
+	if c.QueryParam("from") == "task-panel" {
+		task, err := h.taskRepo.GetByID(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		schedules, err := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
+		if err != nil {
+			return err
+		}
+		return render(c, http.StatusOK, pages.TaskSchedulePanel(task, schedules))
+	}
 	err := h.renderTaskDetailContent(c, taskID, "schedules")
 	if err != nil {
 		if taskLookupErrorLog != "" {
@@ -491,6 +505,9 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 				projectID = task.ProjectID
 			}
 			return h.renderScheduleContentForProject(c, projectID)
+		}
+		if c.QueryParam("from") == "task-panel" {
+			return h.renderScheduleTaskDetail(c, task.ID, "", false)
 		}
 		return c.NoContent(http.StatusOK)
 	}

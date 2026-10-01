@@ -9163,3 +9163,20 @@ func TestHandler_NewTaskBacklogMessageDoesNotRun(t *testing.T) {
 	require.Equal(t, tasks[0].ID, rec.Header().Get("X-Created-Task-ID"))
 	require.Equal(t, "#main-content", rec.Header().Get("HX-Retarget"))
 }
+
+func TestHandler_NewTaskPausedDraftSchedule(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Paused draft schedule")
+	form := url.Values{"message": {"Backlog prompt"}, "category": {"backlog"}, "add_schedule": {"on"}, "run_at": {"2035-01-02T09:30"}, "repeat_type": {"minutes"}, "repeat_interval": {"30"}, "schedule_enabled": {"false"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	schedules, err := h.scheduleRepo.ListByTask(context.Background(), rec.Header().Get("X-Created-Task-ID"))
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	require.False(t, schedules[0].Enabled)
+	require.Equal(t, 30, schedules[0].RepeatInterval)
+}

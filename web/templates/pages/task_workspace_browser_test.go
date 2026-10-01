@@ -282,8 +282,10 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.waitFor("breadcrumb and panel toggle do not overlap", `(function(){var caret=document.getElementById('task-resource-selector-button').getBoundingClientRect(),toggle=document.getElementById('task-details-opener').getBoundingClientRect();return String(caret.right+8<=toggle.left)})()`, "true")
 
 		b.click(`[data-tab="schedules"]`)
-		b.click(`input[name="add_schedule"]`)
-		b.evaluate(`document.querySelector('input[name="run_at"]').value='2035-01-02T09:30'; document.querySelector('select[name="repeat_type"]').value='weekly'; 'configured'`)
+		b.click(`[aria-label="Add schedule"]`)
+		b.evaluate(`document.querySelector('dialog [name="run_at"]').value='2035-01-02T09:30'; document.querySelector('dialog select[name="repeat_type"]').value='weekly'; document.querySelector('dialog select[name="repeat_type"]').dispatchEvent(new Event('change')); 'configured'`)
+		b.click(`[data-schedule-save]`)
+		b.waitFor("pending schedule card", `String(!document.querySelector('[data-draft-schedule-card]').hidden && !document.querySelector('[data-schedule-editor]').open)`, "true")
 		b.click(`[data-tab="attachments"]`)
 		b.waitFor("draft attachments", `String(document.getElementById('new-task-files').getClientRects().length>0)`, "true")
 		b.click("#task-details-opener")
@@ -594,5 +596,89 @@ func TestBrowserFunctional_TaskPanelOpenPreferenceAcrossProjects(t *testing.T) {
 		navigate("/tasks/one?project_id=one", "false")
 		navigate("/tasks/two?project_id=two&tab=details", "true")
 		navigate("/tasks/one?project_id=one", "false")
+	})
+}
+
+func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	project := models.Project{ID: "schedule-project", Name: "Schedules"}
+	task := &models.Task{ID: "schedule-task", ProjectID: project.ID, Title: "Schedule task", Category: models.CategoryBacklog, Status: models.StatusPending}
+	var enabled, clear, removed atomic.Bool
+	enabled.Store(true)
+	clear.Store(true)
+	var interval atomic.Int32
+	interval.Store(30)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		if r.Method != http.MethodGet && !strings.HasPrefix(r.URL.Path, "/schedules/") && r.URL.Path != "/tasks/schedule-task/schedule" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPut {
+			interval.Store(45)
+			clear.Store(false)
+			if r.FormValue("repeat_interval") != "45" || r.FormValue("schedule_agent_definition_present") != "" {
+				t.Error("invalid schedule update")
+			}
+		}
+		if r.Method == http.MethodPost {
+			if r.URL.Path == "/tasks/schedule-task/schedule" {
+				removed.Store(false)
+				enabled.Store(true)
+			} else {
+				enabled.Store(!enabled.Load())
+			}
+		}
+		if r.Method == http.MethodDelete {
+			removed.Store(true)
+		}
+		schedules := []models.Schedule{{ID: "saved", TaskID: task.ID, RepeatType: models.RepeatMinutes, RepeatInterval: int(interval.Load()), Enabled: enabled.Load(), ClearContextOnStart: clear.Load(), RunAt: time.Date(2035, 1, 2, 9, 30, 0, 0, time.Local)}}
+		if removed.Load() {
+			schedules = nil
+		}
+		w.Header().Set("Content-Type", "text/html")
+		if r.Method != http.MethodGet {
+			_ = TaskSchedulePanel(task, schedules).Render(r.Context(), w)
+			return
+		}
+		if r.URL.Path == "/tasks/schedule-task" {
+			_ = TaskDetailPage([]models.Project{project}, task, nil, nil, schedules, nil, nil, nil, "schedules", nil).Render(r.Context(), w)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/schedule-task?tab=schedules", "schedule-modal", func(b *composerFocusCDP) {
+		b.waitFor("schedule card", `String(!!document.getElementById('schedule-card-saved'))`, "true")
+		b.click(`[data-schedule-open="task-schedule-saved"]`)
+		b.waitFor("schedule modal open", `String(document.getElementById('task-schedule-saved').open)`, "true")
+		b.evaluate(`document.querySelector('[data-schedule-editor] [name="repeat_interval"]').value='99'`)
+		b.click(`[data-schedule-cancel]`)
+		b.click(`[data-schedule-open="task-schedule-saved"]`)
+		b.waitFor("cancel discards edits", `document.querySelector('[data-schedule-editor] [name="repeat_interval"]').value`, "30")
+		b.evaluate(`document.querySelector('[data-schedule-editor] [name="repeat_interval"]').value='45'; document.querySelector('[data-schedule-editor] input[type="checkbox"]').checked=false; 'configured'`)
+		b.click(`[data-schedule-save]`)
+		b.waitFor("schedule saved", `String(document.getElementById('schedule-card-saved').textContent.includes('45') && document.getElementById('schedule-card-saved').textContent.includes('Continue previous context') && !document.querySelector('dialog[open]'))`, "true")
+		b.evaluate(`window.scheduleLayoutReady=false; requestAnimationFrame(function(){requestAnimationFrame(function(){window.scheduleLayoutReady=true;})}); 'waiting'`)
+		b.waitFor("schedule layout settled", `String(window.scheduleLayoutReady)`, "true")
+		b.click(`[aria-label="Schedule enabled"]`)
+		b.waitFor("schedule paused", `String(document.getElementById('schedule-card-saved').textContent.includes('Paused'))`, "true")
+		b.waitFor("schedule card ready after pause", `(function(){var b=document.querySelector('[data-schedule-open="task-schedule-saved"]'),r=b.getBoundingClientRect();return String(b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)))})()`, "true")
+		b.click(`[data-schedule-open="task-schedule-saved"]`)
+		b.evaluate(`window.confirm=function(message){window.scheduleDeleteConfirmed=message; return true;}; 'ready'`)
+		b.waitFor("schedule delete ready", `(function(){var b=document.querySelector('[data-schedule-editor] [hx-delete]'),r=b.getBoundingClientRect();return String(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)===b)})()`, "true")
+		b.click(`[data-schedule-editor] [hx-delete]`)
+		b.waitFor("empty schedule restored", `JSON.stringify({add:!!document.querySelector('[aria-label="Add schedule"]'),card:!!document.getElementById('schedule-card-saved'),root:!!document.getElementById('task-schedule-panel')})`, `{"add":true,"card":false,"root":true}`)
+		b.waitFor("delete confirmation requested", `window.scheduleDeleteConfirmed`, "Delete this schedule?")
+		b.evaluate(`window.scheduleThread=document.getElementById('tab-chat'); 'retained'`)
+		b.click(`[aria-label="Add schedule"]`)
+		b.waitFor("once hides interval", `String(document.querySelector('[data-schedule-interval]').hidden)`, "true")
+		b.evaluate(`document.querySelector('[data-schedule-editor] [name="run_at"]').value='2035-01-02T09:30'; 'configured'`)
+		b.click(`[data-schedule-save]`)
+		b.waitFor("schedule added again", `String(!!document.getElementById('schedule-card-saved') && !document.querySelector('[aria-label="Add schedule"]'))`, "true")
+		b.waitFor("thread stays mounted", `String(window.scheduleThread===document.getElementById('tab-chat') && window.scheduleThread.isConnected)`, "true")
+
 	})
 }
