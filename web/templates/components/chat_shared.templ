@@ -4565,6 +4565,7 @@ templ ChatAutoScrollScript() {
 				var terminalStatus = terminalStatuses[authoritativeStatus] ? authoritativeStatus : (terminalStatuses[currentStatus] ? currentStatus : 'completed');
 				pair.setAttribute('data-exec-status', terminalStatus);
 				pair.setAttribute('hx-preserve', 'true');
+				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(pair);
 				return terminalStatus;
 			};
 		// Generate a stable key for a container to persist thinking and tool-row
@@ -5652,6 +5653,7 @@ templ ChatAutoScrollScript() {
 				container.classList.remove('whitespace-pre-wrap');
 				window.setChatRawContent(container, textBuffer);
 				container.replaceChildren(renderFragment);
+				if (window.renderMermaidDiagrams) window.renderMermaidDiagrams(container);
 
 			// Restore open state of thinking sections from before re-render
 			if (prevThinkingStates.length > 0) {
@@ -6118,7 +6120,9 @@ templ ChatAutoScrollScript() {
 				});
 				return Promise.all(renderPromises.map(function(promise) {
 					return Promise.resolve(promise).catch(function() { return false; });
-				}));
+				})).then(function(results) {
+					return window.renderMermaidDiagrams ? window.renderMermaidDiagrams(container).then(function() { return results; }) : results;
+				});
 			};
 	</script>
 }

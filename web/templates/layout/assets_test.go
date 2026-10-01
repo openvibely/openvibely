@@ -28,7 +28,7 @@ func TestBaseLoadsOnlyFirstPartyAssets(t *testing.T) {
 	if m := external.FindString(html); m != "" {
 		t.Errorf("base layout loads an external asset: %s", m)
 	}
-	for _, asset := range []string{"app.css", "app-utilities.css", "vendor/htmx.min.js", "vendor/idiomorph-ext.min.js", "vendor/marked.min.js", "vendor/highlight.min.js", "vendor/highlight-github-dark.min.css", "vendor/chart.umd.min.js"} {
+	for _, asset := range []string{"app.css", "app-utilities.css", "vendor/htmx.min.js", "vendor/idiomorph-ext.min.js", "vendor/marked.min.js", "vendor/mermaid.min.js", "vendor/highlight.min.js", "vendor/highlight-github-dark.min.css", "vendor/chart.umd.min.js"} {
 		if !strings.Contains(html, static.URL(asset)) {
 			t.Errorf("base layout does not reference %s", static.URL(asset))
 		}
