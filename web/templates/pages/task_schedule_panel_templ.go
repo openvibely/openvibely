@@ -61,7 +61,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 			return templ_7745c5c3_Err
 		}
 		if len(schedules) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<button type=\"button\" class=\"btn btn-ghost btn-sm\" aria-label=\"Add schedule\" data-schedule-open=\"task-schedule-new\">+</button>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<button type=\"button\" class=\"btn btn-ghost btn-xs\" aria-label=\"Add schedule\" data-schedule-open=\"task-schedule-new\">+</button>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -76,7 +76,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 				return templ_7745c5c3_Err
 			}
 			if task.ID == "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div data-draft-schedule-card hidden class=\"rounded-lg bg-base-200 p-4\"><button type=\"button\" class=\"text-left w-full\" data-schedule-open=\"task-schedule-new\"><span class=\"flex justify-between\"><strong data-draft-schedule-title></strong><span aria-hidden=\"true\">›</span></span><span class=\"block text-sm opacity-60\" data-draft-schedule-time></span><span class=\"block text-sm opacity-60\" data-draft-schedule-context></span></button> <label class=\"label cursor-pointer mt-2\"><span class=\"label-text\">Enabled</span><input type=\"checkbox\" class=\"toggle toggle-sm\" data-draft-schedule-enabled checked></label><p class=\"text-xs opacity-60 mt-2\">Saved when you create the task.</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div data-draft-schedule-card hidden class=\"rounded-lg bg-base-200 p-4\"><button type=\"button\" class=\"text-left w-full\" data-schedule-open=\"task-schedule-new\"><span class=\"flex justify-between\"><span class=\"text-sm font-semibold\" data-draft-schedule-title></span><span aria-hidden=\"true\">›</span></span><span class=\"block text-sm opacity-60\" data-draft-schedule-time></span><span class=\"block text-sm opacity-60\" data-draft-schedule-context></span></button> <label class=\"label cursor-pointer justify-start gap-2 mt-2\"><input type=\"checkbox\" class=\"toggle toggle-sm toggle-primary shrink-0\" data-draft-schedule-enabled checked><span class=\"label-text\">Enabled</span></label><p class=\"text-xs opacity-60 mt-2\">Saved when you create the task.</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -175,20 +175,20 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"><span class=\"flex justify-between gap-2\"><strong class=\"text-sm\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\"><span class=\"flex justify-between gap-2\"><span class=\"text-sm font-semibold\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(taskPanelScheduleLabel(s))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 40, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_schedule_panel.templ`, Line: 40, Col: 109}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</strong><span aria-hidden=\"true\">›</span></span> <span class=\"block text-sm opacity-60 mt-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span><span aria-hidden=\"true\">›</span></span> <span class=\"block text-sm opacity-60 mt-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -245,7 +245,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-target=\"#task-schedule-panel\" hx-swap=\"outerHTML settle:0\"><label class=\"label cursor-pointer mt-2\"><span class=\"label-text\">Enabled</span><input type=\"checkbox\" class=\"toggle toggle-sm\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-target=\"#task-schedule-panel\" hx-swap=\"outerHTML settle:0\"><label class=\"label cursor-pointer justify-start gap-2 mt-2\"><input type=\"checkbox\" class=\"toggle toggle-sm toggle-primary shrink-0\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -255,7 +255,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " aria-label=\"Schedule enabled\" onchange=\"if(event.isTrusted && !this.form.classList.contains('htmx-request')) this.form.requestSubmit()\"></label><p role=\"alert\" data-schedule-error class=\"text-error text-sm\"></p></form></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " aria-label=\"Schedule enabled\" onchange=\"if(event.isTrusted && !this.form.classList.contains('htmx-request')) this.form.requestSubmit()\"><span class=\"label-text\">Enabled</span></label><p role=\"alert\" data-schedule-error class=\"text-error text-sm\"></p></form></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -488,7 +488,7 @@ func TaskScheduleEditor(task *models.Task, s models.Schedule, id string) templ.C
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" min=\"1\" max=\"365\" step=\"1\" class=\"input input-bordered input-sm w-20\"><span class=\"text-sm opacity-60\" data-schedule-unit></span></span></label> <input type=\"hidden\" name=\"clear_context_on_start\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" name=\"clear_context_on_start\" value=\"true\" class=\"toggle toggle-sm\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" min=\"1\" max=\"365\" step=\"1\" class=\"input input-bordered input-sm w-20\"><span class=\"text-sm opacity-60\" data-schedule-unit></span></span></label> <input type=\"hidden\" name=\"clear_context_on_start\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" name=\"clear_context_on_start\" value=\"true\" class=\"toggle toggle-sm toggle-primary shrink-0\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

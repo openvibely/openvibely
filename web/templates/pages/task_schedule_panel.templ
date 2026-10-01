@@ -17,15 +17,15 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
   <div class="flex items-center justify-between mb-4">
    <h3 class="text-sm font-semibold">Schedule</h3>
    if len(schedules) == 0 {
-    <button type="button" class="btn btn-ghost btn-sm" aria-label="Add schedule" data-schedule-open="task-schedule-new">+</button>
+    <button type="button" class="btn btn-ghost btn-xs" aria-label="Add schedule" data-schedule-open="task-schedule-new">+</button>
    }
   </div>
   if len(schedules) == 0 {
    <p class="text-sm opacity-60" data-schedule-empty>No schedule configured.</p>
    if task.ID == "" {
     <div data-draft-schedule-card hidden class="rounded-lg bg-base-200 p-4">
-     <button type="button" class="text-left w-full" data-schedule-open="task-schedule-new"><span class="flex justify-between"><strong data-draft-schedule-title></strong><span aria-hidden="true">›</span></span><span class="block text-sm opacity-60" data-draft-schedule-time></span><span class="block text-sm opacity-60" data-draft-schedule-context></span></button>
-     <label class="label cursor-pointer mt-2"><span class="label-text">Enabled</span><input type="checkbox" class="toggle toggle-sm" data-draft-schedule-enabled checked/></label>
+     <button type="button" class="text-left w-full" data-schedule-open="task-schedule-new"><span class="flex justify-between"><span class="text-sm font-semibold" data-draft-schedule-title></span><span aria-hidden="true">›</span></span><span class="block text-sm opacity-60" data-draft-schedule-time></span><span class="block text-sm opacity-60" data-draft-schedule-context></span></button>
+     <label class="label cursor-pointer justify-start gap-2 mt-2"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" data-draft-schedule-enabled checked/><span class="label-text">Enabled</span></label>
      <p class="text-xs opacity-60 mt-2">Saved when you create the task.</p>
     </div>
     for _, field := range []struct{Name, Value string}{{"add_schedule",""},{"run_at",""},{"repeat_type","once"},{"repeat_interval","1"},{"clear_context_on_start","true"},{"schedule_enabled","true"}} {
@@ -37,7 +37,7 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
   for _, s := range schedules {
    <div class="rounded-lg bg-base-200 p-4 mb-3" id={ "schedule-card-" + s.ID } data-schedule-next-run={ exactTaskScheduleNextRun(s) }>
     <button type="button" class="text-left w-full" data-schedule-open={ "task-schedule-" + s.ID }>
-     <span class="flex justify-between gap-2"><strong class="text-sm">{ taskPanelScheduleLabel(s) }</strong><span aria-hidden="true">›</span></span>
+     <span class="flex justify-between gap-2"><span class="text-sm font-semibold">{ taskPanelScheduleLabel(s) }</span><span aria-hidden="true">›</span></span>
      <span class="block text-sm opacity-60 mt-1">
       if !s.Enabled {
  Paused
@@ -56,7 +56,7 @@ if s.ClearContextOnStart {
 </span>
     </button>
     <form method="post" hx-post={ fmt.Sprintf("/schedules/%s/toggle?project_id=%s&from=task-panel", s.ID, task.ProjectID) } hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0">
-     <label class="label cursor-pointer mt-2"><span class="label-text">Enabled</span><input type="checkbox" class="toggle toggle-sm" checked?={ s.Enabled } aria-label="Schedule enabled" onchange="if(event.isTrusted && !this.form.classList.contains('htmx-request')) this.form.requestSubmit()"/></label>
+     <label class="label cursor-pointer justify-start gap-2 mt-2"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" checked?={ s.Enabled } aria-label="Schedule enabled" onchange="if(event.isTrusted && !this.form.classList.contains('htmx-request')) this.form.requestSubmit()"/><span class="label-text">Enabled</span></label>
      <p role="alert" data-schedule-error class="text-error text-sm"></p>
     </form>
    </div>
@@ -97,7 +97,7 @@ if s.ID == "" {
     </select></label>
     <label class="form-control mb-4" data-schedule-interval><span class="label">Repeat every</span><span class="flex items-center gap-2"><input type="number" name="repeat_interval" value={ fmt.Sprint(s.RepeatInterval) } min="1" max="365" step="1" class="input input-bordered input-sm w-20"/><span class="text-sm opacity-60" data-schedule-unit></span></span></label>
     <input type="hidden" name="clear_context_on_start" value="false"/>
-    <label class="label cursor-pointer justify-start gap-3"><input type="checkbox" name="clear_context_on_start" value="true" class="toggle toggle-sm" checked?={ s.ClearContextOnStart }/><span class="label-text">Clear context on start</span></label>
+    <label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_context_on_start" value="true" class="toggle toggle-sm toggle-primary shrink-0" checked?={ s.ClearContextOnStart }/><span class="label-text">Clear context on start</span></label>
     <p class="text-xs opacity-60 mb-4">Start each scheduled run without prior model conversation context.</p>
     <p role="alert" data-schedule-error class="text-error text-sm"></p>
     <div class="flex items-center gap-2 mt-4">
