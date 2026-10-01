@@ -125,7 +125,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					mu.Lock()
 					selected = "p01"
 					mu.Unlock()
-					browser.call("Page.reload", map[string]any{}, nil)
+					browser.reload()
 					browser.waitFor("independent web tab", `document.readyState === 'complete' ? document.getElementById('project-selector').value : ''`, "p00")
 					browser.call("Target.closeTarget", map[string]any{"targetId": target.ID}, nil)
 					return
@@ -307,7 +307,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.click(`[data-project-tab="p00"]`)
 				browser.waitFor("project A unaffected by B filters", `location.pathname+location.search`, "/schedule?project_id=p00")
 				browser.evaluate(`String(window.beforeProjectTabsReload = true)`)
-				browser.call("Page.reload", map[string]any{}, nil)
+				browser.reload()
 				browser.waitFor("navigation session reload", `String(!window.beforeProjectTabsReload && typeof window.openVibelyProjectTabsSync === 'function')`, "true")
 				browser.click(`[data-project-tab="p01"]`)
 				browser.waitFor("project B route survives reload", `location.pathname+location.search+location.hash`, "/tasks?project_id=p01&view=board#keep")
