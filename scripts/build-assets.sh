@@ -32,6 +32,8 @@ DAISYUI_VERSION=4.12.14
 FILES=(
   "vendor/htmx.min.js|https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js|e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447"
   "vendor/idiomorph-ext.min.js|https://cdn.jsdelivr.net/npm/idiomorph@0.3.0/dist/idiomorph-ext.min.js|763ad5ebd0963ea9436cb480f303fc4b7e543c37c649925f032c568b4dbab7e6"
+  "vendor/mermaid.min.js|https://cdn.jsdelivr.net/npm/mermaid@11.17.0/dist/mermaid.min.js|8d8e0eec56d3a83b4b3c87f42050845546dee93ebe1875d2117c12e6947c0cb3"
+  "vendor/mermaid.LICENSE|https://cdn.jsdelivr.net/npm/mermaid@11.17.0/LICENSE|ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80"
   "vendor/marked.min.js|https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js|74c9f2e02c180c3e6caa09881a0b24032c86473af90acb1c87b6dc7255d491dd"
   "vendor/highlight.min.js|https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/highlight.min.js|c4a399dd6f488bc97a3546e3476747b3e714c99c57b9473154c6fb8d259b9381"
   "vendor/highlight-github-dark.min.css|https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.11.1/styles/github-dark.min.css|9f208d022102b1d0c7aebfecd8e42ca7997d5de636649d2b31ea63093d809019"

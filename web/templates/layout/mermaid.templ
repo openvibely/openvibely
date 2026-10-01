@@ -1,0 +1,89 @@
+package layout
+
+// MermaidDiagrams enhances completed Markdown without changing the HTML sanitizer.
+templ MermaidDiagrams() {
+ <style>
+ .chat-mermaid { display:block; margin:1em 0; }
+ .chat-mermaid img { display:block; max-width:100%; max-height:480px; background:white; border-radius:8px; }
+ </style>
+ <script>
+ (() => {
+  if (window.renderMermaidDiagrams) return;
+  let library, serial=0, queue=Promise.resolve();
+  const terminal=new Set(['completed','failed','cancelled']);
+  function eligible(code) {
+   const pair=code.closest('[data-execution-pair="true"]');
+   return code.isConnected && pair && terminal.has(pair.getAttribute('data-exec-status')) &&
+    !!code.closest('.chat-bubble-assistant-msg') && !code.closest('.stream-tool');
+  }
+  function loadLibrary() {
+   if (!library) library=new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src=document.querySelector('meta[name="ov-asset-mermaid"]').content;
+    script.onload=()=>{
+     try {
+      const mermaid=window.mermaid;
+      mermaid.initialize({startOnLoad:false, securityLevel:'strict', suppressErrorRendering:true,
+       maxTextSize:50000, maxEdges:500, htmlLabels:false, flowchart:{htmlLabels:false},
+       // Lock every configuration key against frontmatter and init directives.
+       secure:Array.from(new Set(['secure', 'htmlLabels', 'dompurifyConfig', ...Object.keys(mermaid.mermaidAPI.defaultConfig)]))});
+      resolve(mermaid);
+     } catch (error) { reject(error); }
+    };
+    script.onerror=()=>reject(new Error('Mermaid asset unavailable'));
+    document.head.appendChild(script);
+   });
+   return library;
+  }
+  window.renderMermaidDiagrams=function(root) {
+   if (!root || !root.querySelectorAll) return Promise.resolve();
+   const pending=[];
+   root.querySelectorAll('pre > code.language-mermaid').forEach(code=>{
+    if (!eligible(code)) return;
+    if (code._mermaidRender) { pending.push(code._mermaidRender); return; }
+    const source=code.textContent;
+    const render=async()=>{
+     if (!eligible(code) || code.textContent!==source || source.length>50000) return;
+     let host;
+     try {
+      const mermaid=await loadLibrary();
+      if (!eligible(code) || code.textContent!==source) return;
+      // Keep Mermaid's temporary DOM separate from the message, including on errors.
+      host=document.createElement('div');
+      host.style.cssText='position:absolute;left:-100000px;top:0;visibility:hidden;';
+      document.body.appendChild(host);
+      const result=await mermaid.render('ov-mermaid-'+(++serial),source,host);
+      if (!eligible(code) || code.textContent!==source) return;
+      const image=document.createElement('img');
+      image.alt='Mermaid diagram';
+      // A self-contained image URL survives HTMX history restoration and needs no
+      // object-URL registry. Never insert generated SVG into the message's DOM.
+      const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(result.svg);
+      image.src=url;
+      await image.decode();
+      if (!eligible(code) || code.textContent!==source) return;
+      const link=document.createElement('a');
+      link.className='chat-mermaid';
+      link.href=url;
+      link.dataset.imageGalleryItem='';
+      link.dataset.imageName='diagram-'+serial+'.svg';
+      link.setAttribute('aria-label','Preview Mermaid diagram');
+      link.appendChild(image);
+      const markdown=code.closest('.chat-markdown') || code.parentElement.parentElement;
+      markdown.setAttribute('data-image-gallery-group','');
+      code.parentElement.replaceWith(link);
+     } catch (_) {
+      // Invalid or incomplete syntax stays as readable, copyable source.
+     } finally {
+      if (host) host.remove();
+     }
+    };
+    code._mermaidRender=queue.then(render);
+    queue=code._mermaidRender.catch(()=>{});
+    pending.push(code._mermaidRender);
+   });
+   return Promise.all(pending);
+  };
+ })();
+ </script>
+}

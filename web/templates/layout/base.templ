@@ -163,6 +163,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<link href={ static.URL("app.css") } rel="stylesheet" type="text/css"/>
 			<script src={ static.URL("vendor/htmx.min.js") }></script>
 			<script src={ static.URL("vendor/idiomorph-ext.min.js") }></script>
+			<meta name="ov-asset-mermaid" content={ static.URL("vendor/mermaid.min.js") }/>
+			@MermaidDiagrams()
 			<!-- Markdown rendering for chat/thread messages -->
 			<script src={ static.URL("vendor/marked.min.js") } data-ov-asset="marked"></script>
 			<link rel="stylesheet" href={ static.URL("vendor/highlight-github-dark.min.css") }/>
