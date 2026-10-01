@@ -32,6 +32,23 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"session_id": "01234567890123456789012345678901", "attachments": []map[string]any{{"filename": "draft.svg", "size": 100, "media_type": "image/svg+xml", "session_id": "01234567890123456789012345678901"}}})
 			return
 		}
+		if r.URL.Path == "/tasks" && r.Method == http.MethodPost {
+			_ = r.ParseForm()
+			if r.FormValue("attachment_session_id") != "01234567890123456789012345678901" {
+				http.Error(w, "missing uploads", 400)
+				return
+			}
+			w.Header().Set("HX-Retarget", "#main-content")
+			w.Header().Set("HX-Reswap", "innerHTML")
+			w.Header().Set("X-Created-Task-ID", "created")
+			task := &models.Task{ID: "created", ProjectID: project.ID, Title: "Created with image", Status: models.StatusPending, Category: models.CategoryActive}
+			_ = TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "attachments", nil).Render(r.Context(), w)
+			return
+		}
+		if r.URL.Path == "/tasks/created/attachments" {
+			_ = components.AttachmentListOnly(nil, project.ID, []models.ChatAttachment{{ID: "sent", FileName: "draft.svg", MediaType: "image/svg+xml"}}).Render(r.Context(), w)
+			return
+		}
 		if r.URL.Path == "/new" {
 			_ = NewTask([]models.Project{project}, &project, nil, nil).Render(r.Context(), w)
 			return
@@ -56,7 +73,8 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
 		b.waitFor("next image", `document.querySelector('[data-gallery-name]').textContent`, "two.svg")
 		b.click(`[data-gallery-plus]`)
-		b.waitFor("zoom", `document.querySelector('[data-gallery-fit]').textContent`, "150%")
+		b.waitFor("icon toolbar", `String(document.querySelectorAll('.image-gallery-tools svg').length===4 && document.querySelector('.image-gallery-tools').textContent.trim()==='')`, "true")
+		b.waitFor("zoom", `document.querySelector('[data-gallery-fit]').title`, "Fit image (150%)")
 		var point struct {
 			X float64 `json:"x"`
 			Y float64 `json:"y"`
@@ -96,8 +114,15 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.call("Page.reload", map[string]any{}, nil)
 		b.waitFor("new document ready", `String(!window.beforeGalleryReload && document.readyState === "complete" && !!window.imageGallery)`, "true")
 		b.waitFor("pending preview survives reload", `String(!!document.querySelector('#draft-panel-attachments [data-image-gallery-item]') && document.querySelector('#draft-panel-attachments img').complete)`, "true")
+		b.click("#task-message-input")
+		b.typeText("Send the image")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13}, nil)
+		b.waitFor("sent image remains in saved panel", `String(!!document.querySelector('#attachment-list [data-image-name="draft.svg"]') && !document.getElementById('draft-panel-attachments'))`, "true")
+		b.click("#attachment-list [data-image-gallery-item]")
+		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
+		b.click("[data-gallery-close]")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 700, "deviceScaleFactor": 1, "mobile": true}, nil)
-		b.click(`#draft-panel-attachments [data-image-gallery-item]`)
+		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("mobile fits viewport", `String(document.getElementById('image-gallery').getBoundingClientRect().right<=innerWidth && document.getElementById('image-gallery').getBoundingClientRect().bottom<=innerHeight)`, "true")
 	})
 }

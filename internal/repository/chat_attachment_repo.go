@@ -117,6 +117,41 @@ func (r *ChatAttachmentRepo) ListByExecution(ctx context.Context, executionID st
 	return attachments, nil
 }
 
+func (r *ChatAttachmentRepo) ListByTask(ctx context.Context, taskID string) ([]models.ChatAttachment, error) {
+	query := `
+		SELECT id, execution_id, file_name, file_path, media_type, file_size, created_at
+		FROM chat_attachments
+		WHERE execution_id IN (SELECT id FROM executions WHERE task_id = ?)
+		ORDER BY created_at ASC
+	`
+	rows, err := r.db.QueryContext(ctx, query, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat attachments: %w", err)
+	}
+	defer rows.Close()
+
+	var attachments []models.ChatAttachment
+	for rows.Next() {
+		var att models.ChatAttachment
+		if err := rows.Scan(
+			&att.ID,
+			&att.ExecutionID,
+			&att.FileName,
+			&att.FilePath,
+			&att.MediaType,
+			&att.FileSize,
+			&att.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning chat attachment: %w", err)
+		}
+		attachments = append(attachments, att)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating chat attachments: %w", err)
+	}
+	return attachments, nil
+}
+
 func (r *ChatAttachmentRepo) ListByExecutionIDs(ctx context.Context, execIDs []string) (map[string][]models.ChatAttachment, error) {
 	if len(execIDs) == 0 {
 		return map[string][]models.ChatAttachment{}, nil

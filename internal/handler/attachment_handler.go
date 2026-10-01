@@ -340,10 +340,26 @@ func (h *Handler) UploadAttachment(c echo.Context) error {
 	return h.renderTaskAttachmentList(c, taskID, task.ProjectID)
 }
 
+// GetTaskAttachments includes files sent in this task's messages without changing ownership.
+func (h *Handler) GetTaskAttachments(c echo.Context) error {
+	task, err := h.taskSvc.GetByID(c.Request().Context(), c.Param("taskId"))
+	if err != nil || task == nil || (h.mutationProjectID(c) != "" && task.ProjectID != h.mutationProjectID(c)) {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	return h.renderTaskAttachmentList(c, task.ID, task.ProjectID)
+}
+
 func (h *Handler) renderTaskAttachmentList(c echo.Context, taskID, projectID string) error {
 	// Return updated attachments list
-	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, projectID))
+	attachments, err := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	messages, err := h.chatAttachmentRepo.ListByTask(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, projectID, messages))
 }
 
 type taskAttachmentUploadResult struct {
