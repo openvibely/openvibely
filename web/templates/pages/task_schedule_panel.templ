@@ -15,10 +15,10 @@ func taskPanelScheduleLabel(s models.Schedule) string {
 templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
  <div id="task-schedule-panel" data-task-schedule-panel data-draft={ fmt.Sprint(task.ID == "") }>
   <style>
-   .task-schedule-edit { text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
+   .task-schedule-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
    .task-schedule-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
   </style>
-  <div class="flex items-center justify-between mb-4">
+  <div class="flex items-center justify-between mb-3" style="height:20px">
    <h3 class="text-sm font-semibold">Schedule</h3>
    if len(schedules) == 0 {
     <button type="button" class="btn btn-ghost btn-xs" aria-label="Add schedule" data-schedule-open="task-schedule-new">+</button>
@@ -27,8 +27,8 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
   if len(schedules) == 0 {
    <p class="text-sm opacity-60" data-schedule-empty>No schedule configured.</p>
    if task.ID == "" {
-    <div data-draft-schedule-card hidden class="rounded-lg bg-base-200 p-4">
-     <button type="button" class="task-schedule-edit" data-schedule-open="task-schedule-new"><span class="flex justify-between"><span class="text-sm font-semibold" data-draft-schedule-title></span><span aria-hidden="true">›</span></span><span class="block text-sm opacity-60" data-draft-schedule-time></span><span class="block text-sm opacity-60" data-draft-schedule-context></span></button>
+    <div data-draft-schedule-card hidden class="min-w-0">
+     <button type="button" class="task-schedule-edit" data-schedule-open="task-schedule-new"><span><span class="block text-sm font-semibold" data-draft-schedule-title></span><span class="block text-sm opacity-60" data-draft-schedule-time></span><span class="block text-sm opacity-60" data-draft-schedule-context></span></span><span aria-hidden="true">›</span></button>
      <label class="label cursor-pointer justify-start gap-2 mt-2"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" data-draft-schedule-enabled checked/><span class="label-text">Enabled</span></label>
      <p class="text-xs opacity-60 mt-2">Saved when you create the task.</p>
     </div>
@@ -39,9 +39,9 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
    @TaskScheduleEditor(task, models.Schedule{RepeatType:models.RepeatOnce, RepeatInterval:1, ClearContextOnStart:true}, "task-schedule-new")
   }
   for _, s := range schedules {
-   <div class="rounded-lg bg-base-200 p-4 mb-3" id={ "schedule-card-" + s.ID } data-schedule-next-run={ exactTaskScheduleNextRun(s) }>
+   <div class="min-w-0 mb-3" id={ "schedule-card-" + s.ID } data-schedule-next-run={ exactTaskScheduleNextRun(s) }>
     <button type="button" class="task-schedule-edit" data-schedule-open={ "task-schedule-" + s.ID }>
-     <span class="flex justify-between gap-2"><span class="text-sm font-semibold">{ taskPanelScheduleLabel(s) }</span><span aria-hidden="true">›</span></span>
+     <span><span class="block text-sm font-semibold">{ taskPanelScheduleLabel(s) }</span>
      <span class="block text-sm opacity-60 mt-1">
       if !s.Enabled {
  Paused
@@ -57,7 +57,7 @@ if s.ClearContextOnStart {
 } else {
  Continue previous context
 }
-</span>
+</span></span><span aria-hidden="true">›</span>
     </button>
     <form method="post" hx-post={ fmt.Sprintf("/schedules/%s/toggle?project_id=%s&from=task-panel", s.ID, task.ProjectID) } hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0">
      <label class="label cursor-pointer justify-start gap-2 mt-2"><input type="checkbox" class="toggle toggle-sm toggle-primary shrink-0" checked?={ s.Enabled } aria-label="Schedule enabled" onchange="if(event.isTrusted && !this.form.classList.contains('htmx-request')) this.form.requestSubmit()"/><span class="label-text">Enabled</span></label>
@@ -106,7 +106,7 @@ if s.ID == "" {
     <p role="alert" data-schedule-error class="text-error text-sm"></p>
     <div class="flex items-center gap-2 mt-4">
      if s.ID != "" {
-      <button type="button" class="btn btn-sm btn-outline btn-error" hx-delete={ fmt.Sprintf("/schedules/%s?project_id=%s&from=task-panel", s.ID, task.ProjectID) } hx-confirm="Delete this schedule?" hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0">Delete schedule</button>
+      <button type="button" class="btn btn-sm btn-outline btn-error" hx-delete={ fmt.Sprintf("/schedules/%s?project_id=%s&from=task-panel", s.ID, task.ProjectID) } data-schedule-delete hx-trigger="schedule-delete-confirmed" onclick={ templ.ComponentScript{Call: "window.openDestructiveConfirmDialog('" + id + "-delete', '', '')"} } hx-target="#task-schedule-panel" hx-swap="outerHTML settle:0">Delete schedule</button>
      } else if task.ID == "" {
       <button type="button" class="btn btn-sm btn-outline btn-error" data-draft-schedule-remove hidden>Remove schedule</button>
      }
@@ -123,6 +123,11 @@ if s.ID == "" {
   </div>
   <form method="dialog" class="modal-backdrop"><button aria-label="Close schedule editor">close</button></form>
  </dialog>
+ if s.ID != "" {
+  @DestructiveConfirmDialog(id + "-delete", "Close delete schedule confirmation", "Delete Schedule", "Are you sure you want to delete the schedule for ", "", task.Title, "? This action cannot be undone.", templ.ComponentScript{Call:"this.closest('dialog').close()"}, templ.ComponentScript{Call:"this.closest('dialog').dispatchEvent(new Event('confirm-schedule-delete'))"}) {
+   <p>The task and its conversation will be kept. Future scheduled runs will be removed.</p>
+  }
+ }
 }
 
 templ TaskSchedulePanelScript() {
@@ -144,6 +149,11 @@ templ TaskSchedulePanelScript() {
   }
   root.querySelectorAll('[data-schedule-editor]').forEach(function(dialog){
    var form=dialog.querySelector('[data-schedule-editor-form]');
+   var confirmation=document.getElementById(dialog.id+'-delete');
+   if(confirmation) confirmation.addEventListener('confirm-schedule-delete',function(){
+    confirmation.__openVibelyDestructiveTrigger=null; confirmation.close();
+    htmx.trigger(form.querySelector('[data-schedule-delete]'),'schedule-delete-confirmed');
+   });
    function interval(){var type=form.elements.repeat_type.value; var input=form.elements.repeat_interval; form.querySelector('[data-schedule-interval]').hidden=type==='once'; input.disabled=type==='once'; input.required=type!=='once'; form.querySelector('[data-schedule-unit]').textContent=({seconds:'second(s)',minutes:'minute(s)',hours:'hour(s)',daily:'day(s)',weekly:'week(s)',monthly:'month(s)'})[type]||'';}
    var runAt=form.elements.run_at;
    var originalRunAt=runAt.defaultValue;
