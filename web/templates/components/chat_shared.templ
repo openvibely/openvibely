@@ -2113,16 +2113,25 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							function isShortcutModifierKey(event) {
 								return usesAppleShortcuts ? event.key === 'Meta' : event.key === 'Control';
 							}
-							document.addEventListener('keydown', function(event) {
-								if (!isShortcutModifierKey(event)) return;
-								shortcutModifierHeld = true;
-								updatePrimaryActionModifierVisual();
-							});
-							document.addEventListener('keyup', function(event) {
-								if (!isShortcutModifierKey(event)) return;
-								consumeShortcutModifierVisual();
-							});
-							window.addEventListener('blur', consumeShortcutModifierVisual);
+                            // Dispose global modifier listeners when this composer is replaced.
+                            if (form._modifierAbort) form._modifierAbort.abort();
+                            var modifierAbort = new AbortController();
+                            form._modifierAbort = modifierAbort;
+                            var modifierObserver = new MutationObserver(function() {
+                                if (!form.isConnected) modifierAbort.abort();
+                            });
+                            modifierObserver.observe(document.body, {childList: true, subtree: true});
+                            modifierAbort.signal.addEventListener('abort', function() { modifierObserver.disconnect(); }, {once: true});
+                            document.addEventListener('keydown', function(event) {
+                                if (!form.isConnected || !isShortcutModifierKey(event)) return;
+                                shortcutModifierHeld = true;
+                                updatePrimaryActionModifierVisual();
+                            }, {signal: modifierAbort.signal});
+                            document.addEventListener('keyup', function(event) {
+                                if (!form.isConnected || !isShortcutModifierKey(event)) return;
+                                consumeShortcutModifierVisual();
+                            }, {signal: modifierAbort.signal});
+                            window.addEventListener('blur', consumeShortcutModifierVisual, {signal: modifierAbort.signal});
 						function safeSubmit() {
 							var submitBtn = currentSubmitButton();
 									if (typeof form.requestSubmit === 'function') {

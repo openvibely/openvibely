@@ -164,7 +164,7 @@ templ TaskWorkspaceScript() {
 		var breadcrumbButton = breadcrumb && breadcrumb.querySelector('[data-breadcrumb-selector-button]');
 		var apple = /Mac|iPhone|iPad/.test(navigator.platform);
 		opener.title = 'Toggle task details (' + (apple ? '⌘⇧B' : 'Ctrl+Shift+B') + ')';
-		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: Alt+↑/↓; last visited: Alt+L';
+		if (breadcrumbButton) breadcrumbButton.title = 'Switch task (' + (apple ? '⌘K' : 'Ctrl+K') + '); previous/next: ' + (apple ? 'Option' : 'Alt') + '+↑/↓; last visited: ' + (apple ? 'Option' : 'Alt') + '+L';
 		function navigateTask(url, cycling) {
 			var destination = new URL(url, location.href);
 			if (destination.origin !== location.origin) return;
@@ -286,7 +286,7 @@ templ TaskWorkspaceScript() {
 		});
 		on(panel, 'keydown', function(event) {
 			var tab = event.target.closest('[role="tab"]');
-			if (tab && ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) >= 0) {
+			if (tab && !event.defaultPrevented && !event.isComposing && !event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && ['ArrowLeft','ArrowRight','Home','End'].indexOf(event.key) >= 0) {
 				event.preventDefault();
 				var index = tabNames.indexOf(selected);
 				index = event.key === 'Home' ? 0 : event.key === 'End' ? 4 : (index + (event.key === 'ArrowRight' ? 1 : 4)) % 5;

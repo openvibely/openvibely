@@ -79,7 +79,7 @@ templ ImageGallery() {
   dialog.addEventListener('click',e=>{if(e.target===dialog)close();});
   q('close').onclick=close;q('prev').onclick=()=>show(index-1);q('next').onclick=()=>show(index+1);
   q('minus').onclick=()=>zoom(scale/1.5);q('plus').onclick=()=>zoom(scale*1.5);q('fit').onclick=()=>{x=0;y=0;zoom(1);};
-  dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}if(['ArrowLeft','ArrowRight','+','=','-','0'].includes(e.key)){e.preventDefault();e.stopPropagation();if(e.key==='ArrowLeft')show(index-1);else if(e.key==='ArrowRight')show(index+1);else if(e.key==='-')zoom(scale/1.5);else if(e.key==='0')zoom(1);else zoom(scale*1.5);}});
+  dialog.addEventListener('keydown',e=>{if(e.defaultPrevented||e.isComposing||e.altKey||e.metaKey||e.ctrlKey)return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}if(['ArrowLeft','ArrowRight','+','=','-','0'].includes(e.key)){e.preventDefault();e.stopPropagation();if(e.key==='ArrowLeft')show(index-1);else if(e.key==='ArrowRight')show(index+1);else if(e.key==='-')zoom(scale/1.5);else if(e.key==='0')zoom(1);else zoom(scale*1.5);}});
   stage.addEventListener('wheel',e=>{e.preventDefault();zoom(scale*(e.deltaY<0?1.15:1/1.15));},{passive:false});
   stage.addEventListener('pointerdown',e=>{if(scale<=1)return;drag={id:e.pointerId,x:e.clientX,y:e.clientY};stage.setPointerCapture(e.pointerId);});
   stage.addEventListener('pointermove',e=>{if(!drag||drag.id!==e.pointerId)return;x+=e.clientX-drag.x;y+=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;transform();});

@@ -218,6 +218,10 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    if (clicks !== 0 || selectedCount() !== '1 selected' || !desktopSelect.indeterminate || desktopSelect.checked) fail('checkbox click activated card or did not update the master checkbox');
 	    checkbox('b').dispatchEvent(new MouseEvent('click', {bubbles:true, shiftKey:true}));
 	    if (selectedCount() !== '2 selected' || !checkbox('a').checked || !checkbox('b').checked || !desktopSelect.indeterminate) fail('Shift-click range selection failed');
+	    var keyboardDialog=document.createElement('dialog'); document.body.appendChild(keyboardDialog); keyboardDialog.showModal();
+	    keyboardDialog.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}));
+	    if (selectedCount() !== '2 selected') fail('Escape inside a dialog cleared background selection');
+	    keyboardDialog.close(); keyboardDialog.remove();
 	    document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true}));
 	    if (selectedCount() !== '0 selected' || checkbox('a').checked || desktopSelect.checked || desktopSelect.indeterminate) fail('Escape did not clear selection');
 	    desktopSelect.click();
