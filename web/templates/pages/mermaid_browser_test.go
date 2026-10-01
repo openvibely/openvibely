@@ -104,6 +104,12 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
    assert(!stale.pair.querySelector('.chat-mermaid'),'detached render committed');
    assert(!document.querySelector('[id^="ov-mermaid-"]'),'temporary render DOM leaked');
    const link=document.querySelector('.chat-mermaid');
+   async function assertTransparentCanvas(url) {
+    const text=await (await fetch(url)).text();
+    const svgRoot=new DOMParser().parseFromString(text,'image/svg+xml').documentElement;
+    assert(svgRoot.style.backgroundColor==='transparent','SVG canvas is opaque');
+   }
+   await assertTransparentCanvas(link.href);
    const svg=await (await fetch(link.href)).text();
    assert(svg.includes('<svg')&&svg.includes('Start'),'SVG download contents');
    const before=document.querySelectorAll('.chat-mermaid').length;
@@ -122,6 +128,7 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
    document.documentElement.setAttribute('data-theme',originalTheme==='light'?'dark':'light');
    for (let i=0;i<200 && link.href===originalURL;i++) await new Promise(resolve=>setTimeout(resolve,10));
    assert(link.href!==originalURL,'theme did not change SVG');
+   await assertTransparentCanvas(link.href);
    assert(gallery.querySelector('img').src===link.href,'open gallery theme stale');
    assert(gallery.querySelector('[data-gallery-download]').href===link.href,'download theme stale');
    assert(gallery.querySelector('img').style.transform.includes('scale(1.5)'),'theme reset zoom');
