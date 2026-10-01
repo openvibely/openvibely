@@ -2481,7 +2481,7 @@ func taskExecutionMetricsValue(metrics *models.TaskExecutionMetrics) models.Task
 templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentLabel string) {
 	<div
 		id="task-detail-metrics"
-		class="grid gap-1 mb-4 text-sm"
+		class="grid gap-3 mb-4 text-sm"
 		if task.ID != "" {
             hx-get={ fmt.Sprintf("/tasks/%s/detail-status", task.ID) }
             hx-trigger="every 3s"
