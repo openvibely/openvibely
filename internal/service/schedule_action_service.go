@@ -171,13 +171,16 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 	if err := models.ValidateScheduleRepeatInterval(req.RepeatInterval); err != nil {
 		return result, actionError(ScheduleActionIntervalError, fmt.Sprintf("%d", req.RepeatInterval), err)
 	}
+	timingChanged := !schedule.RunAt.Equal(req.RunAt) || schedule.RepeatType != req.RepeatType || schedule.RepeatInterval != req.RepeatInterval
 	schedule.RunAt = req.RunAt
 	schedule.RepeatType = req.RepeatType
 	schedule.RepeatInterval = req.RepeatInterval
 	if req.ClearContextOnStart != nil {
 		schedule.ClearContextOnStart = *req.ClearContextOnStart
 	}
-	schedule.NextRun = &req.RunAt
+	if timingChanged {
+		schedule.NextRun = &req.RunAt
+	}
 	result.Changes = []string{"absolute_form"}
 	if err := s.scheduleRepo.UpdateForTask(ctx, schedule, task.ID); err != nil {
 		return result, actionError(ScheduleActionPersistError, "", err)

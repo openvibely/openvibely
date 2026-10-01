@@ -973,6 +973,12 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 	}
 
+	if scheduledDraft {
+		if err := validatePanelScheduleStart(scheduledFormValues.runAt); err != nil {
+			return err
+		}
+	}
+
 	// Creating an active task immediately submits it to the worker pool.
 	// Block this when no models are configured so tasks do not get stuck queued.
 	if category == models.CategoryActive {

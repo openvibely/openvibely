@@ -9206,3 +9206,17 @@ func TestHandler_NewTaskFutureWeeklyScheduleWaitsForRunAt(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, due)
 }
+
+func TestHandler_NewTaskPastScheduleDoesNotCreateTask(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Past scheduled draft")
+	form := url.Values{"message": {"Run later"}, "category": {"active"}, "add_schedule": {"on"}, "run_at": {time.Now().Add(-11 * time.Hour).Format("2006-01-02T15:04")}, "repeat_type": {"weekly"}, "repeat_interval": {"1"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+	tasks, err := h.taskRepo.ListByProject(context.Background(), project.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+}
