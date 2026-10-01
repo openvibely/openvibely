@@ -29,6 +29,7 @@ type composerFocusCDP struct {
 	conn   *websocket.Conn
 	nextID int
 	events []string
+	loads  int
 }
 
 func (c *composerFocusCDP) captureEvent(message []byte) {
@@ -40,6 +41,8 @@ func (c *composerFocusCDP) captureEvent(message []byte) {
 		return
 	}
 	switch event.Method {
+	case "Page.loadEventFired":
+		c.loads++
 	case "Runtime.exceptionThrown", "Runtime.consoleAPICalled", "Log.entryAdded":
 		entry := event.Method + ": " + string(event.Params)
 		if len(entry) > 1500 {
@@ -211,6 +214,20 @@ func (c *composerFocusCDP) typeText(text string) {
 	}
 }
 
+// Page.reload returns once navigation starts, before the old document is replaced.
+func (c *composerFocusCDP) reload() {
+	c.t.Helper()
+	loads := c.loads
+	c.call("Page.reload", map[string]any{}, nil)
+	for c.loads == loads {
+		_, message, err := c.conn.Read(c.ctx)
+		if err != nil {
+			c.t.Fatalf("wait for reload load event: %v", err)
+		}
+		c.captureEvent(message)
+	}
+}
+
 func (c *composerFocusCDP) navigateHistory(delta int) {
 	c.t.Helper()
 	var history struct {
@@ -297,6 +314,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	browser := &composerFocusCDP{t: t, ctx: ctx, conn: conn}
 	browser.call("Runtime.enable", map[string]any{}, nil)
 	browser.call("Log.enable", map[string]any{}, nil)
+	browser.call("Page.enable", map[string]any{}, nil)
 	run(browser)
 }
 
