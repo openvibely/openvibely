@@ -23,72 +23,38 @@ func TaskAttachmentDeleteURL(attachmentID, projectID string) string {
 	return base + "?project_id=" + url.QueryEscape(projectID)
 }
 
+func TaskAttachmentDownloadURL(id, projectID string) string {
+ return fmt.Sprintf("/attachments/%s/download?project_id=%s", url.PathEscape(id), url.QueryEscape(projectID))
+}
+
 templ AttachmentList(attachments []models.Attachment, projectID string, taskID string) {
-	<div>
-		<!-- Upload Form -->
-		<div class="mb-4">
-			<button
-				id="add-attachment-btn"
-				class="btn btn-sm btn-primary"
-				onclick="document.getElementById('attachment-upload-form').classList.remove('hidden'); document.getElementById('add-attachment-btn').classList.add('hidden')"
-			>
-				+ Add Attachment
-			</button>
-			<div id="attachment-upload-form" class="hidden mt-3 card bg-base-200 shadow-sm border border-base-300">
-				<div class="card-body p-4">
-					<form
-						method="post"
-						id="attachment-form"
-						hx-post={ TaskAttachmentUploadURL(taskID, projectID) }
-						hx-target="#attachment-list"
-						hx-swap="outerHTML"
-						hx-encoding="multipart/form-data"
-					>
-						<div class="form-control mb-4">
-							<label class="label">
-								<span class="label-text">Select Files</span>
-								<span class="label-text-alt text-xs opacity-60">Max 10MB per file</span>
-							</label>
-							<input
-								type="file"
-								name="files"
-								multiple
-								class="file-input file-input-bordered file-input-sm w-full"
-								onchange="this.form.requestSubmit()"
-								required
-							/>
-						</div>
-						<div class="flex gap-2">
-							<button
-								type="button"
-								class="btn btn-ghost btn-sm"
-								onclick="document.getElementById('attachment-upload-form').classList.add('hidden'); document.getElementById('add-attachment-btn').classList.remove('hidden'); this.closest('form').reset()"
-							>
-								Cancel
-							</button>
-						</div>
-					</form>
-					<script>
-						// Reset form and show button after successful upload
-						document.body.addEventListener('htmx:afterSwap', function(event) {
-							if (event.detail.target && event.detail.target.id === 'attachment-list') {
-								const uploadForm = document.getElementById('attachment-upload-form');
-								const addBtn = document.getElementById('add-attachment-btn');
-								if (uploadForm && addBtn) {
-									uploadForm.classList.add('hidden');
-									addBtn.classList.remove('hidden');
-									const form = uploadForm.querySelector('form');
-									if (form) form.reset();
-								}
-							}
-						});
-					</script>
-				</div>
-			</div>
-		</div>
-		<!-- Attachments List -->
-		@AttachmentListOnly(attachments, projectID)
-	</div>
+ <div>
+  <div class="flex items-center justify-between mb-3">
+   <h3 class="text-sm font-semibold">Attachments</h3>
+   <button type="button" id="add-attachment-btn" class="btn btn-ghost btn-xs" aria-label="Add attachments" onclick="document.querySelector('#attachment-form input[type=file]').click()">+</button>
+  </div>
+  <form method="post" id="attachment-form" hx-post={ TaskAttachmentUploadURL(taskID, projectID) } hx-target="#attachment-list" hx-swap="outerHTML" hx-encoding="multipart/form-data" hx-on::after-request="if(event.detail.successful)this.reset()">
+   <input type="file" name="files" multiple class="hidden" aria-label="Select attachments" onchange="this.form.requestSubmit()"/>
+   <span class="htmx-indicator text-sm" role="status">Uploading…</span>
+  </form>
+  @AttachmentListOnly(attachments, projectID)
+ </div>
+}
+
+templ ImageAttachmentRow(fileName string, fileSize int64, mediaType, downloadURL, deleteURL, target string) {
+ <div class="attachment-gallery-row">
+  <a href={ templ.SafeURL(downloadURL) } class="attachment-gallery-open" target="_blank" rel="noopener" data-image-name={ fileName }
+   if IsImageMediaType(mediaType) {
+    data-image-gallery-item=""
+   }
+  >
+   if IsImageMediaType(mediaType) {
+    <img src={ templ.SafeURL(downloadURL) } alt={ fileName } loading="lazy"/>
+   } else { <span aria-hidden="true">▤</span> }
+   <span class="min-w-0"><span class="block text-sm break-all">{ fileName }</span><span class="block text-xs opacity-60">{ FormatFileSize(fileSize) }</span></span>
+  </a>
+  <button type="button" class="btn btn-ghost btn-xs text-error shrink-0" aria-label={ "Remove " + fileName } hx-delete={ deleteURL } hx-target={ target } hx-swap="outerHTML">×</button>
+ </div>
 }
 
 templ AttachmentListRow(fileName string, fileSize int64, downloadURL string, deleteURL string, target string) {
@@ -115,12 +81,12 @@ templ AttachmentListRow(fileName string, fileSize int64, downloadURL string, del
 }
 
 templ AttachmentListOnly(attachments []models.Attachment, projectID string) {
-	<div id="attachment-list" class="space-y-2">
+	<div id="attachment-list" class="space-y-2" data-image-gallery-group="">
 		if len(attachments) == 0 {
 			<p class="text-sm opacity-50">No attachments</p>
 		} else {
 			for _, att := range attachments {
-				@AttachmentListRow(att.FileName, att.FileSize, "", TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list")
+				@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, TaskAttachmentDownloadURL(att.ID, projectID), TaskAttachmentDeleteURL(att.ID, projectID), "#attachment-list")
 			}
 		}
 	</div>

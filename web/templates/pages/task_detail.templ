@@ -540,7 +540,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 		<div id="tab-attachments" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "attachments") }>
 			<div class="flex flex-col min-w-0">
 				<div class="flex flex-col gap-2 flex-1">
-					<h4 class="text-lg font-bold mb-3">Attachments</h4>
 					@components.AttachmentList(attachments, task.ProjectID, task.ID)
 				</div>
 			</div>

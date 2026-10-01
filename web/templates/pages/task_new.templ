@@ -33,8 +33,18 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      @NewTaskDetails(agents, agentDefs)
     </div>
     <div id="tab-attachments" class="task-tab-panel hidden">
-     <label class="label" for="new-task-files">Attachments</label>
-     <button id="new-task-files" type="button" class="btn btn-ghost" onclick="document.getElementById('task-thread-form-file-input').click()">Attach files to message</button>
+     <div class="flex items-center justify-between mb-3"><h3 class="text-sm font-semibold">Attachments</h3>
+     <button id="new-task-files" type="button" class="btn btn-ghost btn-xs" aria-label="Add attachments" onclick="document.getElementById('task-thread-form-file-input').click()">+</button></div>
+     <div id="draft-panel-attachments" data-image-gallery-group=""><p class="text-sm opacity-60">No attachments</p></div>
+     <script>
+      (()=>{
+       const panel=document.getElementById('draft-panel-attachments'),root=panel.closest('#task-detail-content');
+       const update=()=>{const list=root.querySelector('[id$="-attachments-list"]');if(!list)return;panel.replaceChildren(...Array.from(list.children).map(row=>{const clone=row.cloneNode(true);clone.removeAttribute('id');return clone;}));if(!panel.children.length)panel.innerHTML='<p class="text-sm opacity-60">No attachments</p>';};
+       const observer=new MutationObserver(()=>{if(!root.isConnected){observer.disconnect();return;}update();});
+       requestAnimationFrame(()=>{const list=root.querySelector('[id$="-attachments-list"]');if(list){observer.observe(list,{childList:true,subtree:true});update();}});
+       document.body.addEventListener('htmx:beforeCleanupElement',function cleanup(e){if(e.detail.elt===root){observer.disconnect();document.body.removeEventListener('htmx:beforeCleanupElement',cleanup);}});
+      })();
+     </script>
     </div>
     <div id="tab-schedules" class="task-tab-panel hidden">
      @TaskSchedulePanel(&models.Task{ProjectID:project.ID}, nil)

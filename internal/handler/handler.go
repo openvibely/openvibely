@@ -854,6 +854,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Attachments
 	e.POST("/tasks/:taskId/attachments", h.UploadAttachment)
+	e.GET("/attachments/:id/download", h.DownloadTaskAttachment)
 	e.DELETE("/attachments/:id", h.DeleteAttachment)
 
 	// Executions
@@ -1055,6 +1056,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/api/chat/message/:id", h.APIChatMessageStatus)
 	e.DELETE("/chat/history", h.ClearChat)
 	e.POST("/chat/attachments", h.UploadChatAttachment)
+	e.GET("/chat/attachments/pending/:session/:name", h.PreviewPendingAttachment)
 	e.GET("/chat/attachments/:id/download", h.DownloadChatAttachment)
 	e.DELETE("/chat/attachments/:id", h.DeleteChatAttachment)
 

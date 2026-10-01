@@ -6050,6 +6050,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							var target = event.target;
 							var anchor = target && target.closest ? target.closest('a[href]') : null;
 							if (!anchor) return;
+							// Image previews and their downloads stay in the app.
+							if (anchor.hasAttribute('data-image-gallery-item') || anchor.hasAttribute('data-gallery-download')) return;
 							var href = anchor.getAttribute('href');
 							if (!href) return;
 							var desktop = isDesktopRuntime();
@@ -6091,6 +6093,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 				})();
 			</script>
+		@ImageGallery()
 		</body>
 	</html>
 }

@@ -52,7 +52,7 @@ func ChatAttachmentListOnly(attachments []models.ChatAttachment, projectID strin
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"chat-attachment-list\" class=\"space-y-2\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"chat-attachment-list\" data-image-gallery-group=\"\" class=\"space-y-2\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -63,7 +63,7 @@ func ChatAttachmentListOnly(attachments []models.ChatAttachment, projectID strin
 			}
 		} else {
 			for _, att := range attachments {
-				templ_7745c5c3_Err = AttachmentListRow(att.FileName, att.FileSize, ChatAttachmentDownloadURL(att.ID, projectID), ChatAttachmentDeleteURL(att.ID, projectID), "#chat-attachment-list").Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, ChatAttachmentDownloadURL(att.ID, projectID), ChatAttachmentDeleteURL(att.ID, projectID), "#chat-attachment-list").Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
