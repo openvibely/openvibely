@@ -39,7 +39,8 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     <div id="tab-schedules" class="task-tab-panel hidden">
      @TaskSchedulePanel(&models.Task{ProjectID:project.ID}, nil)
     </div>
-    for _, tab := range []string{"chaining", "lifecycle"} {
+    <div id="tab-chaining" class="task-tab-panel hidden">@TaskChainPanel(&models.Task{ProjectID:project.ID}, agents)</div>
+    for _, tab := range []string{"lifecycle"} {
      <div id={ "tab-" + tab } class="task-tab-panel hidden"><p class="text-sm opacity-60">Available after the task is created.</p></div>
     }
    }
