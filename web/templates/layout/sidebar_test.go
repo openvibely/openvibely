@@ -628,9 +628,8 @@ func TestSidebar_CollapseToggleHandlersSharePersistenceHelper(t *testing.T) {
 	}
 	for _, snippet := range []string{
 		"document.addEventListener('keydown', function(e) {",
-		"if ((e.ctrlKey || e.metaKey) && e.key === 'b') {",
-		"var tag = document.activeElement && document.activeElement.tagName;",
-		"if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;",
+		"!e.defaultPrevented && !e.isComposing && !e.repeat && !e.altKey && !e.shiftKey",
+		"(e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b'",
 		"e.preventDefault();\n\t\t\t\t\t\t\ttoggleSidebarCollapsed();",
 	} {
 		if !strings.Contains(html, snippet) {

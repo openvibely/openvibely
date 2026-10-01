@@ -1,0 +1,111 @@
+package pages
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/a-h/templ"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
+	"github.com/openvibely/openvibely/web/templates/components"
+)
+
+func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	project := models.Project{ID: "shortcuts", Name: "Shortcuts"}
+	var lists atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		var component templ.Component
+		switch {
+		case r.URL.Path == "/breadcrumb-selectors/tasks":
+			lists.Add(1)
+			items := []models.BreadcrumbSelectorItem{}
+			for _, id := range []string{"a", "b", "c"} {
+				items = append(items, models.BreadcrumbSelectorItem{ID: id, Name: id, URL: "/tasks/" + id + "?project_id=shortcuts"})
+			}
+			component = components.BreadcrumbSelectorResults("Task", r.URL.Query().Get("current_id"), items, false, false)
+		case strings.HasSuffix(r.URL.Path, "/changes/summary"):
+			fmt.Fprint(w, `{"files":0}`)
+			return
+		case strings.HasSuffix(r.URL.Path, "/thread"):
+			task := &models.Task{ID: strings.Split(r.URL.Path, "/")[2], ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+			component = components.TaskThreadView(task, nil, nil, nil, nil, nil, false, 30)
+		case r.URL.Path == "/tasks/a" || r.URL.Path == "/tasks/b" || r.URL.Path == "/tasks/c":
+			task := &models.Task{ID: strings.TrimPrefix(r.URL.Path, "/tasks/"), ProjectID: project.ID, Title: "Task", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+			if r.Header.Get("HX-Request") == "true" {
+				component = TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil)
+			} else {
+				component = TaskDetailPage([]models.Project{project}, task, nil, nil, nil, nil, nil, nil, "chat", nil)
+			}
+		default:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if err := component.Render(r.Context(), w); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/a?project_id=shortcuts", "task-shortcuts", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1600, "height": 1000, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("composer", `String(!!document.getElementById('task-message-input'))`, "true")
+		command := `(/Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true})`
+		key := func(code, modifiers string) {
+			b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',Object.assign({key:'` + strings.TrimPrefix(code, "Key") + `',code:'` + code + `',bubbles:true,cancelable:true},` + modifiers + `)));'sent'`)
+		}
+		b.evaluate(`document.getElementById('task-message-input').value='Draft'; document.getElementById('task-message-input').dispatchEvent(new Event('input',{bubbles:true})); document.getElementById('task-message-input').focus(); window.sidebarBefore=document.getElementById('sidebar').className; 'ready'`)
+		key("KeyB", command)
+		b.waitFor("sidebar toggles from composer", `String(document.getElementById('sidebar').className!==window.sidebarBefore && document.activeElement.id==='task-message-input')`, "true")
+		b.evaluate(`window.sidebarAfter=document.getElementById('sidebar').className;'ready'`)
+		key("KeyB", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("details opens without sidebar or focus change", `String(!document.getElementById('task-details-panel').hidden && document.getElementById('sidebar').className===window.sidebarAfter && document.activeElement.id==='task-message-input')`, "true")
+		key("KeyB", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("details closes retaining draft", `String(document.getElementById('task-details-panel').hidden && document.getElementById('task-message-input').value==='Draft' && document.activeElement.id==='task-message-input')`, "true")
+		key("ArrowDown", `{altKey:true}`)
+		b.waitFor("typing does not navigate", `location.pathname`, "/tasks/a")
+		if lists.Load() != 0 {
+			t.Fatal("Alt+Down fetched tasks while typing")
+		}
+		key("KeyK", command)
+		b.waitFor("breadcrumb focuses search", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-search'))`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
+		b.waitFor("breadcrumb closes", `String(!document.querySelector('dialog[open]'))`, "true")
+		// Navigate without showing the selector, then reverse through the frozen list.
+		b.evaluate(`document.activeElement.blur();'ready'`)
+		key("ArrowDown", `{altKey:true}`)
+		b.waitFor("next task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
+		count := lists.Load()
+		b.evaluate(`document.activeElement.blur();'ready'`)
+		key("ArrowUp", `{altKey:true}`)
+		b.waitFor("return to original task", `document.getElementById('task-detail-content').dataset.taskId`, "a")
+		b.waitFor("draft restored after navigation", `String(document.getElementById('task-message-input') && document.getElementById('task-message-input').value)`, "Draft")
+		b.evaluate(`document.activeElement.blur();'ready'`)
+		key("ArrowUp", `{altKey:true}`)
+		b.waitFor("first task does not wrap", `location.pathname`, "/tasks/a")
+		key("ArrowDown", `{altKey:true}`)
+		b.waitFor("next again", `document.getElementById('task-detail-content').dataset.taskId`, "b")
+		b.evaluate(`document.activeElement.blur();'ready'`)
+		key("ArrowDown", `{altKey:true}`)
+		b.waitFor("second next task", `document.getElementById('task-detail-content').dataset.taskId`, "c")
+		b.evaluate(`document.activeElement.blur();'ready'`)
+		key("ArrowUp", `{altKey:true}`)
+		b.waitFor("previous task", `document.getElementById('task-detail-content').dataset.taskId`, "b")
+		if lists.Load() != count {
+			t.Fatal("recent list refetched during cycling")
+		}
+		b.evaluate(`document.activeElement.blur();'ready'`)
+		key("KeyL", `{altKey:true}`)
+		b.waitFor("last task", `document.getElementById('task-detail-content').dataset.taskId`, "c")
+		b.evaluate(`document.activeElement.blur();'ready'`)
+		key("KeyL", `{altKey:true}`)
+		b.waitFor("last task toggles back", `document.getElementById('task-detail-content').dataset.taskId`, "b")
+	})
+}
