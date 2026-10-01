@@ -1107,6 +1107,10 @@ func TestTaskSchedulePanelModalControls(t *testing.T) {
 				t.Errorf("unexpected %s", absent)
 			}
 		}
+
+		if !strings.Contains(out, `class="text-sm font-semibold">Every 30 minutes`) || !strings.Contains(out, `class="label cursor-pointer justify-start gap-2 mt-2"><input`) || !strings.Contains(out, `toggle toggle-sm toggle-primary shrink-0`) {
+			t.Fatal("schedule title and leading switch must match Details typography and toggle styling")
+		}
 		if !enabled && !strings.Contains(out, "Paused") {
 			t.Fatal("disabled schedule should show Paused")
 		}

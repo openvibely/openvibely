@@ -1396,7 +1396,7 @@ func TestHandler_NewTaskFirstMessage(t *testing.T) {
 	project := createProject(t, h, "First message")
 	agent := createAgent(t, modelsRepo)
 	for _, message := range []string{"   ", "Hello from a new task"} {
-		form := url.Values{"message": {message}, "agent_id": {agent.ID}, "add_schedule": {"on"}, "run_at": {"2035-01-02T09:30"}, "repeat_type": {"weekly"}, "repeat_interval": {"2"}, "clear_context_on_start": {"false"}}
+		form := url.Values{"message": {message}, "agent_id": {agent.ID}}
 		req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("HX-Request", "true")
@@ -1420,12 +1420,6 @@ func TestHandler_NewTaskFirstMessage(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 	require.NotEmpty(t, tasks[0].Title)
-	schedules, err := h.scheduleRepo.ListByTask(context.Background(), tasks[0].ID)
-	require.NoError(t, err)
-	require.Len(t, schedules, 1)
-	require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
-	require.Equal(t, 2, schedules[0].RepeatInterval)
-	require.False(t, schedules[0].ClearContextOnStart)
 	executions, err := h.execRepo.ListByTask(context.Background(), tasks[0].ID)
 	require.NoError(t, err)
 	require.Len(t, executions, 1)
@@ -9179,4 +9173,36 @@ func TestHandler_NewTaskPausedDraftSchedule(t *testing.T) {
 	require.Len(t, schedules, 1)
 	require.False(t, schedules[0].Enabled)
 	require.Equal(t, 30, schedules[0].RepeatInterval)
+}
+
+func TestHandler_NewTaskFutureWeeklyScheduleWaitsForRunAt(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Future scheduled draft")
+	runAt := time.Now().In(time.Local).Add(2 * time.Hour).Truncate(time.Minute)
+	form := url.Values{"message": {"Run weekly later"}, "category": {"active"}, "add_schedule": {"on"}, "run_at": {runAt.Format("2006-01-02T15:04")}, "repeat_type": {"weekly"}, "repeat_interval": {"1"}, "clear_context_on_start": {"false"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	id := rec.Header().Get("X-Created-Task-ID")
+	task, err := h.taskRepo.GetByID(context.Background(), id)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, task.Category)
+	require.Equal(t, models.StatusPending, task.Status)
+	require.Equal(t, "Run weekly later", task.Prompt)
+	executions, err := h.execRepo.ListByTask(context.Background(), id)
+	require.NoError(t, err)
+	require.Empty(t, executions)
+	schedules, err := h.scheduleRepo.ListByTask(context.Background(), id)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
+	require.False(t, schedules[0].ClearContextOnStart)
+	require.NotNil(t, schedules[0].NextRun)
+	require.True(t, runAt.Equal(*schedules[0].NextRun))
+	due, err := h.scheduleRepo.ListDue(context.Background(), time.Now())
+	require.NoError(t, err)
+	require.Empty(t, due)
 }

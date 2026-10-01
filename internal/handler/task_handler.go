@@ -935,12 +935,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		return err
 	}
 	threadDraft := c.QueryParam("from") == "new" && c.QueryParam("thread") == "1"
+	scheduledDraft := threadDraft && c.FormValue("add_schedule") == "on"
 	if threadDraft {
 		message := strings.TrimSpace(c.FormValue("message"))
 		if message == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 		}
-		if _, err := h.selectAgent(c.Request().Context(), c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil && c.FormValue("category") != string(models.CategoryBacklog) {
+		if _, err := h.selectAgent(c.Request().Context(), c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil && !scheduledDraft && c.FormValue("category") != string(models.CategoryBacklog) {
 			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
 		}
 	}
@@ -948,6 +949,9 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	category := models.TaskCategory(c.FormValue("category"))
 	if category == "" {
 		category = models.CategoryActive
+	}
+	if scheduledDraft {
+		category = models.CategoryScheduled
 	}
 	startDraft := threadDraft && category == models.CategoryActive
 	if threadDraft && priority == 0 {
