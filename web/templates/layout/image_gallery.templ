@@ -1,0 +1,84 @@
+package layout
+
+// ImageGallery is shared by saved attachments, message attachments and drafts.
+templ ImageGallery() {
+ <dialog id="image-gallery" class="bg-base-200 text-base-content" aria-label="Image preview">
+  <div class="modal-box image-gallery-shell bg-base-200">
+   <header><span data-gallery-name></span><span data-gallery-count aria-live="polite"></span><a data-gallery-download class="btn btn-ghost btn-sm" download>Download</a><button type="button" data-gallery-close class="btn btn-circle btn-ghost btn-xs ov-modal-close" aria-label="Close image preview" title="Close image preview"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></header>
+   <div data-gallery-stage><img data-gallery-image alt="" draggable="false"/><p data-gallery-status role="status"></p></div>
+   <footer>
+    <button type="button" data-gallery-prev class="btn btn-ghost btn-sm" aria-label="Previous image">‹</button>
+    <button type="button" data-gallery-minus class="btn btn-ghost btn-sm" aria-label="Zoom out">−</button>
+    <button type="button" data-gallery-fit class="btn btn-ghost btn-sm">Fit</button>
+    <button type="button" data-gallery-plus class="btn btn-ghost btn-sm" aria-label="Zoom in">+</button>
+    <button type="button" data-gallery-next class="btn btn-ghost btn-sm" aria-label="Next image">›</button>
+   </footer>
+  </div>
+ </dialog>
+ <style>
+ #image-gallery { padding:0; border:0; border-radius:12px; color:inherit; width:calc(100vw - 32px); max-width:1200px; height:calc(100dvh - 48px); max-height:900px; margin:auto; }
+ #image-gallery::backdrop { background:rgb(0 0 0 / .7); }
+ #image-gallery .image-gallery-shell { padding:0; width:100%; max-width:none; max-height:none; transform:none; border-radius:0; height:100%; display:flex; flex-direction:column; }
+ #image-gallery header, #image-gallery footer { display:flex; align-items:center; gap:8px; padding:12px; flex-shrink:0; }
+ #image-gallery header { padding-right:44px; }
+ #image-gallery header [data-gallery-name] { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+ #image-gallery [data-gallery-count] { font-size:12px; opacity:.6; }
+ #image-gallery footer { justify-content:center; }
+ #image-gallery [data-gallery-stage] { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; justify-content:center; align-items:center; touch-action:none; }
+ #image-gallery img { max-width:100%; max-height:100%; object-fit:contain; user-select:none; flex-shrink:0; }
+ #image-gallery [data-gallery-status] { position:absolute; pointer-events:none; }
+ [data-image-gallery-item] { cursor:zoom-in; }
+ .attachment-gallery-row { display:flex; align-items:center; gap:12px; min-width:0; padding:8px 0; }
+ .attachment-gallery-open { display:flex; align-items:center; gap:12px; min-width:0; flex:1; border-radius:8px; padding:8px; text-align:left; }
+ .attachment-gallery-open:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+ .attachment-gallery-open img, [data-pending-attachment] img { width:48px; height:48px; object-fit:cover; border-radius:6px; }
+ </style>
+ <script>
+ (() => {
+  if (window.imageGallery) return;
+  const dialog=document.getElementById('image-gallery'), stage=dialog.querySelector('[data-gallery-stage]');
+  let image=dialog.querySelector('img'), items=[], index=0, scale=1, x=0, y=0, opener=null, group=null, drag=null;
+  const q=s=>dialog.querySelector('[data-gallery-'+s+']');
+  function transform(){
+   const maxX=Math.max(0,(image.width*scale-stage.clientWidth)/2), maxY=Math.max(0,(image.height*scale-stage.clientHeight)/2);
+   x=Math.max(-maxX,Math.min(maxX,x)); y=Math.max(-maxY,Math.min(maxY,y));
+   image.style.transform=`translate(${x}px, ${y}px) scale(${scale})`; stage.style.cursor=scale>1?'grab':'default';
+   q('fit').textContent=scale===1?'Fit':Math.round(scale*100)+'%';
+  }
+  function zoom(value){ scale=Math.max(1,Math.min(8,value)); transform(); }
+  function show(next){
+   index=Math.max(0,Math.min(items.length-1,next)); scale=1;x=0;y=0;drag=null;
+   const item=items[index], old=image; image=document.createElement('img'); image.dataset.galleryImage=''; image.draggable=false; image.alt=item.name;
+   old.replaceWith(image); const current=image;
+   q('status').textContent='Loading image…';
+   image.onload=()=>{if(image!==current)return;q('status').textContent='';transform();};
+   image.onerror=()=>{if(image!==current)return;q('status').textContent='Image unavailable';image.style.visibility='hidden';};
+   image.src=item.url; q('name').textContent=item.name; q('count').textContent=(index+1)+' / '+items.length;
+   q('download').href=item.url; q('download').download=item.name;
+   q('prev').disabled=index===0; q('next').disabled=index===items.length-1; transform();
+  }
+  function close(){if(dialog.open)dialog.close();}
+  dialog.addEventListener('close',()=>{ observer.disconnect(); image.removeAttribute('src');items=[];group=null;drag=null;if(opener&&opener.isConnected)opener.focus({preventScroll:true});opener=null; });
+  dialog.addEventListener('click',e=>{if(e.target===dialog)close();});
+  q('close').onclick=close;q('prev').onclick=()=>show(index-1);q('next').onclick=()=>show(index+1);
+  q('minus').onclick=()=>zoom(scale/1.5);q('plus').onclick=()=>zoom(scale*1.5);q('fit').onclick=()=>{x=0;y=0;zoom(1);};
+  dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close();return;}if(['ArrowLeft','ArrowRight','+','=','-','0'].includes(e.key)){e.preventDefault();e.stopPropagation();if(e.key==='ArrowLeft')show(index-1);else if(e.key==='ArrowRight')show(index+1);else if(e.key==='-')zoom(scale/1.5);else if(e.key==='0')zoom(1);else zoom(scale*1.5);}});
+  stage.addEventListener('wheel',e=>{e.preventDefault();zoom(scale*(e.deltaY<0?1.15:1/1.15));},{passive:false});
+  stage.addEventListener('pointerdown',e=>{if(scale<=1)return;drag={id:e.pointerId,x:e.clientX,y:e.clientY};stage.setPointerCapture(e.pointerId);});
+  stage.addEventListener('pointermove',e=>{if(!drag||drag.id!==e.pointerId)return;x+=e.clientX-drag.x;y+=e.clientY-drag.y;drag.x=e.clientX;drag.y=e.clientY;transform();});
+  stage.addEventListener('pointerup',()=>drag=null);stage.addEventListener('pointercancel',()=>drag=null);
+  window.addEventListener('resize',transform);
+  document.addEventListener('click',e=>{
+   const trigger=e.target.closest('[data-image-gallery-item]');if(!trigger)return;
+   const container=trigger.closest('[data-image-gallery-group]');if(!container)return;
+   e.preventDefault();opener=trigger;group=container;
+   const links=Array.from(container.querySelectorAll('[data-image-gallery-item]'));
+   items=links.map(a=>({url:a.href||a.dataset.imageUrl,name:a.dataset.imageName||a.textContent.trim()}));
+   dialog.showModal();observer.observe(document.body,{childList:true,subtree:true});show(links.indexOf(trigger));q('close').focus();
+  });
+  document.addEventListener('htmx:beforeSwap',e=>{const target=e.detail.target;if(dialog.open&&target&&group&&(target===group||target.contains(group)))close();});
+  const observer=new MutationObserver(()=>{if(dialog.open&&(!group||!group.isConnected||!opener.isConnected))close();});
+  window.imageGallery={close};
+ })();
+ </script>
+}

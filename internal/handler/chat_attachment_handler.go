@@ -310,3 +310,18 @@ func generateSessionID() string {
 	}
 	return fmt.Sprintf("%x", b)
 }
+
+// Pending upload sessions are unguessable capabilities, also used by the composer
+// when publishing its draft. Do not accept paths outside the named session.
+func (h *Handler) PreviewPendingAttachment(c echo.Context) error {
+	sessionID, name := c.Param("session"), c.Param("name")
+	if !isValidPendingAttachmentSessionID(sessionID) || name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	}
+	unlock := attachmentsession.Lock(sessionID)
+	defer unlock()
+	c.Response().Header().Set("Cache-Control", "private, no-store")
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+	c.Response().Header().Set("Content-Security-Policy", "sandbox")
+	return c.File(filepath.Join(uploadsDir, "chat", "pending", sessionID, name))
+}

@@ -288,12 +288,12 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 		<div class="chat-bubble-inner">
 			<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
 			if len(attachments) > 0 {
-				<div class="mt-3 pt-3 border-t border-base-content/10">
+				<div class="mt-3 pt-3 border-t border-base-content/10" data-image-gallery-group="">
 					<div class="text-xs font-medium opacity-70 mb-2">Attachments</div>
 					for _, att := range attachments {
 						if IsImageMediaType(att.MediaType) {
 							<div class="mb-3">
-								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } target="_blank" class="block">
+								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } target="_blank" class="block" data-image-gallery-item="" data-image-name={ att.FileName }>
 									<img
 										src={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) }
 										alt={ att.FileName }
@@ -2376,6 +2376,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 			function appendPendingAttachmentRow(targetList, attachment) {
 				if (!targetList || !attachment) return;
+				targetList.setAttribute('data-image-gallery-group', '');
 				var filename = String(attachment.filename || '');
 				var size = parseInt(attachment.size || '0', 10) || 0;
 				var div = document.createElement('div');
@@ -2383,12 +2384,28 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				div.setAttribute('data-pending-attachment', 'true');
 				div.setAttribute('data-pending-attachment-filename', filename);
 				div.setAttribute('data-pending-attachment-size', String(size));
+				div.dataset.pendingAttachmentMediaType = attachment.media_type || '';
+				div.dataset.pendingAttachmentSession = attachment.session_id || '';
 				div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>';
 				var name = document.createElement('span');
 				name.className = 'font-medium';
 				name.textContent = filename;
-				div.appendChild(name);
-				var sizeLabel = document.createElement('span');
+				if ((attachment.media_type || '').startsWith('image/') && attachment.session_id) {
+                    var link = document.createElement('a');
+                    link.href = '/chat/attachments/pending/' + encodeURIComponent(attachment.session_id) + '/' + encodeURIComponent(filename);
+                    link.dataset.imageGalleryItem = '';
+                    link.dataset.imageName = filename;
+                    link.className = 'flex items-center gap-2 min-w-0';
+                    var thumb = document.createElement('img');
+                    thumb.src = link.href;
+                    thumb.alt = filename;
+                    link.appendChild(thumb);
+                    link.appendChild(name);
+                    div.replaceChildren(link);
+                } else {
+                    div.appendChild(name);
+                }
+                var sizeLabel = document.createElement('span');
 				sizeLabel.className = 'text-xs opacity-60';
 				sizeLabel.textContent = formatBytes(size);
 				div.appendChild(sizeLabel);
@@ -2406,7 +2423,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						targetList.querySelectorAll('[data-pending-attachment="true"]').forEach(function(row) {
 							attachments.push({
 								filename: row.getAttribute('data-pending-attachment-filename') || '',
-								size: parseInt(row.getAttribute('data-pending-attachment-size') || '0', 10) || 0
+								size: parseInt(row.getAttribute('data-pending-attachment-size') || '0', 10) || 0,
+								media_type: row.dataset.pendingAttachmentMediaType || '',
+								session_id: row.dataset.pendingAttachmentSession || ''
 							});
 						});
 					}
@@ -2671,7 +2690,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					if (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);
 					files.forEach(function(file) { formData.append('files', file); });
 					try {
-						var response = await fetch('/chat/attachments', {
+						var response = await fetch('/chat/attachments' + (document.getElementById('task-detail-content') ? '?project_id='+encodeURIComponent(document.getElementById('task-detail-content').dataset.projectId) : ''), {
 							method: 'POST',
 							body: formData
 						});

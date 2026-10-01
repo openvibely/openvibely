@@ -498,3 +498,18 @@ func (h *Handler) DeleteAttachment(c echo.Context) error {
 	attachments, _ := h.attachmentRepo.ListByTask(ctx, task.ID)
 	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, task.ProjectID))
 }
+
+// DownloadTaskAttachment resolves the attachment through its owning project.
+func (h *Handler) DownloadTaskAttachment(c echo.Context) error {
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil || projectID == "" {
+		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	}
+	attachment, err := h.attachmentRepo.GetByIDForProject(c.Request().Context(), c.Param("id"), projectID)
+	if err != nil || attachment == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	}
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+	c.Response().Header().Set("Content-Security-Policy", "sandbox")
+	return c.File(attachment.FilePath)
+}

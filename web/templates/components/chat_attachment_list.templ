@@ -24,12 +24,12 @@ func ChatAttachmentDeleteURL(attachmentID, projectID string) string {
 }
 
 templ ChatAttachmentListOnly(attachments []models.ChatAttachment, projectID string) {
-	<div id="chat-attachment-list" class="space-y-2">
+	<div id="chat-attachment-list" data-image-gallery-group="" class="space-y-2">
 		if len(attachments) == 0 {
 			<p class="text-sm opacity-50">No attachments</p>
 		} else {
 			for _, att := range attachments {
-				@AttachmentListRow(att.FileName, att.FileSize, ChatAttachmentDownloadURL(att.ID, projectID), ChatAttachmentDeleteURL(att.ID, projectID), "#chat-attachment-list")
+				@ImageAttachmentRow(att.FileName, att.FileSize, att.MediaType, ChatAttachmentDownloadURL(att.ID, projectID), ChatAttachmentDeleteURL(att.ID, projectID), "#chat-attachment-list")
 			}
 		}
 	</div>
