@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
@@ -64,12 +65,13 @@ func (h *Handler) publishThreadInputCancelledEvent(input *models.ThreadInput) {
 }
 
 // convertQueuedInputToSteering contains the shared logic for both steer handlers:
-// expected-turn-ID guard, ConvertQueuedToSteering call, all three error-type branches,
-// and nil-steering guard. Callers supply a findActiveExecution callback that resolves
-// the surface-specific active execution (chat vs. task thread).
+// the supplied expected-turn-ID guard, ConvertQueuedToSteering call, all three
+// error-type branches, and nil-steering guard. Callers supply a findActiveExecution
+// callback that resolves the surface-specific active execution (chat vs. task thread).
 func (h *Handler) convertQueuedInputToSteering(
 	ctx context.Context,
 	input *models.ThreadInput,
+	expectedTurnID string,
 	findActiveExecution func() (*models.Execution, error),
 ) (*models.ThreadInput, error) {
 	active, err := findActiveExecution()
@@ -79,9 +81,9 @@ func (h *Handler) convertQueuedInputToSteering(
 	if active == nil {
 		return nil, echo.NewHTTPError(http.StatusConflict, "no active response to steer")
 	}
-	expectedTurnID := input.RunExecutionID
+	expectedTurnID = strings.TrimSpace(expectedTurnID)
 	if expectedTurnID == "" {
-		return nil, echo.NewHTTPError(http.StatusConflict, "queued input is missing its active turn guard; refresh and queue the message again")
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 	}
 	steering, err := h.threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, active.ID, expectedTurnID)
 	if err != nil {
@@ -115,7 +117,7 @@ func (h *Handler) ChatQueuedInputSteer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
 	ctx := c.Request().Context()
-	steering, err := h.convertQueuedInputToSteering(ctx, input, func() (*models.Execution, error) {
+	steering, err := h.convertQueuedInputToSteering(ctx, input, input.RunExecutionID, func() (*models.Execution, error) {
 		return h.execRepo.FindLatestActiveChatExecution(ctx, input.ProjectID)
 	})
 	if err != nil {
@@ -152,7 +154,8 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
 	ctx := c.Request().Context()
-	steering, err := h.convertQueuedInputToSteering(ctx, input, func() (*models.Execution, error) {
+	expectedTurnID := c.FormValue("expected_turn_id")
+	steering, err := h.convertQueuedInputToSteering(ctx, input, expectedTurnID, func() (*models.Execution, error) {
 		return h.execRepo.FindActiveTaskThreadExecution(ctx, taskID, "")
 	})
 	if err != nil {

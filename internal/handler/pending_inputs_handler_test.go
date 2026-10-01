@@ -11,6 +11,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -344,7 +345,7 @@ func TestTaskThreadQueuedInputSteer_ResponseCarriesTaskID(t *testing.T) {
 	}
 	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, queued))
 
-	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer").Execute()
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer?expected_turn_id=" + exec.ID).Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 	body := rec.Body.String()
 	if !strings.Contains(body, `data-task-id="`+task.ID+`"`) || !strings.Contains(body, `data-thread-input-id="`+queued.ID+`"`) {
@@ -361,21 +362,59 @@ func TestTaskThreadQueuedInputSteer_ResponseCarriesTaskID(t *testing.T) {
 	}
 }
 
+func TestTaskThreadQueuedInputSteerRejectsStaleClientTurnWithoutMutation(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	p := tc.CreateProject().Build()
+	task := tc.CreateTask(p.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	current := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "current turn"}
+	require.NoError(t, tc.execRepo.Create(ctx, current))
+	queued := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      p.ID,
+		TaskID:         task.ID,
+		RunExecutionID: current.ID, // This row may have been retargeted after the client observed the prior turn.
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "keep queued",
+	}
+	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, queued))
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer").WithForm(url.Values{"expected_turn_id": {"stale-turn"}}).Execute()
+	tc.Assert(rec).StatusCode(http.StatusConflict)
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, models.ThreadInputModeQueued, stored.InputMode)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Equal(t, current.ID, stored.RunExecutionID)
+}
+
 func TestTaskThreadPendingInputs_SteerEndpointUsesTaskID(t *testing.T) {
 	// Ensures the generated Steer button href uses the task ID so converted-queued
 	// rows can be promoted through the correct /tasks/:taskId/thread/queued/:id/steer path.
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	p := tc.CreateProject().Build()
-	task := tc.CreateTask(p.ID).Build()
+	task := tc.CreateTask(p.ID).WithStatus(models.StatusRunning).Build()
+	agent, err := tc.llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, agent)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, tc.execRepo.Create(ctx, exec))
 
 	queued := &models.ThreadInput{
-		Scope:       models.ThreadInputScopeTask,
-		ProjectID:   p.ID,
-		TaskID:      task.ID,
-		InputMode:   models.ThreadInputModeQueued,
-		InputStatus: models.ThreadInputPending,
-		Content:     "steer-endpoint-check",
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      p.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "steer-endpoint-check",
 	}
 	if err := tc.handler.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		t.Fatalf("create queued: %v", err)
@@ -384,7 +423,7 @@ func TestTaskThreadPendingInputs_SteerEndpointUsesTaskID(t *testing.T) {
 	rec := tc.HTTP().Get("/tasks/" + task.ID + "/thread/pending-inputs").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
 	body := rec.Body.String()
-	expectedPath := "/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer"
+	expectedPath := "/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer?expected_turn_id=" + exec.ID
 	if !strings.Contains(body, expectedPath) {
 		t.Errorf("task pending-inputs fragment must contain steer endpoint %q, got: %q", expectedPath, body)
 	}

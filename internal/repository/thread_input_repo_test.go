@@ -814,7 +814,7 @@ func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testi
 	if err := repo.CreateQueued(ctx, guardedForWrongSurface); err != nil {
 		t.Fatalf("CreateQueued wrong surface: %v", err)
 	}
-	if _, err := repo.ConvertQueuedToSteering(ctx, guardedForWrongSurface.ID, wrongSurfaceActive.ID, wrongSurfaceActive.ID); !errors.Is(err, ErrNoActiveTurn) {
+	if _, err := repo.ConvertQueuedToSteering(ctx, guardedForWrongSurface.ID, wrongSurfaceActive.ID, wrongSurfaceActive.ID); !errors.Is(err, ErrActiveTurnChanged) {
 		t.Fatalf("expected wrong surface active turn conflict, got %v", err)
 	}
 
@@ -866,6 +866,40 @@ func TestThreadInputRepo_ConvertQueuedToSteeringRequiresActiveExecution(t *testi
 	if requeued.InputMode != models.ThreadInputModeQueued || requeued.InputStatus != models.ThreadInputPending || requeued.TurnID != "" || requeued.RunExecutionID != active.ID {
 		t.Fatalf("unexpected requeued state: %#v", requeued)
 	}
+}
+
+func TestThreadInputRepo_ConvertQueuedToSteeringRejectsExecutionThatIsNoLongerActive(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	observed := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "observed turn"}
+	require.NoError(t, execRepo.Create(ctx, observed))
+	current := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "new active turn"}
+	require.NoError(t, execRepo.Create(ctx, current))
+	queued := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: observed.ID,
+		AgentConfigID:  agent.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "must remain queued",
+	}
+	require.NoError(t, repo.CreateQueued(ctx, queued))
+
+	_, err := repo.ConvertQueuedToSteering(ctx, queued.ID, observed.ID, observed.ID)
+	require.ErrorIs(t, err, ErrActiveTurnChanged)
+	stored, err := repo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, models.ThreadInputModeQueued, stored.InputMode)
+	require.Equal(t, models.ThreadInputPending, stored.InputStatus)
+	require.Equal(t, observed.ID, stored.RunExecutionID)
 }
 
 func TestThreadInputRepo_RequeuePendingSteeringSkipsAlreadyAppliedRows(t *testing.T) {
