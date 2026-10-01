@@ -113,6 +113,30 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
    document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid.render=originalRender;
    assert(!stale.pair.querySelector('.chat-mermaid'),'detached render committed');
    assert(!document.querySelector('[id^="ov-mermaid-"]'),'temporary render DOM leaked');
+   // History serialization drops handlers and JS properties. Retry must use restored DOM.
+   const historySource=source.replace('Start','HistoryRetry');
+   const history=message('chat-messages','completed',historySource);
+   const renderer=document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid;
+   const realRender=renderer.render;
+   renderer.render=async()=>{throw new Error('temporary render failure')};
+   await window.renderStreamingContent(history.content,historySource);
+   await window.renderMermaidDiagrams(history.pair);
+   const snapshot=history.pair.outerHTML;
+   history.pair.outerHTML=snapshot;
+   const restoredFailure=document.getElementById('chat-messages').lastElementChild;
+   assert(restoredFailure.querySelector('[data-mermaid-retry]'),'restored retry missing');
+   renderer.render=realRender;
+   restoredFailure.querySelector('[data-mermaid-retry]').click();
+   await window.renderMermaidDiagrams(restoredFailure);
+   assert(restoredFailure.querySelector('.chat-mermaid'),'restored retry did not render');
+   assert(!restoredFailure.querySelector('[data-mermaid-error]'),'restored retry left stale error');
+   // Automatic history hydration must also remove the serialized error on success.
+   const holder=document.createElement('div');holder.innerHTML=snapshot;
+   document.getElementById('chat-messages').appendChild(holder);
+   document.dispatchEvent(new Event('htmx:historyRestore'));
+   await window.renderMermaidDiagrams(holder);
+   assert(holder.querySelector('.chat-mermaid'),'history hydration did not render');
+   assert(!holder.querySelector('[data-mermaid-error]'),'history hydration left stale error');
    const link=document.querySelector('.chat-mermaid');
    async function assertTransparentCanvas(url) {
     const text=await (await fetch(url)).text();

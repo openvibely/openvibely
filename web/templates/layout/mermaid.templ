@@ -59,22 +59,38 @@ templ MermaidDiagrams() {
    })().catch(error=>{library=null;throw error;});
    return library;
   }
+  function errorNotice(code) {
+   const anchor=code.matches('a.chat-mermaid')?code:code.parentElement;
+   const notice=anchor.nextElementSibling;
+   return notice && notice.hasAttribute('data-mermaid-error')?notice:null;
+  }
+  function clearFailure(code) {
+   const notice=errorNotice(code);
+   if (notice) notice.remove();
+  }
   function showFailure(code,isDiagram,error) {
    if (!eligible(code)) return;
-   const parent=isDiagram?code.parentElement:code.parentElement.parentElement;
-   if (code._mermaidError) code._mermaidError.remove();
+   clearFailure(code);
    const notice=document.createElement('div');
+   notice.dataset.mermaidError='';
    notice.setAttribute('role','status');
    notice.appendChild(document.createTextNode(error.message==='Diagram rendering timed out'?'Diagram rendering timed out. ':'Could not render diagram. '));
    const button=document.createElement('button');
-   button.type='button';button.textContent='Retry diagram';
-   button.onclick=()=>{
-    notice.remove();delete code._mermaidError;delete code._mermaidRender;
-    delete code.dataset.mermaidTheme;
-    window.renderMermaidDiagrams(parent);
-   };
-   notice.appendChild(button);parent.appendChild(notice);code._mermaidError=notice;
+   button.type='button';button.textContent='Retry diagram';button.dataset.mermaidRetry='';
+   notice.appendChild(button);
+   (isDiagram?code:code.parentElement).after(notice);
   }
+  document.addEventListener('click',event=>{
+   const button=event.target.closest('[data-mermaid-retry]');
+   if (!button) return;
+   const notice=button.closest('[data-mermaid-error]');
+   const anchor=notice && notice.previousElementSibling;
+   const code=anchor && (anchor.matches('a.chat-mermaid')?anchor:anchor.querySelector('code.language-mermaid'));
+   if (!code || !eligible(code)) return;
+   event.preventDefault();
+   clearFailure(code);delete code._mermaidRender;delete code.dataset.mermaidTheme;
+   window.renderMermaidDiagrams(anchor.parentElement);
+  });
   function configure(mermaid,theme) {
    mermaid.initialize({theme, themeVariables:{background:'transparent'},startOnLoad:false, securityLevel:'strict', suppressErrorRendering:true,
        maxTextSize:50000, maxEdges:500, htmlLabels:false, flowchart:{htmlLabels:false},
@@ -90,7 +106,7 @@ templ MermaidDiagrams() {
     const isDiagram=code.matches('a.chat-mermaid');
     const source=isDiagram?code.dataset.mermaidSource:code.textContent;
     const unchanged=()=>eligible(code) && (isDiagram?code.dataset.mermaidSource:code.textContent)===source;
-    if (isDiagram && code.dataset.mermaidTheme===currentTheme()) return;
+    if (isDiagram && code.dataset.mermaidTheme===currentTheme()) { clearFailure(code); return; }
     let retry=false;
     const render=async()=>{
      if (!unchanged() || source.length>50000) return;
@@ -126,6 +142,7 @@ templ MermaidDiagrams() {
       await deadline(image.decode(),Math.max(1,10000-(Date.now()-renderStarted)),()=>{image.removeAttribute('src');});
       if (!unchanged()) return;
       if (theme!==currentTheme()) { retry=true; return; }
+      clearFailure(code);
       const link=isDiagram?code:document.createElement('a');
       link.className='chat-mermaid';
       link.href=url;
@@ -140,7 +157,6 @@ templ MermaidDiagrams() {
        markdown.setAttribute('data-image-gallery-group','');
        code.parentElement.replaceWith(link);
       }
-      if (code._mermaidError) { code._mermaidError.remove();delete code._mermaidError; }
       if (window.imageGallery && window.imageGallery.refreshItem) window.imageGallery.refreshItem(link);
      } catch (error) {
       // Keep source (or the last successful image) and allow explicit recovery.
@@ -151,7 +167,7 @@ templ MermaidDiagrams() {
     };
     const requestedTheme=currentTheme();
     code._mermaidRender=queue.then(render).finally(()=>{
-     if (isDiagram && !code._mermaidError) delete code._mermaidRender;
+     if (isDiagram && !errorNotice(code)) delete code._mermaidRender;
      else if (retry || requestedTheme!==currentTheme()) delete code._mermaidRender;
      if ((retry || requestedTheme!==currentTheme()) && code.isConnected) window.renderMermaidDiagrams(code.parentElement);
     });
