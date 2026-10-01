@@ -91,12 +91,13 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
     assert(window.mermaid.mermaidAPI.getConfig().securityLevel==='strict','frontmatter security override');
    }
    // A render finishing after navigation must not replace or resurrect old DOM.
-   const stale=message('chat-messages','completed',source);
+   const staleSource=source.replace('Start','Detached');
+   const stale=message('chat-messages','completed',staleSource);
    const originalRender=window.mermaid.render;
    let started,release;
    const began=new Promise(resolve=>started=resolve), gate=new Promise(resolve=>release=resolve);
    window.mermaid.render=async(...args)=>{started();await gate;return originalRender(...args)};
-   await window.renderStreamingContent(stale.content,source);
+   await window.renderStreamingContent(stale.content,staleSource);
    const pending=window.renderMermaidDiagrams(stale.pair);
    await began;stale.pair.remove();release();await pending;
    window.mermaid.render=originalRender;
@@ -116,6 +117,22 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
    assert(gallery.querySelector('[data-gallery-download]').href===link.href,'download URL');
    gallery.querySelector('[data-gallery-plus]').click();
    assert(gallery.querySelector('img').style.transform.includes('scale(1.5)'),'zoom unavailable');
+   const originalTheme=document.documentElement.getAttribute('data-theme');
+   const originalURL=link.href;
+   document.documentElement.setAttribute('data-theme',originalTheme==='light'?'dark':'light');
+   for (let i=0;i<200 && link.href===originalURL;i++) await new Promise(resolve=>setTimeout(resolve,10));
+   assert(link.href!==originalURL,'theme did not change SVG');
+   assert(gallery.querySelector('img').src===link.href,'open gallery theme stale');
+   assert(gallery.querySelector('[data-gallery-download]').href===link.href,'download theme stale');
+   assert(gallery.querySelector('img').style.transform.includes('scale(1.5)'),'theme reset zoom');
+   document.documentElement.setAttribute('data-theme',originalTheme);
+   await window.renderMermaidDiagrams(document);
+   assert(link.href===originalURL,'cached theme not reused');
+   document.documentElement.setAttribute('data-theme','light');
+   document.documentElement.setAttribute('data-theme','dark');
+   document.documentElement.setAttribute('data-theme',originalTheme);
+   await window.renderMermaidDiagrams(document);
+   assert(link.href===originalURL,'rapid theme changes left stale image');
    gallery.querySelector('[data-gallery-fit]').click();
    assert(gallery.querySelector('img').style.transform.includes('scale(1)'),'fit unavailable');
    const closed=new Promise(resolve=>gallery.addEventListener('close',resolve,{once:true}));

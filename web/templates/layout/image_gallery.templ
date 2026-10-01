@@ -80,12 +80,22 @@ templ ImageGallery() {
    const container=trigger.closest('[data-image-gallery-group]');if(!container)return;
    e.preventDefault();opener=trigger;group=container;
    const links=Array.from(container.querySelectorAll('[data-image-gallery-item]'));
-   items=links.map(a=>({url:a.href||a.dataset.imageUrl,name:a.dataset.imageName||a.textContent.trim()}));
+   items=links.map(a=>({element:a,url:a.href||a.dataset.imageUrl,name:a.dataset.imageName||a.textContent.trim()}));
    dialog.showModal();observer.observe(document.body,{childList:true,subtree:true});show(links.indexOf(trigger));q('close').focus();
   });
   document.addEventListener('htmx:beforeSwap',e=>{const target=e.detail.target;if(dialog.open&&target&&group&&(target===group||target.contains(group)))close();});
   const observer=new MutationObserver(()=>{if(dialog.open&&(!group||!group.isConnected||!opener.isConnected))close();});
-  window.imageGallery={close};
+  function refreshItem(element) {
+   if (!dialog.open) return;
+   const item=items.find(item=>item.element===element);
+   if (!item) return;
+   item.url=element.href||element.dataset.imageUrl;
+   if (items[index]===item) {
+    image.src=item.url;
+    q('download').href=item.url;
+   }
+  }
+  window.imageGallery={close,refreshItem};
  })();
  </script>
 }
