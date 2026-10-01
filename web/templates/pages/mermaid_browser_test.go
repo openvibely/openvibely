@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openvibely/openvibely/web/static"
@@ -17,7 +18,16 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
 	base := renderTerminalBrowserComponent(t, layout.Base("Mermaid fixture", nil, ""))
 	shared := renderTerminalBrowserComponent(t, components.ChatAutoScrollScript())
 	fixture := strings.Replace(base, "</body>", shared+`<div id="chat-messages"></div><div id="task-thread-messages"></div></body>`, 1)
+	var failedLoads atomic.Int32
+	var loadAttempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/static/vendor/mermaid.min.js" {
+			loadAttempts.Add(1)
+			if failedLoads.Add(-1) >= 0 {
+				http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		if static.ServeAsset(w, r) {
 			return
 		}
@@ -81,26 +91,26 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
    const exportedDOM=new DOMParser().parseFromString(exported,'image/svg+xml');
    assert(!exportedDOM.querySelector('script,foreignObject,a[href]'),'active exported SVG content');
    assert(!Array.from(exportedDOM.querySelectorAll('*')).some(el=>Array.from(el.attributes).some(a=>/^on/i.test(a.name)||/javascript:/i.test(a.value))),'unsafe SVG attribute');
-   const config=window.mermaid.mermaidAPI.getConfig();
+   const config=document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid.mermaidAPI.getConfig();
    assert(config.securityLevel==='strict'&&config.htmlLabels===false&&config.flowchart.htmlLabels===false,'security override accepted');
    assert(config.themeCSS!=='body{color:red}','theme CSS override accepted');
    for (const diagram of ['sequenceDiagram\n Alice->>Bob: Hello', 'classDiagram\n Animal <|-- Duck', '---\nconfig:\n  securityLevel: loose\n  htmlLabels: true\n---\nflowchart LR\n A --> B']) {
     const extra=message('chat-messages','completed',fence+'mermaid\n'+diagram+'\n'+fence);
     await window.cleanAssistantMessages(document.getElementById('chat-messages'));
     assert(extra.content.querySelector('.chat-mermaid'),'additional diagram missing');
-    assert(window.mermaid.mermaidAPI.getConfig().securityLevel==='strict','frontmatter security override');
+    assert(document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid.mermaidAPI.getConfig().securityLevel==='strict','frontmatter security override');
    }
    // A render finishing after navigation must not replace or resurrect old DOM.
    const staleSource=source.replace('Start','Detached');
    const stale=message('chat-messages','completed',staleSource);
-   const originalRender=window.mermaid.render;
+   const originalRender=document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid.render;
    let started,release;
    const began=new Promise(resolve=>started=resolve), gate=new Promise(resolve=>release=resolve);
-   window.mermaid.render=async(...args)=>{started();await gate;return originalRender(...args)};
+   document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid.render=async(...args)=>{started();await gate;return originalRender(...args)};
    await window.renderStreamingContent(stale.content,staleSource);
    const pending=window.renderMermaidDiagrams(stale.pair);
    await began;stale.pair.remove();release();await pending;
-   window.mermaid.render=originalRender;
+   document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid.render=originalRender;
    assert(!stale.pair.querySelector('.chat-mermaid'),'detached render committed');
    assert(!document.querySelector('[id^="ov-mermaid-"]'),'temporary render DOM leaked');
    const link=document.querySelector('.chat-mermaid');
@@ -173,4 +183,58 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
 			t.Fatal("gallery pan did not move the diagram")
 		}
 	})
+	// A fresh page tests automatic retry, exhausted retry recovery, and queue progress.
+	for _, failures := range []int32{1, 2} {
+		failedLoads.Store(failures)
+		loadAttempts.Store(0)
+		runComposerFocusCDP(t, chrome, server.URL, "mermaid-recovery", func(browser *composerFocusCDP) {
+			browser.waitFor("shared renderer", `typeof window.renderStreamingContent`, "function")
+			result := browser.evaluateAwait(`(async()=>{
+    const assert=(ok,message)=>{if(!ok)throw new Error(message)};
+    function message(source) {
+     const pair=document.createElement('div');pair.dataset.executionPair='true';pair.dataset.execStatus='completed';
+     pair.className='chat-bubble-assistant-msg';
+     const pre=document.createElement('pre'),code=document.createElement('code');
+     code.className='language-mermaid';code.textContent=source;pre.appendChild(code);pair.appendChild(pre);document.body.appendChild(pair);
+     return pair;
+    }
+    const first=message('flowchart LR; A --> B');
+    await window.renderMermaidDiagrams(first);
+    if(!first.querySelector('.chat-mermaid')) {
+     assert(first.querySelector('code').textContent.includes('A --> B'),'failed load lost source');
+     const button=Array.from(first.querySelectorAll('button')).find(b=>b.textContent==='Retry diagram');
+     assert(button,'failed load missing retry');button.click();
+     await window.renderMermaidDiagrams(first);
+    }
+    assert(first.querySelector('.chat-mermaid'),'library did not recover');
+    const oldFrame=document.querySelector('iframe[data-mermaid-renderer]');
+    let lateResolve;
+    oldFrame.contentWindow.mermaid.render=()=>new Promise(resolve=>lateResolve=resolve);
+    const stalled=message('flowchart LR; Stalled --> Diagram');
+    const later=message('flowchart LR; Later --> Diagram');
+    const start=Date.now();
+    await Promise.all([window.renderMermaidDiagrams(stalled),window.renderMermaidDiagrams(later)]);
+    assert(Date.now()-start>=9900 && Date.now()-start<20000,'render deadline not bounded');
+    assert(!oldFrame.isConnected,'timed out renderer retained');
+    assert(stalled.querySelector('code'),'timeout lost source');
+    assert(stalled.textContent.includes('timed out'),'timeout message missing');
+    assert(later.querySelector('.chat-mermaid'),'timeout blocked next diagram');
+    lateResolve({svg:'<svg xmlns="http://www.w3.org/2000/svg"></svg>'});
+    await new Promise(resolve=>setTimeout(resolve,20));
+    assert(!stalled.querySelector('.chat-mermaid'),'late render committed');
+    stalled.querySelector('button').click();await window.renderMermaidDiagrams(stalled);
+    assert(stalled.querySelector('.chat-mermaid'),'timed out diagram could not retry');
+    assert(!stalled.querySelector('[role="status"]'),'retry error notice retained');
+    return 'pass';
+   })()`)
+			if result != "pass" {
+				t.Fatalf("recovery: %s", result)
+			}
+		})
+		// Failed responses are retried; the successful local asset is cached for replacement frames.
+		if got := loadAttempts.Load(); got != failures+1 {
+			t.Fatalf("library attempts=%d, want %d", got, failures+1)
+		}
+	}
+
 }

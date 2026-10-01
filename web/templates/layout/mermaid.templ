@@ -9,7 +9,7 @@ templ MermaidDiagrams() {
  <script>
  (() => {
   if (window.renderMermaidDiagrams) return;
-  let library, serial=0, queue=Promise.resolve();
+  let library, frame, serial=0, queue=Promise.resolve();
   const cache=new Map();
   const currentTheme=()=>document.documentElement.getAttribute('data-theme')==='light'?'default':'dark';
   const terminal=new Set(['completed','failed','cancelled']);
@@ -18,20 +18,62 @@ templ MermaidDiagrams() {
    return code.isConnected && pair && terminal.has(pair.getAttribute('data-exec-status')) &&
     !!code.closest('.chat-bubble-assistant-msg') && !code.closest('.stream-tool');
   }
+  function discardFrame() {
+   if (frame) frame.remove();
+   frame=null; library=null;
+  }
+  function deadline(work, milliseconds, onTimeout) {
+   let timer;
+   return Promise.race([work,new Promise((_,reject)=>{
+    timer=setTimeout(()=>{ onTimeout(); reject(new Error('Diagram rendering timed out')); },milliseconds);
+   })]).finally(()=>clearTimeout(timer));
+  }
   function loadLibrary() {
-   if (!library) library=new Promise((resolve,reject)=>{
-    const script=document.createElement('script');
-    script.src=document.querySelector('meta[name="ov-asset-mermaid"]').content;
-    script.onload=()=>{
+   if (!library) library=(async()=>{
+    for (let attempt=0;attempt<2;attempt++) {
      try {
-      const mermaid=window.mermaid;
-      resolve(mermaid);
-     } catch (error) { reject(error); }
-    };
-    script.onerror=()=>reject(new Error('Mermaid asset unavailable'));
-    document.head.appendChild(script);
-   });
+      frame=document.createElement('iframe');
+      frame.setAttribute('aria-hidden','true');
+      frame.dataset.mermaidRenderer='';
+      frame.tabIndex=-1;
+      frame.style.cssText='position:absolute;left:-100000px;top:0;width:1200px;height:900px;visibility:hidden;border:0;';
+      document.body.appendChild(frame);
+      const target=frame;
+      const doc=target.contentDocument;
+      await deadline(new Promise((resolve,reject)=>{
+       const script=doc.createElement('script');
+       script.src=document.querySelector('meta[name="ov-asset-mermaid"]').content;
+       script.onload=()=>resolve();
+       script.onerror=()=>reject(new Error('Diagram library could not load'));
+       doc.head.appendChild(script);
+      }),10000,()=>target.remove());
+      if (!target.contentWindow.mermaid) throw new Error('Diagram library could not load');
+      return target.contentWindow.mermaid;
+     } catch (error) {
+      if (frame) frame.remove();
+      frame=null;
+      if (attempt===1) throw error;
+      await new Promise(resolve=>setTimeout(resolve,1000));
+     }
+    }
+   })().catch(error=>{library=null;throw error;});
    return library;
+  }
+  function showFailure(code,isDiagram,error) {
+   if (!eligible(code)) return;
+   const parent=isDiagram?code.parentElement:code.parentElement.parentElement;
+   if (code._mermaidError) code._mermaidError.remove();
+   const notice=document.createElement('div');
+   notice.setAttribute('role','status');
+   notice.appendChild(document.createTextNode(error.message==='Diagram rendering timed out'?'Diagram rendering timed out. ':'Could not render diagram. '));
+   const button=document.createElement('button');
+   button.type='button';button.textContent='Retry diagram';
+   button.onclick=()=>{
+    notice.remove();delete code._mermaidError;delete code._mermaidRender;
+    delete code.dataset.mermaidTheme;
+    window.renderMermaidDiagrams(parent);
+   };
+   notice.appendChild(button);parent.appendChild(notice);code._mermaidError=notice;
   }
   function configure(mermaid,theme) {
    mermaid.initialize({theme, themeVariables:{background:'transparent'},startOnLoad:false, securityLevel:'strict', suppressErrorRendering:true,
@@ -56,16 +98,17 @@ templ MermaidDiagrams() {
      try {
       const mermaid=await loadLibrary();
       if (!unchanged()) return;
+      const renderStarted=Date.now();
       const theme=currentTheme();
       const key=JSON.stringify([theme,source]);
       let url=cache.get(key);
       if (!url) {
       configure(mermaid,theme);
       // Keep Mermaid's temporary DOM separate from the message, including on errors.
-      host=document.createElement('div');
+      host=frame.contentDocument.createElement('div');
       host.style.cssText='position:absolute;left:-100000px;top:0;visibility:hidden;';
-      document.body.appendChild(host);
-      const result=await mermaid.render('ov-mermaid-'+(++serial),source,host);
+      frame.contentDocument.body.appendChild(host);
+      const result=await deadline(mermaid.render('ov-mermaid-'+(++serial),source,host),10000,discardFrame);
       // Keep the canvas transparent in messages, previews, and downloads.
       const svgDocument=new DOMParser().parseFromString(result.svg,'image/svg+xml');
       svgDocument.documentElement.style.backgroundColor='transparent';
@@ -80,7 +123,7 @@ templ MermaidDiagrams() {
       // A self-contained image URL survives HTMX history restoration and needs no
       // object-URL registry. Never insert generated SVG into the message's DOM.
       image.src=url;
-      await image.decode();
+      await deadline(image.decode(),Math.max(1,10000-(Date.now()-renderStarted)),()=>{image.removeAttribute('src');});
       if (!unchanged()) return;
       if (theme!==currentTheme()) { retry=true; return; }
       const link=isDiagram?code:document.createElement('a');
@@ -97,16 +140,18 @@ templ MermaidDiagrams() {
        markdown.setAttribute('data-image-gallery-group','');
        code.parentElement.replaceWith(link);
       }
+      if (code._mermaidError) { code._mermaidError.remove();delete code._mermaidError; }
       if (window.imageGallery && window.imageGallery.refreshItem) window.imageGallery.refreshItem(link);
-     } catch (_) {
-      // Invalid or incomplete syntax stays as readable, copyable source.
+     } catch (error) {
+      // Keep source (or the last successful image) and allow explicit recovery.
+      showFailure(code,isDiagram,error);
      } finally {
       if (host) host.remove();
      }
     };
     const requestedTheme=currentTheme();
     code._mermaidRender=queue.then(render).finally(()=>{
-     if (isDiagram) delete code._mermaidRender;
+     if (isDiagram && !code._mermaidError) delete code._mermaidRender;
      else if (retry || requestedTheme!==currentTheme()) delete code._mermaidRender;
      if ((retry || requestedTheme!==currentTheme()) && code.isConnected) window.renderMermaidDiagrams(code.parentElement);
     });
