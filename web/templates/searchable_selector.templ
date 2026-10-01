@@ -235,6 +235,7 @@ templ searchableSelectorScript() {
 				if (event.target === nodes(root).dialog) close(root, true);
 			});
 			listen(document, 'keydown', function(event) {
+				if (event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;
 				var root = rootFor(event.target); if (!root) return; var state = nodes(root);
                 root.__selectorKeyboard = true;
 				if (event.target === state.button && (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown')) { event.preventDefault(); open(root); return; }
