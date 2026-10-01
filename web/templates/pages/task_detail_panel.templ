@@ -14,6 +14,9 @@ templ TaskDetailPanel() {
 		</div>
 	</aside>
 	<style>
+		/* Prevent scroll-boundary gestures from bouncing the app shell independently
+		   of the fixed inspector. The thread and panel retain their own scrolling. */
+		html:has(#task-detail-content), body:has(#task-detail-content), #main-content:has(#task-detail-content) { overscroll-behavior-y:none; }
 		#task-detail-content > [data-page-header] > nav { flex-shrink:1; flex-wrap:nowrap; }
 		#task-detail-content > [data-page-header] [data-breadcrumb-selector]:has([data-breadcrumb-selector-caret-only]) { width:28px; flex:0 0 28px; }
 		#task-details-opener, #task-workspace-back { flex-shrink:0; }
