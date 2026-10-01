@@ -34,7 +34,7 @@ templ MermaidDiagrams() {
    return library;
   }
   function configure(mermaid,theme) {
-   mermaid.initialize({theme, themeVariables:{background:theme==='dark'?'#1f2020':'#ffffff'},startOnLoad:false, securityLevel:'strict', suppressErrorRendering:true,
+   mermaid.initialize({theme, themeVariables:{background:'transparent'},startOnLoad:false, securityLevel:'strict', suppressErrorRendering:true,
        maxTextSize:50000, maxEdges:500, htmlLabels:false, flowchart:{htmlLabels:false},
        // Lock every configuration key against frontmatter and init directives.
        secure:Array.from(new Set(['secure', 'htmlLabels', 'dompurifyConfig', ...Object.keys(mermaid.mermaidAPI.defaultConfig)]))});
@@ -66,9 +66,9 @@ templ MermaidDiagrams() {
       host.style.cssText='position:absolute;left:-100000px;top:0;visibility:hidden;';
       document.body.appendChild(host);
       const result=await mermaid.render('ov-mermaid-'+(++serial),source,host);
-      // Bake the canvas color into the SVG so previews and downloads agree.
+      // Keep the canvas transparent in messages, previews, and downloads.
       const svgDocument=new DOMParser().parseFromString(result.svg,'image/svg+xml');
-      svgDocument.documentElement.style.backgroundColor=theme==='dark'?'#1f2020':'#ffffff';
+      svgDocument.documentElement.style.backgroundColor='transparent';
       const svg=new XMLSerializer().serializeToString(svgDocument.documentElement);
       url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
       cache.set(key,url);
