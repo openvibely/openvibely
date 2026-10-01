@@ -1060,26 +1060,10 @@ func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
 	}
 
 	output := buf.String()
-	if strings.Count(output, `data-run-at-picker-container`) < 2 {
-		t.Fatal("expected run-at picker containers for both add and edit schedule forms")
-	}
-	if strings.Count(output, `onclick="openScheduleRunAtPicker(this, event)"`) < 2 {
-		t.Fatal("expected run-at container click handlers for both add and edit forms")
-	}
-	if strings.Count(output, `data-run-at-picker`) < 2 {
-		t.Fatal("expected run-at picker input hooks for both add and edit forms")
-	}
-	if strings.Count(output, `input-sm cursor-pointer`) < 2 {
-		t.Fatal("expected pointer cursor affordance on run-at datetime inputs in add/edit forms")
-	}
-	if !strings.Contains(output, `if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;`) {
-		t.Fatal("expected run-at picker open behavior to be scoped to clicks on the datetime input")
-	}
-	if !strings.Contains(output, `function openScheduleRunAtPicker(container, event)`) {
-		t.Fatal("expected shared run-at picker open helper in task detail script")
-	}
-	if !strings.Contains(output, `if (typeof pickerInput.showPicker === 'function')`) {
-		t.Fatal("expected showPicker-based open behavior with fallback focus")
+	for _, want := range []string{`type="datetime-local"`, `data-run-at-picker`, `onclick="if(this.showPicker) this.showPicker()"`, `value="` + runAt.Local().Format("2006-01-02T15:04") + `"`} {
+		if !strings.Contains(output, want) {
+			t.Errorf("missing existing native picker behavior %s", want)
+		}
 	}
 }
 func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
@@ -1105,217 +1089,48 @@ func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
 	}
 }
 
-func TestTaskDetailContent_ScheduleAgentSelectorsHydratePersistedAssignment(t *testing.T) {
-	selectedID := "agent-selected"
-	task := &models.Task{
-		ID:                "task-scheduled-agent",
-		ProjectID:         "project-1",
-		Title:             "Scheduled Agent Task",
-		Status:            models.StatusPending,
-		Category:          models.CategoryScheduled,
-		AgentDefinitionID: &selectedID,
-	}
-	runAt := time.Now().Add(time.Hour).UTC()
-	schedules := []models.Schedule{{
-		ID:             "schedule-agent-1",
-		TaskID:         task.ID,
-		RunAt:          runAt,
-		NextRun:        &runAt,
-		RepeatType:     models.RepeatDaily,
-		RepeatInterval: 1,
-		Enabled:        true,
-	}}
-	agentDefs := []repository.AgentTaskUIOption{
-		{ID: selectedID, Name: "Selected Runner", Model: "inherit", Scope: models.AgentScopeProject, ProjectID: task.ProjectID, Enabled: true, SelectableAsPrimary: true},
-		{ID: "protected", Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false},
-	}
-
-	var buf bytes.Buffer
-	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render task detail: %v", err)
-	}
-	body := buf.String()
-	editStart := strings.Index(body, `id="schedule-edit-schedule-agent-1"`)
-	if editStart == -1 {
-		t.Fatal("expected schedule edit form")
-	}
-	editBody := body[editStart:]
-	for _, want := range []string{
-		`name="schedule_agent_definition_present" value="1"`,
-		`name="agent_definition_id"`,
-		`>Primary Agent</span>`,
-		`value="agent-selected" selected`,
-		`action="/schedules/schedule-agent-1?project_id=project-1"`,
-		`name="_method" value="PUT"`,
-		`/schedules/schedule-agent-1?project_id=project-1`,
-		`grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2`,
-	} {
-		if !strings.Contains(editBody, want) {
-			t.Fatalf("expected schedule edit form to contain %q", want)
+func TestTaskSchedulePanelModalControls(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		schedule := models.Schedule{ID: "schedule", RepeatType: models.RepeatMinutes, RepeatInterval: 30, Enabled: enabled, ClearContextOnStart: enabled, RunAt: time.Now()}
+		var buf bytes.Buffer
+		if err := TaskSchedulePanel(&models.Task{ID: "task", ProjectID: "project"}, []models.Schedule{schedule}).Render(context.Background(), &buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		for _, want := range []string{`<dialog`, `name="repeat_interval"`, `data-run-at-picker`, `name="clear_context_on_start"`, `hx-put="/schedules/schedule?project_id=project&amp;from=task-panel"`, `from=task-panel`, `Schedule enabled`} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %s", want)
+			}
+		}
+		for _, absent := range []string{`aria-label="Add schedule" data-schedule-open=`, `schedule_agent_definition_present`, `name="agent_definition_id"`} {
+			if strings.Contains(out, absent) {
+				t.Errorf("unexpected %s", absent)
+			}
+		}
+		if !enabled && !strings.Contains(out, "Paused") {
+			t.Fatal("disabled schedule should show Paused")
+		}
+		if enabled && !strings.Contains(out, "Fresh context each run") {
+			t.Fatal("missing context summary")
 		}
 	}
-	if strings.Contains(editBody, "Protected Maintenance") {
-		t.Fatal("schedule Agent choices must exclude agents that are not selectable as primary")
-	}
 }
 
-func TestTaskDetailContent_ScheduleAgentSelectorsSupportNoAgent(t *testing.T) {
-	task := &models.Task{ID: "task-no-agent", ProjectID: "project-1", Title: "No Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled}
-	runAt := time.Now().Add(time.Hour).UTC()
-	schedules := []models.Schedule{{ID: "schedule-no-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}}
-	agentDefs := []repository.AgentTaskUIOption{{ID: "runner", Name: "Runner", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true}}
-
-	var buf bytes.Buffer
-	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render task detail: %v", err)
-	}
-	body := buf.String()
-	if strings.Count(body, `>No Agent</option>`) < 3 {
-		t.Fatalf("expected no-agent option in task, add-schedule, and edit-schedule selectors")
-	}
-	if strings.Count(body, `option value="" selected>No Agent</option>`) < 3 {
-		t.Fatalf("expected server-rendered no-agent selection in all schedule-related selectors")
-	}
-	if !strings.Contains(body, `/tasks/task-no-agent/schedule?project_id=project-1`) {
-		t.Fatal("expected add-schedule form to preserve project scope")
-	}
-}
-
-func TestTaskDetailContent_ScheduleEditDoesNotOfferOrClearProtectedAgent(t *testing.T) {
-	protectedID := "protected-agent"
-	task := &models.Task{ID: "task-protected-agent", ProjectID: "project-1", Title: "Protected Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled, AgentDefinitionID: &protectedID}
-	runAt := time.Now().Add(time.Hour).UTC()
-	schedules := []models.Schedule{{ID: "schedule-protected-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}}
-	agentDefs := []repository.AgentTaskUIOption{{ID: protectedID, Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false}}
-
-	var buf bytes.Buffer
-	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render task detail: %v", err)
-	}
-	body := buf.String()
-	editStart := strings.Index(body, `id="schedule-edit-schedule-protected-agent"`)
-	if editStart == -1 {
-		t.Fatal("expected protected schedule edit form")
-	}
-	editBody := body[editStart:]
-	if strings.Contains(editBody, "Protected Maintenance") || strings.Contains(editBody, `name="schedule_agent_definition_present"`) {
-		t.Fatal("protected Agent must not be exposed or overwritten by the schedule edit form")
-	}
-}
-
-// TestTaskDetailContent_ScheduleEnabledState verifies the task detail schedule
-// card renders the correct controls and badges based on Schedule.Enabled.
-func TestTaskDetailContent_ScheduleEnabledState(t *testing.T) {
-	runAt := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
-	nextRun := runAt
-
-	tests := []struct {
-		name            string
-		enabled         bool
-		wantBadge       string // text that MUST appear
-		wantNoBadge     string // text that must NOT appear
-		wantButton      string // button label that MUST appear
-		wantNoButton    string // button label that must NOT appear
-		wantLineThrough bool   // expect line-through on next-run timestamp
-	}{
-		{
-			name:            "disabled schedule shows Disabled badge and Resume button",
-			enabled:         false,
-			wantBadge:       "Disabled",
-			wantNoBadge:     "",
-			wantButton:      "Resume",
-			wantNoButton:    "Pause",
-			wantLineThrough: true,
-		},
-		{
-			name:            "enabled schedule shows no Disabled badge and Pause button",
-			enabled:         true,
-			wantBadge:       "",
-			wantNoBadge:     "Disabled",
-			wantButton:      "Pause",
-			wantNoButton:    "Resume",
-			wantLineThrough: false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			task := &models.Task{
-				ID:        "task-sched-1",
-				Title:     "My Task",
-				ProjectID: "p1",
-				Category:  models.CategoryScheduled,
-				Status:    models.StatusPending,
+func TestTaskSchedulePanelDraftAndEmptyTaskShareEditor(t *testing.T) {
+	for _, id := range []string{"", "saved"} {
+		var buf bytes.Buffer
+		if err := TaskSchedulePanel(&models.Task{ID: id, ProjectID: "project"}, nil).Render(context.Background(), &buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		for _, want := range []string{`aria-label="Add schedule"`, `No schedule configured.`, `data-schedule-editor-form`, `value="seconds"`, `value="monthly"`, `name="repeat_interval"`, `data-run-at-picker`} {
+			if !strings.Contains(out, want) {
+				t.Errorf("missing %s", want)
 			}
-			schedules := []models.Schedule{{
-				ID:             "sched-1",
-				TaskID:         task.ID,
-				RunAt:          runAt,
-				NextRun:        &nextRun,
-				RepeatType:     models.RepeatDaily,
-				RepeatInterval: 1,
-				Enabled:        tc.enabled,
-			}}
-
-			var buf bytes.Buffer
-			err := TaskDetailContent(task, nil, nil, schedules, nil, nil, nil, "schedules", nil).Render(context.Background(), &buf)
-			if err != nil {
-				t.Fatalf("render: %v", err)
-			}
-			out := buf.String()
-
-			if tc.wantBadge != "" && !strings.Contains(out, `class="badge badge-warning badge-xs ml-2">`+tc.wantBadge+`</span>`) {
-				t.Errorf("expected %q badge, not found in output", tc.wantBadge)
-			}
-			if tc.wantNoBadge != "" && strings.Contains(out, `class="badge badge-warning badge-xs ml-2">`+tc.wantNoBadge+`</span>`) {
-				t.Errorf("expected %q badge to be absent, but found in output", tc.wantNoBadge)
-			}
-			if !strings.Contains(out, tc.wantButton) {
-				t.Errorf("expected %q button, not found in output", tc.wantButton)
-			}
-			if strings.Contains(out, ">"+tc.wantNoButton+"<") {
-				t.Errorf("expected %q button to be absent, but found in output", tc.wantNoButton)
-			}
-			if tc.wantLineThrough && !strings.Contains(out, "line-through") {
-				t.Error("expected line-through CSS class for disabled next-run timestamp")
-			}
-			if !tc.wantLineThrough && strings.Contains(out, "line-through") {
-				t.Error("expected no line-through CSS class for enabled schedule")
-			}
-		})
-	}
-}
-
-func TestTaskDetailScheduleSurfacesDefaultAndHydrateClearContext(t *testing.T) {
-	task := &models.Task{ID: "task-schedule-context", ProjectID: "default", Title: "Scheduled context"}
-	schedules := []models.Schedule{
-		{ID: "clear", TaskID: task.ID, RunAt: time.Now(), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true},
-		{ID: "keep", TaskID: task.ID, RunAt: time.Now(), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true},
-	}
-	var buf bytes.Buffer
-	if err := TaskDetailContent(task, nil, nil, schedules, nil, nil, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	html := buf.String()
-	if strings.Count(html, `name="clear_context_on_start" value="true"`) != 3 {
-		t.Fatalf("expected add and two schedule edit controls, got %d", strings.Count(html, `name="clear_context_on_start" value="true"`))
-	}
-	if strings.Contains(html, `name="clear_context_schedule_ids"`) {
-		t.Fatal("Task Details edit form must not render schedule context controls")
-	}
-	clearCardStart := strings.Index(html, `id="schedule-card-clear"`)
-	keepCardStart := strings.Index(html, `id="schedule-card-keep"`)
-	if clearCardStart < 0 || keepCardStart < 0 {
-		t.Fatal("expected both schedule cards")
-	}
-	clearCard := html[clearCardStart:keepCardStart]
-	keepCard := html[keepCardStart:]
-	checkedInput := `name="clear_context_on_start" value="true" class="checkbox checkbox-sm" checked`
-	if !strings.Contains(clearCard, checkedInput) {
-		t.Fatal("enabled persisted schedule must render checked")
-	}
-	if strings.Contains(keepCard, checkedInput) {
-		t.Fatal("disabled persisted schedule must render unchecked")
+		}
+		if id == "" && !strings.Contains(out, `data-draft-schedule-field="add_schedule"`) {
+			t.Fatal("draft must retain pending fields for first message")
+		}
 	}
 }
 

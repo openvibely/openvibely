@@ -1782,8 +1782,8 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 		t.Fatalf("expected 200 HTMX response, got %d", rec.Code)
 	}
 	assertSchedulesTaskDetailFragment(t, rec.Body.String())
-	if !strings.Contains(rec.Body.String(), `class="badge badge-warning badge-xs ml-2">Disabled</span>`) ||
-		!strings.Contains(rec.Body.String(), `aria-label="Resume schedule">`) {
+	if !strings.Contains(rec.Body.String(), `Paused`) ||
+		!strings.Contains(rec.Body.String(), `aria-label="Schedule enabled"`) {
 		t.Fatalf("expected refreshed paused schedule fragment, body=%s", rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "/schedules/"+s.ID+"/toggle?project_id="+project.ID) {
@@ -1806,8 +1806,7 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 HTMX resume response, got %d", rec.Code)
 	}
-	if strings.Contains(rec.Body.String(), `class="badge badge-warning badge-xs ml-2">Disabled</span>`) ||
-		!strings.Contains(rec.Body.String(), `aria-label="Pause schedule">`) {
+	if !strings.Contains(rec.Body.String(), `checked aria-label="Schedule enabled"`) {
 		t.Fatalf("expected refreshed enabled schedule fragment, body=%s", rec.Body.String())
 	}
 	trigger = struct {
@@ -1863,7 +1862,7 @@ func TestToggleScheduleEnabled_FiredOneTimeReturnsBadRequestWithoutMutation(t *t
 		t.Fatalf("expected 200 HTMX response with visible validation feedback, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	assertSchedulesTaskDetailFragment(t, rec.Body.String())
-	if !strings.Contains(rec.Body.String(), "Resume") {
+	if !strings.Contains(rec.Body.String(), `aria-label="Schedule enabled"`) {
 		t.Fatalf("expected fired schedule to remain resumable after rejected toggle, body=%s", rec.Body.String())
 	}
 	var trigger struct {
@@ -2069,5 +2068,25 @@ func TestAPIToggleScheduleEnabled_RoundTrip(t *testing.T) {
 	}
 	if resp["enabled"] != true {
 		t.Errorf("expected enabled=true, got %v", resp["enabled"])
+	}
+}
+
+func TestDeleteSchedule_TaskPanelRestoresEmptyState(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+	rec := tc.HTMX().Delete("/schedules/" + schedule.ID + "?project_id=" + project.ID + "&from=task-panel").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`id="task-schedule-panel"`, `No schedule configured.`, `aria-label="Add schedule"`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	stored, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	if err != nil || stored != nil {
+		t.Fatalf("delete failed: %v, %v", stored, err)
 	}
 }
