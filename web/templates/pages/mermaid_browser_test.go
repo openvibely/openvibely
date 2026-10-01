@@ -159,6 +159,18 @@ func TestBrowserFunctional_MermaidCompletedMessagesAndGallery(t *testing.T) {
    assert(gallery.querySelector('img').style.transform.includes('scale(1.5)'),'zoom unavailable');
    const originalTheme=document.documentElement.getAttribute('data-theme');
    const originalURL=link.href;
+   // A failed theme render must not pin a settled promise to the diagram.
+   const themeRenderer=document.querySelector('iframe[data-mermaid-renderer]').contentWindow.mermaid;
+   const renderBeforeFailure=themeRenderer.render;
+   themeRenderer.render=async()=>{throw new Error('Simulated theme render failure')};
+   document.documentElement.setAttribute('data-theme',originalTheme==='light'?'dark':'light');
+   await window.renderMermaidDiagrams(document);
+   assert(link.nextElementSibling?.hasAttribute('data-mermaid-error'),'theme failure notice missing');
+   assert(link.href===originalURL,'failed refresh replaced working image');
+   themeRenderer.render=renderBeforeFailure;
+   document.documentElement.setAttribute('data-theme',originalTheme);
+   await window.renderMermaidDiagrams(document);
+   assert(!link.nextElementSibling?.hasAttribute('data-mermaid-error'),'returning to original theme retained error');
    document.documentElement.setAttribute('data-theme',originalTheme==='light'?'dark':'light');
    for (let i=0;i<200 && link.href===originalURL;i++) await new Promise(resolve=>setTimeout(resolve,10));
    assert(link.href!==originalURL,'theme did not change SVG');

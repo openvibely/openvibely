@@ -167,7 +167,8 @@ templ MermaidDiagrams() {
     };
     const requestedTheme=currentTheme();
     code._mermaidRender=queue.then(render).finally(()=>{
-     if (isDiagram && !errorNotice(code)) delete code._mermaidRender;
+     // Only in-flight diagram work should block a later theme refresh.
+     if (isDiagram) delete code._mermaidRender;
      else if (retry || requestedTheme!==currentTheme()) delete code._mermaidRender;
      if ((retry || requestedTheme!==currentTheme()) && code.isConnected) window.renderMermaidDiagrams(code.parentElement);
     });
