@@ -37,7 +37,7 @@ func TestHandler_GetTask_ScheduleDeleteConfirmationDialog(t *testing.T) {
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
 	}
-	createSchedule(t, h, task.ID, time.Now().Add(time.Hour))
+	schedule := createSchedule(t, h, task.ID, time.Now().Add(time.Hour))
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
 	req.Header.Set("HX-Request", "true")
@@ -49,27 +49,26 @@ func TestHandler_GetTask_ScheduleDeleteConfirmationDialog(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		`id="delete_schedule_confirm_modal" class="modal"`,
-		`id="delete_schedule_confirm_name"`,
+		`id="task-schedule-` + schedule.ID + `-delete" class="modal"`,
 		`data-destructive-confirm-dialog`,
-		`openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task')`,
-		`onclick="delete_schedule_confirm_modal.close()"`,
-		`onclick="confirmDeleteSchedule()"`,
+		`window.openDestructiveConfirmDialog('task-schedule-` + schedule.ID + `-delete', '', '')`,
+		`Scheduled Delete Dialog Task`,
+		`Close delete schedule confirmation`,
 		`class="btn btn-error"`,
-		`onclick="openDeleteScheduleConfirm(this)"`,
-		`data-schedule-title="Scheduled Delete Dialog Task"`,
-		`deleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';`,
-		`deleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\s+/, '')) : null;`,
-		`deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';`,
-		`modal.showModal()`,
-		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
+		`hx-delete="/schedules/` + schedule.ID + `?project_id=default&amp;from=task-panel"`,
+		`hx-trigger="schedule-delete-confirmed"`,
+		`hx-target="#task-schedule-panel"`,
+		`hx-swap="outerHTML settle:0"`,
+		`this.closest('dialog').dispatchEvent(new Event('confirm-schedule-delete'))`,
+		`confirmation.addEventListener('confirm-schedule-delete',function(){`,
+		`htmx.trigger(form.querySelector('[data-schedule-delete]'),'schedule-delete-confirmed');`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected task detail schedule delete confirmation markup/script to contain %q", want)
 		}
 	}
-	if strings.Contains(body, `hx-confirm="Remove this schedule?"`) || strings.Contains(body, `hx-delete="/schedules/`) {
-		t.Fatal("expected schedule remove button to open modal instead of deleting immediately")
+	if strings.Contains(body, `hx-confirm="Remove this schedule?"`) {
+		t.Fatal("expected shared confirmation dialog instead of native browser confirmation")
 	}
 }
 
