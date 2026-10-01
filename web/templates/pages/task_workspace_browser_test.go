@@ -488,7 +488,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("background thread mounted", `String(Boolean(document.getElementById('task-message-input')))`, "true")
 		for _, tab := range []string{"chat", "thread", "history", "details", "schedules", "chaining", "attachments", "lifecycle"} {
 			b.call("Page.navigate", map[string]any{"url": server.URL + "/tasks/workspace-task?from=automation&automation_id=origin&automation_name=Source&tab=" + tab}, nil)
-			b.waitFor("deep link "+tab, `String(document.getElementById('task-detail-content')&&document.getElementById('task-detail-content').dataset.initialTab)`, tab)
+			b.waitFor("deep link "+tab, `String(document.readyState!=='loading'&&document.getElementById('task-detail-content').dataset.initialTab)`, tab)
 			wantPanel := "false"
 			if tab == "chat" || tab == "thread" || tab == "history" {
 				wantPanel = "true"
