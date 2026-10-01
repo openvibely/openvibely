@@ -63,7 +63,8 @@ templ ImageGallery() {
   }
   function zoom(value){ scale=Math.max(1,Math.min(8,value)); transform(); }
   function show(next){
-   index=Math.max(0,Math.min(items.length-1,next)); scale=1;x=0;y=0;drag=null;
+   if(next<0 || next>=items.length)return;
+   index=next; scale=1;x=0;y=0;drag=null;
    const item=items[index], old=image; image=document.createElement('img'); image.dataset.galleryImage=''; image.draggable=false; image.alt=item.name;
    old.replaceWith(image); const current=image;
    q('status').textContent='Loading image…';

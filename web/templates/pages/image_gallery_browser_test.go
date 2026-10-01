@@ -70,11 +70,17 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("gallery entries", `String(!!document.querySelector("#attachment-list [data-image-gallery-item]") && !!window.imageGallery)`, "true")
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("task gallery loaded", `document.querySelector('[data-gallery-count]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "1 / 2:")
+		b.evaluate(`window.galleryBoundaryImage=document.querySelector('[data-gallery-image]');window.galleryBoundaryTransform=window.galleryBoundaryImage.style.transform;'saved'`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowLeft"}, nil)
+		b.waitFor("ArrowLeft boundary preserves image and zoom", `String(document.querySelector('[data-gallery-image]')===window.galleryBoundaryImage && window.galleryBoundaryImage.style.transform===window.galleryBoundaryTransform)`, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
 		b.waitFor("next image", `document.querySelector('[data-gallery-name]').textContent`, "two.svg")
 		b.click(`[data-gallery-plus]`)
 		b.waitFor("icon toolbar", `String(document.querySelectorAll('.image-gallery-tools svg').length===4 && document.querySelector('.image-gallery-tools').textContent.trim()==='')`, "true")
 		b.waitFor("zoom", `document.querySelector('[data-gallery-fit]').title`, "Fit image (150%)")
+		b.evaluate(`window.galleryBoundaryImage=document.querySelector('[data-gallery-image]');window.galleryBoundaryTransform=window.galleryBoundaryImage.style.transform;'saved'`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowRight"}, nil)
+		b.waitFor("ArrowRight boundary preserves image and zoom", `String(document.querySelector('[data-gallery-image]')===window.galleryBoundaryImage && window.galleryBoundaryImage.style.transform===window.galleryBoundaryTransform)`, "true")
 		var point struct {
 			X float64 `json:"x"`
 			Y float64 `json:"y"`
