@@ -264,7 +264,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
     });
     list.querySelectorAll('[data-close-project]').forEach(function(close) {
-     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject);
+     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
     });
     var activeTab = list.querySelector('[aria-selected="true"]');
     if (activeTab) activeTab.scrollIntoView({block: 'nearest', inline: 'nearest'});
@@ -277,7 +277,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';
      var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim();
      var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg>'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
-     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject);
+     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject) || close.dataset.closeProject === window.openVibelyProtectedProjectID;
      wrapper.append(tab, close); list.append(wrapper);
     });
     list.append(add);
@@ -419,7 +419,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var index = ids.indexOf(close.dataset.closeProject);
     var next = ids[index + 1] || ids[index - 1];
     var closingID = close.dataset.closeProject;
-    if (pendingCloses.has(closingID)) return;
+    if (pendingCloses.has(closingID) || closingID === window.openVibelyProtectedProjectID) return;
     pendingCloses.add(closingID);
     close.disabled = true;
     try {
