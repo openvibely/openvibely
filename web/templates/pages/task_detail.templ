@@ -565,6 +565,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             .lifecycle-entry-details dl { display:grid; grid-template-columns:5rem minmax(0,1fr); gap:8px; }
                             .lifecycle-entry-details dt { opacity:.6; }
                             .lifecycle-entry-details p { margin-top:8px; }
+                            .lifecycle-entry .badge { max-width:100%; min-width:0; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; line-height:1.4; flex-shrink:0; }
                         </style>
                         <div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="flex-1 min-h-0 overflow-y-auto pr-1">
 							<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">

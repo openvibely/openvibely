@@ -75,15 +75,14 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 
 templ searchableSelectorScript() {
  <style>
- [data-searchable-selector-option] { outline: none !important; }
- [data-searchable-selector-option][data-selector-active],
- [data-searchable-selector-option]:hover { background-color: oklch(var(--bc) / .1) !important; }
+ [data-searchable-selector-option] { outline: none !important; background-color: transparent !important; }
+ [data-searchable-selector-option][data-selector-active] { background-color: oklch(var(--bc) / .1) !important; }
  [data-searchable-selector-trigger][data-selector-return-focus] { outline: none !important; }
  #desktop-project-titlebar #project-selector-trigger[data-selector-return-focus] { background: transparent; }
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 11;
+			var controllerVersion = 12;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });

@@ -699,3 +699,43 @@ func TestBrowserFunctional_TaskScheduleModal(t *testing.T) {
 
 	})
 }
+
+func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{ID: "hover-task", ProjectID: "hover-project", Title: "Current task", Category: models.CategoryBacklog}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/breadcrumb-selectors/tasks" {
+			_ = components.BreadcrumbSelectorResults("Task", task.ID, []models.BreadcrumbSelectorItem{{ID: task.ID, Name: "Current task", URL: "/tasks/hover-task"}, {ID: "other", Name: "Other task", URL: "/tasks/other"}}, false, false).Render(r.Context(), w)
+			return
+		}
+		if r.URL.Path != "/tasks/hover-task" {
+			return
+		}
+		_ = TaskDetailPage(nil, task, nil, nil, nil, nil, nil, nil, "details", nil).Render(r.Context(), w)
+	}))
+	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks/hover-task", "breadcrumb-pointer", func(b *composerFocusCDP) {
+		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
+		b.waitFor("breadcrumb", `String(!!document.querySelector('[data-breadcrumb-selector-button]'))`, "true")
+		b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus(); 'focused'`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
+		b.waitFor("results", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "2")
+		var point struct{ X, Y float64 }
+		b.call("Runtime.evaluate", map[string]any{"expression": `window.hoverPoint=(function(){var r=document.querySelectorAll('[data-breadcrumb-selector-option]')[1].getBoundingClientRect();return {x:r.left+30,y:r.top+r.height/2}})()`}, nil)
+		// Keep the pointer where the second result will appear, then reopen by keyboard.
+		fmt.Sscan(b.evaluate(`String(hoverPoint.x)+' '+String(hoverPoint.y)`), &point.X, &point.Y)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+		b.evaluate(`document.querySelector('[data-breadcrumb-selector-dialog]').close(); document.querySelector('[data-breadcrumb-selector-button]').focus(); 'closed'`)
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
+		b.waitFor("keyboard reopened", `String(document.querySelector('[data-breadcrumb-selector-dialog]').open)`, "true")
+		b.waitFor("stationary pointer remains over second option", `String(document.querySelectorAll('[data-breadcrumb-selector-option]')[1].matches(':hover'))`, "true")
+		b.waitFor("one highlight under stationary pointer", `String(Array.from(document.querySelectorAll('[data-breadcrumb-selector-option]')).filter(function(el){return getComputedStyle(el).backgroundColor!=='rgba(0, 0, 0, 0)'}).length)`, "1")
+		fmt.Sscan(b.evaluate(`(function(){var r=document.querySelectorAll('[data-breadcrumb-selector-option]')[1].getBoundingClientRect();return (r.left+32)+' '+(r.top+r.height/2)})()`), &point.X, &point.Y)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+		b.waitFor("pointer updates active item", `String(document.querySelectorAll('[data-breadcrumb-selector-option]')[1].hasAttribute('data-selector-active'))`, "true")
+	})
+}
