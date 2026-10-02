@@ -288,6 +288,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (duration.getBoundingClientRect().left - duration.previousElementSibling.getBoundingClientRect().right > 8) fail('duration must not use a separate column');
     var refresh = document.querySelector('[aria-label="Refresh lifecycle"]');
     if (!refresh || !refresh.querySelector('svg') || refresh.textContent.trim()) fail('refresh must be an accessible icon button');
+    var rb=refresh.getBoundingClientRect(), icon=refresh.querySelector('svg').getBoundingClientRect();
+    if (rb.width!==28 || rb.height!==28 || Math.abs((icon.left+icon.width/2)-(rb.left+rb.width/2))>1 || Math.abs((icon.top+icon.height/2)-(rb.top+rb.height/2))>1) fail('refresh icon must be centered in a stable square target');
+    if (refresh.disabled || refresh.getAttribute('aria-busy')!=='false') fail('refresh must be available after loading');
     detail.querySelectorAll('.lifecycle-evidence').forEach(function(group) {
       var previous = group.firstElementChild.getBoundingClientRect();
       group.querySelectorAll('.badge').forEach(function(badge) {
