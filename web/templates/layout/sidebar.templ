@@ -75,6 +75,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             if (failed) preferenceRetryDelay = Math.min(preferenceRetryDelay * 2, 30000);
                         }
                     }
+                    window.openVibelySaveProjectPreferences = saveProjectPreferences;
                     window.addEventListener('online', flushProjectPreferences);
                     window.addEventListener('pagehide', flushProjectPreferences);
                     function persistSelectedProject(projectID) {
@@ -128,7 +129,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						history.replaceState(history.state, '', initialURL.pathname + initialURL.search + initialURL.hash);
 					}
 
-					sel.addEventListener('change', function() {
+					sel.addEventListener('change', function(event) {
 						const newProjectId = sel.value;
 						if (!newProjectId || newProjectId === previousProjectID) {
 							syncProjectSelector();
@@ -214,7 +215,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 
 						// HTMX owns the content swap, URL update, and history cache.
-						navigateProject(newUrl, newProjectId);
+						const navigation = navigateProject(newUrl, newProjectId);
+                        if (event.detail) event.detail.navigation = navigation;
 					});
 
                     async function navigateProject(url, id) {
@@ -223,19 +225,22 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         try {
                             try { await window.openVibelyNavigate(url); }
                             catch (error) {
-                                if (generation !== projectSwitchGeneration) return;
+                                if (generation !== projectSwitchGeneration) return false;
                                 if (![404, 410].includes(error.status) || url === fallback) throw error;
                                 await window.openVibelyNavigate(fallback);
                             }
-                            if (generation === projectSwitchGeneration) persistSelectedProject(id);
+                            if (generation !== projectSwitchGeneration || new URLSearchParams(location.search).get('project_id') !== id) return false;
+                            persistSelectedProject(id);
+                            return true;
                         } catch (_) {
-                            if (generation !== projectSwitchGeneration) return;
+                            if (generation !== projectSwitchGeneration) return false;
                             syncProjectSelectorFromURL();
                             if (window.openVibelyRetargetLiveEvents) {
                                 const task = location.pathname.match(/^\/tasks\/([^/]+)/);
                                 window.openVibelyRetargetLiveEvents(sel.value, task ? decodeURIComponent(task[1]) : '');
                             }
                             if (window.showToast) window.showToast('Could not switch projects. Try again.', 'failed');
+                            return false;
                         }
                     }
 					function syncProjectSelectorFromURL() {
