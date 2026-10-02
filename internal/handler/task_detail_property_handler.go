@@ -27,6 +27,13 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 		if task.SwarmRole == models.SwarmRoleParent {
 			return echo.NewHTTPError(http.StatusBadRequest, "Use the swarm editor to change its model")
 		}
+		if value == "default" {
+			model, err := h.selectDefaultAgent(ctx, false)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			}
+			value = model.ID
+		}
 		if value != "" {
 			options, err := h.llmConfigRepo.ListBadgeOptions(ctx)
 			if err != nil {

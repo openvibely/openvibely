@@ -2160,6 +2160,9 @@ func goalStatusLabel(goal *models.TaskGoal) string {
 }
 
 func taskModelLabel(task *models.Task, agents []models.LLMConfig) string {
+	if task != nil && task.AgentID != nil && *task.AgentID == "default" {
+		return "Default"
+	}
 	if task == nil || task.AgentID == nil || *task.AgentID == "" {
 		return "Auto"
 	}
