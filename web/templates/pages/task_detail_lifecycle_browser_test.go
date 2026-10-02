@@ -278,8 +278,21 @@ window.addEventListener('DOMContentLoaded', function() {
     var detail = entry.querySelector('.lifecycle-entry-details');
     if (detail.textContent.includes('Started') || detail.textContent.includes('Finished')) fail('expanded details must not repeat timestamps');
     if (detail.querySelector('[data-lifecycle-duration]') === null) fail('duration must remain visible');
-    var labels = Array.from(detail.querySelectorAll('dt, p > span:not(.badge)'));
+    var labels = Array.from(detail.querySelectorAll('p > span.opacity-60, .lifecycle-evidence > span.opacity-60'));
     if (labels.length !== 4 || labels.some(function(label) { return !label.classList.contains('opacity-60'); })) fail('duration, agent, skills and memories must share muted label styling');
+    var duration = detail.querySelector('[data-lifecycle-duration]');
+    if (!duration.parentElement.textContent.startsWith('Duration: ')) fail('duration must follow colon and space');
+    if (duration.getBoundingClientRect().left - duration.previousElementSibling.getBoundingClientRect().right > 8) fail('duration must not use a separate column');
+    var refresh = document.querySelector('[aria-label="Refresh lifecycle"]');
+    if (!refresh || !refresh.querySelector('svg') || refresh.textContent.trim()) fail('refresh must be an accessible icon button');
+    detail.querySelectorAll('.lifecycle-evidence').forEach(function(group) {
+      var previous = group.firstElementChild.getBoundingClientRect();
+      group.querySelectorAll('.badge').forEach(function(badge) {
+        var box = badge.getBoundingClientRect();
+        if (box.top < previous.bottom || Math.abs(box.left-previous.left)>1) fail('evidence badges must stack below their label');
+        previous = box;
+      });
+    });
     var oldWidth = entry.style.width;
     entry.style.width = '240px';
     var truncated = false;

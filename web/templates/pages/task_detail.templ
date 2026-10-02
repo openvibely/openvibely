@@ -551,7 +551,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					<div class="flex flex-col flex-1 min-h-0">
 						<div class="flex items-center justify-between mb-3 flex-shrink-0" style="height:20px">
 							<h3 class="text-sm font-semibold">Lifecycle</h3>
-							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
+							<button type="button" class="btn btn-ghost btn-xs" aria-label="Refresh lifecycle" title="Refresh lifecycle" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.55-2.1L20 8M4 16l2.35 3.1A7 7 0 0 0 17.9 17"/></svg></button>
 						</div>
 						<style>
                             .lifecycle-entry summary { display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:10px 12px; border-radius:8px; }
@@ -561,7 +561,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             .lifecycle-subtitle { display:block; font-size:12px; opacity:.6; margin-top:4px; }
                             .lifecycle-entry[open] .lifecycle-chevron { transform:rotate(90deg); }
                             .lifecycle-entry-details { padding:8px 12px 16px; overflow-wrap:anywhere; }
-                            .lifecycle-entry-details dl { display:grid; grid-template-columns:5rem minmax(0,1fr); gap:8px; }
+                            .lifecycle-evidence { display:flex; flex-direction:column; align-items:flex-start; gap:8px; margin-top:8px; min-width:0; }
                             .lifecycle-entry-details p { margin-top:8px; }
                             .lifecycle-entry .badge { display:inline-block; vertical-align:middle; max-width:100%; min-width:0; height:1.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:calc(1.25rem - 2px); flex-shrink:0; }
                         </style>
@@ -710,7 +710,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								badges.push('<span class="font-mono text-xs badge badge-outline" title="' + escapeAttribute(value) + '">' + escapeText(value) + '</span>');
 							});
 							if (badges.length === 0) return '';
-							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap"><span class="opacity-60">' + escapeText(label) + ':</span> ' + badges.join(' ') + '</p>';
+							return '<div class="lifecycle-evidence text-sm"><span class="opacity-60">' + escapeText(label) + ':</span>' + badges.join('') + '</div>';
 						}
 
 						function memoryLabels(memories) {
@@ -753,7 +753,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             var seconds = Math.max(0, Math.floor(((end || Date.now()) - start) / 1000));
                             var duration = start && (end || row.status === 'running') ? Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's' : '—';
                             var phase = {before_run:'Before run', after_complete:'After completion', before_plan:'Before planning', after_plan:'After planning'}[row.when] || String(row.when || '').replaceAll('_', ' ');
-                            var details = '<dl class="text-sm"><dt class="opacity-60">Duration</dt><dd data-lifecycle-duration>' + escapeText(duration) + '</dd></dl>';
+                            var details = '<p class="text-sm"><span class="opacity-60">Duration:</span> <span data-lifecycle-duration>' + escapeText(duration) + '</span></p>';
                             if (row.agent_id) details += '<p class="text-sm"><span class="opacity-60">Agent:</span> ' + escapeText(row.agent_name || 'Unavailable agent') + '</p>';
                             // Skill-selection summaries repeat the structured badges; retain the summary only as a fallback.
                             var skills = renderBadgeRow('Selected skills', row.selected_skills);
