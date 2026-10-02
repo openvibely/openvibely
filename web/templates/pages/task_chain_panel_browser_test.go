@@ -52,13 +52,16 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 			runComposerFocusCDP(t, chrome, server.URL+path, "chain-panel", func(b *composerFocusCDP) {
 				b.waitFor("chain add visible", `String(!!document.querySelector('[data-chain-add]') && document.querySelector('[data-chain-add]').getClientRects().length>0)`, "true")
 				b.evaluate(`window.chainHeadingTop=document.querySelector('#task-chain-panel h3').getBoundingClientRect().top; 'saved'`)
+				b.evaluate(`window.panelContentTop=document.querySelector("[data-chain-empty]").getBoundingClientRect().top; "saved"`)
 				for _, tab := range []struct{ key, heading string }{{"details", "#task-detail-metrics h3"}, {"schedules", "#task-schedule-panel h3"}, {"attachments", "#tab-attachments h3"}} {
 					b.click("#inspector-tab-" + tab.key)
 					b.waitFor("heading aligned with "+tab.key, `String(Math.abs(document.querySelector('`+tab.heading+`').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
 				}
+				b.waitFor("files content aligned with chaining", `String(Math.abs(document.querySelector('#draft-panel-attachments, #attachment-list').getBoundingClientRect().top-window.panelContentTop)<1)`, "true")
 				if path != "/new?tab=chaining" {
 					b.click("#inspector-tab-lifecycle")
 					b.waitFor("lifecycle heading aligned", `String(Math.abs(document.querySelector('#tab-lifecycle h3').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
+					b.waitFor("lifecycle content aligned with chaining", `String(Math.abs(document.querySelector("#lifecycle-activity-scroll").getBoundingClientRect().top-window.panelContentTop)<1)`, "true")
 				}
 				b.click("#inspector-tab-chaining")
 				b.evaluate(`window.retainedThread=document.getElementById('tab-chat'); 'saved'`)

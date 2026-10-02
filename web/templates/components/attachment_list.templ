@@ -29,6 +29,10 @@ func TaskAttachmentDownloadURL(id, projectID string) string {
 
 templ AttachmentList(attachments []models.Attachment, projectID string, taskID string) {
  <div>
+  <style>
+   #attachment-form .htmx-indicator { display:none; }
+   #attachment-form.htmx-request .htmx-indicator { display:inline; }
+  </style>
   <div class="flex items-center justify-between mb-3" style="height:20px">
    <h3 class="text-sm font-semibold">Attachments</h3>
    <button type="button" id="add-attachment-btn" class="btn btn-ghost btn-xs" aria-label="Add attachments" onclick="document.querySelector('#attachment-form input[type=file]').click()">+</button>
