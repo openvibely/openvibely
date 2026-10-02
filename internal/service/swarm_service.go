@@ -201,6 +201,10 @@ func (s *SwarmService) StartPlannerForScheduledRun(ctx context.Context, parentTa
 }
 
 func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, startsNewContext bool, modelOverride ...string) error {
+	return s.startPlannerWithFollowup(ctx, parentTaskID, startsNewContext, "", modelOverride...)
+}
+
+func (s *SwarmService) startPlannerWithFollowup(ctx context.Context, parentTaskID string, startsNewContext bool, followup string, modelOverride ...string) error {
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
@@ -240,7 +244,11 @@ func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, st
 		existing.StartsNewContext = startsNewContext
 		return s.submitIfRunnable(ctx, existing)
 	}
-	prompt := plannerPrompt(parent.Prompt, maxWorkers(parent))
+	goal := parent.Prompt
+	if followup != "" {
+		goal += "\n\nFollow-up request:\n" + followup
+	}
+	prompt := plannerPrompt(goal, maxWorkers(parent))
 	child := &models.Task{
 		ProjectID:         parent.ProjectID,
 		Title:             parent.Title + " · Planner",
@@ -820,7 +828,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 		return err
 	}
 	if planner == nil {
-		return s.startPlanner(ctx, parent.ID, false, modelOverride...)
+		return s.startPlannerWithFollowup(ctx, parent.ID, false, message, modelOverride...)
 	}
 	planner, err = s.taskRepo.GetByID(ctx, planner.ID)
 	if err != nil {
