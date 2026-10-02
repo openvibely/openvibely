@@ -70,6 +70,8 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.waitFor("ready", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
 		browser.evaluate(`window.pickProject=function(id){var s=document.getElementById('project-selector');s.value=id;s.dispatchEvent(new Event('change',{bubbles:true}));};pickProject('b');'ok';`)
 		browser.waitFor("failed switch rolls back", `document.getElementById('project-selector').value`, "a")
+		browser.evaluate(`document.querySelector('[data-close-project="a"]').click();'ok';`)
+		browser.waitFor("failed close retains active tab", `document.getElementById('project-selector').value+':'+document.querySelector('[data-project-tab="a"]').getAttribute('aria-selected')+':'+document.getElementById('desktop-project-titlebar').dataset.pinnedProjects`, `a:true:["a","b","c"]`)
 		failB.Store(false)
 		browser.evaluate(`pickProject('b');setTimeout(function(){pickProject('c');},30);'ok';`)
 		browser.waitFor("missing destination falls back", `location.pathname+':'+(document.getElementById('loaded-project')||{}).textContent`, "/chat:c")
@@ -79,5 +81,12 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.waitFor("latest project retained", `document.getElementById('project-selector').value+':'+document.getElementById('loaded-project').textContent`, "c:c")
 		browser.evaluate(`window.savedRequests=0;var originalFetch=window.fetch;window.fetch=function(url,options){if(url==='/ui/preferences' && options.body.includes('project_locations')){window.savedRequests++;if(window.savedRequests===1)return Promise.resolve({ok:false});}return originalFetch.apply(this,arguments);};location.hash='retry';'ok';`)
 		browser.waitFor("unchanged location retried", `String(window.savedRequests >= 2)`, "true")
+		browser.evaluate(`window.tabSaveAttempts=0;window.latestTabSave='';var previousFetch=window.fetch;window.fetch=function(url,options){if(url==='/ui/preferences' && options.body.includes('pinned_project_ids')){window.tabSaveAttempts++;window.latestTabSave=JSON.stringify(JSON.parse(options.body).pinned_project_ids);if(window.tabSaveAttempts===1)return Promise.resolve({ok:false});}return previousFetch.apply(this,arguments);};document.querySelector('[data-close-project="a"]').click();'ok';`)
+		browser.waitFor("tab list save retried", `String(window.tabSaveAttempts >= 2)+':'+window.latestTabSave`, `true:["b","c"]`)
+		browser.evaluate(`document.querySelector('[data-close-project="c"]').click();'ok';`)
+		browser.waitFor("closing tab retained during navigation", `String(!!document.querySelector('[data-project-tab="c"]'))`, "true")
+		browser.waitFor("successful close removes tab", `document.getElementById('loaded-project').textContent+':'+document.getElementById('desktop-project-titlebar').dataset.pinnedProjects`, `b:["b"]`)
+		browser.waitFor("latest tab list saved", `window.latestTabSave`, `["b"]`)
+
 	})
 }

@@ -245,20 +245,13 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    });
    var ids = JSON.parse(bar.dataset.pinnedProjects);
  var closedActive = "";
- var saveQueue = Promise.resolve();
    function saveTabs() {
     bar.dataset.pinnedProjects = JSON.stringify(ids);
-    var payload = JSON.stringify({pinned_project_ids: ids});
-    // Serialize saves so rapid tab changes cannot persist out of order.
-    saveQueue = saveQueue.catch(function() {}).then(function() {
-     return fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: payload, keepalive: true}).then(function(response) {
-      if (!response.ok) throw new Error('Could not save project tabs');
-     });
-    }).catch(function() { if (window.showToast) window.showToast('Could not save project tabs. Try again.', 'failed'); });
+    window.openVibelySaveProjectPreferences({pinned_project_ids: ids.slice()});
    }
-   function switchProject(id) {
+   function switchProject(id, request) {
     select.value = id;
-    select.dispatchEvent(new Event('change', {bubbles: true}));
+    select.dispatchEvent(new CustomEvent('change', {bubbles: true, detail: request || {}}));
     return select.value === id;
    }
    function sync() {
@@ -406,7 +399,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     menu.hidePopover();
     htmx.ajax('GET', '/projects/' + encodeURIComponent(menuTab.dataset.projectTab) + '/edit', {target: document.getElementById('project-settings-container'), swap: 'innerHTML'});
    });
-   list.addEventListener('click', function(event) {
+   list.addEventListener('click', async function(event) {
     var option = event.target.closest('[data-project-selector-option]');
     if (option) {
      closedActive = '';
@@ -421,9 +414,17 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (!close || ids.length <= 1) return;
     var index = ids.indexOf(close.dataset.closeProject);
     var next = ids[index + 1] || ids[index - 1];
-    if (close.dataset.closeProject === select.value && next && !switchProject(next)) return;
-    closedActive = close.dataset.closeProject;
- ids.splice(index, 1); render(); saveTabs();
+    var closingID = close.dataset.closeProject;
+    if (closingID === select.value && next) {
+     var request = {};
+     if (!switchProject(next, request) || !request.navigation || !await request.navigation) return;
+     if (select.value !== next) return;
+    }
+    // Navigation may have allowed other tab changes while this close was pending.
+    index = ids.indexOf(closingID);
+    if (index < 0 || ids.length <= 1) return;
+    closedActive = closingID;
+    ids.splice(index, 1); render(); saveTabs();
     var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
     focus.focus();
    });
