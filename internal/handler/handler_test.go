@@ -5794,7 +5794,7 @@ func TestLayout_ThemeAndSidebarPreferencesPersistBeforeFirstPaint(t *testing.T) 
 		`document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed)`,
 		`/ui/preferences`,
 		`JSON.stringify({ sidebar_collapsed: isCollapsed })`,
-		`JSON.stringify({ project_id: projectID })`,
+		`saveProjectPreferences({project_id: projectID})`,
 	}
 	for _, snippet := range required {
 		if !strings.Contains(body, snippet) {

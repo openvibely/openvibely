@@ -3832,6 +3832,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					clearSelection();
 				}
 
+                    // One owner for full-page fragment navigation, including sidebar links.
+                    let currentPageRequest = null;
+                    document.addEventListener('htmx:beforeRequest', function(event) {
+                        const detail = event.detail;
+                        if (!detail.target || detail.target.id !== 'main-content') return;
+                        const previous = currentPageRequest;
+                        currentPageRequest = detail.xhr;
+                        if (previous && previous !== detail.xhr && previous.readyState !== 4) previous.abort();
+                    });
+                    document.addEventListener('htmx:beforeSwap', function(event) {
+                        const detail = event.detail;
+                        if (detail.target && detail.target.id === 'main-content' && detail.xhr !== currentPageRequest) {
+                            detail.shouldSwap = false;
+                            event.preventDefault();
+                        }
+                    });
 					window.openVibelyNavigate = function(url, historyURL) {
 						var source = document.createElement('a');
 						source.className = 'hidden';
@@ -3843,13 +3859,21 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						source.setAttribute('hx-swap', 'innerHTML');
 						source.setAttribute('hx-push-url', historyURL || 'true');
 						document.body.appendChild(source);
+                        let response = null;
+                        source.addEventListener('htmx:afterRequest', function(event) { response = event.detail.xhr; });
 						var request = htmx.ajax('GET', url, {
 							source: source,
 							target: '#main-content',
 							swap: 'innerHTML'
 						});
 						request.then(function() { source.remove(); }, function() { source.remove(); });
-						return request;
+						return request.then(function() {
+                            if (!response || response.status < 200 || response.status >= 300) {
+                                const error = new Error('Navigation failed');
+                                error.status = response ? response.status : 0;
+                                throw error;
+                            }
+                        });
 					};
 
 					window.syncOpenVibelyPageTitle = function(root) {

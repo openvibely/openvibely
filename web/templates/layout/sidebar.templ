@@ -46,25 +46,50 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					const sel = document.getElementById('project-selector');
 					if (!sel) return;
 
-					function persistSelectedProject(projectID) {
-						try {
-							fetch('/ui/preferences', {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/json' },
-								body: JSON.stringify({ project_id: projectID }),
-								keepalive: true
-							}).catch(function() {});
-						} catch (_) {}
-					}
+                    // Coalesce unsaved values; only acknowledge successful HTTP responses.
+                    const pendingPreferences = {};
+                    let savingPreferences = false;
+                    let preferenceRetry = null;
+                    let preferenceRetryDelay = 1000;
+                    function saveProjectPreferences(values) {
+                        Object.assign(pendingPreferences, values);
+                        flushProjectPreferences();
+                    }
+                    async function flushProjectPreferences() {
+                        if (savingPreferences || !Object.keys(pendingPreferences).length) return;
+                        clearTimeout(preferenceRetry);
+                        savingPreferences = true;
+                        const snapshot = {...pendingPreferences};
+                        let failed = false;
+                        try {
+                            const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(snapshot), keepalive: true});
+                            if (!response.ok) throw new Error('Preference save failed');
+                            Object.keys(snapshot).forEach(function(key) {
+                                if (pendingPreferences[key] === snapshot[key]) delete pendingPreferences[key];
+                            });
+                            preferenceRetryDelay = 1000;
+                        } catch (_) { failed = true; }
+                        savingPreferences = false;
+                        if (Object.keys(pendingPreferences).length) {
+                            preferenceRetry = setTimeout(flushProjectPreferences, failed ? preferenceRetryDelay : 0);
+                            if (failed) preferenceRetryDelay = Math.min(preferenceRetryDelay * 2, 30000);
+                        }
+                    }
+                    window.addEventListener('online', flushProjectPreferences);
+                    window.addEventListener('pagehide', flushProjectPreferences);
+                    function persistSelectedProject(projectID) {
+                        saveProjectPreferences({project_id: projectID});
+                    }
+                    let projectSwitchGeneration = 0;
 
 					var previousProjectID = sel.value;
 					const desktopProjectNavigation = document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop';
 					const projectLocations = new Map(Object.entries(desktopProjectNavigation ? JSON.parse(document.documentElement.getAttribute('data-project-locations') || '{}') : {}));
-                    let locationSaveQueue = Promise.resolve();
+
                     const restoreDesktopLocation = desktopProjectNavigation && location.pathname === '/chat' && !location.search;
                     if (restoreDesktopLocation && projectLocations.has(sel.value)) {
                         const restored = projectLocation(sel.value);
-                        document.addEventListener('DOMContentLoaded', function() { window.openVibelyNavigate(restored); }, {once: true});
+                        document.addEventListener('DOMContentLoaded', function() { navigateProject(restored, sel.value); }, {once: true});
                     }
 					function rememberProjectLocation() {
 						if (!desktopProjectNavigation && !matchMedia('(min-width: 1024px)').matches) return;
@@ -74,10 +99,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						const path = url.pathname + url.search + url.hash;
 						if (projectLocations.get(id) === path) return;
                         projectLocations.set(id, path);
-                        const payload = JSON.stringify({project_locations: Object.fromEntries(projectLocations)});
-                        if (desktopProjectNavigation) locationSaveQueue = locationSaveQueue.catch(function() {}).then(function() {
-                            return fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type':'application/json'}, body: payload, keepalive: true});
-                        });
+                        if (desktopProjectNavigation) saveProjectPreferences({project_locations: Object.fromEntries(projectLocations)});
 						try { sessionStorage.setItem('openvibely.project-location.' + id, path); } catch (_) {}
 					}
 					function projectLocation(id) {
@@ -189,12 +211,33 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 						rememberProjectLocation();
 						if (desktopProjectNavigation || matchMedia('(min-width: 1024px)').matches) newUrl = projectLocation(newProjectId);
-						persistSelectedProject(newProjectId);
+
 
 						// HTMX owns the content swap, URL update, and history cache.
-						window.openVibelyNavigate(newUrl);
+						navigateProject(newUrl, newProjectId);
 					});
 
+                    async function navigateProject(url, id) {
+                        const generation = ++projectSwitchGeneration;
+                        const fallback = '/chat?project_id=' + encodeURIComponent(id);
+                        try {
+                            try { await window.openVibelyNavigate(url); }
+                            catch (error) {
+                                if (generation !== projectSwitchGeneration) return;
+                                if (![404, 410].includes(error.status) || url === fallback) throw error;
+                                await window.openVibelyNavigate(fallback);
+                            }
+                            if (generation === projectSwitchGeneration) persistSelectedProject(id);
+                        } catch (_) {
+                            if (generation !== projectSwitchGeneration) return;
+                            syncProjectSelectorFromURL();
+                            if (window.openVibelyRetargetLiveEvents) {
+                                const task = location.pathname.match(/^\/tasks\/([^/]+)/);
+                                window.openVibelyRetargetLiveEvents(sel.value, task ? decodeURIComponent(task[1]) : '');
+                            }
+                            if (window.showToast) window.showToast('Could not switch projects. Try again.', 'failed');
+                        }
+                    }
 					function syncProjectSelectorFromURL() {
 						var url = new URL(window.location.href);
 						var projectID = url.searchParams.get('project_id');

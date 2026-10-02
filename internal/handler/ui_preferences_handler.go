@@ -127,13 +127,19 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 		for _, project := range projects {
 			available[project.ID] = true
 		}
+		seen := make(map[string]bool)
+		valid := make([]string, 0, len(*req.PinnedProjectIDs))
 		for _, id := range *req.PinnedProjectIDs {
-			if !available[id] {
-				return echo.NewHTTPError(http.StatusBadRequest, "invalid or duplicate pinned project")
+			if seen[id] {
+				return echo.NewHTTPError(http.StatusBadRequest, "duplicate pinned project")
 			}
-			delete(available, id)
+			seen[id] = true
+			// Other windows may retain IDs deleted after their catalog was rendered.
+			if available[id] {
+				valid = append(valid, id)
+			}
 		}
-		value, err := json.Marshal(*req.PinnedProjectIDs)
+		value, err := json.Marshal(valid)
 		if err != nil {
 			return err
 		}

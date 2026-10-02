@@ -141,8 +141,8 @@ func TestSidebar_ProjectSelectorSearchableAndIdentityOnly(t *testing.T) {
 		`event.key === 'Escape'`,
 		`window.openVibelySearchableSelectorInstalled`,
 		`window.openVibelyProjectSelectorChangeInstalled`,
-		`state.value.dispatchEvent(new Event('change', {bubbles: true}))`, `persistSelectedProject(newProjectId)`,
-		`window.openVibelyNavigate(newUrl)`,
+		`state.value.dispatchEvent(new Event('change', {bubbles: true}))`, `navigateProject(newUrl, newProjectId)`,
+		`navigateProject(newUrl, newProjectId)`,
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("searchable project selector missing %q", required)
