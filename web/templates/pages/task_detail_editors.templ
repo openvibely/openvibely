@@ -80,7 +80,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    <form method="post">
     <textarea aria-label="Value" class="textarea textarea-bordered w-full h-48" required></textarea>
     <p data-editor-error role="alert" class="text-error text-sm"></p>
-    <div class="modal-action"><button type="button" class="btn btn-ghost" data-editor-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
+    <div class="modal-action"><button type="button" class="btn btn-ghost" data-goal-action="pause" hidden>Pause</button><button type="button" class="btn btn-ghost" data-goal-action="resume" hidden>Resume</button><button type="button" class="btn btn-outline btn-error" data-goal-action="clear" hidden>Clear goal</button><button type="button" class="btn btn-ghost" data-editor-cancel>Cancel</button><button type="submit" class="btn btn-primary">Save</button></div>
    </form>
   </div>
   <form method="dialog" class="modal-backdrop"><button type="submit" aria-label="Dismiss task property editor">close</button></form>
@@ -123,9 +123,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    if (input) input.value = value || 'auto';
    if (button) { button.dataset.currentValue = value || 'auto'; var text = button.querySelector('.chat-custom-select-label'); if (text) text.textContent = label; }
   }
-  async function save(name, value) {
+  async function save(name, value, action) {
    revision++;
-   var path = name === 'goal' ? '/goal' : '/details/property';
+   var path = name === 'goal' ? '/goal' + (action ? '/' + action : '') : '/details/property';
    var body = new URLSearchParams(name === 'goal' ? {goal:value} : {field:name,value:value});
    var response = await fetch('/tasks/' + encodeURIComponent(taskID) + path + '?project_id=' + encodeURIComponent(projectID), {method:name === 'goal' ? 'POST' : 'PATCH',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body});
    if (!response.ok) { var error = await response.text(); try { error = JSON.parse(error).message || error; } catch (_) {} throw new Error(error); }
@@ -178,6 +178,11 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    current = editor; field = editor.dataset.detailEditor;
    dialog.querySelector('[data-editor-title]').textContent = field === 'goal' ? 'Goal' : 'Prompt';
    dialog.querySelector('textarea').value = editor.dataset.value || '';
+   dialog.querySelector('textarea').required = field !== 'goal';
+   dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {
+    var status = editor.dataset.goalStatus;
+    button.hidden = field !== 'goal' || !taskID || !editor.dataset.value || (button.dataset.goalAction === 'pause' && status !== 'active') || (button.dataset.goalAction === 'resume' && !String(status).toLowerCase().startsWith('paused'));
+   });
    dialog.querySelector('[data-editor-error]').textContent = '';
    dialog.showModal(); dialog.querySelector('textarea').focus();
   });
@@ -208,13 +213,23 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    } catch (error) { picker.querySelector('[data-property-error]').textContent = error.message; }
    finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }
   });
+  dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {
+   button.onclick = async function() {
+    if (busy) return;
+    busy = true;
+    dialog.querySelectorAll('button').forEach(function(control) { control.disabled = true; });
+    try { await save('goal', '', button.dataset.goalAction); dialog.close(); }
+    catch (error) { dialog.querySelector('[data-editor-error]').textContent = error.message; }
+    finally { busy = false; dialog.querySelectorAll('button').forEach(function(control) { control.disabled = false; }); }
+   };
+  });
   dialog.querySelector('[data-editor-cancel]').onclick = function() { dialog.close(); };
   dialog.querySelector('form').addEventListener('submit', async function(event) {
    event.preventDefault(); if (busy) return; busy = true;
    var button = dialog.querySelector('[type="submit"]'); button.disabled = true;
    try {
     var value = dialog.querySelector('textarea').value;
-    if (taskID) await save(field, value);
+    if (taskID) await save(field, value, field === 'goal' && !value.trim() ? 'clear' : '');
     else { root.querySelector('[data-draft-property="goal"]').value = value; current.dataset.value = value; current.textContent = value ? 'Edit' : '+'; }
     dialog.close();
     var trigger = root.querySelector('[data-detail-editor="' + field + '"]'); if (trigger) trigger.focus({preventScroll:true});

@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -554,7 +555,7 @@ func (h *Handler) saveDeferredTaskUploads(ctx context.Context, taskID, sessionID
 		if file.IsDir() {
 			continue
 		}
-		path := filepath.Join(dest, file.Name())
+		path := filepath.Join(dest, repository.NewID()+"-"+file.Name())
 		if err := copyFileAtomically(filepath.Join(source, file.Name()), path); err != nil {
 			rollback()
 			return err

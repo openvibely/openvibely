@@ -2226,7 +2226,7 @@ templ TaskGoalPanel(taskID string, goal *models.TaskGoal) {
     <span class="text-xs opacity-60">{ goalStatusLabel(goal) }</span>
    }
   </div>
-  <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="goal" data-value={ goalValue(goal) } aria-label="Edit goal">
+  <button type="button" class="btn btn-ghost btn-xs" data-detail-editor="goal" data-goal-status={ goalStatusLabel(goal) } data-value={ goalValue(goal) } aria-label="Edit goal">
    if goalValue(goal) == "" {
     +
    } else {

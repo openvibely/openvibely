@@ -169,3 +169,59 @@ func TestDeferredTaskImagesRemainAvailable(t *testing.T) {
 		})
 	}
 }
+
+func TestSwarmComposerUploadsSurviveCreationAndFollowup(t *testing.T) {
+	for _, category := range []string{"active", "backlog", "scheduled"} {
+		t.Run(category, func(t *testing.T) {
+			h, e, repo := setupTestHandler(t)
+			useTempUploadsDir(t)
+			project := createProject(t, h, "Swarm uploads")
+			agent := createAgent(t, repo)
+			session := "01234567890123456789012345678901"
+			dir := filepath.Join(uploadsDir, "chat", "pending", session)
+			require.NoError(t, os.MkdirAll(dir, 0700))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "image.png"), []byte("first image"), 0600))
+			form := url.Values{"category": {category}, "title": {"Swarm images"}, "message": {"Inspect images"}, "agent_id": {agent.ID}, "swarm_mode": {"on"}, "attachment_session_id": {session}}
+			if category == "scheduled" {
+				form.Set("add_schedule", "on")
+				form.Set("run_at", "2035-01-02T09:30")
+				form.Set("repeat_type", "weekly")
+				form.Set("repeat_interval", "1")
+			}
+			send := func(path string, values url.Values) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(values.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.Header.Set("HX-Request", "true")
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				return rec
+			}
+			rec := send("/tasks?project_id="+project.ID+"&from=new&thread=1", form)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			location, err := url.Parse(rec.Header().Get("HX-Location"))
+			require.NoError(t, err)
+			id := strings.TrimPrefix(location.Path, "/tasks/")
+			require.NotEmpty(t, id)
+			files, err := h.attachmentRepo.ListByTask(context.Background(), id)
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			firstPath := files[0].FilePath
+			planner, err := h.taskRepo.FindSwarmChildByRole(context.Background(), id, models.SwarmRolePlanner)
+			require.NoError(t, err)
+			if category == "active" {
+				require.NotNil(t, planner)
+			} else {
+				require.Nil(t, planner)
+			}
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "image.png"), []byte("second image"), 0600))
+			rec = send("/tasks/"+id+"/thread?project_id="+project.ID, url.Values{"message": {"Inspect another image"}, "attachment_session_id": {session}})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			files, err = h.attachmentRepo.ListByTask(context.Background(), id)
+			require.NoError(t, err)
+			require.Len(t, files, 2)
+			data, err := os.ReadFile(firstPath)
+			require.NoError(t, err)
+			require.Equal(t, "first image", string(data))
+		})
+	}
+}
