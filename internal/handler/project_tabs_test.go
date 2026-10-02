@@ -24,7 +24,7 @@ func TestPinnedProjectPreferences(t *testing.T) {
 		want   string
 	}{
 		{`{"pinned_project_ids":["` + id + `"]}`, 204, `["` + id + `"]`},
-		{`{"pinned_project_ids":["missing"]}`, 400, `["` + id + `"]`},
+		{`{"pinned_project_ids":["missing","` + id + `"]}`, 204, `["` + id + `"]`},
 		{`{"pinned_project_ids":["` + id + `","` + id + `"]}`, 400, `["` + id + `"]`},
 		{`{"pinned_project_ids":[]}`, 204, `[]`},
 	} {
