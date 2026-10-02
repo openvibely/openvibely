@@ -200,7 +200,7 @@ func (s *SwarmService) StartPlannerForScheduledRun(ctx context.Context, parentTa
 	return s.startPlanner(ctx, parentTaskID, startsNewContext)
 }
 
-func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, startsNewContext bool) error {
+func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, startsNewContext bool, modelOverride ...string) error {
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
@@ -215,6 +215,9 @@ func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, st
 		if err != nil || parent == nil {
 			return fmt.Errorf("reloading guarded swarm parent: %w", err)
 		}
+	}
+	if len(modelOverride) > 0 {
+		parent.AgentID = &modelOverride[0]
 	}
 	if s.workerSvc != nil {
 		s.workerSvc.ClearCancellationRequested(parent.ID)
@@ -788,7 +791,7 @@ func (s *SwarmService) handleChildCancelled(ctx context.Context, parent *models.
 	return nil
 }
 
-func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID string, message string) error {
+func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID string, message string, modelOverride ...string) error {
 	unlock := repository.LockTaskLifecycle(parentTaskID)
 	defer unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
@@ -817,7 +820,7 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 		return err
 	}
 	if planner == nil {
-		return s.StartPlanner(ctx, parent.ID)
+		return s.startPlanner(ctx, parent.ID, false, modelOverride...)
 	}
 	planner, err = s.taskRepo.GetByID(ctx, planner.ID)
 	if err != nil {
@@ -825,6 +828,10 @@ func (s *SwarmService) HandleParentFollowup(ctx context.Context, parentTaskID st
 	}
 	if planner == nil {
 		return fmt.Errorf("loading planner task for parent %s: task not found", parent.ID)
+	}
+	planner.AgentID = parent.AgentID
+	if len(modelOverride) > 0 {
+		planner.AgentID = &modelOverride[0]
 	}
 	planner.Prompt = coordinatorFollowupPrompt(parent.Prompt, message, cfg.Generation)
 	planner.Status = models.StatusPending
