@@ -285,6 +285,12 @@ func TestCollectionSelectionProductionBrowserInteractions(t *testing.T) {
 	    window.refreshCardListToolbars(alertsRoot);
 	    if (alertsRoot.querySelector('[data-card-filter-chip="source"]') || alertsRoot.querySelector('[name="source"]').value) fail('raw rejected Alert source was reactivated by client hydration');
 	    if ((alertsRoot.getAttribute('data-card-pagination-url') || '').includes('source=')) fail('rejected Alert source contaminated authoritative root state');
+	    var alertsFilters=alertsRoot.querySelector('[data-card-filters-button]'), sourceInput=alertsRoot.querySelector('[name="source"]');
+	    alertsFilters.click(); sourceInput.focus();
+	    if (document.activeElement !== sourceInput || alertsFilters.getAttribute('aria-expanded') !== 'true') fail('Source Escape setup failed');
+	    sourceInput.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true}));
+	    if (alertsFilters.getAttribute('aria-expanded') !== 'false' || getComputedStyle(alertsRoot.querySelector('[data-card-filters-popover]')).visibility !== 'hidden' || document.activeElement !== alertsFilters) fail('Escape from Source did not close Filters and restore focus');
+
 		    verifyMixedCollection('personality'); verifyMixedCollection('channels');
 		    var emptyChannelsParsed=new DOMParser().parseFromString(EMPTY_CHANNELS_HTML, 'text/html'), emptyChannelsRoot=emptyChannelsParsed.getElementById('channels-container');
 		    emptyChannelsRoot=document.querySelector('main').appendChild(document.importNode(emptyChannelsRoot, true)); window.refreshCardListToolbars(emptyChannelsRoot);
