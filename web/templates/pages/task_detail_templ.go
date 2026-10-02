@@ -1138,7 +1138,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "\"><div class=\"flex flex-col min-w-0 flex-1 min-h-0\"><div class=\"flex flex-col gap-2 flex-1 min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0\"><h4 class=\"text-sm font-semibold\">Lifecycle</h4>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 110, "\"><div class=\"flex flex-col min-w-0 flex-1 min-h-0\"><div class=\"flex flex-col gap-2 flex-1 min-h-0\"><div class=\"flex items-center justify-between mb-3 flex-shrink-0\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Lifecycle</h3>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -549,8 +549,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			<div id="tab-lifecycle" class={ "task-tab-panel flex-1 flex flex-col min-h-0", templ.KV("hidden", defaultTab != "lifecycle") }>
 				<div class="flex flex-col min-w-0 flex-1 min-h-0">
 					<div class="flex flex-col gap-2 flex-1 min-h-0">
-						<div class="flex items-center justify-between mb-3 flex-shrink-0">
-							<h4 class="text-sm font-semibold">Lifecycle</h4>
+						<div class="flex items-center justify-between mb-3 flex-shrink-0" style="height:20px">
+							<h3 class="text-sm font-semibold">Lifecycle</h3>
 							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 						</div>
 						<div data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0">Routing, preparation, and completion activity.</div>
