@@ -8,6 +8,7 @@ type LifecycleExecutionView struct {
 	ParentExecutionID *string              `json:"parent_execution_id,omitempty"`
 	ID                string               `json:"id"`
 	When              string               `json:"when"`
+	AgentName         string               `json:"agent_name"`
 	AgentID           string               `json:"agent_id"`
 	SkillKey          string               `json:"skill_key"`
 	Status            string               `json:"status"`

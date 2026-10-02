@@ -544,6 +544,7 @@ func TestHandler_GetTaskLifecycleExecution_ReturnsPromptSafeViewAndRejectsForeig
 	agentRepo := repository.NewAgentRepo(db)
 	lifecycleRepo := repository.NewLifecycleRepo(db)
 	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentRepo(agentRepo)
 
 	projectA := createProject(t, h, "execution-project-a")
 	projectB := createProject(t, h, "execution-project-b")
@@ -574,6 +575,10 @@ func TestHandler_GetTaskLifecycleExecution_ReturnsPromptSafeViewAndRejectsForeig
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"agent_name":"`+agent.Name+`"`) {
+		t.Fatalf("missing agent display name: %s", rec.Body.String())
+	}
+
 	var got viewmodels.LifecycleExecutionView
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode execution view: %v", err)
@@ -679,6 +684,7 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	lifecycleRepo := repository.NewLifecycleRepo(db)
 	h.SetAgentRepo(agentRepo)
 	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentRepo(agentRepo)
 
 	// Create a task and agent to back the FKs.
 	project := createProject(t, h, "lifecycle-activity")
@@ -772,6 +778,10 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"agent_name":"`+agent.Name+`"`) {
+		t.Fatalf("missing agent display name: %s", rec.Body.String())
+	}
+
 	var got viewmodels.LifecycleExecutionPageView
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)

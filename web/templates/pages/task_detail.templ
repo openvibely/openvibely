@@ -756,7 +756,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             var duration = start && (end || row.status === 'running') ? Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's' : '—';
                             var phase = {before_run:'Before run', after_complete:'After completion', before_plan:'Before planning', after_plan:'After planning'}[row.when] || String(row.when || '').replaceAll('_', ' ');
                             var details = '<dl class="text-sm"><dt>Started</dt><dd>' + escapeText(displayTime(row.started_at)) + '</dd><dt>Finished</dt><dd data-lifecycle-finished>' + escapeText(end ? displayTime(row.completed_at) : '—') + '</dd><dt>Duration</dt><dd>' + escapeText(duration) + '</dd></dl>';
-                            if (row.agent_id) details += '<p class="text-sm">Agent: ' + escapeText(row.agent_id) + '</p>';
+                            if (row.agent_id) details += '<p class="text-sm">Agent: ' + escapeText(row.agent_name || 'Unavailable agent') + '</p>';
                             // Skill-selection summaries repeat the structured badges; retain the summary only as a fallback.
                             var skills = renderBadgeRow('Selected skills', row.selected_skills);
                             if (row.summary && !(row.output_contract === 'selected_skills' && skills)) details += '<p class="text-sm">' + escapeText(row.summary) + '</p>';

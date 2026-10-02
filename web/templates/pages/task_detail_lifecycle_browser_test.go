@@ -46,6 +46,8 @@ func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
 			"skill_key":           skill,
 			"status":              "completed",
 			"output_contract":     contract,
+			"agent_id":            "opaque-agent-id",
+			"agent_name":          "Routing Agent",
 			"summary":             summary,
 			"started_at":          startedAt.Format(time.RFC3339),
 			"selected_skills":     []string{"debug_go_tests", "openvibely_responsive_templ_layout_workflow_with_a_very_long_skill_name"},
@@ -266,6 +268,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]')) fail('initial lifecycle rows missing');
     var entry = list().querySelector('[data-lifecycle-execution-id="event-4"]');
     if (entry.tagName !== 'DETAILS' || entry.open) fail('lifecycle should begin collapsed');
+    if (!entry.textContent.includes('Agent: Routing Agent') || entry.textContent.includes('opaque-agent-id')) fail('agent must display its name, not ID');
     if ((entry.textContent.match(/Selected skills:/g) || []).length !== 1) fail('selected skills must appear once, as badges');
     if ((entry.textContent.match(/Selected memories:/g) || []).length !== 1) fail('selected memories must appear once');
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]').textContent.includes('Distinct activity summary')) fail('distinct activity summary must remain visible');
