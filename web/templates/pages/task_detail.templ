@@ -757,8 +757,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             var phase = {before_run:'Before run', after_complete:'After completion', before_plan:'Before planning', after_plan:'After planning'}[row.when] || String(row.when || '').replaceAll('_', ' ');
                             var details = '<dl class="text-sm"><dt>Started</dt><dd>' + escapeText(displayTime(row.started_at)) + '</dd><dt>Finished</dt><dd data-lifecycle-finished>' + escapeText(end ? displayTime(row.completed_at) : '—') + '</dd><dt>Duration</dt><dd>' + escapeText(duration) + '</dd></dl>';
                             if (row.agent_id) details += '<p class="text-sm">Agent: ' + escapeText(row.agent_id) + '</p>';
-                            if (row.summary) details += '<p class="text-sm">' + escapeText(row.summary) + '</p>';
-                            details += renderBadgeRow('Selected skills', row.selected_skills) + renderBadgeRow('Selected memories', memoryLabels(row.selected_memories));
+                            // Skill-selection summaries repeat the structured badges; retain the summary only as a fallback.
+                            var skills = renderBadgeRow('Selected skills', row.selected_skills);
+                            if (row.summary && !(row.output_contract === 'selected_skills' && skills)) details += '<p class="text-sm">' + escapeText(row.summary) + '</p>';
+                            details += skills + renderBadgeRow('Selected memories', memoryLabels(row.selected_memories));
                             if (row.error) details += '<p class="text-sm text-error">' + escapeText(row.error) + '</p>';
                             if (row.parent_execution_id) details += '<button type="button" class="btn btn-ghost btn-sm" data-lifecycle-thread="' + escapeAttribute(row.parent_execution_id) + '">View in thread →</button>';
                             return '<details data-lifecycle-execution-id="' + escapeAttribute(row.id) + '" class="lifecycle-entry"><summary><span><span class="text-sm font-semibold">' + escapeText(row.skill_key || phase || 'Lifecycle activity') + '</span> ' + statusBadge(row.status || '') + '<span class="lifecycle-subtitle">' + escapeText(phase) + ' · ' + escapeText(displayTime(row.started_at)) + ' · ' + escapeText(duration) + '</span></span><span class="lifecycle-chevron" aria-hidden="true">›</span></summary><div class="lifecycle-entry-details">' + details + '</div></details>';

@@ -35,14 +35,18 @@ func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
 	}
 
 	rowAt := func(id string, startedAt time.Time, skill string) map[string]any {
+		contract, summary := "selected_skills", "Selected skills: debug_go_tests, openvibely_responsive_templ_layout_workflow_with_a_very_long_skill_name"
+		if id == "event-3" {
+			contract, summary = "activity_summary", "Distinct activity summary"
+		}
 		return map[string]any{
 			"parent_execution_id": "thread-parent",
 			"id":                  id,
 			"when":                "after_complete",
 			"skill_key":           skill,
 			"status":              "completed",
-			"output_contract":     "activity_summary",
-			"summary":             "summary for " + id,
+			"output_contract":     contract,
+			"summary":             summary,
 			"started_at":          startedAt.Format(time.RFC3339),
 			"selected_skills":     []string{"debug_go_tests", "openvibely_responsive_templ_layout_workflow_with_a_very_long_skill_name"},
 			"selected_memories":   []map[string]string{{"file": "testing_coverage_and_performance.md"}},
@@ -262,6 +266,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]')) fail('initial lifecycle rows missing');
     var entry = list().querySelector('[data-lifecycle-execution-id="event-4"]');
     if (entry.tagName !== 'DETAILS' || entry.open) fail('lifecycle should begin collapsed');
+    if ((entry.textContent.match(/Selected skills:/g) || []).length !== 1) fail('selected skills must appear once, as badges');
+    if ((entry.textContent.match(/Selected memories:/g) || []).length !== 1) fail('selected memories must appear once');
+    if (!list().querySelector('[data-lifecycle-execution-id="event-3"]').textContent.includes('Distinct activity summary')) fail('distinct activity summary must remain visible');
     entry.querySelector('summary').click();
     if (!entry.open || entry.querySelector('.lifecycle-entry-details').getBoundingClientRect().height === 0) fail('selecting entry should expand inline');
     var oldWidth = entry.style.width;
