@@ -63,8 +63,27 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         let failed = false;
                         try {
                             const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(snapshot), keepalive: true});
-                            if (!response.ok) throw new Error('Preference save failed');
-                            Object.keys(snapshot).forEach(function(key) {
+                            let acknowledged = Object.keys(snapshot);
+                            if (!response.ok) {
+                                // Retry transient failures only. Validation can reject one field
+                                // in a coalesced request; keep the others for a clean save.
+                                if (!(response.status >= 400 && response.status < 500) || response.status === 408 || response.status === 429) {
+                                    throw new Error('Preference save failed');
+                                }
+                                if (response.status === 400) {
+                                    let error = {};
+                                    try { error = await response.json(); } catch (_) {}
+                                    const rejectedFields = {
+                                        'invalid project': 'project_id',
+                                        'invalid project location': 'project_locations',
+                                        'duplicate pinned project': 'pinned_project_ids'
+                                    };
+                                    const field = rejectedFields[error.message];
+                                    if (field && Object.prototype.hasOwnProperty.call(snapshot, field)) acknowledged = [field];
+                                }
+                                if (window.showToast) window.showToast('Could not save project preferences. Refresh and try again.', 'failed');
+                            }
+                            acknowledged.forEach(function(key) {
                                 if (pendingPreferences[key] === snapshot[key]) delete pendingPreferences[key];
                             });
                             preferenceRetryDelay = 1000;

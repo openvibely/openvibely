@@ -92,5 +92,14 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.waitFor("successful close removes tab", `document.getElementById('loaded-project').textContent+':'+document.getElementById('desktop-project-titlebar').dataset.pinnedProjects`, `b:["b"]`)
 		browser.waitFor("latest tab list saved", `window.latestTabSave`, `["b"]`)
 
+		browser.evaluate(`window.permanentAttempts=0;window.validPreferenceSaved=false;window.releaseRejectedSave=null;window.fetch=function(url,options){if(url==='/ui/preferences'){var value=JSON.parse(options.body);if(value.project_id==='deleted'){window.permanentAttempts++;return new Promise(function(resolve){window.releaseRejectedSave=function(){resolve({ok:false,status:400,json:async function(){return {message:'invalid project'};}});};});}if(value.project_id==='b' && value.pinned_project_ids[0]==='b')window.validPreferenceSaved=true;return Promise.resolve({ok:true,status:204});}return originalFetch.apply(this,arguments);};window.openVibelySaveProjectPreferences({project_id:'deleted',pinned_project_ids:['b']});'ok';`)
+		browser.waitFor("validation request pending", `typeof window.releaseRejectedSave`, "function")
+		browser.evaluate(`window.openVibelySaveProjectPreferences({project_id:'b'});window.releaseRejectedSave();'ok';`)
+		browser.waitFor("newer values survive validation rejection", `String(window.validPreferenceSaved)`, "true")
+		browser.evaluate(`window.openVibelySaveProjectPreferences({project_id:'deleted'});'ok';`)
+		browser.waitFor("second rejection pending", `String(window.permanentAttempts)`, "2")
+		browser.evaluate(`window.releaseRejectedSave();setTimeout(function(){window.permanentSettled=true;},1200);'ok';`)
+		browser.waitFor("permanent error settles", `String(window.permanentSettled)`, "true")
+		browser.waitFor("permanent error not retried", `String(window.permanentAttempts)`, "2")
 	})
 }
