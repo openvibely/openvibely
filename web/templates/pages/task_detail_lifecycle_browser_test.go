@@ -267,6 +267,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-4"]'); }, 'initial lifecycle page');
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]')) fail('initial lifecycle rows missing');
     var entry = list().querySelector('[data-lifecycle-execution-id="event-4"]');
+    if (list().querySelector('[data-lifecycle-day]')) fail('dates belong in entries, not separate group headings');
     if (entry.tagName !== 'DETAILS' || entry.open) fail('lifecycle should begin collapsed');
     if (!entry.textContent.includes('Agent: Routing Agent') || entry.textContent.includes('opaque-agent-id')) fail('agent must display its name, not ID');
     if ((entry.textContent.match(/Selected skills:/g) || []).length !== 1) fail('selected skills must appear once, as badges');
@@ -281,11 +282,17 @@ window.addEventListener('DOMContentLoaded', function() {
     if (labels.length !== 4 || labels.some(function(label) { return !label.classList.contains('opacity-60'); })) fail('duration, agent, skills and memories must share muted label styling');
     var oldWidth = entry.style.width;
     entry.style.width = '240px';
+    var truncated = false;
     entry.querySelectorAll('.badge').forEach(function(badge) {
-      var range = document.createRange(); range.selectNodeContents(badge);
-      var text = range.getBoundingClientRect(), box = badge.getBoundingClientRect();
-      if (text.top < box.top-1 || text.bottom > box.bottom+1 || box.right > entry.getBoundingClientRect().right+1) fail('lifecycle badge text exceeds its container');
+      var box = badge.getBoundingClientRect(), css = getComputedStyle(badge);
+      if (Math.abs(box.height - 20) > 1 || box.right > entry.getBoundingClientRect().right+1) fail('badge must stay one line within entry');
+      if (css.whiteSpace !== 'nowrap' || css.textOverflow !== 'ellipsis' || css.overflow !== 'hidden') fail('badge must truncate with ellipsis');
+      if (badge.classList.contains('badge-outline')) {
+        if (badge.title !== badge.textContent) fail('full evidence must remain available on hover');
+        if (badge.scrollWidth > badge.clientWidth) truncated = true;
+      }
     });
+    if (!truncated) fail('long skill must exercise truncation at narrow width');
     entry.style.width = oldWidth;
     entry.querySelector('summary').click();
     if (entry.open) fail('selecting entry again should collapse');

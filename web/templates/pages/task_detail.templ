@@ -563,7 +563,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             .lifecycle-entry-details { padding:8px 12px 16px; overflow-wrap:anywhere; }
                             .lifecycle-entry-details dl { display:grid; grid-template-columns:5rem minmax(0,1fr); gap:8px; }
                             .lifecycle-entry-details p { margin-top:8px; }
-                            .lifecycle-entry .badge { max-width:100%; min-width:0; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; line-height:1.4; flex-shrink:0; }
+                            .lifecycle-entry .badge { display:inline-block; vertical-align:middle; max-width:100%; min-width:0; height:1.25rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:calc(1.25rem - 2px); flex-shrink:0; }
                         </style>
                         <div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="flex-1 min-h-0 overflow-y-auto pr-1">
 							<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
@@ -707,7 +707,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							values.forEach(function(value) {
 								if (!value || seen[value]) return;
 								seen[value] = true;
-								badges.push('<span class="font-mono text-xs badge badge-outline">' + escapeText(value) + '</span>');
+								badges.push('<span class="font-mono text-xs badge badge-outline" title="' + escapeAttribute(value) + '">' + escapeText(value) + '</span>');
 							});
 							if (badges.length === 0) return '';
 							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap"><span class="opacity-60">' + escapeText(label) + ':</span> ' + badges.join(' ') + '</p>';
@@ -794,16 +794,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									html = '<p data-lifecycle-empty class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
 								}
 								} else {
-									var lastDay = "";
                                     state.order.forEach(function(id) {
-                                        var date = new Date(state.records[id].started_at), today = new Date(), yesterday = new Date();
-                                        yesterday.setDate(today.getDate() - 1);
-                                        var day = date.toDateString();
-                                        if (day !== lastDay) {
-                                            var label = day === today.toDateString() ? "Today" : day === yesterday.toDateString() ? "Yesterday" : date.toLocaleDateString();
-                                            html += '<h5 data-lifecycle-day style="margin:0;padding:8px 12px;font-size:12px;line-height:16px;opacity:.6">' + escapeText(label) + '</h5>';
-                                            lastDay = day;
-                                        }
 										state.gaps.forEach(function(gap) {
 											if (gap.boundaryID === id) html += gapMarkup(gap);
 										});
