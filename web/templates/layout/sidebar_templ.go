@@ -650,7 +650,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<button id=\"new-project-btn\" type=\"button\" class=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<button id=\"new-project-btn\" type=\"button\" data-searchable-selector-option data-searchable-selector-action class=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
