@@ -2,7 +2,11 @@ package themes
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -41,7 +45,69 @@ func Catalog() []Theme {
 func VSCodeCatalog() []Theme {
 	var catalog []Theme
 	_ = json.Unmarshal([]byte(CatalogJSONRaw), &catalog)
+	for i := range catalog {
+		if catalog[i].CSS == nil {
+			catalog[i].CSS = make(map[string]string)
+		}
+		catalog[i].CSS["--ov-subtle-border"] = subtleBorderColor(catalog[i].Semantic["surface"], catalog[i].Semantic["text"])
+	}
 	return catalog
+}
+
+func subtleBorderColor(surface, text string) string {
+	surfaceRGB, surfaceAlpha, surfaceOK := parseThemeHexColor(surface)
+	textRGB, textAlpha, textOK := parseThemeHexColor(text)
+	if !surfaceOK || !textOK {
+		return surface
+	}
+
+	const textWeight = 0.08
+	surfaceWeight := 1 - textWeight
+	alpha := surfaceAlpha*surfaceWeight + textAlpha*textWeight
+	if alpha <= 0 {
+		return surface
+	}
+	mixed := [3]uint8{}
+	for i := range mixed {
+		channel := (surfaceRGB[i]*surfaceAlpha*surfaceWeight + textRGB[i]*textAlpha*textWeight) / alpha
+		mixed[i] = uint8(math.Round(channel))
+	}
+	if alpha < 1 {
+		return fmt.Sprintf("#%02X%02X%02X%02X", mixed[0], mixed[1], mixed[2], uint8(math.Round(alpha*255)))
+	}
+	return fmt.Sprintf("#%02X%02X%02X", mixed[0], mixed[1], mixed[2])
+}
+
+func parseThemeHexColor(value string) ([3]float64, float64, bool) {
+	var rgb [3]float64
+	hex := strings.TrimPrefix(strings.TrimSpace(value), "#")
+	if len(hex) == 3 || len(hex) == 4 {
+		var expanded strings.Builder
+		for _, digit := range hex {
+			expanded.WriteRune(digit)
+			expanded.WriteRune(digit)
+		}
+		hex = expanded.String()
+	}
+	if len(hex) != 6 && len(hex) != 8 {
+		return rgb, 0, false
+	}
+	for i := range rgb {
+		value, err := strconv.ParseUint(hex[i*2:i*2+2], 16, 8)
+		if err != nil {
+			return rgb, 0, false
+		}
+		rgb[i] = float64(value)
+	}
+	alpha := 1.0
+	if len(hex) == 8 {
+		value, err := strconv.ParseUint(hex[6:8], 16, 8)
+		if err != nil {
+			return rgb, 0, false
+		}
+		alpha = float64(value) / 255
+	}
+	return rgb, alpha, true
 }
 
 func OpenVibelyThemes() []Theme {
