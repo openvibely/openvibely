@@ -277,7 +277,7 @@ func TestUpdateSchedule_WeeklyTimezoneRoundTrip(t *testing.T) {
 
 	nextRunLocal := updated.NextRun.Local()
 	t.Logf("Updated RunAt:   %v (local: %v)", updated.RunAt, updated.RunAt.Local())
-	t.Logf("Updated NextRun: %v (local: %v)", updated.NextRun, nextRunLocal)
+	t.Logf("Updated NextRun: %v (local: %v)", updated.NextRun, updated.NextRun.Local())
 
 	// NextRun should be on a Saturday
 	if nextRunLocal.Weekday() != time.Saturday {
@@ -449,14 +449,40 @@ func TestUpdateSchedule_PastDateRecurring(t *testing.T) {
 		t.Fatal("NextRun should not be nil")
 	}
 
-	// NextRun = RunAt (handler sets NextRun to RunAt; scheduler handles advancing)
-	nextRunLocal := updated.NextRun.Local()
-	runAtLocal := updated.RunAt.Local()
-	if nextRunLocal.Format("2006-01-02T15:04") != runAtLocal.Format("2006-01-02T15:04") {
-		t.Errorf("NextRun should equal RunAt. RunAt: %s, NextRun: %s",
-			runAtLocal.Format("2006-01-02T15:04"), nextRunLocal.Format("2006-01-02T15:04"))
+	// Recurrence edits advance from the anchor rather than replaying it.
+	if updated.NextRun == nil {
+		t.Fatal("missing next run")
+	}
+	expected := updated.ComputeNextRun(time.Now())
+	if expected == nil || !updated.NextRun.Equal(*expected) {
+		t.Fatalf("next run %v, want %v", updated.NextRun, expected)
 	}
 
-	t.Logf("RunAt:   %v (local: %v)", updated.RunAt, runAtLocal)
-	t.Logf("NextRun: %v (local: %v)", updated.NextRun, nextRunLocal)
+	t.Logf("RunAt:   %v (local: %v)", updated.RunAt, updated.RunAt.Local())
+	t.Logf("NextRun: %v (local: %v)", updated.NextRun, updated.NextRun.Local())
+}
+
+func TestUpdateSchedulePanelRecurrenceKeepsFutureNextRun(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Recurrence edit")
+	task := createTask(t, h, project.ID, "Scheduled")
+	anchor := time.Now().AddDate(0, 0, -8).Truncate(time.Minute)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: anchor, RepeatType: models.RepeatWeekly, RepeatInterval: 1, Enabled: true}
+	if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"run_at": {anchor.Local().Format("2006-01-02T15:04")}, "repeat_type": {"weekly"}, "repeat_interval": {"2"}}
+	req := httptest.NewRequest(http.MethodPut, "/schedules/"+schedule.ID+"?project_id="+project.ID+"&from=task-panel", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	stored, err := h.scheduleRepo.GetByID(ctx, schedule.ID)
+	if err != nil || stored.NextRun == nil || !stored.NextRun.After(time.Now()) {
+		t.Fatalf("schedule made due: %v %v", stored, err)
+	}
 }

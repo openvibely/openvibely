@@ -941,7 +941,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if message == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 		}
-		if _, err := h.selectAgent(c.Request().Context(), c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil && !scheduledDraft && c.FormValue("category") != string(models.CategoryBacklog) {
+		if _, err := h.selectTaskAgent(c.Request().Context(), projectID, c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil && !scheduledDraft && c.FormValue("category") != string(models.CategoryBacklog) {
 			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
 		}
 	}
@@ -1066,6 +1066,15 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
+
+	if threadDraft && !startDraft && !isSwarmTaskForm(c) {
+		if err := h.saveDeferredTaskUploads(c.Request().Context(), t.ID, c.FormValue("attachment_session_id")); err != nil {
+			if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(c.Request().Context()), t.ID); rollbackErr != nil {
+				return fmt.Errorf("saving attachments: %w; rolling back task: %v", err, rollbackErr)
+			}
+			return err
+		}
+	}
 
 	// If category is scheduled, create its schedule before reporting success.
 	if t.Category == models.CategoryScheduled || (threadDraft && c.FormValue("add_schedule") == "on") {
@@ -3210,7 +3219,7 @@ func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 	}
 
 	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
-		agent, selErr := h.selectAgent(c.Request().Context(), agentID, "", false)
+		agent, selErr := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
 		if selErr != nil || agent == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
 		}
@@ -3265,7 +3274,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 
 	// Select agent: prefer form value, fall back to task's assigned agent, then auto-select.
 	// "auto" routes through complexity-based auto-selection; explicit IDs route directly.
-	agent, err := h.selectAgent(c.Request().Context(), agentID, message, hasImages)
+	agent, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, message, hasImages)
 	if err != nil {
 		applog.Infof("[handler] TaskThreadSend agent selection error: %v, trying task fallback", err)
 		if task.AgentID != nil {

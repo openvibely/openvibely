@@ -180,6 +180,9 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 	}
 	if timingChanged {
 		schedule.NextRun = &req.RunAt
+		if !req.RunAt.After(time.Now()) {
+			schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		}
 	}
 	result.Changes = []string{"absolute_form"}
 	if err := s.scheduleRepo.UpdateForTask(ctx, schedule, task.ID); err != nil {

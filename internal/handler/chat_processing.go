@@ -2786,6 +2786,23 @@ func (h *Handler) selectAgent(ctx context.Context, agentID, message string, hasI
 
 // selectDefaultAgent retrieves the project's default model (the one marked IsDefault in agent_configs).
 // Falls back to the first available agent if no default is configured.
+// selectTaskAgent applies project defaults only to the explicit Default choice.
+func (h *Handler) selectTaskAgent(ctx context.Context, projectID, agentID, message string, hasImages bool) (*models.LLMConfig, error) {
+	if agentID == "default" && h.projectRepo != nil && projectID != "" {
+		project, err := h.projectRepo.GetByID(ctx, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if project != nil && project.DefaultAgentConfigID != nil {
+			model, err := h.llmConfigRepo.GetByID(ctx, *project.DefaultAgentConfigID)
+			if err != nil || model != nil {
+				return model, err
+			}
+		}
+	}
+	return h.selectAgent(ctx, agentID, message, hasImages)
+}
+
 func (h *Handler) selectDefaultAgent(ctx context.Context, hasImages bool) (*models.LLMConfig, error) {
 	agent, err := h.llmConfigRepo.GetDefault(ctx)
 	if err != nil {
