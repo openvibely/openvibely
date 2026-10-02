@@ -268,6 +268,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]')) fail('initial lifecycle rows missing');
     var entry = list().querySelector('[data-lifecycle-execution-id="event-4"]');
     if (list().querySelector('[data-lifecycle-day]')) fail('dates belong in entries, not separate group headings');
+    var summaryRect = entry.querySelector('summary').getBoundingClientRect(), listRect = list().getBoundingClientRect();
+    if (Math.abs(summaryRect.left-listRect.left+12)>1 || Math.abs(summaryRect.right-listRect.right-12)>1) fail('lifecycle summary must use the standard panel row edges');
+    if (Math.abs(entry.querySelector('summary > span').getBoundingClientRect().left-listRect.left)>1) fail('lifecycle text must align with the content column');
     if (entry.tagName !== 'DETAILS' || entry.open) fail('lifecycle should begin collapsed');
     if (!entry.textContent.includes('Agent: Routing Agent') || entry.textContent.includes('opaque-agent-id')) fail('agent must display its name, not ID');
     if ((entry.textContent.match(/Selected skills:/g) || []).length !== 1) fail('selected skills must appear once, as badges');

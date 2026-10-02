@@ -271,7 +271,7 @@ func TaskChainPanel(task *models.Task, agents []models.LLMConfig) templ.Componen
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" class=\"input input-bordered input-sm\" placeholder=\"Optional model override\"></label><p role=\"alert\" data-chain-form-error class=\"text-error text-sm\"></p><div class=\"flex items-center gap-2 mt-4\"><button type=\"button\" class=\"btn btn-sm btn-outline btn-error\" data-chain-remove onclick=\"window.openDestructiveConfirmDialog('task-chain-delete', '', '')\">Remove follow-up</button><button type=\"button\" class=\"btn btn-sm btn-ghost ml-auto\" onclick=\"this.closest('dialog').close()\">Cancel</button><button type=\"submit\" class=\"btn btn-primary btn-sm\" data-chain-save>Save</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close follow-up editor\">close</button></form></dialog>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" class=\"input input-bordered input-sm\" placeholder=\"Optional model override\"></label><p role=\"alert\" data-chain-form-error class=\"text-error text-sm\"></p><div class=\"flex items-center gap-2 mt-4\"><button type=\"button\" class=\"btn btn-sm btn-outline btn-error\" data-chain-remove onclick=\"window.openDestructiveConfirmDialog('task-chain-delete', '', '')\">Delete follow-up</button><button type=\"button\" class=\"btn btn-sm btn-ghost ml-auto\" onclick=\"this.closest('dialog').close()\">Cancel</button><button type=\"submit\" class=\"btn btn-primary btn-sm\" data-chain-save>Save</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button aria-label=\"Close follow-up editor\">close</button></form></dialog>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -293,7 +293,7 @@ func TaskChainPanel(task *models.Task, agents []models.LLMConfig) templ.Componen
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = DestructiveConfirmDialog("task-chain-delete", "Close remove follow-up confirmation", "Remove follow-up", "Remove the follow-up configuration for ", "", task.Title, "?", templ.ComponentScript{Call: "this.closest('dialog').close()"}, templ.ComponentScript{Call: "this.closest('dialog').dispatchEvent(new Event('confirm-chain-remove'))"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var11), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = DestructiveConfirmDialog("task-chain-delete", "Close delete follow-up confirmation", "Delete follow-up", "Delete the follow-up configuration for ", "", task.Title, "?", templ.ComponentScript{Call: "this.closest('dialog').close()"}, templ.ComponentScript{Call: "this.closest('dialog').dispatchEvent(new Event('confirm-chain-remove'))"}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var11), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

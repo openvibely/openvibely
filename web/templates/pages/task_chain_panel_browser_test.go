@@ -72,6 +72,7 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 				b.waitFor("configured heading keeps its position", `String(Math.abs(document.querySelector('#task-chain-panel h3').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
 				b.waitFor("thread retained", `String(window.retainedThread===document.getElementById('tab-chat'))`, "true")
 				b.click(`[data-chain-card] [data-chain-open]`)
+				b.waitFor("consistent delete label", `document.querySelector("[data-chain-remove]").textContent`, "Delete follow-up")
 				b.evaluate(`document.querySelector('[data-chain-form] [name="chain_child_category"]').value='active'; 'set'`)
 				b.click(`#task-chain-editor .btn-ghost.ml-auto`)
 				b.click(`[data-chain-card] [data-chain-open]`)
