@@ -274,6 +274,11 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!list().querySelector('[data-lifecycle-execution-id="event-3"]').textContent.includes('Distinct activity summary')) fail('distinct activity summary must remain visible');
     entry.querySelector('summary').click();
     if (!entry.open || entry.querySelector('.lifecycle-entry-details').getBoundingClientRect().height === 0) fail('selecting entry should expand inline');
+    var detail = entry.querySelector('.lifecycle-entry-details');
+    if (detail.textContent.includes('Started') || detail.textContent.includes('Finished')) fail('expanded details must not repeat timestamps');
+    if (detail.querySelector('[data-lifecycle-duration]') === null) fail('duration must remain visible');
+    var labels = Array.from(detail.querySelectorAll('dt, p > span:not(.badge)'));
+    if (labels.length !== 4 || labels.some(function(label) { return !label.classList.contains('opacity-60'); })) fail('duration, agent, skills and memories must share muted label styling');
     var oldWidth = entry.style.width;
     entry.style.width = '240px';
     entry.querySelectorAll('.badge').forEach(function(badge) {
@@ -2374,9 +2379,9 @@ window.addEventListener('DOMContentLoaded', function() {
       status:'completed'
     }}));
     await waitFor(function() { return lifecycleStatus('event-target') === 'completed'; }, 'retained row terminal rehydration', 4000);
-    var completed = lifecycleRow('event-target').querySelector('[data-lifecycle-finished]');
+    var completed = lifecycleRow('event-target').querySelector('[data-lifecycle-duration]');
     var error = lifecycleRow('event-target').querySelector('.text-error');
-    if (!completed || completed.textContent.indexOf(':05:') < 0) throw new Error('retained row did not render refreshed completion time: ' + (completed && completed.textContent || '<missing>'));
+    if (!completed || completed.textContent !== '5m 0s') throw new Error('retained row did not render refreshed duration: ' + (completed && completed.textContent || '<missing>'));
     if (!error || error.textContent.indexOf('terminal target error') < 0) throw new Error('retained row did not render refreshed terminal error');
     if (lifecycleStatus('event-reconnect') !== 'running') throw new Error('first refresh unexpectedly finalized reconnect target');
     window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
