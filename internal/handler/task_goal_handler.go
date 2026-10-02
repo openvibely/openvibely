@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
@@ -74,6 +75,13 @@ func (h *Handler) GetTaskGoal(c echo.Context) error {
 
 func (h *Handler) SetTaskGoal(c echo.Context) error {
 	return h.handleTaskGoalRoute(c, http.StatusOK, func(c echo.Context, taskID string, svc *service.TaskGoalService) (taskGoalRouteResult, error) {
+		previous, err := svc.GetGoal(c.Request().Context(), taskID)
+		if err != nil {
+			return taskGoalRouteResult{}, err
+		}
+		if previous != nil && previous.Status != models.TaskGoalStatusCleared && previous.Objective == strings.TrimSpace(c.FormValue("goal")) {
+			return taskGoalRouteResult{goal: previous}, nil
+		}
 		goal, err := svc.SetGoal(c.Request().Context(), taskID, c.FormValue("goal"), service.GoalOptions{Actor: "user"})
 		if err != nil {
 			if err == service.ErrTaskGoalEmpty || err == service.ErrTaskGoalTooLong {

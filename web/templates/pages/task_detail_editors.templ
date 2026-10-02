@@ -181,7 +181,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    dialog.querySelector('textarea').required = field !== 'goal';
    dialog.querySelectorAll('[data-goal-action]').forEach(function(button) {
     var status = editor.dataset.goalStatus;
-    button.hidden = field !== 'goal' || !taskID || !editor.dataset.value || (button.dataset.goalAction === 'pause' && status !== 'active') || (button.dataset.goalAction === 'resume' && !String(status).toLowerCase().startsWith('paused'));
+    button.hidden = field !== 'goal' || !taskID || !editor.dataset.value || (button.dataset.goalAction === 'pause' && status !== 'active') || (button.dataset.goalAction === 'resume' && status !== 'blocked' && !String(status).toLowerCase().startsWith('paused'));
    });
    dialog.querySelector('[data-editor-error]').textContent = '';
    dialog.showModal(); dialog.querySelector('textarea').focus();

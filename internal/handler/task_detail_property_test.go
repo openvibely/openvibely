@@ -107,3 +107,22 @@ func TestTaskDefaultSelectionUsesProjectModel(t *testing.T) {
 		t.Fatal("global fallback failed", err)
 	}
 }
+
+func TestSwarmDetailModelSelection(t *testing.T) {
+	h, e, repo := setupTestHandler(t)
+	model := createAgent(t, repo, func(a *models.LLMConfig) { a.Name = "Swarm selected model" })
+	project := createProject(t, h, "Swarm models")
+	task := createTask(t, h, project.ID, "Swarm parent", func(task *models.Task) { task.SwarmRole = models.SwarmRoleParent })
+	form := url.Values{"field": {"agent_id"}, "value": {model.ID}}
+	req := httptest.NewRequest(http.MethodPatch, "/tasks/"+task.ID+"/details/property?project_id="+project.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	got, err := h.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil || got.AgentID == nil || *got.AgentID != model.ID {
+		t.Fatalf("model not saved: %+v %v", got, err)
+	}
+}

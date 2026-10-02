@@ -177,6 +177,12 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			b.waitFor("goal action "+action, `document.querySelector('[data-detail-editor="goal"]').dataset.goalStatus`, want)
 		}
 
+		b.evaluate(`document.querySelector('[data-detail-editor="goal"]').dataset.goalStatus='blocked'; 'blocked'`)
+		b.click(`[data-detail-editor="goal"]`)
+		b.waitFor("blocked goal can resume", `String(!document.querySelector('#task-detail-text-editor [data-goal-action="resume"]').hidden)`, "true")
+		b.click(`#task-detail-text-editor [data-goal-action="resume"]`)
+		b.waitFor("blocked goal resumed", `document.querySelector('[data-detail-editor="goal"]').dataset.goalStatus`, "active")
+
 		for _, field := range []string{"goal", "prompt"} {
 			b.click(`[data-detail-editor="` + field + `"]`)
 			b.evaluate(`document.querySelector('#task-detail-text-editor textarea').value='Discard this edit'; 'edited'`)

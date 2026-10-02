@@ -7813,13 +7813,7 @@ func TestHandler_TaskThreadSelectModel_AutoDoesNotOverride(t *testing.T) {
 	}
 }
 
-// TestHandler_TaskThreadSelectModel_SkipsSwarmParent verifies that the
-// immediate model-select endpoint does not mutate Task.AgentID for swarm
-// parent tasks, consistent with TaskThreadSend's swarm-parent handling. Swarm
-// parents resolve their assigned agent through swarm-specific semantics
-// (SwarmService.resolveAssignedAgentID and child creation), not direct
-// composer persistence.
-func TestHandler_TaskThreadSelectModel_SkipsSwarmParent(t *testing.T) {
+func TestHandler_TaskThreadSelectModel_PersistsSwarmParent(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 	defaultAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Default Agent" })
@@ -7846,8 +7840,8 @@ func TestHandler_TaskThreadSelectModel_SkipsSwarmParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if updatedTask.AgentID == nil || *updatedTask.AgentID != defaultAgent.ID {
-		t.Fatalf("expected swarm parent task.AgentID to remain unchanged at %s, got %v", defaultAgent.ID, updatedTask.AgentID)
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != explicitAgent.ID {
+		t.Fatalf("expected swarm parent task.AgentID to be selected model %s, got %v", explicitAgent.ID, updatedTask.AgentID)
 	}
 }
 
