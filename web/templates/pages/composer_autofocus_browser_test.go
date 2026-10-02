@@ -265,7 +265,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 		"--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
 		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
 		fmt.Sprintf("--remote-debugging-port=%d", debugPort),
-		"--user-data-dir="+filepath.Join(t.TempDir(), profileName+"-profile"), targetURL,
+		"--user-data-dir="+filepath.Join(t.TempDir(), profileName+"-profile"), "about:blank",
 	)
 	cmd.Stderr = stderrFile
 	if err := startBrowserProcess(cmd); err != nil {
@@ -274,6 +274,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	defer stopBrowserProcess(cmd)
 
 	type debugTarget struct {
+		Type                 string `json:"type"`
 		URL                  string `json:"url"`
 		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 	}
@@ -286,7 +287,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 			_ = resp.Body.Close()
 			if decodeErr == nil {
 				for _, candidate := range targets {
-					if strings.HasPrefix(candidate.URL, targetURL) && candidate.WebSocketDebuggerURL != "" {
+					if candidate.Type == "page" && candidate.WebSocketDebuggerURL != "" {
 						target = candidate
 						break
 					}
@@ -299,7 +300,7 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	}
 	if target.WebSocketDebuggerURL == "" {
 		stderr, _ := os.ReadFile(stderrPath)
-		t.Fatalf("find Chrome debugging target for %s\n%s", targetURL, stderr)
+		t.Fatalf("find Chrome debugging page target\n%s", stderr)
 	}
 
 	// Some fixtures perform several independent 15-second condition waits. Keep
@@ -315,6 +316,14 @@ func runComposerFocusCDP(t *testing.T, chrome, targetURL, profileName string, ru
 	browser.call("Runtime.enable", map[string]any{}, nil)
 	browser.call("Log.enable", map[string]any{}, nil)
 	browser.call("Page.enable", map[string]any{}, nil)
+	// A busy Chrome lists a command-line URL before the tab starts loading it, so load the fixture through this session.
+	var navigation struct {
+		ErrorText string `json:"errorText"`
+	}
+	browser.call("Page.navigate", map[string]any{"url": targetURL}, &navigation)
+	if navigation.ErrorText != "" {
+		t.Fatalf("navigate Chrome to %s: %s", targetURL, navigation.ErrorText)
+	}
 	run(browser)
 }
 
