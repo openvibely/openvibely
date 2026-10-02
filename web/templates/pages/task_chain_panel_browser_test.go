@@ -56,6 +56,10 @@ func TestBrowserFunctional_TaskChainPanel(t *testing.T) {
 					b.click("#inspector-tab-" + tab.key)
 					b.waitFor("heading aligned with "+tab.key, `String(Math.abs(document.querySelector('`+tab.heading+`').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
 				}
+				if path != "/new?tab=chaining" {
+					b.click("#inspector-tab-lifecycle")
+					b.waitFor("lifecycle heading aligned", `String(Math.abs(document.querySelector('#tab-lifecycle h3').getBoundingClientRect().top-window.chainHeadingTop)<1)`, "true")
+				}
 				b.click("#inspector-tab-chaining")
 				b.evaluate(`window.retainedThread=document.getElementById('tab-chat'); 'saved'`)
 				b.click(`[data-chain-add]`)
