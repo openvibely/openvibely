@@ -245,6 +245,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    });
    var ids = JSON.parse(bar.dataset.pinnedProjects);
  var closedActive = "";
+ var pendingCloses = new Set();
    function saveTabs() {
     bar.dataset.pinnedProjects = JSON.stringify(ids);
     window.openVibelySaveProjectPreferences({pinned_project_ids: ids.slice()});
@@ -262,6 +263,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      tab.setAttribute('aria-selected', String(tab.dataset.projectTab === active));
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
     });
+    list.querySelectorAll('[data-close-project]').forEach(function(close) {
+     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject);
+    });
     var activeTab = list.querySelector('[aria-selected="true"]');
     if (activeTab) activeTab.scrollIntoView({block: 'nearest', inline: 'nearest'});
    }
@@ -273,7 +277,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
      var wrapper = document.createElement('div'); wrapper.className = 'desktop-project-tab';
      var tab = document.createElement('button'); tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.projectTab = id; tab.textContent = option.textContent.trim();
      var close = document.createElement('button'); close.type = 'button'; close.dataset.closeProject = id; close.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg>'; close.setAttribute('aria-label', 'Close project tab: ' + tab.textContent);
-     close.disabled = ids.length <= 1;
+     close.disabled = ids.length <= 1 || pendingCloses.has(close.dataset.closeProject);
      wrapper.append(tab, close); list.append(wrapper);
     });
     list.append(add);
@@ -415,18 +419,26 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var index = ids.indexOf(close.dataset.closeProject);
     var next = ids[index + 1] || ids[index - 1];
     var closingID = close.dataset.closeProject;
-    if (closingID === select.value && next) {
-     var request = {};
-     if (!switchProject(next, request) || !request.navigation || !await request.navigation) return;
-     if (select.value !== next) return;
+    if (pendingCloses.has(closingID)) return;
+    pendingCloses.add(closingID);
+    close.disabled = true;
+    try {
+     if (closingID === select.value && next) {
+      var request = {};
+      if (!switchProject(next, request) || !request.navigation || !await request.navigation) return;
+      if (select.value !== next) return;
+     }
+     // Navigation may have allowed other tab changes while this close was pending.
+     index = ids.indexOf(closingID);
+     if (index < 0 || ids.length <= 1) return;
+     closedActive = closingID;
+     ids.splice(index, 1); render(); saveTabs();
+     var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
+     focus.focus();
+    } finally {
+     pendingCloses.delete(closingID);
+     sync();
     }
-    // Navigation may have allowed other tab changes while this close was pending.
-    index = ids.indexOf(closingID);
-    if (index < 0 || ids.length <= 1) return;
-    closedActive = closingID;
-    ids.splice(index, 1); render(); saveTabs();
-    var focus = list.querySelector('[aria-selected="true"]') || list.querySelector('[data-project-tab]') || add;
-    focus.focus();
    });
    list.addEventListener('keydown', function(event) {
     var tab = event.target.closest('[data-project-tab]');
