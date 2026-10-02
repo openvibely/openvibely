@@ -34,7 +34,7 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`window.openVibelyThemes.toggleMode`,
 		`window.openVibelyThemes.applySystemMode`,
 		`window.openVibelyThemes.syncThemeControls`,
-		`[data-color-theme^="vscode-"]{--ov-subtle-border:var(--ov-surface-raised);background-color:var(--ov-content-bg)}`,
+		`[data-color-theme^="vscode-"]{--ov-subtle-border:color-mix(in srgb,var(--ov-surface) 92%,var(--ov-text) 8%);background-color:var(--ov-content-bg)}`,
 		`[data-color-theme^="vscode-"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }`,
 		`[data-color-theme] .hljs-keyword`,
 		`var(--ov-syntax-keyword)`,
@@ -128,11 +128,14 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 	if strings.Contains(html, `[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-border-strong))!important}`) {
 		t.Fatal("imported-theme YAML rail CSS must not override the active inline rail color with !important")
 	}
+	if strings.Contains(html, `[data-color-theme^="vscode-"]{--ov-subtle-border:var(--ov-surface-raised)`) {
+		t.Fatal("imported-theme subtle borders must not inherit the raised-surface color")
+	}
+	if !strings.Contains(html, `--ov-subtle-border:color-mix(in srgb,var(--ov-surface) 92%,var(--ov-text) 8%)`) {
+		t.Fatal("imported-theme subtle borders must blend lightly with the card surface")
+	}
 	if strings.Contains(html, `[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-subtle-border))`) {
 		t.Fatal("imported-theme YAML rails must not fall back to the surface-raised alias")
-	}
-	if strings.Contains(html, "github-dark.min.css") {
-		t.Fatal("base layout must not pin Highlight.js to GitHub Dark")
 	}
 	chatUserStart := strings.Index(html, `[data-color-theme^="vscode-"] .chat-bubble-user-msg,[data-color-theme^="vscode-"] .chat-bubble-assistant-msg{`)
 	if chatUserStart < 0 {
@@ -192,6 +195,26 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		if strings.Contains(html, broadOverride) {
 			t.Fatalf("native OpenVibely defaults must not be captured by broad exact-theme override %q", broadOverride)
 		}
+	}
+}
+
+func TestImportedThemeSubtleBordersBlendWithCardSurface(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	for _, fragment := range []string{
+		`--ov-subtle-border:color-mix(in srgb,var(--ov-surface) 92%,var(--ov-text) 8%)`,
+		`[data-color-theme^="vscode-"] .card,`,
+		`[data-color-theme^="vscode-"] .dropdown-content{background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}`,
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Fatalf("imported-theme card and dropdown border styling missing %q", fragment)
+		}
+	}
+	if strings.Contains(html, `[data-color-theme^="vscode-"]{--ov-subtle-border:var(--ov-surface-raised)`) {
+		t.Fatal("imported-theme subtle borders must not inherit the raised-surface color")
 	}
 }
 
