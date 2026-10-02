@@ -221,6 +221,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
                     async function navigateProject(url, id) {
                         const generation = ++projectSwitchGeneration;
+                        // Keep the loaded page's tab available for rollback, even though
+                        // the selector already shows the optimistic destination.
+                        window.openVibelyProtectedProjectID = new URLSearchParams(location.search).get('project_id');
+                        if (window.openVibelyProjectTabsSync) window.openVibelyProjectTabsSync();
                         const fallback = '/chat?project_id=' + encodeURIComponent(id);
                         try {
                             try { await window.openVibelyNavigate(url); }
@@ -241,6 +245,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             }
                             if (window.showToast) window.showToast('Could not switch projects. Try again.', 'failed');
                             return false;
+                        } finally {
+                            if (generation === projectSwitchGeneration) {
+                                window.openVibelyProtectedProjectID = '';
+                                if (window.openVibelyProjectTabsSync) window.openVibelyProjectTabsSync();
+                            }
                         }
                     }
 					function syncProjectSelectorFromURL() {
