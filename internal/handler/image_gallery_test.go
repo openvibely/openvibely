@@ -214,8 +214,19 @@ func TestSwarmComposerUploadsSurviveCreationAndFollowup(t *testing.T) {
 				require.Nil(t, planner)
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "image.png"), []byte("second image"), 0600))
-			rec = send("/tasks/"+id+"/thread?project_id="+project.ID, url.Values{"message": {"Inspect another image"}, "attachment_session_id": {session}})
+			nextModel := createAgent(t, repo, func(a *models.LLMConfig) { a.Name = "Follow-up model" })
+			rec = send("/tasks/"+id+"/thread?project_id="+project.ID, url.Values{"message": {"Inspect another image"}, "attachment_session_id": {session}, "agent_id": {nextModel.ID}})
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			parent, err := h.taskRepo.GetByID(context.Background(), id)
+			require.NoError(t, err)
+			require.NotNil(t, parent.AgentID)
+			require.Equal(t, nextModel.ID, *parent.AgentID)
+			if category != "active" {
+				planner, err = h.taskRepo.FindSwarmChildByRole(context.Background(), id, models.SwarmRolePlanner)
+				require.NoError(t, err)
+				require.NotNil(t, planner)
+				require.Equal(t, nextModel.ID, *planner.AgentID)
+			}
 			files, err = h.attachmentRepo.ListByTask(context.Background(), id)
 			require.NoError(t, err)
 			require.Len(t, files, 2)

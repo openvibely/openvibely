@@ -1140,3 +1140,34 @@ func TestTaskGoalTools_CurrentAliasAndSendToTaskQueuesOnly(t *testing.T) {
 		t.Fatalf("send_to_task created inline execution: %+v", execs)
 	}
 }
+
+func TestGoalSaveUnchangedPreservesState(t *testing.T) {
+	for _, status := range []models.TaskGoalStatus{models.TaskGoalStatusPaused, models.TaskGoalStatusAchieved, models.TaskGoalStatusBlocked} {
+		t.Run(string(status), func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := &models.Task{ProjectID: project.ID, Title: "Goal state", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+			ctx := context.Background()
+			if err := tc.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Keep state", service.GoalOptions{Actor: "user"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			repo := repository.NewTaskGoalRepo(tc.db)
+			before, err := repo.UpdateStatus(ctx, task.ID, goal.GoalID, status, "reason", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal?project_id=" + project.ID).WithForm(url.Values{"goal": {"Keep state"}}).Execute()
+			if rec.Code != 200 {
+				t.Fatal(rec.Code, rec.Body.String())
+			}
+			after, err := repo.GetByTaskID(ctx, task.ID)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("goal changed: before=%+v after=%+v err=%v", before, after, err)
+			}
+		})
+	}
+}

@@ -3209,7 +3209,6 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 // are not persisted here (matches TaskThreadSend's persistence semantics).
 func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 	taskID := c.Param("taskId")
-	agentID := c.FormValue("agent_id")
 
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil {
@@ -3219,15 +3218,15 @@ func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	// Swarm parent tasks resolve their assigned agent through swarm-specific
-	// semantics (see SwarmService.resolveAssignedAgentID and child creation),
-	// not through direct Task.AgentID composer persistence. TaskThreadSend
-	// skips AgentID persistence for swarm parents by routing through
-	// HandleParentFollowup first; mirror that here so this endpoint cannot
-	// mutate parent.AgentID and unintentionally affect swarm child creation.
-	if task.SwarmRole == models.SwarmRoleParent {
-		return c.NoContent(http.StatusNoContent)
+	if err := h.persistTaskThreadModel(c, task); err != nil {
+		return err
 	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// Persist the parent selection for future swarm children as well as ordinary runs.
+func (h *Handler) persistTaskThreadModel(c echo.Context, task *models.Task) error {
+	agentID := c.FormValue("agent_id")
 
 	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
 		agent, selErr := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
@@ -3235,14 +3234,14 @@ func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
 		}
 		if task.AgentID == nil || *task.AgentID != agent.ID {
-			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, agent.ID); updErr != nil {
-				applog.Infof("[handler] TaskThreadSelectModel error persisting selected model task=%s agent=%s: %v", taskID, agent.ID, updErr)
+			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), task.ID, agent.ID); updErr != nil {
+				applog.Infof("[handler] TaskThreadSelectModel error persisting selected model task=%s agent=%s: %v", task.ID, agent.ID, updErr)
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist model selection")
 			}
 		}
 	}
 
-	return c.NoContent(http.StatusNoContent)
+	return nil
 }
 
 // TaskThreadSend handles sending a follow-up message in the task thread.
@@ -3270,6 +3269,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 	if h.swarmSvc != nil && task.SwarmRole == models.SwarmRoleParent {
+		if err := h.persistTaskThreadModel(c, task); err != nil {
+			return err
+		}
 		if err := h.saveDeferredTaskUploads(c.Request().Context(), task.ID, sessionID); err != nil {
 			return err
 		}

@@ -24,9 +24,6 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 	field, value := c.FormValue("field"), strings.TrimSpace(c.FormValue("value"))
 	switch field {
 	case "agent_id":
-		if task.SwarmRole == models.SwarmRoleParent {
-			return echo.NewHTTPError(http.StatusBadRequest, "Use the swarm editor to change its model")
-		}
 		if value == "default" {
 			model, err := h.selectTaskAgent(ctx, task.ProjectID, "default", "", false)
 			if err != nil {
