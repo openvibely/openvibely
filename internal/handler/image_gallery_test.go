@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -221,12 +222,10 @@ func TestSwarmComposerUploadsSurviveCreationAndFollowup(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, parent.AgentID)
 			require.Equal(t, nextModel.ID, *parent.AgentID)
-			if category != "active" {
-				planner, err = h.taskRepo.FindSwarmChildByRole(context.Background(), id, models.SwarmRolePlanner)
-				require.NoError(t, err)
-				require.NotNil(t, planner)
-				require.Equal(t, nextModel.ID, *planner.AgentID)
-			}
+			planner, err = h.taskRepo.FindSwarmChildByRole(context.Background(), id, models.SwarmRolePlanner)
+			require.NoError(t, err)
+			require.NotNil(t, planner)
+			require.Equal(t, nextModel.ID, *planner.AgentID)
 			files, err = h.attachmentRepo.ListByTask(context.Background(), id)
 			require.NoError(t, err)
 			require.Len(t, files, 2)
@@ -234,5 +233,42 @@ func TestSwarmComposerUploadsSurviveCreationAndFollowup(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "first image", string(data))
 		})
+	}
+}
+
+func TestSwarmFollowupAutoSelectsPlannerModel(t *testing.T) {
+	for _, category := range []models.TaskCategory{models.CategoryActive, models.CategoryBacklog} {
+		for _, selection := range []string{"auto", ""} {
+			t.Run(string(category)+"/"+selection, func(t *testing.T) {
+				h, e, repo := setupTestHandler(t)
+				ctx := context.Background()
+				project := createProject(t, h, "Auto swarm")
+				first := createAgent(t, repo)
+				second := createAgent(t, repo, func(a *models.LLMConfig) { a.Name = "Other model" })
+				message := "Explain the next step"
+				expected, err := h.selectTaskAgent(ctx, project.ID, "auto", message, false)
+				require.NoError(t, err)
+				old := first
+				if expected.ID == first.ID {
+					old = second
+				}
+				parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{ProjectID: project.ID, Title: "Auto planner", Prompt: "Build it", Category: category, AgentID: &old.ID})
+				require.NoError(t, err)
+				values := url.Values{"message": {message}, "agent_id": {selection}}
+				req := httptest.NewRequest(http.MethodPost, "/tasks/"+parent.ID+"/thread?project_id="+project.ID, strings.NewReader(values.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				rec := httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+				planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+				require.NoError(t, err)
+				require.NotNil(t, planner)
+				require.NotNil(t, planner.AgentID)
+				require.Equal(t, expected.ID, *planner.AgentID)
+				saved, err := h.taskRepo.GetByID(ctx, parent.ID)
+				require.NoError(t, err)
+				require.Nil(t, saved.AgentID, "Auto must not retain the previous fixed model")
+			})
+		}
 	}
 }

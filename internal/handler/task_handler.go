@@ -3206,7 +3206,8 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 // (which is keyed by ProjectID), navigating away and back would otherwise
 // re-render the composer from the task's unchanged Task.AgentID and silently
 // revert the visible selection. "auto" and "" are one-off routing choices and
-// are not persisted here (matches TaskThreadSend's persistence semantics).
+// are not persisted for ordinary tasks. For swarms they clear the fixed parent
+// assignment; each follow-up resolves its planner model from the message.
 func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 	taskID := c.Param("taskId")
 
@@ -3227,6 +3228,10 @@ func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 // Persist the parent selection for future swarm children as well as ordinary runs.
 func (h *Handler) persistTaskThreadModel(c echo.Context, task *models.Task) error {
 	agentID := c.FormValue("agent_id")
+
+	if (agentID == "auto" || agentID == "") && task.SwarmRole == models.SwarmRoleParent && h.taskRepo != nil {
+		return h.taskRepo.UpdateAgentID(c.Request().Context(), task.ID, "")
+	}
 
 	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
 		agent, selErr := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, "", false)
@@ -3269,13 +3274,21 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 	if h.swarmSvc != nil && task.SwarmRole == models.SwarmRoleParent {
+		var modelOverride []string
+		if agentID == "auto" || agentID == "" {
+			model, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, message, hasPendingImages(sessionID))
+			if err != nil || model == nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "no model available for automatic selection")
+			}
+			modelOverride = []string{model.ID}
+		}
 		if err := h.persistTaskThreadModel(c, task); err != nil {
 			return err
 		}
 		if err := h.saveDeferredTaskUploads(c.Request().Context(), task.ID, sessionID); err != nil {
 			return err
 		}
-		if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message); err != nil {
+		if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message, modelOverride...); err != nil {
 			applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 		}
