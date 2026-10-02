@@ -45,6 +45,7 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		id := r.URL.Query().Get("project_id")
 		if r.Header.Get("HX-Request") == "true" {
 			if id == "b" && failB.Load() {
+				time.Sleep(300 * time.Millisecond)
 				http.Error(w, "failed", 500)
 				return
 			}
@@ -70,8 +71,8 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.waitFor("ready", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
 		browser.evaluate(`window.pickProject=function(id){var s=document.getElementById('project-selector');s.value=id;s.dispatchEvent(new Event('change',{bubbles:true}));};pickProject('b');'ok';`)
 		browser.waitFor("failed switch rolls back", `document.getElementById('project-selector').value`, "a")
-		browser.evaluate(`document.querySelector('[data-close-project="a"]').click();'ok';`)
-		browser.waitFor("failed close retains active tab", `document.getElementById('project-selector').value+':'+document.querySelector('[data-project-tab="a"]').getAttribute('aria-selected')+':'+document.getElementById('desktop-project-titlebar').dataset.pinnedProjects`, `a:true:["a","b","c"]`)
+		browser.evaluate(`document.querySelector('[data-close-project="a"]').click();document.querySelector('[data-close-project="a"]').click();'ok';`)
+		browser.waitFor("repeated failed close retains active tab", `document.getElementById('project-selector').value+':'+document.querySelector('[data-project-tab="a"]').getAttribute('aria-selected')+':'+document.getElementById('desktop-project-titlebar').dataset.pinnedProjects`, `a:true:["a","b","c"]`)
 		failB.Store(false)
 		browser.evaluate(`pickProject('b');setTimeout(function(){pickProject('c');},30);'ok';`)
 		browser.waitFor("missing destination falls back", `location.pathname+':'+(document.getElementById('loaded-project')||{}).textContent`, "/chat:c")
