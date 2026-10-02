@@ -132,6 +132,34 @@ func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T)
 				t.Fatalf("runtime theme %s should keep %s in compact roles, not CSS map", theme.ID, name)
 			}
 		}
+		if strings.HasPrefix(theme.ID, "vscode-") && theme.CSS["--ov-subtle-border"] != expectedTheme.CSS["--ov-subtle-border"] {
+			t.Fatalf("runtime theme %s subtle border = %q, want precomputed palette color %q", theme.ID, theme.CSS["--ov-subtle-border"], expectedTheme.CSS["--ov-subtle-border"])
+		}
+	}
+}
+
+func TestVSCodeCatalogProvidesSubtleBorderColorsForLegacyWebViews(t *testing.T) {
+	wanted := map[string]bool{"Kimbie Dark": false, "Monokai Dimmed": false}
+	for _, theme := range VSCodeCatalog() {
+		border := theme.CSS["--ov-subtle-border"]
+		if border == "" || strings.Contains(border, "color-mix") {
+			t.Fatalf("theme %s subtle border must be a precomputed CSS color, got %q", theme.Name, border)
+		}
+		ratio := contrastRatioForTest(border, theme.Semantic["surface"])
+		if ratio < 1 || ratio > 1.5 {
+			t.Fatalf("theme %s subtle border contrast = %.2f, want a visible but subtle value at most 1.50 against card surface", theme.Name, ratio)
+		}
+		if _, ok := wanted[theme.Name]; ok {
+			if border == theme.Semantic["surface"] || border == theme.Semantic["surfaceRaised"] {
+				t.Fatalf("theme %s subtle border reused a surface color: %q", theme.Name, border)
+			}
+			wanted[theme.Name] = true
+		}
+	}
+	for name, found := range wanted {
+		if !found {
+			t.Fatalf("catalog did not include regression palette %s", name)
+		}
 	}
 }
 

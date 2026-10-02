@@ -34,8 +34,9 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`window.openVibelyThemes.toggleMode`,
 		`window.openVibelyThemes.applySystemMode`,
 		`window.openVibelyThemes.syncThemeControls`,
-		`[data-color-theme^="vscode-"]{--ov-subtle-border:color-mix(in srgb,var(--ov-surface) 92%,var(--ov-text) 8%);background-color:var(--ov-content-bg)}`,
+		`[data-color-theme^="vscode-"]{background-color:var(--ov-content-bg)}`,
 		`[data-color-theme^="vscode-"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }`,
+		`[data-color-theme] .hljs * { color: var(--ov-syntax-foreground); }`,
 		`[data-color-theme] .hljs-keyword`,
 		`var(--ov-syntax-keyword)`,
 		`[data-color-theme] pre { background-color: var(--ov-syntax-background); }`,
@@ -131,8 +132,11 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 	if strings.Contains(html, `[data-color-theme^="vscode-"]{--ov-subtle-border:var(--ov-surface-raised)`) {
 		t.Fatal("imported-theme subtle borders must not inherit the raised-surface color")
 	}
-	if !strings.Contains(html, `--ov-subtle-border:color-mix(in srgb,var(--ov-surface) 92%,var(--ov-text) 8%)`) {
-		t.Fatal("imported-theme subtle borders must blend lightly with the card surface")
+	if strings.Contains(html, `--ov-subtle-border:color-mix(`) {
+		t.Fatal("imported-theme subtle borders must use precomputed palette colors for older webviews")
+	}
+	if strings.Contains(html, "highlight-github-dark.min.css") {
+		t.Fatal("base layout must not load the fixed GitHub Dark Highlight.js theme")
 	}
 	if strings.Contains(html, `[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-subtle-border))`) {
 		t.Fatal("imported-theme YAML rails must not fall back to the surface-raised alias")
@@ -205,13 +209,20 @@ func TestImportedThemeSubtleBordersBlendWithCardSurface(t *testing.T) {
 	}
 	html := buf.String()
 	for _, fragment := range []string{
-		`--ov-subtle-border:color-mix(in srgb,var(--ov-surface) 92%,var(--ov-text) 8%)`,
+		`[data-color-theme^="vscode-"]{background-color:var(--ov-content-bg)}`,
 		`[data-color-theme^="vscode-"] .card,`,
 		`[data-color-theme^="vscode-"] .dropdown-content{background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important}`,
+		`[data-color-theme] .hljs * { color: var(--ov-syntax-foreground); }`,
 	} {
 		if !strings.Contains(html, fragment) {
-			t.Fatalf("imported-theme card and dropdown border styling missing %q", fragment)
+			t.Fatalf("imported-theme styling missing %q", fragment)
 		}
+	}
+	if strings.Contains(html, `--ov-subtle-border:color-mix(`) {
+		t.Fatal("imported-theme subtle borders must use precomputed palette colors for older webviews")
+	}
+	if strings.Contains(html, "highlight-github-dark.min.css") {
+		t.Fatal("base layout must not load the fixed GitHub Dark Highlight.js theme")
 	}
 	if strings.Contains(html, `[data-color-theme^="vscode-"]{--ov-subtle-border:var(--ov-surface-raised)`) {
 		t.Fatal("imported-theme subtle borders must not inherit the raised-surface color")
