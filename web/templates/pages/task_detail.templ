@@ -553,7 +553,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							<h3 class="text-sm font-semibold">Lifecycle</h3>
 							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 						</div>
-						<div data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0">Routing, preparation, and completion activity.</div>
 						<style>
                             .lifecycle-entry summary { display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:10px 12px; border-radius:8px; }
                             .lifecycle-entry summary::-webkit-details-marker { display:none; }
