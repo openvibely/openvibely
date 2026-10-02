@@ -121,9 +121,12 @@ templ searchableSelectorScript() {
                 root.__selectorActive = option;
                 options(root).forEach(function(item) { item.toggleAttribute('data-selector-active', item === option); });
             }
+            function optionKey(option) { return option ? option.getAttribute('data-searchable-selector-id') || option.getAttribute('href') : null; }
             function reconcileHighlight(root, reset) {
                 var list = visibleOptions(root);
-                if (reset || !list.includes(root.__selectorActive)) highlight(root, list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list[0]);
+                if (!reset && list.includes(root.__selectorActive)) return;
+                var key = !reset && optionKey(root.__selectorActive);
+                highlight(root, (key && list.find(function(item) { return optionKey(item) === key; })) || list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list[0]);
             }
 			function position(root) {
 				var state = nodes(root), dialog = state.dialog, button = state.button;
@@ -215,7 +218,10 @@ templ searchableSelectorScript() {
 				if (root.hasAttribute('data-searchable-selector-local')) syncLocal(root, state.value && state.value.value);
 				reconcileHighlight(root, true);
                 position(root); state.search.focus(); state.search.select();
-				if (!root.hasAttribute('data-searchable-selector-local') && window.htmx) htmx.trigger(state.search, 'search');
+				if (root.hasAttribute('data-searchable-selector-local') || !window.htmx) return;
+				// HTMX binds hx-trigger listeners on DOMContentLoaded; a search fired earlier is dropped.
+				if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function() { if (state.dialog.open) htmx.trigger(state.search, 'search'); }, {once: true});
+				else htmx.trigger(state.search, 'search');
 			}
 			listen(document, 'click', function(event) {
 				var root = rootFor(event.target); if (!root) return;
