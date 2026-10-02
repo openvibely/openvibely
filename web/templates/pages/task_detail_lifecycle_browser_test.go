@@ -44,7 +44,7 @@ func TestBrowserFunctional_TaskDetailLifecyclePaginationInChrome(t *testing.T) {
 			"output_contract":     "activity_summary",
 			"summary":             "summary for " + id,
 			"started_at":          startedAt.Format(time.RFC3339),
-			"selected_skills":     []string{"debug_go_tests", "review_changes"},
+			"selected_skills":     []string{"debug_go_tests", "openvibely_responsive_templ_layout_workflow_with_a_very_long_skill_name"},
 			"selected_memories":   []map[string]string{{"file": "testing_coverage_and_performance.md"}},
 		}
 	}
@@ -264,6 +264,14 @@ window.addEventListener('DOMContentLoaded', function() {
     if (entry.tagName !== 'DETAILS' || entry.open) fail('lifecycle should begin collapsed');
     entry.querySelector('summary').click();
     if (!entry.open || entry.querySelector('.lifecycle-entry-details').getBoundingClientRect().height === 0) fail('selecting entry should expand inline');
+    var oldWidth = entry.style.width;
+    entry.style.width = '240px';
+    entry.querySelectorAll('.badge').forEach(function(badge) {
+      var range = document.createRange(); range.selectNodeContents(badge);
+      var text = range.getBoundingClientRect(), box = badge.getBoundingClientRect();
+      if (text.top < box.top-1 || text.bottom > box.bottom+1 || box.right > entry.getBoundingClientRect().right+1) fail('lifecycle badge text exceeds its container');
+    });
+    entry.style.width = oldWidth;
     entry.querySelector('summary').click();
     if (entry.open) fail('selecting entry again should collapse');
     var originalWorkspace = window.taskWorkspace, openedThread = false, scrolled = false;
