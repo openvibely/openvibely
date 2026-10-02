@@ -3834,6 +3834,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
                     // One owner for full-page fragment navigation, including sidebar links.
                     let currentPageRequest = null;
+                    // Capture runs before HTMX restores cached history or starts a
+                    // cache-miss request. A late response must not replace history.
+                    if (window.addEventListener) window.addEventListener('popstate', function() {
+                        const previous = currentPageRequest;
+                        currentPageRequest = null;
+                        if (previous && previous.readyState !== 4) previous.abort();
+                    }, true);
                     document.addEventListener('htmx:beforeRequest', function(event) {
                         const detail = event.detail;
                         if (!detail.target || detail.target.id !== 'main-content') return;
