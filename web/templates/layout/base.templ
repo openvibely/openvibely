@@ -2535,7 +2535,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.tool-status-error { color: hsl(var(--er, 0 60% 50%) / 0.7); }
 
 					/* Built-in VS Code palette application. Variables are generated at build time. */
-[data-color-theme^="vscode-"]{--ov-subtle-border:var(--ov-surface-raised);background-color:var(--ov-content-bg)}
+[data-color-theme^="vscode-"]{--ov-subtle-border:color-mix(in srgb,var(--ov-surface) 92%,var(--ov-text) 8%);background-color:var(--ov-content-bg)}
 [data-color-theme^="vscode-"] body,
 [data-color-theme^="vscode-"] .drawer-content,
 [data-color-theme^="vscode-"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }
