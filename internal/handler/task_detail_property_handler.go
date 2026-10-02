@@ -28,7 +28,7 @@ func (h *Handler) UpdateTaskDetailProperty(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "Use the swarm editor to change its model")
 		}
 		if value == "default" {
-			model, err := h.selectDefaultAgent(ctx, false)
+			model, err := h.selectTaskAgent(ctx, task.ProjectID, "default", "", false)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 			}

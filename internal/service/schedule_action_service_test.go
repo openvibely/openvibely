@@ -773,3 +773,26 @@ func TestScheduleActionServiceModifyLiteralTitle(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduleRecurrenceEditDoesNotReplayPastAnchor(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projects := repository.NewProjectRepo(db)
+	tasks := repository.NewTaskRepo(db, nil)
+	schedules := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Recurrence"}
+	require.NoError(t, projects.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Scheduled", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, tasks.Create(ctx, task))
+	anchor := time.Now().AddDate(0, 0, -8).Truncate(time.Minute)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: anchor, RepeatType: models.RepeatWeekly, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, schedules.Create(ctx, schedule))
+	svc := NewScheduleActionService(tasks, schedules, newTestWorkerService(t))
+	for _, repeat := range []models.RepeatType{models.RepeatWeekly, models.RepeatDaily} {
+		result, err := svc.ModifyAbsolute(ctx, ModifyAbsoluteScheduleRequest{ScheduleID: schedule.ID, RunAt: anchor, RepeatType: repeat, RepeatInterval: 2})
+		require.NoError(t, err)
+		require.NotNil(t, result.Schedule.NextRun)
+		require.True(t, result.Schedule.NextRun.After(time.Now()))
+		require.True(t, result.Schedule.RunAt.Equal(anchor))
+	}
+}

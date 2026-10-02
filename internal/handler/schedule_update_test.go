@@ -98,13 +98,13 @@ func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 		t.Fatalf("failed to reload after update: %v", err)
 	}
 
-	// NextRun should equal RunAt. The handler now always sets NextRun = RunAt,
-	// and the scheduler handles picking up past-due schedules immediately.
-	runAtLocal := updated.RunAt.Local()
-	nextRunLocal := updated.NextRun.Local()
-	if nextRunLocal.Format("2006-01-02T15:04") != runAtLocal.Format("2006-01-02T15:04") {
-		t.Errorf("NextRun should equal RunAt. RunAt=%s, NextRun=%s",
-			runAtLocal.Format("2006-01-02T15:04"), nextRunLocal.Format("2006-01-02T15:04"))
+	// Recurrence edits advance from the anchor rather than replaying it.
+	if updated.NextRun == nil {
+		t.Fatal("missing next run")
+	}
+	expected := updated.ComputeNextRun(time.Now())
+	if expected == nil || !updated.NextRun.Equal(*expected) {
+		t.Fatalf("next run %v, want %v", updated.NextRun, expected)
 	}
 
 	// Verify the interval was updated

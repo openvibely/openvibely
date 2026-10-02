@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -98,4 +99,73 @@ func TestNewTaskMessageImagesRemainInAttachmentPanel(t *testing.T) {
 	messageFiles, err := h.chatAttachmentRepo.ListByTask(context.Background(), id)
 	require.NoError(t, err)
 	require.Len(t, messageFiles, 1)
+}
+
+func TestDeferredTaskImagesRemainAvailable(t *testing.T) {
+	for _, scheduled := range []bool{false, true} {
+		t.Run(fmt.Sprint(scheduled), func(t *testing.T) {
+			h, e, modelsRepo := setupTestHandler(t)
+			useTempUploadsDir(t)
+			project := createProject(t, h, "Gallery first send")
+			other := createProject(t, h, "Other gallery")
+			agent := createAgent(t, modelsRepo)
+			var upload bytes.Buffer
+			writer := multipart.NewWriter(&upload)
+			file, err := writer.CreateFormFile("files", "screenshot.png")
+			require.NoError(t, err)
+			_, err = file.Write([]byte("\x89PNG\r\n\x1a\nimage"))
+			require.NoError(t, err)
+			require.NoError(t, writer.Close())
+			req := httptest.NewRequest(http.MethodPost, "/chat/attachments?project_id="+project.ID, &upload)
+			req.Header.Set("Content-Type", writer.FormDataContentType())
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var uploaded struct {
+				SessionID string `json:"session_id"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &uploaded))
+			require.NotEmpty(t, uploaded.SessionID)
+			form := url.Values{"category": {"backlog"}, "message": {"Inspect screenshot"}, "agent_id": {agent.ID}, "attachment_session_id": {uploaded.SessionID}}
+			if scheduled {
+				form.Set("add_schedule", "on")
+				form.Set("run_at", "2035-01-02T09:30")
+				form.Set("repeat_type", "weekly")
+				form.Set("repeat_interval", "1")
+			}
+			req = httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("HX-Request", "true")
+			rec = httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			id := rec.Header().Get("X-Created-Task-ID")
+			require.NotEmpty(t, id)
+			require.Contains(t, rec.Body.String(), `/tasks/`+id+`/attachments?project_id=`+project.ID)
+			for _, projectID := range []string{project.ID, other.ID} {
+				req = httptest.NewRequest(http.MethodGet, "/tasks/"+id+"/attachments?project_id="+projectID, nil)
+				rec = httptest.NewRecorder()
+				e.ServeHTTP(rec, req)
+				if projectID == other.ID {
+					require.Equal(t, http.StatusNotFound, rec.Code)
+					continue
+				}
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.Contains(t, rec.Body.String(), "screenshot.png")
+				require.Contains(t, rec.Body.String(), "data-image-gallery-item")
+
+				require.NotContains(t, rec.Body.String(), "No attachments")
+			}
+			taskFiles, err := h.attachmentRepo.ListByTask(context.Background(), id)
+			require.NoError(t, err)
+			require.Len(t, taskFiles, 1)
+			require.FileExists(t, taskFiles[0].FilePath)
+			executions, err := h.execRepo.ListByTask(context.Background(), id)
+			require.NoError(t, err)
+			require.Empty(t, executions)
+			messageFiles, err := h.chatAttachmentRepo.ListByTask(context.Background(), id)
+			require.NoError(t, err)
+			require.Empty(t, messageFiles)
+		})
+	}
 }

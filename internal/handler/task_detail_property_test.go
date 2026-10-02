@@ -57,3 +57,53 @@ func TestTaskDetailPropertyIsScopedAndPreservesOtherFields(t *testing.T) {
 		t.Fatalf("unexpected task changes: %+v", got)
 	}
 }
+
+func TestTaskDefaultSelectionUsesProjectModel(t *testing.T) {
+	h, e, repo := setupTestHandler(t)
+	ctx := context.Background()
+	global := createAgent(t, repo, func(a *models.LLMConfig) { a.IsDefault = true })
+	projectModel := createAgent(t, repo, func(a *models.LLMConfig) { a.IsDefault = false; a.Name = "Project model" })
+	project := createProject(t, h, "Project default")
+	project.DefaultAgentConfigID = &projectModel.ID
+	if err := h.projectRepo.Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := createTask(t, h, project.ID, "Default selection")
+	form := url.Values{"field": {"agent_id"}, "value": {"default"}}
+	req := httptest.NewRequest(http.MethodPatch, "/tasks/"+task.ID+"/details/property?project_id="+project.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	stored, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil || stored.AgentID == nil || *stored.AgentID != projectModel.ID {
+		t.Fatalf("project default not assigned: %v %v", stored, err)
+	}
+	form = url.Values{"message": {"Use the project model"}, "agent_id": {"default"}}
+	req = httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	stored, err = h.taskRepo.GetByID(ctx, rec.Header().Get("X-Created-Task-ID"))
+	if err != nil || stored == nil || stored.AgentID == nil || *stored.AgentID != projectModel.ID {
+		t.Fatalf("first send default not assigned: %v %v", stored, err)
+	}
+	selected, err := h.selectTaskAgent(ctx, project.ID, global.ID, "", false)
+	if err != nil || selected.ID != global.ID {
+		t.Fatal("explicit model overridden", err)
+	}
+	project.DefaultAgentConfigID = nil
+	if err := h.projectRepo.Update(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	selected, err = h.selectTaskAgent(ctx, project.ID, "default", "", false)
+	if err != nil || selected.ID != global.ID {
+		t.Fatal("global fallback failed", err)
+	}
+}

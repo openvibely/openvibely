@@ -529,3 +529,49 @@ func (h *Handler) DownloadTaskAttachment(c echo.Context) error {
 	c.Response().Header().Set("Content-Security-Policy", "sandbox")
 	return c.File(attachment.FilePath)
 }
+
+// saveDeferredTaskUploads publishes draft files before returning a non-running task.
+// Such tasks have no execution to own message attachments yet.
+func (h *Handler) saveDeferredTaskUploads(ctx context.Context, taskID, sessionID string) error {
+	if sessionID == "" {
+		return nil
+	}
+	if !isValidPendingAttachmentSessionID(sessionID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid attachment session")
+	}
+	source := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	files, err := os.ReadDir(source)
+	if err != nil {
+		return err
+	}
+	dest := filepath.Join(uploadsDir, "tasks", taskID)
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return err
+	}
+	var staged []attachmentPublication
+	rollback := func() { rollbackAttachmentPublications(ctx, staged, h.attachmentRepo.Delete) }
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		path := filepath.Join(dest, file.Name())
+		if err := copyFileAtomically(filepath.Join(source, file.Name()), path); err != nil {
+			rollback()
+			return err
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			os.Remove(path)
+			rollback()
+			return err
+		}
+		attachment := &models.Attachment{TaskID: taskID, FileName: file.Name(), FilePath: path, FileSize: info.Size(), MediaType: mediaTypeFromExtension(file.Name())}
+		if err := h.attachmentRepo.Create(ctx, attachment); err != nil {
+			os.Remove(path)
+			rollback()
+			return err
+		}
+		staged = append(staged, attachmentPublication{id: attachment.ID, path: path})
+	}
+	return nil
+}
