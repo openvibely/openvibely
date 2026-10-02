@@ -452,7 +452,6 @@ func TestTaskDetailContent_LifecycleTabFillsRemainingHeight(t *testing.T) {
 		`id="tab-lifecycle" class="task-tab-panel flex-1 flex flex-col min-h-0"`,
 		`class="flex flex-col min-w-0 flex-1 min-h-0"`,
 		`class="flex flex-col gap-2 flex-1 min-h-0"`,
-		`data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0"`,
 		`id="lifecycle-activity-scroll"`,
 		`class="flex-1 min-h-0 overflow-y-auto pr-1"`,
 	} {

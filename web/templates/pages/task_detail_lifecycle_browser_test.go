@@ -2514,7 +2514,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var root = document.getElementById('task-detail-content');
     var panel = document.getElementById('tab-lifecycle');
     var card = panel.firstElementChild;
-    var description = card.querySelector('[data-lifecycle-description]');
+    var description = card.querySelector('h3');
     var firstRow = document.querySelector('#lifecycle-activity-list [data-lifecycle-execution-id]');
     var port = document.getElementById('lifecycle-activity-scroll');
     var inspector = document.getElementById('task-details-panel');
@@ -2526,7 +2526,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var descriptionRect = description.getBoundingClientRect();
     var firstRowRect = firstRow.getBoundingClientRect();
     if (Math.abs(cardRect.bottom - bodyBottom) > 2) throw new Error('lifecycle card does not fill inspector body: card=' + cardRect.bottom + ' body=' + bodyBottom);
-    if (firstRowRect.top - descriptionRect.bottom > 64) throw new Error('lifecycle rows start too far below the description: gap=' + (firstRowRect.top - descriptionRect.bottom));
+    if (firstRowRect.top - descriptionRect.bottom > 64) throw new Error('lifecycle rows start too far below the heading: gap=' + (firstRowRect.top - descriptionRect.bottom));
     if (port.clientHeight < 500) throw new Error('lifecycle scrollport is unexpectedly short: ' + port.clientHeight);
     if (port.scrollHeight <= port.clientHeight) throw new Error('lifecycle rows do not overflow their internal scrollport');
     if (root.scrollHeight > root.clientHeight + 2) throw new Error('lifecycle rows escaped into page-level overflow');
