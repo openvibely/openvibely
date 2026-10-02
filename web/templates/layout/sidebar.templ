@@ -1073,7 +1073,7 @@ templ ProjectSelector(projects []models.Project, currentProjectID string) {
 				}) {
                     if serverRuntimeMode(ctx) == "desktop" {
                         <div class={ templateui.SearchableSelectorMenuClass }>
-                        <button id="new-project-btn" type="button" class={ templateui.SearchableSelectorOptionClass } onclick="this.closest('dialog').close()"><span class="w-4 shrink-0" aria-hidden="true">+</span><span>Create New Project</span></button>
+                        <button id="new-project-btn" type="button" data-searchable-selector-option data-searchable-selector-action class={ templateui.SearchableSelectorOptionClass } onclick="this.closest('dialog').close()"><span class="w-4 shrink-0" aria-hidden="true">+</span><span>Create New Project</span></button>
                         </div>
                         <hr class="border-base-300 my-1" role="separator"/>
                     }

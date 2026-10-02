@@ -187,10 +187,15 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    if (media.matches) {
     list.append(add); bar.prepend(toggle);
     createRow.append(create); create.append(label);
-    create.className = 'btn btn-ghost btn-sm w-full justify-start';
+    create.className = 'flex w-full max-w-full min-w-0 items-center gap-2 overflow-hidden rounded-btn px-4 py-2';
+    create.setAttribute('data-searchable-selector-option', '');
+    create.setAttribute('data-searchable-selector-action', '');
    } else {
     home.after(add); toggleHome.append(toggle);
     createHome.append(create); label.remove(); create.className = originalCreateClass;
+    create.removeAttribute('data-searchable-selector-option');
+    create.removeAttribute('data-searchable-selector-action');
+    create.removeAttribute('data-selector-active');
    }
    createRow.hidden = !media.matches;
   }

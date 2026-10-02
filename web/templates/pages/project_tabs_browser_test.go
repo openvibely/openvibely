@@ -109,6 +109,21 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if got := browser.evaluate(`String(document.querySelector('.drawer-content').getBoundingClientRect().bottom <= innerHeight + 1)`); got != "true" {
 					t.Fatal("shared page shell extends below viewport", got)
 				}
+				browser.click("#project-selector-trigger")
+				browser.waitFor("menu ready for hover", `String(document.getElementById('project-selector-dialog').open)`, "true")
+				activeColor := browser.evaluate(`getComputedStyle(document.querySelector('#project-selector-dialog [data-selector-active]')).backgroundColor`)
+				for _, selector := range []string{"#new-project-btn", "[data-project-selector-option]", "#new-project-btn"} {
+					var hoverPoint struct{ X, Y float64 }
+					if err := json.Unmarshal([]byte(browser.evaluate(`JSON.stringify((function(){var r=document.querySelector('`+selector+`').getBoundingClientRect();return {X:r.x+r.width/2,Y:r.y+r.height/2};})())`)), &hoverPoint); err != nil {
+						t.Fatal(err)
+					}
+					browser.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": hoverPoint.X, "y": hoverPoint.Y}, nil)
+					browser.waitFor("one menu highlight", `String(document.querySelectorAll('#project-selector-dialog [data-selector-active]').length===1 && document.querySelector('`+selector+`').hasAttribute('data-selector-active'))`, "true")
+					browser.waitFor("standard menu highlight color", `getComputedStyle(document.querySelector('`+selector+`')).backgroundColor`, activeColor)
+				}
+
+				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
+				browser.waitFor("hover test menu closed", `String(document.getElementById('project-selector-dialog').open)`, "false")
 				if !desktop {
 					browser.waitFor("web selector", `String(!!document.querySelector('#desktop-project-titlebar #project-selector') && !document.querySelector('[data-wml-window]'))`, "true")
 					browser.waitFor("web plus idle background", `getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor`, "rgba(0, 0, 0, 0)")
@@ -343,6 +358,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				key("Home", "Home")
 				browser.click("#project-selector-trigger")
 				browser.waitFor("full selector", `String(document.getElementById('project-selector-dialog').open)`, "true")
+
 				if got := browser.evaluate(`String(Math.abs(document.getElementById('new-project-btn').getBoundingClientRect().height - document.querySelector('[data-project-selector-option]').getBoundingClientRect().height) < 1 && document.getElementById('new-project-btn').parentElement.nextElementSibling.matches('[role="separator"]'))`); got != "true" {
 					t.Fatal("create row must match option height and have a separator", got)
 				}

@@ -82,7 +82,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 12;
+			var controllerVersion = 13;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -150,6 +150,7 @@ templ searchableSelectorScript() {
 				var state = nodes(root); if (!state.search || !state.value) return;
 				var query = String(state.search.value || '').trim().toLowerCase(), matchCount = 0;
 				options(root).forEach(function(option) {
+                    if (option.hasAttribute('data-searchable-selector-action')) return;
 					var match = !query || String(option.getAttribute('data-searchable-selector-name') || '').trim().toLowerCase().indexOf(query) !== -1;
 					var hidden = !match;
 					if (!hidden) matchCount++;
