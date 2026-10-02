@@ -74,6 +74,7 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks/new?tab=details", "detail-properties", func(b *composerFocusCDP) {
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1500, "height": 900, "deviceScaleFactor": 1, "mobile": false}, nil)
 		b.waitFor("draft details", `String(document.getElementById('task-details-panel') && !document.getElementById('task-details-panel').hidden)`, "true")
+		b.waitFor("automatic model label matches composer", `String(document.querySelector('[data-detail-property="agent_id"] [data-property-label]').textContent.trim()==='Auto' && document.getElementById('task-thread-form-agent-select').textContent.includes('Auto'))`, "true")
 		b.waitFor("property highlight clears panel edges", `(function(){var row=document.querySelector('[data-detail-property="priority"]').getBoundingClientRect(),panel=document.getElementById('task-details-panel').getBoundingClientRect();return String(row.left-panel.left>=12 && panel.right-row.right>=12)})()`, "true")
 		b.waitFor("property highlight inset", `(function(){var row=document.querySelector('[data-detail-property="priority"]'),text=row.firstElementChild;return String(Math.abs(text.getBoundingClientRect().left-row.getBoundingClientRect().left-12)<1 && getComputedStyle(row).paddingRight==='12px')})()`, "true")
 		b.click(`[data-detail-property="priority"]`)

@@ -41,7 +41,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   <input type="search" aria-label="Search options" placeholder="Search…" class="input input-bordered input-sm w-full mb-2"/>
   <div class="overflow-y-auto" style="max-height:240px">
    <div data-options="agent_id">
-    <button type="button" data-value="" class="btn btn-ghost btn-sm w-full justify-start">Default model</button>
+    <button type="button" data-value="" class="btn btn-ghost btn-sm w-full justify-start">Auto</button>
     for _, model := range agents {
      <button type="button" data-value={ model.ID } class="btn btn-ghost btn-sm w-full justify-start">{ model.Name }</button>
     }
@@ -226,7 +226,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    if (!taskID && event.target.id === 'task-thread-form-agent-select') {
     var row = root.querySelector('[data-detail-property="agent_id"]'), value = event.detail.value;
     var option = Array.from(picker.querySelectorAll('[data-options="agent_id"] button')).find(function(item) { return item.dataset.value === value; });
-    row.dataset.value = option ? value : ''; row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Default model';
+    row.dataset.value = option ? value : ''; row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Auto';
    }
   });
  })();
