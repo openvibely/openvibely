@@ -37,7 +37,7 @@ handler(event({metaKey:true}),{querySelectorAll(){throw Error('modified arrow re
 body=between(read('../layout/base.templ'),"if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;",'\n\t\t\t\t\t\t});');
 body="if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;"+body;
 let cleared=0;handler=new Function('event','document','closeCardFilterDropdown',body);
-const doc={querySelector(){return true},querySelectorAll(selector){if(selector.includes('aria-modal')) return [];return [{closest(){return this},_openVibelyClearSelection(){cleared++}}]}};
+const doc={querySelector(){return true},querySelectorAll(selector){if(selector.includes('aria-modal') || selector.includes('.dropdown-open')) return [];return [{closest(){return this},_openVibelyClearSelection(){cleared++}}]}};
 handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,0);
 doc.querySelector=()=>false;handler(event({key:'Escape',defaultPrevented:true}),doc,()=>{});assert.equal(cleared,0);
 handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,1);
