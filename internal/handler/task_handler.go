@@ -1042,8 +1042,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if h.swarmSvc == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "swarm service unavailable")
 		}
+		// Keep the planner stopped until pending uploads have been published.
+		swarmCategory := category
+		if threadDraft && category == models.CategoryActive {
+			swarmCategory = models.CategoryBacklog
+		}
 		maxWorkers, _ := strconv.Atoi(c.FormValue("swarm_max_workers"))
-		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: category, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
+		parent, err := h.swarmSvc.CreateSwarmTask(c.Request().Context(), service.CreateSwarmTaskRequest{ProjectID: projectID, Title: t.Title, Prompt: t.Prompt, Goal: c.FormValue("goal"), Category: swarmCategory, Priority: priority, AgentID: t.AgentID, AgentDefinitionID: t.AgentDefinitionID, Tag: t.Tag, MaxWorkers: maxWorkers, WorkerIsolation: c.FormValue("swarm_worker_isolation"), ReviewerEnabled: formBoolEnabled(c, "swarm_reviewer_enabled", true), MergerEnabled: swarmMergerEnabledFormValue(c), AutoMerge: t.AutoMerge, AutoMergeOnGoalAchieved: t.AutoMergeOnGoalAchieved, MergeTargetBranch: t.MergeTargetBranch})
 		if err != nil {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
@@ -1067,7 +1072,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
 
-	if threadDraft && !startDraft && !isSwarmTaskForm(c) {
+	if threadDraft && (!startDraft || isSwarmTaskForm(c)) {
 		if err := h.saveDeferredTaskUploads(c.Request().Context(), t.ID, c.FormValue("attachment_session_id")); err != nil {
 			if rollbackErr := h.taskRepo.Delete(context.WithoutCancel(c.Request().Context()), t.ID); rollbackErr != nil {
 				return fmt.Errorf("saving attachments: %w; rolling back task: %v", err, rollbackErr)
@@ -1104,6 +1109,12 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			}
 		}
 		applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
+	}
+
+	if threadDraft && isSwarmTaskForm(c) && category == models.CategoryActive {
+		if err := h.swarmSvc.StartPlanner(c.Request().Context(), t.ID); err != nil {
+			return err
+		}
 	}
 
 	if threadDraft && !isSwarmTaskForm(c) {
@@ -3259,6 +3270,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 	if h.swarmSvc != nil && task.SwarmRole == models.SwarmRoleParent {
+		if err := h.saveDeferredTaskUploads(c.Request().Context(), task.ID, sessionID); err != nil {
+			return err
+		}
 		if err := h.swarmSvc.HandleParentFollowup(c.Request().Context(), task.ID, message); err != nil {
 			applog.Infof("[handler] TaskThreadSend swarm parent follow-up routing failed task=%s: %v", taskID, err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")

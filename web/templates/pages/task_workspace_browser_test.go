@@ -54,6 +54,12 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 				http.Error(w, "invalid field", 400)
 				return
 			}
+		case "/tasks/details-task/goal/pause":
+			component = TaskGoalPanel(task.ID, &models.TaskGoal{Objective: "Saved goal", Status: models.TaskGoalStatusPaused})
+		case "/tasks/details-task/goal/resume":
+			component = TaskGoalPanel(task.ID, &models.TaskGoal{Objective: "Saved goal", Status: models.TaskGoalStatusActive})
+		case "/tasks/details-task/goal/clear":
+			component = TaskGoalPanel(task.ID, nil)
 		case "/tasks/details-task/goal":
 			component = TaskGoalPanel(task.ID, &models.TaskGoal{Objective: r.FormValue("goal"), Status: models.TaskGoalStatusActive})
 		case "/tasks/details-task/thread":
@@ -161,6 +167,16 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.typeText("Saved goal")
 		b.click(`#task-detail-text-editor [type="submit"]`)
 		b.waitFor("saved goal", `document.querySelector('[data-detail-editor="goal"]').dataset.value`, "Saved goal")
+		for _, action := range []string{"pause", "resume"} {
+			b.click(`[data-detail-editor="goal"]`)
+			b.click(`#task-detail-text-editor [data-goal-action="` + action + `"]`)
+			want := "paused"
+			if action == "resume" {
+				want = "active"
+			}
+			b.waitFor("goal action "+action, `document.querySelector('[data-detail-editor="goal"]').dataset.goalStatus`, want)
+		}
+
 		for _, field := range []string{"goal", "prompt"} {
 			b.click(`[data-detail-editor="` + field + `"]`)
 			b.evaluate(`document.querySelector('#task-detail-text-editor textarea').value='Discard this edit'; 'edited'`)
@@ -174,6 +190,17 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 			b.waitFor("dismiss discarded "+field, `document.querySelector('#task-detail-text-editor textarea').value`, want)
 			b.click(`#task-detail-text-editor [data-editor-cancel]`)
 		}
+		b.click(`[data-detail-editor="goal"]`)
+		b.click(`#task-detail-text-editor [data-goal-action="clear"]`)
+		b.waitFor("goal cleared", `document.querySelector('[data-detail-editor="goal"]').dataset.value`, "")
+		b.click(`[data-detail-editor="goal"]`)
+		b.typeText("Saved goal")
+		b.click(`#task-detail-text-editor [type="submit"]`)
+		b.waitFor("goal restored", `document.querySelector('[data-detail-editor="goal"]').dataset.value`, "Saved goal")
+		b.click(`[data-detail-editor="goal"]`)
+		b.evaluate(`document.querySelector('#task-detail-text-editor textarea').value=''; 'empty'`)
+		b.click(`#task-detail-text-editor [type="submit"]`)
+		b.waitFor("empty goal clears", `document.querySelector('[data-detail-editor="goal"]').dataset.value`, "")
 
 	})
 }

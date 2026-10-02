@@ -873,3 +873,107 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 
 	t.Logf("SUCCESS: When no vision agents available, system provides clear warning: %s", visionDecision.Detail)
 }
+
+func TestLLMService_SwarmChildReceivesParentImages(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	textOnly := &models.LLMConfig{
+		Name:       "Task text-only model",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "task-text-key",
+		Model:      "local-text-model",
+	}
+	vision := &models.LLMConfig{
+		Name:                 "Task stored vision model",
+		Provider:             models.ProviderAnthropic,
+		AuthMethod:           models.AuthMethodOAuth,
+		OAuthAccessToken:     "task-oauth-access",
+		OAuthRefreshToken:    "task-oauth-refresh",
+		OAuthClientSecret:    "task-client-secret",
+		Model:                "claude-opus-5",
+		BaseURL:              "https://anthropic.example/v1",
+		ExtraBodyJSON:        `{"task_setting":"body"}`,
+		CustomAuthConfigJSON: `{"task_secret":"config"}`,
+		CustomAuthStateJSON:  `{"task_state":"state"}`,
+		MixtureConfigJSON:    `{"task_mixture":true}`,
+		MaxTokens:            4096,
+	}
+	for _, cfg := range []*models.LLMConfig{textOnly, vision} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	imagePath := filepath.Join(t.TempDir(), "task.png")
+	if err := os.WriteFile(imagePath, []byte("fake png"), 0644); err != nil {
+		t.Fatalf("create task image: %v", err)
+	}
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Execute screenshot task",
+		Prompt:    "Describe this screenshot",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	parent := &models.Task{ProjectID: "default", Title: "Image swarm", Prompt: "Inspect", Category: models.CategoryBacklog, Status: models.StatusBlocked, SwarmRole: models.SwarmRoleParent}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	task.ParentTaskID = &parent.ID
+	task.SwarmRole = models.SwarmRolePlanner
+	if err := taskRepo.Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := attachmentRepo.Create(ctx, &models.Attachment{TaskID: parent.ID, FileName: "task.png", FilePath: imagePath, MediaType: "image/png", FileSize: 9}); err != nil {
+		t.Fatalf("create task attachment: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, nil, nil, attachmentRepo)
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderAnthropic: capture}
+	counter.Reset()
+	counter.SetEnabled(true)
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *textOnly)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+
+	requests := capture.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("provider requests = %d, want one request", len(requests))
+	}
+	if len(requests[0].Attachments) != 1 {
+		t.Fatalf("missing inherited image: %#v", requests[0].Attachments)
+	}
+	got := requests[0].Agent
+	if got.ID != vision.ID || got.AuthMethod != vision.AuthMethod || got.OAuthAccessToken != vision.OAuthAccessToken ||
+		got.OAuthRefreshToken != vision.OAuthRefreshToken || got.OAuthClientSecret != vision.OAuthClientSecret ||
+		got.BaseURL != vision.BaseURL || got.ExtraBodyJSON != vision.ExtraBodyJSON ||
+		got.CustomAuthConfigJSON != vision.CustomAuthConfigJSON || got.CustomAuthStateJSON != vision.CustomAuthStateJSON ||
+		got.MixtureConfigJSON != vision.MixtureConfigJSON {
+		t.Fatalf("task provider received compact or incomplete model config: %#v", got)
+	}
+	compactQueries := 0
+	for _, raw := range counter.Statements() {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if strings.Contains(stmt, "order by is_default desc, name asc") {
+			compactQueries++
+		}
+	}
+	if compactQueries != 1 {
+		t.Fatalf("task vision routing should use one compact selection query, statements=%#v", counter.Statements())
+	}
+}

@@ -1040,6 +1040,26 @@ func (s *LLMService) getDefaultAgentForTask(ctx context.Context, projectID strin
 	return s.llmConfigRepo.GetDefault(ctx)
 }
 
+// Swarm children consume the parent's shared inputs without duplicating files.
+func (s *LLMService) loadTaskRunAttachments(ctx context.Context, task *models.Task) ([]models.Attachment, error) {
+	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
+	if err != nil || task.SwarmRole == "" || task.ParentTaskID == nil {
+		return attachments, err
+	}
+	parent, err := s.taskRepo.GetByID(ctx, *task.ParentTaskID)
+	if err != nil {
+		return nil, err
+	}
+	if parent == nil || parent.ProjectID != task.ProjectID || parent.SwarmRole != models.SwarmRoleParent {
+		return attachments, nil
+	}
+	shared, err := s.attachmentRepo.ListByTask(ctx, parent.ID)
+	if err != nil {
+		return nil, err
+	}
+	return append(attachments, shared...), nil
+}
+
 func (s *LLMService) reconcileMissingTaskAttachments(ctx context.Context, taskID string, attachments []models.Attachment) []models.Attachment {
 	valid := make([]models.Attachment, 0, len(attachments))
 	for _, attachment := range attachments {
@@ -1191,7 +1211,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	applog.Debugf("[agent-svc] ExecuteTaskWithAgent execution=%s created, calling LLM...", exec.ID)
 
 	// Load attachments for the task
-	attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
+	attachments, err := s.loadTaskRunAttachments(ctx, &task)
 	if err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error loading attachments: %v", err)
 		if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", err.Error(), 0, 0); completeErr != nil {
