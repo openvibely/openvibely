@@ -294,8 +294,16 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	views := make([]viewmodels.LifecycleExecutionView, 0, len(page.Items))
+	names := make(map[string]string)
 	for _, e := range page.Items {
-		views = append(views, toLifecycleExecutionView(e))
+		view := toLifecycleExecutionView(e)
+		name, cached := names[e.AgentID]
+		if !cached {
+			name = h.lifecycleAgentName(c, e.AgentID)
+			names[e.AgentID] = name
+		}
+		view.AgentName = name
+		views = append(views, view)
 	}
 	return c.JSON(http.StatusOK, viewmodels.LifecycleExecutionPageView{
 		Items:      views,
@@ -344,7 +352,9 @@ func (h *Handler) GetTaskLifecycleExecution(c echo.Context) error {
 	if !found {
 		return echo.NewHTTPError(http.StatusNotFound, "lifecycle execution not found")
 	}
-	return c.JSON(http.StatusOK, toLifecycleExecutionView(*execution))
+	view := toLifecycleExecutionView(*execution)
+	view.AgentName = h.lifecycleAgentName(c, execution.AgentID)
+	return c.JSON(http.StatusOK, view)
 }
 
 // GetLifecycleExecutionEvents returns the durable trace for one lifecycle execution.
@@ -383,6 +393,16 @@ func (h *Handler) GetLifecycleExecutionEvents(c echo.Context) error {
 		views = append(views, toLifecycleExecutionEventView(e))
 	}
 	return c.JSON(http.StatusOK, views)
+}
+
+func (h *Handler) lifecycleAgentName(c echo.Context, id string) string {
+	if h.agentRepo != nil {
+		agent, err := h.agentRepo.GetByID(c.Request().Context(), id)
+		if err == nil && agent != nil && h.ensureAgentProjectAccess(c, agent) == nil {
+			return agent.Name
+		}
+	}
+	return "Unavailable agent"
 }
 
 // toLifecycleExecutionView returns the prompt-safe shape for UI/API use: never
