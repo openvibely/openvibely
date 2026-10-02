@@ -563,7 +563,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             .lifecycle-entry[open] .lifecycle-chevron { transform:rotate(90deg); }
                             .lifecycle-entry-details { padding:8px 12px 16px; overflow-wrap:anywhere; }
                             .lifecycle-entry-details dl { display:grid; grid-template-columns:5rem minmax(0,1fr); gap:8px; }
-                            .lifecycle-entry-details dt { opacity:.6; }
                             .lifecycle-entry-details p { margin-top:8px; }
                             .lifecycle-entry .badge { max-width:100%; min-width:0; height:auto; min-height:1.25rem; white-space:normal; overflow-wrap:anywhere; line-height:1.4; flex-shrink:0; }
                         </style>
@@ -712,7 +711,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								badges.push('<span class="font-mono text-xs badge badge-outline">' + escapeText(value) + '</span>');
 							});
 							if (badges.length === 0) return '';
-							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap"><span>' + escapeText(label) + ':</span> ' + badges.join(' ') + '</p>';
+							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap"><span class="opacity-60">' + escapeText(label) + ':</span> ' + badges.join(' ') + '</p>';
 						}
 
 						function memoryLabels(memories) {
@@ -755,8 +754,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
                             var seconds = Math.max(0, Math.floor(((end || Date.now()) - start) / 1000));
                             var duration = start && (end || row.status === 'running') ? Math.floor(seconds / 60) + 'm ' + seconds % 60 + 's' : '—';
                             var phase = {before_run:'Before run', after_complete:'After completion', before_plan:'Before planning', after_plan:'After planning'}[row.when] || String(row.when || '').replaceAll('_', ' ');
-                            var details = '<dl class="text-sm"><dt>Started</dt><dd>' + escapeText(displayTime(row.started_at)) + '</dd><dt>Finished</dt><dd data-lifecycle-finished>' + escapeText(end ? displayTime(row.completed_at) : '—') + '</dd><dt>Duration</dt><dd>' + escapeText(duration) + '</dd></dl>';
-                            if (row.agent_id) details += '<p class="text-sm">Agent: ' + escapeText(row.agent_name || 'Unavailable agent') + '</p>';
+                            var details = '<dl class="text-sm"><dt class="opacity-60">Duration</dt><dd data-lifecycle-duration>' + escapeText(duration) + '</dd></dl>';
+                            if (row.agent_id) details += '<p class="text-sm"><span class="opacity-60">Agent:</span> ' + escapeText(row.agent_name || 'Unavailable agent') + '</p>';
                             // Skill-selection summaries repeat the structured badges; retain the summary only as a fallback.
                             var skills = renderBadgeRow('Selected skills', row.selected_skills);
                             if (row.summary && !(row.output_contract === 'selected_skills' && skills)) details += '<p class="text-sm">' + escapeText(row.summary) + '</p>';
