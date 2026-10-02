@@ -69,6 +69,7 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 	defer server.Close()
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id=a", "project-failures", func(browser *composerFocusCDP) {
 		browser.waitFor("ready", `String(typeof window.openVibelyProjectTabsSync === 'function')`, "true")
+		browser.evaluate(`var trackFetch=window.fetch;window.savedSelectedProject='';window.fetch=function(url,options){return trackFetch.apply(this,arguments).then(function(response){if(url==='/ui/preferences'&&response.ok){var value=JSON.parse(options.body);if(value.project_id)window.savedSelectedProject=value.project_id;}return response;});};'ok';`)
 		browser.evaluate(`window.pickProject=function(id){var s=document.getElementById('project-selector');s.value=id;s.dispatchEvent(new Event('change',{bubbles:true}));};pickProject('b');'ok';`)
 		browser.waitFor("failed switch rolls back", `document.getElementById('project-selector').value`, "a")
 		browser.evaluate(`document.querySelector('[data-close-project="a"]').click();document.querySelector('[data-close-project="a"]').click();'ok';`)
@@ -90,8 +91,10 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.evaluate(`setTimeout(function(){window.historyRaceSettled=true;},500);'ok';`)
 		browser.waitFor("history race settled", `String(window.historyRaceSettled)`, "true")
 		browser.waitFor("late switch cannot overwrite Back", `document.getElementById('project-selector').value+':'+location.pathname+':'+String(!!window.openVibelyProtectedProjectID)`, "a:/tasks:false")
+		browser.waitFor("Back persists selected project", `window.savedSelectedProject`, "a")
 		browser.navigateHistory(1)
 		browser.waitFor("Forward restores project C", `document.getElementById('project-selector').value+':'+document.getElementById('loaded-project').textContent`, "c:c")
+		browser.waitFor("Forward persists selected project", `window.savedSelectedProject`, "c")
 		browser.evaluate(`window.savedRequests=0;var originalFetch=window.fetch;window.fetch=function(url,options){if(url==='/ui/preferences' && options.body.includes('project_locations')){window.savedRequests++;if(window.savedRequests===1)return Promise.resolve({ok:false});}return originalFetch.apply(this,arguments);};location.hash='retry';'ok';`)
 		browser.waitFor("unchanged location retried", `String(window.savedRequests >= 2)`, "true")
 		browser.evaluate(`window.tabSaveAttempts=0;window.latestTabSave='';var previousFetch=window.fetch;window.fetch=function(url,options){if(url==='/ui/preferences' && options.body.includes('pinned_project_ids')){window.tabSaveAttempts++;window.latestTabSave=JSON.stringify(JSON.parse(options.body).pinned_project_ids);if(window.tabSaveAttempts===1)return Promise.resolve({ok:false});}return previousFetch.apply(this,arguments);};document.querySelector('[data-close-project="a"]').click();'ok';`)

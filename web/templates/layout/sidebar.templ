@@ -319,7 +319,13 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						var target = event.detail && event.detail.target;
 						if (target && target.id === 'main-content') syncProjectSelectorFromURL();
 					});
-					document.addEventListener('htmx:historyRestore', syncProjectSelectorFromURL);
+					document.addEventListener('htmx:historyRestore', function() {
+                        syncProjectSelectorFromURL();
+                        // Persist only a successfully restored, known project, not an
+                        // optimistic popstate selection while history is still loading.
+                        var restoredID = new URLSearchParams(location.search).get('project_id');
+                        if (restoredID && restoredID === sel.value) persistSelectedProject(restoredID);
+                    });
 					window.addEventListener('popstate', syncProjectSelectorFromURL);
 				})();
 
