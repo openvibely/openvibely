@@ -101,6 +101,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         saveProjectPreferences({project_id: projectID});
                     }
                     let projectSwitchGeneration = 0;
+                    window.addEventListener('popstate', function() {
+                        // History owns navigation now; suppress switch fallback,
+                        // error toasts and deferred close completion from the old request.
+                        projectSwitchGeneration++;
+                        window.openVibelyProtectedProjectID = '';
+                    }, true);
 
 					var previousProjectID = sel.value;
 					const desktopProjectNavigation = document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop';
