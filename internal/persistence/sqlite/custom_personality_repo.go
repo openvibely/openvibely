@@ -46,7 +46,7 @@ func (r *CustomPersonalityRepo) GetByKey(ctx context.Context, key string) (*mode
 	return &p, nil
 }
 
-const customPersonalityPromptPreviewLength = 90
+const customPersonalityPromptPreviewLength = 150
 
 // List returns custom personalities ordered by name using a compact card/list projection.
 // SystemPrompt is intentionally left empty; callers that need the full prompt must use GetByKey.
