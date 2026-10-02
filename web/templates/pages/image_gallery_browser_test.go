@@ -110,6 +110,8 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.evaluate(`document.getElementById('task-message-input').value='Keep my draft';document.getElementById('task-message-input').dispatchEvent(new Event('input',{bubbles:true}));var dt=new DataTransfer();dt.items.add(new File(['image'],'draft.svg',{type:'image/svg+xml'}));var input=document.getElementById('task-thread-form-file-input');input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));'uploaded'`)
 		b.waitFor("draft image in panel", `String(!!document.querySelector('#draft-panel-attachments [data-image-gallery-item]'))`, "true")
 		b.waitFor("file thumbnail uses standard content inset", `String(Math.abs(document.querySelector("#draft-panel-attachments .attachment-gallery-open img").getBoundingClientRect().top-document.querySelector("#draft-panel-attachments").getBoundingClientRect().top-4)<1)`, "true")
+
+		b.waitFor("draft file row aligns with panel rows", `String((function(){var row=document.querySelector('#draft-panel-attachments .attachment-gallery-row').getBoundingClientRect(), heading=document.querySelector('#tab-attachments h3').getBoundingClientRect(), list=document.querySelector('#draft-panel-attachments').getBoundingClientRect();return Math.abs(row.left-heading.left+12)<1 && Math.abs(row.right-list.right-12)<1 && Math.abs(document.querySelector('#draft-panel-attachments img').getBoundingClientRect().left-heading.left)<1;})())`, "true")
 		b.click(`#draft-panel-attachments [data-image-gallery-item]`)
 		b.waitFor("draft preview", `document.querySelector('[data-gallery-name]').textContent+':'+document.querySelector('[data-gallery-status]').textContent`, "draft.svg:")
 		b.click(`[data-gallery-close]`)
@@ -130,6 +132,8 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("sent image remains in saved panel", `String(!!document.querySelector('#attachment-list [data-image-name="draft.svg"]') && !document.getElementById('draft-panel-attachments'))`, "true")
 		b.waitFor("consistent attachment spacing", `String(getComputedStyle(document.querySelector('#attachment-list .attachment-gallery-open')).gap===window.draftRowSpacing)`, "true")
 		b.waitFor("file thumbnail uses standard content inset", `String(Math.abs(document.querySelector("#attachment-list .attachment-gallery-open img").getBoundingClientRect().top-document.querySelector("#attachment-list").getBoundingClientRect().top-4)<1)`, "true")
+
+		b.waitFor("saved file row aligns with panel rows", `String((function(){var row=document.querySelector('#attachment-list .attachment-gallery-row').getBoundingClientRect(), heading=document.querySelector('#tab-attachments h3').getBoundingClientRect(), list=document.querySelector('#attachment-list').getBoundingClientRect();return Math.abs(row.left-heading.left+12)<1 && Math.abs(row.right-list.right-12)<1 && Math.abs(document.querySelector('#attachment-list img').getBoundingClientRect().left-heading.left)<1;})())`, "true")
 		b.click("#attachment-list [data-image-gallery-item]")
 		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
 		b.click("[data-gallery-close]")

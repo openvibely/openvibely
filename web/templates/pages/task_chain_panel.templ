@@ -54,12 +54,12 @@ templ TaskChainPanel(task *models.Task, agents []models.LLMConfig) {
      </select></label>
      <label class="form-control mb-4"><span class="label">Child task model override</span><input type="text" name="chain_child_model" value={ config.ChildModel } class="input input-bordered input-sm" placeholder="Optional model override"/></label>
      <p role="alert" data-chain-form-error class="text-error text-sm"></p>
-     <div class="flex items-center gap-2 mt-4"><button type="button" class="btn btn-sm btn-outline btn-error" data-chain-remove onclick="window.openDestructiveConfirmDialog('task-chain-delete', '', '')">Remove follow-up</button><button type="button" class="btn btn-sm btn-ghost ml-auto" onclick="this.closest('dialog').close()">Cancel</button><button type="submit" class="btn btn-primary btn-sm" data-chain-save>Save</button></div>
+     <div class="flex items-center gap-2 mt-4"><button type="button" class="btn btn-sm btn-outline btn-error" data-chain-remove onclick="window.openDestructiveConfirmDialog('task-chain-delete', '', '')">Delete follow-up</button><button type="button" class="btn btn-sm btn-ghost ml-auto" onclick="this.closest('dialog').close()">Cancel</button><button type="submit" class="btn btn-primary btn-sm" data-chain-save>Save</button></div>
     </form>
    </div>
    <form method="dialog" class="modal-backdrop"><button aria-label="Close follow-up editor">close</button></form>
   </dialog>
-  @DestructiveConfirmDialog("task-chain-delete", "Close remove follow-up confirmation", "Remove follow-up", "Remove the follow-up configuration for ", "", task.Title, "?", templ.ComponentScript{Call:"this.closest('dialog').close()"}, templ.ComponentScript{Call:"this.closest('dialog').dispatchEvent(new Event('confirm-chain-remove'))"}) {
+  @DestructiveConfirmDialog("task-chain-delete", "Close delete follow-up confirmation", "Delete follow-up", "Delete the follow-up configuration for ", "", task.Title, "?", templ.ComponentScript{Call:"this.closest('dialog').close()"}, templ.ComponentScript{Call:"this.closest('dialog').dispatchEvent(new Event('confirm-chain-remove'))"}) {
    <p>Any waiting follow-up task will be removed. Tasks that have already started will be kept.</p>
   }
   @TaskChainPanelScript()
