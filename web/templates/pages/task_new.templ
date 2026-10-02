@@ -66,7 +66,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     @components.ChatInputForm(components.ChatInputFormConfig{
      FormID: "task-thread-form", InputID: "task-message-input",
      PostEndpoint: fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", project.ID),
-     TargetID: "task-thread-messages", DiscardDraftOnLeave: true, Agents: agents, ShowModelSelector: true,
+     TargetID: "task-thread-messages", DiscardDraftOnLeave: true, SelectedAgentID: "default", Agents: agents, ShowModelSelector: true,
     })
    </div>
   </div>
@@ -212,7 +212,7 @@ templ NewTaskAdvancedOptions() {
 
 templ NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskUIOption) {
  <div class="min-w-0">
-  @TaskDetailMetrics(&models.Task{Category:models.CategoryActive, Priority:2}, models.TaskExecutionMetrics{}, agents, "")
+  @TaskDetailMetrics(&models.Task{Category:models.CategoryActive, Priority:2, AgentID: newTaskDefaultModel()}, models.TaskExecutionMetrics{}, agents, "")
   for _, field := range []struct{ Name, Value string }{{"agent_definition_id",""},{"category","active"},{"priority","2"},{"tag",""},{"goal",""}} {
    <input type="hidden" name={ field.Name } value={ field.Value } data-draft-property={ field.Name } form="task-thread-form"/>
   }
@@ -222,3 +222,5 @@ templ NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTask
   <details><summary class="text-sm cursor-pointer">Advanced options</summary>@NewTaskAdvancedOptions()</details>
  </div>
 }
+
+func newTaskDefaultModel() *string { value := "default"; return &value }

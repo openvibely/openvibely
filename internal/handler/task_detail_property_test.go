@@ -33,6 +33,7 @@ func TestTaskDetailPropertyIsScopedAndPreservesOtherFields(t *testing.T) {
 		{"priority", "4", p.ID, 200}, {"tag", "bug", p.ID, 200},
 		{"priority", "99", p.ID, 400}, {"status", "running", p.ID, 400},
 		{"agent_id", "missing", p.ID, 400}, {"prompt", "", p.ID, 400},
+		{"agent_id", "default", p.ID, 200},
 		{"agent_id", options[0].ID, p.ID, 200}, {"agent_id", "", p.ID, 200},
 		{"agent_definition_id", "missing", p.ID, 400},
 		{"priority", "1", "", 400},

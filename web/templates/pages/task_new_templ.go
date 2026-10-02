@@ -215,7 +215,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		templ_7745c5c3_Err = components.ChatInputForm(components.ChatInputFormConfig{
 			FormID: "task-thread-form", InputID: "task-message-input",
 			PostEndpoint: fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", project.ID),
-			TargetID:     "task-thread-messages", DiscardDraftOnLeave: true, Agents: agents, ShowModelSelector: true,
+			TargetID:     "task-thread-messages", DiscardDraftOnLeave: true, SelectedAgentID: "default", Agents: agents, ShowModelSelector: true,
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -495,7 +495,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = TaskDetailMetrics(&models.Task{Category: models.CategoryActive, Priority: 2}, models.TaskExecutionMetrics{}, agents, "").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = TaskDetailMetrics(&models.Task{Category: models.CategoryActive, Priority: 2, AgentID: newTaskDefaultModel()}, models.TaskExecutionMetrics{}, agents, "").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -567,5 +567,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 		return nil
 	})
 }
+
+func newTaskDefaultModel() *string { value := "default"; return &value }
 
 var _ = templruntime.GeneratedTemplate
