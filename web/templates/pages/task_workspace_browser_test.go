@@ -384,7 +384,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 	fileEvents := make(chan string, 30)
 	executions := []models.Execution{}
 	for i := 0; i < 20; i++ {
-		executions = append(executions, models.Execution{ID: fmt.Sprintf("execution-%d", i), TaskID: task.ID, Status: models.ExecCompleted, PromptSent: strings.Repeat("Reading history ", 20), StartedAt: time.Unix(int64(i+1), 0)})
+		executions = append(executions, models.Execution{ID: fmt.Sprintf("execution-%d", i), TaskID: task.ID, Status: models.ExecCompleted, DurationMs: 12000, PromptSent: strings.Repeat("Reading history ", 20), StartedAt: time.Unix(int64(i+1), 0)})
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if static.ServeAsset(w, r) {
@@ -494,6 +494,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
 		}
 		b.waitFor("live summary", `document.getElementById('task-change-activity').hidden+':'+document.querySelector('[data-change-summary]').textContent.includes('3 files')`, "false:true")
+		b.waitFor("completed status and duration remain visible with changes", `(function(){var status=document.querySelector('[data-task-terminal-status]');return String(status && getComputedStyle(status).display!=='none' && status.getBoundingClientRect().height>0 && status.textContent.includes('Task completed') && status.textContent.includes('12s'))})()`, "true")
 		b.waitFor("summary first inside composer", `String(document.querySelector('#task-thread-form > #task-change-activity') !== null && document.getElementById('task-change-activity').getBoundingClientRect().bottom <= document.getElementById('pending-thread-inputs').getBoundingClientRect().top)`, "true")
 		b.evaluate(`htmx.ajax('GET', '/test/pending-inputs', {target:'#pending-thread-inputs',swap:'outerHTML'}); 'loading'`)
 		b.waitFor("changes stay above queued and steered rows after live replacement", `(function(){var bar=document.getElementById('task-change-activity'),rows=document.querySelectorAll('#pending-thread-inputs [data-thread-input-id]');return String(rows.length===2 && Array.from(rows).every(function(row){return bar.getBoundingClientRect().bottom<=row.getBoundingClientRect().top}) && document.querySelectorAll('#task-change-activity').length===1)})()`, "true")

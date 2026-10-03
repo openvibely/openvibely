@@ -240,8 +240,8 @@ templ TaskWorkspaceScript() {
 			var comments = bar.querySelector('[data-change-comments]');
 			comments.hidden = !summary.review_comments;
 			comments.textContent = summary.review_comments ? summary.review_comments.toLocaleString() + (summary.review_comments === 1 ? ' comment' : ' comments') : '';
-			var action = summary.status === 'failed' ? 'Inspect changes' : summary.status === 'completed' ? 'Review changes' : 'View changes';
-			bar.querySelector('[data-change-action]').textContent = summary.status === 'failed' ? 'Inspect changes' : 'Review changes';
+			var action = 'Review changes';
+			bar.querySelector('[data-change-action]').textContent = action;
 			bar.querySelector('.task-change-review').setAttribute('aria-label', action);
 			bar.querySelector('.task-change-summary').setAttribute('aria-label', action + ': ' + summary.files + ' files changed, ' + summary.insertions + ' lines added, ' + summary.deletions + ' lines removed');
 		}
