@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +20,7 @@ import (
 func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	var saves atomic.Int32
+	var replayed atomic.Bool
 	var failB atomic.Bool
 	failB.Store(true)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +28,10 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/ui/preferences" {
+			body, _ := io.ReadAll(r.Body)
+			if strings.Contains(string(body), `"pinned_project_ids":["c","b","a"]`) && strings.Contains(string(body), `/schedule?project_id=b`) {
+				replayed.Store(true)
+			}
 			if saves.Add(1) == 1 {
 				http.Error(w, "temporary", 503)
 				return
@@ -113,5 +119,16 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.evaluate(`window.releaseRejectedSave();setTimeout(function(){window.permanentSettled=true;},1200);'ok';`)
 		browser.waitFor("permanent error settles", `String(window.permanentSettled)`, "true")
 		browser.waitFor("permanent error not retried", `String(window.permanentAttempts)`, "2")
+		// Hold a save open, queue a newer tab order and page, then destroy the
+		// document. keepalive cannot send the newer in-memory queue by itself.
+		browser.evaluate(`window.fetch=function(url,options){if(url==='/ui/preferences')return new Promise(function(resolve){window.releaseOldSave=resolve;});return originalFetch.apply(this,arguments);};window.openVibelySaveProjectPreferences({pinned_project_ids:['a','b','c']});window.openVibelySaveProjectPreferences({pinned_project_ids:['c','b','a'],project_locations:{b:'/schedule?project_id=b'}});window.releaseOldSave({ok:true,status:204});'ok';`)
+		browser.waitFor("old acknowledgment retains latest durable order", `JSON.stringify(JSON.parse(localStorage.getItem('openvibely.project-preference-outbox.pinned_project_ids')).value)`, `["c","b","a"]`)
+		browser.evaluate(`sessionStorage.clear();'ok';`)
+		browser.reload()
+		browser.waitFor("startup replays and clears outbox", `String(!localStorage.getItem('openvibely.project-preference-outbox.pinned_project_ids')&&!localStorage.getItem('openvibely.project-preference-outbox.project_locations'))`, "true")
+		if !replayed.Load() {
+			t.Fatal("startup did not replay the latest tab order and project page")
+		}
+
 	})
 }

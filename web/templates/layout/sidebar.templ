@@ -48,11 +48,33 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
                     // Coalesce unsaved values; only acknowledge successful HTTP responses.
                     const pendingPreferences = {};
+                    const preferenceVersions = {};
+                    const preferenceOutboxPrefix = 'openvibely.project-preference-outbox.';
+                    const projectPreferenceFields = ['project_id', 'project_locations', 'pinned_project_ids'];
+                    // This is an outbox, not a second preference store. Keep only unacknowledged
+                    // writes across reloads/restarts (the desktop asset origin is stable).
+                    projectPreferenceFields.forEach(function(key) {
+                        try {
+                            const entry = JSON.parse(localStorage.getItem(preferenceOutboxPrefix + key));
+                            if (entry && typeof entry.version === 'string' && Object.prototype.hasOwnProperty.call(entry, 'value')) {
+                                pendingPreferences[key] = entry.value;
+                                preferenceVersions[key] = entry.version;
+                            }
+                        } catch (_) {}
+                    });
                     let savingPreferences = false;
                     let preferenceRetry = null;
                     let preferenceRetryDelay = 1000;
                     function saveProjectPreferences(values) {
-                        Object.assign(pendingPreferences, values);
+                        Object.keys(values).forEach(function(key) {
+                            if (!projectPreferenceFields.includes(key)) return;
+                            pendingPreferences[key] = values[key];
+                            const version = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+                            preferenceVersions[key] = version;
+                            try {
+                                localStorage.setItem(preferenceOutboxPrefix + key, JSON.stringify({version: version, value: values[key]}));
+                            } catch (_) {}
+                        });
                         flushProjectPreferences();
                     }
                     async function flushProjectPreferences() {
@@ -60,6 +82,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         clearTimeout(preferenceRetry);
                         savingPreferences = true;
                         const snapshot = {...pendingPreferences};
+                        const versions = {...preferenceVersions};
                         let failed = false;
                         try {
                             const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(snapshot), keepalive: true});
@@ -84,7 +107,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                                 if (window.showToast) window.showToast('Could not save project preferences. Refresh and try again.', 'failed');
                             }
                             acknowledged.forEach(function(key) {
-                                if (pendingPreferences[key] === snapshot[key]) delete pendingPreferences[key];
+                                if (preferenceVersions[key] === versions[key]) delete pendingPreferences[key];
+                                try {
+                                    const entry = JSON.parse(localStorage.getItem(preferenceOutboxPrefix + key));
+                                    // Another window may have queued a newer last-save-wins update.
+                                    if (entry && entry.version === versions[key]) localStorage.removeItem(preferenceOutboxPrefix + key);
+                                } catch (_) {}
                             });
                             preferenceRetryDelay = 1000;
                         } catch (_) { failed = true; }
@@ -94,6 +122,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             if (failed) preferenceRetryDelay = Math.min(preferenceRetryDelay * 2, 30000);
                         }
                     }
+                    // Replay without waiting for another interaction or an unload event.
+                    flushProjectPreferences();
                     window.openVibelySaveProjectPreferences = saveProjectPreferences;
                     window.addEventListener('online', flushProjectPreferences);
                     window.addEventListener('pagehide', flushProjectPreferences);
