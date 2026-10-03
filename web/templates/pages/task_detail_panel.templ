@@ -20,6 +20,14 @@ templ TaskDetailPanel() {
 		#task-detail-content > [data-page-header] > nav { flex-shrink:1; flex-wrap:nowrap; }
 		#task-detail-content > [data-page-header] [data-breadcrumb-selector]:has([data-breadcrumb-selector-caret-only]) { width:28px; flex:0 0 28px; }
 		#task-details-opener, #task-workspace-back { flex-shrink:0; }
+		#task-breadcrumb-toolbar [data-breadcrumb-selector]:has([data-breadcrumb-selector-caret-only]) { width:28px; flex:0 0 28px; }
+		#task-breadcrumb-title { font-size:16px; line-height:22px; font-weight:500; }
+		#task-breadcrumb-changes { font-size:16px; line-height:22px; }
+		#task-breadcrumb-title:disabled { cursor:default; }
+		#task-breadcrumb-title:not(:disabled):hover { text-decoration:underline; text-underline-offset:3px; }
+		#task-breadcrumb-toolbar [data-breadcrumb-selector-button]:hover { background:oklch(var(--bc) / .08); }
+		#task-breadcrumb-toolbar button:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; border-radius:6px; }
+		#task-breadcrumb-changes[hidden] { display:none; }
 		#task-workspaces { display:flex; position:relative; flex:1; min-height:0; min-width:0; gap:12px; }
 		#tab-chat, #tab-changes { order:0; flex:1; min-width:0; min-height:0; }
 		#tab-changes { overflow:auto; }

@@ -1609,7 +1609,7 @@ func ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttach
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "<div class=\"ml-auto flex shrink-0 items-center gap-2\"><button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium\" hx-post=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 101, "<div class=\"ml-auto flex shrink-0 items-center gap-2\"><button type=\"button\" class=\"btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal\" hx-post=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

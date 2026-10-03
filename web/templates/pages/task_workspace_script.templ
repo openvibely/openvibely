@@ -114,6 +114,11 @@ templ TaskWorkspaceScript() {
 			thread.classList.toggle('hidden', diff);
 			changes.classList.toggle('hidden', !diff);
 			back.hidden = !diff;
+			root.querySelector('#task-breadcrumb-changes').hidden = !diff;
+			var title = root.querySelector('#task-breadcrumb-title');
+			title.disabled = !diff;
+			if (diff) title.title = 'Back to thread';
+			else title.removeAttribute('title');
 			resize(width);
 			if (diff) {
 				_startFileChangesSSE(taskID);

@@ -88,15 +88,19 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				Tasks
 			</a>
 			<span class="text-2xl text-base-content/30 flex-shrink-0">/</span>
-			<div class="-ml-1 min-w-0 flex-1">
+			<div class="min-w-0 flex-1 flex items-center gap-1">
+				<button id="task-breadcrumb-title" type="button" class="min-w-0 truncate text-2xl font-bold text-left" disabled onclick="window.taskWorkspace.openThread()">{ task.Title }</button>
 				@components.BreadcrumbSelector(models.BreadcrumbSelector{
 					ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
 					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", task.ProjectID, task.ID),
-					ContextName: "tab", ContextValue: defaultTab,
+					ContextName: "tab", ContextValue: defaultTab, CaretOnly: true,
 					OriginName: "from",
 				})
+				<span id="task-breadcrumb-changes" class="flex-shrink-0 text-sm" aria-current="page" hidden><span class="mx-1 text-base-content/30" aria-hidden="true">/</span> Changes</span>
 			</div>
-			<button id="task-workspace-back" type="button" class="btn btn-ghost btn-sm" hidden onclick="window.taskWorkspace.openThread()">‹ Back to thread</button>
+			<button id="task-workspace-back" type="button" class="btn btn-ghost btn-sm btn-square" title="Back to thread" aria-label="Back to thread" hidden onclick="window.taskWorkspace.openThread()">
+				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 15H5l-3 3V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2"/><path d="M10 8h10a2 2 0 0 1 2 2v12l-3-3h-9a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z"/></svg>
+			</button>
 			<button id="task-details-opener" type="button" class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square" aria-label="Toggle details panel" aria-controls="task-details-panel" aria-expanded="false" onclick="window.taskWorkspace.togglePanel()"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path class="panel-toggle-fill" d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4Z" stroke="none"/><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
 			<script>
 				(function() {
