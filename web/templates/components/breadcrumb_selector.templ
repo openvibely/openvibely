@@ -9,6 +9,16 @@ import (
 
 templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 	<div class={ "min-w-0", templ.KV("shrink-0 w-0 overflow-visible", config.CaretOnly) } data-breadcrumb-selector data-searchable-selector data-searchable-selector-kind={ config.Kind } data-searchable-selector-pointer-x-anchor>
+	<style>
+		[data-breadcrumb-selector]:not([data-automation-editable-breadcrumb] > [data-breadcrumb-selector]):has([data-breadcrumb-selector-caret-only]) { width:28px; flex:0 0 28px; }
+		[data-breadcrumb-selector] [data-breadcrumb-selector-button]:is(:hover, [aria-expanded="true"]) { background:oklch(var(--bc) / .12); }
+		[data-breadcrumb-selector] [data-breadcrumb-selector-button]:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; }
+		[data-breadcrumb-title] { font-size:16px; line-height:22px; font-weight:500; text-decoration:none; }
+		[data-breadcrumb-title]:disabled { cursor:default; }
+		[data-breadcrumb-title]:is(a, button:not(:disabled)) { color:oklch(var(--bc) / .5); }
+		[data-breadcrumb-title]:is(a, button:not(:disabled)):hover { color:oklch(var(--bc) / .8); text-decoration:none; }
+		[data-breadcrumb-title]:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; border-radius:6px; }
+	</style>
 		if config.ContextName != "" {
 			<input type="hidden" name={ config.ContextName } value={ config.ContextValue } data-breadcrumb-selector-context/>
 		}

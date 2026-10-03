@@ -89,7 +89,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			</a>
 			<span class="text-2xl text-base-content/30 flex-shrink-0">/</span>
 			<div class="min-w-0 flex-1 flex items-center gap-1">
-				<button id="task-breadcrumb-title" type="button" class="min-w-0 truncate text-2xl font-bold text-left" disabled onclick="window.taskWorkspace.openThread()">{ task.Title }</button>
+				<button id="task-breadcrumb-title" data-breadcrumb-title type="button" class="min-w-0 truncate text-2xl font-bold text-left" disabled onclick="window.taskWorkspace.openThread()">{ task.Title }</button>
 				@components.BreadcrumbSelector(models.BreadcrumbSelector{
 					ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
 					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", task.ProjectID, task.ID),

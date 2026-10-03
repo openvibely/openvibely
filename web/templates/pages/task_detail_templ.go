@@ -355,14 +355,14 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-automation-url-base=\"/automations/\">Tasks</a> <span class=\"text-2xl text-base-content/30 flex-shrink-0\">/</span><div class=\"min-w-0 flex-1 flex items-center gap-1\"><button id=\"task-breadcrumb-title\" type=\"button\" class=\"min-w-0 truncate text-2xl font-bold text-left\" disabled onclick=\"window.taskWorkspace.openThread()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-automation-url-base=\"/automations/\">Tasks</a> <span class=\"text-2xl text-base-content/30 flex-shrink-0\">/</span><div class=\"min-w-0 flex-1 flex items-center gap-1\"><button id=\"task-breadcrumb-title\" data-breadcrumb-title type=\"button\" class=\"min-w-0 truncate text-2xl font-bold text-left\" disabled onclick=\"window.taskWorkspace.openThread()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(task.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 92, Col: 172}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 92, Col: 194}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
