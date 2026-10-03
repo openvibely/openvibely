@@ -5,6 +5,7 @@ package testutil
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,10 +41,19 @@ func GuardBrowserProcess(cmd *exec.Cmd) {
 		env = os.Environ()
 	}
 	cmd.Env = append(env, "OPENVIBELY_TEST_PARENT_PID="+strconv.Itoa(os.Getpid()))
+	guardArgs := []string{"/bin/sh", "-c", browserGuardScript, "sh", cmd.Path}
 	// Without a mock keychain, macOS Chrome blocks startup on securityd, which stalls for
 	// many seconds when several test browsers launch concurrently.
-	cmd.Args = append([]string{"/bin/sh", "-c", browserGuardScript, "sh", cmd.Path, "--use-mock-keychain"}, cmd.Args[1:]...)
+	if browserSupportsMockKeychain(cmd.Path) {
+		guardArgs = append(guardArgs, "--use-mock-keychain")
+	}
+	cmd.Args = append(guardArgs, cmd.Args[1:]...)
 	cmd.Path = "/bin/sh"
+}
+
+func browserSupportsMockKeychain(path string) bool {
+	name := strings.ToLower(filepath.Base(path))
+	return strings.Contains(name, "chrome") || strings.Contains(name, "chromium")
 }
 
 // StopBrowserProcessGroup terminates a browser started via GuardBrowserProcess and
