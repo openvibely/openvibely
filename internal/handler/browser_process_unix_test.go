@@ -24,6 +24,5 @@ func killHandlerBrowserProcess(cmd *exec.Cmd) {
 }
 
 func stopHandlerBrowserProcess(cmd *exec.Cmd) {
-	killHandlerBrowserProcess(cmd)
-	_ = cmd.Wait()
+	testutil.StopBrowserProcessGroup(cmd)
 }

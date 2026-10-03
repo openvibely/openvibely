@@ -40,7 +40,9 @@ func GuardBrowserProcess(cmd *exec.Cmd) {
 		env = os.Environ()
 	}
 	cmd.Env = append(env, "OPENVIBELY_TEST_PARENT_PID="+strconv.Itoa(os.Getpid()))
-	cmd.Args = append([]string{"/bin/sh", "-c", browserGuardScript, "sh", cmd.Path}, cmd.Args[1:]...)
+	// Without a mock keychain, macOS Chrome blocks startup on securityd, which stalls for
+	// many seconds when several test browsers launch concurrently.
+	cmd.Args = append([]string{"/bin/sh", "-c", browserGuardScript, "sh", cmd.Path, "--use-mock-keychain"}, cmd.Args[1:]...)
 	cmd.Path = "/bin/sh"
 }
 
