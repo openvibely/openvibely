@@ -2,36 +2,35 @@ package components
 
 // This node is preserved during thread morphs; the workspace controller owns its compact JSON projection.
 templ TaskChangeActivity(taskID string) {
-	<div id="task-change-activity" data-task-id={ taskID } hx-preserve="true" hidden>
+	<div id="task-change-activity" data-task-id={ taskID } hx-preserve="true" class="flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" hidden>
 		<button type="button" class="task-change-summary" data-review-changes onclick="window.taskWorkspace.openChanges()">
-			<svg class="task-change-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h6M11 10v6M8 19h6"/></svg>
+			<svg class="task-change-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2h12l4 4v16H4z"/><path d="M8 10h8M12 6v8M8 17h8"/></svg>
 			<span class="task-change-summary-text" data-change-summary aria-live="polite">
 				<span data-change-files></span>
 				<span class="task-change-stats"><span data-change-additions></span> <span data-change-deletions></span></span>
 				<span data-change-comments hidden></span>
 			</span>
 		</button>
-		<button type="button" class="task-change-review" data-review-changes onclick="window.taskWorkspace.openChanges()"><span data-change-action>Review changes</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+		<button type="button" class="task-change-review btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium" data-review-changes onclick="window.taskWorkspace.openChanges()"><span data-change-action>Review changes</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
 	</div>
 	<style>
-		#task-change-activity { display:flex; align-items:center; gap:12px; min-height:38px; min-width:0; max-width:100%; padding:3px 10px; margin-bottom:14px; border-radius:8px; background:oklch(var(--b3) / .45); font-size:12px; }
+		#task-change-activity { min-width:0; max-width:100%; margin-bottom:14px; }
 		#task-change-activity[hidden], #task-change-activity [hidden] { display:none; }
-		#task-change-activity button { cursor:pointer; border:0; background:transparent; border-radius:5px; font:inherit; color:inherit; }
+		.task-change-summary { cursor:pointer; border:0; background:transparent; border-radius:6px; font:inherit; color:inherit; }
 		#task-change-activity button:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:-2px; }
-		.task-change-summary { display:flex; align-items:center; flex:1; gap:10px; min-width:0; padding:5px 0; text-align:left; }
-		.task-change-icon { flex-shrink:0; opacity:.8; }
+		.task-change-summary { display:flex; align-items:center; flex:1; gap:10px; min-width:0; padding:0; text-align:left; }
+		.task-change-icon { flex-shrink:0; }
+		.task-change-icon, .task-change-review svg { color:oklch(var(--bc) / .6); }
 		#task-change-activity:not([hidden]) ~ [id$="-attachments-preview"] { margin-top:0; }
-		.task-change-summary:hover { color:oklch(var(--bc) / 1); }
 		.task-change-summary-text { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
-		[data-change-files] { white-space:nowrap; font-size:13px; font-weight:500; }
+		[data-change-files] { white-space:nowrap; font-weight:400; }
 		.task-change-stats { display:inline-flex; flex-wrap:wrap; gap:6px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums; }
 		[data-change-additions] { color:var(--ov-diff-add-fg, #73c991); }
 		[data-change-deletions] { color:var(--ov-diff-del-fg, #e98989); }
 		[data-theme="dark"] [data-change-additions] { color:color-mix(in srgb, var(--ov-diff-add-fg, #73c991) 75%, oklch(var(--bc))); }
 		[data-theme="dark"] [data-change-deletions] { color:color-mix(in srgb, var(--ov-diff-del-fg, #e98989) 75%, oklch(var(--bc))); }
 		[data-change-comments] { opacity:.75; }
-		.task-change-review { flex-shrink:0; display:flex; align-items:center; gap:5px; padding:4px 7px; white-space:nowrap; }
-		#task-change-activity .task-change-review:hover { background:oklch(var(--bc) / .08); }
-		@media(max-width:480px) { #task-change-activity { gap:4px; padding:4px 8px; } .task-change-summary { gap:5px; } .task-change-icon { display:none; } [data-change-files], .task-change-stats { font-size:12px; } }
+		.task-change-review { flex-shrink:0; gap:5px; white-space:nowrap; }
+		@media(max-width:480px) { .task-change-icon { display:none; } }
 	</style>
 }
