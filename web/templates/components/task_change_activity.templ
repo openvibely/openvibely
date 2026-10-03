@@ -11,7 +11,7 @@ templ TaskChangeActivity(taskID string) {
 				<span data-change-comments hidden></span>
 			</span>
 		</button>
-		<button type="button" class="task-change-review btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" data-review-changes onclick="window.taskWorkspace.openChanges()"><span data-change-action>Review changes</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+		<button type="button" class="task-change-review btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal" data-review-changes onclick="window.taskWorkspace.openChanges()"><span data-change-action>Review changes</span></button>
 	</div>
 	<style>
 		#task-change-activity { min-width:0; max-width:100%; margin-bottom:14px; }
@@ -20,7 +20,7 @@ templ TaskChangeActivity(taskID string) {
 		#task-change-activity button:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:-2px; }
 		.task-change-summary { display:flex; align-items:center; flex:1; gap:10px; min-width:0; padding:0; text-align:left; }
 		.task-change-icon { flex-shrink:0; }
-		.task-change-icon, .task-change-review svg { color:oklch(var(--bc) / .6); }
+		.task-change-icon { color:oklch(var(--bc) / .6); }
 		#task-change-activity:not([hidden]) ~ [id$="-attachments-preview"] { margin-top:0; }
 		.task-change-summary-text { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 		[data-change-files] { white-space:nowrap; font-weight:400; }
@@ -28,7 +28,7 @@ templ TaskChangeActivity(taskID string) {
 		[data-change-additions] { color:var(--ov-diff-add-fg); }
 		[data-change-deletions] { color:var(--ov-diff-del-fg); }
 		[data-change-comments] { opacity:.75; }
-		.task-change-review { flex-shrink:0; gap:5px; white-space:nowrap; }
+		.task-change-review { flex-shrink:0; white-space:nowrap; }
 		@media(max-width:480px) { .task-change-icon { display:none; } }
 	</style>
 }
