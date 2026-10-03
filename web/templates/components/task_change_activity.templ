@@ -25,10 +25,8 @@ templ TaskChangeActivity(taskID string) {
 		.task-change-summary-text { display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; }
 		[data-change-files] { white-space:nowrap; font-weight:400; }
 		.task-change-stats { display:inline-flex; flex-wrap:wrap; gap:6px; font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums; }
-		[data-change-additions] { color:var(--ov-diff-add-fg, #73c991); }
-		[data-change-deletions] { color:var(--ov-diff-del-fg, #e98989); }
-		[data-theme="dark"] [data-change-additions] { color:color-mix(in srgb, var(--ov-diff-add-fg, #73c991) 75%, oklch(var(--bc))); }
-		[data-theme="dark"] [data-change-deletions] { color:color-mix(in srgb, var(--ov-diff-del-fg, #e98989) 75%, oklch(var(--bc))); }
+		[data-change-additions] { color:var(--ov-diff-add-fg); }
+		[data-change-deletions] { color:var(--ov-diff-del-fg); }
 		[data-change-comments] { opacity:.75; }
 		.task-change-review { flex-shrink:0; gap:5px; white-space:nowrap; }
 		@media(max-width:480px) { .task-change-icon { display:none; } }
