@@ -252,9 +252,14 @@ global.document = {
   },
   createElement: function() {
     const attributes = {};
+    const elementListeners = {};
     return {
       setAttribute: function(name, value) { attributes[name] = String(value); },
       getAttribute: function(name) { return attributes[name] || null; },
+      addEventListener: function(name, handler) { elementListeners[name] = handler; },
+      dispatchTestEvent: function(name, event) {
+        if (elementListeners[name]) elementListeners[name](event);
+      },
       remove: function() {}
     };
   }
@@ -263,6 +268,7 @@ global.htmx = {
   ajax: function(method, url, context) {
     if (navigationSource !== context.source) throw new Error('programmatic navigation source was not connected before the HTMX request');
     ajaxCalls.push({ method: method, url: url, context: context });
+    context.source.dispatchTestEvent('htmx:afterRequest', { detail: { xhr: { status: 200 } } });
     return Promise.resolve();
   }
 };
