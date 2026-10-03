@@ -101,6 +101,7 @@ type ChatInputFormConfig struct {
 	TargetID               string
 	Agents                 []models.LLMConfig
 	ShowModelSelector      bool
+	ShowChangesSummary     bool // task workspace review card above attachments and pending inputs
 	ShowModeSelector       bool
 	ChatMode               models.ChatMode // default when not persisted
 	TaskID                 string
@@ -1597,6 +1598,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			if config.ActiveTurnID != "" {
 				<input type="hidden" name="expected_turn_id" value={ config.ActiveTurnID }/>
 			}
+			if config.ShowChangesSummary && config.TaskID != "" {
+				@TaskChangeActivity(config.TaskID)
+			}
 			<!-- File Attachments Preview -->
 			<div id={ chatAttachmentPreviewID(config.FormID) } class="hidden border-b border-base-content/[0.12] -mx-4 px-4 -mt-4 pt-2.5 pb-2.5 mb-3">
 				<div class="flex items-center justify-between mb-1.5">
@@ -1621,7 +1625,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			</div>
 			<!-- Bottom controls row -->
 			<div class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden">
-				<div class="flex items-center gap-1 min-w-0 flex-1">
+				<div data-composer-options class="flex items-center gap-1 min-w-0 flex-1">
 					if config.ShowModelSelector {
 						<!-- Custom mobile-safe model selector: replaces native <select> to avoid
 						     incorrect popup positioning inside overflow:auto containers on mobile Chrome. -->

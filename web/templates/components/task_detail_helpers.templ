@@ -381,7 +381,6 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			</div>
 			@ChatLatestMessageButton("task-thread-messages", "scrollTracker_task-thread-messages")
 		</div>
-		@TaskChangeActivity(task.ID)
 		<!-- Message Input Form (shared component with model selector) -->
 		@ChatInputForm(ChatInputFormConfig{
 			FormID:                 "task-thread-form",
@@ -390,6 +389,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			TargetID:               "task-thread-messages",
 			Agents:                 agents,
 			ShowModelSelector:      true,
+			ShowChangesSummary:     true,
 			TaskID:                 task.ID,
 			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
 			ActiveTurnID:           taskThreadActiveTurnID(executions),

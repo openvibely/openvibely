@@ -232,13 +232,18 @@ templ TaskWorkspaceScript() {
 			if (!bar || !summary) return;
 			bar.hidden = summary.files === 0;
 			root.dataset.hasChanges = String(summary.files > 0);
-			var labels = {running:'● Working', queued:'● Queued', completed:'✓ Completed', failed:'× Failed', cancelled:'Cancelled', pending:'Pending', blocked:'Blocked'};
-			var text = [labels[summary.status] || summary.status];
-			if (summary.duration && (summary.status === 'completed' || summary.status === 'failed')) text.push(summary.duration);
-			text.push(summary.files + ' files changed', '+' + summary.insertions + ' −' + summary.deletions);
-			if (summary.review_comments) text.push(summary.review_comments + ' comments');
-			bar.querySelector('[data-change-summary]').textContent = text.join(' · ');
-			bar.querySelector('[data-review-changes]').textContent = summary.status === 'failed' ? 'Inspect changes' : summary.status === 'completed' ? 'Review changes' : 'View changes';
+			bar.querySelector('[data-change-files]').textContent = summary.files.toLocaleString() + (summary.files === 1 ? ' file' : ' files');
+			bar.querySelector('[data-change-additions]').textContent = '+' + summary.insertions.toLocaleString();
+			bar.querySelector('[data-change-deletions]').textContent = '−' + summary.deletions.toLocaleString();
+			bar.querySelector('[data-change-additions]').hidden = summary.insertions === 0;
+			bar.querySelector('[data-change-deletions]').hidden = summary.deletions === 0;
+			var comments = bar.querySelector('[data-change-comments]');
+			comments.hidden = !summary.review_comments;
+			comments.textContent = summary.review_comments ? summary.review_comments.toLocaleString() + (summary.review_comments === 1 ? ' comment' : ' comments') : '';
+			var action = summary.status === 'failed' ? 'Inspect changes' : summary.status === 'completed' ? 'Review changes' : 'View changes';
+			bar.querySelector('[data-change-action]').textContent = summary.status === 'failed' ? 'Inspect changes' : 'Review changes';
+			bar.querySelector('.task-change-review').setAttribute('aria-label', action);
+			bar.querySelector('.task-change-summary').setAttribute('aria-label', action + ': ' + summary.files + ' files changed, ' + summary.insertions + ' lines added, ' + summary.deletions + ' lines removed');
 		}
 		function refreshSummary() {
 			timer = null;
