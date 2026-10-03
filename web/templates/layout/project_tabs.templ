@@ -243,7 +243,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (getComputedStyle(event.target).getPropertyValue('--wails-draggable').trim() !== 'drag') return;
     if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();
    });
-   var ids = JSON.parse(bar.dataset.pinnedProjects);
+   var recoveredTabs = (window.openVibelyRecoveredProjectPreferences || {}).pinned_project_ids;
+   var ids = Array.from(new Set((Array.isArray(recoveredTabs) ? recoveredTabs : JSON.parse(bar.dataset.pinnedProjects)).filter(function(id) {
+    return Array.from(select.options).some(function(option) { return option.value === id; });
+   })));
+   bar.dataset.pinnedProjects = JSON.stringify(ids);
  var closedActive = "";
  var pendingCloses = new Set();
    function saveTabs() {
@@ -457,7 +461,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     tabs[index].tabIndex = 0; tabs[index].focus(); tabs[index].scrollIntoView({block: 'nearest', inline: 'nearest'});
    });
    window.openVibelyProjectTabsSync = sync;
-   sync();
+   render();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installProjectTabs, {once: true});
   else installProjectTabs();
