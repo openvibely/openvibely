@@ -147,8 +147,15 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 		press(" ", "Space", "")
 		browser.waitFor("native Space task navigation", `window.__alertNavigations[window.__alertNavigations.length - 1] || ''`, taskURL)
 
+		before = navigationCount(taskURL)
+		browser.click(cardSelector + " details summary")
+		if got := navigationCount(taskURL); got != before {
+			t.Fatalf("Inspect summary navigated parent task card: count %s, want %s", got, before)
+		}
+		// Opening Inspect lazy-loads detail above the action buttons; clicking them
+		// before it lands lets the layout shift split mousedown/mouseup across elements.
+		browser.waitFor("lazy alert detail", `document.querySelector(`+fmt.Sprintf("%q", cardSelector+" [data-alert-copy]")+") ? 'true' : 'false'", "true")
 		nestedControls := []string{
-			cardSelector + " details summary",
 			cardSelector + " .btn-success",
 			cardSelector + " .btn-error.btn-outline",
 			cardSelector + ` button[title="Mark as read"]`,
@@ -161,7 +168,6 @@ func TestBrowserFunctional_AlertsTaskLinkedCardsSupportNativeKeyboardNavigationI
 				t.Fatalf("nested control %s navigated parent task card: count %s, want %s", selector, got, before)
 			}
 		}
-		browser.waitFor("lazy alert detail", `document.querySelector(`+fmt.Sprintf("%q", cardSelector+" [data-alert-copy]")+") ? 'true' : 'false'", "true")
 		before = navigationCount(taskURL)
 		browser.click(cardSelector + " [data-alert-copy]")
 		if got := navigationCount(taskURL); got != before {

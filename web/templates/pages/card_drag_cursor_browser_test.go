@@ -228,6 +228,11 @@ window.addEventListener('DOMContentLoaded', function() {
     });
   }
   async function exerciseOuterAutoScrollDrop(selector, containerSelector, axis, targetSelector, label, pointerId) {
+    // A prior drop's reconciliation refresh replaces #kanban-board, and htmx's settle phase then
+    // resets its style attribute; resolve nodes and resize the scroller only after both finish.
+    await waitFor(function() {
+      return !(window.hasPendingKanbanMoves && window.hasPendingKanbanMoves()) && !document.querySelector('.htmx-request, .htmx-swapping, .htmx-settling');
+    }, label + ' prior move reconciliation');
     await waitFor(function() { return document.querySelector(selector) && document.querySelector(containerSelector) && document.querySelector(targetSelector); }, label + ' ready');
     var card = document.querySelector(selector);
     var container = document.querySelector(containerSelector);
