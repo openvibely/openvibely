@@ -66,7 +66,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     @components.ChatInputForm(components.ChatInputFormConfig{
      FormID: "task-thread-form", InputID: "task-message-input",
      PostEndpoint: fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", project.ID),
-     TargetID: "task-thread-messages", DiscardDraftOnLeave: true, SelectedAgentID: "default", Agents: agents, ShowModelSelector: true,
+     TargetID: "main-content", DiscardDraftOnLeave: true, SelectedAgentID: "default", Agents: agents, ShowModelSelector: true,
     })
    </div>
   </div>
@@ -95,7 +95,24 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     document.body.addEventListener('htmx:beforeCleanupElement',discardDraft);
 
     form.addEventListener('htmx:afterRequest', function(event) {
-     if (!event.detail.successful) document.getElementById('new-task-error').textContent = event.detail.xhr.responseText;
+     if (!event.detail || event.detail.elt !== form) return;
+     var xhr = event.detail.xhr;
+     var error = root.querySelector('#new-task-error');
+     if (!error || !root.isConnected) return;
+     if (event.detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300)) {
+      error.textContent = '';
+      return;
+     }
+     var message = 'Unable to create the task. Please try again.';
+     if (xhr) {
+      var contentType = xhr.getResponseHeader('Content-Type') || '';
+      if (contentType.indexOf('application/json') !== -1) {
+       try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}
+      } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {
+       message = xhr.responseText;
+      }
+     }
+     error.textContent = message;
     });
    })();
   </script>

@@ -215,7 +215,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		templ_7745c5c3_Err = components.ChatInputForm(components.ChatInputFormConfig{
 			FormID: "task-thread-form", InputID: "task-message-input",
 			PostEndpoint: fmt.Sprintf("/tasks?project_id=%s&from=new&thread=1", project.ID),
-			TargetID:     "task-thread-messages", DiscardDraftOnLeave: true, SelectedAgentID: "default", Agents: agents, ShowModelSelector: true,
+			TargetID:     "main-content", DiscardDraftOnLeave: true, SelectedAgentID: "default", Agents: agents, ShowModelSelector: true,
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -232,7 +232,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     input.setAttribute('form', 'task-thread-form');\n    });\n    var form = document.getElementById('task-thread-form');\n    // Do not cache an abandoned creation draft in HTMX history.\n    function discardDraft(event) {\n     if(event.type==='htmx:beforeCleanupElement' && event.detail.elt!==root) return;\n     form.reset();\n     var clear=window[form.getAttribute('data-clear-func-name')];\n     if(clear) clear();\n     root.querySelector('#task-message-input').value='';\n     if(event.type==='htmx:beforeCleanupElement') {\n      document.body.removeEventListener('htmx:beforeHistorySave',discardDraft);\n      document.body.removeEventListener('htmx:beforeCleanupElement',discardDraft);\n     }\n    }\n    document.body.addEventListener('htmx:beforeHistorySave',discardDraft);\n    document.body.addEventListener('htmx:beforeCleanupElement',discardDraft);\n\n    form.addEventListener('htmx:afterRequest', function(event) {\n     if (!event.detail.successful) document.getElementById('new-task-error').textContent = event.detail.xhr.responseText;\n    });\n   })();\n  </script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<script>\n   (function() {\n    var root = document.getElementById('task-detail-content');\n    root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {\n     input.setAttribute('form', 'task-thread-form');\n    });\n    var form = document.getElementById('task-thread-form');\n    // Do not cache an abandoned creation draft in HTMX history.\n    function discardDraft(event) {\n     if(event.type==='htmx:beforeCleanupElement' && event.detail.elt!==root) return;\n     form.reset();\n     var clear=window[form.getAttribute('data-clear-func-name')];\n     if(clear) clear();\n     root.querySelector('#task-message-input').value='';\n     if(event.type==='htmx:beforeCleanupElement') {\n      document.body.removeEventListener('htmx:beforeHistorySave',discardDraft);\n      document.body.removeEventListener('htmx:beforeCleanupElement',discardDraft);\n     }\n    }\n    document.body.addEventListener('htmx:beforeHistorySave',discardDraft);\n    document.body.addEventListener('htmx:beforeCleanupElement',discardDraft);\n\n    form.addEventListener('htmx:afterRequest', function(event) {\n     if (!event.detail || event.detail.elt !== form) return;\n     var xhr = event.detail.xhr;\n     var error = root.querySelector('#new-task-error');\n     if (!error || !root.isConnected) return;\n     if (event.detail.successful || (xhr && xhr.status >= 200 && xhr.status < 300)) {\n      error.textContent = '';\n      return;\n     }\n     var message = 'Unable to create the task. Please try again.';\n     if (xhr) {\n      var contentType = xhr.getResponseHeader('Content-Type') || '';\n      if (contentType.indexOf('application/json') !== -1) {\n       try { var body = JSON.parse(xhr.responseText); if (typeof body.message === 'string') message = body.message; } catch (_) {}\n      } else if (contentType.indexOf('text/plain') !== -1 && xhr.responseText.trim()) {\n       message = xhr.responseText;\n      }\n     }\n     error.textContent = message;\n    });\n   })();\n  </script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -273,7 +273,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 114, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 131, Col: 33}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 			if templ_7745c5c3_Err != nil {
@@ -286,7 +286,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 115, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 132, Col: 22}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
@@ -324,7 +324,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 129, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 146, Col: 31}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
@@ -337,7 +337,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.Model)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 129, Col: 61}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 146, Col: 61}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 				if templ_7745c5c3_Err != nil {
@@ -350,7 +350,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 130, Col: 20}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 147, Col: 20}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
@@ -368,7 +368,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 					var templ_7745c5c3_Var15 string
 					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 132, Col: 23}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 149, Col: 23}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 					if templ_7745c5c3_Err != nil {
@@ -401,7 +401,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 143, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 160, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -414,7 +414,7 @@ func NewTaskOptions(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 144, Col: 24}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 161, Col: 24}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 			if templ_7745c5c3_Err != nil {
@@ -507,7 +507,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(field.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 217, Col: 41}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 234, Col: 41}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 			if templ_7745c5c3_Err != nil {
@@ -520,7 +520,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(field.Value)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 217, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 234, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 			if templ_7745c5c3_Err != nil {
@@ -533,7 +533,7 @@ func NewTaskDetails(agents []models.LLMConfig, agentDefs []repository.AgentTaskU
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(field.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 217, Col: 98}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_new.templ`, Line: 234, Col: 98}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {

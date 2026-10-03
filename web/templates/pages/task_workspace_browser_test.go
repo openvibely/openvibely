@@ -313,6 +313,12 @@ func TestBrowserFunctional_NewTaskWorkspace(t *testing.T) {
 		b.waitFor("new workspace navigation", `location.pathname+':'+String(Boolean(document.querySelector('#task-detail-content textarea[name="message"]')))`, "/tasks/new:true")
 		b.waitFor("no creation dialog", `String(document.querySelector('dialog[open]')===null)`, "true")
 		b.waitFor("initial composer settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request'))`, "true")
+		b.waitFor("creation targets full workspace", `document.getElementById('task-thread-form').getAttribute('hx-target')`, "#main-content")
+		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{detail:{elt:form,successful:false,xhr:{status:500,responseText:'<html><script>internal page source</script></html>',getResponseHeader:function(){return 'text/html';}}}}));return 'done';})()`)
+		b.waitFor("HTML errors stay readable", `document.getElementById('new-task-error').textContent`, "Unable to create the task. Please try again.")
+		b.evaluate(`(function(){var form=document.getElementById('task-thread-form');form.dispatchEvent(new CustomEvent('htmx:afterRequest',{detail:{elt:form,successful:false,xhr:{status:400,responseText:'{"message":"A message is required"}',getResponseHeader:function(){return 'application/json';}}}}));return 'done';})()`)
+		b.waitFor("validation errors remain visible", `document.getElementById('new-task-error').textContent`, "A message is required")
+
 		b.click(`input[name="title"]`)
 		b.typeText("New task draft")
 		b.click(`textarea[name="message"]`)
