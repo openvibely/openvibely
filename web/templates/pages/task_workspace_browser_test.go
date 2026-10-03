@@ -420,6 +420,11 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		case "/tasks/workspace-task/thread":
 			threadRequests.Add(1)
 			fmt.Fprint(w, render(components.TaskThreadView(task, executions, nil, nil, nil, nil, false, 30)))
+		case "/test/pending-inputs":
+			fmt.Fprint(w, render(components.ChatComposerQueuedInputRowsForTask([]models.ThreadInput{
+				{ID: "queued-review", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, Content: "Check the light theme"},
+				{ID: "steered-review", TaskID: task.ID, InputMode: models.ThreadInputModeSteering, Content: "Keep the accent color"},
+			}, func(models.ThreadInput) string { return "/test/steer" }, task.ID)))
 		case "/tasks/workspace-task/changes/summary":
 			summaryRequests.Add(1)
 			w.Header().Set("Content-Type", "application/json")
@@ -488,7 +493,10 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		for i := 0; i < 20; i++ {
 			fileEvents <- `{"type":"file_modified","task_id":"workspace-task","project_id":"workspace-project"}`
 		}
-		b.waitFor("live summary", `document.getElementById('task-change-activity').hidden+':'+document.querySelector('[data-change-summary]').textContent.includes('3 files changed')`, "false:true")
+		b.waitFor("live summary", `document.getElementById('task-change-activity').hidden+':'+document.querySelector('[data-change-summary]').textContent.includes('3 files')`, "false:true")
+		b.waitFor("summary first inside composer", `String(document.querySelector('#task-thread-form > #task-change-activity') !== null && document.getElementById('task-change-activity').getBoundingClientRect().bottom <= document.getElementById('pending-thread-inputs').getBoundingClientRect().top)`, "true")
+		b.evaluate(`htmx.ajax('GET', '/test/pending-inputs', {target:'#pending-thread-inputs',swap:'outerHTML'}); 'loading'`)
+		b.waitFor("changes stay above queued and steered rows after live replacement", `(function(){var bar=document.getElementById('task-change-activity'),rows=document.querySelectorAll('#pending-thread-inputs [data-thread-input-id]');return String(rows.length===2 && Array.from(rows).every(function(row){return bar.getBoundingClientRect().bottom<=row.getBoundingClientRect().top}) && document.querySelectorAll('#task-change-activity').length===1)})()`, "true")
 		b.evaluate(`window.savedScroll=document.getElementById('task-thread-messages').scrollTop; 'saved'`)
 		b.click("[data-review-changes]")
 		b.waitFor("one click full diff", `String(document.getElementById('diff-viewer')&&document.getElementById('diff-viewer').textContent)`, "Authoritative full diff")
@@ -506,7 +514,11 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("Back restores diff in place", `document.getElementById('tab-changes').classList.contains('hidden')+':'+(window.savedThread===document.getElementById('task-thread-view'))`, "false:true")
 		b.navigateHistory(1)
 		b.waitFor("Forward restores thread in place", `document.getElementById('tab-chat').classList.contains('hidden')+':'+(window.savedThread===document.getElementById('task-thread-view'))`, "false:true")
+		b.click(".task-change-review")
+		b.waitFor("toolbar review opens changes", `String(!document.getElementById('tab-changes').classList.contains('hidden'))`, "true")
+		b.click("#task-workspace-back")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": true}, nil)
+		b.waitFor("mobile changes controls contained in composer", `(function(){var form=document.getElementById('task-thread-form').getBoundingClientRect();return String(Array.from(document.querySelectorAll('#task-change-activity button, #task-thread-form-primary-action button')).every(function(el){var r=el.getBoundingClientRect();return r.width>0 && r.left>=form.left && r.right<=form.right && r.bottom<=form.bottom}))})()`, "true")
 		b.click("#task-details-opener")
 		b.waitFor("mobile full screen sheet", `(function(){var p=document.getElementById('task-details-panel'),r=p.getBoundingClientRect();return p.dataset.overlay+':'+Math.round(r.width)+':'+Math.round(r.left)})()`, "true:390:0")
 		b.click("#task-details-opener")
