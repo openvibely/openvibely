@@ -62,6 +62,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             }
                         } catch (_) {}
                     });
+                    // Capture before replay acknowledges/deletes entries. The shell must
+                    // start from the same latest state being recovered to the database.
+                    const recoveredPreferences = {...pendingPreferences};
+                    window.openVibelyRecoveredProjectPreferences = recoveredPreferences;
                     let savingPreferences = false;
                     let preferenceRetry = null;
                     let preferenceRetryDelay = 1000;
@@ -140,12 +144,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					var previousProjectID = sel.value;
 					const desktopProjectNavigation = document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop';
-					const projectLocations = new Map(Object.entries(desktopProjectNavigation ? JSON.parse(document.documentElement.getAttribute('data-project-locations') || '{}') : {}));
+					const projectLocations = new Map(Object.entries(desktopProjectNavigation ? (recoveredPreferences.project_locations || JSON.parse(document.documentElement.getAttribute('data-project-locations') || '{}')) : {}));
 
                     const restoreDesktopLocation = desktopProjectNavigation && location.pathname === '/chat' && !location.search;
-                    if (restoreDesktopLocation && projectLocations.has(sel.value)) {
-                        const restored = projectLocation(sel.value);
-                        document.addEventListener('DOMContentLoaded', function() { navigateProject(restored, sel.value); }, {once: true});
+                    const recoveredProjectID = recoveredPreferences.project_id;
+                    const startupProjectID = restoreDesktopLocation && Array.from(sel.options).some(function(option) { return option.value === recoveredProjectID; }) ? recoveredProjectID : sel.value;
+                    if (restoreDesktopLocation && (projectLocations.has(startupProjectID) || startupProjectID !== sel.value)) {
+                        const restored = projectLocation(startupProjectID);
+                        document.addEventListener('DOMContentLoaded', function() { navigateProject(restored, startupProjectID); }, {once: true});
                     }
 					function rememberProjectLocation() {
 						if (!desktopProjectNavigation && !matchMedia('(min-width: 1024px)').matches) return;
@@ -183,6 +189,13 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						initialURL.searchParams.set('project_id', sel.value);
 						history.replaceState(history.state, '', initialURL.pathname + initialURL.search + initialURL.hash);
 					}
+
+                    // Preserve the loaded URL for rollback, but initialize the tab strip
+                    // with the recovered launch selection before its first sync/save.
+                    if (restoreDesktopLocation) {
+                        sel.value = startupProjectID;
+                        previousProjectID = startupProjectID;
+                    }
 
 					sel.addEventListener('change', function(event) {
 						const newProjectId = sel.value;
