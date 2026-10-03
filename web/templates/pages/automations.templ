@@ -2368,21 +2368,18 @@ templ automationEditableBreadcrumb(currentProjectID string, automationID string,
 		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		if automationName != "" {
 			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
-			if currentLabel != "" && automationID != "" {
-				<div class="-ml-1 min-w-0">
-					@components.BreadcrumbSelector(models.BreadcrumbSelector{
-						ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
-						SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),
-					})
-				</div>
-			} else {
-				<div class="-ml-1 min-w-0 flex-1">
-					@components.BreadcrumbSelector(models.BreadcrumbSelector{
-						ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
-						SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),
-					})
-				</div>
-			}
+			<div class="min-w-0 flex-1 flex items-center gap-1">
+				if currentLabel != "" && automationID != "" {
+					<a data-breadcrumb-title class="min-w-0 truncate" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true">{ automationName }</a>
+				} else {
+					<span data-breadcrumb-title class="min-w-0 truncate">{ automationName }</span>
+				}
+				@components.BreadcrumbSelector(models.BreadcrumbSelector{
+					ID: "automation-resource-selector", Kind: "Automation", CurrentID: automationID, CurrentName: automationName,
+					SearchURL: fmt.Sprintf("/breadcrumb-selectors/automations?project_id=%s&current_id=%s&view=live", currentProjectID, automationID),
+					CaretOnly: true,
+				})
+			</div>
 		}
 		if currentLabel != "" {
 			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>

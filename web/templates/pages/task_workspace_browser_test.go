@@ -785,12 +785,15 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 		b.evaluate(`document.querySelector('[data-breadcrumb-selector-button]').focus(); 'focused'`)
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
 		b.waitFor("results", `String(document.querySelectorAll('[data-breadcrumb-selector-option]').length)`, "2")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 10, "y": 10}, nil)
+		b.waitFor("open breadcrumb trigger stays highlighted away from pointer", `String(document.querySelector('[data-breadcrumb-selector-button]').getAttribute('aria-expanded')==='true' && getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).backgroundColor!=='rgba(0, 0, 0, 0)')`, "true")
 		var point struct{ X, Y float64 }
 		b.call("Runtime.evaluate", map[string]any{"expression": `window.hoverPoint=(function(){var r=document.querySelectorAll('[data-breadcrumb-selector-option]')[1].getBoundingClientRect();return {x:r.left+30,y:r.top+r.height/2}})()`}, nil)
 		// Keep the pointer where the second result will appear, then reopen by keyboard.
 		fmt.Sscan(b.evaluate(`String(hoverPoint.x)+' '+String(hoverPoint.y)`), &point.X, &point.Y)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 		b.evaluate(`document.querySelector('[data-breadcrumb-selector-dialog]').close(); document.querySelector('[data-breadcrumb-selector-button]').focus(); 'closed'`)
+		b.waitFor("closed breadcrumb trigger clears highlight", `String(document.querySelector('[data-breadcrumb-selector-button]').getAttribute('aria-expanded')==='false' && getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).backgroundColor==='rgba(0, 0, 0, 0)')`, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
 		b.waitFor("keyboard reopened", `String(document.querySelector('[data-breadcrumb-selector-dialog]').open)`, "true")
 		b.waitFor("stationary pointer remains over second option", `String(document.querySelectorAll('[data-breadcrumb-selector-option]')[1].matches(':hover'))`, "true")
