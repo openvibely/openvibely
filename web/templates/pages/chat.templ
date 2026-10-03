@@ -1760,7 +1760,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										actionWrap.className = 'ml-auto flex shrink-0 items-center gap-2';
 										var steerBtn = document.createElement('button');
 										steerBtn.type = 'button';
-										steerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium';
+										steerBtn.className = 'btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-sm font-normal';
 										steerBtn.setAttribute('hx-post', '/chat/queued/' + data.exec_id + '/steer');
 										steerBtn.setAttribute('hx-target', '#thread-input-' + data.exec_id);
 										steerBtn.setAttribute('hx-swap', 'outerHTML');
