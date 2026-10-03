@@ -119,6 +119,15 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.evaluate(`window.releaseRejectedSave();setTimeout(function(){window.permanentSettled=true;},1200);'ok';`)
 		browser.waitFor("permanent error settles", `String(window.permanentSettled)`, "true")
 		browser.waitFor("permanent error not retried", `String(window.permanentAttempts)`, "2")
+		// Exercise both a stalled request and a stalled validation response body.
+		// Shorten only the save deadline; keep the real retry queue and abort signal.
+		browser.evaluate(`window.realSaveTimer=window.setTimeout;window.setTimeout=function(fn,delay){return window.realSaveTimer(fn,delay===10000?100:delay);};'ok';`)
+		for _, stalledBody := range []bool{false, true} {
+			browser.evaluate(fmt.Sprintf(`window.stalledBody=%t;window.stallAttempts=0;window.stallAborted=false;window.retryPayload=null;window.fetch=function(url,options){if(url!=='/ui/preferences')return originalFetch.apply(this,arguments);window.stallAttempts++;if(window.stallAttempts===1){var stalled=new Promise(function(resolve,reject){if(options.signal)options.signal.addEventListener('abort',function(){window.stallAborted=true;reject(new DOMException('Timed out','AbortError'));},{once:true});});return window.stalledBody?Promise.resolve({ok:false,status:400,json:function(){return stalled;}}):stalled;}window.retryPayload=JSON.parse(options.body);return Promise.resolve({ok:true,status:204});};window.openVibelySaveProjectPreferences({pinned_project_ids:['a','b']});window.openVibelySaveProjectPreferences({pinned_project_ids:['b','c'],project_id:'b'});'ok';`, stalledBody))
+			browser.waitFor("stalled save aborts and retries latest values", `String(window.stallAborted)+':'+JSON.stringify(window.retryPayload)`, `true:{"pinned_project_ids":["b","c"],"project_id":"b"}`)
+			browser.waitFor("retried save acknowledges outbox", `String(!localStorage.getItem('openvibely.project-preference-outbox.pinned_project_ids')&&!localStorage.getItem('openvibely.project-preference-outbox.project_id'))`, "true")
+		}
+		browser.evaluate(`window.setTimeout=window.realSaveTimer;'ok';`)
 		// Hold a save open, queue a newer tab order and page, then destroy the
 		// document. keepalive cannot send the newer in-memory queue by itself.
 		browser.evaluate(`window.fetch=function(url,options){if(url==='/ui/preferences')return new Promise(function(resolve){window.releaseOldSave=resolve;});return originalFetch.apply(this,arguments);};window.openVibelySaveProjectPreferences({pinned_project_ids:['a','b','c']});window.openVibelySaveProjectPreferences({pinned_project_ids:['c','b','a'],project_locations:{b:'/schedule?project_id=b'}});window.releaseOldSave({ok:true,status:204});'ok';`)

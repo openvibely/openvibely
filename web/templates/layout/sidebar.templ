@@ -88,8 +88,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         const snapshot = {...pendingPreferences};
                         const versions = {...preferenceVersions};
                         let failed = false;
+                        const controller = new AbortController();
+                        // Bound both the request and response-body read so a stalled save
+                        // cannot hold the queue forever. Pending values remain in the outbox.
+                        const deadline = setTimeout(function() { controller.abort(); }, 10000);
                         try {
-                            const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(snapshot), keepalive: true});
+                            const response = await fetch('/ui/preferences', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(snapshot), keepalive: true, signal: controller.signal});
                             let acknowledged = Object.keys(snapshot);
                             if (!response.ok) {
                                 // Retry transient failures only. Validation can reject one field
@@ -99,7 +103,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                                 }
                                 if (response.status === 400) {
                                     let error = {};
-                                    try { error = await response.json(); } catch (_) {}
+                                    try { error = await response.json(); } catch (err) {
+                                        if (controller.signal.aborted) throw err;
+                                    }
                                     const rejectedFields = {
                                         'invalid project': 'project_id',
                                         'invalid project location': 'project_locations',
@@ -120,6 +126,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                             });
                             preferenceRetryDelay = 1000;
                         } catch (_) { failed = true; }
+                        finally { clearTimeout(deadline); }
                         savingPreferences = false;
                         if (Object.keys(pendingPreferences).length) {
                             preferenceRetry = setTimeout(flushProjectPreferences, failed ? preferenceRetryDelay : 0);
