@@ -895,6 +895,11 @@ window.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('task-automation-future')) fail('future Automation schedule was incorrectly projected as queued');
     if (document.getElementById('task-ordinary-scheduled')) fail('ordinary scheduled task was incorrectly projected onto the board');
 
+    var emptyQueue=document.querySelector('.kanban-queue');
+    var emptyHeight=emptyQueue.getBoundingClientRect().height;
+    if(emptyHeight<43 || emptyHeight>48) fail('empty queue is not compact: '+emptyHeight);
+    var runningBefore=emptyQueue.previousElementSibling.getBoundingClientRect().height;
+
     await fetch('/claim', {method:'POST'});
     await new Promise(function(resolve) { setTimeout(resolve, 700); });
     if (document.getElementById('task-automation-capacity')) fail('foreign-project board event refreshed the selected project');
@@ -905,10 +910,22 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!pending || !pending.contains(queued)) fail('capacity-queued Automation is not in Active pending dropzone');
     if (queued.dataset.taskCategory !== 'scheduled' || queued.dataset.taskStatus !== 'pending') fail('queued Automation card lost its persisted category/status');
 
+    var queueSection=pending.parentElement;
+    var oneHeight=queueSection.getBoundingClientRect().height;
+    if(oneHeight<=emptyHeight) fail('queue did not expand for its first task');
+    if(queueSection.previousElementSibling.getBoundingClientRect().height>=runningBefore) fail('running area did not yield space to queue');
+    var clones=[];
+    for(var i=0;i<8;i++){var clone=queued.cloneNode(true);clone.removeAttribute('id');pending.appendChild(clone);clones.push(clone);}
+    var maxHeight=queueSection.parentElement.getBoundingClientRect().height/2;
+    if(queueSection.getBoundingClientRect().height>maxHeight+1) fail('queue exceeded half the column');
+    if(pending.scrollHeight<=pending.clientHeight) fail('full queue does not scroll');
+    clones.forEach(function(clone){clone.remove();});
+
     await fetch('/fail', {method:'POST'});
     await waitFor(function() {
       return !document.getElementById('task-automation-capacity') && document.getElementById('task-terminal-failed');
     }, 'terminal failed live projection');
+    if(document.querySelector('.kanban-queue').getBoundingClientRect().height>48) fail('queue did not collapse after last task left');
     var completed = document.querySelector('.category-drop-zone[data-category="completed"]');
     var backlog = document.querySelector('.category-drop-zone[data-category="backlog"]');
     if (!completed || !completed.contains(document.getElementById('task-terminal-failed'))) fail('terminal failed Automation is not visible in Completed');
