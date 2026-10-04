@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"math"
 	"strings"
 	"testing"
 )
@@ -36,6 +37,71 @@ func TestEstimateAgenticResponseItemModelVisibleBytes_ImageFastPathMatchesJSONSi
 			}
 			if got, want := estimateAgenticResponseItemModelVisibleBytes(item), legacyAgenticVisibleBytesForTest(t, item); got != want {
 				t.Fatalf("visible bytes = %d, want existing estimate %d", got, want)
+			}
+		})
+	}
+}
+
+func TestAgenticImageJSONSizeCounterMatchesEncodingJSONForSupportedValues(t *testing.T) {
+	values := []any{
+		float64(math.SmallestNonzeroFloat64),
+		float64(1e-7),
+		float64(1e20),
+		float32(1e-7),
+		float32(1e20),
+		int64(-123456789),
+		uint64(123456789),
+		[]any{"<escaped>", map[string]any{"quote\"key": "line\nfeed\u2028"}},
+		string([]byte{0xff, '<', '&'}),
+	}
+	for index, value := range values {
+		item := map[string]any{
+			"type": "message",
+			"content": []any{map[string]any{
+				"type":      "input_image",
+				"image_url": "data:image/png;base64,AA==",
+				"detail":    "auto",
+			}},
+			"metadata": value,
+		}
+		serialized, err := json.Marshal(item)
+		if err != nil {
+			t.Fatalf("case %d marshal: %v", index, err)
+		}
+		got, removed, _, _, optimized, ok := agenticJSONSizeReplacingImageURLs(item, 0)
+		if !ok || !optimized {
+			t.Fatalf("case %d did not use image-size fast path", index)
+		}
+		if got+removed != len(serialized) {
+			t.Fatalf("case %d encoded size = %d, want %d", index, got+removed, len(serialized))
+		}
+	}
+}
+
+func TestEstimateAgenticResponseItemModelVisibleBytes_ValidOriginalImageDetail(t *testing.T) {
+	const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+	for _, detail := range []string{"auto", "original"} {
+		t.Run(detail, func(t *testing.T) {
+			item := map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []any{map[string]any{
+					"type":      "input_image",
+					"image_url": "data:image/png;base64," + onePixelPNG,
+					"detail":    detail,
+				}},
+			}
+			serialized, err := json.Marshal(item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replacementBytes := openAIResizedImageBytesEstimate
+			if detail == "original" {
+				replacementBytes = approxOpenAIBytesForTokens(1)
+			}
+			want := len(serialized) - len(onePixelPNG) + replacementBytes
+			if got := estimateAgenticResponseItemModelVisibleBytes(item); got != want {
+				t.Fatalf("visible bytes = %d, want %d", got, want)
 			}
 		})
 	}
