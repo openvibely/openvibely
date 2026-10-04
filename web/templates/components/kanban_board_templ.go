@@ -87,6 +87,9 @@ func activeBoardStatus(task models.Task) models.TaskStatus {
 	if models.IsTerminalStatus(task.Status) {
 		return task.Status
 	}
+	if task.WorkerCapacityQueued {
+		return models.StatusQueued
+	}
 	if hasRunnableSwarmChild(task) {
 		return models.StatusRunning
 	}
@@ -233,7 +236,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(capitalize(string(category)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 170, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 173, Col: 64}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -251,7 +254,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			var templ_7745c5c3_Var4 string
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", countActiveDisplayedTasks(tasks)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 172, Col: 99}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 175, Col: 99}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -269,7 +272,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(tasks)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 174, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 177, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -313,7 +316,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_asc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 182, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 185, Col: 94}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 				if templ_7745c5c3_Err != nil {
@@ -348,7 +351,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_desc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 195, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 198, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
@@ -383,7 +386,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_desc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 208, Col: 99}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 211, Col: 99}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 				if templ_7745c5c3_Err != nil {
@@ -418,7 +421,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=completed_asc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 221, Col: 98}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 224, Col: 98}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 				if templ_7745c5c3_Err != nil {
@@ -453,7 +456,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_desc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 234, Col: 98}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 237, Col: 98}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 				if templ_7745c5c3_Err != nil {
@@ -488,7 +491,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_asc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 247, Col: 97}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 250, Col: 97}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 				if templ_7745c5c3_Err != nil {
@@ -519,7 +522,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 					var templ_7745c5c3_Var25 string
 					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 265, Col: 36}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 268, Col: 36}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 					if templ_7745c5c3_Err != nil {
@@ -566,7 +569,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_asc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 285, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 288, Col: 92}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 				if templ_7745c5c3_Err != nil {
@@ -601,7 +604,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_desc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 298, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 301, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 				if templ_7745c5c3_Err != nil {
@@ -636,7 +639,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var34 string
 				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_desc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 311, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 314, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 				if templ_7745c5c3_Err != nil {
@@ -671,7 +674,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var37 string
 				templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_asc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 324, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 327, Col: 94}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 				if templ_7745c5c3_Err != nil {
@@ -706,7 +709,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var40 string
 				templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_desc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 337, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 340, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 				if templ_7745c5c3_Err != nil {
@@ -741,7 +744,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 				var templ_7745c5c3_Var43 string
 				templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_asc", projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 350, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 353, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 				if templ_7745c5c3_Err != nil {
@@ -777,7 +780,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 						var templ_7745c5c3_Var45 string
 						templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/execute?project_id=%s", projectID))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 366, Col: 82}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 369, Col: 82}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 						if templ_7745c5c3_Err != nil {
@@ -790,7 +793,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 						var templ_7745c5c3_Var46 string
 						templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Execute All (%d)", countEligibleBacklogTasks(tasks)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 374, Col: 77}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 377, Col: 77}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 						if templ_7745c5c3_Err != nil {
@@ -809,7 +812,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 								var templ_7745c5c3_Var47 string
 								templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=%d", projectID, priority))
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 381, Col: 106}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 384, Col: 106}
 								}
 								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 								if templ_7745c5c3_Err != nil {
@@ -822,7 +825,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 								var templ_7745c5c3_Var48 string
 								templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Execute %d %s priority backlog tasks?", count, strings.ToLower(PriorityLabel(priority))))
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 384, Col: 126}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 387, Col: 126}
 								}
 								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var48)
 								if templ_7745c5c3_Err != nil {
@@ -835,7 +838,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 								var templ_7745c5c3_Var49 string
 								templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Execute %s (%d)", PriorityLabel(priority), count))
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 387, Col: 76}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 390, Col: 76}
 								}
 								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 								if templ_7745c5c3_Err != nil {
@@ -855,7 +858,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 					var templ_7745c5c3_Var50 string
 					templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 398, Col: 36}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 401, Col: 36}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 					if templ_7745c5c3_Err != nil {
@@ -898,7 +901,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			var templ_7745c5c3_Var51 string
 			templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(category))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 422, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 425, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 			if templ_7745c5c3_Err != nil {
@@ -911,7 +914,7 @@ func KanbanColumn(tasks []models.Task, projectID string, category models.TaskCat
 			var templ_7745c5c3_Var52 string
 			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 423, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 426, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 			if templ_7745c5c3_Err != nil {
@@ -968,14 +971,14 @@ func activeColumnContent(tasks []models.Task, projectID string, llmModels []mode
 			templ_7745c5c3_Var53 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<style>\n\t\t.kanban-queue { flex:0 1 auto; min-height:44px; max-height:calc(50% - 8px); }\n\t\t.kanban-queue > .task-drop-zone { flex:0 1 auto; min-height:0; }\n\t\t.kanban-queue:not(:has([data-task-id])) > h4 { display:none; }\n\t\t.kanban-queue:not(:has([data-task-id])) > .task-drop-zone { min-height:44px; }\n\t\t.kanban-queue:not(:has([data-task-id])) > .task-drop-zone::before { content:\"Queued — drop tasks here\"; display:flex; align-items:center; justify-content:center; min-height:40px; font-size:14px; opacity:.5; }\n\t</style><!-- In Progress --><div class=\"mb-4 flex-1 flex flex-col min-h-0\"><h4 class=\"text-sm font-semibold mb-2 text-primary flex-shrink-0\">In Progress</h4><div class=\"task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto\" data-drop-type=\"status\" data-status=\"running\" data-category=\"active\" data-project-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<style>\n\t\t.kanban-queue { flex:0 1 auto; min-height:44px; max-height:calc(50% - 8px); }\n\t\t.kanban-queue > .task-drop-zone { flex:0 1 auto; min-height:0; }\n\t\t.kanban-queue:not(:has([data-task-id])) { display:none; }\n\t</style><!-- In Progress --><div class=\"mb-4 flex-1 flex flex-col min-h-0\"><h4 class=\"text-sm font-semibold mb-2 text-primary flex-shrink-0\">In Progress</h4><div class=\"task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto\" data-drop-type=\"status\" data-status=\"running\" data-category=\"active\" data-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var54 string
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 453, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 454, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 		if templ_7745c5c3_Err != nil {
@@ -1005,7 +1008,7 @@ func activeColumnContent(tasks []models.Task, projectID string, llmModels []mode
 		var templ_7745c5c3_Var55 string
 		templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 472, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 473, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 		if templ_7745c5c3_Err != nil {
