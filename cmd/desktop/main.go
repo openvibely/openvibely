@@ -290,6 +290,11 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 			}
 		})
 	}
+	minWidth, minHeight := 1024, 680
+	if runtime.GOOS != "darwin" {
+		// Allow half-screen and portrait Snap Layouts to fit on common displays.
+		minWidth, minHeight = 500, 480
+	}
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:  "main",
 		Title: "OpenVibely",
@@ -297,15 +302,18 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		URL:       "/chat",
 		Width:     1280,
 		Height:    820,
-		MinWidth:  1024,
-		MinHeight: 680,
+		MinWidth:  minWidth,
+		MinHeight: minHeight,
 		// The app draws native-looking controls alongside the project tabs.
 		// Do not reserve a second native titlebar above this shared row.
 		Frameless: true,
 		// A nonzero radius selects Wails' genuinely borderless AppKit window,
 		// rather than retaining a native titlebar that can reappear in fullscreen.
 		Mac: application.MacWindow{CornerRadius: 20},
+		// Composition hosting lets Windows hit-test the caption buttons for Snap Layouts.
+		Windows: application.WindowsWindow{WebView2CompositionHosting: true},
 	})
+	registerPlatformWindowControls(app, window)
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		application.InvokeAsync(installFullscreenPresentation)
 	})

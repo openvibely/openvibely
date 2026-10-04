@@ -166,7 +166,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 			t.Errorf("missing native window configuration: %s", want)
 		}
 	}
-	source, err = os.ReadFile("project_tabs.templ")
+	source, err = os.ReadFile("window_controls.templ")
 	if err != nil {
 		t.Fatal(err)
 	}

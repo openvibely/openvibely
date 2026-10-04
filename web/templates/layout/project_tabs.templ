@@ -109,11 +109,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar [data-project-selector] > div:first-child { display: none; }
   #desktop-project-titlebar [data-project-selector] .label-text { display: none; }
 	  #desktop-project-titlebar #project-selector-trigger { width: 30px; }
-	  .desktop-window-controls { display: flex; align-items: center; align-self: stretch; flex-shrink: 0; --wails-draggable: no-drag; }
-	  .desktop-window-controls button { display: flex; align-items: center; justify-content: center; padding: 0; width: 46px; height: 100%; color: inherit; }
-	  .desktop-window-controls svg { width: 12px; height: 12px; pointer-events: none; }
-	  .desktop-window-controls:not(.desktop-traffic-lights) button:hover { background: oklch(var(--bc) / .12); }
-	  .desktop-window-controls:not(.desktop-traffic-lights) button:last-child:hover { background: #c42b1c; color: white; }
  </style>
 	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ projectBarPlatform(ctx) } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
 			<span class="project-bar-brand">OpenVibely</span>
@@ -133,13 +128,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
         </div>
 
 		<div class="desktop-titlebar-space" aria-hidden="true"></div>
-			if serverRuntimeMode(ctx) == "desktop" && runtime.GOOS != "darwin" {
-				<div class="desktop-window-controls" role="group" aria-label="Window controls">
-					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="M1 6h10"/></svg></button>
-					<button type="button" data-wml-window="ToggleMaximise" aria-label="Maximize or restore window" title="Maximize or restore"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
-					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden="true"><path d="m1 1 10 10m0-10L1 11"/></svg></button>
-				</div>
-			}
+		if serverRuntimeMode(ctx) == "desktop" {
+			@DesktopWindowControls(runtime.GOOS)
+		}
 
 	</header>
  <div id="project-tab-menu" popover="manual" role="menu" aria-label="Project tab"><button type="button" role="menuitem" id="project-tab-settings-action">Project Settings</button></div>

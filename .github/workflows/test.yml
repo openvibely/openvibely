@@ -19,6 +19,8 @@ env:
     libwebkitgtk-6.0-dev
     libglib2.0-dev
     libsoup-3.0-dev
+    xvfb
+    openbox
 
 jobs:
   test:
@@ -193,6 +195,15 @@ jobs:
 
       - name: Compile and test the Linux GTK3 desktop path
         run: go test -tags gtk3 ./cmd/desktop -count=1 -timeout 120s
+
+      - name: Test native Linux caption controls with GTK3 and GTK4
+        run: |
+          xvfb-run -a sh -c '
+            openbox >/tmp/openvibely-caption-wm.log 2>&1 &
+            wm_pid=$!
+            trap "kill $wm_pid 2>/dev/null || true" EXIT
+            OPENVIBELY_RUN_NATIVE_UI=1 go test -tags gtk3 ./cmd/desktop -run "^TestNativeLinuxWindowControls$" -count=1 -timeout 120s
+          '
 
       - name: Run browser performance regressions
         run: go test ./web/templates/components -run '^TestBrowserPerformance_' -count=1 -timeout 120s
