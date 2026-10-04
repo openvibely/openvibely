@@ -42,16 +42,26 @@ func projectWorkerLimitExceedsGlobal(globalMaxWorkers int, projectMaxWorkers *in
 
 templ WorkerSettings(projects []models.Project, currentProjectID string, maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
 	@layout.Base("Workers", projects, currentProjectID) {
-		@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats)
+		@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, true, true)
+	}
+}
+
+templ WorkerSettingsWithAvailability(projects []models.Project, currentProjectID string, maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats, projectStatsAvailable bool, modelStatsAvailable bool) {
+	@layout.Base("Workers", projects, currentProjectID) {
+		@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, projectStatsAvailable, modelStatsAvailable)
 	}
 }
 
 // WorkerSettingsContent renders just the worker settings content for HTMX requests
 templ WorkerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
-	@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats)
+	@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, true, true)
 }
 
-templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
+templ WorkerSettingsContentWithAvailability(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats, projectStatsAvailable bool, modelStatsAvailable bool) {
+	@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, projectStatsAvailable, modelStatsAvailable)
+}
+
+templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats, projectStatsAvailable bool, modelStatsAvailable bool) {
 	<div id="worker-settings-content" class="w-full min-w-0 max-w-full flex-none pb-6">
 		@layout.PageTitle("Workers")
 		<h2 data-page-header class="text-2xl font-bold mb-6">Workers</h2>
@@ -60,6 +70,9 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 			<div class="card-body min-w-0">
 				<h3 class="card-title text-lg">Worker Capacity &amp; Utilization</h3>
 				<p class="text-sm opacity-60 mb-4">Global and per-project worker limits shown together. Click a limit value to edit it.</p>
+				if !projectStatsAvailable {
+					<p class="text-sm text-warning mb-4">Project worker capacity is currently unavailable.</p>
+				}
 				<div class="worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto">
 					<table class="table table-sm worker-stats-table w-full min-w-max h-auto">
 						<thead>
@@ -72,18 +85,21 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 								<th>Status</th>
 							</tr>
 						</thead>
-						@projectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats)
+						@projectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, projectStatsAvailable)
 					</table>
 				</div>
 			</div>
 		</div>
 
 		<!-- Per-Model Utilization -->
-		if len(modelStats) > 0 {
+		if len(modelStats) > 0 || !modelStatsAvailable {
 			<div class="card bg-base-100 shadow-sm border border-base-300 w-full min-w-0 max-w-full flex-none h-auto">
 				<div class="card-body min-w-0">
 					<h3 class="card-title text-lg">Per-Model Worker Pools</h3>
 					<p class="text-sm opacity-60 mb-4">Models with dedicated worker pools. Configure limits on the Models page.</p>
+					if !modelStatsAvailable {
+						<p class="text-sm text-warning mb-4">Model worker capacity is currently unavailable.</p>
+					}
 					<div class="worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto">
 						<table class="table table-sm worker-stats-table w-full min-w-max h-auto">
 							<thead>
@@ -94,7 +110,7 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 									<th>Status</th>
 								</tr>
 							</thead>
-							@modelStatsTableBody(modelStats)
+							@modelStatsTableBody(modelStats, modelStatsAvailable)
 						</table>
 					</div>
 				</div>
@@ -287,12 +303,17 @@ templ globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) {
 
 // Fragment template for project stats table body (used for polling)
 templ ProjectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats) {
-	@projectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats)
+	@projectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, true)
 }
 
-templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats) {
+templ ProjectStatsTableBodyWithAvailability(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, projectStatsAvailable bool) {
+	@projectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, projectStatsAvailable)
+}
+
+templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, projectStatsAvailable bool) {
 	<tbody
 		id="project-stats-tbody"
+		data-capacity-available={ fmt.Sprint(projectStatsAvailable) }
 		hx-get="/workers/stats/projects"
 		hx-trigger="every 3s"
 		hx-swap="outerHTML"
@@ -424,12 +445,17 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 
 // Fragment template for model stats table body (used for polling)
 templ ModelStatsTableBody(modelStats []ModelWorkerStats) {
-	@modelStatsTableBody(modelStats)
+	@modelStatsTableBody(modelStats, true)
 }
 
-templ modelStatsTableBody(modelStats []ModelWorkerStats) {
+templ ModelStatsTableBodyWithAvailability(modelStats []ModelWorkerStats, modelStatsAvailable bool) {
+	@modelStatsTableBody(modelStats, modelStatsAvailable)
+}
+
+templ modelStatsTableBody(modelStats []ModelWorkerStats, modelStatsAvailable bool) {
 	<tbody
 		id="model-stats-tbody"
+		data-capacity-available={ fmt.Sprint(modelStatsAvailable) }
 		hx-get="/workers/stats/models"
 		hx-trigger="every 3s"
 		hx-swap="outerHTML"

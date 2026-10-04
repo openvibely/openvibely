@@ -2756,6 +2756,28 @@ func TestHandler_WorkerSettings(t *testing.T) {
 	assertNotContains(t, rec, "input-warning")
 }
 
+func TestHandler_WorkerSettingsReportsCapacitySourceFailures(t *testing.T) {
+	_, e, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	for _, statement := range []string{
+		`ALTER TABLE projects RENAME TO unavailable_projects_fixture`,
+		`ALTER TABLE agent_configs RENAME TO unavailable_agent_configs_fixture`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("simulate worker capacity source failure with %q: %v", statement, err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/workers", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `id="project-stats-tbody" data-capacity-available="false"`)
+	assert.Contains(t, rec.Body.String(), `id="model-stats-tbody" data-capacity-available="false"`)
+	assert.Contains(t, rec.Body.String(), "Project worker capacity is currently unavailable.")
+	assert.Contains(t, rec.Body.String(), "Model worker capacity is currently unavailable.")
+}
+
 func TestHandler_WorkersPage_DoesNotContainChatRootSelector(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	createProject(t, h, "Worker Test Project")

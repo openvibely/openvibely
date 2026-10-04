@@ -182,6 +182,8 @@ definitions:
         type: integer
       queued_tasks:
         type: integer
+      failed_tasks:
+        type: integer
     type: object
   models.AccountLimitView:
     properties:
@@ -1713,6 +1715,8 @@ definitions:
     properties:
       agent_id:
         type: string
+      agent_name:
+        type: string
       completed_at:
         type: string
       error:
@@ -1720,6 +1724,8 @@ definitions:
       id:
         type: string
       output_contract:
+        type: string
+      parent_execution_id:
         type: string
       selected_memories:
         items:
@@ -2910,8 +2916,8 @@ paths:
       - tasks
   /api/tasks/status-counts:
     get:
-      description: Returns only the active-category and queued-status predicates needed
-        by terminal status.
+      description: Returns only the active-category, queued-status, and failed-status
+        predicates needed by terminal status.
       parameters:
       - description: Project ID
         in: query
