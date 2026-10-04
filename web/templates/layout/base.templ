@@ -324,11 +324,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							background-color: var(--ov-account-limit-fill);
 						}
 						/* Theme toggle is intentionally immediate (no global transition choreography). */
-					/* Keep viewport-centered overlays stationary when native dialogs enter
-					   or leave the top layer by reserving equal scrollbar space on both sides. */
+					/* The app scrolls inside its panels, not at the root. Modal opening must
+					   not reserve native scrollbar gutters and inset the entire app shell. */
 					html,
 					:root:has(:is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open])) {
-						scrollbar-gutter: stable both-edges;
+						scrollbar-gutter: auto;
 						overflow: hidden;
 					}
 					body {

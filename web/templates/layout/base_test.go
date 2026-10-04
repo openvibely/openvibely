@@ -42,14 +42,14 @@ func TestBaseRendersProjectDialogHostsOutsideSidebar(t *testing.T) {
 	}
 }
 
-func TestBaseReservesSymmetricRootScrollbarGutters(t *testing.T) {
+func TestBaseDisablesRootModalScrollbarGutters(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Tasks", nil, "default").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render Base: %v", err)
 	}
 	html := buf.String()
-	if !strings.Contains(html, "scrollbar-gutter: stable both-edges;") {
-		t.Fatal("base layout must reserve symmetric root gutters so dialogs retain their horizontal center while leaving the top layer")
+	if !strings.Contains(html, "scrollbar-gutter: auto;") {
+		t.Fatal("base layout must disable root gutters because scrolling belongs to the panels")
 	}
 	if !strings.Contains(html, ":root:has(:is(.modal-open, .modal:target, .modal-toggle:checked + .modal, .modal[open]))") {
 		t.Fatal("base layout must override DaisyUI's higher-specificity open-modal scrollbar gutter rule")
