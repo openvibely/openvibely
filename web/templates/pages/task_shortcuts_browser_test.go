@@ -79,6 +79,7 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 		b.waitFor("breadcrumb focuses search", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-search'))`, "true")
 		key("KeyK", command)
 		b.waitFor("command K closes breadcrumb", `String(!document.querySelector('dialog[open]'))`, "true")
+		b.waitFor("command K restores focus without a ring", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-button') && document.activeElement.hasAttribute('data-selector-return-focus') && getComputedStyle(document.activeElement).outlineStyle==='none')`, "true")
 		key("KeyK", command)
 		b.waitFor("command K reopens breadcrumb", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-search'))`, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
