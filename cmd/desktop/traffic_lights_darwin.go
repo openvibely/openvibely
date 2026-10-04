@@ -46,7 +46,7 @@ package main
     [super updateTrackingAreas];
     if (_hoverArea) { [self removeTrackingArea:_hoverArea]; [_hoverArea release]; }
     _hoverArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect
-        options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+        options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved | NSTrackingActiveAlways | NSTrackingInVisibleRect
         owner:self userInfo:nil];
     [self addTrackingArea:_hoverArea];
     [self refresh];
@@ -61,14 +61,26 @@ package main
 }
 - (void)mouseEntered:(NSEvent *)event { [self refresh]; }
 - (void)mouseExited:(NSEvent *)event { [self refresh]; }
+- (void)mouseMoved:(NSEvent *)event { [self refresh]; }
 - (NSView *)hitTest:(NSPoint)point {
     NSView *hit = [super hitTest:point];
     return hit == self ? nil : hit;
 }
 - (void)refresh {
     BOOL fullscreen = (self.window.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    BOOL hovered = [self _mouseInGroup:nil];
     for (NSButton *button in self.subviews) {
         button.enabled = button.action != @selector(minimiseWindow:) || !fullscreen;
+        // AppKit cells also track hover individually. Keep that state in sync
+        // across the whole group, including movement between sibling buttons.
+        NSButtonCell *cell = (NSButtonCell *)button.cell;
+        BOOL showSymbol = hovered && button.enabled;
+        NSEvent *event = [NSEvent enterExitEventWithType:showSymbol ? NSEventTypeMouseEntered : NSEventTypeMouseExited
+            location:self.window.mouseLocationOutsideOfEventStream modifierFlags:0
+            timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:self.window.windowNumber
+            context:nil eventNumber:0 trackingNumber:0 userData:NULL];
+        if (showSymbol) [cell mouseEntered:event];
+        else [cell mouseExited:event];
         [button setNeedsDisplay:YES];
     }
 }

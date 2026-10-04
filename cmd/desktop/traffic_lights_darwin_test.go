@@ -32,12 +32,22 @@ func TestNativeTrafficLightsHoverFollowsPointer(t *testing.T) {
 @end
 @implementation OVHoverTestWindow
 - (BOOL)isKeyWindow { return self.testKey; }
+- (BOOL)isMainWindow { return self.testKey; }
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeMainWindow { return YES; }
 - (NSPoint)mouseLocationOutsideOfEventStream { return self.testPointer; }
+@end
+@interface OVHoverRecordingCell : NSButtonCell
+@property BOOL hovered;
+@end
+@implementation OVHoverRecordingCell
+- (void)mouseEntered:(NSEvent *)event { self.hovered = YES; }
+- (void)mouseExited:(NSEvent *)event { self.hovered = NO; }
 @end
 int main(void) {
  @autoreleasepool {
   [NSApplication sharedApplication];
-  OVHoverTestWindow *window = [[OVHoverTestWindow alloc] initWithContentRect:NSMakeRect(0,0,400,200) styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
+  OVHoverTestWindow *window = [[OVHoverTestWindow alloc] initWithContentRect:NSMakeRect(0,0,400,200) styleMask:NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
   OVTrafficLights *controls = [[OVTrafficLights alloc] init];
   [window.contentView addSubview:controls];
   [controls setFrameOrigin:NSMakePoint(16,160)];
@@ -58,6 +68,33 @@ int main(void) {
   window.testKey = YES;
   controls.hidden = YES;
   if ([controls _mouseInGroup:button]) return 6;
+  controls.hidden = NO;
+  window.testPointer = NSMakePoint(300,50);
+  [controls mouseExited:nil];
+  // Record the public cell tracking calls without relying on the appearance
+  // of an offscreen window (AppKit may render its minimize cell disabled).
+  for (NSButton *sibling in controls.subviews) {
+   SEL action = sibling.action;
+   OVHoverRecordingCell *cell = [[OVHoverRecordingCell alloc] init];
+   sibling.cell = cell;
+   sibling.target = controls;
+   sibling.action = action;
+   [cell release];
+  }
+  // Hover each button, including movement between siblings without a group
+  // exit: every enabled button must render its hover symbol together.
+  for (NSButton *hovered in controls.subviews) {
+   window.testPointer = [hovered convertPoint:NSMakePoint(7,7) toView:nil];
+   [controls mouseMoved:nil];
+   for (NSUInteger i=0; i<controls.subviews.count; i++) {
+    if (![(OVHoverRecordingCell *)[(NSButton *)controls.subviews[i] cell] hovered]) return 7;
+   }
+  }
+  window.testPointer = NSMakePoint(300,50);
+  [controls mouseExited:nil];
+  for (NSUInteger i=0; i<controls.subviews.count; i++) {
+   if ([(OVHoverRecordingCell *)[(NSButton *)controls.subviews[i] cell] hovered]) return 8;
+  }
   [controls release];
   [window release];
  }
