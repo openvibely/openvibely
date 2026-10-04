@@ -580,7 +580,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					for _, m := range metas {
 						<a
 							href={ templ.SafeURL(fmt.Sprintf("#diff-file-%d", m.Index)) }
-							class="badge badge-sm badge-outline cursor-pointer hover:badge-primary max-w-full min-w-0 overflow-hidden"
+							class="badge badge-sm badge-outline cursor-pointer max-w-full min-w-0 overflow-hidden"
 							onclick={ templ.ComponentScript{Call: fmt.Sprintf("expandAndScrollDiffFile(%d)", m.Index)} }
 						>
 							<span class="block truncate min-w-0">{ diffFileName(m.File.Path) }</span>
@@ -1772,7 +1772,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 					for _, m := range metas {
 						<a
 							href={ templ.SafeURL(fmt.Sprintf("#diff-file-%d", m.Index)) }
-							class="badge badge-sm badge-outline cursor-pointer hover:badge-primary max-w-full min-w-0 overflow-hidden"
+							class="badge badge-sm badge-outline cursor-pointer max-w-full min-w-0 overflow-hidden"
 							onclick={ templ.ComponentScript{Call: fmt.Sprintf("expandAndScrollDiffFile(%d)", m.Index)} }
 						>
 							<span class="block truncate min-w-0">{ diffFileName(m.File.Path) }</span>
