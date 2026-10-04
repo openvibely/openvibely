@@ -12,8 +12,8 @@ templ DesktopWindowControls(platform string) {
    .desktop-window-controls svg { width:10px; height:10px; pointer-events:none; }
    .desktop-window-controls button:is(:hover,[data-native-hover]) { background:oklch(var(--bc) / .1); }
    .desktop-window-controls button:is(:active,[data-native-pressed]) { background:oklch(var(--bc) / .2); }
-   .desktop-window-controls [data-wml-window="Close"]:hover { background:#c42b1c; color:white; }
-   .desktop-window-controls [data-wml-window="Close"]:active { background:#b22a1b; color:white; }
+   .desktop-window-controls [data-window-action="Close"]:hover { background:#c42b1c; color:white; }
+   .desktop-window-controls [data-window-action="Close"]:active { background:#b22a1b; color:white; }
    .desktop-window-controls[data-inactive] svg { opacity:.5; }
    .desktop-window-controls [data-restore-icon] { display:none; }
    .desktop-window-controls[data-maximized] [data-maximize-icon] { display:none; }
@@ -28,9 +28,9 @@ templ DesktopWindowControls(platform string) {
    }
   </style>
   <div class="desktop-window-controls" role="group" aria-label="Window controls">
-   <button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
-   <button type="button" data-wml-window="ToggleMaximise" aria-label="Maximize window" title="Maximize"><svg data-maximize-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9"/></svg><svg data-restore-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M2.5 2.5v-2h7v7h-2m-7-5h7v7h-7z"/></svg></button>
-   <button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="m.5.5 9 9m0-9-9 9"/></svg></button>
+   <button type="button" data-window-action="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
+   <button type="button" data-window-action="ToggleMaximise" aria-label="Maximize window" title="Maximize"><svg data-maximize-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9"/></svg><svg data-restore-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M2.5 2.5v-2h7v7h-2m-7-5h7v7h-7z"/></svg></button>
+   <button type="button" data-window-action="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="m.5.5 9 9m0-9-9 9"/></svg></button>
   </div>
   <script>
    window.openVibelyInstallWindowControls = function(runtime) {
@@ -38,7 +38,14 @@ templ DesktopWindowControls(platform string) {
     if (!controls || controls.dataset.installed || !runtime.Window.IsMaximised) return;
     controls.dataset.installed = 'true';
     var bar = document.getElementById('desktop-project-titlebar');
-    var maximize = controls.querySelector('[data-wml-window="ToggleMaximise"]');
+    var maximize = controls.querySelector('[data-window-action="ToggleMaximise"]');
+    // Bind directly: importing the Wails runtime does not enable WML actions.
+    controls.addEventListener('click', function(event) {
+     var button = event.target.closest('button[data-window-action]');
+     if (!button || !controls.contains(button)) return;
+     var action = button.getAttribute('data-window-action');
+     if (typeof runtime.Window[action] === 'function') runtime.Window[action]();
+    });
     var generation = 0;
     function emit(name, data) { if (runtime.Events && runtime.Events.Emit) runtime.Events.Emit(name, data); }
     function reportBounds() {
@@ -57,7 +64,7 @@ templ DesktopWindowControls(platform string) {
       controls.toggleAttribute('data-maximized', state[0] || state[1]);
       maximize.title = state[1] ? 'Exit fullscreen' : state[0] ? 'Restore' : 'Maximize';
       maximize.setAttribute('aria-label', maximize.title + ' window');
-      maximize.setAttribute('data-wml-window', state[1] ? 'UnFullscreen' : 'ToggleMaximise');
+      maximize.setAttribute('data-window-action', state[1] ? 'UnFullscreen' : 'ToggleMaximise');
       reportBounds();
      } catch (_) { /* The window may be closing. */ }
     }

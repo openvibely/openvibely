@@ -28,3 +28,11 @@ func (b captionBounds) contains(x, y, clientWidth float64) bool {
 	scale := clientWidth / b.Viewport
 	return x >= b.X*scale && x < (b.X+b.Width)*scale && y >= b.Y*scale && y < (b.Y+b.Height)*scale
 }
+
+// Work-area sizes are device-independent pixels, just like Wails window sizes.
+func fitDesktopWindowSize(width, height, workWidth, workHeight int) (int, int) {
+	if workWidth <= 0 || workHeight <= 0 {
+		return width, height
+	}
+	return min(width, workWidth), min(height, workHeight)
+}
