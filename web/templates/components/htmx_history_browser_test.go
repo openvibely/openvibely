@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -273,7 +274,7 @@ func TestBrowserFunctional_SidebarHostedIdentityPayloadIsInertInChrome(t *testin
 	runHeadlessChromeFixture(t, chrome, fixtureServer.URL+"/", "hosted identity", 5000, 20*time.Second)
 }
 
-func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virtualTimeBudget int, timeout time.Duration) {
+func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virtualTimeBudget int, timeout time.Duration) string {
 	t.Helper()
 	tempDir := t.TempDir()
 	stdoutPath := filepath.Join(tempDir, "chrome-stdout.html")
@@ -327,16 +328,18 @@ func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virt
 	_ = stderrFile.Close()
 
 	if strings.Contains(result, `data-test-result="pass"`) {
-		return
+		return result
 	}
 	stderr, _ := os.ReadFile(stderrPath)
+	rootState := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
 	if len(result) > 5000 {
 		result = result[len(result)-5000:]
 	}
 	if len(stderr) > 5000 {
 		stderr = stderr[len(stderr)-5000:]
 	}
-	t.Fatalf("real %s fixture failed:\nDOM tail:\n%s\nChrome stderr tail:\n%s", name, result, stderr)
+	t.Fatalf("real %s fixture failed:\nFixture state: %s\nDOM tail:\n%s\nChrome stderr tail:\n%s", name, rootState, result, stderr)
+	return ""
 }
 
 func testChromePath(t *testing.T) string {

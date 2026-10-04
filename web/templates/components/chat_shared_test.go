@@ -4095,18 +4095,27 @@ func TestRenderStreamingContent_PairsRepeatedToolResultsFIFOAndUsesStableToolIDs
 
 	content := buf.String()
 	for _, want := range []string{
-		"var toolUseQueues = {}",
-		"toolUseQueues[usingName].push(segments[si])",
-		"for (var sk = 0; sk < queue.length; sk++)",
+		"window.linkStreamingToolResults = function(segments)",
+		"var toolUseQueues = Object.create(null)",
+		"calls: [], next: 0",
+		"queue.calls[queue.next++]",
 		"segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++",
+		"for (var si = segments.length - 1; si >= 0; si--)",
+		"window.linkStreamingToolResults(segments)",
 		"wrap.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 		"outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 	} {
 		if !strings.Contains(content, want) {
-			t.Fatalf("renderStreamingContent missing repeated-tool boundary logic %q", want)
+			t.Fatalf("renderStreamingContent missing linear FIFO matching logic %q", want)
 		}
 	}
 
+	if strings.Contains(content, "for (var sk = 0; sk < queue.length; sk++)") {
+		t.Fatal("renderStreamingContent must not rescan a same-name call queue for every result")
+	}
+	if strings.Contains(content, "for (var sj = si + 1; sj < segments.length; sj++)") {
+		t.Fatal("renderStreamingContent must not rescan the segment suffix for every unmatched call")
+	}
 	if strings.Contains(content, "for (var sk = si - 1; sk >= 0; sk--)") {
 		t.Fatal("renderStreamingContent must not pair tool results with the newest previous same-name tool")
 	}
