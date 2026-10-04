@@ -90,7 +90,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 15;
+			var controllerVersion = 16;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -248,6 +248,31 @@ templ searchableSelectorScript() {
 				}
 				if (event.target === nodes(root).dialog) close(root, true);
 			});
+            var apple = /Mac|iPhone|iPad/.test(navigator.platform);
+            function labelShortcuts() {
+                document.querySelectorAll('[data-breadcrumb-selector-button], #project-selector-trigger').forEach(function(button) {
+                    var project = button.id === 'project-selector-trigger';
+                    button.setAttribute('aria-keyshortcuts', (apple ? 'Meta+' : 'Control+') + (project ? 'Shift+' : '') + 'K');
+                    if (project || !button.title) button.title = (project ? 'Open project' : button.getAttribute('aria-label')) + ' (' + (apple ? '⌘' : 'Ctrl+') + (project ? (apple ? '⇧' : 'Shift+') : '') + 'K)';
+                });
+            }
+            labelShortcuts();
+            listen(document, 'DOMContentLoaded', labelShortcuts);
+            listen(document, 'htmx:afterSwap', labelShortcuts);
+            listen(document, 'keydown', function(event) {
+                if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey || event.code !== 'KeyK') return;
+                var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+                if (!command) return;
+                var button = event.shiftKey ? document.getElementById('project-selector-trigger') : Array.from(document.querySelectorAll('[data-breadcrumb-selector-button]')).find(function(el) { return el.getClientRects().length > 0; });
+                if (!button || button.disabled || !button.getClientRects().length) return;
+                var root = rootFor(button), state = nodes(root), activeDialog = document.querySelector('dialog[open]');
+                if (!state.dialog || (activeDialog && activeDialog !== state.dialog)) return;
+                event.preventDefault();
+                root.__selectorKeyboard = true;
+                if (state.dialog.open) close(root, true);
+                else open(root);
+            });
+
 			listen(document, 'keydown', function(event) {
 				if (event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;
 				var root = rootFor(event.target); if (!root) return; var state = nodes(root);

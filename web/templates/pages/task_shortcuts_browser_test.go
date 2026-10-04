@@ -62,6 +62,10 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 		key := func(code, modifiers string) {
 			b.evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',Object.assign({key:'` + strings.TrimPrefix(code, "Key") + `',code:'` + code + `',bubbles:true,cancelable:true},` + modifiers + `)));'sent'`)
 		}
+		key("KeyK", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("project shortcut opens project search", `String(document.getElementById('project-selector-dialog').open && document.activeElement.id==='project-selector-search')`, "true")
+		key("KeyK", `Object.assign({shiftKey:true},`+command+`)`)
+		b.waitFor("project shortcut closes without return ring", `String(!document.getElementById('project-selector-dialog').open && document.activeElement.id==='project-selector-trigger' && getComputedStyle(document.activeElement).outlineStyle==='none')`, "true")
 		b.evaluate(`document.getElementById('task-message-input').value='Draft'; document.getElementById('task-message-input').dispatchEvent(new Event('input',{bubbles:true})); document.getElementById('task-message-input').focus(); window.sidebarBefore=document.getElementById('sidebar').className; 'ready'`)
 		key("KeyB", command)
 		b.waitFor("sidebar toggles from composer", `String(document.getElementById('sidebar').className!==window.sidebarBefore && document.activeElement.id==='task-message-input')`, "true")
