@@ -15,8 +15,10 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
@@ -1096,66 +1098,200 @@ func marshalAgenticItemAndImageAdjustment(item any) (int, int, int, bool, error)
 	if !ok || !strings.EqualFold(strings.TrimSpace(stringFromAny(itemMap["type"])), "message") {
 		return marshalFallback()
 	}
-	content, ok := itemMap["content"].([]any)
-	if !ok {
+	if _, ok := itemMap["content"].([]any); !ok {
 		return marshalFallback()
 	}
 
-	var copiedContent []any
-	removedImageURLBytes := 0
-	imagePayloadBytes := 0
-	imageReplacementBytes := 0
-	for index, rawBlock := range content {
-		block, ok := rawBlock.(map[string]any)
-		if !ok || strings.TrimSpace(stringFromAny(block["type"])) != "input_image" {
-			continue
+	serialized, removedImageURLBytes, imagePayloadBytes, imageReplacementBytes, optimized, ok := agenticJSONSizeReplacingImageURLs(item, 0)
+	if !ok || !optimized {
+		return marshalFallback()
+	}
+	return serialized + removedImageURLBytes, imagePayloadBytes, imageReplacementBytes, true, nil
+}
+
+// agenticJSONSizeReplacingImageURLs counts the JSON bytes for decoded Responses
+// values without allocating a serialized copy of an image data URL. Unsupported
+// Go value types and excessive nesting return ok=false so encoding/json remains
+// the compatibility fallback.
+func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBytes, payloadBytes, replacementBytes int, optimized, ok bool) {
+	if depth >= 10000 {
+		return 0, 0, 0, 0, false, false
+	}
+	switch typed := value.(type) {
+	case nil:
+		return len("null"), 0, 0, 0, false, true
+	case bool:
+		if typed {
+			return len("true"), 0, 0, 0, false, true
 		}
-		urlKey := "image_url"
-		imageURL, ok := block[urlKey].(string)
-		if !ok || strings.TrimSpace(imageURL) == "" {
-			urlKey = "url"
-			imageURL, ok = block[urlKey].(string)
+		return len("false"), 0, 0, 0, false, true
+	case string:
+		return agenticJSONEncodedStringSize(typed), 0, 0, 0, false, true
+	case float64:
+		floatSize, floatOK := agenticJSONFloatSize(typed, 64)
+		return floatSize, 0, 0, 0, false, floatOK
+	case float32:
+		floatSize, floatOK := agenticJSONFloatSize(float64(typed), 32)
+		return floatSize, 0, 0, 0, false, floatOK
+	case int:
+		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+	case int8:
+		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+	case int16:
+		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+	case int32:
+		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
+	case int64:
+		return agenticJSONIntegerSize(typed), 0, 0, 0, false, true
+	case uint:
+		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+	case uint8:
+		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+	case uint16:
+		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+	case uint32:
+		return agenticJSONUnsignedIntegerSize(uint64(typed)), 0, 0, 0, false, true
+	case uint64:
+		return agenticJSONUnsignedIntegerSize(typed), 0, 0, 0, false, true
+	case []any:
+		if typed == nil {
+			return len("null"), 0, 0, 0, false, true
 		}
-		if !ok || strings.TrimSpace(imageURL) == "" {
-			continue
+		size = 2
+		for index, element := range typed {
+			if index > 0 {
+				size++
+			}
+			elementSize, elementRemoved, elementPayload, elementReplacement, elementOptimized, elementOK := agenticJSONSizeReplacingImageURLs(element, depth+1)
+			if !elementOK {
+				return 0, 0, 0, 0, false, false
+			}
+			size += elementSize
+			removedURLBytes += elementRemoved
+			payloadBytes += elementPayload
+			replacementBytes += elementReplacement
+			optimized = optimized || elementOptimized
 		}
-		trimmedURL := strings.TrimSpace(imageURL)
-		payload, ok := parseAgenticBase64DataURL(trimmedURL, "image/")
-		if !ok || imageURL != trimmedURL || !agenticImageURLNeedsNoJSONEscaping(trimmedURL, payload) {
-			return marshalFallback()
+		return size, removedURLBytes, payloadBytes, replacementBytes, optimized, true
+	case map[string]any:
+		if typed == nil {
+			return len("null"), 0, 0, 0, false, true
+		}
+		replacedURLKey := ""
+		replacedURL := ""
+		replacedPayload := ""
+		isImage := strings.EqualFold(strings.TrimSpace(stringFromAny(typed["type"])), "input_image")
+		if isImage {
+			urlKey := "image_url"
+			imageURL, hasURL := typed[urlKey].(string)
+			if !hasURL || strings.TrimSpace(imageURL) == "" {
+				urlKey = "url"
+				imageURL, hasURL = typed[urlKey].(string)
+			}
+			if hasURL && strings.TrimSpace(imageURL) != "" {
+				trimmedURL := strings.TrimSpace(imageURL)
+				payload, isDataURL := parseAgenticBase64DataURL(trimmedURL, "image/")
+				if isDataURL {
+					if imageURL != trimmedURL || !agenticImageURLNeedsNoJSONEscaping(trimmedURL, payload) {
+						return 0, 0, 0, 0, false, false
+					}
+					replacedURLKey = urlKey
+					replacedURL = imageURL
+					replacedPayload = payload
+				}
+			}
 		}
 
-		if copiedContent == nil {
-			copiedContent = append([]any(nil), content...)
+		size = 2
+		first := true
+		for key, element := range typed {
+			if !first {
+				size++
+			}
+			first = false
+			size += agenticJSONEncodedStringSize(key) + 1
+			if key == replacedURLKey {
+				size += 2 // The replaced URL is the JSON string "".
+				removedURLBytes += len(replacedURL)
+				payloadBytes += len(replacedPayload)
+				optimized = true
+				if strings.EqualFold(strings.TrimSpace(stringFromAny(typed["detail"])), "original") {
+					replacementBytes += estimateAgenticOriginalImageBytesFromValidatedPayload(replacedPayload)
+				} else {
+					replacementBytes += openAIResizedImageBytesEstimate
+				}
+				continue
+			}
+			elementSize, elementRemoved, elementPayload, elementReplacement, elementOptimized, elementOK := agenticJSONSizeReplacingImageURLs(element, depth+1)
+			if !elementOK {
+				return 0, 0, 0, 0, false, false
+			}
+			size += elementSize
+			removedURLBytes += elementRemoved
+			payloadBytes += elementPayload
+			replacementBytes += elementReplacement
+			optimized = optimized || elementOptimized
 		}
-		clonedBlock := make(map[string]any, len(block))
-		for key, value := range block {
-			clonedBlock[key] = value
+		return size, removedURLBytes, payloadBytes, replacementBytes, optimized, true
+	default:
+		return 0, 0, 0, 0, false, false
+	}
+}
+
+func agenticJSONEncodedStringSize(value string) int {
+	size := 2 // surrounding quotes
+	for index := 0; index < len(value); {
+		char := value[index]
+		if char < utf8.RuneSelf {
+			index++
+			switch {
+			case char == '"' || char == '\\' || char == '\b' || char == '\f' || char == '\n' || char == '\r' || char == '\t':
+				size += 2
+			case char < 0x20 || char == '<' || char == '>' || char == '&':
+				size += 6
+			default:
+				size++
+			}
+			continue
 		}
-		clonedBlock[urlKey] = ""
-		copiedContent[index] = clonedBlock
-		removedImageURLBytes += len(imageURL)
-		imagePayloadBytes += len(payload)
-		if strings.EqualFold(strings.TrimSpace(stringFromAny(block["detail"])), "original") {
-			imageReplacementBytes += estimateAgenticOriginalImageBytesFromValidatedURL(trimmedURL)
+		runeValue, width := utf8.DecodeRuneInString(value[index:])
+		index += width
+		if runeValue == utf8.RuneError && width == 1 {
+			size += utf8.RuneLen(utf8.RuneError) // encoding/json replaces invalid UTF-8 with U+FFFD.
+		} else if runeValue == '\u2028' || runeValue == '\u2029' {
+			size += 6
 		} else {
-			imageReplacementBytes += openAIResizedImageBytesEstimate
+			size += width
 		}
 	}
-	if copiedContent == nil {
-		return marshalFallback()
-	}
+	return size
+}
 
-	clonedItem := make(map[string]any, len(itemMap))
-	for key, value := range itemMap {
-		clonedItem[key] = value
+func agenticJSONIntegerSize(value int64) int {
+	var buffer [32]byte
+	return len(strconv.AppendInt(buffer[:0], value, 10))
+}
+
+func agenticJSONUnsignedIntegerSize(value uint64) int {
+	var buffer [32]byte
+	return len(strconv.AppendUint(buffer[:0], value, 10))
+}
+
+func agenticJSONFloatSize(value float64, bits int) (int, bool) {
+	if math.IsInf(value, 0) || math.IsNaN(value) {
+		return 0, false
 	}
-	clonedItem["content"] = copiedContent
-	serialized, err := json.Marshal(clonedItem)
-	if err != nil {
-		return 0, 0, 0, false, err
+	format := byte('f')
+	absolute := math.Abs(value)
+	if absolute != 0 && ((bits == 64 && (absolute < 1e-6 || absolute >= 1e21)) || (bits == 32 && (float32(absolute) < 1e-6 || float32(absolute) >= 1e21))) {
+		format = 'e'
 	}
-	return len(serialized) + removedImageURLBytes, imagePayloadBytes, imageReplacementBytes, true, nil
+	var buffer [64]byte
+	encoded := strconv.AppendFloat(buffer[:0], value, format, -1, bits)
+	if format == 'e' && len(encoded) >= 4 && encoded[len(encoded)-4] == 'e' && encoded[len(encoded)-3] == '-' && encoded[len(encoded)-2] == '0' {
+		encoded = encoded[:len(encoded)-1]
+	}
+	return len(encoded), true
 }
 
 func agenticImageURLNeedsNoJSONEscaping(value, payload string) bool {
@@ -1313,16 +1449,31 @@ func parseAgenticBase64DataURL(url string, mediaTypePrefix string) (string, bool
 	}
 	metadata := url[len("data:"):commaIndex]
 	payload := url[commaIndex+1:]
-	parts := strings.Split(metadata, ";")
-	if len(parts) == 0 || len(parts[0]) < len(mediaTypePrefix) || !strings.EqualFold(parts[0][:len(mediaTypePrefix)], mediaTypePrefix) {
+	metadataEnd := strings.IndexByte(metadata, ';')
+	mediaType := metadata
+	parameters := ""
+	if metadataEnd >= 0 {
+		mediaType = metadata[:metadataEnd]
+		parameters = metadata[metadataEnd+1:]
+	}
+	if len(mediaType) < len(mediaTypePrefix) || !strings.EqualFold(mediaType[:len(mediaTypePrefix)], mediaTypePrefix) {
 		return "", false
 	}
 	hasBase64Marker := false
-	for _, part := range parts[1:] {
-		if strings.EqualFold(part, "base64") {
+	for {
+		parameterEnd := strings.IndexByte(parameters, ';')
+		parameter := parameters
+		if parameterEnd >= 0 {
+			parameter = parameters[:parameterEnd]
+		}
+		if strings.EqualFold(parameter, "base64") {
 			hasBase64Marker = true
 			break
 		}
+		if parameterEnd < 0 {
+			break
+		}
+		parameters = parameters[parameterEnd+1:]
 	}
 	if !hasBase64Marker {
 		return "", false
@@ -1350,6 +1501,10 @@ func estimateAgenticOriginalImageBytesFromValidatedURL(imageURL string) int {
 	if !ok {
 		return openAIResizedImageBytesEstimate
 	}
+	return estimateAgenticOriginalImageBytesFromValidatedPayload(payload)
+}
+
+func estimateAgenticOriginalImageBytesFromValidatedPayload(payload string) int {
 	config, _, err := image.DecodeConfig(base64.NewDecoder(base64.StdEncoding, strings.NewReader(payload)))
 	if err != nil || config.Width <= 0 || config.Height <= 0 {
 		return openAIResizedImageBytesEstimate
