@@ -1403,7 +1403,7 @@ func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 	}
 }
 
-func TestBrowserFunctional_AnalyticsContent_FullscreenChartsInChrome(t *testing.T) {
+func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
 	var rendered bytes.Buffer
 	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
@@ -1417,9 +1417,9 @@ func TestBrowserFunctional_AnalyticsContent_FullscreenChartsInChrome(t *testing.
   function check(ok,message){if(!ok)throw new Error(message);}
   const tick=()=>new Promise(resolve=>setTimeout(resolve,30));
   try {
-   for(let i=0;i<100&&!document.querySelector('[data-analytics-fullscreen]');i++)await tick();
-   const dialog=document.querySelector('[data-analytics-fullscreen]');
-   check(dialog,'full screen dialog missing');
+   for(let i=0;i<100&&!document.querySelector('[data-analytics-preview]');i++)await tick();
+   const dialog=document.querySelector('[data-analytics-preview]');
+   check(dialog,'graph preview dialog missing');
    for(const canvas of document.querySelectorAll('canvas'))check(canvas.closest('.card').querySelector('[data-analytics-expand]'),'missing expand button: '+canvas.id);
    const canvas=document.getElementById('modelRunTimeTrendChart'),card=canvas.closest('.card'),parent=card.parentElement,next=card.nextSibling;
    const button=card.querySelector('[data-analytics-expand]'),select=card.querySelector('select'),plot=canvas.parentElement;
@@ -1428,32 +1428,40 @@ func TestBrowserFunctional_AnalyticsContent_FullscreenChartsInChrome(t *testing.
    check(getComputedStyle(card.querySelector('.card-body')).paddingTop!=='56px','header still reserves an empty row');
    const close=dialog.firstElementChild;
    check(close.querySelector('svg')&&!close.textContent.trim(),'exit control is not icon only');
-   check(close.getAttribute('aria-label')==='Exit full screen'&&close.title==='Exit full screen','exit icon lacks accessible label or tooltip');
+   check(close.getAttribute('aria-label')==='Close graph preview'&&close.title==='Close graph preview','exit icon lacks accessible label or tooltip');
    const originalStyle=plot.getAttribute('style');
    let resized=0;
-   window._analyticsCharts.fullscreenTest={canvas,resize(){resized++;},destroy(){}};
+   window._analyticsCharts.previewTest={canvas,resize(){resized++;},destroy(){}};
    button.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1})); await tick();
-   check(dialog.open&&dialog.contains(card),'chart did not enter full screen');
-   check(dialog.getBoundingClientRect().width===innerWidth&&dialog.getBoundingClientRect().height===innerHeight,'dialog does not fill viewport');
-   check(plot.getBoundingClientRect().height>=innerHeight-200,'plot did not fill available height: '+plot.getBoundingClientRect().height+' of '+innerHeight);
+   check(dialog.open&&dialog.contains(card),'chart did not enter graph preview');
+   const bounds=dialog.getBoundingClientRect();
+   check(bounds.left>=16&&bounds.top>=24&&bounds.right<=innerWidth-16&&bounds.bottom<=innerHeight-24,'preview lacks viewport margins');
+   check(bounds.width===Math.min(1200,innerWidth-32)&&bounds.height===Math.min(900,innerHeight-48),'preview dimensions differ from gallery');
+   check(getComputedStyle(dialog).borderRadius==='12px','preview lacks rounded corners');
+   check(plot.getBoundingClientRect().height>=bounds.height-200,'plot did not fill available height: '+plot.getBoundingClientRect().height+' of '+innerHeight);
    const closeRect=close.getBoundingClientRect();
    const fullHeaderRect=header.getBoundingClientRect();
    check(close.parentElement===header&&Math.abs(closeRect.top+closeRect.height/2-fullHeaderRect.top-fullHeaderRect.height/2)<1&&Math.abs(fullHeaderRect.right-closeRect.right)<1,'exit icon is not inline at header right');
    check(dialog.querySelector('select')===select,'model filter was replaced');
    check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
    check(document.activeElement===dialog,'mouse opening left focus on exit button');
+   canvas.click(); await tick();
+   check(dialog.open,'chart interaction dismissed preview');
    close.click(); await tick();
    check(!dialog.open&&card.parentElement===parent&&card.nextSibling===next,'chart not restored in original position');
    check(document.activeElement===button,'focus not restored');
-   check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-fullscreen-plot'),'plot sizing not restored');
+   check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-preview-plot'),'plot sizing not restored');
    button.click(); await tick();
    check(document.activeElement===close,'keyboard opening did not focus exit button');
    // Native dialog cancellation is the Escape path.
    if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();
    await tick(); check(!dialog.open&&card.parentElement===parent,'cancel did not restore chart');
    button.click(); await tick();
+   dialog.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:0,clientY:0})); await tick();
+   check(!dialog.open&&card.parentElement===parent,'backdrop click did not restore chart');
+   button.click(); await tick();
    window._analyticsAbortController.abort();
-   check(!dialog.isConnected&&card.parentElement===parent,'navigation left full screen overlay behind');
+   check(!dialog.isConnected&&card.parentElement===parent,'navigation left graph preview overlay behind');
    result.setAttribute('data-test-result','pass');
   }catch(error){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',error.message);}
  });
