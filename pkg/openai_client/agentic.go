@@ -1128,9 +1128,11 @@ func agenticJSONSizeReplacingImageURLs(value any, depth int) (size, removedURLBy
 	case string:
 		return agenticJSONEncodedStringSize(typed), 0, 0, 0, false, true
 	case float64:
-		return agenticJSONFloatSize(typed, 64)
+		floatSize, floatOK := agenticJSONFloatSize(typed, 64)
+		return floatSize, 0, 0, 0, false, floatOK
 	case float32:
-		return agenticJSONFloatSize(float64(typed), 32)
+		floatSize, floatOK := agenticJSONFloatSize(float64(typed), 32)
+		return floatSize, 0, 0, 0, false, floatOK
 	case int:
 		return agenticJSONIntegerSize(int64(typed)), 0, 0, 0, false, true
 	case int8:
@@ -1275,9 +1277,9 @@ func agenticJSONUnsignedIntegerSize(value uint64) int {
 	return len(strconv.AppendUint(buffer[:0], value, 10))
 }
 
-func agenticJSONFloatSize(value float64, bits int) (int, int, int, int, bool, bool) {
+func agenticJSONFloatSize(value float64, bits int) (int, bool) {
 	if math.IsInf(value, 0) || math.IsNaN(value) {
-		return 0, 0, 0, 0, false, false
+		return 0, false
 	}
 	format := byte('f')
 	absolute := math.Abs(value)
@@ -1289,7 +1291,7 @@ func agenticJSONFloatSize(value float64, bits int) (int, int, int, int, bool, bo
 	if format == 'e' && len(encoded) >= 4 && encoded[len(encoded)-4] == 'e' && encoded[len(encoded)-3] == '-' && encoded[len(encoded)-2] == '0' {
 		encoded = encoded[:len(encoded)-1]
 	}
-	return len(encoded), 0, 0, 0, false, true
+	return len(encoded), true
 }
 
 func agenticImageURLNeedsNoJSONEscaping(value, payload string) bool {
