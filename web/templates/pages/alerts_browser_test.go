@@ -1056,6 +1056,22 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 	    stealSortFocusAfterSwap = false;
 	    if (document.querySelectorAll('[data-alert-scroll-anchor="live-sort-open"]').length !== 1) fail('Alerts live refresh rendered the new alert more than once');
 	    if (document.getElementById('alerts-container').getAttribute('data-card-pagination-has-more') !== document.getElementById('alerts-live-results').getAttribute('data-card-pagination-has-more')) fail('Alerts live refresh did not synchronize pagination state');
+	    await waitForAlertsSettled('before approval');
+	    var oldToolbar = document.querySelector('[data-card-list-toolbar]');
+	    var approve = row('item-03').querySelector('button[hx-post*="/approve"]');
+	    if (!approve) fail('missing approval button');
+	    approve.click();
+	    await waitFor(function() { return !oldToolbar.isConnected; }, 'approval content replacement');
+	    await waitForAlertsSettled('approval');
+	    var approvedCheckbox = row('item-03').querySelector('[data-card-selection-gutter] input');
+	    if (!approvedCheckbox) fail('missing selection checkbox after approval');
+	    approvedCheckbox.click();
+	    var actions = document.querySelector('[data-card-selection-actions]');
+	    if (!actions || getComputedStyle(actions).display === 'none') fail('selection actions hidden after approval');
+	    if (document.querySelector('[data-card-selected-count]').textContent.trim() !== '1 selected') fail('selection count stale after approval');
+	    document.querySelector('[data-card-select-loaded]').click();
+	    document.querySelector('[data-card-select-loaded]').click();
+	    if (approvedCheckbox.checked || getComputedStyle(actions).display !== 'none') fail('selection cancellation broken after approval');
 	    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
@@ -1095,6 +1111,15 @@ func TestBrowserFunctional_AlertsLiveRefreshAndSingleDeletePreserveViewportInChr
 			}
 			prependAlert(r.URL.Query().Get("kind"))
 			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/alerts/item-03/approve" && r.Method == http.MethodPost:
+			mu.Lock()
+			for i := range alerts {
+				if alerts[i].ID == "item-03" {
+					alerts[i].DecisionState = models.AlertDecisionApproved
+				}
+			}
+			mu.Unlock()
+			_, _ = w.Write([]byte(renderAlerts()))
 		case strings.HasPrefix(r.URL.Path, "/alerts/item-") && r.Method == http.MethodDelete:
 			deleteAlert(strings.TrimPrefix(r.URL.Path, "/alerts/"))
 			w.Header().Set("HX-Trigger", "alertBadgeUpdate")
