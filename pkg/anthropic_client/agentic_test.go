@@ -2129,7 +2129,7 @@ func TestContextManagementEdit_WithThinking(t *testing.T) {
 }
 
 func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T) {
-	models := []string{"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"}
+	models := []string{"claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5"}
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

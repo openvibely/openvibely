@@ -1089,7 +1089,8 @@ func TestCreateModel_NormalizesAnthropicCatalogID(t *testing.T) {
 	form := modelValidationForm("Canonical Anthropic")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "api_key")
-	form.Set("model", " CLAUDE-SONNET-5 ")
+	form.Set("model", " CLAUDE-SONNET-5-5 ")
+	form.Set("reasoning_effort", "xhigh")
 	rec := htmxPost(e, "/models", form)
 	assertCode(t, rec, http.StatusOK)
 	configs, err := repo.List(context.Background())
@@ -1098,8 +1099,11 @@ func TestCreateModel_NormalizesAnthropicCatalogID(t *testing.T) {
 	}
 	for _, cfg := range configs {
 		if cfg.Name == "Canonical Anthropic" {
-			if cfg.Model != "claude-sonnet-5" {
+			if cfg.Model != "claude-sonnet-5-5" {
 				t.Fatalf("saved model = %q", cfg.Model)
+			}
+			if cfg.ReasoningEffort != "xhigh" {
+				t.Fatalf("saved reasoning effort = %q, want xhigh", cfg.ReasoningEffort)
 			}
 			return
 		}

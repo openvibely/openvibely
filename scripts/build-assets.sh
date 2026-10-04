@@ -109,8 +109,18 @@ done
 printf '@tailwind base;\n@tailwind utilities;\n' >"$cache/app-utilities.input.css"
 
 cd "$assets"
-"$tailwind" -c tailwind.config.js -i "$cache/app.input.css" -o "$dist/app.css" --minify 2>/dev/null
-"$tailwind" -c tailwind.config.js -i "$cache/app-utilities.input.css" -o "$dist/app-utilities.css" --minify 2>/dev/null
+"$tailwind" -c tailwind.config.js -i "$cache/app.input.css" -o "$dist/app.css" --minify 2>/dev/null &
+app_pid=$!
+"$tailwind" -c tailwind.config.js -i "$cache/app-utilities.input.css" -o "$dist/app-utilities.css" --minify 2>/dev/null &
+utilities_pid=$!
+app_status=0
+utilities_status=0
+wait "$app_pid" || app_status=$?
+wait "$utilities_pid" || utilities_status=$?
+if [[ "$app_status" -ne 0 || "$utilities_status" -ne 0 ]]; then
+  echo "Tailwind asset build failed (app.css: $app_status, app-utilities.css: $utilities_status)." >&2
+  exit 1
+fi
 
 if [[ "$mode" == "--check" ]]; then
   if [[ -n "$(git -C "$root" status --porcelain -- web/static/dist)" ]]; then

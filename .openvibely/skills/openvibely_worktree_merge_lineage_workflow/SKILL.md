@@ -137,7 +137,7 @@ Tool calls (`read_file`, `edit_file`, `write_file`, `bash`) resolve **relative p
 - Do not hide or reject merge actions solely because `tasks.merge_status=merged` or worktree metadata is blank. First revalidate against Git and recover conventional `.worktrees/task_<id>` / expected `task/<id_prefix>-<slug>` metadata when present.
 - Clear stale merged metadata whenever Git shows the task branch still has commits beyond the target, including diverged branches where the target also has newer commits.
 - Only treat a task as already merged when the task branch is fully reachable from the target.
-- Apply stale metadata recovery consistently across `/tasks/:id/changes`, merge POST, older `/tasks/:id/changes/worktree`, worktree info panel, and direct task-detail renders with `?tab=changes`.
+- Apply stale metadata recovery consistently across `/tasks/:id/changes`, merge POST, worktree info panel, and direct task-detail renders with `?tab=changes`.
 - Direct `?tab=changes` render should lazy-load `/tasks/:id/changes` on page load instead of inlining stale `TaskChangesContent(...)`.
 - Direct `/tasks/:id/changes/file` lazy-file requests currently need care because normal UI flow runs `/tasks/:id/changes` first and persists recovery before lazy file loads.
 - Worktree merge HTMX flows should close the dropdown, disable/show busy state for the clicked action, and refresh the initiating Changes surface or show a toast.
@@ -193,7 +193,7 @@ git log --oneline main..HEAD
 - Add regressions for startup sync proving local branch authority: divergent or ahead `origin/main` must not be fetched/merged by default, mere `origin/main` existence must not change the merge source, broken `origin` should not matter, and upstream-only remotes should still use the selected local branch.
 - Add regressions for stale `merge_status=merged` with blank/recovered metadata, target moved, task branch still has commits, and Changes tab showing local actions after status resets.
 - Cover active follow-up Changes diff regressions where a previous execution committed a file and the running follow-up edits the same file; assert service diff generation and `/tasks/:id/changes` render exactly one diff file/card with the latest content. Also cover target-only commits being excluded, the revert-to-merge-base edge case, and rebase availability requiring unique commits on both sides.
-- Cover direct `?tab=changes`, lazy `/tasks/:id/changes`, merge POST, worktree panel, and legacy fragments when stale metadata recovery changes.
+- Cover direct task-detail renders with `?tab=changes`, lazy `/tasks/:id/changes`, merge POST, and the worktree info panel when stale metadata recovery changes.
 - Cover dirty-but-non-overlapping target changes, Git overwrite refusals, true conflicts, squash failure cleanup, checked-out target fast-forward merge, and ref-only target updates.
 - Cover follow-up lineage for terminal merged/stale tasks, dirty follow-up reuse, clean follow-up staleness, startup sync conflict fallback, cleanup preserving conventional worktrees, and chained-task descendants.
 - For orphan cleanup changes, add focused service regressions for base path extraction, `.worktrees/task_<id>_followup_<timestamp>` extraction, actual `SetupFollowupWorktree` naming, stale metadata with an existing task preserving the follow-up worktree and branch, dirty candidate preservation, unmerged candidate preservation, and reachability of follow-up commits after cleanup.
