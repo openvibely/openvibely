@@ -1,0 +1,91 @@
+package layout
+
+// DesktopWindowControls supplies the Windows caption buttons and a Linux
+// fallback until GTK has installed its native, theme-aware controls.
+templ DesktopWindowControls(platform string) {
+ if platform == "windows" || platform == "linux" {
+  <style>
+   #desktop-project-titlebar[data-platform="windows"] { padding-right: 0; }
+   @media(max-width:1023px) { #desktop-project-titlebar:is([data-platform="windows"],[data-platform="linux"]) { padding-left:46px; } }
+   .desktop-window-controls { display:flex; align-items:stretch; align-self:stretch; flex-shrink:0; --wails-draggable:no-drag; }
+   .desktop-window-controls button { display:flex; align-items:center; justify-content:center; padding:0; width:46px; height:100%; color:inherit; border:0; border-radius:0; background:transparent; cursor:default; }
+   .desktop-window-controls svg { width:10px; height:10px; pointer-events:none; }
+   .desktop-window-controls button:is(:hover,[data-native-hover]) { background:oklch(var(--bc) / .1); }
+   .desktop-window-controls button:is(:active,[data-native-pressed]) { background:oklch(var(--bc) / .2); }
+   .desktop-window-controls [data-wml-window="Close"]:hover { background:#c42b1c; color:white; }
+   .desktop-window-controls [data-wml-window="Close"]:active { background:#b22a1b; color:white; }
+   .desktop-window-controls[data-inactive] svg { opacity:.5; }
+   .desktop-window-controls [data-restore-icon] { display:none; }
+   .desktop-window-controls[data-maximized] [data-maximize-icon] { display:none; }
+   .desktop-window-controls[data-maximized] [data-restore-icon] { display:block; }
+   html[data-native-linux-controls] .desktop-window-controls { display:none; }
+   html[data-native-linux-controls] #desktop-project-titlebar { padding-right:calc(var(--native-controls-right, 0px) + 8px); padding-left:max(3.5rem, calc(var(--native-controls-left, 0px) + 46px)); }
+   html[data-native-linux-controls] #desktop-project-titlebar > #sidebar-collapse-btn { left:calc(var(--native-controls-left, 0px) + 8px); }
+   html[data-native-linux-controls] #desktop-project-titlebar .project-bar-brand { left:calc(var(--native-controls-left, 0px) + 16px); }
+   @media(min-width:1024px) {
+    html[data-native-linux-controls] body:not(.sidebar-collapsed-pending) #desktop-project-titlebar { padding-left:max(16rem, calc(var(--native-controls-left, 0px) + 170px)); }
+    html[data-native-linux-controls] body:not(.sidebar-collapsed-pending) #desktop-project-titlebar > #sidebar-collapse-btn { left:max(calc(16rem - 40px), calc(var(--native-controls-left, 0px) + 130px)); }
+   }
+  </style>
+  <div class="desktop-window-controls" role="group" aria-label="Window controls">
+   <button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M0 5.5h10"/></svg></button>
+   <button type="button" data-wml-window="ToggleMaximise" aria-label="Maximize window" title="Maximize"><svg data-maximize-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9"/></svg><svg data-restore-icon viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="M2.5 2.5v-2h7v7h-2m-7-5h7v7h-7z"/></svg></button>
+   <button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" aria-hidden="true"><path d="m.5.5 9 9m0-9-9 9"/></svg></button>
+  </div>
+  <script>
+   window.openVibelyInstallWindowControls = function(runtime) {
+    var controls = document.querySelector('.desktop-window-controls');
+    if (!controls || controls.dataset.installed || !runtime.Window.IsMaximised) return;
+    controls.dataset.installed = 'true';
+    var bar = document.getElementById('desktop-project-titlebar');
+    var maximize = controls.querySelector('[data-wml-window="ToggleMaximise"]');
+    var generation = 0;
+    function emit(name, data) { if (runtime.Events && runtime.Events.Emit) runtime.Events.Emit(name, data); }
+    function reportBounds() {
+     if (bar.dataset.platform !== 'windows') return;
+     var r = maximize.getBoundingClientRect();
+     // An HTML modal makes the caption button inert; native hit testing must
+     // then leave the webview alone too.
+     var modal = !!document.querySelector('dialog:modal');
+     emit('desktop:caption-bounds', {x:r.x,y:r.y,width:modal?0:r.width,height:r.height,viewport:innerWidth});
+    }
+    async function sync() {
+     var current = ++generation;
+     try {
+      var state = await Promise.all([runtime.Window.IsMaximised(), runtime.Window.IsFullscreen()]);
+      if (current !== generation) return;
+      controls.toggleAttribute('data-maximized', state[0] || state[1]);
+      maximize.title = state[1] ? 'Exit fullscreen' : state[0] ? 'Restore' : 'Maximize';
+      maximize.setAttribute('aria-label', maximize.title + ' window');
+      maximize.setAttribute('data-wml-window', state[1] ? 'UnFullscreen' : 'ToggleMaximise');
+      reportBounds();
+     } catch (_) { /* The window may be closing. */ }
+    }
+    if (runtime.Events && runtime.Events.On) {
+     ['WindowMaximise','WindowUnMaximise','WindowRestore','WindowFullscreen','WindowUnFullscreen'].forEach(function(name) { runtime.Events.On('common:' + name, sync); });
+     runtime.Events.On('common:WindowLostFocus', function() { controls.setAttribute('data-inactive',''); });
+     runtime.Events.On('common:WindowFocus', function() { controls.removeAttribute('data-inactive'); sync(); });
+     runtime.Events.On('desktop:caption-hover', function(event) {
+      maximize.toggleAttribute('data-native-hover', !!event.data.hover);
+      maximize.toggleAttribute('data-native-pressed', !!event.data.pressed);
+     });
+     runtime.Events.On('desktop:linux-controls', function(event) {
+      document.documentElement.style.setProperty('--native-controls-left', event.data.left + 'px');
+      document.documentElement.style.setProperty('--native-controls-right', event.data.right + 'px');
+      document.documentElement.setAttribute('data-native-linux-controls', '');
+     });
+    }
+    new ResizeObserver(reportBounds).observe(bar);
+    new MutationObserver(reportBounds).observe(document.body, {subtree:true,attributes:true,attributeFilter:['open']});
+    window.addEventListener('resize', sync);
+    function syncTheme() {
+     if (bar.dataset.platform === 'linux') emit('desktop:controls-theme', {dark:document.documentElement.getAttribute('data-theme') === 'dark'});
+    }
+    new MutationObserver(syncTheme).observe(document.documentElement, {attributes:true,attributeFilter:['data-theme']});
+    syncTheme();
+    emit('desktop:controls-ready', {});
+    sync();
+   };
+  </script>
+ }
+}

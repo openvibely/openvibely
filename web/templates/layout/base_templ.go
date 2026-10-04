@@ -310,7 +310,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 			return templ_7745c5c3_Err
 		}
 		if serverRuntimeMode(ctx) == "desktop" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<script type=\"module\">\n\t\t\t\t\timport * as runtime from '/wails/runtime.js';\n\t\t\t\t\twindow.wails = runtime;\n\t\t\t\t\twindow.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();\n\t\t\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<script type=\"module\">\n\t\t\t\t\timport * as runtime from '/wails/runtime.js';\n\t\t\t\t\twindow.wails = runtime;\n\t\t\t\t\twindow.openVibelyInstallWindowControls && window.openVibelyInstallWindowControls(runtime);\n\t\t\t\t\twindow.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();\n\t\t\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -322,7 +322,7 @@ func Base(title string, projects []models.Project, currentProjectID string) temp
 		var templ_7745c5c3_Var18 templ.SafeURL
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(static.URL("app-utilities.css"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 4318, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/base.templ`, Line: 4319, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
