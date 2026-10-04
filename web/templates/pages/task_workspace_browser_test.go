@@ -493,6 +493,13 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.click("#task-details-opener")
 		b.click("#task-message-input")
 		b.typeText("Keep this draft")
+		shortcut := func() {
+			b.evaluate(`(function(){var apple=/Mac|iPhone|iPad/.test(navigator.platform);document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'D',code:'KeyD',metaKey:apple,ctrlKey:!apple,shiftKey:true,bubbles:true,cancelable:true}));return 'sent';})()`)
+		}
+		shortcut()
+		b.waitFor("shortcut opens changes from composer", `new URL(location.href).searchParams.get('tab')`, "changes")
+		shortcut()
+		b.waitFor("shortcut returns to thread", `String(document.getElementById('tab-changes').classList.contains('hidden') && document.activeElement===document.getElementById('task-message-input') && document.getElementById('task-message-input').value==='Keep this draft')`, "true")
 		b.wheel("#task-thread-messages", -650)
 		b.evaluate(`window.savedThread=document.getElementById('task-thread-view');window.savedComposer=document.getElementById('task-message-input');window.savedScroll=document.getElementById('task-thread-messages').scrollTop;window.savedSources=window._threadEventSources; 'saved'`)
 		files.Store(3)

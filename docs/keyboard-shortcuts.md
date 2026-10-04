@@ -8,6 +8,7 @@ These are the app's keyboard bindings. On macOS, **Command** is ⌘ and **Option
 | --- | --- | --- |
 | Toggle left navigation | Command+B | Ctrl+B |
 | Toggle task details panel | Command+Shift+B | Ctrl+Shift+B |
+| Toggle task thread / Changes | Command+Shift+D | Ctrl+Shift+D |
 | Open or close the task / automation breadcrumb selector | Command+K | Ctrl+K |
 | Open or close the project menu | Command+Shift+K | Ctrl+Shift+K |
 | Previous project tab | Command+Shift+← | Ctrl+Shift+← |
@@ -25,6 +26,7 @@ The task-specific shortcuts are available on a task page. All of them work while
 - **Previous/next task** uses the same project-scoped list and ordering as the breadcrumb selector, without opening it. This is not a history of pages you visited: the list includes task grouping and update recency. The order stays fixed while you step through it, and navigation stops at either end. Opening a different task another way resets the list for the next cycle.
 - **Last task visited** switches between the last two distinct tasks visited within the current project and browser tab. It does nothing until a previous task is available.
 - Task switching preserves the current composer draft. Toggling the task details panel keeps composer focus when the panel is docked; an overlay panel takes focus while open.
+- Thread / Changes toggling works on saved tasks, including while the composer is focused, and preserves the draft and thread scroll intent. It pauses while an overlay details panel or popover is open. Chrome also assigns this combination to bookmarking all tabs.
 - Task shortcuts pause while a dialog is open, except that Command/Ctrl+K can close the task breadcrumb selector itself.
 
 Browser or desktop-webview back/forward navigation is separate from these task-list shortcuts. Browser and operating-system bindings may intercept a key combination before the app receives it.
