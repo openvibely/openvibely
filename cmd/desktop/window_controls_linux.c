@@ -9,10 +9,26 @@ typedef struct {
  int last_left, last_right;
 } OVCaption;
 
+#if GTK_MAJOR_VERSION < 4
+static void ovCaptionFindButton(GtkWidget *widget, gpointer data) {
+ gboolean *found = data;
+ if (*found || !gtk_widget_get_visible(widget)) return;
+ if (GTK_IS_BUTTON(widget)) { *found = TRUE; return; }
+ if (GTK_IS_CONTAINER(widget)) gtk_container_forall(GTK_CONTAINER(widget), ovCaptionFindButton, data);
+}
+static int ovCaptionWidth(GtkWidget *widget) {
+ gboolean found = FALSE;
+ ovCaptionFindButton(widget, &found);
+ // A "menu" decoration without an application menu leaves an empty padded
+ // header bar. Only reserve space when GTK actually created a button.
+ return found ? gtk_widget_get_allocated_width(widget) : 0;
+}
+#endif
+
 static void ovCaptionMeasure(OVCaption *c) {
 #if GTK_MAJOR_VERSION < 4
- int left = gtk_widget_get_visible(c->left) ? gtk_widget_get_allocated_width(c->left) : 0;
- int right = gtk_widget_get_visible(c->right) ? gtk_widget_get_allocated_width(c->right) : 0;
+ int left = ovCaptionWidth(c->left);
+ int right = ovCaptionWidth(c->right);
 #else
  int left = gtk_window_controls_get_empty(GTK_WINDOW_CONTROLS(c->left)) ? 0 : gtk_widget_get_width(c->left) + 6;
  int right = gtk_window_controls_get_empty(GTK_WINDOW_CONTROLS(c->right)) ? 0 : gtk_widget_get_width(c->right) + 6;

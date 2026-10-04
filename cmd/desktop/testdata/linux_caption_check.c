@@ -59,6 +59,11 @@ int main(int argc,char **argv) {
 #endif
  if (reported_left != 0 || reported_right < 60) { g_printerr("right layout %d %d\n",reported_left,reported_right);return 11; }
  if (!find_button(c->right,"minimize") || !find_button(c->right,"maximize") || !find_button(c->right,"close")) return 12;
+ // GTK's default can request an app menu even when this window has none.
+ // A nonempty layout string is not evidence of an actual left-side control.
+ g_object_set(gtk_settings_get_default(),"gtk-decoration-layout","menu:minimize,maximize,close",NULL);
+ settle();
+ if (reported_left != 0) { g_printerr("phantom menu width %d\n",reported_left);return 22; }
  g_object_set(gtk_settings_get_default(),"gtk-decoration-layout","close,minimize,maximize:",NULL);
  settle();
  if (reported_left < 60 || reported_right != 0) { g_printerr("left layout %d %d\n",reported_left,reported_right);return 13; }
