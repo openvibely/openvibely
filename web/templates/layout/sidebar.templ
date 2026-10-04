@@ -1004,6 +1004,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			</a>
 		</div>
 		<style>
+            /* Section labels do not participate in menu hover/active states. */
+            #sidebar .menu-title {
+                pointer-events: none;
+                cursor: default;
+                -webkit-user-select: none;
+                user-select: none;
+            }
+
 			/* Dividers are decoration, not menu actions. */
 			.sidebar-divider {
 				cursor: default;

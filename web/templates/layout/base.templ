@@ -348,6 +348,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				body.drag-cursor-active * {
 					cursor: grabbing !important;
 				}
+                .drag-cursor-surface[data-task-id]:active,
+                .drag-cursor-surface[data-task-id].dragging {
+                    -webkit-user-select: none;
+                    user-select: none;
+                }
 				.dragging {
 					opacity: 0.85;
 					pointer-events: none;
