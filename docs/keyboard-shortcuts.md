@@ -13,15 +13,15 @@ These are the app's keyboard bindings. On macOS, **Command** is ⌘ and **Option
 | Open or close the project menu | Command+Shift+K | Ctrl+Shift+K |
 | Previous project tab | Command+Shift+← | Ctrl+Shift+← |
 | Next project tab | Command+Shift+→ | Ctrl+Shift+→ |
-| Previous task in the breadcrumb list | Option+↑ | Alt+↑ |
-| Next task in the breadcrumb list | Option+↓ | Alt+↓ |
-| Switch to the last task visited | Option+L | Alt+L |
+| Previous task in the breadcrumb list | Command+Shift+↑ | Ctrl+Shift+↑ |
+| Next task in the breadcrumb list | Command+Shift+↓ | Ctrl+Shift+↓ |
+| Switch to the last task visited | Command+Shift+L | Ctrl+Shift+L |
 
 Project-tab shortcuts follow the displayed tab order and wrap at either end. They require at least two tabs and a visible tab strip. They work while the chat or task composer is focused. They are ignored inside other text fields, editors, and select controls, and while a dialog or popover is open.
 
 Command/Ctrl+K also opens the breadcrumb selector on automation view/edit pages. Command/Ctrl+Shift+K toggles the project menu wherever its button is visible.
 
-The task-specific shortcuts are available on a task page. All of them work while the task composer is focused. Option/Alt task-switching shortcuts are ignored in other text fields and editors.
+The task-specific shortcuts are available on a task page. All of them work while the task composer is focused. Command/Ctrl+Shift task-switching shortcuts are ignored in other text fields and editors.
 
 - **Previous/next task** uses the same project-scoped list and ordering as the breadcrumb selector, without opening it. This is not a history of pages you visited: the list includes task grouping and update recency. The order stays fixed while you step through it, and navigation stops at either end. Opening a different task another way resets the list for the next cycle.
 - **Last task visited** switches between the last two distinct tasks visited within the current project and browser tab. It does nothing until a previous task is available.
@@ -48,7 +48,7 @@ Command/Ctrl+Enter requests steering when supported and an active turn is availa
 
 Message-history navigation uses **unmodified** Up/Down arrows. It is available when the composer is empty or the caret is at the very start of the text with no selection. Down only browses history after Up has entered it. Escape restores the draft saved when history browsing began. Chat and individual task threads have separate message histories.
 
-Option/Alt+Up/Down in the task composer switches tasks rather than browsing sent messages.
+Command/Ctrl+Shift+Up/Down in the task composer switches tasks rather than browsing sent messages.
 
 ## Selectors and panels
 

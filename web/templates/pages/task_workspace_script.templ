@@ -221,7 +221,7 @@ templ TaskWorkspaceScript() {
 				else closePanel(true, false);
 				if (panel.hidden && panel.contains(active)) opener.focus({preventScroll:true});
 
-			} else if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+			} else if (command && !event.altKey && event.shiftKey) {
 				if (event.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]') && event.target.id !== 'task-message-input') return;
 				if (event.code === 'ArrowUp' || event.code === 'ArrowDown') {
 					event.preventDefault();
