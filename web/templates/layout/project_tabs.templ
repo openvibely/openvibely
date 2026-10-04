@@ -54,8 +54,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 
   [data-openvibely-runtime="desktop"] body > .drawer { height: calc(100% - 46px); }
   [data-openvibely-runtime="desktop"] #sidebar { height: calc(100dvh - 46px); }
-  [data-openvibely-runtime="desktop"] .drawer-side { top: 46px; height: calc(100dvh - 46px); }
-  @media (min-width: 1024px) { [data-openvibely-runtime="desktop"] .drawer-side { top: 0; } }
+  [data-openvibely-runtime="desktop"] .drawer-side { top: 0; height: calc(100dvh - 46px); z-index: auto; }
+  [data-openvibely-runtime="desktop"] .drawer-content > .navbar,
+  [data-openvibely-runtime="desktop"] .sidebar-header { display: none; }
   #desktop-project-titlebar { height: 46px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; --wails-draggable: drag; cursor: default; -webkit-user-select: none; user-select: none; --project-tab-selected: oklch(var(--b2)); --project-tab-contour: oklch(var(--b1)); box-shadow: inset 0 -2px var(--project-tab-contour); }
   /* Reserve the sidebar column; the first tab's curved foot starts at its edge. */
   #desktop-project-titlebar { position: relative; }
@@ -74,6 +75,19 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     #desktop-project-titlebar[data-platform="darwin"] { padding-left: 16rem; }
     body.sidebar-collapsed-pending #desktop-project-titlebar { padding-left: 3.5rem; }
     body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] { padding-left: max(3.5rem, 128px); }
+  }
+  /* Native desktop navigation stays available below the web breakpoint. */
+  @media (max-width: 1023px) {
+    [data-openvibely-runtime="desktop"] #desktop-project-titlebar .project-bar-brand { display: block; }
+    [data-openvibely-runtime="desktop"] #desktop-project-titlebar[data-platform="darwin"] .project-bar-brand { left: 90px; }
+    [data-openvibely-runtime="desktop"] #desktop-project-titlebar > #sidebar-collapse-btn, [data-openvibely-runtime="desktop"] #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: calc(16rem - 40px); }
+    [data-openvibely-runtime="desktop"] body.sidebar-collapsed-pending #desktop-project-titlebar .project-bar-brand { display: none; }
+    [data-openvibely-runtime="desktop"] body.sidebar-collapsed-pending #desktop-project-titlebar > #sidebar-collapse-btn { left: calc((3.5rem - 1px - 32px) / 2); }
+    [data-openvibely-runtime="desktop"] body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: 82px; }
+    [data-openvibely-runtime="desktop"] #desktop-project-titlebar { padding-left: 16rem; }
+    [data-openvibely-runtime="desktop"] #desktop-project-titlebar[data-platform="darwin"] { padding-left: 16rem; }
+    [data-openvibely-runtime="desktop"] body.sidebar-collapsed-pending #desktop-project-titlebar { padding-left: 3.5rem; }
+    [data-openvibely-runtime="desktop"] body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] { padding-left: max(3.5rem, 128px); }
   }
   [data-theme="light"] #desktop-project-titlebar { --project-tab-contour: var(--ov-l-border); }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }

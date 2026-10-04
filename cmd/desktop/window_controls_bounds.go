@@ -2,6 +2,11 @@ package main
 
 import "math"
 
+const (
+	desktopMinWidth  = 1024
+	desktopMinHeight = 680
+)
+
 // Browser CSS coordinates are scaled against the actual HWND client width,
 // accounting for both display scaling and webview zoom.
 type captionBounds struct {
