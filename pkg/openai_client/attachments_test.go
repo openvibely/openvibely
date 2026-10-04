@@ -176,6 +176,30 @@ func isUnsupportedFileTypeError(err error) bool {
 	return ok
 }
 
+func TestNewFileAttachment_LegacyImageExtensionFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.gif")
+	if err := os.WriteFile(path, []byte("GIF data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	mediaType, hadMapping := supportedMediaTypes[".gif"]
+	delete(supportedMediaTypes, ".gif")
+	defer func() {
+		if hadMapping {
+			supportedMediaTypes[".gif"] = mediaType
+		}
+	}()
+
+	attachment, err := NewFileAttachment(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attachment.MediaType != "image/gif" {
+		t.Errorf("MediaType = %q, want image/gif", attachment.MediaType)
+	}
+}
+
 func TestNewFileAttachmentFromBytes(t *testing.T) {
 	t.Run("basic", func(t *testing.T) {
 		att, err := NewFileAttachmentFromBytes("test.png", "image/png", []byte("PNG data"))
@@ -227,8 +251,11 @@ func TestToInputContent_Image(t *testing.T) {
 		t.Errorf("type = %v, want input_image", content["type"])
 	}
 	imageURL, ok := content["image_url"].(string)
-	if !ok || !strings.HasPrefix(imageURL, "data:image/png;base64,") {
+	if !ok || imageURL != "data:image/png;base64,ZmFrZS1wbmctZGF0YQ==" {
 		t.Errorf("image_url = %v", content["image_url"])
+	}
+	if content["detail"] != "auto" {
+		t.Errorf("detail = %v, want auto", content["detail"])
 	}
 }
 
@@ -250,7 +277,7 @@ func TestToInputContent_TextFile(t *testing.T) {
 	if !ok {
 		t.Fatal("text not a string")
 	}
-	if !strings.Contains(text, "main.go") || !strings.Contains(text, "package main") {
+	if text != "--- File: main.go ---\npackage main\nfunc main() {}\n\n--- End of main.go ---" {
 		t.Errorf("text = %q", text)
 	}
 }
@@ -276,6 +303,15 @@ func TestToInputContent_TextFileFromDisk(t *testing.T) {
 	text := content["text"].(string)
 	if !strings.Contains(text, "package hello") {
 		t.Errorf("text = %q", text)
+	}
+}
+
+func TestLoadData_ReadErrorContext(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "missing.txt")
+	att := &FileAttachment{FileName: "missing.txt", FilePath: missingPath}
+	_, err := att.loadData()
+	if err == nil || !strings.Contains(err.Error(), "read attachment "+missingPath+":") {
+		t.Fatalf("loadData error = %v, want path context", err)
 	}
 }
 
