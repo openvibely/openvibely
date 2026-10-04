@@ -204,13 +204,6 @@ templ TaskWorkspaceScript() {
 			if (event.defaultPrevented || event.isComposing || event.repeat || !root.isConnected) return;
 			var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 			var openDialog = document.querySelector('dialog[open]');
-			if (command && !event.altKey && !event.shiftKey && event.code === 'KeyK' && breadcrumbButton && (!openDialog || breadcrumb.contains(openDialog))) {
-				event.preventDefault();
-				breadcrumb.__selectorKeyboard = true;
-				if (openDialog) window.openVibelySearchableSelector.close(breadcrumb, true);
-				else breadcrumbButton.click();
-				return;
-			}
 			if (openDialog) return;
 			if (command && !event.altKey && event.shiftKey && event.code === 'KeyB') {
 				event.preventDefault();

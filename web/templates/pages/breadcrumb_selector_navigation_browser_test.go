@@ -95,6 +95,13 @@ window.addEventListener('DOMContentLoaded', function() {
   function options() { return Array.prototype.slice.call(document.querySelectorAll('[data-breadcrumb-selector-option]')); }
   function route(kind, id) { var el=document.querySelector('[data-fixture-route="'+kind+'"]'); return !!el && (!id || el.dataset.resourceId===id); }
   function key(target, value) { target.dispatchEvent(new KeyboardEvent('keydown', {key:value, bubbles:true, cancelable:true})); }
+  function checkBreadcrumbShortcut() {
+    function toggle() { document.activeElement.dispatchEvent(new KeyboardEvent('keydown',Object.assign({key:'k',code:'KeyK',bubbles:true,cancelable:true}, /Mac|iPhone|iPad/.test(navigator.platform)?{metaKey:true}:{ctrlKey:true}))); }
+    toggle();
+    if(!dialog().open || document.activeElement!==input()) fail('Command K did not open automation selector');
+    toggle();
+    if(dialog().open || document.activeElement!==button() || getComputedStyle(button()).outlineStyle!=='none') fail('Command K did not close automation selector cleanly');
+  }
   function setSearch(value) { var el=input(); el.value=value; htmx.trigger(el, 'search'); }
   async function counts() { return fetch('/counts').then(function(response){ return response.json(); }); }
   async function waitCount(key, want, label) {
@@ -182,6 +189,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await window.openVibelyNavigate('/automations/auto-one?project_id=project-browser');
     await waitFor(function(){ return route('automation-live', 'auto-one'); }, 'Automation Live');
     htmx.process(selector());
+    checkBreadcrumbShortcut();
     var liveName=document.querySelector('[data-automation-breadcrumb] [data-breadcrumb-title]');
     var liveNameLeft=liveName.getBoundingClientRect().left;
     var liveSlash=document.querySelector('[data-automation-breadcrumb] > span').getBoundingClientRect();
@@ -219,6 +227,7 @@ window.addEventListener('DOMContentLoaded', function() {
     editButton.focus();
     if(document.activeElement!==editButton) fail('Automation Edit selector caret cannot receive focus');
     htmx.process(editSelector);
+    checkBreadcrumbShortcut();
     editButton.click();
     await waitFor(function(){ return editDialog.open && editSelector.querySelectorAll('[data-breadcrumb-selector-option]').length>0; }, 'Automation Edit selector');
     editSearch.value='two'; htmx.trigger(editSearch, 'search');
