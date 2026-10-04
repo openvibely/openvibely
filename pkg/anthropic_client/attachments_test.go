@@ -187,8 +187,8 @@ func TestToContentBlock_TextFile(t *testing.T) {
 	if !ok {
 		t.Fatal("text field not a string")
 	}
-	if text == "" {
-		t.Error("text field is empty")
+	if text != "--- File: test.txt ---\nHello\n--- End of test.txt ---" {
+		t.Errorf("text = %q", text)
 	}
 }
 
@@ -231,6 +231,9 @@ func TestToContentBlock_Image(t *testing.T) {
 	if source["media_type"] != "image/png" {
 		t.Errorf("source.media_type = %v, want 'image/png'", source["media_type"])
 	}
+	if source["data"] != "ZmFrZSBwbmcgZGF0YQ==" {
+		t.Errorf("source.data = %v, want base64 encoded image bytes", source["data"])
+	}
 }
 
 func TestToContentBlock_Document(t *testing.T) {
@@ -247,6 +250,13 @@ func TestToContentBlock_Document(t *testing.T) {
 
 	if block["type"] != "document" {
 		t.Errorf("type = %v, want 'document'", block["type"])
+	}
+	source, ok := block["source"].(map[string]interface{})
+	if !ok {
+		t.Fatal("source field not a map")
+	}
+	if source["type"] != "base64" || source["media_type"] != "application/pdf" || source["data"] != "ZmFrZSBwZGYgZGF0YQ==" {
+		t.Errorf("document source = %#v", source)
 	}
 }
 
@@ -327,6 +337,7 @@ func TestIsSupportedFileType(t *testing.T) {
 		{"test.png", true},
 		{"test.go", true},
 		{"test.pdf", true},
+		{"test.bmp", false},
 		{"test.xyz", false},
 		{"test", false},
 	}
