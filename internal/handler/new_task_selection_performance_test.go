@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -20,38 +23,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var newTaskSelectionBenchmarkSink *models.LLMConfig
-
 func TestHandler_NewTaskFirstMessageReusesPreflightSelection(t *testing.T) {
 	for _, scenario := range []struct {
 		name      string
 		agentMode string
+		images    bool
 	}{
 		{name: "auto_text", agentMode: "auto"},
+		{name: "auto_image", agentMode: "auto", images: true},
 		{name: "explicit", agentMode: "explicit"},
 		{name: "default", agentMode: "default"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			db := testutil.NewTestDB(t)
 			env := newTestHandlerEnv(t, db)
+			env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 			project := createProjectTB(t, env.Handler, "New task selection "+scenario.name)
 			clearModelConfigs(t, db)
-			catalog := seedNewTaskSelectionModels(t, env.LLMConfigRepo, 3, false)
+			catalog := seedNewTaskSelectionModels(t, env.LLMConfigRepo, 3, scenario.images)
 			selectionAgentID := scenario.agentMode
 			if scenario.agentMode == "explicit" {
 				selectionAgentID = catalog[1].ID
 			}
 			message := "build endpoint handler service database integration test"
-			selectedBefore, err := env.Handler.selectTaskAgent(context.Background(), project.ID, selectionAgentID, message, false)
+			selectedBefore, err := env.Handler.selectTaskAgent(context.Background(), project.ID, selectionAgentID, message, scenario.images)
 			require.NoError(t, err)
 			require.NotNil(t, selectedBefore)
-			form := url.Values{"message": {message}, "agent_id": {selectionAgentID}}
-			req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", strings.NewReader(form.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.Header.Set("HX-Request", "true")
-			rec := httptest.NewRecorder()
-			env.Echo.ServeHTTP(rec, req)
+			require.Equal(t, scenario.images, selectedBefore.Provider == models.ProviderAnthropic, "fixture should exercise image-aware model selection")
 
+			form := url.Values{"message": {message}, "agent_id": {selectionAgentID}}
+			if scenario.images {
+				sessionID := repository.NewID()
+				form.Set("attachment_session_id", sessionID)
+				seedNewTaskSelectionImage(t, sessionID)
+			}
+			rec, err := runNewTaskCreateHandler(env.Handler, env.Echo, project.ID, form, false)
+			require.NoError(t, err)
 			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			taskID := rec.Header().Get("X-Created-Task-ID")
 			require.NotEmpty(t, taskID)
@@ -66,6 +73,9 @@ func TestHandler_NewTaskFirstMessageReusesPreflightSelection(t *testing.T) {
 			require.Len(t, executions, 1)
 			require.Equal(t, selectedBefore.ID, executions[0].AgentConfigID)
 			require.Equal(t, message, executions[0].PromptSent)
+			inputs, err := env.Handler.threadInputRepo.ListPendingForTask(context.Background(), taskID)
+			require.NoError(t, err)
+			require.Empty(t, inputs, "a direct first-turn admission must not also create a queued input")
 		})
 	}
 }
@@ -81,36 +91,41 @@ func TestHandler_NewTaskSelectionHandoffDoesNotRepeatModelLookups(t *testing.T) 
 		{name: "auto_text", agentID: "auto", expectedSQL: 2},
 		{name: "auto_image", agentID: "auto", hasImages: true, vision: true, expectedSQL: 2},
 		{name: "explicit", expectedSQL: 1},
-		{name: "default", agentID: "default", expectedSQL: 2},
+		{name: "default", agentID: "default", expectedSQL: 1},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			db, counter := testutil.NewStatementCountingTestDB(t)
 			env := newTestHandlerEnv(t, db)
+			env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 			project := createProjectTB(t, env.Handler, "Selection handoff "+scenario.name)
 			clearModelConfigs(t, db)
 			catalog := seedNewTaskSelectionModels(t, env.LLMConfigRepo, 3, scenario.vision)
 			if scenario.name == "explicit" {
 				scenario.agentID = catalog[1].ID
 			}
-			message := "build endpoint handler service database integration test"
-			req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+project.ID+"&from=new&thread=1", nil)
-			c := env.Echo.NewContext(req, httptest.NewRecorder())
-			c.Set("newTaskThread", true)
+			form := url.Values{
+				"message":  {"build endpoint handler service database integration test"},
+				"agent_id": {scenario.agentID},
+			}
+			if scenario.hasImages {
+				sessionID := repository.NewID()
+				form.Set("attachment_session_id", sessionID)
+				seedNewTaskSelectionImage(t, sessionID)
+			}
 
 			counter.Reset()
 			counter.SetEnabled(true)
-			preflight, err := env.Handler.selectTaskAgent(context.Background(), project.ID, scenario.agentID, message, scenario.hasImages)
-			require.NoError(t, err)
-			require.NotNil(t, preflight)
-			if scenario.vision {
-				require.Equal(t, catalog[2].ID, preflight.ID, "Auto image routing must select the vision-capable model")
-			}
-			c.Set(newTaskThreadSelectedAgentContextKey, preflight)
-			handoff, err := env.Handler.selectTaskThreadAgent(c, project.ID, scenario.agentID, message, scenario.hasImages)
+			rec, err := runNewTaskCreateHandler(env.Handler, env.Echo, project.ID, form, false)
 			counter.SetEnabled(false)
 			require.NoError(t, err)
-			require.Equal(t, preflight.ID, handoff.ID)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 			require.Equal(t, scenario.expectedSQL, countNewTaskSelectionQueries(counter.Statements()), "selection SQL statements: %q", counter.Statements())
+			executions, err := env.ExecRepo.ListByTask(context.Background(), rec.Header().Get("X-Created-Task-ID"))
+			require.NoError(t, err)
+			require.Len(t, executions, 1)
+			if scenario.vision {
+				require.Equal(t, catalog[2].ID, executions[0].AgentConfigID, "first send must keep image-aware routing")
+			}
 		})
 	}
 }
@@ -149,6 +164,7 @@ func TestHandler_NewTaskModelSelectionFailuresAreRejectedBeforePersistence(t *te
 func TestHandler_DirectTaskThreadStillSelectsFromRequest(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	env := newTestHandlerEnv(t, db)
+	env.Handler.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
 	project := createProjectTB(t, env.Handler, "Direct thread selection")
 	clearModelConfigs(t, db)
 	model := seedNewTaskSelectionModels(t, env.LLMConfigRepo, 1, false)[0]
@@ -171,7 +187,7 @@ func TestHandler_DirectTaskThreadStillSelectsFromRequest(t *testing.T) {
 	require.Equal(t, model.ID, executions[0].AgentConfigID)
 }
 
-func BenchmarkNewTaskModelSelectionHandoff(b *testing.B) {
+func BenchmarkNewTaskFirstSubmitHandlerPath(b *testing.B) {
 	previousLogOutput := log.Writer()
 	log.SetOutput(io.Discard)
 	defer log.SetOutput(previousLogOutput)
@@ -179,10 +195,16 @@ func BenchmarkNewTaskModelSelectionHandoff(b *testing.B) {
 	for _, catalogSize := range []int{1, 50, 200} {
 		b.Run(fmt.Sprintf("models_%d", catalogSize), func(b *testing.B) {
 			db, counter := testutil.NewStatementCountingTestDB(b)
-			h, _, repo := setupTestHandlerForDB(b, db)
-			project := createProjectTB(b, h, "New task model selection benchmark")
+			env := newTestHandlerEnv(b, db)
+			h := env.Handler
+			project := createProjectTB(b, h, "New task first-submit benchmark")
 			clearModelConfigs(b, db)
-			catalog := seedNewTaskSelectionModels(b, repo, catalogSize, true)
+			catalog := seedNewTaskSelectionModels(b, env.LLMConfigRepo, catalogSize, true)
+			h.startStreamingResponseOverride = func(streamingResponseParams) error { return nil }
+			h.processTaskThreadAttachmentsOverride = func(context.Context, string, string) (string, []models.Attachment, []models.ChatAttachment, error) {
+				return "", nil, nil, nil
+			}
+
 			for _, selectionMode := range []struct {
 				name      string
 				agentID   string
@@ -194,85 +216,134 @@ func BenchmarkNewTaskModelSelectionHandoff(b *testing.B) {
 				{name: "default", agentID: "default"},
 			} {
 				b.Run(selectionMode.name, func(b *testing.B) {
-					for _, variant := range []struct {
-						name  string
-						reuse bool
-					}{{name: "before", reuse: false}, {name: "after", reuse: true}} {
-						b.Run(variant.name, func(b *testing.B) {
-							ctx := newTaskSelectionBenchmarkContext(project.ID)
-							selectOnce := func() *models.LLMConfig {
-								selected, err := runNewTaskSelectionHandoff(h, ctx, project.ID, selectionMode.agentID, "build endpoint handler service database integration test", selectionMode.hasImages, variant.reuse)
-								if err != nil {
-									b.Fatal(err)
-								}
-								return selected
+					beforeLatencies := make([]int64, 0, b.N)
+					afterLatencies := make([]int64, 0, b.N)
+					pairedLatencyDeltas := make([]int64, 0, b.N)
+					var beforeBytes, afterBytes uint64
+					var beforeAllocs, afterAllocs uint64
+					var beforeSQL, afterSQL int64
+					b.ReportAllocs()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						order := [2]bool{true, false}
+						if i%2 == 1 {
+							order = [2]bool{false, true}
+						}
+						var pairBefore, pairAfter int64
+						for _, forceReselection := range order {
+							b.StopTimer()
+							form := url.Values{
+								"message":  {"build endpoint handler service database integration test"},
+								"agent_id": {selectionMode.agentID},
 							}
-
+							pendingSessionID := ""
+							if selectionMode.hasImages {
+								pendingSessionID = repository.NewID()
+								form.Set("attachment_session_id", pendingSessionID)
+								seedNewTaskSelectionImage(b, pendingSessionID)
+							}
+							ctx, rec := newTaskCreateEchoContext(env.Echo, project.ID, form, forceReselection)
 							counter.Reset()
 							counter.SetEnabled(true)
-							selected := selectOnce()
-							counter.SetEnabled(false)
-							if selected == nil {
-								b.Fatal("selection returned nil")
-							}
-							selectionSQL := countNewTaskSelectionQueries(counter.Statements())
-							counter.Reset()
-							selectOnce() // warm the same fixture before timing
-							b.ReportAllocs()
-							b.ResetTimer()
-							for i := 0; i < b.N; i++ {
-								newTaskSelectionBenchmarkSink = selectOnce()
-							}
+							var memBefore, memAfter runtime.MemStats
+							runtime.ReadMemStats(&memBefore)
+							b.StartTimer()
+							start := time.Now()
+							err := h.CreateTask(ctx)
+							latency := time.Since(start).Nanoseconds()
 							b.StopTimer()
-							b.ReportMetric(float64(selectionSQL), "selection-sql/op")
-							b.ReportMetric(float64(medianNewTaskSelectionLatency(b, selectOnce)), "median-ns/op")
-						})
+							runtime.ReadMemStats(&memAfter)
+							counter.SetEnabled(false)
+							if err != nil {
+								b.Fatalf("CreateTask: %v", err)
+							}
+							if rec.Code != http.StatusOK {
+								b.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+							}
+							if !strings.Contains(rec.Body.String(), `data-loaded="true"`) || strings.Contains(rec.Body.String(), "Thread is loading...") {
+								b.Fatal("first-submit response did not contain the preloaded task thread")
+							}
+							taskID := rec.Header().Get("X-Created-Task-ID")
+							if taskID == "" {
+								b.Fatal("first-submit response omitted X-Created-Task-ID")
+							}
+							executions, err := env.ExecRepo.ListByTask(context.Background(), taskID)
+							if err != nil || len(executions) != 1 {
+								b.Fatalf("first-submit executions = %d, err=%v; want one", len(executions), err)
+							}
+							statements := counter.Statements()
+							if forceReselection {
+								pairBefore = latency
+								beforeBytes += memAfter.TotalAlloc - memBefore.TotalAlloc
+								beforeAllocs += memAfter.Mallocs - memBefore.Mallocs
+								beforeSQL += int64(countNewTaskSelectionQueries(statements))
+							} else {
+								pairAfter = latency
+								afterBytes += memAfter.TotalAlloc - memBefore.TotalAlloc
+								afterAllocs += memAfter.Mallocs - memBefore.Mallocs
+								afterSQL += int64(countNewTaskSelectionQueries(statements))
+							}
+							if err := env.TaskRepo.Delete(context.Background(), taskID); err != nil {
+								b.Fatalf("delete benchmark task: %v", err)
+							}
+							for _, execution := range executions {
+								_ = os.RemoveAll(filepath.Join(uploadsDir, "chat", execution.ID))
+							}
+							if pendingSessionID != "" {
+								_ = os.RemoveAll(filepath.Join(uploadsDir, "chat", "pending", pendingSessionID))
+							}
+						}
+						beforeLatencies = append(beforeLatencies, pairBefore)
+						afterLatencies = append(afterLatencies, pairAfter)
+						pairedLatencyDeltas = append(pairedLatencyDeltas, pairAfter-pairBefore)
 					}
+					b.StopTimer()
+					b.ReportMetric(float64(medianInt64(beforeLatencies)), "median-before-ns/op")
+					b.ReportMetric(float64(medianInt64(afterLatencies)), "median-after-ns/op")
+					b.ReportMetric(float64(medianInt64(pairedLatencyDeltas)), "median-paired-delta-ns/op")
+					b.ReportMetric(float64(beforeBytes)/float64(b.N), "before-B/op")
+					b.ReportMetric(float64(afterBytes)/float64(b.N), "after-B/op")
+					b.ReportMetric(float64(beforeAllocs)/float64(b.N), "before-allocs/op")
+					b.ReportMetric(float64(afterAllocs)/float64(b.N), "after-allocs/op")
+					b.ReportMetric(float64(beforeSQL)/float64(b.N), "before-selection-sql/op")
+					b.ReportMetric(float64(afterSQL)/float64(b.N), "after-selection-sql/op")
 				})
 			}
 		})
 	}
 }
 
-func newTaskSelectionBenchmarkContext(projectID string) echo.Context {
-	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+projectID+"&from=new&thread=1", nil)
-	ctx := echo.New().NewContext(req, httptest.NewRecorder())
-	ctx.Set("newTaskThread", true)
-	ctx.SetParamNames("taskId")
-	ctx.SetParamValues("benchmark-task")
-	return ctx
+func medianInt64(values []int64) int64 {
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	return values[len(values)/2]
 }
 
-func runNewTaskSelectionHandoff(h *Handler, c echo.Context, projectID, agentID, message string, hasImages, reuse bool) (*models.LLMConfig, error) {
-	selected, err := h.selectTaskAgent(c.Request().Context(), projectID, agentID, message, hasImages)
-	if err != nil {
-		return nil, err
+func newTaskCreateEchoContext(e *echo.Echo, projectID string, form url.Values, forceReselection bool) (echo.Context, *httptest.ResponseRecorder) {
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id="+projectID+"&from=new&thread=1", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	if forceReselection {
+		ctx.Set(newTaskThreadForceReselectionContextKey, true)
 	}
-	if !reuse {
-		return h.selectTaskAgent(c.Request().Context(), projectID, agentID, message, hasImages)
-	}
-	c.Set(newTaskThreadSelectedAgentContextKey, selected)
-	handoff, handoffErr := h.selectTaskThreadAgent(c, projectID, agentID, message, hasImages)
-	c.Set(newTaskThreadSelectedAgentContextKey, nil)
-	return handoff, handoffErr
+	return ctx, rec
 }
 
-func medianNewTaskSelectionLatency(b *testing.B, run func() *models.LLMConfig) int64 {
-	b.Helper()
-	const samples = 9
-	const batch = 32
-	latencies := make([]int64, 0, samples)
-	for sample := 0; sample < samples; sample++ {
-		start := time.Now()
-		for i := 0; i < batch; i++ {
-			if run() == nil {
-				b.Fatal("selection returned nil")
-			}
-		}
-		latencies = append(latencies, time.Since(start).Nanoseconds()/batch)
+func runNewTaskCreateHandler(h *Handler, e *echo.Echo, projectID string, form url.Values, forceReselection bool) (*httptest.ResponseRecorder, error) {
+	ctx, rec := newTaskCreateEchoContext(e, projectID, form, forceReselection)
+	return rec, h.CreateTask(ctx)
+}
+
+func seedNewTaskSelectionImage(tb testing.TB, sessionID string) {
+	tb.Helper()
+	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	if err := os.MkdirAll(pendingDir, 0o700); err != nil {
+		tb.Fatalf("create benchmark pending image directory: %v", err)
 	}
-	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-	return latencies[len(latencies)/2]
+	if err := os.WriteFile(filepath.Join(pendingDir, "draft.png"), []byte("image"), 0o600); err != nil {
+		tb.Fatalf("write benchmark pending image: %v", err)
+	}
 }
 
 func seedNewTaskSelectionModels(tb testing.TB, repo *repository.LLMConfigRepo, count int, includeVisionModel bool) []*models.LLMConfig {
@@ -307,8 +378,7 @@ func countNewTaskSelectionQueries(statements []string) int {
 		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
 		if strings.HasPrefix(normalized, "select id, name, provider, model, is_default, auth_method from agent_configs order by is_default desc, name asc") ||
 			strings.HasPrefix(normalized, "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '')") ||
-			strings.HasPrefix(normalized, "select a.id, a.name, a.provider, a.model, a.reasoning_effort,") ||
-			strings.HasPrefix(normalized, "select id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers") {
+			strings.HasPrefix(normalized, "select a.id, a.name, a.provider, a.model, a.reasoning_effort,") {
 			count++
 		}
 	}
