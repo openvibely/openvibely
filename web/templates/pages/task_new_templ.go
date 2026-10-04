@@ -135,7 +135,7 @@ func NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDef
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = components.BreadcrumbSelector(models.BreadcrumbSelector{ID: "task-resource-selector", Kind: "Task", CurrentName: "New task", SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s", project.ID), CaretOnly: true, ContextName: "tab", ContextValue: "chat"}).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.BreadcrumbSelector(models.BreadcrumbSelector{ID: "task-resource-selector", Kind: "Task", CurrentName: "New task", SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s", project.ID), CaretOnly: true, ContextName: "tab", ContextValue: "chat", CreateURL: fmt.Sprintf("/tasks/new?project_id=%s", project.ID), CreateLabel: "Create New Task"}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

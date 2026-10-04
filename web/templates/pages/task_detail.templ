@@ -94,6 +94,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 					ID: "task-resource-selector", Kind: "Task", CurrentID: task.ID, CurrentName: task.Title,
 					SearchURL: fmt.Sprintf("/breadcrumb-selectors/tasks?project_id=%s&current_id=%s", task.ProjectID, task.ID),
 					ContextName: "tab", ContextValue: defaultTab, CaretOnly: true,
+					CreateURL: fmt.Sprintf("/tasks/new?project_id=%s", task.ProjectID), CreateLabel: "Create New Task",
 					OriginName: "from",
 				})
 				<span id="task-breadcrumb-changes" class="flex-shrink-0 text-sm" aria-current="page" hidden><span class="mx-1 text-base-content/30" aria-hidden="true">/</span> Changes</span>

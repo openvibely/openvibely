@@ -47,6 +47,7 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 			ID: config.ID,
 			Kind: config.Kind,
 			SearchURL: config.SearchURL,
+			CreateURL: config.CreateURL, CreateLabel: config.CreateLabel,
 			InitialStatus: "Search results update as you type.",
 		}) {
 			<p class="px-3 py-6 text-center text-sm text-base-content/60">Loading { config.Kind }s…</p>
