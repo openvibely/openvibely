@@ -159,50 +159,55 @@ func TestEstimateAgenticResponseItemModelVisibleBytes_NonImageInputsMatchJSONSiz
 }
 
 func TestEstimateAgenticImageRepeatedChecksPreserveBoundariesAndRequestJSON(t *testing.T) {
-	item := map[string]any{
-		"type": "message",
-		"role": "user",
-		"content": []any{
-			map[string]any{"type": "input_text", "text": "inspect this image"},
-			map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + strings.Repeat("a", 12000), "detail": "auto"},
-		},
-	}
-	inputItems := []any{item}
-	requestBodyBefore, err := json.Marshal(map[string]any{"input": inputItems})
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantBytes := legacyAgenticVisibleBytesForTest(t, item)
-	wantTokens := approxOpenAITokensFromByteCount(wantBytes)
-	wantRequestTokens := estimateCompactionRequestTokens(inputItems, nil, "") + 32
+	const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+	for _, detail := range []string{"auto", "original"} {
+		t.Run(detail, func(t *testing.T) {
+			item := map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_text", "text": "inspect this image"},
+					map[string]any{"type": "input_image", "image_url": "data:image/png;base64," + onePixelPNG, "detail": detail},
+				},
+			}
+			inputItems := []any{item}
+			requestBodyBefore, err := json.Marshal(map[string]any{"input": inputItems})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantBytes := legacyAgenticVisibleBytesForTest(t, item)
+			wantTokens := approxOpenAITokensFromByteCount(wantBytes)
+			wantRequestTokens := estimateCompactionRequestTokens(inputItems, nil, "") + 32
 
-	for round := 1; round <= 8; round++ {
-		if got := estimateAgenticResponseItemModelVisibleBytes(item); got != wantBytes {
-			t.Fatalf("round %d visible bytes = %d, want %d", round, got, wantBytes)
-		}
-		if got := estimateInputItemsTokens(inputItems); got != wantTokens {
-			t.Fatalf("round %d input tokens = %d, want %d", round, got, wantTokens)
-		}
-		if !shouldAutoCompactInputItems(inputItems, wantTokens) || shouldAutoCompactInputItems(inputItems, wantTokens+1) {
-			t.Fatalf("round %d changed the compaction boundary at %d tokens", round, wantTokens)
-		}
+			for round := 1; round <= 8; round++ {
+				if got := estimateAgenticResponseItemModelVisibleBytes(item); got != wantBytes {
+					t.Fatalf("round %d visible bytes = %d, want %d", round, got, wantBytes)
+				}
+				if got := estimateInputItemsTokens(inputItems); got != wantTokens {
+					t.Fatalf("round %d input tokens = %d, want %d", round, got, wantTokens)
+				}
+				if !shouldAutoCompactInputItems(inputItems, wantTokens) || shouldAutoCompactInputItems(inputItems, wantTokens+1) {
+					t.Fatalf("round %d changed the compaction boundary at %d tokens", round, wantTokens)
+				}
 
-		fitsAtBoundary := &AgenticOptions{ContextWindow: wantRequestTokens + 100 + 1024, MaxOutputTokens: 100}
-		if err := ensureOpenAIAgenticRequestFits(inputItems, nil, fitsAtBoundary); err != nil {
-			t.Fatalf("round %d should fit at exact safe budget: %v", round, err)
-		}
-		failsBelowBoundary := &AgenticOptions{ContextWindow: wantRequestTokens + 100 + 1023, MaxOutputTokens: 100}
-		if err := ensureOpenAIAgenticRequestFits(inputItems, nil, failsBelowBoundary); err == nil {
-			t.Fatalf("round %d should exceed a safe budget one token below the estimate", round)
-		}
-	}
+				fitsAtBoundary := &AgenticOptions{ContextWindow: wantRequestTokens + 100 + 1024, MaxOutputTokens: 100}
+				if err := ensureOpenAIAgenticRequestFits(inputItems, nil, fitsAtBoundary); err != nil {
+					t.Fatalf("round %d should fit at exact safe budget: %v", round, err)
+				}
+				failsBelowBoundary := &AgenticOptions{ContextWindow: wantRequestTokens + 100 + 1023, MaxOutputTokens: 100}
+				if err := ensureOpenAIAgenticRequestFits(inputItems, nil, failsBelowBoundary); err == nil {
+					t.Fatalf("round %d should exceed a safe budget one token below the estimate", round)
+				}
+			}
 
-	requestBodyAfter, err := json.Marshal(map[string]any{"input": inputItems})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(requestBodyAfter) != string(requestBodyBefore) {
-		t.Fatal("provider request JSON changed after repeated estimates")
+			requestBodyAfter, err := json.Marshal(map[string]any{"input": inputItems})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(requestBodyAfter) != string(requestBodyBefore) {
+				t.Fatal("provider request JSON changed after repeated estimates")
+			}
+		})
 	}
 }
 
