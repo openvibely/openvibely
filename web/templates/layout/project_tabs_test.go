@@ -159,11 +159,13 @@ func TestMacTrafficLightGeometry(t *testing.T) {
 	}
 	for _, want := range []string{
 		`box-shadow: inset 0 0 0 .5px`,
+		`.desktop-traffic-lights { gap: 9px;`,
+		`flex: 0 0 14px; width: 14px; height: 14px;`,
 		`transform: translate(-50%, -50%)`,
-		`stroke-width="1" stroke-linecap="round"`,
-		`d="M3.5 3.5l5 5m0-5-5 5"`,
-		`d="M2.5 6h7"`,
-		`d="M2.5 2.5h4l-4 4zm7 7h-4l4-4z"`,
+		`stroke-width="1.5" stroke-linecap="round"`,
+		`d="M4 4l6 6m0-6-6 6"`,
+		`d="M3 7h8"`,
+		`d="M3.5 3.5H8l-4.5 4.5zm7 7H6l4.5-4.5z"`,
 	} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing traffic-light geometry: %s", want)
