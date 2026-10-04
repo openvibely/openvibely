@@ -818,7 +818,7 @@ func diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, revi
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" class=\"badge badge-sm badge-outline cursor-pointer hover:badge-primary max-w-full min-w-0 overflow-hidden\" onclick=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" class=\"badge badge-sm badge-outline cursor-pointer max-w-full min-w-0 overflow-hidden\" onclick=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1937,7 +1937,7 @@ func diffViewerContent(metas []DiffFileRenderMeta, initialView string) templ.Com
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\" class=\"badge badge-sm badge-outline cursor-pointer hover:badge-primary max-w-full min-w-0 overflow-hidden\" onclick=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 113, "\" class=\"badge badge-sm badge-outline cursor-pointer max-w-full min-w-0 overflow-hidden\" onclick=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

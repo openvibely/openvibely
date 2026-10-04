@@ -2033,7 +2033,7 @@ diff --git a/web/templates/components/really-long-directory-name/another-long-di
 			if !strings.Contains(body, `<div class="flex flex-wrap gap-1 min-w-0 max-w-full overflow-hidden">`) {
 				t.Fatal("changed files badge group must wrap within its container")
 			}
-			if !strings.Contains(body, `class="badge badge-sm badge-outline cursor-pointer hover:badge-primary max-w-full min-w-0 overflow-hidden"`) {
+			if !strings.Contains(body, `class="badge badge-sm badge-outline cursor-pointer max-w-full min-w-0 overflow-hidden"`) {
 				t.Fatal("changed file badge must be constrained to the available width")
 			}
 			if !strings.Contains(body, `<span class="block truncate min-w-0">.../another-long-directory-name/this-is-an-extremely-long-file-name-that-must-not-overflow-the-task-changes-changed-files-pill-container.go</span>`) {
