@@ -444,6 +444,11 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					if (typeof window.refreshCardSearches === 'function') {
 						window.refreshCardSearches(root);
 					}
+					// Full-content actions replace the toolbar. Initialize its handlers
+					// before installing checkboxes so they reference the current toolbar.
+					if (typeof window.refreshCardListToolbars === 'function') {
+						window.refreshCardListToolbars(root);
+					}
 					if (typeof root._openVibelyInstallSelectionCards === 'function') {
 						root._openVibelyInstallSelectionCards();
 					}
