@@ -346,6 +346,10 @@ templ analyticsContent(currentProject *models.Project) {
 						  const bounds = dialog.getBoundingClientRect();
 						  if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dismiss(event);
 						 }, {signal:eventSignal});
+						 dialog.addEventListener('keydown', event => {
+						  if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;
+						  event.preventDefault(); event.stopPropagation(); dismiss(event);
+						 }, {signal:eventSignal});
 						 dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(event); }, {signal:eventSignal});
 						 dialog.addEventListener('close', () => { if (!dialog.open) restore(); }, {signal:eventSignal});
 						 document.querySelectorAll('[data-analytics-expand]').forEach(button => {
