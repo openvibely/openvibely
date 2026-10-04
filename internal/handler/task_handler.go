@@ -936,13 +936,18 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 	threadDraft := c.QueryParam("from") == "new" && c.QueryParam("thread") == "1"
 	scheduledDraft := threadDraft && c.FormValue("add_schedule") == "on"
+	var selectedThreadAgent *models.LLMConfig
 	if threadDraft {
 		message := strings.TrimSpace(c.FormValue("message"))
 		if message == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 		}
-		if _, err := h.selectTaskAgent(c.Request().Context(), projectID, c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id"))); err != nil && !scheduledDraft && c.FormValue("category") != string(models.CategoryBacklog) {
+		selectedAgent, err := h.selectTaskAgent(c.Request().Context(), projectID, c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id")))
+		if err != nil && !scheduledDraft && c.FormValue("category") != string(models.CategoryBacklog) {
 			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")
+		}
+		if err == nil {
+			selectedThreadAgent = selectedAgent
 		}
 	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
@@ -1122,6 +1127,9 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		c.SetParamValues(t.ID)
 		c.Set("newTaskThread", true)
 		if startDraft {
+			if selectedThreadAgent != nil {
+				c.Set(newTaskThreadSelectedAgentContextKey, selectedThreadAgent)
+			}
 			return h.TaskThreadSend(c)
 		}
 		c.Response().Header().Set("X-Created-Task-ID", t.ID)
@@ -3251,6 +3259,17 @@ func (h *Handler) persistTaskThreadModel(c echo.Context, task *models.Task) erro
 	return nil
 }
 
+const newTaskThreadSelectedAgentContextKey = "newTaskThreadSelectedAgent"
+
+func (h *Handler) selectTaskThreadAgent(c echo.Context, projectID, agentID, message string, hasImages bool) (*models.LLMConfig, error) {
+	if isNewTaskThread, _ := c.Get("newTaskThread").(bool); isNewTaskThread {
+		if selected, _ := c.Get(newTaskThreadSelectedAgentContextKey).(*models.LLMConfig); selected != nil {
+			return selected, nil
+		}
+	}
+	return h.selectTaskAgent(c.Request().Context(), projectID, agentID, message, hasImages)
+}
+
 // TaskThreadSend handles sending a follow-up message in the task thread.
 // Uses shared agent selection and streaming response processing from chat_processing.go.
 func (h *Handler) TaskThreadSend(c echo.Context) error {
@@ -3300,12 +3319,10 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		))
 	}
 
-	// Check for pending image attachments (for vision-aware agent selection)
-	hasImages := hasPendingImages(sessionID)
-
 	// Select agent: prefer form value, fall back to task's assigned agent, then auto-select.
 	// "auto" routes through complexity-based auto-selection; explicit IDs route directly.
-	agent, err := h.selectTaskAgent(c.Request().Context(), task.ProjectID, agentID, message, hasImages)
+	hasImages := hasPendingImages(sessionID)
+	agent, err := h.selectTaskThreadAgent(c, task.ProjectID, agentID, message, hasImages)
 	if err != nil {
 		applog.Infof("[handler] TaskThreadSend agent selection error: %v, trying task fallback", err)
 		if task.AgentID != nil {
