@@ -1423,6 +1423,11 @@ func TestBrowserFunctional_AnalyticsContent_FullscreenChartsInChrome(t *testing.
    for(const canvas of document.querySelectorAll('canvas'))check(canvas.closest('.card').querySelector('[data-analytics-expand]'),'missing expand button: '+canvas.id);
    const canvas=document.getElementById('modelRunTimeTrendChart'),card=canvas.closest('.card'),parent=card.parentElement,next=card.nextSibling;
    const button=card.querySelector('[data-analytics-expand]'),select=card.querySelector('select'),plot=canvas.parentElement;
+   const cardRect=card.getBoundingClientRect(),buttonRect=button.getBoundingClientRect();
+   check(Math.abs(buttonRect.top-cardRect.top-12)<1&&Math.abs(cardRect.right-buttonRect.right-16)<1,'expand icon is not at card top right');
+   const close=dialog.firstElementChild;
+   check(close.querySelector('svg')&&!close.textContent.trim(),'exit control is not icon only');
+   check(close.getAttribute('aria-label')==='Exit full screen'&&close.title==='Exit full screen','exit icon lacks accessible label or tooltip');
    const originalStyle=plot.getAttribute('style');
    let resized=0;
    window._analyticsCharts.fullscreenTest={canvas,resize(){resized++;},destroy(){}};
@@ -1430,6 +1435,8 @@ func TestBrowserFunctional_AnalyticsContent_FullscreenChartsInChrome(t *testing.
    check(dialog.open&&dialog.contains(card),'chart did not enter full screen');
    check(dialog.getBoundingClientRect().width===innerWidth&&dialog.getBoundingClientRect().height===innerHeight,'dialog does not fill viewport');
    check(plot.getBoundingClientRect().height>=innerHeight-200,'plot did not fill available height: '+plot.getBoundingClientRect().height+' of '+innerHeight);
+   const closeRect=close.getBoundingClientRect();
+   check(Math.abs(closeRect.top-12)<1&&Math.abs(innerWidth-closeRect.right-16)<1,'exit icon is not at full screen top right');
    check(dialog.querySelector('select')===select,'model filter was replaced');
    check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
    check(document.activeElement===dialog.firstElementChild,'close button not focused');
