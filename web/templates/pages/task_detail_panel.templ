@@ -19,6 +19,7 @@ templ TaskDetailPanel() {
 		html:has(#task-detail-content), body:has(#task-detail-content), #main-content:has(#task-detail-content) { overscroll-behavior-y:none; }
 		#task-detail-content > [data-page-header] > nav { flex-shrink:1; flex-wrap:nowrap; }
 		#task-details-opener, #task-workspace-back { flex-shrink:0; }
+		#task-workspace-back:not([hidden]) + #task-details-opener { margin-left:-4px; }
 		#task-breadcrumb-changes { font-size:16px; line-height:22px; }
 		#task-breadcrumb-toolbar button:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; border-radius:6px; }
 		#task-breadcrumb-changes[hidden] { display:none; }

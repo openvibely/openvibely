@@ -98,8 +98,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				})
 				<span id="task-breadcrumb-changes" class="flex-shrink-0 text-sm" aria-current="page" hidden><span class="mx-1 text-base-content/30" aria-hidden="true">/</span> Changes</span>
 			</div>
-			<button id="task-workspace-back" type="button" class="btn btn-ghost btn-sm btn-square" title="Back to thread" aria-label="Back to thread" hidden onclick="window.taskWorkspace.openThread()">
-				<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5-6 6 6 6M3 11h10a7 7 0 0 1 7 7v2"/></svg>
+			<button id="task-workspace-back" type="button" class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square" title="Back to thread" aria-label="Back to thread" hidden onclick="window.taskWorkspace.openThread()">
+				<svg width="20" height="20" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" data-slot="icon">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155"/>
+</svg>
 			</button>
 			<button id="task-details-opener" type="button" class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square" aria-label="Toggle details panel" aria-controls="task-details-panel" aria-expanded="false" onclick="window.taskWorkspace.togglePanel()"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path class="panel-toggle-fill" d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4Z" stroke="none"/><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg></button>
 			<script>
