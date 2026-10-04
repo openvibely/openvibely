@@ -506,7 +506,6 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 		`data-analytics-hover-marker`,
 		`pointerEvents = 'none'`,
 		`zIndex = '2'`,
-		`marker.style.clipPath = 'inset('`,
 		`beforeDestroy: function(chart)`,
 		`analyticsLineTooltipOptions()`,
 		`itemSort: function(a, b)`,
@@ -642,8 +641,14 @@ func TestBrowserFunctional_AnalyticsContent_LineChartHoverMarkerBehaviorInChrome
     if (!marker) fail('plugin did not create a DOM marker above the canvas tooltip');
     if (marker.style.pointerEvents !== 'none' || marker.style.zIndex !== '2') fail('DOM marker does not preserve pointer tracking or layer above the canvas');
     if (marker.style.left !== '80px' || marker.style.top !== '4px') fail('DOM marker is not responsively positioned over the selected point');
-    var markerClipPath = getComputedStyle(marker).clipPath;
-    if (markerClipPath === 'none' || markerClipPath.indexOf('2px') < 0) fail('DOM marker does not preserve chart-area clipping at an edge point: ' + markerClipPath);
+    // Endpoint halos must remain whole, including with a responsively scaled canvas.
+    [chart.chartArea.left, chart.chartArea.right].forEach(function(x) {
+      points[1].element.x = x;
+      plugin.afterDraw(chart);
+      if (marker.style.left !== (x * 2) + 'px') fail('endpoint marker moved away from its data point');
+      if (getComputedStyle(marker).clipPath !== 'none') fail('endpoint hover halo is clipped at x=' + x);
+      if (marker.style.display !== 'block') fail('endpoint hover halo is hidden');
+    });
     if (marker.style.backgroundColor !== 'rgb(59, 130, 246)' || marker.style.borderColor !== 'rgba(255, 255, 255, 0.96)') fail('DOM marker lacks an opaque dataset-colored center and contrasting halo');
     var outArgs = {event: {type: 'mouseout'}, inChartArea: false, changed: false};
     plugin.beforeEvent(chart, outArgs);

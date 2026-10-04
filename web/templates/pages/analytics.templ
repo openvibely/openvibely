@@ -1294,13 +1294,8 @@ templ analyticsContent(currentProject *models.Project) {
 											const datasetColor = dataset.borderColor || element.options?.borderColor || element.options?.backgroundColor;
 											const markerLeft = canvasRect.left - parentRect.left + element.x * scaleX;
 											const markerTop = canvasRect.top - parentRect.top + element.y * scaleY;
-											const chartLeft = canvasRect.left - parentRect.left + chart.chartArea.left * scaleX;
-											const chartTop = canvasRect.top - parentRect.top + chart.chartArea.top * scaleY;
-											const chartRight = canvasRect.left - parentRect.left + chart.chartArea.right * scaleX;
-											const chartBottom = canvasRect.top - parentRect.top + chart.chartArea.bottom * scaleY;
 											marker.style.left = markerLeft + 'px';
 											marker.style.top = markerTop + 'px';
-											marker.style.clipPath = 'inset(' + Math.max(0, chartTop - markerTop + 6) + 'px ' + Math.max(0, markerLeft + 6 - chartRight) + 'px ' + Math.max(0, markerTop + 6 - chartBottom) + 'px ' + Math.max(0, chartLeft - markerLeft + 6) + 'px)';
 											marker.style.backgroundColor = typeof datasetColor === 'string' ? datasetColor : 'rgb(59, 130, 246)';
 											marker.style.display = 'block';
 										},
