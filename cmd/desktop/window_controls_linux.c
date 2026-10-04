@@ -24,8 +24,22 @@ static void ovCaptionMeasure(OVCaption *c) {
 }
 
 #if GTK_MAJOR_VERSION < 4
+static void ovCaptionStateChanged(GtkWidget *widget, GtkStateFlags previous, gpointer data) {
+ // The transparent caption sits over WebKit's separately rendered surface.
+ // Redraw the overlay as well as the button so the old hover is erased.
+ gtk_widget_queue_draw(GTK_WIDGET(data));
+}
+static void ovCaptionWatchState(GtkWidget *widget, gpointer data) {
+ if (!g_object_get_data(G_OBJECT(widget), "ov-caption-state-watched")) {
+  g_signal_connect(widget, "state-flags-changed", G_CALLBACK(ovCaptionStateChanged), data);
+  g_object_set_data(G_OBJECT(widget), "ov-caption-state-watched", GINT_TO_POINTER(1));
+ }
+ if (GTK_IS_CONTAINER(widget)) gtk_container_forall(GTK_CONTAINER(widget), ovCaptionWatchState, data);
+}
 static void ovCaptionAllocated(GtkWidget *widget, GtkAllocation *allocation, gpointer data) {
- ovCaptionMeasure(data);
+ OVCaption *c = data;
+ ovCaptionWatchState(widget, c->overlay);
+ ovCaptionMeasure(c);
 }
 static void ovCaptionSettings(GtkSettings *settings, GParamSpec *spec, gpointer data) {
  OVCaption *c = data;
