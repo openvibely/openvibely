@@ -3,9 +3,10 @@ package openaiclient
 import (
 	"encoding/base64"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/openvibely/openvibely/pkg/attachment"
 )
 
 // FileAttachment represents a file attached to an OpenAI request.
@@ -17,64 +18,20 @@ type FileAttachment struct {
 	FilePath  string
 }
 
-// supportedMediaTypes maps file extensions to their MIME types.
-var supportedMediaTypes = map[string]string{
-	// Images
-	".png":  "image/png",
-	".jpg":  "image/jpeg",
-	".jpeg": "image/jpeg",
-	".gif":  "image/gif",
-	".webp": "image/webp",
-	".bmp":  "image/bmp",
-
-	// Code / text files
-	".txt":  "text/plain",
-	".md":   "text/markdown",
-	".go":   "text/x-go",
-	".py":   "text/x-python",
-	".js":   "text/javascript",
-	".ts":   "text/typescript",
-	".jsx":  "text/javascript",
-	".tsx":  "text/typescript",
-	".rs":   "text/x-rust",
-	".rb":   "text/x-ruby",
-	".java": "text/x-java",
-	".c":    "text/x-c",
-	".cpp":  "text/x-c++",
-	".h":    "text/x-c",
-	".hpp":  "text/x-c++",
-	".cs":   "text/x-csharp",
-	".html": "text/html",
-	".css":  "text/css",
-	".xml":  "text/xml",
-	".json": "application/json",
-	".yaml": "text/yaml",
-	".yml":  "text/yaml",
-	".toml": "text/toml",
-	".sql":  "text/x-sql",
-	".sh":   "text/x-sh",
-	".bash": "text/x-sh",
-	".zsh":  "text/x-sh",
-	".csv":  "text/csv",
-	".log":  "text/plain",
-	".env":  "text/plain",
-	".cfg":  "text/plain",
-	".ini":  "text/plain",
-	".conf": "text/plain",
-}
+// supportedMediaTypes combines the common mappings with OpenAI's BMP support.
+var supportedMediaTypes = attachment.MediaTypes(map[string]string{
+	".bmp": "image/bmp",
+})
 
 // IsSupportedFileType returns true if the file extension is a supported attachment type.
 func IsSupportedFileType(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
-	_, ok := supportedMediaTypes[ext]
-	return ok
+	return attachment.IsSupportedFileType(filename, supportedMediaTypes)
 }
 
 // MediaTypeFromExtension returns the MIME type for a file extension.
 // Returns empty string if the extension is not supported.
 func MediaTypeFromExtension(filename string) string {
-	ext := strings.ToLower(filepath.Ext(filename))
-	return supportedMediaTypes[ext]
+	return attachment.MediaTypeFromExtension(filename, supportedMediaTypes)
 }
 
 // IsImageMediaType returns true if the media type is an image type.
@@ -92,67 +49,35 @@ func IsTextMediaType(mediaType string) bool {
 // Auto-detects the media type from the extension.
 // Returns an error if the file doesn't exist or has an unsupported type.
 func NewFileAttachment(filePath string) (*FileAttachment, error) {
-	info, err := os.Stat(filePath)
+	prepared, err := attachment.NewFromPathWithFallback(filePath, supportedMediaTypes, mediaTypeFromExtensionLegacy)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("file not found: %s", filePath)
-		}
-		return nil, fmt.Errorf("stat file %s: %w", filePath, err)
-	}
-	if info.IsDir() {
-		return nil, fmt.Errorf("cannot attach directory: %s", filePath)
-	}
-
-	fileName := filepath.Base(filePath)
-	mediaType := MediaTypeFromExtension(fileName)
-	if mediaType == "" {
-		mediaType = mediaTypeFromExtensionLegacy(fileName)
-	}
-	if mediaType == "" {
-		return nil, &UnsupportedFileTypeError{FileName: fileName, Extension: strings.ToLower(filepath.Ext(fileName))}
+		return nil, err
 	}
 
 	return &FileAttachment{
-		FileName:  fileName,
-		MediaType: mediaType,
-		FilePath:  filePath,
+		FileName:  prepared.FileName,
+		MediaType: prepared.MediaType,
+		Data:      prepared.Data,
+		FilePath:  prepared.FilePath,
 	}, nil
 }
 
 // NewFileAttachmentFromBytes creates a FileAttachment from raw bytes.
 func NewFileAttachmentFromBytes(fileName string, mediaType string, data []byte) (*FileAttachment, error) {
-	if fileName == "" {
-		return nil, fmt.Errorf("fileName is required")
+	prepared, err := attachment.NewFromBytes(fileName, mediaType, data, supportedMediaTypes)
+	if err != nil {
+		return nil, err
 	}
-	if mediaType == "" {
-		mediaType = MediaTypeFromExtension(fileName)
-		if mediaType == "" {
-			return nil, &UnsupportedFileTypeError{FileName: fileName, Extension: strings.ToLower(filepath.Ext(fileName))}
-		}
-	}
-	if len(data) == 0 {
-		return nil, fmt.Errorf("empty file data for %s", fileName)
-	}
-
 	return &FileAttachment{
-		FileName:  fileName,
-		MediaType: mediaType,
-		Data:      data,
+		FileName:  prepared.FileName,
+		MediaType: prepared.MediaType,
+		Data:      prepared.Data,
+		FilePath:  prepared.FilePath,
 	}, nil
 }
 
 // UnsupportedFileTypeError is returned when a file has an unsupported extension.
-type UnsupportedFileTypeError struct {
-	FileName  string
-	Extension string
-}
-
-func (e *UnsupportedFileTypeError) Error() string {
-	if e.Extension == "" {
-		return fmt.Sprintf("unsupported file type: %s (no extension)", e.FileName)
-	}
-	return fmt.Sprintf("unsupported file type: %s (extension %s)", e.FileName, e.Extension)
-}
+type UnsupportedFileTypeError = attachment.UnsupportedFileTypeError
 
 // SupportedExtensions returns a list of supported file extensions.
 func SupportedExtensions() []string {
@@ -164,17 +89,7 @@ func SupportedExtensions() []string {
 }
 
 func (f *FileAttachment) loadData() ([]byte, error) {
-	if f.Data != nil {
-		return f.Data, nil
-	}
-	if f.FilePath == "" {
-		return nil, fmt.Errorf("no data or file path for attachment %s", f.FileName)
-	}
-	data, err := os.ReadFile(f.FilePath)
-	if err != nil {
-		return nil, fmt.Errorf("read attachment %s: %w", f.FilePath, err)
-	}
-	return data, nil
+	return attachment.LoadData(f.FileName, f.FilePath, f.Data)
 }
 
 func (f *FileAttachment) toInputContent() (map[string]any, error) {

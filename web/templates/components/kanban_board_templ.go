@@ -968,14 +968,14 @@ func activeColumnContent(tasks []models.Task, projectID string, llmModels []mode
 			templ_7745c5c3_Var53 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<!-- In Progress --><div class=\"mb-4 flex-1 flex flex-col min-h-0\"><h4 class=\"text-sm font-semibold mb-2 text-primary flex-shrink-0\">In Progress</h4><div class=\"task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto\" data-drop-type=\"status\" data-status=\"running\" data-category=\"active\" data-project-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<style>\n\t\t.kanban-queue { flex:0 1 auto; min-height:44px; max-height:calc(50% - 8px); }\n\t\t.kanban-queue > .task-drop-zone { flex:0 1 auto; min-height:0; }\n\t\t.kanban-queue:not(:has([data-task-id])) > h4 { display:none; }\n\t\t.kanban-queue:not(:has([data-task-id])) > .task-drop-zone { min-height:44px; }\n\t\t.kanban-queue:not(:has([data-task-id])) > .task-drop-zone::before { content:\"Queued — drop tasks here\"; display:flex; align-items:center; justify-content:center; min-height:40px; font-size:14px; opacity:.5; }\n\t</style><!-- In Progress --><div class=\"mb-4 flex-1 flex flex-col min-h-0\"><h4 class=\"text-sm font-semibold mb-2 text-primary flex-shrink-0\">In Progress</h4><div class=\"task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto\" data-drop-type=\"status\" data-status=\"running\" data-category=\"active\" data-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var54 string
 		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 446, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 453, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 		if templ_7745c5c3_Err != nil {
@@ -998,14 +998,14 @@ func activeColumnContent(tasks []models.Task, projectID string, llmModels []mode
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</div></div><!-- Queued (includes pending + completed/failed tasks awaiting auto-move) --><div class=\"flex-1 flex flex-col min-h-0\"><h4 class=\"text-sm font-semibold mb-2 flex-shrink-0\">Queued</h4><div class=\"task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto\" data-drop-type=\"status\" data-status=\"pending\" data-category=\"active\" data-project-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</div></div><!-- Queued (includes pending + completed/failed tasks awaiting auto-move) --><div class=\"kanban-queue flex flex-col\"><h4 class=\"text-sm font-semibold mb-2 flex-shrink-0\">Queued</h4><div class=\"task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto\" data-drop-type=\"status\" data-status=\"pending\" data-category=\"active\" data-project-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var55 string
 		templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue(projectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 465, Col: 30}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/kanban_board.templ`, Line: 472, Col: 30}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 		if templ_7745c5c3_Err != nil {
@@ -1022,13 +1022,8 @@ func activeColumnContent(tasks []models.Task, projectID string, llmModels []mode
 					return templ_7745c5c3_Err
 				}
 			}
-		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "<div class=\"text-center py-4 opacity-30 text-sm\">Drop tasks here</div>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

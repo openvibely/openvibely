@@ -1004,6 +1004,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			</a>
 		</div>
 		<style>
+			/* Dividers are decoration, not menu actions. */
+			.sidebar-divider {
+				cursor: default;
+			}
+			.sidebar-divider > hr {
+				pointer-events: none;
+			}
+
 			/* Sidebar collapse toggle button */
 			.sidebar-toggle-btn .panel-toggle-fill { fill: none; }
 			.sidebar-toggle-btn[aria-expanded="true"] .panel-toggle-fill { fill: currentColor; }

@@ -435,6 +435,13 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 }
 
 templ activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []repository.AgentTaskUIOption, menuStates ...map[string]TaskCardMergeMenuState) {
+	<style>
+		.kanban-queue { flex:0 1 auto; min-height:44px; max-height:calc(50% - 8px); }
+		.kanban-queue > .task-drop-zone { flex:0 1 auto; min-height:0; }
+		.kanban-queue:not(:has([data-task-id])) > h4 { display:none; }
+		.kanban-queue:not(:has([data-task-id])) > .task-drop-zone { min-height:44px; }
+		.kanban-queue:not(:has([data-task-id])) > .task-drop-zone::before { content:"Queued — drop tasks here"; display:flex; align-items:center; justify-content:center; min-height:40px; font-size:14px; opacity:.5; }
+	</style>
 	<!-- In Progress -->
 	<div class="mb-4 flex-1 flex flex-col min-h-0">
 		<h4 class="text-sm font-semibold mb-2 text-primary flex-shrink-0">In Progress</h4>
@@ -455,7 +462,7 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 		</div>
 	</div>
 	<!-- Queued (includes pending + completed/failed tasks awaiting auto-move) -->
-	<div class="flex-1 flex flex-col min-h-0">
+	<div class="kanban-queue flex flex-col">
 		<h4 class="text-sm font-semibold mb-2 flex-shrink-0">Queued</h4>
 		<div
 			class="task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto"
@@ -468,8 +475,6 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 				for _, task := range filterPendingTasks(tasks) {
 					@TaskCard(task, projectID, "active", llmModels, agentDefs, taskCardMergeMenuStateMap(menuStates))
 				}
-			} else {
-				<div class="text-center py-4 opacity-30 text-sm">Drop tasks here</div>
 			}
 		</div>
 	</div>

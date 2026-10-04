@@ -180,6 +180,99 @@ func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompleted
 	require.Nil(t, updatedSchedule.NextRun)
 }
 
+func TestSchedulerService_CheckDueTasksOneTimeScheduleUsesLastRunInsteadOfTaskStatus(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusCompleted, models.StatusFailed} {
+		t.Run("manual "+string(status), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			workerSvc := newTestWorkerService(t)
+			ctx := context.Background()
+
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     "Manually run before one-time schedule",
+				Category:  models.CategoryScheduled,
+				Status:    models.StatusPending,
+				Prompt:    "test",
+			}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			runAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+			schedule := &models.Schedule{
+				TaskID:         task.ID,
+				RunAt:          runAt,
+				RepeatType:     models.RepeatOnce,
+				RepeatInterval: 1,
+				Enabled:        true,
+			}
+			require.NoError(t, scheduleRepo.Create(ctx, schedule))
+			require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, status))
+
+			svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+			svc.now = func() time.Time { return runAt }
+			svc.checkDueTasks(ctx)
+
+			select {
+			case submitted := <-workerSvc.Submitted():
+				require.Equal(t, task.ID, submitted.ID)
+				require.Equal(t, models.StatusPending, submitted.Status)
+			case <-time.After(100 * time.Millisecond):
+				t.Fatal("expected the unused one-time scheduled occurrence to run")
+			}
+
+			stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored.LastRun)
+			require.True(t, stored.LastRun.Equal(runAt), "last_run should record the scheduled occurrence time")
+			require.Nil(t, stored.NextRun, "one-time schedule should be consumed by this dispatch")
+		})
+	}
+}
+
+func TestSchedulerService_CheckDueTasksDoesNotReplayDispatchedOneTimeSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Previously dispatched one-time schedule",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "test",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          runAt,
+		RepeatType:     models.RepeatOnce,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+
+	previousRun := runAt.Add(-24 * time.Hour)
+	require.NoError(t, scheduleRepo.MarkRan(ctx, schedule.ID, previousRun, nil))
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.LastRun)
+	stored.NextRun = &runAt // Simulate a stale due entry after the occurrence was dispatched.
+	require.NoError(t, scheduleRepo.Update(ctx, stored))
+
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	svc.now = func() time.Time { return runAt }
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("dispatched one-time schedule replayed task %s", submitted.ID)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -1175,7 +1268,7 @@ func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *test
 
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 
-	// Create a completed one-time scheduled task (simulating a task that was already executed)
+	// Create a completed one-time scheduled task whose scheduled occurrence ran.
 	task := &models.Task{
 		ProjectID: "default",
 		Title:     "Completed Task",
@@ -1186,7 +1279,7 @@ func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *test
 	taskRepo.Create(ctx, task)
 
 	now := time.Now().UTC()
-	// Create a one-time schedule with next_run in the past (simulating drag/drop to past time)
+	// Simulate a one-time occurrence that was dispatched and later rescheduled into the past.
 	sched := &models.Schedule{
 		TaskID:         task.ID,
 		RunAt:          now.Add(-1 * time.Hour),
@@ -1194,22 +1287,24 @@ func TestSchedulerService_DragDropReschedule_DoesNotExecuteCompletedTask(t *test
 		RepeatInterval: 1,
 		Enabled:        true,
 	}
-	pastTime := now.Add(-30 * time.Minute)
-	sched.NextRun = &pastTime
 	scheduleRepo.Create(ctx, sched)
+	previousRun := now.Add(-2 * time.Hour)
+	require.NoError(t, scheduleRepo.MarkRan(ctx, sched.ID, previousRun, nil))
+	storedSchedule, err := scheduleRepo.GetByID(ctx, sched.ID)
+	require.NoError(t, err)
+	pastTime := now.Add(-30 * time.Minute)
+	storedSchedule.NextRun = &pastTime
+	require.NoError(t, scheduleRepo.Update(ctx, storedSchedule))
 
-	// Run checkDueTasks - this should NOT execute the task
+	// Run checkDueTasks - the already dispatched occurrence must not execute again.
 	svc.checkDueTasks(ctx)
 
-	// Verify task was NOT submitted
 	select {
 	case submitted := <-workerSvc.Submitted():
-		t.Fatalf("expected no task submission for completed one-time schedule, but got task ID=%s", submitted.ID)
+		t.Fatalf("expected no task submission for dispatched one-time schedule, but got task ID=%s", submitted.ID)
 	case <-time.After(100 * time.Millisecond):
-		// Expected - no submission
 	}
 
-	// Verify task status is still completed
 	updatedTask, _ := taskRepo.GetByID(ctx, task.ID)
 	if updatedTask.Status != models.StatusCompleted {
 		t.Errorf("expected task status to remain completed, got %s", updatedTask.Status)
