@@ -4327,7 +4327,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							}
 						})();				</script>
 			@DesktopProjectTabs(projects, currentProjectID)
-			<div class="drawer lg:drawer-open h-full">
+			<div class={ "drawer lg:drawer-open h-full", templ.KV("drawer-open", serverRuntimeMode(ctx) == "desktop") }>
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
 				<div class="drawer-content flex flex-col h-full overflow-hidden">
 					<!-- Navbar (mobile only) -->

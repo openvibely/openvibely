@@ -290,11 +290,6 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 			}
 		})
 	}
-	minWidth, minHeight := 1024, 680
-	if runtime.GOOS != "darwin" {
-		// Allow half-screen and portrait Snap Layouts to fit on common displays.
-		minWidth, minHeight = 500, 480
-	}
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:  "main",
 		Title: "OpenVibely",
@@ -302,8 +297,8 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		URL:       "/chat",
 		Width:     1280,
 		Height:    820,
-		MinWidth:  minWidth,
-		MinHeight: minHeight,
+		MinWidth:  desktopMinWidth,
+		MinHeight: desktopMinHeight,
 		// The app draws native-looking controls alongside the project tabs.
 		// Do not reserve a second native titlebar above this shared row.
 		Frameless: true,

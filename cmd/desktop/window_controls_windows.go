@@ -51,7 +51,7 @@ func registerPlatformWindowControls(app *application.App, window *application.We
 				width, height := window.Size()
 				fitWidth, fitHeight := fitDesktopWindowSize(width, height, screen.WorkArea.Width, screen.WorkArea.Height)
 				if fitWidth != width || fitHeight != height {
-					window.SetMinSize(min(500, fitWidth), min(480, fitHeight))
+					window.SetMinSize(min(desktopMinWidth, fitWidth), min(desktopMinHeight, fitHeight))
 					window.SetSize(fitWidth, fitHeight)
 					window.Center()
 				}
