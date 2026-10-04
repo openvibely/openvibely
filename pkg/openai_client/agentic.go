@@ -1062,12 +1062,14 @@ func estimateAgenticResponseItemModelVisibleBytes(item any) int {
 		}
 	}
 
-	serialized, err := json.Marshal(item)
-	if err != nil || len(serialized) == 0 {
+	serialized, imagePayloadBytes, imageReplacementBytes, optimizedImageAdjustment, err := marshalAgenticItemAndImageAdjustment(item)
+	if err != nil {
 		return 0
 	}
-	raw := len(serialized)
-	imagePayloadBytes, imageReplacementBytes := agenticImageDataURLEstimateAdjustment(item)
+	if !optimizedImageAdjustment {
+		imagePayloadBytes, imageReplacementBytes = agenticImageDataURLEstimateAdjustment(item)
+	}
+	raw := serialized
 	audioPayloadBytes, audioReplacementBytes := agenticAudioDataURLEstimateAdjustment(item)
 	encryptedPayloadBytes, encryptedReplacementBytes := agenticEncryptedFunctionOutputEstimateAdjustment(item)
 	raw = raw - imagePayloadBytes + imageReplacementBytes - audioPayloadBytes + audioReplacementBytes
@@ -1076,6 +1078,127 @@ func estimateAgenticResponseItemModelVisibleBytes(item any) int {
 		return 0
 	}
 	return raw
+}
+
+// marshalAgenticItemWithoutImagePayload computes the JSON size of a Responses
+// message without copying a large base64 image URL into the marshaled buffer.
+func marshalAgenticItemWithoutImagePayload(item any) (int, error) {
+	serialized, _, _, _, err := marshalAgenticItemAndImageAdjustment(item)
+	return serialized, err
+}
+
+func marshalAgenticItemAndImageAdjustment(item any) (int, int, int, bool, error) {
+	marshalFallback := func() (int, int, int, bool, error) {
+		serialized, err := json.Marshal(item)
+		return len(serialized), 0, 0, false, err
+	}
+	itemMap, ok := item.(map[string]any)
+	if !ok || !strings.EqualFold(strings.TrimSpace(stringFromAny(itemMap["type"])), "message") {
+		return marshalFallback()
+	}
+	content, ok := itemMap["content"].([]any)
+	if !ok {
+		return marshalFallback()
+	}
+
+	var copiedContent []any
+	removedImageURLBytes := 0
+	imagePayloadBytes := 0
+	imageReplacementBytes := 0
+	for index, rawBlock := range content {
+		block, ok := rawBlock.(map[string]any)
+		if !ok || strings.TrimSpace(stringFromAny(block["type"])) != "input_image" {
+			continue
+		}
+		urlKey := "image_url"
+		imageURL, ok := block[urlKey].(string)
+		if !ok || strings.TrimSpace(imageURL) == "" {
+			urlKey = "url"
+			imageURL, ok = block[urlKey].(string)
+		}
+		if !ok || strings.TrimSpace(imageURL) == "" {
+			continue
+		}
+		trimmedURL := strings.TrimSpace(imageURL)
+		payload, ok := parseAgenticBase64DataURL(trimmedURL, "image/")
+		if !ok || imageURL != trimmedURL || !agenticImageURLNeedsNoJSONEscaping(trimmedURL, payload) {
+			return marshalFallback()
+		}
+
+		if copiedContent == nil {
+			copiedContent = append([]any(nil), content...)
+		}
+		clonedBlock := make(map[string]any, len(block))
+		for key, value := range block {
+			clonedBlock[key] = value
+		}
+		clonedBlock[urlKey] = ""
+		copiedContent[index] = clonedBlock
+		removedImageURLBytes += len(imageURL)
+		imagePayloadBytes += len(payload)
+		if strings.EqualFold(strings.TrimSpace(stringFromAny(block["detail"])), "original") {
+			imageReplacementBytes += estimateAgenticOriginalImageBytesFromValidatedURL(trimmedURL)
+		} else {
+			imageReplacementBytes += openAIResizedImageBytesEstimate
+		}
+	}
+	if copiedContent == nil {
+		return marshalFallback()
+	}
+
+	clonedItem := make(map[string]any, len(itemMap))
+	for key, value := range itemMap {
+		clonedItem[key] = value
+	}
+	clonedItem["content"] = copiedContent
+	serialized, err := json.Marshal(clonedItem)
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+	return len(serialized) + removedImageURLBytes, imagePayloadBytes, imageReplacementBytes, true, nil
+}
+
+func agenticImageURLNeedsNoJSONEscaping(value, payload string) bool {
+	commaIndex := strings.IndexByte(value, ',')
+	if commaIndex < 0 || !agenticCanonicalBase64Payload(payload) {
+		return false
+	}
+	metadata := value[:commaIndex+1]
+	for index := 0; index < len(metadata); index++ {
+		char := metadata[index]
+		if char < 0x20 || char >= 0x7f || char == '"' || char == '\\' || char == '<' || char == '>' || char == '&' {
+			return false
+		}
+	}
+	return true
+}
+
+var agenticBase64PayloadAlphabet = func() [256]bool {
+	const symbols = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	var alphabet [256]bool
+	for index := 0; index < len(symbols); index++ {
+		alphabet[symbols[index]] = true
+	}
+	return alphabet
+}()
+
+func agenticCanonicalBase64Payload(payload string) bool {
+	if len(payload)%4 != 0 {
+		return false
+	}
+	padding := 0
+	if len(payload) > 0 && payload[len(payload)-1] == '=' {
+		padding = 1
+		if len(payload) > 1 && payload[len(payload)-2] == '=' {
+			padding = 2
+		}
+	}
+	for index := 0; index < len(payload)-padding; index++ {
+		if !agenticBase64PayloadAlphabet[payload[index]] {
+			return false
+		}
+	}
+	return true
 }
 
 func estimateOpenAIReasoningLength(encodedLen int) int {
@@ -1212,14 +1335,37 @@ func estimateAgenticOriginalImageBytes(imageURL string) int {
 	if !ok {
 		return openAIResizedImageBytesEstimate
 	}
+	if agenticCanonicalBase64Payload(payload) {
+		return estimateAgenticOriginalImageBytesFromValidatedURL(imageURL)
+	}
 	decoded, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
 		return openAIResizedImageBytesEstimate
 	}
+	return estimateAgenticOriginalImageBytesFromDecoded(decoded)
+}
+
+func estimateAgenticOriginalImageBytesFromValidatedURL(imageURL string) int {
+	payload, ok := parseAgenticBase64DataURL(imageURL, "image/")
+	if !ok {
+		return openAIResizedImageBytesEstimate
+	}
+	config, _, err := image.DecodeConfig(base64.NewDecoder(base64.StdEncoding, strings.NewReader(payload)))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return openAIResizedImageBytesEstimate
+	}
+	return estimateAgenticOriginalImageBytesFromConfig(config)
+}
+
+func estimateAgenticOriginalImageBytesFromDecoded(decoded []byte) int {
 	config, _, err := image.DecodeConfig(bytes.NewReader(decoded))
 	if err != nil || config.Width <= 0 || config.Height <= 0 {
 		return openAIResizedImageBytesEstimate
 	}
+	return estimateAgenticOriginalImageBytesFromConfig(config)
+}
+
+func estimateAgenticOriginalImageBytesFromConfig(config image.Config) int {
 	patchesWide := (config.Width + openAIOriginalImagePatchSize - 1) / openAIOriginalImagePatchSize
 	patchesHigh := (config.Height + openAIOriginalImagePatchSize - 1) / openAIOriginalImagePatchSize
 	patchCount := patchesWide * patchesHigh
