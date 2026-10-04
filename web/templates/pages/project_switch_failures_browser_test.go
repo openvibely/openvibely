@@ -137,7 +137,7 @@ func TestBrowserFunctional_ProjectSwitchFailures(t *testing.T) {
 		browser.waitFor("startup replays and clears outbox", `String(!localStorage.getItem('openvibely.project-preference-outbox.pinned_project_ids')&&!localStorage.getItem('openvibely.project-preference-outbox.project_locations'))`, "true")
 		browser.waitFor("recovered tabs rendered in order", `Array.from(document.querySelectorAll('[data-project-tab]')).map(el=>el.dataset.projectTab).join(',')`, "c,b,a")
 		browser.evaluate(`var s=document.getElementById('project-selector');s.value='b';s.dispatchEvent(new Event('change',{bubbles:true}));'ok';`)
-		browser.waitFor("recovered page used when switching", `location.pathname+':'+document.getElementById('loaded-project').textContent`, "/schedule:b")
+		browser.waitFor("recovered page used when switching", `location.pathname+':'+(document.getElementById('loaded-project')||{}).textContent`, "/schedule:b")
 		// A fresh desktop launch must recover the selected project too, before
 		// the server's stale A selection can be added back to the saved list.
 		browser.evaluate(`var launchFetch=window.fetch;window.fetch=function(url,options){if(url==='/ui/preferences')return new Promise(function(){});return launchFetch.apply(this,arguments);};window.openVibelySaveProjectPreferences({project_id:'b',pinned_project_ids:['c','b'],project_locations:{b:'/schedule?project_id=b'}});sessionStorage.clear();'ok';`)
