@@ -16,7 +16,7 @@ templ BreadcrumbSelector(config models.BreadcrumbSelector) {
 		[data-breadcrumb-selector] [data-breadcrumb-selector-button]:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; }
 		[data-breadcrumb-title] { font-size:16px; line-height:22px; font-weight:500; text-decoration:none; }
 		[data-breadcrumb-title]:disabled { cursor:default; }
-		[data-breadcrumb-title]:is(a, button:not(:disabled)) { color:oklch(var(--bc) / .5); }
+		[data-breadcrumb-title]:is(a, button:not(:disabled)) { color:oklch(var(--bc) / .5); font-weight:400; }
 		[data-breadcrumb-title]:is(a, button:not(:disabled)):hover { color:oklch(var(--bc) / .8); text-decoration:none; }
 		[data-breadcrumb-title]:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; border-radius:6px; }
 	</style>
