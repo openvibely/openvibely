@@ -1203,7 +1203,7 @@ func TestAnalyticsContent_TokenUsageModelSelectStaysWithinCard(t *testing.T) {
 
 	content := buf.String()
 	required := []string{
-		`<div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">`,
+		`<div data-analytics-chart-controls>`,
 		`<div class="form-control min-w-0 w-full sm:w-auto">`,
 		`id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"`,
 	}
@@ -1408,7 +1408,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
 	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	fixture := `<main id="reconnect-result"></main><style>.card-body{display:flex;flex-direction:column;gap:12px}.card-body p{flex-grow:1}.relative{position:relative}.h-80{height:320px}.h-64{height:256px}.hidden{display:none}.overflow-x-auto{overflow-x:auto}</style><script>
+	fixture := `<main id="reconnect-result"></main><style>.flex{display:flex}.items-center{align-items:center}.card-title{display:flex;align-items:center;margin:0}.card-body{display:flex;flex-direction:column;gap:12px}.card-body p{flex-grow:1}.relative{position:relative}.h-80{height:320px}.h-64{height:256px}.hidden{display:none}.overflow-x-auto{overflow-x:auto}</style><script>
  history.replaceState({},'',location.pathname+'?project_id=project-1&view=models');
  window.fetch=()=>new Promise(()=>{});
  window.Chart=function(){};
@@ -1421,11 +1421,26 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    const dialog=document.querySelector('[data-analytics-preview]');
    check(dialog,'graph preview dialog missing');
    for(const canvas of document.querySelectorAll('canvas'))check(canvas.closest('.card').querySelector('[data-analytics-expand]'),'missing expand button: '+canvas.id);
+   const comparison=Array.from(document.querySelectorAll('h4')).find(title=>title.textContent==='Model comparison');
+   check(comparison&&!comparison.closest('.card').querySelector('[data-analytics-expand]'),'model comparison table has expand control');
+   function checkTitleAlignment(card,control){
+    const title=card.querySelector('h4').getBoundingClientRect(),icon=control.getBoundingClientRect();
+    check(Math.abs(title.top+title.height/2-icon.top-icon.height/2)<1,'control is not centered with title');
+    const select=card.querySelector('select');
+    if(select)check(select.getBoundingClientRect().top>=title.bottom,'dropdown is not below title');
+   }
+   for(const controls of document.querySelectorAll('[data-analytics-chart-controls]')){
+    const card=controls.closest('.card'),expand=card.querySelector('[data-analytics-expand]');
+    expand.click(); await tick();
+    checkTitleAlignment(card,dialog.querySelector('[aria-label="Close graph preview"]'));
+    dialog.querySelector('[aria-label="Close graph preview"]').click(); await tick();
+   }
    const canvas=document.getElementById('modelRunTimeTrendChart'),card=canvas.closest('.card'),parent=card.parentElement,next=card.nextSibling;
    const button=card.querySelector('[data-analytics-expand]'),select=card.querySelector('select'),plot=canvas.parentElement;
    const header=button.parentElement,headerRect=header.getBoundingClientRect(),buttonRect=button.getBoundingClientRect();
    check(header.hasAttribute('data-analytics-chart-header')&&Math.abs(buttonRect.top+buttonRect.height/2-headerRect.top-headerRect.height/2)<1&&Math.abs(headerRect.right-buttonRect.right)<1,'expand icon is not inline at header right');
    check(getComputedStyle(card.querySelector('.card-body')).paddingTop!=='56px','header still reserves an empty row');
+   checkTitleAlignment(card,button);
    const close=dialog.firstElementChild;
    check(close.querySelector('svg')&&!close.textContent.trim(),'exit control is not icon only');
    check(close.getAttribute('aria-label')==='Close graph preview'&&close.title==='Close graph preview','exit icon lacks accessible label or tooltip');
@@ -1439,6 +1454,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(bounds.width===Math.min(1200,innerWidth-32)&&bounds.height===Math.min(900,innerHeight-48),'preview dimensions differ from gallery');
    check(getComputedStyle(dialog).borderRadius==='12px','preview lacks rounded corners');
    check(plot.getBoundingClientRect().height>=bounds.height-200,'plot did not fill available height: '+plot.getBoundingClientRect().height+' of '+innerHeight);
+   checkTitleAlignment(card,close);
    const closeRect=close.getBoundingClientRect();
    const fullHeaderRect=header.getBoundingClientRect();
    check(close.parentElement===header&&Math.abs(closeRect.top+closeRect.height/2-fullHeaderRect.top-fullHeaderRect.height/2)<1&&Math.abs(fullHeaderRect.right-closeRect.right)<1,'exit icon is not inline at header right');

@@ -13,7 +13,7 @@ templ Analytics(projects []models.Project, currentProject *models.Project) {
 
 templ analyticsModelTrendCard(title, description, key string) {
  <div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
-  <div class="flex flex-wrap items-center justify-between gap-3">@analyticsChartHeading(title, description)<select id={ key + "Select" } aria-label={ title + " model" } class="select select-bordered select-xs"><option value="combined">All models combined</option><option value="all">Each model</option></select></div>
+  <div data-analytics-chart-controls>@analyticsChartHeading(title, description)<select id={ key + "Select" } aria-label={ title + " model" } class="select select-bordered select-xs"><option value="combined">All models combined</option><option value="all">Each model</option></select></div>
   <div class="relative h-80"><canvas id={ key + "Chart" }></canvas></div>
  </div></div>
 }
@@ -78,12 +78,18 @@ templ analyticsExpandButton(title string) {
 }
 
 templ analyticsChartHeading(title, description string) {
+	@analyticsCardHeading(title, description, true)
+}
+
+templ analyticsCardHeading(title, description string, expandable bool) {
 	<div class="flex items-center gap-2">
 		<h4 class="card-title">{ title }</h4>
 		if description != "" {
 			<button type="button" class="btn btn-ghost btn-circle btn-xs shrink-0" data-model-help={ description } aria-label={ "About " + title } aria-expanded="false">ⓘ</button>
 		}
-		@analyticsExpandButton(title)
+		if expandable {
+			@analyticsExpandButton(title)
+		}
 	</div>
 }
 
@@ -158,7 +164,7 @@ templ analyticsContent(currentProject *models.Project) {
 					@analyticsTaskSummary("agents")
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300"><div class="card-body">
-							<div class="flex flex-wrap items-center justify-between gap-3"><h4 class="card-title">Agent outcome comparison <button id="agentOutcomeHelp" type="button" class="btn btn-ghost btn-circle btn-xs" data-model-help="Share of evaluated tasks whose goal was met." aria-label="About the selected agent outcome metric">ⓘ</button>@analyticsExpandButton("Agent outcome comparison")</h4>
+							<div data-analytics-chart-controls><h4 class="card-title">Agent outcome comparison <button id="agentOutcomeHelp" type="button" class="btn btn-ghost btn-circle btn-xs" data-model-help="Share of evaluated tasks whose goal was met." aria-label="About the selected agent outcome metric">ⓘ</button>@analyticsExpandButton("Agent outcome comparison")</h4>
 								<select id="agentOutcomeMetric" aria-label="Agent outcome metric" class="select select-bordered select-xs w-full max-w-full sm:w-auto sm:min-w-48"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option><option value="first_pass">First-run success</option><option value="follow_up">Follow-up rate</option></select>
 							</div>
 							<p id="agentOutcomeCount" class="text-sm opacity-60">Up to 12 agents, highest rate first.</p>
@@ -182,7 +188,7 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 					@analyticsTaskSummary("models")
 					<div class="card bg-base-100 border border-base-300"><div class="card-body">
-						@analyticsChartHeading("Model comparison", "Current goals and merges, plus effort during the selected period. Follow-ups can reflect changed goals, not just corrections. Each configuration keeps its own color across charts.")
+						@analyticsCardHeading("Model comparison", "Current goals and merges, plus effort during the selected period. Follow-ups can reflect changed goals, not just corrections. Each configuration keeps its own color across charts.", false)
 						<div id="modelScorecard" class="overflow-x-auto" style="min-height:12rem"></div>
 					</div></div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -203,7 +209,7 @@ templ analyticsContent(currentProject *models.Project) {
 					</div>
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">
-							<div class="flex flex-wrap items-center justify-between gap-3">@analyticsChartHeading("Task outcomes", "Current goal or merge status for tasks active in the selected period. Goals: achieved / tasks with non-cleared goals. Merges: merged / tasks with worktrees or merge status. Mixed configurations excluded; n is the eligible task count.")<select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
+							<div data-analytics-chart-controls>@analyticsChartHeading("Task outcomes", "Current goal or merge status for tasks active in the selected period. Goals: achieved / tasks with non-cleared goals. Merges: merged / tasks with worktrees or merge status. Mixed configurations excluded; n is the eligible task count.")<select id="modelOutcomeMetric" aria-label="Model outcome metric" class="select select-bordered select-xs"><option value="goal_achievement">Goal achievement</option><option value="merge_completion">Work merged</option></select></div>
 							<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelOutcomesChart"></canvas></div></div>
 						</div></div>
 					<div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body">@analyticsChartHeading("Run reliability", "Successful means the run was marked completed, not that the task’s goal was met or its work merged. Failed means marked failed. Cancelled and unfinished runs excluded.")<div class="overflow-x-auto"><div class="relative h-80"><canvas id="modelReliabilityChart"></canvas></div></div></div></div>
@@ -229,7 +235,7 @@ templ analyticsContent(currentProject *models.Project) {
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Least Active Enabled Skills</h4><table class="table table-sm"><tbody id="underusedSkillsTable"></tbody></table></div></div>
 					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 						<div class="card bg-base-100 border border-base-300"><div class="card-body">
-							<div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">
+							<div data-analytics-chart-controls>
 							<h4 class="card-title">Observed skill outcomes
 								@analyticsExpandButton("Observed skill outcomes")
 							</h4>
@@ -258,15 +264,17 @@ templ analyticsContent(currentProject *models.Project) {
 					<div><div id="accountUsageCards" class="relative grid grid-cols-1 lg:grid-cols-2 gap-6" style="min-height:12rem">
 						<p class="text-center opacity-50 py-12 lg:col-span-2">Loading analytics…</p>
 					</div></div>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">@analyticsChartHeading("Token Usage", "Recorded tokens by usage date. Includes task and other project activity. Colors identify the same provider/model across charts.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Total recorded tokens per configuration. Aliases stay separate; usage without a linked configuration remains included.", "modelTokenBreakdownChart", "h-64")</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300"><div class="card-body"><div data-analytics-chart-controls>@analyticsChartHeading("Token Usage", "Recorded tokens by usage date. Includes task and other project activity. Colors identify the same provider/model across charts.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select></div></div><div class="relative h-64"><canvas id="usageRateChart"></canvas></div></div></div>@analyticsChartCard("Model Breakdown by Tokens", "Total recorded tokens per configuration. Aliases stay separate; usage without a linked configuration remains included.", "modelTokenBreakdownChart", "h-64")</div>
 					<div class="card bg-base-100 border border-base-300"><div class="card-body"><h4 class="card-title">Token Usage Breakdown</h4><div class="overflow-x-auto"><table class="table table-sm"><thead id="usageBreakdownHead"></thead><tbody id="usageBreakdownTable"></tbody></table></div></div></div>
 					<details id="usageEventEvidenceCard" class="collapse collapse-arrow bg-base-100 border border-base-300 hidden"><summary class="collapse-title font-semibold">Supporting usage events</summary><div class="collapse-content"><p id="usageEventEvidenceCoverage"></p><table class="table table-sm"><tbody id="usageEventEvidenceTable"></tbody></table></div></details>
-					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div class="flex flex-wrap items-end justify-between gap-3 mb-2 min-w-0">@analyticsChartHeading("Task runs over time", "Task run starts across the selected date range. Includes unfinished runs; excludes chat activity.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRunModelSelect" aria-label="Task run model" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"><option value="combined">All models combined</option></select></div></div><div class="relative h-64"><canvas id="usageRunHoursChart"></canvas></div></div></div> @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-6"><div class="card bg-base-100 border border-base-300 min-w-0"><div class="card-body"><div data-analytics-chart-controls>@analyticsChartHeading("Task runs over time", "Task run starts across the selected date range. Includes unfinished runs; excludes chat activity.")<div class="form-control min-w-0 w-full sm:w-auto"><select id="usageRunModelSelect" aria-label="Task run model" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"><option value="combined">All models combined</option></select></div></div><div class="relative h-64"><canvas id="usageRunHoursChart"></canvas></div></div></div> @analyticsChartCard("Task runs by model", "Number of task runs, including unfinished runs. Chat activity excluded.", "usageRunModelsChart", "h-64")</div>
 				</section>
 			<!-- Chart.js and Custom Script -->
 			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
 			<style>
-				[data-analytics-chart-header] { display:flex; align-items:center; gap:1rem; }
+				[data-analytics-chart-controls] { display:flex; flex-direction:column; align-items:stretch; gap:.75rem; min-width:0; }
+				[data-analytics-chart-controls] > select, [data-analytics-chart-controls] > .form-control { align-self:flex-start; max-width:100%; }
+				[data-analytics-chart-header] { display:flex; width:100%; align-items:center; gap:1rem; }
 				[data-analytics-chart-header] > :first-child { flex:1; min-width:0; }
 				dialog[data-analytics-preview] { position:fixed; inset:0; width:calc(100vw - 32px); height:calc(100dvh - 48px); max-width:1200px; max-height:900px; margin:auto; padding:0; border:0; border-radius:12px; background:transparent; color:inherit; }
 				dialog[data-analytics-preview]::backdrop { background:rgb(0 0 0 / .7); }
@@ -335,7 +343,7 @@ templ analyticsContent(currentProject *models.Project) {
 						 dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(); }, {signal:eventSignal});
 						 dialog.addEventListener('close', () => { if (!dialog.open) restore(); }, {signal:eventSignal});
 						 document.querySelectorAll('[data-analytics-expand]').forEach(button => {
-						  const heading = button.closest('.card-body').firstElementChild;
+						  const heading = button.parentElement;
 						  const header = document.createElement('div');
 						  header.setAttribute('data-analytics-chart-header', '');
 						  heading.before(header); header.append(heading, button);
