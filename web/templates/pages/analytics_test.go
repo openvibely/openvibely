@@ -1490,7 +1490,19 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-preview-plot'),'plot sizing not restored');
    button.click(); await tick();
    check(document.activeElement===close,'keyboard opening did not focus exit button');
-   // Native dialog cancellation is the Escape path.
+   let outerEscapes=0;
+   const outerEscape=event=>{if(event.key==='Escape')outerEscapes++;};
+   window.addEventListener('keydown',outerEscape);
+   const escape=new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true});
+   close.dispatchEvent(escape); await tick();
+   check(escape.defaultPrevented&&outerEscapes===0,'preview Escape reached outer window handling');
+   check(!dialog.open&&card.parentElement===parent,'Escape did not restore chart');
+   check(document.activeElement===button,'Escape did not restore expand focus');
+   button.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+   check(outerEscapes===1,'closed preview still intercepts Escape');
+   window.removeEventListener('keydown',outerEscape);
+   button.click(); await tick();
+   // Keep native dialog cancellation available to other close requests.
    if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();
    await tick(); check(!dialog.open&&card.parentElement===parent,'cancel did not restore chart');
    check(document.activeElement===button,'keyboard closing did not restore expand focus');
