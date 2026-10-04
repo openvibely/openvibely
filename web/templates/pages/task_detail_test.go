@@ -981,7 +981,9 @@ func TestTaskDetailContent_ThreadTabRestoresPerTaskScrollState(t *testing.T) {
 		"chatMessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : chatMessages.scrollHeight;",
 		"userScrolledUp: userScrolledUp, pinned: !userScrolledUp",
 		"if (document.getElementById('thread-content')) {",
-		"scrollState = messages ? messages.scrollTop : null;",
+		"scrollTop: messages.scrollTop,",
+		"userScrolledUp: tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp",
+		"messages.scrollTop = scrollState.userScrolledUp ? scrollState.scrollTop : messages.scrollHeight;",
 		"_restoreThreadScrollOrBottom(taskId, false);",
 	}
 	for _, r := range required {
