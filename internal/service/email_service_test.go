@@ -286,7 +286,7 @@ func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageI
 	svc.pollOnce(context.Background(), EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"})
 
 	assert.Equal(t, 2, processed)
-	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, []uint32{101, 102}, client.seenIDs())
 }
 
 func TestEmailPollOnceBatchesReceiptRecoveryWithNewHandoff(t *testing.T) {
@@ -316,6 +316,73 @@ func TestEmailPollOnceBatchesReceiptRecoveryWithNewHandoff(t *testing.T) {
 	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
 	assert.Equal(t, 1, client.fullBodyFetches)
 	assert.Equal(t, [][]uint32{{2}}, client.fullBodyFetchIDs, "already-receipted messages must be excluded from the full fetch")
+}
+
+func TestEmailPollOnceKeepsUIDIdentityAcrossExpunges(t *testing.T) {
+	tests := []struct {
+		name       string
+		shiftAfter string
+	}{
+		{name: "discovery before metadata", shiftAfter: "search"},
+		{name: "metadata before body", shiftAfter: "metadata"},
+		{name: "body before handoff", shiftAfter: "body"},
+		{name: "handoff before acknowledgement", shiftAfter: "handoff"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			expungedUID := uint32(11)
+			targetUID := uint32(22)
+			otherUID := uint32(33)
+			expungedMessage := testIMAPMessage(1, "expunged message", "alice@example.com")
+			expungedMessage.Uid = expungedUID
+			targetMessage := testIMAPMessageWithBody(2, "target message", "alice@example.com", "process this exact message")
+			targetMessage.Uid = targetUID
+			otherMessage := testIMAPMessage(3, "already read unrelated message", "alice@example.com")
+			otherMessage.Uid = otherUID
+			client := newFakeEmailIMAPClient(expungedMessage, targetMessage, otherMessage)
+			client.uidValidity = 88
+			client.markUIDSeen(expungedUID)
+			client.markUIDSeen(otherUID)
+
+			switch tt.shiftAfter {
+			case "search":
+				client.afterSearch = func() { client.expungeUID(expungedUID) }
+			case "metadata":
+				client.afterUIDFetch = func(fullBody bool) {
+					if !fullBody {
+						client.expungeUID(expungedUID)
+					}
+				}
+			case "body":
+				client.afterUIDFetch = func(fullBody bool) {
+					if fullBody {
+						client.expungeUID(expungedUID)
+					}
+				}
+			}
+
+			var processedSubjects []string
+			svc := &EmailService{}
+			svc.processIncomingMessageFn = func(_ context.Context, message EmailInboundMessage) bool {
+				processedSubjects = append(processedSubjects, message.Subject)
+				if tt.shiftAfter == "handoff" {
+					client.expungeUID(expungedUID)
+				}
+				return true
+			}
+			svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) {
+				return client, nil
+			}
+
+			svc.pollOnce(context.Background(), EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"})
+
+			assert.Equal(t, []string{"target message"}, processedSubjects, "only the originally unread UID may be handed off")
+			assert.Equal(t, [][]uint32{{targetUID}, {targetUID}}, client.fetchIDs, "metadata and body fetches must target the discovered UID")
+			assert.Equal(t, [][]uint32{{targetUID}}, client.storeBatches(), "acknowledgement must target only the handed-off UID")
+			assert.Equal(t, []uint32{targetUID, otherUID}, client.seenIDs(), "expunge must not cause an unrelated UID to be acknowledged")
+		})
+	}
 }
 
 func TestEmailPollOnceUsesMIMEMessageIDBeforeEnvelopeAndUID(t *testing.T) {
@@ -360,7 +427,7 @@ func TestEmailPollOnceUsesMIMEMessageIDAfterUIDMetadataFallback(t *testing.T) {
 	message.Uid = 101
 	client := newFakeEmailIMAPClient(message)
 	client.uidValidity = 77
-	client.metadataMessageIDOmissions = map[uint32]bool{1: true}
+	client.metadataMessageIDOmissions = map[uint32]bool{101: true}
 	processed := 0
 	svc := &EmailService{emailInboundReceiptStore: receipts}
 	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
@@ -374,7 +441,7 @@ func TestEmailPollOnceUsesMIMEMessageIDAfterUIDMetadataFallback(t *testing.T) {
 	assert.Zero(t, processed, "a MIME Message-ID discovered after UID fallback must still deduplicate")
 	assert.Equal(t, 2, receipts.existsCalls, "the provisional and final receipt keys must use point checks for a one-message batch")
 	assert.Zero(t, receipts.batchCalls, "a one-message batch should retain the point lookup fast path")
-	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, []uint32{101}, client.seenIDs())
 	assert.Zero(t, receipts.recordCalls, "receipt recovery must not write a UID-keyed duplicate receipt")
 }
 func TestEmailPollOnceRecordsMIMEMessageIDAfterUIDMetadataFallback(t *testing.T) {
@@ -384,7 +451,7 @@ func TestEmailPollOnceRecordsMIMEMessageIDAfterUIDMetadataFallback(t *testing.T)
 	message.Uid = 101
 	client := newFakeEmailIMAPClient(message)
 	client.uidValidity = 77
-	client.metadataMessageIDOmissions = map[uint32]bool{1: true}
+	client.metadataMessageIDOmissions = map[uint32]bool{101: true}
 	client.storeFailures = 1
 	h.svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
 	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
@@ -396,7 +463,7 @@ func TestEmailPollOnceRecordsMIMEMessageIDAfterUIDMetadataFallback(t *testing.T)
 	assert.Zero(t, h.receipts.batchCalls, "a one-message batch should retain the point lookup fast path")
 	assert.Equal(t, 1, h.receipts.withHandoffCalls)
 	assert.Zero(t, h.receipts.recordCalls, "a successful WithHandoff must not use the provisional UID Record path")
-	assert.Equal(t, [][]uint32{{1}}, client.fullBodyFetchIDs, "the canonical key must be discovered from the full MIME fetch after metadata falls back to UID")
+	assert.Equal(t, [][]uint32{{101}}, client.fullBodyFetchIDs, "the canonical key must be discovered from the full MIME fetch after metadata falls back to UID")
 	canonicalKey := "message-id:<message-1@example.com>"
 	provisionalKey := "imap-uid:77:101"
 	canonicalExists, err := h.receipts.inner.Exists(h.ctx, emailMailboxIdentity(cfg), canonicalKey)
@@ -411,7 +478,7 @@ func TestEmailPollOnceRecordsMIMEMessageIDAfterUIDMetadataFallback(t *testing.T)
 
 	h.svc.pollOnce(h.ctx, cfg)
 
-	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, []uint32{101}, client.seenIDs())
 	assert.Equal(t, 4, h.receipts.existsCalls, "receipt recovery point-checks the provisional and canonical MIME identities")
 	assert.Zero(t, h.receipts.batchCalls, "a one-message batch should retain the point lookup fast path")
 	assert.Equal(t, 1, h.receipts.withHandoffCalls, "receipt recovery must not repeat the durable first-turn handoff")
@@ -1303,8 +1370,8 @@ func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
 
 type fakeEmailIMAPClient struct {
 	mu                         sync.RWMutex
-	messages                   map[uint32]*imap.Message
-	seen                       map[uint32]bool
+	messages                   map[uint32]*imap.Message // keyed by UID
+	seen                       map[uint32]bool          // keyed by UID
 	fetchCount                 int
 	fullBodyFetches            int
 	fullBodyFetchIDs           [][]uint32
@@ -1319,7 +1386,9 @@ type fakeEmailIMAPClient struct {
 	storeDelay                 time.Duration
 	uidValidity                uint32
 	metadataMessageIDOmissions map[uint32]bool
-	bodyData                   map[uint32]map[*imap.BodySectionName][]byte
+	bodyData                   map[uint32]map[*imap.BodySectionName][]byte // keyed by UID
+	afterSearch                func()
+	afterUIDFetch              func(fullBody bool)
 }
 
 func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
@@ -1337,9 +1406,9 @@ func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
 func (c *fakeEmailIMAPClient) setMessage(msg *imap.Message) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.messages[msg.SeqNum] = msg
+	c.messages[msg.Uid] = msg
 	if len(msg.Body) == 0 {
-		delete(c.bodyData, msg.SeqNum)
+		delete(c.bodyData, msg.Uid)
 		return
 	}
 	bodyData := make(map[*imap.BodySectionName][]byte, len(msg.Body))
@@ -1349,12 +1418,12 @@ func (c *fakeEmailIMAPClient) setMessage(msg *imap.Message) {
 		bodyData[section] = data
 		freshBody[section] = bytes.NewReader(data)
 	}
-	c.bodyData[msg.SeqNum] = bodyData
+	c.bodyData[msg.Uid] = bodyData
 	msg.Body = freshBody
 }
 
 func testIMAPMessage(id uint32, subject, from string) *imap.Message {
-	msg := &imap.Message{SeqNum: id, Envelope: &imap.Envelope{Subject: subject, MessageId: fmt.Sprintf("<message-%d@example.com>", id)}}
+	msg := &imap.Message{SeqNum: id, Uid: id, Envelope: &imap.Envelope{Subject: subject, MessageId: fmt.Sprintf("<message-%d@example.com>", id)}}
 	if from != "" {
 		parts := strings.SplitN(from, "@", 2)
 		msg.Envelope.From = []*imap.Address{{MailboxName: parts[0], HostName: parts[1]}}
@@ -1435,29 +1504,38 @@ func (c *fakeEmailIMAPClient) Select(string, bool) (*imap.MailboxStatus, error) 
 	defer c.mu.RUnlock()
 	return &imap.MailboxStatus{UidValidity: c.uidValidity}, nil
 }
-func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
+func (c *fakeEmailIMAPClient) UidSearch(*imap.SearchCriteria) ([]uint32, error) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var ids []uint32
-	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
-		if !c.seen[id] {
-			ids = append(ids, id)
+	var uids []uint32
+	for uid := range c.messages {
+		if !c.seen[uid] {
+			uids = append(uids, uid)
 		}
 	}
-	return ids, nil
+	sort.Slice(uids, func(i, j int) bool {
+		return c.messages[uids[i]].SeqNum < c.messages[uids[j]].SeqNum
+	})
+	afterSearch := c.afterSearch
+	c.mu.RUnlock()
+	if afterSearch != nil {
+		afterSearch()
+	}
+	return uids, nil
 }
-func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
+func (c *fakeEmailIMAPClient) UidFetch(uidset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
 	c.mu.Lock()
 	c.fetchCount++
 	c.fetchItems = append(c.fetchItems, append([]imap.FetchItem(nil), items...))
-	var fetchedIDs []uint32
-	for id := range c.messages {
-		if seqset.Contains(id) {
-			fetchedIDs = append(fetchedIDs, id)
+	var fetchedUIDs []uint32
+	for uid := range c.messages {
+		if uidset.Contains(uid) {
+			fetchedUIDs = append(fetchedUIDs, uid)
 		}
 	}
-	sort.Slice(fetchedIDs, func(i, j int) bool { return fetchedIDs[i] < fetchedIDs[j] })
-	c.fetchIDs = append(c.fetchIDs, append([]uint32(nil), fetchedIDs...))
+	sort.Slice(fetchedUIDs, func(i, j int) bool {
+		return c.messages[fetchedUIDs[i]].SeqNum < c.messages[fetchedUIDs[j]].SeqNum
+	})
+	c.fetchIDs = append(c.fetchIDs, append([]uint32(nil), fetchedUIDs...))
 	fullBody := false
 	for _, item := range items {
 		if item == (&imap.BodySectionName{}).FetchItem() {
@@ -1467,19 +1545,19 @@ func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem,
 	}
 	if fullBody {
 		c.fullBodyFetches++
-		c.fullBodyFetchIDs = append(c.fullBodyFetchIDs, append([]uint32(nil), fetchedIDs...))
-		for _, id := range fetchedIDs {
-			if body := c.messages[id].GetBody(&imap.BodySectionName{}); body != nil {
+		c.fullBodyFetchIDs = append(c.fullBodyFetchIDs, append([]uint32(nil), fetchedUIDs...))
+		for _, uid := range fetchedUIDs {
+			if body := c.messages[uid].GetBody(&imap.BodySectionName{}); body != nil {
 				if sized, ok := body.(interface{ Len() int }); ok {
 					c.fullBodyBytes += int64(sized.Len())
 				}
 			}
 		}
 	}
-	fetchedMessages := make([]*imap.Message, 0, len(fetchedIDs))
-	for _, id := range fetchedIDs {
-		message := c.messages[id]
-		if bodyData := c.bodyData[id]; len(bodyData) > 0 {
+	fetchedMessages := make([]*imap.Message, 0, len(fetchedUIDs))
+	for _, uid := range fetchedUIDs {
+		message := c.messages[uid]
+		if bodyData := c.bodyData[uid]; len(bodyData) > 0 {
 			copyMessage := *message
 			copyMessage.Body = make(map[*imap.BodySectionName]imap.Literal, len(bodyData))
 			for section, data := range bodyData {
@@ -1487,7 +1565,7 @@ func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem,
 			}
 			message = &copyMessage
 		}
-		if !fullBody && c.metadataMessageIDOmissions[id] {
+		if !fullBody && c.metadataMessageIDOmissions[uid] {
 			metadataSection := emailMessageIDHeaderSection()
 			metadataSection.Peek = false
 			copyMessage := *message
@@ -1502,25 +1580,32 @@ func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem,
 		}
 		fetchedMessages = append(fetchedMessages, message)
 	}
+	afterUIDFetch := c.afterUIDFetch
 	c.mu.Unlock()
 
-	defer close(ch)
 	for _, message := range fetchedMessages {
 		ch <- message
 	}
+	close(ch)
+	if afterUIDFetch != nil {
+		afterUIDFetch(fullBody)
+	}
 	return nil
 }
-func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ interface{}, _ chan *imap.Message) error {
+func (c *fakeEmailIMAPClient) UidStore(uidset *imap.SeqSet, _ imap.StoreItem, _ interface{}, _ chan *imap.Message) error {
 	c.mu.Lock()
 	c.storeCalls++
-	var storedIDs []uint32
-	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
-		if seqset.Contains(id) {
-			storedIDs = append(storedIDs, id)
+	var storedUIDs []uint32
+	for uid := range c.messages {
+		if uidset.Contains(uid) {
+			storedUIDs = append(storedUIDs, uid)
 		}
 	}
-	if len(storedIDs) > 0 {
-		c.storedIDs = append(c.storedIDs, storedIDs)
+	sort.Slice(storedUIDs, func(i, j int) bool {
+		return c.messages[storedUIDs[i]].SeqNum < c.messages[storedUIDs[j]].SeqNum
+	})
+	if len(storedUIDs) > 0 {
+		c.storedIDs = append(c.storedIDs, storedUIDs)
 	}
 	storeDelay := c.storeDelay
 	storeFailed := c.storeFailures > 0
@@ -1536,13 +1621,37 @@ func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ int
 		return fmt.Errorf("transient store failure")
 	}
 	c.mu.Lock()
-	for _, id := range storedIDs {
-		c.seen[id] = true
+	for _, uid := range storedUIDs {
+		c.seen[uid] = true
 	}
 	c.mu.Unlock()
 	return nil
 }
 func (c *fakeEmailIMAPClient) Logout() error { return nil }
+
+func (c *fakeEmailIMAPClient) expungeUID(uid uint32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	message, ok := c.messages[uid]
+	if !ok {
+		return
+	}
+	removedSequence := message.SeqNum
+	delete(c.messages, uid)
+	delete(c.bodyData, uid)
+	delete(c.seen, uid)
+	for _, current := range c.messages {
+		if current.SeqNum > removedSequence {
+			current.SeqNum--
+		}
+	}
+}
+
+func (c *fakeEmailIMAPClient) markUIDSeen(uid uint32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seen[uid] = true
+}
 
 func (c *fakeEmailIMAPClient) storeCallCount() int {
 	c.mu.RLock()
@@ -1568,12 +1677,12 @@ func newBlockingEmailIMAPClient(messages ...*imap.Message) *blockingEmailIMAPCli
 	}
 }
 
-func (c *blockingEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
+func (c *blockingEmailIMAPClient) UidFetch(uidset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
 	c.blockFetch.Do(func() {
 		close(c.fetchStarted)
 		<-c.releaseFetch
 	})
-	return c.fakeEmailIMAPClient.Fetch(seqset, items, ch)
+	return c.fakeEmailIMAPClient.UidFetch(uidset, items, ch)
 }
 
 func (c *blockingEmailIMAPClient) Terminate() error {
@@ -1592,13 +1701,16 @@ func (c *fakeEmailIMAPClient) storeBatches() [][]uint32 {
 func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	var ids []uint32
-	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
-		if c.seen[id] {
-			ids = append(ids, id)
+	var uids []uint32
+	for uid := range c.messages {
+		if c.seen[uid] {
+			uids = append(uids, uid)
 		}
 	}
-	return ids
+	sort.Slice(uids, func(i, j int) bool {
+		return c.messages[uids[i]].SeqNum < c.messages[uids[j]].SeqNum
+	})
+	return uids
 }
 
 func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) {
