@@ -17,7 +17,7 @@ These are the app's keyboard bindings. On macOS, **Command** is ⌘ and **Option
 | Next task in the breadcrumb list | Option+↓ | Alt+↓ |
 | Switch to the last task visited | Option+L | Alt+L |
 
-Project-tab shortcuts follow the displayed tab order and wrap at either end. They require at least two tabs and a visible tab strip. They are ignored inside text fields, editors, and select controls, and while a dialog or popover is open.
+Project-tab shortcuts follow the displayed tab order and wrap at either end. They require at least two tabs and a visible tab strip. They work while the chat or task composer is focused. They are ignored inside other text fields, editors, and select controls, and while a dialog or popover is open.
 
 Command/Ctrl+K also opens the breadcrumb selector on automation view/edit pages. Command/Ctrl+Shift+K toggles the project menu wherever its button is visible.
 
