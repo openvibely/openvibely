@@ -118,8 +118,9 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 		}
 
 					<style>
-                        .worker-limit-field { position: relative; display: inline-flex; }
-                        .worker-limit-infinity { display: none; position: absolute; left: .75rem; top: 50%; transform: translateY(-50%); pointer-events: none; font-size: 1.125rem; line-height: 1; }
+                        .worker-limit-field { position: relative; display: inline-flex; font-size: .75rem; line-height: 1.625; }
+                        .worker-limit-field .worker-limit-input { font: inherit; }
+                        .worker-limit-infinity { display: none; position: absolute; left: .5rem; top: 50%; transform: translateY(-50%); pointer-events: none; font: inherit; }
                         .worker-limit-input[data-unlimited="true"] { color: transparent; -webkit-text-fill-color: transparent; caret-color: transparent; }
                         .worker-limit-input[data-unlimited="true"]::selection { color: transparent; -webkit-text-fill-color: transparent; background: transparent; }
                         .worker-limit-input[data-unlimited="true"] + .worker-limit-infinity { display: block; }
