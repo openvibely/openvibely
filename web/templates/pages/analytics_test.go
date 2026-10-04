@@ -1410,7 +1410,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
 	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	fixture := `<main id="reconnect-result"></main><style>.flex{display:flex}.items-center{align-items:center}.card-title{display:flex;align-items:center;margin:0}.card-body{display:flex;flex-direction:column;gap:12px}.card-body p{flex-grow:1}.relative{position:relative}.h-80{height:320px}.h-64{height:256px}.hidden{display:none}.overflow-x-auto{overflow-x:auto}</style><script>
+	fixture := `<main id="reconnect-result"></main><style>html{overflow-y:scroll}::-webkit-scrollbar{width:16px;height:16px}.flex{display:flex}.items-center{align-items:center}.card-title{display:flex;align-items:center;margin:0}.card-body{display:flex;flex-direction:column;gap:12px}.card-body p{flex-grow:1}.relative{position:relative}.h-80{height:320px}.h-64{height:256px}.hidden{display:none}.overflow-x-auto{overflow-x:auto}</style><script>
  history.replaceState({},'',location.pathname+'?project_id=project-1&view=models');
  window.fetch=()=>new Promise(()=>{});
  window.Chart=function(){};
@@ -1452,8 +1452,11 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    button.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1})); await tick();
    check(dialog.open&&dialog.contains(card),'chart did not enter graph preview');
    const bounds=dialog.getBoundingClientRect();
-   check(bounds.left>=16&&bounds.top>=24&&bounds.right<=innerWidth-16&&bounds.bottom<=innerHeight-24,'preview lacks viewport margins');
-   check(bounds.width===Math.min(1200,innerWidth-32)&&bounds.height===Math.min(900,innerHeight-48),'preview dimensions differ from gallery');
+   const viewportWidth=document.documentElement.clientWidth;
+   check(viewportWidth<innerWidth,'fixture must reserve space for a scrollbar');
+   const geometry=JSON.stringify({bounds:bounds.toJSON(),viewportWidth,innerWidth,innerHeight});
+   check(bounds.left>=16&&bounds.top>=24&&bounds.right<=viewportWidth-16&&bounds.bottom<=innerHeight-24,'preview lacks viewport margins: '+geometry);
+   check(bounds.width===Math.min(1200,viewportWidth-32)&&bounds.height===Math.min(900,innerHeight-48),'preview dimensions differ from gallery: '+geometry);
    check(getComputedStyle(dialog).borderRadius==='12px','preview lacks rounded corners');
    check(plot.getBoundingClientRect().height>=bounds.height-200,'plot did not fill available height: '+plot.getBoundingClientRect().height+' of '+innerHeight);
    checkTitleAlignment(card,close);
