@@ -138,4 +138,5 @@ import "C"
 // the application lifetime; presentation changes never modify system settings.
 func installFullscreenPresentation() {
 	C.ovInstallFullscreenPresentation()
+	installNativeTrafficLights()
 }
