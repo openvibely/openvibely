@@ -66,6 +66,12 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 		b.waitFor("project shortcut opens project search", `String(document.getElementById('project-selector-dialog').open && document.activeElement.id==='project-selector-search')`, "true")
 		key("KeyK", `Object.assign({shiftKey:true},`+command+`)`)
 		b.waitFor("project shortcut closes without return ring", `String(!document.getElementById('project-selector-dialog').open && document.activeElement.id==='project-selector-trigger' && getComputedStyle(document.activeElement).outlineStyle==='none')`, "true")
+		var projectX, projectY float64
+		fmt.Sscan(b.evaluate(`(function(){var r=document.getElementById('project-selector-trigger').getBoundingClientRect();return (r.left+r.width/2)+' '+(r.top+r.height/2)})()`), &projectX, &projectY)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": projectX, "y": projectY}, nil)
+		b.waitFor("project hover works after shortcut close without click", `String(document.activeElement.id==='project-selector-trigger' && getComputedStyle(document.activeElement).outlineStyle==='none' && getComputedStyle(document.activeElement).backgroundColor!=='rgba(0, 0, 0, 0)')`, "true")
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 10, "y": 10}, nil)
+		b.waitFor("project hover clears on pointer exit", `getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor`, "rgba(0, 0, 0, 0)")
 		b.evaluate(`document.getElementById('task-message-input').value='Draft'; document.getElementById('task-message-input').dispatchEvent(new Event('input',{bubbles:true})); document.getElementById('task-message-input').focus(); window.sidebarBefore=document.getElementById('sidebar').className; 'ready'`)
 		key("KeyB", command)
 		b.waitFor("sidebar toggles from composer", `String(document.getElementById('sidebar').className!==window.sidebarBefore && document.activeElement.id==='task-message-input')`, "true")
