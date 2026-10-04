@@ -82,7 +82,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 13;
+			var controllerVersion = 14;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -225,7 +225,7 @@ templ searchableSelectorScript() {
 			}
 			listen(document, 'click', function(event) {
 				var root = rootFor(event.target); if (!root) return;
-				var trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { open(root, event); return; }
+				var trigger = event.target.closest && event.target.closest('[data-searchable-selector-trigger]'); if (trigger) { if (nodes(root).dialog.open) close(root, true); else open(root, event); return; }
 				var option = event.target.closest && event.target.closest('[data-searchable-selector-option]');
 				if (option) {
 					if (root.hasAttribute('data-searchable-selector-local')) {
@@ -260,6 +260,21 @@ templ searchableSelectorScript() {
                     highlight(root, list[index]); list[index].focus();
                 }
 			});
+            // A modal dialog makes its trigger inert. Track pointer geometry so
+            // clicking the backdrop over the trigger retains its hover state.
+            function trackBreadcrumbHover(event) {
+                document.querySelectorAll('[data-breadcrumb-selector-button]').forEach(function(button) {
+                    var rect = button.getBoundingClientRect();
+                    button.toggleAttribute('data-pointer-over', event.pointerType !== 'touch' && event.clientX >= rect.left && event.clientX < rect.right && event.clientY >= rect.top && event.clientY < rect.bottom);
+                });
+            }
+            function clearBreadcrumbHover() {
+                document.querySelectorAll('[data-breadcrumb-selector-button][data-pointer-over]').forEach(function(button) { button.removeAttribute('data-pointer-over'); });
+            }
+            listen(document, 'pointermove', trackBreadcrumbHover, true);
+            listen(document, 'pointerdown', trackBreadcrumbHover, true);
+            listen(document, 'pointerout', function(event) { if (!event.relatedTarget) clearBreadcrumbHover(); }, true);
+            listen(window, 'blur', clearBreadcrumbHover);
             listen(document, 'pointerdown', function(event) { var root = rootFor(event.target); if (root) root.__selectorKeyboard = false; });
             listen(document, 'pointermove', function(event) {
                 var root = rootFor(event.target); if (!root) return;
