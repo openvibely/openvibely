@@ -535,14 +535,15 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/")
 }
 
-func (h *Handler) buildProjectWorkerStats(ctx context.Context) []pages.ProjectWorkerStats {
+func (h *Handler) buildProjectWorkerStats(ctx context.Context) ([]pages.ProjectWorkerStats, bool) {
 	projects, err := h.projectSvc.ListWorkerCapacityProjects(ctx)
 	if err != nil {
 		applog.Infof("[handler] project worker stats error listing worker capacity projects: %v", err)
-		return nil
+		return nil, false
 	}
 
 	pendingCounts, err := h.taskRepo.CountPendingByProject(ctx)
+	available := err == nil
 	if err != nil {
 		applog.Infof("[handler] project worker stats error counting pending tasks: %v", err)
 		pendingCounts = make(map[string]int)
@@ -558,15 +559,15 @@ func (h *Handler) buildProjectWorkerStats(ctx context.Context) []pages.ProjectWo
 			MaxWorkers: p.MaxWorkers,
 		}
 	}
-	return projectStats
+	return projectStats, available
 }
 
 // buildModelWorkerStatsList returns per-model worker stats for configured model worker pools.
-func (h *Handler) buildModelWorkerStatsList(ctx context.Context) []pages.ModelWorkerStats {
+func (h *Handler) buildModelWorkerStatsList(ctx context.Context) ([]pages.ModelWorkerStats, bool) {
 	agents, err := h.llmConfigRepo.ListWorkerCapacities(ctx)
 	if err != nil {
 		applog.Infof("[handler] buildModelWorkerStatsList error: %v", err)
-		return nil
+		return nil, false
 	}
 	stats := make([]pages.ModelWorkerStats, 0, len(agents))
 	for _, agent := range agents {
@@ -578,7 +579,7 @@ func (h *Handler) buildModelWorkerStatsList(ctx context.Context) []pages.ModelWo
 			MaxWorkers: agent.MaxWorkers,
 		})
 	}
-	return stats
+	return stats, true
 }
 
 func (h *Handler) WorkerSettings(c echo.Context) error {
@@ -594,22 +595,22 @@ func (h *Handler) WorkerSettings(c echo.Context) error {
 	if !isHTMX {
 		projects, _ = h.projectSvc.ListSelectorOptions(ctx)
 	}
-	projectStats := h.buildProjectWorkerStats(ctx)
+	projectStats, projectStatsAvailable := h.buildProjectWorkerStats(ctx)
 
-	// Build per-model utilization
-	modelStats := h.buildModelWorkerStatsList(ctx)
+	// Build per-model utilization and preserve source failures in the response.
+	modelStats, modelStatsAvailable := h.buildModelWorkerStatsList(ctx)
 
 	applog.Infof("[handler] WorkerSettings max_workers=%d running_workers=%d total_running=%d queue_size=%d",
 		maxWorkers, runningWorkers, totalRunning, queueSize)
 
 	// For HTMX requests, return just the worker settings content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.WorkerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats))
+		return render(c, http.StatusOK, pages.WorkerSettingsContentWithAvailability(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, projectStatsAvailable, modelStatsAvailable))
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 
-	return render(c, http.StatusOK, pages.WorkerSettings(projects, currentProjectID, maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats))
+	return render(c, http.StatusOK, pages.WorkerSettingsWithAvailability(projects, currentProjectID, maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, projectStatsAvailable, modelStatsAvailable))
 }
 
 func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
@@ -636,10 +637,9 @@ func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	if isHTMX {
 		queueSize := h.workerSvc.QueueSize()
-		projectStats := h.buildProjectWorkerStats(c.Request().Context())
-
-		modelStats := h.buildModelWorkerStatsList(c.Request().Context())
-		return render(c, http.StatusOK, pages.WorkerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats))
+		projectStats, projectStatsAvailable := h.buildProjectWorkerStats(c.Request().Context())
+		modelStats, modelStatsAvailable := h.buildModelWorkerStatsList(c.Request().Context())
+		return render(c, http.StatusOK, pages.WorkerSettingsContentWithAvailability(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, projectStatsAvailable, modelStatsAvailable))
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/workers")
@@ -656,20 +656,20 @@ func (h *Handler) GlobalWorkerStats(c echo.Context) error {
 
 // ProjectWorkerStats returns just the project stats table body for polling
 func (h *Handler) ProjectWorkerStats(c echo.Context) error {
-	projectStats := h.buildProjectWorkerStats(c.Request().Context())
+	projectStats, projectStatsAvailable := h.buildProjectWorkerStats(c.Request().Context())
 
 	maxWorkers, _ := h.workerRepo.GetMaxWorkers(c.Request().Context())
 	runningWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 	queueSize := h.workerSvc.QueueSize()
 
-	return render(c, http.StatusOK, pages.ProjectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats))
+	return render(c, http.StatusOK, pages.ProjectStatsTableBodyWithAvailability(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, projectStatsAvailable))
 }
 
 // ModelWorkerStats returns per-model worker stats for polling
 func (h *Handler) ModelWorkerStats(c echo.Context) error {
-	modelStats := h.buildModelWorkerStatsList(c.Request().Context())
-	return render(c, http.StatusOK, pages.ModelStatsTableBody(modelStats))
+	modelStats, modelStatsAvailable := h.buildModelWorkerStatsList(c.Request().Context())
+	return render(c, http.StatusOK, pages.ModelStatsTableBodyWithAvailability(modelStats, modelStatsAvailable))
 }
 
 func parseScheduleSelection(anchorID, raw string) ([]string, error) {
@@ -894,10 +894,10 @@ func (h *Handler) UpdateProjectWorkerLimit(c echo.Context) error {
 	runningWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 
-	projectStats := h.buildProjectWorkerStats(c.Request().Context())
+	projectStats, projectStatsAvailable := h.buildProjectWorkerStats(c.Request().Context())
 
-	modelStats := h.buildModelWorkerStatsList(c.Request().Context())
-	return render(c, http.StatusOK, pages.WorkerSettingsContent(maxGlobalWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats))
+	modelStats, modelStatsAvailable := h.buildModelWorkerStatsList(c.Request().Context())
+	return render(c, http.StatusOK, pages.WorkerSettingsContentWithAvailability(maxGlobalWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats, projectStatsAvailable, modelStatsAvailable))
 }
 
 // API endpoints for capacity information

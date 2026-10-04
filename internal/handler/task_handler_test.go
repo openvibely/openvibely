@@ -26,6 +26,8 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	project := tc.CreateProject().WithName("Task Status Count Project").Build()
 	foreign := tc.CreateProject().WithName("Foreign Task Status Count Project").Build()
 	empty := tc.CreateProject().WithName("Empty Task Status Count Project").Build()
+	failedOnly := tc.CreateProject().WithName("Failed Only Task Status Count Project").Build()
+	cancelledOnly := tc.CreateProject().WithName("Cancelled Only Task Status Count Project").Build()
 
 	tc.CreateTask(project.ID).WithTitle("Active pending").WithCategory(models.CategoryActive).WithStatus(models.StatusPending).Build()
 	tc.CreateTask(project.ID).WithTitle("Active running").WithCategory(models.CategoryActive).WithStatus(models.StatusRunning).Build()
@@ -63,6 +65,10 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	}
 	tc.CreateTask(project.ID).WithTitle("Active failed").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
 	tc.CreateTask(project.ID).WithTitle("Active cancelled").WithCategory(models.CategoryActive).WithStatus(models.StatusCancelled).Build()
+	tc.CreateTask(project.ID).WithTitle("Hidden chat failed").WithCategory(models.CategoryChat).WithStatus(models.StatusFailed).Build()
+	tc.CreateTask(project.ID).WithTitle("Hidden scheduled failed").WithCategory(models.CategoryScheduled).WithStatus(models.StatusFailed).Build()
+	tc.CreateTask(failedOnly.ID).WithTitle("Only failure").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
+	tc.CreateTask(cancelledOnly.ID).WithTitle("Only cancellation").WithCategory(models.CategoryActive).WithStatus(models.StatusCancelled).Build()
 
 	parentID := "status-count-swarm-parent"
 	parent := &models.Task{
@@ -73,11 +79,12 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	childParentID := parent.ID
 	require.NoError(t, tc.handler.taskRepo.Create(ctx, &models.Task{
 		ID: "status-count-swarm-worker", ProjectID: project.ID, Title: "Swarm worker", Prompt: "worker",
-		Category: models.CategoryActive, Status: models.StatusQueued, SwarmRole: models.SwarmRoleWorker,
+		Category: models.CategoryActive, Status: models.StatusFailed, SwarmRole: models.SwarmRoleWorker,
 		ParentTaskID: &childParentID,
 	}))
 
 	tc.CreateTask(foreign.ID).WithTitle("Foreign queued").WithCategory(models.CategoryActive).WithStatus(models.StatusQueued).Build()
+	tc.CreateTask(foreign.ID).WithTitle("Foreign failed").WithCategory(models.CategoryActive).WithStatus(models.StatusFailed).Build()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts?project_id="+project.ID, nil)
 	rec := httptest.NewRecorder()
@@ -85,7 +92,7 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	require.Equal(t, http.StatusOK, rec.Code)
 	var response TaskStatusCountsResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&response))
-	require.Equal(t, TaskStatusCountsResponse{ActiveTasks: 3, QueuedTasks: 3}, response)
+	require.Equal(t, TaskStatusCountsResponse{ActiveTasks: 3, QueuedTasks: 3, FailedTasks: 1}, response)
 
 	emptyReq := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts?project_id="+empty.ID, nil)
 	emptyRec := httptest.NewRecorder()
@@ -93,6 +100,22 @@ func TestHandler_GetTaskStatusCountsUsesOnlyCompactProjectPredicates(t *testing.
 	var emptyResponse TaskStatusCountsResponse
 	require.NoError(t, json.NewDecoder(emptyRec.Body).Decode(&emptyResponse))
 	require.Equal(t, TaskStatusCountsResponse{}, emptyResponse)
+
+	for _, test := range []struct {
+		projectID string
+		want      TaskStatusCountsResponse
+	}{
+		{projectID: failedOnly.ID, want: TaskStatusCountsResponse{FailedTasks: 1}},
+		{projectID: cancelledOnly.ID, want: TaskStatusCountsResponse{}},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts?project_id="+test.projectID, nil)
+		rec := httptest.NewRecorder()
+		require.NoError(t, tc.handler.GetTaskStatusCounts(tc.echo.NewContext(req, rec)))
+		require.Equal(t, http.StatusOK, rec.Code)
+		var got TaskStatusCountsResponse
+		require.NoError(t, json.NewDecoder(rec.Body).Decode(&got))
+		require.Equal(t, test.want, got)
+	}
 
 	badReq := httptest.NewRequest(http.MethodGet, "/api/tasks/status-counts", nil)
 	badRec := httptest.NewRecorder()

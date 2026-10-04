@@ -1342,7 +1342,7 @@ const docTemplate = `{
         },
         "/api/tasks/status-counts": {
             "get": {
-                "description": "Returns only the active-category and queued-status predicates needed by terminal status.",
+                "description": "Returns only the active-category, queued-status, and failed-status predicates needed by terminal status.",
                 "produces": [
                     "application/json"
                 ],
@@ -2003,6 +2003,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "queued_tasks": {
+                    "type": "integer"
+                },
+                "failed_tasks": {
                     "type": "integer"
                 }
             }
@@ -4291,6 +4294,9 @@ const docTemplate = `{
                 "agent_id": {
                     "type": "string"
                 },
+                "agent_name": {
+                    "type": "string"
+                },
                 "completed_at": {
                     "type": "string"
                 },
@@ -4301,6 +4307,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "output_contract": {
+                    "type": "string"
+                },
+                "parent_execution_id": {
                     "type": "string"
                 },
                 "selected_memories": {

@@ -31,6 +31,7 @@ func (r *TaskRepo) TaskExecutionHistoryCutoff(ctx context.Context, taskID string
 type ProjectTaskStatusCounts struct {
 	ActiveTasks int
 	QueuedTasks int
+	FailedTasks int
 }
 
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, auto_merge_on_goal_achieved, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
@@ -2676,7 +2677,7 @@ func (r *TaskRepo) listWithSchedulesByProjectQuery(ctx context.Context, query, p
 	return results, rows.Err()
 }
 
-// CountProjectStatus returns the active-category and queued-status counts for a
+// CountProjectStatus returns the active-category, queued-status, and failed-status counts for a
 // project using the same card projection as the full task board. Hidden chat,
 // ordinary scheduled, and swarm-child rows must not change the status shown by
 // clients that previously counted rendered task cards.
@@ -2701,12 +2702,16 @@ func (r *TaskRepo) CountProjectStatus(ctx context.Context, projectID string) (Pr
 							AND d.status IN ('pending', 'processing', 'submitted')
 					))
 				)
+			THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN t.status = 'failed'
+				AND t.category IN ('active', 'backlog', 'completed')
+				AND COALESCE(t.swarm_role, '') NOT IN ('planner', 'worker', 'reviewer', 'merger', 'integrator')
 			THEN 1 ELSE 0 END), 0)
 		FROM tasks t
 		WHERE t.project_id = ?`
 
 	var counts ProjectTaskStatusCounts
-	if err := r.db.QueryRowContext(ctx, query, projectID).Scan(&counts.ActiveTasks, &counts.QueuedTasks); err != nil {
+	if err := r.db.QueryRowContext(ctx, query, projectID).Scan(&counts.ActiveTasks, &counts.QueuedTasks, &counts.FailedTasks); err != nil {
 		return ProjectTaskStatusCounts{}, fmt.Errorf("counting project task status: %w", err)
 	}
 	return counts, nil

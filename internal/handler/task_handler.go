@@ -2950,11 +2950,12 @@ func taskReferenceModelName(task repository.TaskReference, llmModels []models.LL
 type TaskStatusCountsResponse struct {
 	ActiveTasks int `json:"active_tasks"`
 	QueuedTasks int `json:"queued_tasks"`
+	FailedTasks int `json:"failed_tasks"`
 }
 
-// GetTaskStatusCounts returns active-category and queued-status counts for one project.
+// GetTaskStatusCounts returns active-category, queued-status, and failed-status counts for one project.
 // @Summary Get project task status counts
-// @Description Returns only the active-category and queued-status predicates needed by terminal status.
+// @Description Returns only the active-category, queued-status, and failed-status predicates needed by terminal status.
 // @Tags tasks
 // @Produce json
 // @Param project_id query string true "Project ID"
@@ -2975,6 +2976,7 @@ func (h *Handler) GetTaskStatusCounts(c echo.Context) error {
 	return c.JSON(http.StatusOK, TaskStatusCountsResponse{
 		ActiveTasks: counts.ActiveTasks,
 		QueuedTasks: counts.QueuedTasks,
+		FailedTasks: counts.FailedTasks,
 	})
 }
 
