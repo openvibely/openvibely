@@ -143,8 +143,8 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 	allEfforts := []string{"low", "medium", "high", "xhigh", "max"}
 	noneEfforts := []string{"none", "low", "medium", "high", "xhigh", "max"}
 	for model, want := range map[string][]string{
-		"claude-sonnet-5": allEfforts, "claude-opus-5-5": allEfforts,
-		"claude-opus-5": allEfforts, "claude-fable-5-1": allEfforts,
+		"claude-sonnet-5-5": allEfforts, "claude-sonnet-5": allEfforts,
+		"claude-opus-5-5": allEfforts, "claude-opus-5": allEfforts, "claude-fable-5-1": allEfforts,
 		"gpt-5.6-sol": noneEfforts, "gpt-6-astra": allEfforts,
 		"gpt-6.1-sol": allEfforts, "gpt-6-sol": noneEfforts, "gpt-6-luna": noneEfforts,
 	} {
@@ -195,8 +195,9 @@ func TestModelsContent_CatalogModelsInSelector(t *testing.T) {
 
 func TestBuiltInModelOptionsPreserveCatalogReasoningDefaults(t *testing.T) {
 	var options map[string][]struct {
-		Value         string `json:"value"`
-		DefaultEffort string `json:"defaultEffort"`
+		Value         string   `json:"value"`
+		DefaultEffort string   `json:"defaultEffort"`
+		Efforts       []string `json:"efforts"`
 	}
 	if err := json.Unmarshal([]byte(builtInModelOptionsJSON()), &options); err != nil {
 		t.Fatal(err)
@@ -207,6 +208,16 @@ func TestBuiltInModelOptionsPreserveCatalogReasoningDefaults(t *testing.T) {
 			t.Errorf("%s browser default %q differs from catalog %q", option.Value, option.DefaultEffort, spec.DefaultReasoningEffort)
 		}
 	}
+	wantEfforts := []string{"low", "medium", "high", "xhigh", "max"}
+	for _, option := range options[string(models.ProviderAnthropic)] {
+		if option.Value == "claude-sonnet-5-5" {
+			if !slices.Equal(option.Efforts, wantEfforts) {
+				t.Fatalf("Sonnet 5.5 browser efforts = %v, want %v", option.Efforts, wantEfforts)
+			}
+			return
+		}
+	}
+	t.Fatal("Sonnet 5.5 missing from Anthropic browser model options")
 }
 
 func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
