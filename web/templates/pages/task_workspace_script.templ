@@ -210,7 +210,11 @@ templ TaskWorkspaceScript() {
 			var command = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
-			if (command && !event.altKey && event.shiftKey && event.code === 'KeyB') {
+			if (command && !event.altKey && event.shiftKey && event.code === 'KeyD') {
+				if (!taskID || document.querySelector('[popover]:popover-open') || (!panel.hidden && panel.dataset.overlay === 'true')) return;
+				event.preventDefault();
+				workspace(changes.classList.contains('hidden'));
+			} else if (command && !event.altKey && event.shiftKey && event.code === 'KeyB') {
 				event.preventDefault();
 				var active = document.activeElement;
 				if (panel.hidden) openPanel(null, true, false);
