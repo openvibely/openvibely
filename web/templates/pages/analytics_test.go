@@ -1408,7 +1408,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
 	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
 		t.Fatal(err)
 	}
-	fixture := `<main id="reconnect-result"></main><style>.card-body{display:flex;flex-direction:column;gap:12px}.relative{position:relative}.h-80{height:320px}.h-64{height:256px}.hidden{display:none}.overflow-x-auto{overflow-x:auto}</style><script>
+	fixture := `<main id="reconnect-result"></main><style>.card-body{display:flex;flex-direction:column;gap:12px}.card-body p{flex-grow:1}.relative{position:relative}.h-80{height:320px}.h-64{height:256px}.hidden{display:none}.overflow-x-auto{overflow-x:auto}</style><script>
  history.replaceState({},'',location.pathname+'?project_id=project-1&view=models');
  window.fetch=()=>new Promise(()=>{});
  window.Chart=function(){};
@@ -1459,6 +1459,17 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    button.click(); await tick();
    dialog.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:0,clientY:0})); await tick();
    check(!dialog.open&&card.parentElement===parent,'backdrop click did not restore chart');
+   const skillCanvas=document.getElementById('skillOutcomeChart'),skillCard=skillCanvas.closest('.card'),skillParent=skillCard.parentElement;
+   const description=document.getElementById('skillOutcomeDescription');
+   description.textContent='Observed outcomes for tasks using each skill. Association only; not causation.';
+   skillCard.querySelector('[data-analytics-expand]').click(); await tick();
+   const descriptionBounds=description.getBoundingClientRect(),skillPlot=skillCanvas.parentElement.getBoundingClientRect();
+   check(dialog.contains(skillCard)&&getComputedStyle(description).flexGrow==='0','skill description grows in preview');
+   check(descriptionBounds.height<60,'skill description leaves excess empty space');
+   check(skillPlot.top-descriptionBounds.bottom<60,'skill plot is separated from description by empty space');
+   check(skillPlot.height>dialog.getBoundingClientRect().height-220,'skill plot does not fill remaining preview height');
+   close.click(); await tick();
+   check(skillCard.parentElement===skillParent,'skill chart was not restored');
    button.click(); await tick();
    window._analyticsAbortController.abort();
    check(!dialog.isConnected&&card.parentElement===parent,'navigation left graph preview overlay behind');
