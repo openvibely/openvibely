@@ -43,6 +43,39 @@ func TestModelCatalogEntriesAreCompleteAndUnique(t *testing.T) {
 	}
 }
 
+func TestClaudeSonnet55CatalogPolicy(t *testing.T) {
+	spec, ok := LookupModel(ProviderAnthropic, "claude-sonnet-5-5")
+	if !ok {
+		t.Fatal("claude-sonnet-5-5 missing from Anthropic catalog")
+	}
+	wantEfforts := []string{"low", "medium", "high", "xhigh", "max"}
+	if len(spec.ReasoningEfforts) != len(wantEfforts) {
+		t.Fatalf("Sonnet 5.5 efforts = %v, want %v", spec.ReasoningEfforts, wantEfforts)
+	}
+	for i, want := range wantEfforts {
+		if spec.ReasoningEfforts[i] != want {
+			t.Fatalf("Sonnet 5.5 efforts = %v, want %v", spec.ReasoningEfforts, wantEfforts)
+		}
+	}
+	if spec.ContextWindow != 200000 {
+		t.Fatalf("Sonnet 5.5 context window = %d, want OpenVibely's 200000-token budget", spec.ContextWindow)
+	}
+	if !spec.RequiresAdaptiveThinking || !spec.UsesAdaptiveThinking {
+		t.Fatalf("Sonnet 5.5 thinking capabilities = (required %v, adaptive %v), want both true", spec.RequiresAdaptiveThinking, spec.UsesAdaptiveThinking)
+	}
+	if spec.DefaultOutputTokens != 64000 || spec.MaxOutputTokens != 128000 {
+		t.Fatalf("Sonnet 5.5 output tokens = (%d, %d), want default 64000 and max 128000", spec.DefaultOutputTokens, spec.MaxOutputTokens)
+	}
+	defaultModel, ok := DefaultModel(ProviderAnthropic)
+	if !ok || defaultModel.ID != "claude-sonnet-4-5-20250929" {
+		t.Fatalf("Anthropic default = %q, want unchanged default claude-sonnet-4-5-20250929", defaultModel.ID)
+	}
+	providerModels := ProviderModels(ProviderAnthropic)
+	if len(providerModels) == 0 || providerModels[0].ID != "claude-opus-5-5" {
+		t.Fatalf("first Anthropic model = %v, want existing first option claude-opus-5-5", providerModels)
+	}
+}
+
 func TestRetiredBuiltInModelsAreUnsupported(t *testing.T) {
 	for _, tc := range []struct {
 		provider LLMProvider
