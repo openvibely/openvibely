@@ -178,7 +178,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   var results = selectorMenu.querySelector('[role="listbox"]');
   var createRow = document.createElement('div');
   createRow.hidden = true;
-  createRow.style.cssText = 'padding: 8px; border-bottom: 1px solid oklch(var(--bc) / .15)';
+  createRow.setAttribute('data-searchable-selector-divider', '');
+  createRow.style.cssText = 'padding: 8px; border-bottom-width: 1px';
   (results || selectorMenu.firstElementChild).before(createRow);
   var label = document.createElement('span'); label.textContent = 'Create New Project';
   var media = matchMedia('(min-width: 1024px)');

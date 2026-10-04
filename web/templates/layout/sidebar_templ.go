@@ -663,7 +663,7 @@ func ProjectSelector(projects []models.Project, currentProjectID string) templ.C
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" onclick=\"this.closest('dialog').close()\"><span class=\"w-4 shrink-0\" aria-hidden=\"true\">+</span><span>Create New Project</span></button></div><hr class=\"border-base-300 my-1\" role=\"separator\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "\" onclick=\"this.closest('dialog').close()\"><span class=\"w-4 shrink-0\" aria-hidden=\"true\">+</span><span>Create New Project</span></button></div><hr class=\"my-1\" data-searchable-selector-divider role=\"separator\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
