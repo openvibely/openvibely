@@ -158,6 +158,8 @@ func (c *composerFocusCDP) waitForTimeout(label, expression, want string, timeou
 
 func (c *composerFocusCDP) click(selector string) {
 	c.t.Helper()
+	// Opening dialogs scale their content in; measuring mid-transition makes the press miss the moving target.
+	c.evaluateAwait(fmt.Sprintf(`(function(){var el=document.querySelector(%q),running=[];for(var node=el;node;node=node.parentElement){running=running.concat(node.getAnimations().filter(function(a){return a.effect&&a.effect.getComputedTiming().endTime!==Infinity;}));}return Promise.all(running.map(function(a){return a.finished.catch(function(){});})).then(function(){return 'settled';});})()`, selector))
 	coordinates := c.evaluate(fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(!el)return 'missing';el.scrollIntoView({block:'center',inline:'center'});var r=el.getBoundingClientRect(),fractions=[.5,.25,.75],x,y,hit,owns=false;for(var yi=0;yi<fractions.length&&!owns;yi++){for(var xi=0;xi<fractions.length&&!owns;xi++){x=r.left+r.width*fractions[xi];y=r.top+r.height*fractions[yi];hit=document.elementFromPoint(x,y);owns=!!(hit&&(hit===el||el.contains(hit)));}}return JSON.stringify({x:x,y:y,hit:hit&&(hit.id||hit.tagName),hitHTML:hit&&hit.outerHTML.slice(0,180),targetRect:[r.left,r.top,r.right,r.bottom],hitRect:hit&&function(){var h=hit.getBoundingClientRect();return [h.left,h.top,h.right,h.bottom]}(),owns:owns,visibility:getComputedStyle(el).visibility,active:document.activeElement&&(document.activeElement.id||document.activeElement.tagName)});})()`, selector))
 	if coordinates == "missing" {
 		c.t.Fatalf("native click target %s is missing", selector)
