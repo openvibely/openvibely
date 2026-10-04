@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -286,8 +287,19 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.waitFor("settings belong to clicked inactive tab", `document.getElementById('settings-project')?.textContent || ''`, "/projects/p01/edit")
 				browser.waitFor("settings do not switch projects", `document.getElementById('project-selector').value`, "p00")
 
-				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(tab.width>=240 && tab.top-bar.top>=5 && controls && Array.from(controls.querySelectorAll('button')).every(function(button){var r=button.getBoundingClientRect();return Math.abs((r.top+r.bottom-bar.top-bar.bottom)/2)<1 && getComputedStyle(button).getPropertyValue('--wails-draggable').trim()==='no-drag';}));})()`); got != "true" {
-					t.Fatal("wide inset tabs and vertically centered window controls must share the titlebar", got)
+				if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),tab=document.querySelector('.desktop-project-tab').getBoundingClientRect();return String(tab.width>=240 && tab.top-bar.top>=5);})()`); got != "true" {
+					t.Fatal("wide inset tabs must fit the titlebar", got)
+				}
+				if runtime.GOOS == "darwin" {
+					// AppKit draws macOS controls above the webview; HTML replicas
+					// would duplicate them. Their behavior is tested natively.
+					if got := browser.evaluate(`String(document.querySelector('#desktop-project-titlebar .desktop-window-controls, #desktop-project-titlebar [data-wml-window]') === null)`); got != "true" {
+						t.Fatal("macOS titlebar must not duplicate native window controls in HTML", got)
+					}
+				} else {
+					if got := browser.evaluate(`(function(){var bar=document.getElementById('desktop-project-titlebar').getBoundingClientRect(),controls=document.querySelector('.desktop-window-controls');return String(!!controls && controls.querySelectorAll('button').length===3 && Array.from(controls.querySelectorAll('button')).every(function(button){var r=button.getBoundingClientRect();return Math.abs((r.top+r.bottom-bar.top-bar.bottom)/2)<1 && getComputedStyle(button).getPropertyValue('--wails-draggable').trim()==='no-drag';}));})()`); got != "true" {
+						t.Fatal("HTML window controls must be vertically centered and non-draggable", got)
+					}
 				}
 
 				if got := browser.evaluate(`String(document.getElementById('desktop-project-tabs').scrollWidth > document.getElementById('desktop-project-tabs').clientWidth && document.documentElement.scrollWidth <= innerWidth)`); got != "true" {
