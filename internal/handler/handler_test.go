@@ -2746,7 +2746,7 @@ func TestHandler_WorkerSettings(t *testing.T) {
 	assertContains(t, rec, "Worker Capacity &amp; Utilization")
 	assertContains(t, rec, "badge badge-primary badge-sm\">Global")
 	assertContains(t, rec, `id="limit-input-global" value="0" min="0"`)
-	assertContains(t, rec, ">Unlimited</span>")
+	assertContains(t, rec, ">∞</span>")
 	assertNotContains(t, rec, "Global Worker Pool")
 	assertContains(t, rec, "if (!window._workerSettingsHandlersBound)")
 	assertContains(t, rec, "window._workerLimitSuppressDirtyRestoreUntil")
@@ -2868,7 +2868,7 @@ func TestHandler_UpdateWorkerSettings(t *testing.T) {
 		rec := htmxPost(e, "/workers", form)
 		assertCode(t, rec, http.StatusOK)
 		assertContains(t, rec, `id="limit-input-global" value="0" min="0"`)
-		assertContains(t, rec, ">Unlimited</span>")
+		assertContains(t, rec, ">∞</span>")
 
 		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
 		if err != nil {
@@ -3055,8 +3055,8 @@ func TestHandler_GlobalWorkerStats(t *testing.T) {
 	assertContains(t, rec, "Worker Pool Size")
 	assertContains(t, rec, "Tasks Running")
 	assertContains(t, rec, "Queue")
-	assertContains(t, rec, ">Unlimited</span>")
-	assertContains(t, rec, `0 / Unlimited`)
+	assertContains(t, rec, ">∞</span>")
+	assertContains(t, rec, `0 / ∞`)
 	assertContains(t, rec, `hx-get="/workers/stats/global"`)
 }
 
