@@ -510,6 +510,7 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("changes breadcrumb and separate task menu", `String(!document.getElementById('task-breadcrumb-changes').hidden && !document.getElementById('task-breadcrumb-title').disabled && document.getElementById('task-resource-selector-button').hasAttribute('data-breadcrumb-selector-caret-only') && document.getElementById('task-workspace-back').getAttribute('aria-label')==='Back to thread')`, "true")
 		b.waitFor("context retained", `new URLSearchParams(location.search).get('from')+':'+new URLSearchParams(location.search).get('tab')`, "alerts:changes")
 		b.waitFor("thread retained", `(window.savedThread===document.getElementById('task-thread-view'))+':'+(window.savedSources===window._threadEventSources)`, "true:true")
+		b.evaluate(`var added=document.createElement('div');added.style.height='400px';added.textContent='New message while reviewing changes';document.getElementById('task-thread-messages').appendChild(added); 'appended'`)
 		b.click("#task-details-opener")
 		b.waitFor("diff inspector docked without covering changes", `(function(){var p=document.getElementById('task-details-panel'),diff=document.getElementById('tab-changes');return String(p.dataset.overlay==='false' && !diff.inert && diff.getBoundingClientRect().right<p.getBoundingClientRect().left)})()`, "true")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 1100, "height": 760, "deviceScaleFactor": 1, "mobile": false}, nil)
@@ -526,6 +527,18 @@ func TestBrowserFunctional_TaskWorkspacePanelAndDiff(t *testing.T) {
 		b.waitFor("toolbar review opens changes", `String(!document.getElementById('tab-changes').classList.contains('hidden'))`, "true")
 		b.click("#task-breadcrumb-title")
 		b.waitFor("breadcrumb returns to thread without opening menu", `String(document.getElementById('task-breadcrumb-changes').hidden && document.getElementById('task-breadcrumb-title').disabled && !document.querySelector('#task-resource-selector-dialog').open && !document.getElementById('tab-chat').classList.contains('hidden'))`, "true")
+		// A pinned thread must follow content received while Changes was visible.
+		for _, returnControl := range []string{"#task-workspace-back", "#task-breadcrumb-title", "history"} {
+			b.evaluate(`window._taskThreadPageTracker.returnToLatest(false); 'pinned'`)
+			b.click(".task-change-review")
+			b.evaluate(`var added=document.createElement('div');added.style.height='400px';added.textContent='Incoming message';document.getElementById('task-thread-messages').appendChild(added); 'appended'`)
+			if returnControl == "history" {
+				b.navigateHistory(-1)
+			} else {
+				b.click(returnControl)
+			}
+			b.waitFor("return follows latest via "+returnControl, `(function(){var m=document.getElementById('task-thread-messages');return String(!document.getElementById('tab-chat').classList.contains('hidden') && Math.abs(m.scrollHeight-m.clientHeight-m.scrollTop)<=2 && !window._taskThreadPageTracker.userScrolledUp)})()`, "true")
+		}
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": true}, nil)
 		b.waitFor("mobile changes controls contained in composer", `(function(){var form=document.getElementById('task-thread-form').getBoundingClientRect();return String(Array.from(document.querySelectorAll('#task-change-activity button, #task-thread-form-primary-action button')).every(function(el){var r=el.getBoundingClientRect();return r.width>0 && r.left>=form.left && r.right<=form.right && r.bottom<=form.bottom}))})()`, "true")
 		b.click("#task-details-opener")

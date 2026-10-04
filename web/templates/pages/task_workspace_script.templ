@@ -106,7 +106,11 @@ templ TaskWorkspaceScript() {
 			var wasDiff = !changes.classList.contains('hidden');
 			var messages = root.querySelector('#task-thread-messages');
 			if (diff && !wasDiff) {
-				scrollState = messages ? messages.scrollTop : null;
+				var tracker = window._taskThreadPageTracker;
+				scrollState = messages ? {
+					scrollTop: messages.scrollTop,
+					userScrolledUp: tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp
+				} : null;
 				returnFocus = composerFocus || document.activeElement;
 				composerFocus = null;
 			}
@@ -134,9 +138,10 @@ templ TaskWorkspaceScript() {
 				_stopFileChangesSSE();
 				delete thread.dataset.workspaceHidden;
 				if (wasDiff && messages && scrollState !== null) {
-					messages.scrollTop = scrollState;
 					var tracker = window._taskThreadPageTracker;
-					if (tracker) tracker.userScrolledUp = messages.scrollHeight - messages.clientHeight - scrollState > 10;
+					if (tracker) tracker.userScrolledUp = scrollState.userScrolledUp;
+					window._taskThreadUserScrolledUp = scrollState.userScrolledUp;
+					messages.scrollTop = scrollState.userScrolledUp ? scrollState.scrollTop : messages.scrollHeight;
 				}
 				if (wasDiff && returnFocus && returnFocus.isConnected && push !== false) returnFocus.focus({preventScroll:true});
 				else if (wasDiff && push !== false) _focusTaskThreadComposer(back);
