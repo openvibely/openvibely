@@ -108,7 +108,7 @@ func TestWorkerSettingsContentShowsUnlimitedForProjectRunningColumn(t *testing.T
 	}
 	html := buf.String()
 
-	for _, want := range []string{"3 / Unlimited", "4 / Unlimited"} {
+	for _, want := range []string{"3 / ∞", "4 / ∞"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("project running column missing unlimited label %q", want)
 		}
