@@ -1402,3 +1402,51 @@ func TestAnalyticsContent_FocusedViewsPreserveExistingMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserFunctional_AnalyticsContent_FullscreenChartsInChrome(t *testing.T) {
+	var rendered bytes.Buffer
+	if err := AnalyticsContent(&models.Project{ID: "project-1", Name: "Project One"}).Render(context.Background(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	fixture := `<main id="reconnect-result"></main><style>.card-body{display:flex;flex-direction:column;gap:12px}.relative{position:relative}.h-80{height:320px}.h-64{height:256px}.hidden{display:none}.overflow-x-auto{overflow-x:auto}</style><script>
+ history.replaceState({},'',location.pathname+'?project_id=project-1&view=models');
+ window.fetch=()=>new Promise(()=>{});
+ window.Chart=function(){};
+ window.addEventListener('load',async function(){
+  const result=document.getElementById('reconnect-result');
+  function check(ok,message){if(!ok)throw new Error(message);}
+  const tick=()=>new Promise(resolve=>setTimeout(resolve,30));
+  try {
+   for(let i=0;i<100&&!document.querySelector('[data-analytics-fullscreen]');i++)await tick();
+   const dialog=document.querySelector('[data-analytics-fullscreen]');
+   check(dialog,'full screen dialog missing');
+   for(const canvas of document.querySelectorAll('canvas'))check(canvas.closest('.card').querySelector('[data-analytics-expand]'),'missing expand button: '+canvas.id);
+   const canvas=document.getElementById('modelRunTimeTrendChart'),card=canvas.closest('.card'),parent=card.parentElement,next=card.nextSibling;
+   const button=card.querySelector('[data-analytics-expand]'),select=card.querySelector('select'),plot=canvas.parentElement;
+   const originalStyle=plot.getAttribute('style');
+   let resized=0;
+   window._analyticsCharts.fullscreenTest={canvas,resize(){resized++;},destroy(){}};
+   button.click(); await tick();
+   check(dialog.open&&dialog.contains(card),'chart did not enter full screen');
+   check(dialog.getBoundingClientRect().width===innerWidth&&dialog.getBoundingClientRect().height===innerHeight,'dialog does not fill viewport');
+   check(plot.getBoundingClientRect().height>=innerHeight-200,'plot did not fill available height: '+plot.getBoundingClientRect().height+' of '+innerHeight);
+   check(dialog.querySelector('select')===select,'model filter was replaced');
+   check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
+   check(document.activeElement===dialog.firstElementChild,'close button not focused');
+   dialog.firstElementChild.click(); await tick();
+   check(!dialog.open&&card.parentElement===parent&&card.nextSibling===next,'chart not restored in original position');
+   check(document.activeElement===button,'focus not restored');
+   check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-fullscreen-plot'),'plot sizing not restored');
+   button.click(); await tick();
+   // Native dialog cancellation is the Escape path.
+   if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();
+   await tick(); check(!dialog.open&&card.parentElement===parent,'cancel did not restore chart');
+   button.click(); await tick();
+   window._analyticsAbortController.abort();
+   check(!dialog.isConnected&&card.parentElement===parent,'navigation left full screen overlay behind');
+   result.setAttribute('data-test-result','pass');
+  }catch(error){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',error.message);}
+ });
+ </script>` + rendered.String()
+	runReconnectChromeFixture(t, fixture)
+}
