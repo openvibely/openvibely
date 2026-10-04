@@ -8,11 +8,11 @@ import (
 )
 
 templ BreadcrumbSelector(config models.BreadcrumbSelector) {
-	<div class={ "min-w-0", templ.KV("shrink-0 w-0 overflow-visible", config.CaretOnly) } data-breadcrumb-selector data-searchable-selector data-searchable-selector-kind={ config.Kind } data-searchable-selector-pointer-x-anchor>
+	<div class={ "min-w-0", templ.KV("shrink-0 w-0 overflow-visible", config.CaretOnly) } data-breadcrumb-selector data-searchable-selector data-searchable-selector-kind={ config.Kind } data-searchable-selector-left-anchor>
 	<style>
 		[data-page-header] > input + [data-breadcrumb-selector]:has([data-breadcrumb-selector-caret-only]) { margin-left:4px; }
 		[data-breadcrumb-selector]:not([data-automation-editable-breadcrumb] > [data-breadcrumb-selector]):has([data-breadcrumb-selector-caret-only]) { width:28px; flex:0 0 28px; }
-		[data-breadcrumb-selector] [data-breadcrumb-selector-button]:is(:hover, [aria-expanded="true"]) { background:oklch(var(--bc) / .12); }
+		[data-breadcrumb-selector] [data-breadcrumb-selector-button]:is(:hover, [data-pointer-over], [aria-expanded="true"]) { background:oklch(var(--bc) / .12); }
 		[data-breadcrumb-selector] [data-breadcrumb-selector-button]:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:2px; }
 		[data-breadcrumb-title] { font-size:16px; line-height:22px; font-weight:500; text-decoration:none; }
 		[data-breadcrumb-title]:disabled { cursor:default; }

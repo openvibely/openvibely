@@ -107,7 +107,7 @@ func TestBrowserFunctional_BreadcrumbSelectorKeyboardFocusAndContainmentInChrome
 		    var box=dialog.getBoundingClientRect(), triggerBox=button.getBoundingClientRect();
 		    if(box.left < 7 || box.right > innerWidth-7 || box.bottom > innerHeight-7) throw new Error('selector escaped viewport: '+JSON.stringify(box));
 		    if(Math.abs(box.top-triggerBox.bottom-4) > 2) throw new Error('selector is not anchored below trigger: '+JSON.stringify({box:box,trigger:triggerBox}));
-		    if(Math.abs(box.left-clickX) > 2) throw new Error('selector left edge is not anchored to pointer x: '+JSON.stringify({box:box,clickX:clickX}));
+		    if(Math.abs(box.left-triggerBox.left) > 2) throw new Error('selector left edge is not anchored to trigger: '+JSON.stringify({box:box,clickX:clickX}));
 		    document.documentElement.setAttribute('data-theme','light');
 		    var themeBox=dialog, lightStyle=getComputedStyle(themeBox);
 		    var light=[lightStyle.backgroundColor,lightStyle.borderColor,lightStyle.color].join('|');

@@ -181,7 +181,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await window.openVibelyNavigate('/automations/auto-one?project_id=project-browser');
     await waitFor(function(){ return route('automation-live', 'auto-one'); }, 'Automation Live');
     htmx.process(selector());
-    var liveName=button().querySelector('span');
+    var liveName=document.querySelector('[data-automation-breadcrumb] [data-breadcrumb-title]');
     var liveNameLeft=liveName.getBoundingClientRect().left;
     var liveSlash=document.querySelector('[data-automation-breadcrumb] > span').getBoundingClientRect();
     var liveButtonBox=button().getBoundingClientRect();

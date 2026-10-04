@@ -801,5 +801,20 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 		fmt.Sscan(b.evaluate(`(function(){var r=document.querySelectorAll('[data-breadcrumb-selector-option]')[1].getBoundingClientRect();return (r.left+32)+' '+(r.top+r.height/2)})()`), &point.X, &point.Y)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 		b.waitFor("pointer updates active item", `String(document.querySelectorAll('[data-breadcrumb-selector-option]')[1].hasAttribute('data-selector-active'))`, "true")
+		// Click the trigger through the modal backdrop, then reopen at a different x.
+		fmt.Sscan(b.evaluate(`(function(){var r=document.querySelector('[data-breadcrumb-selector-button]').getBoundingClientRect();window.savedMenuLeft=document.querySelector('[data-breadcrumb-selector-dialog]').getBoundingClientRect().left;return (r.left+3)+' '+(r.top+r.height/2)})()`), &point.X, &point.Y)
+		clickTrigger := func(x float64) {
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": point.Y}, nil)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": x, "y": point.Y, "button": "left", "clickCount": 1}, nil)
+			b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": x, "y": point.Y, "button": "left", "clickCount": 1}, nil)
+		}
+		clickTrigger(point.X)
+		b.waitFor("trigger click closes menu and retains hover", `String(!document.querySelector('[data-breadcrumb-selector-dialog]').open && document.querySelector('[data-breadcrumb-selector-button]').hasAttribute('data-pointer-over') && getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).backgroundColor!=='rgba(0, 0, 0, 0)')`, "true")
+		clickTrigger(point.X + 20)
+		b.waitFor("menu anchor stays fixed across click positions", `String(document.querySelector('[data-breadcrumb-selector-dialog]').open && Math.abs(document.querySelector('[data-breadcrumb-selector-dialog]').getBoundingClientRect().left-window.savedMenuLeft)<1)`, "true")
+		clickTrigger(point.X + 20)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 10, "y": 10}, nil)
+		b.waitFor("hover clears after leaving closed trigger", `String(!document.querySelector('[data-breadcrumb-selector-dialog]').open && !document.querySelector('[data-breadcrumb-selector-button]').hasAttribute('data-pointer-over') && getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).backgroundColor==='rgba(0, 0, 0, 0)')`, "true")
+
 	})
 }
