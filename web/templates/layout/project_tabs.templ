@@ -461,6 +461,20 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     tabs.forEach(function(item) { item.tabIndex = -1; });
     tabs[index].tabIndex = 0; tabs[index].focus(); tabs[index].scrollIntoView({block: 'nearest', inline: 'nearest'});
    });
+   document.addEventListener('keydown', function(event) {
+    if (event.defaultPrevented || event.isComposing || event.repeat || event.metaKey === event.ctrlKey || !event.shiftKey || event.altKey) return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    var target = event.target;
+    if (target && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
+    if (document.querySelector('dialog[open], [popover]:popover-open') || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
+    var tabs = Array.from(list.querySelectorAll('[data-project-tab]'));
+    if (tabs.length < 2 || !list.getClientRects().length) return;
+    var index = tabs.findIndex(function(tab) { return tab.dataset.projectTab === select.value; });
+    if (index < 0) return;
+    event.preventDefault();
+    index = (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    switchProject(tabs[index].dataset.projectTab);
+   });
    window.openVibelyProjectTabsSync = sync;
    render();
   }
