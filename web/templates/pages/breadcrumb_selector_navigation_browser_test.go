@@ -136,6 +136,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (options().some(function(option){return option.textContent.indexOf('Stale Task')>=0;})) fail('stale Task response replaced newer results');
     input().focus();
     key(input(), 'ArrowDown');
+    if (document.activeElement.hasAttribute('data-searchable-selector-action')) key(document.activeElement, 'ArrowDown');
     if (!document.activeElement.matches('[data-breadcrumb-selector-option]')) fail('ArrowDown did not focus Task result; active='+document.activeElement.outerHTML+'; options='+options().length+'; installed='+window.openVibelyBreadcrumbSelectorInstalled);
     key(document.activeElement, 'Enter');
     await waitFor(function(){ return route('task', 'task-two'); }, 'Task switch');

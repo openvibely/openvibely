@@ -773,6 +773,11 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 			_ = components.BreadcrumbSelectorResults("Task", task.ID, []models.BreadcrumbSelectorItem{{ID: task.ID, Name: "Current task", URL: "/tasks/hover-task"}, {ID: "other", Name: "Other task", URL: "/tasks/other"}}, false, false).Render(r.Context(), w)
 			return
 		}
+		if r.URL.Path == "/tasks/new" {
+			project := models.Project{ID: "hover-project", Name: "Project"}
+			_ = NewTaskContent(&project, nil, nil).Render(r.Context(), w)
+			return
+		}
 		if r.URL.Path != "/tasks/hover-task" {
 			return
 		}
@@ -815,6 +820,13 @@ func TestBrowserFunctional_BreadcrumbStationaryPointerHasSingleHighlight(t *test
 		clickTrigger(point.X + 20)
 		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 10, "y": 10}, nil)
 		b.waitFor("hover clears after leaving closed trigger", `String(!document.querySelector('[data-breadcrumb-selector-dialog]').open && !document.querySelector('[data-breadcrumb-selector-button]').hasAttribute('data-pointer-over') && getComputedStyle(document.querySelector('[data-breadcrumb-selector-button]')).backgroundColor==='rgba(0, 0, 0, 0)')`, "true")
+
+		b.click("[data-breadcrumb-selector-button]")
+		b.waitFor("create task action available", `String(document.querySelector('#task-resource-selector-dialog [data-searchable-selector-action]').getAttribute('href')==='/tasks/new?project_id=hover-project')`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "ArrowUp", "code": "ArrowUp"}, nil)
+		b.waitFor("create task is keyboard reachable", `String(document.activeElement.hasAttribute('data-searchable-selector-action'))`, "true")
+		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter", "code": "Enter"}, nil)
+		b.waitFor("create opens task composer in current project", `String(location.pathname==='/tasks/new' && new URLSearchParams(location.search).get('project_id')==='hover-project' && !!document.querySelector('input[aria-label="Task title"]') && !document.querySelector('dialog[open]'))`, "true")
 
 	})
 }

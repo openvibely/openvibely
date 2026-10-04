@@ -2,6 +2,8 @@ package models
 
 // BreadcrumbSelector configures a searchable selector for one selected deep resource.
 type BreadcrumbSelector struct {
+	CreateURL    string
+	CreateLabel  string
 	ID           string
 	Kind         string
 	CurrentID    string

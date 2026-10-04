@@ -58,6 +58,14 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 					</div>
 				</div>
 			</div>
+			if config.CreateURL != "" {
+				<div class="p-2" style="border-bottom:1px solid oklch(var(--bc) / .15)">
+					<a href={ templ.URL(config.CreateURL) } class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+						<span>{ config.CreateLabel }</span>
+					</a>
+				</div>
+			}
 			<div
 				id={ config.ID + "-results" }
 				class={ SearchableSelectorResultsClass }
@@ -82,7 +90,7 @@ templ searchableSelectorScript() {
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 14;
+			var controllerVersion = 15;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -126,7 +134,7 @@ templ searchableSelectorScript() {
                 var list = visibleOptions(root);
                 if (!reset && list.includes(root.__selectorActive)) return;
                 var key = !reset && optionKey(root.__selectorActive);
-                highlight(root, (key && list.find(function(item) { return optionKey(item) === key; })) || list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list[0]);
+                highlight(root, (key && list.find(function(item) { return optionKey(item) === key; })) || list.find(function(item) { return item.getAttribute('aria-selected') === 'true'; }) || list.find(function(item) { return !item.hasAttribute('data-searchable-selector-action'); }));
             }
 			function position(root) {
 				var state = nodes(root), dialog = state.dialog, button = state.button;

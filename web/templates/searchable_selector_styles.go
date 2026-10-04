@@ -1,6 +1,8 @@
 package templates
 
 type SearchableSelectorConfig struct {
+	CreateURL     string
+	CreateLabel   string
 	ID            string
 	Kind          string
 	SearchURL     string
