@@ -439,6 +439,8 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 					browser.waitFor("selected tab navigation", `location.search`, "?project_id=p02")
 					browser.evaluate(`(function(){var ids=Array.from(document.querySelectorAll('[data-close-project]')).map(button=>button.dataset.closeProject).filter(id=>id!=='p02');ids.forEach(id=>document.querySelector('[data-close-project="'+id+'"]').click());return 'closed';})()`)
 					browser.waitFor("last tab cannot close", `String(document.querySelectorAll('[data-project-tab]').length === 1 && document.querySelector('[data-close-project]').disabled)`, "true")
+					browser.waitFor("one tab does not overflow", `(function(){var list=document.getElementById('desktop-project-tabs');return String(list.scrollWidth===list.clientWidth && list.scrollHeight===list.clientHeight);})()`, "true")
+					browser.waitFor("tab strip suppresses native scrollbar chrome", `(function(){var style=getComputedStyle(document.getElementById('desktop-project-tabs'));return style.overflowY+':'+style.scrollbarWidth;})()`, "hidden:none")
 					browser.evaluate(`(function(){document.querySelector('[data-close-project]').click(); document.querySelector('[data-project-tab]').dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete', bubbles: true}));return 'attempted';})()`)
 					browser.waitFor("last tab survives click and Delete", `String(document.querySelectorAll('[data-project-tab]').length === 1)`, "true")
 				})
