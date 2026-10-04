@@ -1032,7 +1032,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/tasks/:taskId/worktree/resolve", h.ResolveTaskConflicts)
 	e.POST("/tasks/:taskId/worktree/abort", h.AbortTaskMerge)
 	e.POST("/tasks/:taskId/worktree/cleanup", h.CleanupTaskWorktree)
-	e.GET("/tasks/:taskId/changes/worktree", h.GetTaskChangesWorktree)
 	e.POST("/settings/worktree", h.UpdateWorktreeSettings)
 
 	// Code Review Comments

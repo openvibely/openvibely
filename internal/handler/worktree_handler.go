@@ -1072,35 +1072,6 @@ func (h *Handler) renderWorktreeInfo(c echo.Context, task *models.Task) error {
 	return render(c, http.StatusOK, pages.WorktreeInfoPanel(task, fileStats))
 }
 
-// GetTaskChangesWorktree returns changes tab showing worktree-specific diff.
-func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
-	taskID := c.Param("taskId")
-
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	ctx := c.Request().Context()
-	state := h.resolveTaskChangesWorktreeState(ctx, task)
-
-	reviewComments := h.loadTaskReviewComments(ctx, taskID)
-
-	diffView := h.uiDiffViewPreference(ctx)
-
-	if state.UseWorktreeContent {
-		var taskPR *models.TaskPullRequest
-		if h.taskPullRequestRepo != nil {
-			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
-			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.LocalMergeUnavailable, state.ConflictRecovery, state.RebaseAvailable, diffView,
-		))
-	}
-
-	return render(c, http.StatusOK, pages.TaskChangesContentWithView(state.DiffOutput, task.ID, reviewComments, diffView))
-}
-
 // UpdateWorktreeSettings updates global worktree settings.
 func (h *Handler) UpdateWorktreeSettings(c echo.Context) error {
 	ctx := c.Request().Context()
