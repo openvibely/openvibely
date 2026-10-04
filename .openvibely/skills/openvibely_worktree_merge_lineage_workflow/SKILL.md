@@ -137,7 +137,7 @@ Tool calls (`read_file`, `edit_file`, `write_file`, `bash`) resolve **relative p
 - Do not hide or reject merge actions solely because `tasks.merge_status=merged` or worktree metadata is blank. First revalidate against Git and recover conventional `.worktrees/task_<id>` / expected `task/<id_prefix>-<slug>` metadata when present.
 - Clear stale merged metadata whenever Git shows the task branch still has commits beyond the target, including diverged branches where the target also has newer commits.
 - Only treat a task as already merged when the task branch is fully reachable from the target.
-- Apply stale metadata recovery consistently across `/tasks/:id/changes`, merge POST, older `/tasks/:id/changes/worktree`, worktree info panel, and direct task-detail renders with `?tab=changes`.
+- Apply stale metadata recovery consistently across `/tasks/:id/changes`, merge POST, worktree info panel, and direct task-detail renders with `?tab=changes`.
 - Direct `?tab=changes` render should lazy-load `/tasks/:id/changes` on page load instead of inlining stale `TaskChangesContent(...)`.
 - Direct `/tasks/:id/changes/file` lazy-file requests currently need care because normal UI flow runs `/tasks/:id/changes` first and persists recovery before lazy file loads.
 - Worktree merge HTMX flows should close the dropdown, disable/show busy state for the clicked action, and refresh the initiating Changes surface or show a toast.
