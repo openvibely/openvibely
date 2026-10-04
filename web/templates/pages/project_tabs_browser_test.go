@@ -173,9 +173,15 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				for _, modifiers := range []int{12, 10} { // Meta+Shift and Control+Shift.
 					for _, key := range []string{"ArrowLeft", "ArrowRight", "ArrowRight", "ArrowLeft"} {
 						want := browser.evaluate(`(function(){var tabs=Array.from(document.querySelectorAll('[data-project-tab]'));var i=tabs.findIndex(t=>t.getAttribute('aria-selected')==='true');return tabs[(i+(` + fmt.Sprintf("%q", key) + `==='ArrowRight'?1:-1)+tabs.length)%tabs.length].dataset.projectTab;})()`)
+						composerID := "message-input"
+						if key == "ArrowLeft" {
+							composerID = "task-message-input"
+						}
+						browser.evaluate(`(function(){var input=document.createElement('textarea');input.id=` + fmt.Sprintf("%q", composerID) + `;input.dataset.shortcutFixture='true';document.body.appendChild(input);input.focus();return 'focused';})()`)
 						browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": key, "code": key, "modifiers": modifiers}, nil)
 						browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": key, "code": key}, nil)
 						browser.waitFor("shortcut project navigation", `new URLSearchParams(location.search).get('project_id')`, want)
+						browser.evaluate(`document.querySelectorAll('[data-shortcut-fixture]').forEach(el=>el.remove()); "removed"`)
 					}
 					if got := browser.evaluate(`(function(){var input=document.createElement('textarea');document.body.appendChild(input);input.focus();var event=new KeyboardEvent('keydown',{key:'ArrowLeft',metaKey:` + fmt.Sprint(modifiers == 12) + `,ctrlKey:` + fmt.Sprint(modifiers == 10) + `,shiftKey:true,bubbles:true,cancelable:true});input.dispatchEvent(event);input.remove();return String(event.defaultPrevented);})()`); got != "false" {
 						t.Fatal("project shortcut intercepted text selection", got)
