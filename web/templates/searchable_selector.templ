@@ -59,7 +59,7 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 				</div>
 			</div>
 			if config.CreateURL != "" {
-				<div class="p-2" style="border-bottom:1px solid oklch(var(--bc) / .15)">
+				<div class="p-2" data-searchable-selector-divider style="border-bottom-width:1px">
 					<a href={ templ.URL(config.CreateURL) } class={ SearchableSelectorOptionClass } data-searchable-selector-option data-searchable-selector-action>
 						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
 						<span>{ config.CreateLabel }</span>
@@ -83,14 +83,15 @@ templ SearchableSelector(config SearchableSelectorConfig) {
 
 templ searchableSelectorScript() {
  <style>
- [data-searchable-selector-option] { outline: none !important; background-color: transparent !important; }
+ [data-searchable-selector-divider] { border-color:oklch(var(--bc) / .15); }
+ [data-searchable-selector-option] { font-size:.875rem; line-height:1.25rem; font-weight:400; outline: none !important; background-color: transparent !important; }
  [data-searchable-selector-option][data-selector-active] { background-color: oklch(var(--bc) / .1) !important; }
  [data-searchable-selector-trigger][data-selector-return-focus] { outline: none !important; }
  #desktop-project-titlebar #project-selector-trigger[data-selector-return-focus] { background: transparent; }
  </style>
 	<script>
 		(function() {
-			var controllerVersion = 16;
+			var controllerVersion = 17;
 			var previousController = window.openVibelySearchableSelectorController;
 			document.querySelectorAll('[data-searchable-selector-search]').forEach(function(input) { input.type = 'text'; });
 			document.querySelectorAll('[data-project-selector-clear]').forEach(function(control) { control.remove(); });
@@ -313,8 +314,8 @@ templ searchableSelectorScript() {
                 var root = rootFor(event.target); if (!root) return;
                 var option = event.target.closest('[data-searchable-selector-option]');
                 if (option) highlight(root, option);
-                var button = nodes(root).button;
-                if (button && button.contains(event.target)) button.removeAttribute('data-selector-return-focus');
+                // Keep return-focus suppression until focus leaves the trigger.
+                // Pointer hover must not restore a keyboard outline.
             });
             listen(document, 'focusin', function(event) {
                 var root = rootFor(event.target);

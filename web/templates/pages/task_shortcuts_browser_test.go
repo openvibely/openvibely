@@ -84,6 +84,10 @@ func TestBrowserFunctional_TaskShortcuts(t *testing.T) {
 		key("KeyK", command)
 		b.waitFor("command K closes breadcrumb", `String(!document.querySelector('dialog[open]'))`, "true")
 		b.waitFor("command K restores focus without a ring", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-button') && document.activeElement.hasAttribute('data-selector-return-focus') && getComputedStyle(document.activeElement).outlineStyle==='none')`, "true")
+		var hoverX, hoverY float64
+		fmt.Sscan(b.evaluate(`(function(){var r=document.activeElement.getBoundingClientRect();return (r.left+r.width/2)+' '+(r.top+r.height/2)})()`), &hoverX, &hoverY)
+		b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": hoverX, "y": hoverY}, nil)
+		b.waitFor("hover after shortcut close keeps ring suppressed", `String(document.activeElement.hasAttribute('data-selector-return-focus') && getComputedStyle(document.activeElement).outlineStyle==='none' && getComputedStyle(document.activeElement).backgroundColor!=='rgba(0, 0, 0, 0)')`, "true")
 		key("KeyK", command)
 		b.waitFor("command K reopens breadcrumb", `String(document.activeElement.hasAttribute('data-breadcrumb-selector-search'))`, "true")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
