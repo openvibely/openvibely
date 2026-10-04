@@ -40,9 +40,10 @@ templ ImageGallery() {
  #image-gallery .image-gallery-arrow:disabled { opacity:.3; cursor:default; }
  #image-gallery [data-gallery-prev] { left:12px; }
  #image-gallery [data-gallery-next] { right:12px; }
- #image-gallery [data-gallery-stage] { flex:1; min-height:0; overflow:hidden; position:relative; display:flex; justify-content:center; align-items:center; touch-action:none; }
+ #image-gallery [data-gallery-stage] { flex:1; min-width:0; margin-inline:68px; min-height:0; overflow:hidden; position:relative; display:flex; justify-content:center; align-items:center; touch-action:none; }
  #image-gallery img { max-width:100%; max-height:100%; object-fit:contain; user-select:none; flex-shrink:0; }
  #image-gallery [data-gallery-status] { position:absolute; pointer-events:none; }
+ @media (max-width:640px) { #image-gallery [data-gallery-stage] { margin-inline:0; } }
  [data-image-gallery-item] { cursor:zoom-in; }
  .attachment-gallery-row { display:flex; align-items:center; gap:12px; min-width:0; padding:0; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }
  .attachment-gallery-open { display:flex; align-items:center; gap:12px; min-width:0; flex:1; border-radius:8px; padding:4px 12px; text-align:left; }
