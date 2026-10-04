@@ -4851,6 +4851,43 @@ templ ChatAutoScrollScript() {
 				return promise;
 			};
 
+			window.linkStreamingToolResults = function(segments) {
+				var toolUseQueues = Object.create(null);
+				var toolRenderOrdinal = 0;
+				for (var si = 0; si < segments.length; si++) {
+					if (segments[si].type === 'using') {
+						var usingName = segments[si].normalizedName || segments[si].name;
+						segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++;
+						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = { calls: [], next: 0 };
+						toolUseQueues[usingName].calls.push(segments[si]);
+						continue;
+					}
+					if (segments[si].type !== 'tool_result') continue;
+					var resultName = segments[si].normalizedName || segments[si].name;
+					var queue = toolUseQueues[resultName];
+					if (!queue || queue.next >= queue.calls.length) continue;
+					var using = queue.calls[queue.next++];
+					using.resultLinked = true;
+					using.resultStatus = segments[si].status;
+					using.resultOutput = segments[si].output || '';
+					using.completed = true;
+				}
+				// Paired calls are already complete. Only scan the suffix when calls are unmatched.
+				var hasUnmatchedToolUses = false;
+				for (var usingName in toolUseQueues) {
+					var queue = toolUseQueues[usingName];
+					if (queue.next < queue.calls.length) { hasUnmatchedToolUses = true; break; }
+				}
+				if (hasUnmatchedToolUses) {
+					var hasContentFollowing = false;
+					for (var si = segments.length - 1; si >= 0; si--) {
+						if (segments[si].type === 'using' && hasContentFollowing) segments[si].completed = true;
+						if (segments[si].type !== 'text' || segments[si].content.trim()) hasContentFollowing = true;
+					}
+				}
+				return true;
+			};
+
 			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches) {
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
@@ -5154,41 +5191,7 @@ templ ChatAutoScrollScript() {
 						return true;
 					}
 					function linkToolResults() {
-					// Assign stable IDs and link each result to the oldest unmatched use.
-					var toolUseQueues = {};
-					var toolRenderOrdinal = 0;
-					for (var si = 0; si < segments.length; si++) {
-						if (segments[si].type === 'using') {
-						var usingName = segments[si].normalizedName || segments[si].name;
-						segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++;
-						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = [];
-						toolUseQueues[usingName].push(segments[si]);
-						continue;
-					}
-					if (segments[si].type === 'tool_result') {
-						var resultName = segments[si].normalizedName || segments[si].name;
-						var queue = toolUseQueues[resultName] || [];
-						for (var sk = 0; sk < queue.length; sk++) {
-							if (queue[sk].resultLinked) continue;
-							queue[sk].resultLinked = true;
-							queue[sk].resultStatus = segments[si].status;
-							queue[sk].resultOutput = segments[si].output || '';
-							break;
-							}
-						}
-					}
-					// Mark tools as completed if anything follows them.
-					for (var si = 0; si < segments.length; si++) {
-						if (segments[si].type !== 'using') continue;
-					if (segments[si].resultLinked) { segments[si].completed = true; continue; }
-					for (var sj = si + 1; sj < segments.length; sj++) {
-						if (segments[sj].type !== 'text' || segments[sj].content.trim()) {
-							segments[si].completed = true;
-							break;
-							}
-						}
-						}
-						return true;
+						return window.linkStreamingToolResults(segments);
 					}
 				var preparationPhases = [
 						prepareInitialCodeRanges,
