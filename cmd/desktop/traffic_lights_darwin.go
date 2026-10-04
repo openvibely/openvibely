@@ -8,6 +8,12 @@ package main
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 
+// AppKit's standard window buttons use this callback to refresh their cached
+// group-hover artwork. NSButtonCell mouseEntered: is for ordinary push buttons.
+@interface NSButton (OVWindowButtonHover)
+- (void)mouseEnteredOrExited;
+@end
+
 // Native controls live above the webview, in the space reserved by the HTML
 // header. AppKit draws their artwork, including fullscreen and disabled states.
 @interface OVTrafficLights : NSView {
@@ -68,19 +74,11 @@ package main
 }
 - (void)refresh {
     BOOL fullscreen = (self.window.styleMask & NSWindowStyleMaskFullScreen) != 0;
-    BOOL hovered = [self _mouseInGroup:nil];
     for (NSButton *button in self.subviews) {
         button.enabled = button.action != @selector(minimiseWindow:) || !fullscreen;
-        // AppKit cells also track hover individually. Keep that state in sync
-        // across the whole group, including movement between sibling buttons.
-        NSButtonCell *cell = (NSButtonCell *)button.cell;
-        BOOL showSymbol = hovered && button.enabled;
-        NSEvent *event = [NSEvent enterExitEventWithType:showSymbol ? NSEventTypeMouseEntered : NSEventTypeMouseExited
-            location:self.window.mouseLocationOutsideOfEventStream modifierFlags:0
-            timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:self.window.windowNumber
-            context:nil eventNumber:0 trackingNumber:0 userData:NULL];
-        if (showSymbol) [cell mouseEntered:event];
-        else [cell mouseExited:event];
+        if ([button respondsToSelector:@selector(mouseEnteredOrExited)]) {
+            [button mouseEnteredOrExited];
+        }
         [button setNeedsDisplay:YES];
     }
 }

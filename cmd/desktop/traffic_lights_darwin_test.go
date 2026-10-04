@@ -29,21 +29,21 @@ func TestNativeTrafficLightsHoverFollowsPointer(t *testing.T) {
 @interface OVHoverTestWindow : NSWindow
 @property NSPoint testPointer;
 @property BOOL testKey;
+@property BOOL testFullscreen;
 @end
 @implementation OVHoverTestWindow
 - (BOOL)isKeyWindow { return self.testKey; }
+- (NSWindowStyleMask)styleMask { return [super styleMask] | (self.testFullscreen ? NSWindowStyleMaskFullScreen : 0); }
 - (BOOL)isMainWindow { return self.testKey; }
 - (BOOL)canBecomeKeyWindow { return YES; }
 - (BOOL)canBecomeMainWindow { return YES; }
 - (NSPoint)mouseLocationOutsideOfEventStream { return self.testPointer; }
 @end
-@interface OVHoverRecordingCell : NSButtonCell
-@property BOOL hovered;
-@end
-@implementation OVHoverRecordingCell
-- (void)mouseEntered:(NSEvent *)event { self.hovered = YES; }
-- (void)mouseExited:(NSEvent *)event { self.hovered = NO; }
-@end
+static NSData *pixels(NSView *view) {
+ NSBitmapImageRep *rep = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
+ [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
+ return [NSData dataWithBytes:rep.bitmapData length:rep.bytesPerRow * rep.pixelsHigh];
+}
 int main(void) {
  @autoreleasepool {
   [NSApplication sharedApplication];
@@ -71,30 +71,33 @@ int main(void) {
   controls.hidden = NO;
   window.testPointer = NSMakePoint(300,50);
   [controls mouseExited:nil];
-  // Record the public cell tracking calls without relying on the appearance
-  // of an offscreen window (AppKit may render its minimize cell disabled).
-  for (NSButton *sibling in controls.subviews) {
-   SEL action = sibling.action;
-   OVHoverRecordingCell *cell = [[OVHoverRecordingCell alloc] init];
-   sibling.cell = cell;
-   sibling.target = controls;
-   sibling.action = action;
-   [cell release];
-  }
+  NSMutableArray *idle = [NSMutableArray array];
+  for (NSButton *sibling in controls.subviews) [idle addObject:pixels(sibling)];
   // Hover each button, including movement between siblings without a group
   // exit: every enabled button must render its hover symbol together.
   for (NSButton *hovered in controls.subviews) {
    window.testPointer = [hovered convertPoint:NSMakePoint(7,7) toView:nil];
    [controls mouseMoved:nil];
    for (NSUInteger i=0; i<controls.subviews.count; i++) {
-    if (![(OVHoverRecordingCell *)[(NSButton *)controls.subviews[i] cell] hovered]) return 7;
+    if ([idle[i] isEqualToData:pixels(controls.subviews[i])]) return 7;
    }
   }
   window.testPointer = NSMakePoint(300,50);
   [controls mouseExited:nil];
   for (NSUInteger i=0; i<controls.subviews.count; i++) {
-   if ([(OVHoverRecordingCell *)[(NSButton *)controls.subviews[i] cell] hovered]) return 8;
+   if (![idle[i] isEqualToData:pixels(controls.subviews[i])]) return 8;
   }
+  // Fullscreen must leave Minimize disabled with identical idle/hover artwork.
+  window.testFullscreen = YES;
+  [controls refresh];
+  if ([(NSButton *)controls.subviews[1] isEnabled]) return 9;
+  NSData *disabled = pixels(controls.subviews[1]);
+  window.testPointer = [controls convertPoint:NSMakePoint(7,7) toView:nil];
+  [controls mouseEntered:nil];
+  if (![disabled isEqualToData:pixels(controls.subviews[1])]) return 10;
+  window.testFullscreen = NO;
+  [controls refresh];
+  if (![(NSButton *)controls.subviews[1] isEnabled]) return 11;
   [controls release];
   [window release];
  }
