@@ -206,6 +206,7 @@ templ TaskWorkspaceScript() {
 			var openDialog = document.querySelector('dialog[open]');
 			if (command && !event.altKey && !event.shiftKey && event.code === 'KeyK' && breadcrumbButton && (!openDialog || breadcrumb.contains(openDialog))) {
 				event.preventDefault();
+				breadcrumb.__selectorKeyboard = true;
 				if (openDialog) window.openVibelySearchableSelector.close(breadcrumb, true);
 				else breadcrumbButton.click();
 				return;
