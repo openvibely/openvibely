@@ -21,22 +21,26 @@ func TestBrowserFunctional_DesktopWindowControls(t *testing.T) {
 					t.Error(err)
 				}
 				fmt.Fprint(w, `</header><dialog id="dialog">Modal</dialog><script>
-     window.maximized=false;window.fullscreen=false;window.handlers={};window.sent={};
-     window.testRuntime={Window:{IsMaximised:async()=>window.maximized,IsFullscreen:async()=>window.fullscreen},Events:{On:(name,fn)=>window.handlers[name]=fn,Emit:(name,data)=>window.sent[name]=data}};
+     window.calls=[];window.maximized=false;window.fullscreen=false;window.handlers={};window.sent={};
+     window.testRuntime={Window:{Close:()=>window.calls.push('Close'),Minimise:()=>window.calls.push('Minimise'),ToggleMaximise:()=>window.calls.push('ToggleMaximise'),UnFullscreen:()=>window.calls.push('UnFullscreen'),IsMaximised:async()=>window.maximized,IsFullscreen:async()=>window.fullscreen},Events:{On:(name,fn)=>window.handlers[name]=fn,Emit:(name,data)=>window.sent[name]=data}};
      window.openVibelyInstallWindowControls(window.testRuntime);
     </script></body></html>`)
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "window-controls", func(browser *composerFocusCDP) {
 				browser.waitFor("caption initialized", `document.querySelector('[data-maximize-icon]').parentElement.title`, "Maximize")
+				browser.evaluate(`document.querySelector('[data-window-action="Minimise"]').click();document.querySelector('[data-window-action="ToggleMaximise"]').click();document.querySelector('[data-window-action="Close"] svg path').dispatchEvent(new MouseEvent('click',{bubbles:true}));'ok'`)
+				browser.waitFor("caption clicks reach runtime", `window.calls.join(',')`, "Minimise,ToggleMaximise,Close")
 				browser.evaluate(`window.maximized=true;window.handlers['common:WindowMaximise']();'ok'`)
 				browser.waitFor("restore icon", `getComputedStyle(document.querySelector('[data-restore-icon]')).display`, "block")
 				browser.waitFor("maximize hidden", `getComputedStyle(document.querySelector('[data-maximize-icon]')).display`, "none")
 				browser.waitFor("restore label", `document.querySelector('[data-restore-icon]').parentElement.title`, "Restore")
 				browser.evaluate(`window.fullscreen=true;window.handlers['common:WindowFullscreen']();'ok'`)
-				browser.waitFor("fullscreen action", `document.querySelector('[data-restore-icon]').parentElement.getAttribute('data-wml-window')`, "UnFullscreen")
+				browser.waitFor("fullscreen action", `document.querySelector('[data-restore-icon]').parentElement.getAttribute('data-window-action')`, "UnFullscreen")
+				browser.evaluate(`document.querySelector('[data-window-action="UnFullscreen"]').click();'ok'`)
+				browser.waitFor("fullscreen click reaches runtime", `window.calls.at(-1)`, "UnFullscreen")
 				browser.evaluate(`window.fullscreen=false;window.maximized=false;window.handlers['common:WindowUnFullscreen']();'ok'`)
-				browser.waitFor("restored action", `document.querySelector('[data-restore-icon]').parentElement.getAttribute('data-wml-window')`, "ToggleMaximise")
+				browser.waitFor("restored action", `document.querySelector('[data-restore-icon]').parentElement.getAttribute('data-window-action')`, "ToggleMaximise")
 				browser.evaluate(`window.handlers['common:WindowLostFocus']();'ok'`)
 				browser.waitFor("inactive controls", `getComputedStyle(document.querySelector('[data-maximize-icon]')).opacity`, "0.5")
 				browser.evaluate(`window.handlers['common:WindowFocus']();'ok'`)

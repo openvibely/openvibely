@@ -24,3 +24,22 @@ func TestCaptionBoundsScaling(t *testing.T) {
 		t.Fatal("accepted invalid viewport")
 	}
 }
+
+func TestFitDesktopWindowSize(t *testing.T) {
+	for _, tc := range []struct {
+		name                       string
+		workW, workH, wantW, wantH int
+	}{
+		{"large display", 1920, 1040, 1280, 820},
+		{"scaled VM", 1024, 720, 1024, 720},
+		{"short display", 1366, 720, 1280, 720},
+		{"unknown display", 0, 0, 1280, 820},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, h := fitDesktopWindowSize(1280, 820, tc.workW, tc.workH)
+			if w != tc.wantW || h != tc.wantH {
+				t.Fatalf("size = %dx%d, want %dx%d", w, h, tc.wantW, tc.wantH)
+			}
+		})
+	}
+}

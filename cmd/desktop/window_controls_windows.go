@@ -45,6 +45,17 @@ func registerPlatformWindowControls(app *application.App, window *application.We
 	})
 	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 		application.InvokeAsync(func() {
+			// Wails centers the requested DIP size without clamping it. On a
+			// scaled/small display this can place the entire caption offscreen.
+			if screen, err := window.GetScreen(); err == nil && screen != nil {
+				width, height := window.Size()
+				fitWidth, fitHeight := fitDesktopWindowSize(width, height, screen.WorkArea.Width, screen.WorkArea.Height)
+				if fitWidth != width || fitHeight != height {
+					window.SetMinSize(min(500, fitWidth), min(480, fitHeight))
+					window.SetSize(fitWidth, fitHeight)
+					window.Center()
+				}
+			}
 			hwnd := uintptr(window.NativeWindow())
 			if hwnd == 0 {
 				return

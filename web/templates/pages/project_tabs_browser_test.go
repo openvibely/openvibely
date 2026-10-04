@@ -126,7 +126,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				browser.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
 				browser.waitFor("hover test menu closed", `String(document.getElementById('project-selector-dialog').open)`, "false")
 				if !desktop {
-					browser.waitFor("web selector", `String(!!document.querySelector('#desktop-project-titlebar #project-selector') && !document.querySelector('[data-wml-window]'))`, "true")
+					browser.waitFor("web selector", `String(!!document.querySelector('#desktop-project-titlebar #project-selector') && !document.querySelector('[data-window-action]'))`, "true")
 					browser.waitFor("web plus idle background", `getComputedStyle(document.getElementById('project-selector-trigger')).backgroundColor`, "rgba(0, 0, 0, 0)")
 					browser.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": true}, nil)
 					browser.waitFor("mobile keeps sidebar selector", `String(!!document.querySelector('#sidebar #project-selector') && getComputedStyle(document.getElementById('desktop-project-titlebar')).display === 'none')`, "true")
@@ -293,7 +293,7 @@ func TestBrowserFunctional_ProjectTabsAndBrowserScope(t *testing.T) {
 				if runtime.GOOS == "darwin" {
 					// AppKit draws macOS controls above the webview; HTML replicas
 					// would duplicate them. Their behavior is tested natively.
-					if got := browser.evaluate(`String(document.querySelector('#desktop-project-titlebar .desktop-window-controls, #desktop-project-titlebar [data-wml-window]') === null)`); got != "true" {
+					if got := browser.evaluate(`String(document.querySelector('#desktop-project-titlebar .desktop-window-controls, #desktop-project-titlebar [data-window-action]') === null)`); got != "true" {
 						t.Fatal("macOS titlebar must not duplicate native window controls in HTML", got)
 					}
 				} else {

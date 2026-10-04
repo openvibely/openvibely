@@ -170,7 +170,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`data-wml-window="Close"`, `data-wml-window="Minimise"`, `data-wml-window="ToggleMaximise"`} {
+	for _, want := range []string{`data-window-action="Close"`, `data-window-action="Minimise"`, `data-window-action="ToggleMaximise"`} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing app-drawn native-style control: %s", want)
 		}
@@ -215,7 +215,7 @@ func TestWebProjectBarResponsiveShell(t *testing.T) {
 			t.Errorf("missing responsive web shell %s", want)
 		}
 	}
-	if strings.Contains(html, `<button type="button" data-wml-window=`) {
+	if strings.Contains(html, `<button type="button" data-window-action=`) {
 		t.Error("web must not render native window controls")
 	}
 }
