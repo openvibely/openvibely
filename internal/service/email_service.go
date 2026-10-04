@@ -179,9 +179,9 @@ type EmailConnectionStatus struct {
 type emailIMAPClient interface {
 	Login(username, password string) error
 	Select(name string, readOnly bool) (*imap.MailboxStatus, error)
-	Search(criteria *imap.SearchCriteria) ([]uint32, error)
-	Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error
-	Store(seqset *imap.SeqSet, item imap.StoreItem, flags interface{}, ch chan *imap.Message) error
+	UidSearch(criteria *imap.SearchCriteria) ([]uint32, error)
+	UidFetch(uidset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error
+	UidStore(uidset *imap.SeqSet, item imap.StoreItem, flags interface{}, ch chan *imap.Message) error
 	Logout() error
 }
 
@@ -638,8 +638,8 @@ func (s *EmailService) markUnreadSeenForRun(ctx context.Context, cfg EmailRuntim
 	if !s.pollRunCanContinue(ctx, run) {
 		return ctx.Err()
 	}
-	ids, err := client.Search(unseenCriteria())
-	if err != nil || len(ids) == 0 {
+	uids, err := client.UidSearch(unseenCriteria())
+	if err != nil || len(uids) == 0 {
 		return err
 	}
 	if !s.pollRunCanContinue(ctx, run) {
@@ -654,7 +654,7 @@ func (s *EmailService) markUnreadSeenForRun(ctx context.Context, cfg EmailRuntim
 			return ctx.Err()
 		}
 	}
-	return storeSeen(client, ids)
+	return storeSeen(client, uids)
 }
 
 func emailPollCanContinue(ctx context.Context, run *emailPollRun) bool {
@@ -718,8 +718,8 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 	if !s.pollRunCanContinue(ctx, run) {
 		return
 	}
-	ids, err := client.Search(unseenCriteria())
-	if err != nil || len(ids) == 0 {
+	uids, err := client.UidSearch(unseenCriteria())
+	if err != nil || len(uids) == 0 {
 		if err != nil {
 			applog.Infof("[email] search unread failed: %v", err)
 		}
@@ -728,7 +728,7 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 	if !s.pollRunCanContinue(ctx, run) {
 		return
 	}
-	metadata, err := fetchEmailMessageMetadata(client, ids)
+	metadata, err := fetchEmailMessageMetadata(client, uids)
 	if err != nil {
 		applog.Infof("[email] fetch message metadata failed: %v", err)
 		return
@@ -748,27 +748,27 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 	}
 
 	if len(unresolved) > 0 {
-		unresolvedIDs := make([]uint32, 0, len(unresolved))
+		uids := make([]uint32, 0, len(unresolved))
 		for _, candidate := range unresolved {
-			unresolvedIDs = append(unresolvedIDs, candidate.ID)
+			uids = append(uids, candidate.UID)
 		}
-		messages, err := s.fetchEmailMessages(client, unresolvedIDs, cfg.SkipAttachments)
+		messages, err := s.fetchEmailMessages(client, uids, cfg.SkipAttachments)
 		if err != nil {
 			applog.Infof("[email] fetch messages failed: %v", err)
 		} else {
 			if !s.pollRunCanContinue(ctx, run) {
 				return
 			}
-			messagesByID := make(map[uint32]fetchedEmailMessage, len(messages))
+			messagesByUID := make(map[uint32]fetchedEmailMessage, len(messages))
 			for _, fetched := range messages {
-				messagesByID[fetched.ID] = fetched
+				messagesByUID[fetched.UID] = fetched
 			}
 			for _, candidate := range unresolved {
 				if !s.pollRunCanContinue(ctx, run) {
 					return
 				}
-				fetched, ok := messagesByID[candidate.ID]
-				if !ok {
+				fetched, ok := messagesByUID[candidate.UID]
+				if !ok || fetched.UID != candidate.UID {
 					continue
 				}
 				messageKey := candidate.MessageKey
@@ -777,18 +777,18 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 				} else if messageKey == "" {
 					messageKey, ok = emailInboundMessageKey(fetched.Message, mailbox.UidValidity, fetched.UID)
 					if !ok {
-						applog.Infof("[email] message %d has no stable Message-ID or IMAP UID identity; leaving unread", fetched.ID)
+						applog.Infof("[email] message UID %d has no stable Message-ID or IMAP UID identity; leaving unread", fetched.UID)
 						continue
 					}
 				}
 				if s.emailInboundReceiptStore != nil && messageKey != candidate.MessageKey {
 					received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
 					if err != nil {
-						applog.Infof("[email] check receipt for message %d failed: %v", fetched.ID, err)
+						applog.Infof("[email] check receipt for message UID %d failed: %v", fetched.UID, err)
 						continue
 					}
 					if received {
-						acknowledgementSet[fetched.ID] = struct{}{}
+						acknowledgementSet[fetched.UID] = struct{}{}
 						continue
 					}
 				}
@@ -805,7 +805,7 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 				}
 				if result.handled && s.emailInboundReceiptStore != nil && !result.receiptRecorded {
 					if err := s.emailInboundReceiptStore.Record(ctx, mailboxIdentity, messageKey); err != nil {
-						applog.Infof("[email] record receipt for message %d failed: %v", fetched.ID, err)
+						applog.Infof("[email] record receipt for message UID %d failed: %v", fetched.UID, err)
 					}
 				}
 				if run != nil {
@@ -814,20 +814,20 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 				if !result.handled {
 					continue
 				}
-				acknowledgementSet[fetched.ID] = struct{}{}
+				acknowledgementSet[fetched.UID] = struct{}{}
 			}
 		}
 	}
 	if !s.pollRunCanContinue(ctx, run) {
 		return
 	}
-	acknowledgementIDs := make([]uint32, 0, len(acknowledgementSet))
+	acknowledgementUIDs := make([]uint32, 0, len(acknowledgementSet))
 	for _, meta := range metadata {
-		if _, ok := acknowledgementSet[meta.ID]; ok {
-			acknowledgementIDs = append(acknowledgementIDs, meta.ID)
+		if _, ok := acknowledgementSet[meta.UID]; ok {
+			acknowledgementUIDs = append(acknowledgementUIDs, meta.UID)
 		}
 	}
-	if len(acknowledgementIDs) > 0 {
+	if len(acknowledgementUIDs) > 0 {
 		if run != nil {
 			if !s.acquirePollSideEffects(ctx, run) {
 				return
@@ -837,8 +837,8 @@ func (s *EmailService) pollOnceForRun(ctx context.Context, cfg EmailRuntimeConfi
 				return
 			}
 		}
-		if err := storeSeen(client, acknowledgementIDs); err != nil {
-			applog.Infof("[email] mark %d handled messages seen failed: %v", len(acknowledgementIDs), err)
+		if err := storeSeen(client, acknowledgementUIDs); err != nil {
+			applog.Infof("[email] mark %d handled messages seen failed: %v", len(acknowledgementUIDs), err)
 		}
 	}
 }
@@ -849,7 +849,7 @@ func (s *EmailService) filterEmailReceiptCandidates(ctx context.Context, mailbox
 	seenStableKeys := make(map[string]struct{}, len(metadata))
 	for _, meta := range metadata {
 		messageKey, stable := emailInboundMessageKey(EmailInboundMessage{MessageID: meta.MessageID}, uidValidity, meta.UID)
-		metadataCandidates = append(metadataCandidates, emailMessageCandidate{ID: meta.ID, MessageKey: messageKey})
+		metadataCandidates = append(metadataCandidates, emailMessageCandidate{UID: meta.UID, MessageKey: messageKey})
 		if stable {
 			if _, seen := seenStableKeys[messageKey]; !seen {
 				seenStableKeys[messageKey] = struct{}{}
@@ -870,7 +870,7 @@ func (s *EmailService) filterEmailReceiptCandidates(ctx context.Context, mailbox
 				continue
 			}
 			if _, received := receivedKeys[candidate.MessageKey]; received {
-				acknowledgementSet[candidate.ID] = struct{}{}
+				acknowledgementSet[candidate.UID] = struct{}{}
 				continue
 			}
 		}
@@ -939,10 +939,10 @@ func unseenCriteria() *imap.SearchCriteria {
 	return criteria
 }
 
-func storeSeen(client emailIMAPClient, ids []uint32) error {
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(ids...)
-	return client.Store(seqset, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.SeenFlag}, nil)
+func storeSeen(client emailIMAPClient, uids []uint32) error {
+	uidset := new(imap.SeqSet)
+	uidset.AddNum(uids...)
+	return client.UidStore(uidset, imap.FormatFlagsOp(imap.AddFlags, true), []interface{}{imap.SeenFlag}, nil)
 }
 
 func defaultEmailIMAPConnect(ctx context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error) {
@@ -970,18 +970,16 @@ func defaultEmailIMAPConnect(ctx context.Context, cfg EmailRuntimeConfig) (email
 }
 
 type emailMessageMetadata struct {
-	ID        uint32
 	UID       uint32
 	MessageID string
 }
 
 type emailMessageCandidate struct {
-	ID         uint32
+	UID        uint32
 	MessageKey string
 }
 
 type fetchedEmailMessage struct {
-	ID      uint32
 	UID     uint32
 	Message EmailInboundMessage
 }
@@ -996,19 +994,28 @@ func emailMessageIDHeaderSection() *imap.BodySectionName {
 	}
 }
 
-func fetchEmailMessageMetadata(client emailIMAPClient, ids []uint32) ([]emailMessageMetadata, error) {
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(ids...)
+func fetchEmailMessageMetadata(client emailIMAPClient, uids []uint32) ([]emailMessageMetadata, error) {
+	uidset := new(imap.SeqSet)
+	uidset.AddNum(uids...)
 	section := emailMessageIDHeaderSection()
 	items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid, section.FetchItem()}
-	ch := make(chan *imap.Message, len(ids))
-	if err := client.Fetch(seqset, items, ch); err != nil {
+	ch := make(chan *imap.Message, len(uids))
+	if err := client.UidFetch(uidset, items, ch); err != nil {
 		return nil, err
 	}
 
-	byID := make(map[uint32]emailMessageMetadata, len(ids))
+	requested := make(map[uint32]struct{}, len(uids))
+	for _, uid := range uids {
+		if uid != 0 {
+			requested[uid] = struct{}{}
+		}
+	}
+	byUID := make(map[uint32]emailMessageMetadata, len(uids))
 	for msg := range ch {
-		if msg == nil || msg.SeqNum == 0 {
+		if msg == nil || msg.Uid == 0 {
+			continue
+		}
+		if _, ok := requested[msg.Uid]; !ok {
 			continue
 		}
 		messageID := ""
@@ -1020,57 +1027,64 @@ func fetchEmailMessageMetadata(client emailIMAPClient, ids []uint32) ([]emailMes
 				messageID = firstNonEmpty(mr.Header.Get("Message-ID"), messageID)
 			}
 		}
-		byID[msg.SeqNum] = emailMessageMetadata{ID: msg.SeqNum, UID: msg.Uid, MessageID: messageID}
+		byUID[msg.Uid] = emailMessageMetadata{UID: msg.Uid, MessageID: messageID}
 	}
 
-	metadata := make([]emailMessageMetadata, 0, len(ids))
-	for _, id := range ids {
-		if meta, ok := byID[id]; ok {
+	metadata := make([]emailMessageMetadata, 0, len(uids))
+	for _, uid := range uids {
+		if meta, ok := byUID[uid]; ok {
 			metadata = append(metadata, meta)
-			continue
 		}
-		metadata = append(metadata, emailMessageMetadata{ID: id})
 	}
 	return metadata, nil
 }
 
-func (s *EmailService) fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bool) ([]fetchedEmailMessage, error) {
+func (s *EmailService) fetchEmailMessages(client emailIMAPClient, uids []uint32, skipAttachments bool) ([]fetchedEmailMessage, error) {
 	parseFn := s.parseIMAPMessageFn
 	if parseFn == nil {
 		parseFn = parseIMAPMessage
 	}
-	return fetchEmailMessagesWithParser(client, ids, skipAttachments, parseFn)
+	return fetchEmailMessagesWithParser(client, uids, skipAttachments, parseFn)
 }
 
-func fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bool) ([]fetchedEmailMessage, error) {
-	return fetchEmailMessagesWithParser(client, ids, skipAttachments, parseIMAPMessage)
+func fetchEmailMessages(client emailIMAPClient, uids []uint32, skipAttachments bool) ([]fetchedEmailMessage, error) {
+	return fetchEmailMessagesWithParser(client, uids, skipAttachments, parseIMAPMessage)
 }
 
-func fetchEmailMessagesWithParser(client emailIMAPClient, ids []uint32, skipAttachments bool, parseFn func(*imap.Message, *imap.BodySectionName, bool) (EmailInboundMessage, error)) ([]fetchedEmailMessage, error) {
-	seqset := new(imap.SeqSet)
-	seqset.AddNum(ids...)
+func fetchEmailMessagesWithParser(client emailIMAPClient, uids []uint32, skipAttachments bool, parseFn func(*imap.Message, *imap.BodySectionName, bool) (EmailInboundMessage, error)) ([]fetchedEmailMessage, error) {
+	uidset := new(imap.SeqSet)
+	uidset.AddNum(uids...)
 	section := &imap.BodySectionName{}
 	items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid, section.FetchItem()}
-	ch := make(chan *imap.Message, len(ids))
-	if err := client.Fetch(seqset, items, ch); err != nil {
+	ch := make(chan *imap.Message, len(uids))
+	if err := client.UidFetch(uidset, items, ch); err != nil {
 		return nil, err
 	}
-	byID := make(map[uint32]fetchedEmailMessage, len(ids))
+	requested := make(map[uint32]struct{}, len(uids))
+	for _, uid := range uids {
+		if uid != 0 {
+			requested[uid] = struct{}{}
+		}
+	}
+	byUID := make(map[uint32]fetchedEmailMessage, len(uids))
 	for msg := range ch {
-		if msg == nil {
+		if msg == nil || msg.Uid == 0 {
+			continue
+		}
+		if _, ok := requested[msg.Uid]; !ok {
 			continue
 		}
 		inbound, err := parseFn(msg, section, skipAttachments)
 		if err != nil {
-			applog.Infof("[email] parse message %d failed: %v", msg.SeqNum, err)
+			applog.Infof("[email] parse message UID %d failed: %v", msg.Uid, err)
 			continue
 		}
-		byID[msg.SeqNum] = fetchedEmailMessage{ID: msg.SeqNum, UID: msg.Uid, Message: inbound}
+		byUID[msg.Uid] = fetchedEmailMessage{UID: msg.Uid, Message: inbound}
 	}
 
-	out := make([]fetchedEmailMessage, 0, len(byID))
-	for _, id := range ids {
-		if fetched, ok := byID[id]; ok {
+	out := make([]fetchedEmailMessage, 0, len(byUID))
+	for _, uid := range uids {
+		if fetched, ok := byUID[uid]; ok {
 			out = append(out, fetched)
 		}
 	}
