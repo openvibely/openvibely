@@ -335,6 +335,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					height: 100vh;
 					width: 100vw;
 				}
+                /* Decorate the truncating element so its ellipsis is included. */
+                .task-card-title-link:hover [data-task-title] {
+                    text-decoration-line: underline;
+                }
 				.drag-cursor-surface {
 					cursor: grab;
 				}

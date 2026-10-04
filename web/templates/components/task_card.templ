@@ -559,7 +559,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						hx-target="#main-content"
 						hx-swap="innerHTML"
 						hx-push-url={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
-						class="font-medium hover:underline cursor-pointer inline-flex items-start gap-2 min-w-0 max-w-full leading-snug"
+						class="task-card-title-link font-medium cursor-pointer inline-flex items-start gap-2 min-w-0 max-w-full leading-snug"
 						title={ task.Title }
 					>
 						@TaskStateIcon(task)
