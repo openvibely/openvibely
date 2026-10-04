@@ -26,8 +26,17 @@ type chatMatcherBrowserReport struct {
 	Preparation map[string]map[string]struct {
 		P95MS float64 `json:"p95MS"`
 	} `json:"preparation"`
-	Improvement400 float64 `json:"improvement400"`
-	Growth100To400 float64 `json:"growth100To400"`
+	LargeRender    map[string]chatMatcherLargeRenderReport `json:"largeRender"`
+	Improvement400 float64                                 `json:"improvement400"`
+	Growth100To400 float64                                 `json:"growth100To400"`
+}
+
+type chatMatcherLargeRenderReport struct {
+	InputBytes      int     `json:"inputBytes"`
+	MatcherRuns     int     `json:"matcherRuns"`
+	FullRenderP95MS float64 `json:"fullRenderP95MS"`
+	FrameGapP95MS   float64 `json:"frameGapP95MS"`
+	RenderedDOMSame bool    `json:"renderedDOMSame"`
 }
 
 func TestBrowserPerformance_ChatToolResultMatchingScalesLinearlyInChrome(t *testing.T) {
@@ -139,6 +148,80 @@ window.addEventListener('DOMContentLoaded', function() {
     samples.sort(function(a, b) { return a - b; });
     return {p95MS: samples[Math.ceil(samples.length * 0.95) - 1]};
   }
+  function makeLargeStreamTranscript(count) {
+    var transcript = 'large streamed response context '.repeat(2400) + '\n';
+    var callIndexes = [];
+    for (var i = 0; i < count; i++) {
+      callIndexes.push(transcript.length);
+      transcript += '[Using tool: bash | command-' + i + ']\n';
+    }
+    for (var resultIndex = 0; resultIndex < count; resultIndex++) {
+      var status = resultIndex % 2 === 0 ? 'done' : 'error';
+      transcript += '[Tool bash ' + status + ']\nlarge-output-' + resultIndex + '\n[/Tool]\n';
+    }
+    return {text: transcript, callIndexes: callIndexes};
+  }
+  function verifyLargeRenderedDOM(transcript, markup, count) {
+    var cards = Array.from(container.querySelectorAll('.stream-tool'));
+    assert(cards.length === count, 'large stream rendered ' + cards.length + ' tool cards, expected ' + count);
+    for (var i = 0; i < count; i++) {
+      var expectedID = 'tool-' + transcript.callIndexes[i] + '-' + i;
+      assert(cards[i].getAttribute('data-tool-render-id') === expectedID, 'large stream tool ID changed at call ' + i);
+      var output = cards[i].querySelector('.stream-tool-body-scroll[data-tool-row="out"] > pre');
+      assert(output && output.textContent === 'large-output-' + i, 'large stream output was misplaced at call ' + i);
+      var icon = cards[i].querySelector('.stream-tool-summary svg');
+      var expectedStatus = i % 2 === 0 ? 'tool-status-done' : 'tool-status-error';
+      assert(icon && icon.classList.contains(expectedStatus), 'large stream result status changed at call ' + i);
+    }
+    assert(markup === container.innerHTML, 'large stream DOM changed during inspection');
+  }
+  var activeFrameGaps = null;
+  var previousFrameAt = 0;
+  var frameTracking = false;
+  function recordRenderFrame(timestamp) {
+    if (!frameTracking) return;
+    if (activeFrameGaps) {
+      activeFrameGaps.push(timestamp - previousFrameAt);
+      previousFrameAt = timestamp;
+    }
+    requestAnimationFrame(recordRenderFrame);
+  }
+  async function measureLargeStream(fn, transcript, count, restoreMatcher) {
+    var matcherCalls = 0;
+    var fullRenderSamples = [];
+    var frameGapSamples = [];
+    var repetitions = 12;
+    for (var sample = 0; sample < repetitions; sample++) {
+      window.linkStreamingToolResults = function(segments) {
+        matcherCalls++;
+        return fn(segments);
+      };
+      var frameGaps = [];
+      activeFrameGaps = frameGaps;
+      previousFrameAt = performance.now();
+      frameTracking = true;
+      requestAnimationFrame(recordRenderFrame);
+      var renderStartedAt = performance.now();
+      var committed = await window.renderStreamingContent(container, transcript.text, true);
+      fullRenderSamples.push(performance.now() - renderStartedAt);
+      await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+      frameTracking = false;
+      activeFrameGaps = null;
+      assert(committed !== false, 'large asynchronous render did not commit at sample ' + sample);
+      frameGapSamples.push(frameGaps.length ? Math.max.apply(Math, frameGaps) : 0);
+    }
+    assert(matcherCalls === repetitions, 'large asynchronous render invoked the matcher ' + matcherCalls + ' times, expected ' + repetitions);
+    window.linkStreamingToolResults = restoreMatcher;
+    var largeMarkup = container.innerHTML;
+    verifyLargeRenderedDOM(transcript, largeMarkup, count);
+    return {
+      matcherRuns: matcherCalls,
+      fullRenderP95MS: p95(fullRenderSamples),
+      frameGapP95MS: p95(frameGapSamples),
+      inputBytes: transcript.text.length,
+      markup: largeMarkup
+    };
+  }
   function makeTranscript(count) {
     var text = '';
     for (var i = 0; i < count; i++) text += '[Using tool: bash | echo command-' + i + ']\n';
@@ -247,6 +330,23 @@ window.addEventListener('DOMContentLoaded', function() {
     }
     window.linkStreamingToolResults = linearLink;
 
+    var largeTranscript = makeLargeStreamTranscript(400);
+    assert(largeTranscript.text.length >= 64 * 1024, 'large streamed fixture does not enter asynchronous preparation');
+    var legacyLarge = await measureLargeStream(legacyLinkStreamingToolResults, largeTranscript, 400, linearLink);
+    var linearLarge = await measureLargeStream(linearLink, largeTranscript, 400, linearLink);
+    assert(legacyLarge.markup === linearLarge.markup, 'legacy and linear large-stream rendering differ');
+    function largeMetrics(result) {
+      return {
+        inputBytes: result.inputBytes,
+        matcherRuns: result.matcherRuns,
+        fullRenderP95MS: result.fullRenderP95MS,
+        frameGapP95MS: result.frameGapP95MS,
+        renderedDOMSame: true
+      };
+    }
+    report.largeRender = {legacy: largeMetrics(legacyLarge), linear: largeMetrics(linearLarge)};
+    assert(linearLarge.frameGapP95MS <= legacyLarge.frameGapP95MS + 2, 'large-stream p95 frame gap exceeded baseline by more than 2ms: legacy=' + legacyLarge.frameGapP95MS.toFixed(3) + 'ms linear=' + linearLarge.frameGapP95MS.toFixed(3) + 'ms');
+
     for (var size of sizes) {
       for (var scenario of scenarios) {
         var legacyVisits = report.matcher.legacy[scenario][String(size)].visits;
@@ -308,6 +408,23 @@ window.addEventListener('DOMContentLoaded', function() {
 	if report.Growth100To400 > 6 {
 		t.Fatalf("browser matching p95 grew %.2fx from 100 to 400 pairs; expected at most 6x", report.Growth100To400)
 	}
+	legacyLarge, legacyLargeOK := report.LargeRender["legacy"]
+	linearLarge, linearLargeOK := report.LargeRender["linear"]
+	if !legacyLargeOK || !linearLargeOK {
+		t.Fatal("browser fixture omitted large asynchronous render measurements")
+	}
+	if legacyLarge.MatcherRuns != 12 || linearLarge.MatcherRuns != 12 {
+		t.Fatalf("large async matcher measured %d legacy and %d optimized invocations; expected 12 each", legacyLarge.MatcherRuns, linearLarge.MatcherRuns)
+	}
+	if legacyLarge.InputBytes < 64*1024 || linearLarge.InputBytes < 64*1024 {
+		t.Fatalf("large render did not enter asynchronous preparation: legacy=%d bytes linear=%d bytes", legacyLarge.InputBytes, linearLarge.InputBytes)
+	}
+	if !legacyLarge.RenderedDOMSame || !linearLarge.RenderedDOMSame {
+		t.Fatal("large streamed output did not render equivalently under both matchers")
+	}
+	if linearLarge.FrameGapP95MS > legacyLarge.FrameGapP95MS+2 {
+		t.Fatalf("large-render p95 frame gap exceeded baseline by more than 2ms: legacy %.3fms linear %.3fms", legacyLarge.FrameGapP95MS, linearLarge.FrameGapP95MS)
+	}
 	for scenario, sizes := range report.Matcher["linear"] {
 		for size, measurement := range sizes {
 			n := mustAtoi(t, size)
@@ -332,6 +449,10 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 		}
 	}
+	t.Logf("large streamed render (400 calls, %d bytes; matcher runs legacy %d linear %d): full-render p95 legacy %.3fms linear %.3fms; frame-gap p95 legacy %.3fms linear %.3fms; DOM equivalent=%t",
+		linearLarge.InputBytes, legacyLarge.MatcherRuns, linearLarge.MatcherRuns,
+		legacyLarge.FullRenderP95MS, linearLarge.FullRenderP95MS,
+		legacyLarge.FrameGapP95MS, linearLarge.FrameGapP95MS, linearLarge.RenderedDOMSame)
 	t.Logf("browser matcher measurements (same Chrome/runtime): %s", decoded)
 	for size, legacy := range report.Preparation["legacy"] {
 		linear := report.Preparation["linear"][size]
