@@ -325,22 +325,28 @@ templ analyticsContent(currentProject *models.Project) {
 						 }
 						 function restore() {
 						  if (!active) return;
-						  const {card, placeholder, button, plot, region} = active;
+						  const {card, placeholder, button, plot, region, keyboard} = active;
 						  active = null;
 						  dialog.appendChild(close);
 						  placeholder.replaceWith(card);
 						  plot.removeAttribute('data-analytics-preview-plot');
 						  region.removeAttribute('data-analytics-preview-region');
 						  resize(card);
-						  if (button.isConnected) button.focus({preventScroll:true});
+						  if (button.isConnected) {
+						   if (keyboard) button.focus({preventScroll:true});
+						   else button.blur();
+						  }
 						 }
-						 function dismiss() { dialog.close(); restore(); }
+						 function dismiss(event) {
+						  if (active && event) active.keyboard = event.type === 'cancel' || event.detail === 0;
+						  dialog.close(); restore();
+						 }
 						 close.addEventListener('click', dismiss, {signal:eventSignal});
 						 dialog.addEventListener('click', event => {
 						  const bounds = dialog.getBoundingClientRect();
-						  if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dismiss();
+						  if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) dismiss(event);
 						 }, {signal:eventSignal});
-						 dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(); }, {signal:eventSignal});
+						 dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(event); }, {signal:eventSignal});
 						 dialog.addEventListener('close', () => { if (!dialog.open) restore(); }, {signal:eventSignal});
 						 document.querySelectorAll('[data-analytics-expand]').forEach(button => {
 						  const heading = button.parentElement;
@@ -356,7 +362,7 @@ templ analyticsContent(currentProject *models.Project) {
 						   while (region.parentElement !== card.querySelector('.card-body')) region = region.parentElement;
 						   const placeholder = document.createComment('analytics chart position');
 						   card.before(placeholder);
-						   active = {card, placeholder, button, plot, region};
+						   active = {card, placeholder, button, plot, region, keyboard:event.detail === 0};
 						   plot.setAttribute('data-analytics-preview-plot', '');
 						   region.setAttribute('data-analytics-preview-region', '');
 						   dialog.setAttribute('aria-label', card.querySelector('h4').textContent + ' preview');
@@ -832,13 +838,17 @@ templ analyticsContent(currentProject *models.Project) {
 							}
 							function setupModelHelp() {
 								const root=document.getElementById('analyticsError').parentElement,tip=document.getElementById('modelMetricHelp');
+								const preview=document.querySelector('[data-analytics-preview]'),tipParent=tip.parentElement;
 								let active=null,pinned=false;
 								function close() {
 									if(active){active.removeAttribute('aria-describedby');active.setAttribute('aria-expanded','false');}
 									active=null;pinned=false;if(tip.matches(':popover-open'))tip.hidePopover();
+									if(tip.parentElement!==tipParent)tipParent.appendChild(tip);
 								}
 								function show(button,pin) {
 									if(active!==button)close();active=button;pinned=pinned||pin;
+									const host=button.closest('[data-analytics-preview]')||tipParent;
+									if(tip.parentElement!==host)host.appendChild(tip);
 									const sample=button.querySelector('[data-task-summary-sample]');
 									tip.textContent=button.dataset.modelHelp+(sample&&sample.textContent?' '+sample.textContent+'.':'');button.setAttribute('aria-describedby',tip.id);button.setAttribute('aria-expanded','true');
 									if(!tip.matches(':popover-open'))tip.showPopover();
@@ -846,11 +856,14 @@ templ analyticsContent(currentProject *models.Project) {
 									tip.style.left=Math.max(8,Math.min(r.left,window.innerWidth-box.width-8))+'px';
 									tip.style.top=Math.max(8,r.bottom+box.height+8<=window.innerHeight?r.bottom:r.top-box.height)+'px';
 								}
-								root.addEventListener('pointerover',function(e){const b=e.target.closest('[data-model-help]');if(b&&!pinned)show(b,false);},{signal:eventSignal});
-								root.addEventListener('pointerout',function(e){if(!pinned&&active&&!active.contains(e.relatedTarget)&&!tip.contains(e.relatedTarget))close();},{signal:eventSignal});
-								root.addEventListener('focusin',function(e){const b=e.target.closest('[data-model-help]');if(b)show(b,false);},{signal:eventSignal});
-								root.addEventListener('focusout',function(e){if(active===e.target)close();},{signal:eventSignal});
-								root.addEventListener('click',function(e){const b=e.target.closest('[data-model-help]');if(!b)return;if(active===b&&pinned)close();else show(b,true);},{signal:eventSignal});
+								for(const helpRoot of root.contains(preview)?[root]:[root,preview]) {
+									helpRoot.addEventListener('pointerover',function(e){const b=e.target.closest('[data-model-help]');if(b&&!pinned)show(b,false);},{signal:eventSignal});
+									helpRoot.addEventListener('pointerout',function(e){if(!pinned&&active&&!active.contains(e.relatedTarget)&&!tip.contains(e.relatedTarget))close();},{signal:eventSignal});
+									helpRoot.addEventListener('focusin',function(e){const b=e.target.closest('[data-model-help]');if(b)show(b,false);},{signal:eventSignal});
+									helpRoot.addEventListener('focusout',function(e){if(active===e.target)close();},{signal:eventSignal});
+									helpRoot.addEventListener('click',function(e){const b=e.target.closest('[data-model-help]');if(!b)return;if(active===b&&pinned)close();else show(b,true);},{signal:eventSignal});
+								}
+								preview.addEventListener('close',close,{signal:eventSignal});
 								document.addEventListener('keydown',function(e){if(e.key==='Escape')close();},{signal:eventSignal});
 								document.addEventListener('click',function(e){if(active&&!active.contains(e.target)&&!tip.contains(e.target))close();},{signal:eventSignal});
 								tip.addEventListener('toggle',function(){if(!tip.matches(':popover-open'))close();},{signal:eventSignal});

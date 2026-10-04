@@ -1461,20 +1461,38 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(dialog.querySelector('select')===select,'model filter was replaced');
    check(dialog.querySelector('canvas')===canvas&&resized>0,'chart was replaced or not resized');
    check(document.activeElement===dialog,'mouse opening left focus on exit button');
+   const help=card.querySelector('[data-model-help]'),tip=document.getElementById('modelMetricHelp'),tipParent=tip.parentElement;
+   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
+   check(tip.matches(':popover-open')&&tip.textContent===help.dataset.modelHelp,'preview info hover did not show tooltip');
+   check(dialog.contains(tip),'preview tooltip is outside modal and inert');
+   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
+   check(!tip.matches(':popover-open'),'preview info tooltip did not dismiss on pointer exit');
+   help.focus(); await tick();
+   check(document.activeElement===help&&tip.matches(':popover-open'),'preview info keyboard focus did not show tooltip');
+   help.click(); await tick();
+   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
+   check(tip.matches(':popover-open'),'preview info click did not pin tooltip');
    canvas.click(); await tick();
-   check(dialog.open,'chart interaction dismissed preview');
-   close.click(); await tick();
+   check(dialog.open&&!tip.matches(':popover-open'),'chart interaction did not dismiss only tooltip');
+   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
+   close.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1})); await tick();
+   check(!tip.matches(':popover-open')&&tip.parentElement===tipParent,'closing preview left tooltip behind');
    check(!dialog.open&&card.parentElement===parent&&card.nextSibling===next,'chart not restored in original position');
-   check(document.activeElement===button,'focus not restored');
+   check(document.activeElement!==button&&!button.matches(':focus-visible'),'mouse closing leaves expand button focused');
+   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
+   check(tip.matches(':popover-open'),'restored card info tooltip no longer works');
+   help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
    check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-preview-plot'),'plot sizing not restored');
    button.click(); await tick();
    check(document.activeElement===close,'keyboard opening did not focus exit button');
    // Native dialog cancellation is the Escape path.
    if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();
    await tick(); check(!dialog.open&&card.parentElement===parent,'cancel did not restore chart');
+   check(document.activeElement===button,'keyboard closing did not restore expand focus');
    button.click(); await tick();
-   dialog.dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:0,clientY:0})); await tick();
+   dialog.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1,clientX:0,clientY:0})); await tick();
    check(!dialog.open&&card.parentElement===parent,'backdrop click did not restore chart');
+   check(document.activeElement!==button,'backdrop closing leaves expand button focused');
    const skillCanvas=document.getElementById('skillOutcomeChart'),skillCard=skillCanvas.closest('.card'),skillParent=skillCard.parentElement;
    const description=document.getElementById('skillOutcomeDescription');
    description.textContent='Observed outcomes for tasks using each skill. Association only; not causation.';
@@ -1492,6 +1510,6 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    result.setAttribute('data-test-result','pass');
   }catch(error){result.setAttribute('data-test-result','fail');result.setAttribute('data-test-error',error.message);}
  });
- </script>` + rendered.String()
+ </script><section>` + rendered.String() + `</section>`
 	runReconnectChromeFixture(t, fixture)
 }
