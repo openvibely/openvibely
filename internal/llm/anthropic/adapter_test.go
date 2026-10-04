@@ -140,8 +140,8 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 		Agent: models.LLMConfig{
 			Name:            "Claude API",
 			Provider:        models.ProviderAnthropic,
-			Model:           "claude-opus-5",
-			ReasoningEffort: "low",
+			Model:           "claude-sonnet-5-5",
+			ReasoningEffort: "medium",
 			AuthMethod:      models.AuthMethodAPIKey,
 			APIKey:          "test-key",
 		},
@@ -161,8 +161,11 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 		t.Fatalf("zero-history follow-up received initial-task guidance: %#v", gotBody)
 	}
 	outputConfig, ok := gotBody["output_config"].(map[string]any)
-	if !ok || outputConfig["effort"] != "low" {
-		t.Fatalf("output_config = %#v, want effort low", gotBody["output_config"])
+	if !ok || outputConfig["effort"] != "medium" {
+		t.Fatalf("output_config = %#v, want effort medium", gotBody["output_config"])
+	}
+	if gotBody["model"] != "claude-sonnet-5-5" {
+		t.Fatalf("wire model = %v, want claude-sonnet-5-5", gotBody["model"])
 	}
 }
 
@@ -619,29 +622,43 @@ func TestCallDirectLifecycleHookDropsCodingAgentFraming(t *testing.T) {
 	}
 }
 
-func TestCallStreamingUsesAgenticStreamCallbacksAndRuntimeTools(t *testing.T) {
-	var gotBody map[string]any
+func TestCallStreamingSonnet55PreservesEffortAndThinkingToolHistory(t *testing.T) {
+	var gotBodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		var gotBody map[string]any
 		if err := json.Unmarshal(body, &gotBody); err != nil {
 			t.Fatalf("unmarshal request body: %v", err)
 		}
+		gotBodies = append(gotBodies, gotBody)
 		if got := r.Header.Get("x-api-key"); got != "test-key" {
 			t.Fatalf("x-api-key = %q, want test-key", got)
 		}
+
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
+		if len(gotBodies) == 1 {
+			for _, evt := range []string{
+				`{"type":"message_start","message":{"id":"msg_sonnet55_tool","model":"claude-sonnet-5-5","usage":{"input_tokens":11}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"consider the task"}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sonnet55-thinking-signature"}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_sonnet55","name":"create_task","input":{"title":"ship it"}}}`,
+				`{"type":"content_block_stop","index":1}`,
+				`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`,
+				`{"type":"message_stop"}`,
+			} {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+			return
+		}
 		for _, evt := range []string{
-			`{"type":"message_start","message":{"id":"msg_stream","model":"claude-opus-5","usage":{"input_tokens":11,"cache_creation_input_tokens":2,"cache_read_input_tokens":3}}}`,
-			`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
-			`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"consider options"}}`,
+			`{"type":"message_start","message":{"id":"msg_sonnet55_final","model":"claude-sonnet-5-5","usage":{"input_tokens":7}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"streamed Sonnet 5.5 answer"}}`,
 			`{"type":"content_block_stop","index":0}`,
-			`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"create_task","input":{"title":"ship it"}}}`,
-			`{"type":"content_block_stop","index":1}`,
-			`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
-			`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"streamed answer"}}`,
-			`{"type":"content_block_stop","index":2}`,
-			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`,
 			`{"type":"message_stop"}`,
 		} {
 			fmt.Fprintf(w, "data: %s\n\n", evt)
@@ -655,7 +672,7 @@ func TestCallStreamingUsesAgenticStreamCallbacksAndRuntimeTools(t *testing.T) {
 
 	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task", Description: "Create task", Parameters: json.RawMessage(`{"type":"object"}`)}},
-		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		Executor: func(_ context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 			if name != "create_task" || !strings.Contains(string(input), "ship it") {
 				t.Fatalf("runtime tool call = %s %s", name, string(input))
 			}
@@ -665,39 +682,85 @@ func TestCallStreamingUsesAgenticStreamCallbacksAndRuntimeTools(t *testing.T) {
 	})
 
 	adapter := New(nil, nil, nil)
-	output, textOnly, usage, err := adapter.callStreaming(ctx, "Finish task", nil, models.LLMConfig{
-		Name:            "Claude API",
-		Provider:        models.ProviderAnthropic,
-		Model:           "claude-opus-5",
-		ReasoningEffort: "low",
-		AuthMethod:      models.AuthMethodAPIKey,
-		APIKey:          "test-key",
-	}, "exec-stream", "/repo/worktree", "project rules", nil, nil, nil, false)
+	result, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationTask,
+		Message:             "Finish task",
+		ExecID:              "exec-sonnet55-task",
+		ProjectInstructions: "project rules",
+		Agent: models.LLMConfig{
+			Name:            "Claude Sonnet 5.5",
+			Provider:        models.ProviderAnthropic,
+			Model:           "claude-sonnet-5-5",
+			ReasoningEffort: "xhigh",
+			AuthMethod:      models.AuthMethodAPIKey,
+			APIKey:          "test-key",
+		},
+	}, "/repo/worktree", nil)
 	if err != nil {
-		t.Fatalf("callStreaming: %v", err)
+		t.Fatalf("Call task: %v", err)
 	}
-	if !strings.Contains(output, "streamed answer") || !strings.Contains(output, "consider options") {
-		t.Fatalf("stream output missing thinking/text events: %q", output)
+	if !strings.Contains(result.Output, "streamed Sonnet 5.5 answer") || !strings.Contains(result.Output, "consider the task") {
+		t.Fatalf("stream output missing answer or thinking: %q", result.Output)
 	}
-	if textOnly != "streamed answer" {
-		t.Fatalf("textOnly = %q, want streamed answer", textOnly)
+	if len(gotBodies) != 2 {
+		t.Fatalf("Anthropic request count = %d, want tool turn and final turn", len(gotBodies))
 	}
-	if usage.InputTokens != 11 || usage.OutputTokens != 5 || usage.TotalTokens != 16 {
-		t.Fatalf("usage = %#v", usage)
+	firstPayload := fmt.Sprint(gotBodies[0])
+	if !strings.Contains(firstPayload, "Finish task") || !strings.Contains(firstPayload, "project rules") || !strings.Contains(firstPayload, "create_task") {
+		t.Fatalf("task request body missing prompt/system/runtime tools: %#v", gotBodies[0])
 	}
-	payload := fmt.Sprint(gotBody)
-	if !strings.Contains(payload, "Finish task") || !strings.Contains(payload, "project rules") || !strings.Contains(payload, "create_task") {
-		t.Fatalf("request body missing prompt/system/runtime tools: %#v", gotBody)
-	}
-	if !strings.Contains(fmt.Sprint(gotBody["system"]), llmprompt.AnthropicAgentSystemPrompt) {
+	if !strings.Contains(fmt.Sprint(gotBodies[0]["system"]), llmprompt.AnthropicAgentSystemPrompt) {
 		t.Fatal("task request omitted Anthropic base prompt")
 	}
-	if !strings.Contains(payload, "If you recovered and completed the requested outcome, report success") ||
-		!strings.Contains(payload, "[STATUS: FAILED | <describe what prevented completion>]") {
-		t.Fatalf("task request missing provider-neutral outcome status contract: %#v", gotBody["messages"])
+	if !strings.Contains(firstPayload, "If you recovered and completed the requested outcome, report success") ||
+		!strings.Contains(firstPayload, "[STATUS: FAILED | <describe what prevented completion>]") {
+		t.Fatalf("task request missing provider-neutral outcome status contract: %#v", gotBodies[0]["messages"])
 	}
-	if strings.Contains(payload, "Bash") {
-		t.Fatalf("SkipDefaultTools should omit default tools, got %#v", gotBody["tools"])
+	if strings.Contains(firstPayload, "Bash") {
+		t.Fatalf("SkipDefaultTools should omit default tools, got %#v", gotBodies[0]["tools"])
+	}
+	for i, body := range gotBodies {
+		if body["model"] != "claude-sonnet-5-5" {
+			t.Errorf("request %d model = %v, want claude-sonnet-5-5", i+1, body["model"])
+		}
+		if body["max_tokens"] != float64(64000) {
+			t.Errorf("request %d max_tokens = %v, want 64000", i+1, body["max_tokens"])
+		}
+		if outputConfig, ok := body["output_config"].(map[string]any); !ok || outputConfig["effort"] != "xhigh" {
+			t.Errorf("request %d output_config = %#v, want effort xhigh", i+1, body["output_config"])
+		}
+		if thinking, ok := body["thinking"].(map[string]any); !ok || thinking["type"] != "adaptive" {
+			t.Errorf("request %d thinking = %#v, want adaptive", i+1, body["thinking"])
+		}
+		for _, unsupported := range []string{"temperature", "top_p", "top_k", "tool_choice"} {
+			if _, ok := body[unsupported]; ok {
+				t.Errorf("request %d unexpectedly included %q: %#v", i+1, unsupported, body[unsupported])
+			}
+		}
+	}
+
+	messages, ok := gotBodies[1]["messages"].([]any)
+	if !ok {
+		t.Fatalf("second turn messages = %#v", gotBodies[1]["messages"])
+	}
+	var echoedThinking, echoedToolUse, returnedToolResult bool
+	for _, rawMessage := range messages {
+		message, _ := rawMessage.(map[string]any)
+		blocks, _ := message["content"].([]any)
+		for _, rawBlock := range blocks {
+			block, _ := rawBlock.(map[string]any)
+			switch block["type"] {
+			case "thinking":
+				echoedThinking = block["thinking"] == "consider the task" && block["signature"] == "sonnet55-thinking-signature"
+			case "tool_use":
+				echoedToolUse = block["id"] == "toolu_sonnet55" && block["name"] == "create_task"
+			case "tool_result":
+				returnedToolResult = block["tool_use_id"] == "toolu_sonnet55"
+			}
+		}
+	}
+	if !echoedThinking || !echoedToolUse || !returnedToolResult {
+		t.Fatalf("second turn did not preserve thinking signature/tool history: thinking=%v tool_use=%v tool_result=%v messages=%#v", echoedThinking, echoedToolUse, returnedToolResult, messages)
 	}
 }
 
@@ -711,7 +774,7 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		for _, evt := range []string{
-			`{"type":"message_start","message":{"id":"msg_chat","model":"claude-opus-5","usage":{"input_tokens":7}}}`,
+			`{"type":"message_start","message":{"id":"msg_chat","model":"claude-sonnet-5-5","usage":{"input_tokens":7}}}`,
 			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
 			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"chat answer"}}`,
 			`{"type":"content_block_stop","index":0}`,
@@ -731,22 +794,31 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "List tasks", Parameters: json.RawMessage(`{"type":"object"}`)}},
 	})
 	adapter := New(nil, nil, nil)
-	output, usage, err := adapter.callChatStreaming(ctx, "What next?", nil, models.LLMConfig{
-		Name:            "Claude API",
-		Provider:        models.ProviderAnthropic,
-		Model:           "claude-opus-5",
-		ReasoningEffort: "low",
-		AuthMethod:      models.AuthMethodAPIKey,
-		APIKey:          "test-key",
-	}, "exec-chat", []models.Execution{{PromptSent: "Earlier question", Output: "Earlier answer", Status: models.ExecCompleted}}, "CHAT_SYSTEM_SENTINEL", true, models.ChatModeOrchestrate, "/repo/worktree", nil, nil, nil, false)
+	result, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Operation:         llmcontracts.OperationStreaming,
+		Message:           "What next?",
+		ExecID:            "exec-chat",
+		ChatHistory:       []models.Execution{{PromptSent: "Earlier question", Output: "Earlier answer", Status: models.ExecCompleted}},
+		ChatSystemContext: "CHAT_SYSTEM_SENTINEL",
+		Followup:          true,
+		ChatMode:          models.ChatModeOrchestrate,
+		Agent: models.LLMConfig{
+			Name:            "Claude API",
+			Provider:        models.ProviderAnthropic,
+			Model:           "claude-sonnet-5-5",
+			ReasoningEffort: "medium",
+			AuthMethod:      models.AuthMethodAPIKey,
+			APIKey:          "test-key",
+		},
+	}, "/repo/worktree", nil)
 	if err != nil {
-		t.Fatalf("callChatStreaming: %v", err)
+		t.Fatalf("Call chat: %v", err)
 	}
-	if !strings.Contains(output, "chat answer") {
-		t.Fatalf("output = %q", output)
+	if !strings.Contains(result.Output, "chat answer") {
+		t.Fatalf("output = %q", result.Output)
 	}
-	if usage.InputTokens != 7 || usage.OutputTokens != 4 {
-		t.Fatalf("usage = %#v", usage)
+	if result.Usage.InputTokens != 7 || result.Usage.OutputTokens != 4 {
+		t.Fatalf("usage = %#v", result.Usage)
 	}
 	payload := fmt.Sprint(gotBody)
 	for _, want := range []string{"What next?", "Earlier question", "Earlier answer", "CHAT_SYSTEM_SENTINEL", "list_tasks", llmprompt.AnthropicAgentSystemPrompt} {
@@ -756,5 +828,19 @@ func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T)
 	}
 	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
 		t.Fatalf("chat runtime tools should enable action guidance: %#v", gotBody["system"])
+	}
+	if gotBody["model"] != "claude-sonnet-5-5" {
+		t.Fatalf("chat model = %v, want claude-sonnet-5-5", gotBody["model"])
+	}
+	if outputConfig, ok := gotBody["output_config"].(map[string]any); !ok || outputConfig["effort"] != "medium" {
+		t.Fatalf("chat output_config = %#v, want effort medium", gotBody["output_config"])
+	}
+	if thinking, ok := gotBody["thinking"].(map[string]any); !ok || thinking["type"] != "adaptive" {
+		t.Fatalf("chat thinking = %#v, want adaptive", gotBody["thinking"])
+	}
+	for _, unsupported := range []string{"temperature", "top_p", "top_k", "tool_choice"} {
+		if _, ok := gotBody[unsupported]; ok {
+			t.Errorf("chat request unexpectedly included %q: %#v", unsupported, gotBody[unsupported])
+		}
 	}
 }
