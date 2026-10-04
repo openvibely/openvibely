@@ -266,17 +266,17 @@ templ analyticsContent(currentProject *models.Project) {
 			<!-- Chart.js and Custom Script -->
 			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
 			<style>
-				.card:has([data-analytics-expand]) { position:relative; }
-				.card:has([data-analytics-expand]) > .card-body { padding-top:3.5rem; }
-				[data-analytics-expand] { position:absolute; top:.75rem; right:1rem; }
+				[data-analytics-chart-header] { display:flex; align-items:center; gap:1rem; }
+				[data-analytics-chart-header] > :first-child { flex:1; min-width:0; }
 				dialog[data-analytics-fullscreen] { position:fixed; inset:0; width:100vw; height:100dvh; max-width:none; max-height:none; margin:0; padding:0; border:0; background:transparent; color:inherit; }
 				dialog[data-analytics-fullscreen]::backdrop { background:rgba(0,0,0,.65); }
 				dialog[data-analytics-fullscreen] > .card { width:100%; height:100%; border-radius:0; }
-				dialog[data-analytics-fullscreen] .card-body { height:100%; min-height:0; box-sizing:border-box; padding-top:3.5rem; overflow:auto; }
+				dialog[data-analytics-fullscreen] .card-body { height:100%; min-height:0; box-sizing:border-box; overflow:auto; }
 				dialog[data-analytics-fullscreen] [data-analytics-expand] { display:none; }
 				dialog[data-analytics-fullscreen] [data-analytics-fullscreen-region] { flex:1; min-height:200px; }
 				dialog[data-analytics-fullscreen] [data-analytics-fullscreen-plot] { height:100% !important; min-height:200px; }
-				dialog[data-analytics-fullscreen] > button { position:absolute; top:.75rem; right:1rem; z-index:3; }
+				dialog[data-analytics-fullscreen]:focus { outline:none; }
+				[data-analytics-chart-header] > button:focus:not(:focus-visible) { outline:none; box-shadow:none; }
 			</style>
 			<script type="text/javascript">
 				(function() {
@@ -304,6 +304,7 @@ templ analyticsContent(currentProject *models.Project) {
 						function setupAnalyticsFullscreen() {
 						 const dialog = document.createElement('dialog');
 						 dialog.setAttribute('data-analytics-fullscreen', '');
+						 dialog.tabIndex = -1;
 						 const close = document.createElement('button');
 						 close.type = 'button'; close.className = 'btn btn-ghost btn-circle btn-xs shrink-0';
 						 close.setAttribute('aria-label', 'Exit full screen'); close.title = 'Exit full screen';
@@ -317,6 +318,7 @@ templ analyticsContent(currentProject *models.Project) {
 						  if (!active) return;
 						  const {card, placeholder, button, plot, region} = active;
 						  active = null;
+						  dialog.appendChild(close);
 						  placeholder.replaceWith(card);
 						  plot.removeAttribute('data-analytics-fullscreen-plot');
 						  region.removeAttribute('data-analytics-fullscreen-region');
@@ -328,7 +330,11 @@ templ analyticsContent(currentProject *models.Project) {
 						 dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(); }, {signal:eventSignal});
 						 dialog.addEventListener('close', () => { if (!dialog.open) restore(); }, {signal:eventSignal});
 						 document.querySelectorAll('[data-analytics-expand]').forEach(button => {
-						  button.addEventListener('click', () => {
+						  const heading = button.closest('.card-body').firstElementChild;
+						  const header = document.createElement('div');
+						  header.setAttribute('data-analytics-chart-header', '');
+						  heading.before(header); header.append(heading, button);
+						  button.addEventListener('click', event => {
 						   const card = button.closest('.card');
 						   const canvas = card?.querySelector('canvas');
 						   if (!canvas || active) return;
@@ -341,7 +347,10 @@ templ analyticsContent(currentProject *models.Project) {
 						   plot.setAttribute('data-analytics-fullscreen-plot', '');
 						   region.setAttribute('data-analytics-fullscreen-region', '');
 						   dialog.setAttribute('aria-label', card.querySelector('h4').textContent + ' full screen');
-						   dialog.appendChild(card); dialog.showModal(); resize(card); close.focus();
+						   button.before(close);
+						   dialog.appendChild(card); dialog.showModal(); resize(card);
+						   if (event.detail > 0) dialog.focus({preventScroll:true});
+						   else close.focus({preventScroll:true});
 						  }, {signal:eventSignal});
 						 });
 						 eventSignal.addEventListener('abort', () => { restore(); dialog.close(); dialog.remove(); }, {once:true});
