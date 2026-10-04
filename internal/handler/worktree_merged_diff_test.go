@@ -702,7 +702,18 @@ func TestHandler_GetTaskWorktreeInfo_StaleMergedBlankMetadataShowsFastForwardOpt
 	}
 }
 
-func TestHandler_GetTaskChangesWorktree_StaleMergedBlankMetadataShowsFastForwardOption(t *testing.T) {
+func TestHandler_LegacyTaskChangesWorktreeRouteIsRemoved(t *testing.T) {
+	_, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	for _, route := range e.Routes() {
+		if route.Method == http.MethodGet && route.Path == "/tasks/:taskId/changes/worktree" {
+			t.Fatal("legacy task worktree Changes route is still registered")
+		}
+	}
+}
+
+func TestHandler_GetTaskChanges_StaleMergedBlankMetadataShowsFastForwardOption(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
 
@@ -739,14 +750,14 @@ func TestHandler_GetTaskChangesWorktree_StaleMergedBlankMetadataShowsFastForward
 	runGit(t, worktreePath, "add", "worktree_fragment.txt")
 	runGit(t, worktreePath, "commit", "-m", "worktree fragment stale metadata")
 
-	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", nil)
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
 	c.SetParamValues(task.ID)
 
-	if err := h.GetTaskChangesWorktree(c); err != nil {
-		t.Fatalf("GetTaskChangesWorktree failed: %v", err)
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges failed: %v", err)
 	}
 	body := rec.Body.String()
 	if rec.Code != http.StatusOK {
@@ -997,7 +1008,7 @@ func TestHandler_MergeTaskBranch_RejectsAlreadyMergedBranch(t *testing.T) {
 	}
 }
 
-func TestHandler_TaskChangesEndpointsShareActiveLiveWorktreeResolution(t *testing.T) {
+func TestHandler_GetTaskChanges_UsesActiveLiveWorktreeResolution(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
 
@@ -1053,19 +1064,13 @@ func TestHandler_TaskChangesEndpointsShareActiveLiveWorktreeResolution(t *testin
 		t.Fatalf("unexpected authoritative summary: %s", summaryRecorder.Body.String())
 	}
 
-	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
-	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
+	changesBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID)
 
-	assertBodyContainsAll(t, fullBody, "active_live.txt", "active live equivalent diff")
-	assertBodyContainsAll(t, worktreeBody, "active_live.txt", "active live equivalent diff")
-	assertBodyOmitsAll(t, fullBody, "stale.txt", "stale preserved diff")
-	assertBodyOmitsAll(t, worktreeBody, "stale.txt", "stale preserved diff")
-	if strings.Contains(fullBody, "/worktree/merge") != strings.Contains(worktreeBody, "/worktree/merge") {
-		t.Fatalf("expected equivalent local action visibility full=%t worktree=%t", strings.Contains(fullBody, "/worktree/merge"), strings.Contains(worktreeBody, "/worktree/merge"))
-	}
+	assertBodyContainsAll(t, changesBody, "active_live.txt", "active live equivalent diff")
+	assertBodyOmitsAll(t, changesBody, "stale.txt", "stale preserved diff")
 }
 
-func TestHandler_TaskChangesEndpointsShareMergedPreservedDiffResolution(t *testing.T) {
+func TestHandler_GetTaskChanges_UsesMergedPreservedDiff(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
 
@@ -1123,16 +1128,13 @@ func TestHandler_TaskChangesEndpointsShareMergedPreservedDiffResolution(t *testi
 		t.Fatalf("unexpected authoritative summary: %s", summaryRecorder.Body.String())
 	}
 
-	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
-	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
+	changesBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID)
 
-	assertBodyContainsAll(t, fullBody, "preserved_merged.txt", "preserved merged endpoint-equivalent diff")
-	assertBodyContainsAll(t, worktreeBody, "preserved_merged.txt", "preserved merged endpoint-equivalent diff")
-	assertBodyOmitsAll(t, fullBody, "merged branch content", "/worktree/merge", "Merge commit", "Fast-forward only", "Squash merge")
-	assertBodyOmitsAll(t, worktreeBody, "merged branch content", "/worktree/merge", "Merge commit", "Fast-forward only", "Squash merge")
+	assertBodyContainsAll(t, changesBody, "preserved_merged.txt", "preserved merged endpoint-equivalent diff")
+	assertBodyOmitsAll(t, changesBody, "merged branch content", "/worktree/merge", "Merge commit", "Fast-forward only", "Squash merge")
 }
 
-func TestHandler_TaskChangesEndpointsShareMissingWorktreeFallbackResolution(t *testing.T) {
+func TestHandler_GetTaskChanges_UsesMissingWorktreeFallback(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
 
@@ -1188,33 +1190,22 @@ func TestHandler_TaskChangesEndpointsShareMissingWorktreeFallbackResolution(t *t
 		t.Fatalf("unexpected authoritative summary: %s", summaryRecorder.Body.String())
 	}
 
-	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
-	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
+	changesBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID)
 
-	assertBodyContainsAll(t, fullBody, "preserved_missing.txt", "preserved missing worktree diff")
-	assertBodyContainsAll(t, worktreeBody, "preserved_missing.txt", "preserved missing worktree diff")
-	if strings.Contains(fullBody, "branch-only live diff") || strings.Contains(worktreeBody, "branch-only live diff") {
-		t.Fatalf("expected both endpoints to use preserved fallback rather than branch live diff\nfull=%s\nworktree=%s", fullBody, worktreeBody)
-	}
-	if strings.Contains(fullBody, "/worktree/merge") != strings.Contains(worktreeBody, "/worktree/merge") {
-		t.Fatalf("expected equivalent local action visibility full=%t worktree=%t", strings.Contains(fullBody, "/worktree/merge"), strings.Contains(worktreeBody, "/worktree/merge"))
+	assertBodyContainsAll(t, changesBody, "preserved_missing.txt", "preserved missing worktree diff")
+	if strings.Contains(changesBody, "branch-only live diff") {
+		t.Fatalf("expected Changes endpoint to use preserved fallback rather than branch live diff\nbody=%s", changesBody)
 	}
 }
 
-func renderTaskChangesEndpoint(t *testing.T, h *Handler, e *echo.Echo, method, path, taskID string, worktree bool) string {
+func renderTaskChangesEndpoint(t *testing.T, h *Handler, e *echo.Echo, method, path, taskID string) string {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetParamNames("taskId")
 	c.SetParamValues(taskID)
-	var err error
-	if worktree {
-		err = h.GetTaskChangesWorktree(c)
-	} else {
-		err = h.GetTaskChanges(c)
-	}
-	if err != nil {
+	if err := h.GetTaskChanges(c); err != nil {
 		t.Fatalf("render %s failed: %v", path, err)
 	}
 	if rec.Code != http.StatusOK {

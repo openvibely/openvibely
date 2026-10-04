@@ -206,11 +206,11 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			continue
 		}
 
-		// For non-recurring schedules (RepeatOnce), skip completed/failed tasks.
-		// These represent one-time schedules that shouldn't auto-reset when rescheduled.
-		// For recurring schedules, we DO want to reset and re-execute.
-		if sched.RepeatType == models.RepeatOnce && (task.Status == models.StatusCompleted || task.Status == models.StatusFailed) {
-			applog.Infof("[scheduler] checkDueTasks skipping one-time schedule task %s (status=%s, drag/drop reschedule should not trigger execution)", task.ID, task.Status)
+		// Skip a one-time schedule only after its scheduled occurrence was
+		// dispatched. Task status may reflect an earlier manual run and must not
+		// consume a future scheduled occurrence.
+		if sched.RepeatType == models.RepeatOnce && sched.LastRun != nil {
+			applog.Infof("[scheduler] checkDueTasks skipping one-time schedule %s (already dispatched at %s)", sched.ID, sched.LastRun.UTC().Format(time.RFC3339))
 			continue
 		}
 
