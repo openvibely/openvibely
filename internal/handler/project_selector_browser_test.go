@@ -51,7 +51,9 @@ func TestProjectRelatedModalClosePositionStaysStationaryInChrome(t *testing.T) {
 			await openFn();
 			var dialog = await waitFor(dialogSelector, function(node) { return node.open; });
 			var rootGutter = getComputedStyle(document.documentElement).scrollbarGutter;
-			if (rootGutter.indexOf('both-edges') === -1) fail(name + ' modal overrode the symmetric root scrollbar gutter: ' + rootGutter);
+			// The app scrolls inside its panes. Reserving a root gutter when a
+			// modal opens shrinks the entire shell, especially with Windows scrollbars.
+			if (rootGutter !== 'auto') fail(name + ' modal reserved a root scrollbar gutter: ' + rootGutter);
 			var box = dialog.querySelector('.modal-box');
 			if (!box) fail(name + ' modal missing .modal-box');
 			await nextFrame();
