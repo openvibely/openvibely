@@ -326,13 +326,14 @@ window.addEventListener('load',async function(){
   assert(rel.options.indexAxis==='y'&&rel.options.scales.x.stacked&&rel.options.scales.y.stacked&&rel.options.scales.x.max===100,'success and failure must stack horizontally to 100%');
   assert(rel.data.datasets[0].backgroundColor==='rgba(34, 197, 94, 0.5)'&&rel.data.datasets[0].borderWidth===1,'reliability bars should match skill follow-through styling');
   assert(rel.options.plugins.tooltip.callbacks.label({dataIndex:0,datasetIndex:0,raw:75,dataset:{label:'Successful'}}).includes('3/4 runs'),'tooltip must show eligible run counts');
+  assert(rel.data.datasets.every(dataset=>dataset.maxBarThickness===undefined&&dataset.categoryPercentage===1&&dataset.barPercentage===0.95),'horizontal reliability bars must use compact spacing even in expanded previews');
   assert(!document.getElementById('modelReliabilityMetric'),'redundant reliability dropdown remains');
   var tokenChart=configs.modelTokensChart;
   for(var id of ['modelTimeChart','modelRunTimeChart','modelTokensChart','modelFollowupsChart']){
    var bars=configs[id].data.datasets[0];
-   assert(bars.barThickness===undefined&&bars.categoryPercentage===0.8&&bars.barPercentage===0.9,'vertical bars must share proportional sizing');
+   assert(bars.barThickness===undefined&&bars.categoryPercentage===1&&bars.barPercentage===0.95,'vertical bars must share proportional sizing');
    assert(configs[id].data.labels.join('|')===configs.modelOutcomesChart.data.labels.join('|'),'model slots must match across metrics');
-   assert(document.getElementById(id).parentElement.style.minWidth===Math.max(320,configs[id].data.labels.length*64+64)+'px','model chart spacing should be compact');
+   assert(document.getElementById(id).parentElement.style.minWidth===Math.max(320,configs[id].data.labels.length*40+64)+'px','model chart spacing should be compact');
   }
   var taskCard=document.getElementById('modelTimeChart').closest('.card'),runCard=document.getElementById('modelRunTimeChart').closest('.card');
   for(var pair of [['modelTaskTimeTrend','modelTime'],['modelRunTimeTrend','modelRunTime'],['modelTokenTrend','modelTokens'],['modelFollowupTrend','modelFollowups']]){
@@ -400,7 +401,7 @@ window.addEventListener('load',async function(){
   assert(configs.usageRunHoursChart.data.datasets[0].data.join('|')==='3|3','combined totals lost');
   assert(calls===requestCount&&configs.usageRunModelsChart===runBars&&configs.modelTokenBreakdownChart===tokenBreakdown,'run selector should redraw only its chart without refetching');
   assert(configs.usageRunModelsChart.data.datasets[0].data[0]===6,'model run counts incorrect');
-  for(var id of ['usageRunModelsChart','modelTokenBreakdownChart'])assert(configs[id].data.datasets[0].barThickness===undefined&&configs[id].data.datasets[0].categoryPercentage===0.8&&configs[id].data.datasets[0].barPercentage===0.9,'usage bars must share the model chart style');
+  for(var id of ['usageRunModelsChart','modelTokenBreakdownChart'])assert(configs[id].data.datasets[0].barThickness===undefined&&configs[id].data.datasets[0].categoryPercentage===1&&configs[id].data.datasets[0].barPercentage===0.95,'usage bars must share the model chart style');
   assert(configs.modelTokenBreakdownChart.options.plugins.legend.display===false,'redundant token legend should be hidden');
   assert(configs.modelTokenBreakdownChart.data.datasets[0].label==='Recorded tokens','token dataset needs a label');
   var usageTable=document.getElementById('usageBreakdownTable'),usageRows=usageTable.querySelectorAll('[data-usage-model]');
@@ -557,6 +558,7 @@ func TestBrowserFunctional_AnalyticsContent_SkillOutcomeMetricSelectorInChrome(t
       if(document.querySelectorAll('#skillSummary [data-skill-summary-value]').length!==3||document.getElementById('skillRecommendations'))fail('skill KPI cards must replace recommendations');
       if(!bars.parentElement.classList.contains('h-64')||bars.parentElement.style.height)fail('skill outcomes must use the same fixed chart height as Agent/Skill Pairs');
       if(skillChartConfig.data.datasets[0].maxBarThickness!==undefined||skillChartConfig.data.datasets[0].barThickness!==undefined)fail('skill outcomes must use standard bar spacing');
+      if(skillChartConfig.data.datasets.some(dataset=>dataset.categoryPercentage!==1||dataset.barPercentage!==0.95))fail('horizontal skill bars must use compact spacing');
       if(!bars.getAttribute('aria-label').startsWith('beta:')||!bars.getAttribute('aria-label').includes('100.0% · 5/5'))fail('goal order or visible values');
       if(!bars.getAttribute('aria-label').includes('Unavailable'))fail('missing evidence must not be zero');
       selector.value='technical_completion';selector.dispatchEvent(new Event('change'));

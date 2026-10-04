@@ -908,16 +908,17 @@ templ analyticsContent(currentProject *models.Project) {
 							 }
 							 if(config.type==='bar'&&options.indexAxis==='y'){
 							  for(const dataset of config.data.datasets){
-							   dataset.categoryPercentage=0.8;dataset.barPercentage=0.9;
+							   delete dataset.barThickness;delete dataset.maxBarThickness;
+							   dataset.categoryPercentage=1;dataset.barPercentage=0.95;
 							  }
 							 }
 							 if(config.type==='bar'&&options.indexAxis!=='y'){
 							  for(const dataset of config.data.datasets){
 							   delete dataset.barThickness;delete dataset.maxBarThickness;
-							   dataset.categoryPercentage=0.8;dataset.barPercentage=0.9;
+							   dataset.categoryPercentage=1;dataset.barPercentage=0.95;
 							  }
 							  const plot=context.canvas.parentElement;
-							  plot.style.minWidth=Math.max(320,config.data.labels.length*64+64)+'px';
+							  plot.style.minWidth=Math.max(320,config.data.labels.length*40+64)+'px';
 							  if(!plot.parentElement.matches('[data-vertical-bar-scroll],[data-model-chart-scroll],[data-run-scroll],.overflow-x-auto')){
 							   const scroll=document.createElement('div');scroll.className='overflow-x-auto';scroll.setAttribute('data-vertical-bar-scroll','');
 							   plot.parentElement.insertBefore(scroll,plot);scroll.appendChild(plot);
@@ -965,7 +966,7 @@ templ analyticsContent(currentProject *models.Project) {
 										const scroll=document.createElement('div');scroll.className='overflow-x-auto';scroll.setAttribute('data-model-chart-scroll','');
 										plot.parentElement.insertBefore(scroll,plot);scroll.appendChild(plot);
 									}
-									plot.style.minWidth=Math.max(320,supported.length*64+64)+'px';
+									plot.style.minWidth=Math.max(320,supported.length*40+64)+'px';
 									charts[key]=createAnalyticsChart(canvas.getContext('2d'),{
 										type:'bar',data:{labels:supported.map(r=>{const label=modelConfigLabel(r);return label.length>24?label.slice(0,21)+'…':label;}),datasets:[{data:supported.map((_,i)=>valueAt(i)),backgroundColor:supported.map(modelChartColor)}]},
 										plugins:[analyticsBarValues('modelValues',textAt,i=>!available[i])],
@@ -1027,7 +1028,7 @@ templ analyticsContent(currentProject *models.Project) {
 								const metric=document.getElementById('modelOutcomeMetric').value;
 								const models=modelSlots(rows);
 								const canvas=renderChartState('modelOutcomes','modelOutcomesChart',models,'No outcome evidence in this period');if(!canvas)return;
-								canvas.parentElement.style.minWidth=Math.max(320,models.length*64+64)+'px';
+								canvas.parentElement.style.minWidth=Math.max(320,models.length*40+64)+'px';
 								const values=models.map(r=>Number((r[metric]||{}).denominator)>0?Number(r[metric].percent||0):null);
 								const labels=values.map(v=>v===null?'Unavailable':v.toFixed(1)+'%');
 								charts.modelOutcomes=createAnalyticsChart(canvas.getContext('2d'),{
@@ -1821,7 +1822,7 @@ templ analyticsContent(currentProject *models.Project) {
 									renderTaskRunTrend(data);
 									const canvas=renderChartState('usageRunModels','usageRunModelsChart',rows,'No task runs in this period');
 									if(canvas){
-										canvas.parentElement.style.minWidth=Math.max(320,rows.length*64+64)+'px';
+										canvas.parentElement.style.minWidth=Math.max(320,rows.length*40+64)+'px';
 										if(!canvas.parentElement.parentElement.hasAttribute('data-run-scroll')){const scroll=document.createElement('div');scroll.className='overflow-x-auto';scroll.setAttribute('data-run-scroll','');const plot=canvas.parentElement;plot.parentElement.insertBefore(scroll,plot);scroll.appendChild(plot);}
 										charts.usageRunModels=createAnalyticsChart(canvas.getContext('2d'),{type:'bar',data:{labels:rows.map(modelConfigLabel),datasets:[{data:rows.map(r=>r.runs),backgroundColor:rows.map(modelChartColor)}]},plugins:[analyticsBarValues('usageRunValues',i=>compactChartNumber(rows[i].runs))],options:{layout:{padding:{top:24}},plugins:{legend:{display:false},tooltip:{callbacks:{label:item=>rows[item.dataIndex].runs+' task runs'}}},scales:{y:{beginAtZero:true,grace:'15%',ticks:{precision:0,callback:compactChartNumber}},x:{ticks:{autoSkip:false,maxRotation:45,minRotation:0}}}}});
 									}
