@@ -1,0 +1,116 @@
+//go:build darwin
+
+package main
+
+/*
+#cgo CFLAGS: -x objective-c -fblocks
+#cgo LDFLAGS: -framework Cocoa
+#import <Cocoa/Cocoa.h>
+#import <objc/runtime.h>
+
+// Native controls live above the webview, in the space reserved by the HTML
+// header. AppKit draws their artwork, including fullscreen and disabled states.
+@interface OVTrafficLights : NSView {
+    NSTrackingArea *_hoverArea;
+    BOOL _mouseInside;
+}
+- (void)refresh;
+@end
+
+@implementation OVTrafficLights
+- (instancetype)init {
+    self = [super initWithFrame:NSZeroRect];
+    if (!self) return nil;
+    NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+        NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+    NSArray *types = @[@(NSWindowCloseButton), @(NSWindowMiniaturizeButton), @(NSWindowZoomButton)];
+    SEL actions[] = {@selector(closeWindow:), @selector(minimiseWindow:), @selector(fullscreenWindow:)};
+    CGFloat x = 0, height = 0;
+    for (NSUInteger i = 0; i < types.count; i++) {
+        NSButton *button = [NSWindow standardWindowButton:[types[i] integerValue] forStyleMask:style];
+        button.target = self;
+        button.action = actions[i];
+        [button setFrameOrigin:NSMakePoint(x, 0)];
+        [self addSubview:button];
+        x += NSWidth(button.frame) + 9;
+        height = MAX(height, NSHeight(button.frame));
+    }
+    [self setFrameSize:NSMakeSize(x - 9, height)];
+    self.autoresizingMask = NSViewMinYMargin | NSViewMaxXMargin;
+    return self;
+}
+- (void)dealloc {
+    [_hoverArea release];
+    [super dealloc];
+}
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (_hoverArea) { [self removeTrackingArea:_hoverArea]; [_hoverArea release]; }
+    _hoverArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+        options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+        owner:self userInfo:nil];
+    [self addTrackingArea:_hoverArea];
+}
+// Standard AppKit window-button cells ask their container for group hover.
+- (BOOL)_mouseInGroup:(NSButton *)button { return _mouseInside; }
+- (void)mouseEntered:(NSEvent *)event { _mouseInside = YES; [self refresh]; }
+- (void)mouseExited:(NSEvent *)event { _mouseInside = NO; [self refresh]; }
+- (NSView *)hitTest:(NSPoint)point {
+    NSView *hit = [super hitTest:point];
+    return hit == self ? nil : hit;
+}
+- (void)refresh {
+    BOOL fullscreen = (self.window.styleMask & NSWindowStyleMaskFullScreen) != 0;
+    for (NSButton *button in self.subviews) {
+        button.enabled = button.action != @selector(minimiseWindow:) || !fullscreen;
+        [button setNeedsDisplay:YES];
+    }
+}
+- (void)closeWindow:(id)sender {
+    NSWindow *window = self.window;
+    // Preserve Wails' WindowClosing event and cancellation handling.
+    if (![window.delegate respondsToSelector:@selector(windowShouldClose:)] ||
+        [window.delegate windowShouldClose:window]) [window close];
+}
+- (void)minimiseWindow:(id)sender {
+    if (!(self.window.styleMask & NSWindowStyleMaskFullScreen)) [self.window miniaturize:sender];
+}
+- (void)fullscreenWindow:(id)sender { [self.window toggleFullScreen:sender]; }
+@end
+
+static char ovTrafficLightsKey;
+static void ovAttachTrafficLights(NSWindow *window) {
+    if (![window isKindOfClass:NSClassFromString(@"WebviewWindow")]) return;
+    NSView *content = window.contentView;
+    if (!content) return;
+    OVTrafficLights *controls = objc_getAssociatedObject(window, &ovTrafficLightsKey);
+    if (!controls) {
+        controls = [[OVTrafficLights alloc] init];
+        objc_setAssociatedObject(window, &ovTrafficLightsKey, controls, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [controls release];
+    }
+    if (controls.superview != content) [content addSubview:controls positioned:NSWindowAbove relativeTo:nil];
+    CGFloat y = content.isFlipped ? (46 - NSHeight(controls.frame)) / 2 :
+        NSHeight(content.bounds) - (46 + NSHeight(controls.frame)) / 2;
+    [controls setFrameOrigin:NSMakePoint(16, y)];
+    [controls refresh];
+}
+static void ovInstallTrafficLights(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        for (NSWindow *window in NSApp.windows) ovAttachTrafficLights(window);
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        for (NSNotificationName name in @[NSWindowDidBecomeKeyNotification, NSWindowDidResignKeyNotification,
+            NSWindowDidResizeNotification, NSWindowDidEnterFullScreenNotification, NSWindowDidExitFullScreenNotification]) {
+            [center addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+                ovAttachTrafficLights(note.object);
+            }];
+        }
+    });
+}
+*/
+import "C"
+
+func installNativeTrafficLights() {
+	C.ovInstallTrafficLights()
+}

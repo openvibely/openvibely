@@ -62,7 +62,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   #desktop-project-titlebar[data-platform="darwin"] { padding-left: 128px; }
   #desktop-project-titlebar > #sidebar-collapse-btn { position: absolute; left: 8px; top: 7px; width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; }
   #desktop-project-titlebar[data-platform="darwin"] > #sidebar-collapse-btn { left: 82px; }
-  #desktop-project-titlebar > .desktop-traffic-lights { position: absolute; left: 8px; top: 0; height: 46px; }
   .project-bar-brand { cursor: default; -webkit-user-select: none; user-select: none; --wails-draggable: drag; display: none; position: absolute; left: 16px; font-size: 14px; line-height: 20px; font-weight: 500; }
   @media (min-width: 1024px) {
     #desktop-project-titlebar .project-bar-brand { display: block; }
@@ -115,22 +114,10 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
 	  .desktop-window-controls svg { width: 12px; height: 12px; pointer-events: none; }
 	  .desktop-window-controls:not(.desktop-traffic-lights) button:hover { background: oklch(var(--bc) / .12); }
 	  .desktop-window-controls:not(.desktop-traffic-lights) button:last-child:hover { background: #c42b1c; color: white; }
-	  .desktop-traffic-lights { gap: 9px; padding: 0 12px 0 8px; }
-		  .desktop-traffic-lights button { position: relative; flex: 0 0 14px; width: 14px; height: 14px; min-width: 14px; min-height: 14px; box-sizing: border-box; border-radius: 50%; border: 0; appearance: none; cursor: default; }
-		  .desktop-traffic-lights [data-wml-window="Close"] { background: #ff5f57; color: #4c0000; box-shadow: inset 0 0 0 .5px #e0443e; }
-		  .desktop-traffic-lights [data-wml-window="Minimise"] { background: #febc2e; color: #995700; box-shadow: inset 0 0 0 .5px #dea123; }
-		  .desktop-traffic-lights [data-wml-window="ToggleFullscreen"] { background: #28c840; color: #006500; box-shadow: inset 0 0 0 .5px #1aab29; }
-		  .desktop-traffic-lights svg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 14px; height: 14px; opacity: 0; }	  .desktop-traffic-lights:hover svg, .desktop-traffic-lights button:focus-visible svg { opacity: 1; }
-	  .desktop-traffic-lights button:active { filter: brightness(.85); } </style>
+ </style>
 	<header id="desktop-project-titlebar" class="bg-base-300" data-platform={ projectBarPlatform(ctx) } data-pinned-projects={ pinnedProjectJSON(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) } aria-label="Project title bar">
 			<span class="project-bar-brand">OpenVibely</span>
-			if serverRuntimeMode(ctx) == "desktop" && runtime.GOOS == "darwin" {
-				<div class="desktop-window-controls desktop-traffic-lights" role="group" aria-label="Window controls">
-					<button type="button" data-wml-window="Close" aria-label="Close window" title="Close"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l6 6m0-6-6 6"/></svg></button>
-					<button type="button" data-wml-window="Minimise" aria-label="Minimize window" title="Minimize"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 7h8"/></svg></button>
-					<button type="button" data-wml-window="ToggleFullscreen" aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen"><svg viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path data-fullscreen-glyph d="M3.5 3.5H8l-4.5 4.5zm7 7H6l4.5-4.5z"/><path data-restore-glyph d="M3 6.5h3.5V3zm8 1H7.5V11z" style="display: none"/></svg></button>
-				</div>
-			}
+
 			if serverRuntimeMode(ctx) == "desktop" {
  @SidebarToggle()
  }
@@ -225,21 +212,6 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     if (['Tab', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'ContextMenu', 'F10'].includes(event.key)) bar.setAttribute('data-keyboard-navigation', '');
    }, true);
    document.addEventListener('pointerdown', function() { bar.removeAttribute('data-keyboard-navigation'); }, true);
-   var fullscreenButton = bar.querySelector('[data-wml-window="ToggleFullscreen"]');
-   if (fullscreenButton && window.wails && window.wails.Events) {
-    var fullscreenRevision = 0;
-    function showFullscreenState(fullscreen) {
-     fullscreenButton.querySelector('[data-fullscreen-glyph]').style.display = fullscreen ? 'none' : '';
-     fullscreenButton.querySelector('[data-restore-glyph]').style.display = fullscreen ? '' : 'none';
-     fullscreenButton.title = fullscreen ? 'Exit fullscreen' : 'Enter fullscreen';
-     fullscreenButton.setAttribute('aria-label', fullscreenButton.title);
-    }
-    window.wails.Events.On('common:WindowFullscreen', function() { fullscreenRevision++; showFullscreenState(true); });
-    window.wails.Events.On('common:WindowUnFullscreen', function() { fullscreenRevision++; showFullscreenState(false); });
-    window.wails.Window.IsFullscreen().then(function(value) {
-     if (fullscreenRevision === 0) showFullscreenState(value);
-    }).catch(function() {});
-   }
    bar.addEventListener('dblclick', function(event) {
     if (getComputedStyle(event.target).getPropertyValue('--wails-draggable').trim() !== 'drag') return;
     if (window.wails && window.wails.Window) window.wails.Window.ToggleMaximise();

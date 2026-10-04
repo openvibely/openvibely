@@ -141,34 +141,17 @@ func TestMacFullscreenPresentationAndGlyphs(t *testing.T) {
 			t.Errorf("missing fullscreen lifecycle contract: %s", want)
 		}
 	}
-	source, err = os.ReadFile("project_tabs.templ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{"common:WindowFullscreen", "common:WindowUnFullscreen", "data-fullscreen-glyph", "data-restore-glyph"} {
-		if !strings.Contains(string(source), want) {
-			t.Errorf("missing stateful traffic-light glyph: %s", want)
-		}
-	}
-}
-
-func TestMacTrafficLightGeometry(t *testing.T) {
-	source, err := os.ReadFile("project_tabs.templ")
+	source, err = os.ReadFile("../../../cmd/desktop/traffic_lights_darwin.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		`box-shadow: inset 0 0 0 .5px`,
-		`.desktop-traffic-lights { gap: 9px;`,
-		`flex: 0 0 14px; width: 14px; height: 14px;`,
-		`transform: translate(-50%, -50%)`,
-		`stroke-width="1.5" stroke-linecap="round"`,
-		`d="M4 4l6 6m0-6-6 6"`,
-		`d="M3 7h8"`,
-		`d="M3.5 3.5H8l-4.5 4.5zm7 7H6l4.5-4.5z"`,
+		"NSWindow standardWindowButton:", "NSWindowCloseButton", "NSWindowMiniaturizeButton", "NSWindowZoomButton",
+		"_mouseInGroup:", "NSWindowDidEnterFullScreenNotification", "NSWindowDidExitFullScreenNotification",
+		"button.action != @selector(minimiseWindow:) || !fullscreen", "windowShouldClose:window",
 	} {
 		if !strings.Contains(string(source), want) {
-			t.Errorf("missing traffic-light geometry: %s", want)
+			t.Errorf("missing native window-control behavior: %s", want)
 		}
 	}
 }
@@ -187,7 +170,7 @@ func TestProjectTabsNativeWindowContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`data-wml-window="Close"`, `data-wml-window="Minimise"`, `data-wml-window="ToggleFullscreen"`, `desktop-traffic-lights`, `#ff5f57`, `#febc2e`, `#28c840`} {
+	for _, want := range []string{`data-wml-window="Close"`, `data-wml-window="Minimise"`, `data-wml-window="ToggleMaximise"`} {
 		if !strings.Contains(string(source), want) {
 			t.Errorf("missing app-drawn native-style control: %s", want)
 		}
