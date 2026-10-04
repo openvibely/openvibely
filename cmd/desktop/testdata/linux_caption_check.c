@@ -51,6 +51,12 @@ int main(int argc,char **argv) {
  gtk_window_present(GTK_WINDOW(window)); settle();
  OVCaption *c=g_object_get_data(G_OBJECT(window),"ov-caption");
  if (!c || !gtk_widget_get_parent(content)) return 10;
+#if GTK_MAJOR_VERSION < 4
+ // Wails shows the hierarchy after the caption is installed. Empty groups
+ // must remain hidden, otherwise their padding shifts the sidebar toggle.
+ gtk_widget_show_all(window); settle();
+ if (gtk_widget_get_visible(c->left)) return 21;
+#endif
  if (reported_left != 0 || reported_right < 60) { g_printerr("right layout %d %d\n",reported_left,reported_right);return 11; }
  if (!find_button(c->right,"minimize") || !find_button(c->right,"maximize") || !find_button(c->right,"close")) return 12;
  g_object_set(gtk_settings_get_default(),"gtk-decoration-layout","close,minimize,maximize:",NULL);

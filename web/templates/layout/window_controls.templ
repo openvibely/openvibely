@@ -21,6 +21,7 @@ templ DesktopWindowControls(platform string) {
    html[data-native-linux-controls] .desktop-window-controls { display:none; }
    html[data-native-linux-controls] #desktop-project-titlebar { padding-right:calc(var(--native-controls-right, 0px) + 8px); padding-left:max(3.5rem, calc(var(--native-controls-left, 0px) + 46px)); }
    html[data-native-linux-controls] #desktop-project-titlebar > #sidebar-collapse-btn { left:calc(var(--native-controls-left, 0px) + 8px); }
+   html[data-native-linux-controls] body.sidebar-collapsed-pending #desktop-project-titlebar > #sidebar-collapse-btn { left:max(calc((3.5rem - 1px - 32px) / 2), calc(var(--native-controls-left, 0px) + 8px)); }
    html[data-native-linux-controls] #desktop-project-titlebar .project-bar-brand { left:calc(var(--native-controls-left, 0px) + 16px); }
    @media(min-width:1024px) {
     html[data-native-linux-controls] body:not(.sidebar-collapsed-pending) #desktop-project-titlebar { padding-left:max(16rem, calc(var(--native-controls-left, 0px) + 170px)); }
