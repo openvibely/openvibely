@@ -325,20 +325,16 @@ templ analyticsContent(currentProject *models.Project) {
 						 }
 						 function restore() {
 						  if (!active) return;
-						  const {card, placeholder, button, plot, region, keyboard} = active;
+						  const {card, placeholder, button, plot, region} = active;
 						  active = null;
 						  dialog.appendChild(close);
 						  placeholder.replaceWith(card);
 						  plot.removeAttribute('data-analytics-preview-plot');
 						  region.removeAttribute('data-analytics-preview-region');
 						  resize(card);
-						  if (button.isConnected) {
-						   if (keyboard) button.focus({preventScroll:true});
-						   else button.blur();
-						  }
+						  if (button.isConnected) button.blur();
 						 }
-						 function dismiss(event) {
-						  if (active && event) active.keyboard = event.type === 'cancel' || event.detail === 0;
+						 function dismiss() {
 						  dialog.close(); restore();
 						 }
 						 close.addEventListener('click', dismiss, {signal:eventSignal});
@@ -366,7 +362,7 @@ templ analyticsContent(currentProject *models.Project) {
 						   while (region.parentElement !== card.querySelector('.card-body')) region = region.parentElement;
 						   const placeholder = document.createComment('analytics chart position');
 						   card.before(placeholder);
-						   active = {card, placeholder, button, plot, region, keyboard:event.detail === 0};
+						   active = {card, placeholder, button, plot, region};
 						   plot.setAttribute('data-analytics-preview-plot', '');
 						   region.setAttribute('data-analytics-preview-region', '');
 						   dialog.setAttribute('aria-label', card.querySelector('h4').textContent + ' preview');

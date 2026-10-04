@@ -1497,7 +1497,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    close.dispatchEvent(escape); await tick();
    check(escape.defaultPrevented&&outerEscapes===0,'preview Escape reached outer window handling');
    check(!dialog.open&&card.parentElement===parent,'Escape did not restore chart');
-   check(document.activeElement===button,'Escape did not restore expand focus');
+   check(document.activeElement!==button&&!button.matches(':focus-visible'),'Escape leaves expand button highlighted');
    button.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
    check(outerEscapes===1,'closed preview still intercepts Escape');
    window.removeEventListener('keydown',outerEscape);
@@ -1505,7 +1505,7 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    // Keep native dialog cancellation available to other close requests.
    if(dialog.dispatchEvent(new Event('cancel',{cancelable:true})))dialog.close();
    await tick(); check(!dialog.open&&card.parentElement===parent,'cancel did not restore chart');
-   check(document.activeElement===button,'keyboard closing did not restore expand focus');
+   check(document.activeElement!==button&&!button.matches(':focus-visible'),'cancel leaves expand button highlighted');
    button.click(); await tick();
    dialog.dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1,clientX:0,clientY:0})); await tick();
    check(!dialog.open&&card.parentElement===parent,'backdrop click did not restore chart');
