@@ -12,7 +12,6 @@ package main
 // header. AppKit draws their artwork, including fullscreen and disabled states.
 @interface OVTrafficLights : NSView {
     NSTrackingArea *_hoverArea;
-    BOOL _mouseInside;
 }
 - (void)refresh;
 @end
@@ -50,11 +49,18 @@ package main
         options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
         owner:self userInfo:nil];
     [self addTrackingArea:_hoverArea];
+    [self refresh];
 }
-// Standard AppKit window-button cells ask their container for group hover.
-- (BOOL)_mouseInGroup:(NSButton *)button { return _mouseInside; }
-- (void)mouseEntered:(NSEvent *)event { _mouseInside = YES; [self refresh]; }
-- (void)mouseExited:(NSEvent *)event { _mouseInside = NO; [self refresh]; }
+// Fullscreen transitions can replace tracking areas without delivering an exit.
+// Read the pointer position when AppKit draws, rather than retaining a stale
+// mouse-entered flag across a resize, focus change, or fullscreen transition.
+- (BOOL)_mouseInGroup:(NSButton *)button {
+    if (!self.window.isKeyWindow || self.hiddenOrHasHiddenAncestor) return NO;
+    NSPoint point = [self convertPoint:self.window.mouseLocationOutsideOfEventStream fromView:nil];
+    return NSMouseInRect(point, self.bounds, self.isFlipped);
+}
+- (void)mouseEntered:(NSEvent *)event { [self refresh]; }
+- (void)mouseExited:(NSEvent *)event { [self refresh]; }
 - (NSView *)hitTest:(NSPoint)point {
     NSView *hit = [super hitTest:point];
     return hit == self ? nil : hit;
