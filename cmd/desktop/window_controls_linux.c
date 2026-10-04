@@ -98,6 +98,9 @@ void ovInstallLinuxCaption(void *native_window) {
  gtk_css_provider_load_from_data(css, "#ov-caption-left, #ov-caption-right { background: transparent; background-image: none; border: none; box-shadow: none; padding: 0 6px; margin: 0; min-height: 0; }", -1, NULL);
  GtkWidget *controls[] = {c->left,c->right};
  for (int i=0;i<2;i++) {
+  // Wails may show the window hierarchy again after installation. Keep an
+  // empty decoration group hidden so it cannot reserve phantom header space.
+  gtk_widget_set_no_show_all(controls[i], TRUE);
   gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(controls[i]), FALSE);
   gtk_header_bar_set_custom_title(GTK_HEADER_BAR(controls[i]), gtk_box_new(GTK_ORIENTATION_HORIZONTAL,0));
   gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(controls[i]), TRUE);
