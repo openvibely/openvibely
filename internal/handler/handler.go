@@ -85,7 +85,10 @@ type Handler struct {
 	customPersonalityRepo      *repository.CustomPersonalityRepo
 	agentRepo                  *repository.AgentRepo
 	// taskUIAgentOptionsLoader is a test seam; production uses agentRepo.ListTaskUIOptions.
-	taskUIAgentOptionsLoader   func(context.Context) ([]repository.AgentTaskUIOption, error)
+	taskUIAgentOptionsLoader             func(context.Context) ([]repository.AgentTaskUIOption, error)
+	startStreamingResponseOverride       func(streamingResponseParams) error // test seam for handler-path measurements
+	processTaskThreadAttachmentsOverride func(context.Context, string, string) (string, []models.Attachment, []models.ChatAttachment, error)
+
 	lifecycleRepo              *repository.LifecycleRepo
 	worktreeSvc                *service.WorktreeService
 	taskPullRequestRepo        *repository.TaskPullRequestRepo

@@ -238,6 +238,9 @@ func (h *Handler) buildStreamingResponseActionRuntime(ctx context.Context, param
 }
 
 func (h *Handler) startStreamingResponse(params streamingResponseParams) error {
+	if h.startStreamingResponseOverride != nil {
+		return h.startStreamingResponseOverride(params)
+	}
 	class := update.WorkChat
 	if params.IsTaskFollowup {
 		class = update.WorkTask

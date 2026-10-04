@@ -3259,15 +3259,30 @@ func (h *Handler) persistTaskThreadModel(c echo.Context, task *models.Task) erro
 	return nil
 }
 
-const newTaskThreadSelectedAgentContextKey = "newTaskThreadSelectedAgent"
+const (
+	newTaskThreadSelectedAgentContextKey = "newTaskThreadSelectedAgent"
+	// newTaskThreadForceReselectionContextKey lets paired handler benchmarks model
+	// the pre-handoff behavior without changing the production request path.
+	newTaskThreadForceReselectionContextKey = "newTaskThreadForceReselection"
+)
 
 func (h *Handler) selectTaskThreadAgent(c echo.Context, projectID, agentID, message string, hasImages bool) (*models.LLMConfig, error) {
 	if isNewTaskThread, _ := c.Get("newTaskThread").(bool); isNewTaskThread {
-		if selected, _ := c.Get(newTaskThreadSelectedAgentContextKey).(*models.LLMConfig); selected != nil {
-			return selected, nil
+		forceReselection, _ := c.Get(newTaskThreadForceReselectionContextKey).(bool)
+		if !forceReselection {
+			if selected, _ := c.Get(newTaskThreadSelectedAgentContextKey).(*models.LLMConfig); selected != nil {
+				return selected, nil
+			}
 		}
 	}
 	return h.selectTaskAgent(c.Request().Context(), projectID, agentID, message, hasImages)
+}
+
+func (h *Handler) processTaskThreadAttachments(ctx context.Context, sessionID, executionID string) (string, []models.Attachment, []models.ChatAttachment, error) {
+	if h.processTaskThreadAttachmentsOverride != nil {
+		return h.processTaskThreadAttachmentsOverride(ctx, sessionID, executionID)
+	}
+	return h.processAttachmentsWithReturn(ctx, sessionID, executionID)
 }
 
 // TaskThreadSend handles sending a follow-up message in the task thread.
@@ -3407,7 +3422,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	if sessionID != "" {
 		applog.Infof("[handler] TaskThreadSend processing attachments for session=%s", sessionID)
 		var attErr error
-		attachmentContext, imageAttachments, chatAttachments, attErr = h.processAttachmentsWithReturn(c.Request().Context(), sessionID, exec.ID)
+		attachmentContext, imageAttachments, chatAttachments, attErr = h.processTaskThreadAttachments(c.Request().Context(), sessionID, exec.ID)
 		if attErr != nil {
 			applog.Infof("[handler] TaskThreadSend error processing attachments: %v", attErr)
 			message = message + fmt.Sprintf("\n\n⚠️ Attachment processing error: %v", attErr)
