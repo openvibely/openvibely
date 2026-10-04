@@ -3876,20 +3876,30 @@ func TestWorkerService_ReservedDispatchRefreshesMetadataAfterCapacityWait(t *tes
 	require.NoError(t, err)
 	require.Len(t, admissions, 1)
 
-	worker := NewWorkerService(nil, 1, nil)
+	_, err = db.ExecContext(ctx, `UPDATE projects SET max_workers = 1 WHERE id = 'default'`)
+	require.NoError(t, err)
+	worker := NewWorkerService(nil, 2, nil)
+	worker.SetProjectRepo(repository.NewProjectRepo(db))
 	worker.SetTaskRepo(taskRepo)
 	worker.SetExecutionRepo(execRepo)
 	worker.SetLLMConfigRepo(modelRepo)
-	require.True(t, worker.TryAcquireProjectSlot("occupied-project"))
+	require.True(t, worker.TryAcquireProjectSlot("default"))
 	worker.Start(ctx)
 	defer worker.Stop()
+	boardTasks, err := taskRepo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "", "")
+	require.NoError(t, err)
+	require.Len(t, boardTasks, 1)
+	require.True(t, boardTasks[0].WorkerCapacityQueued, "project capacity wait must render in Queued")
+	waitingExecution, err := execRepo.GetByID(ctx, admissions[0].ExecutionID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecQueued, waitingExecution.Status)
 
 	current, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	current.Prompt = "current prompt"
 	current.AgentID = &secondModel.ID
 	require.NoError(t, taskRepo.Update(ctx, current))
-	worker.ReleaseProjectSlot("occupied-project")
+	worker.ReleaseProjectSlot("default")
 	worker.dispatchNext()
 
 	require.Eventually(t, func() bool {

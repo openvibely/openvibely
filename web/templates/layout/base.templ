@@ -3796,7 +3796,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (draggedTaskIds.length === 1) {
 						const taskID = draggedTaskIds[0];
 						const currentCategory = draggedElement.getAttribute('data-task-category');
-						const currentStatus = draggedElement.getAttribute('data-task-status');
+						// The displayed lane can differ from durable status while a reserved
+                        // execution waits for worker capacity. Use the lane for drag intent.
+                        const sourceZone = draggedElement.closest('.task-drop-zone[data-status]');
+                        const currentStatus = sourceZone ? sourceZone.getAttribute('data-status') : draggedElement.getAttribute('data-task-status');
 
 						// Calculate drop position
 						const dropPosition = getDropPosition(event, dropZone);

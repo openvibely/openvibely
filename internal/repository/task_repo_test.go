@@ -5377,3 +5377,36 @@ func TestTaskRepo_SearchByTitle_LiteralMetacharacters(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskRepo_BoardReservedExecutionWaitsForWorkerAdmission(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "Waiting for worker", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	admissions, err := repo.MoveTasksToActiveLane(ctx, "default", []ActiveLaneTaskMove{{ID: task.ID, ExpectedCategory: models.CategoryBacklog, ExpectedStatus: models.StatusPending}}, models.StatusRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		tasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 || tasks[0].WorkerCapacityQueued != want {
+			t.Fatalf("board tasks = %+v, want capacity queued %v", tasks, want)
+		}
+		if tasks[0].Status != models.StatusRunning {
+			t.Fatal("board must preserve durable status for stale-move checks")
+		}
+	}
+	check(true)
+	_, claimed, err := repo.ClaimReservedTaskForDispatch(ctx, task.ID, admissions[0].ExecutionID)
+	if err != nil || !claimed {
+		t.Fatalf("claim = %v, %v", claimed, err)
+	}
+	check(false)
+}

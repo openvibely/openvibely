@@ -301,3 +301,21 @@ func renderKanbanColumnForCategoryTest(t *testing.T, category models.TaskCategor
 	}
 	return buf.String()
 }
+
+func TestKanbanBoardReservedCapacityWaitUsesQueuedLane(t *testing.T) {
+	tasks := []models.Task{
+		{ID: "executing", Category: models.CategoryActive, Status: models.StatusRunning},
+		{ID: "waiting", Category: models.CategoryActive, Status: models.StatusRunning, WorkerCapacityQueued: true},
+	}
+	running, queued := filterRunningTasks(tasks), filterPendingTasks(tasks)
+	if len(running) != 1 || running[0].ID != "executing" || len(queued) != 1 || queued[0].ID != "waiting" {
+		t.Fatalf("running=%+v queued=%+v", running, queued)
+	}
+	if state := taskCardDisplayState(tasks[1]); state.Key != "queued" {
+		t.Fatalf("waiting card state = %+v", state)
+	}
+	tasks[1].WorkerCapacityQueued = false
+	if len(filterRunningTasks(tasks)) != 2 || len(filterPendingTasks(tasks)) != 0 {
+		t.Fatal("admitted task did not move to running")
+	}
+}

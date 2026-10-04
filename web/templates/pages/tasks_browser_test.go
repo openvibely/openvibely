@@ -897,7 +897,7 @@ window.addEventListener('DOMContentLoaded', function() {
 
     var emptyQueue=document.querySelector('.kanban-queue');
     var emptyHeight=emptyQueue.getBoundingClientRect().height;
-    if(emptyHeight<43 || emptyHeight>48) fail('empty queue is not compact: '+emptyHeight);
+    if(emptyHeight!==0 || getComputedStyle(emptyQueue).display!=='none') fail('empty queue is not hidden: '+emptyHeight);
     var runningBefore=emptyQueue.previousElementSibling.getBoundingClientRect().height;
 
     await fetch('/claim', {method:'POST'});
@@ -925,7 +925,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() {
       return !document.getElementById('task-automation-capacity') && document.getElementById('task-terminal-failed');
     }, 'terminal failed live projection');
-    if(document.querySelector('.kanban-queue').getBoundingClientRect().height>48) fail('queue did not collapse after last task left');
+    if(document.querySelector('.kanban-queue').getBoundingClientRect().height!==0) fail('queue did not hide after last task left');
     var completed = document.querySelector('.category-drop-zone[data-category="completed"]');
     var backlog = document.querySelector('.category-drop-zone[data-category="backlog"]');
     if (!completed || !completed.contains(document.getElementById('task-terminal-failed'))) fail('terminal failed Automation is not visible in Completed');

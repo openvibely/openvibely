@@ -220,6 +220,7 @@ type Task struct {
 	TelegramChatID           int64        `json:"telegram_chat_id"`   // Telegram chat ID for sending completion notifications
 	HasGoal                  bool         `json:"has_goal,omitempty"` // Derived: task has a non-cleared persisted goal
 	GoalMet                  bool         `json:"goal_met,omitempty"` // Derived: task's persisted goal is achieved
+	WorkerCapacityQueued     bool         `json:"-"`                  // Board projection: reserved execution waiting for worker admission.
 	AutomationCapacityQueued bool         `json:"-"`                  // Runtime-only board projection: an unfinished Automation dispatch is waiting for worker admission
 	StartsNewContext         bool         `json:"-"`                  // Runtime-only: this dispatch starts a new model replay context
 	CreatedAt                time.Time    `json:"created_at"`

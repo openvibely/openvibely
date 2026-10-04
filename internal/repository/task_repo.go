@@ -161,6 +161,7 @@ const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.pr
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 				EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status = 'achieved') AS goal_met,
 				0 AS automation_capacity_queued,
+				0 AS worker_capacity_queued,
 				t.created_at, t.updated_at, t.completed_at`
 
 const BoardPromptPreviewCodePoints = 300
@@ -171,6 +172,8 @@ var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t
 					EXISTS(SELECT 1 FROM automation_dispatch_outbox d
 						JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
 					WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
+					(t.status = 'running' AND EXISTS(SELECT 1 FROM executions e WHERE e.task_id = t.id AND e.status = 'queued' AND e.is_followup = 0 AND e.dispatch_id IS NULL)
+						AND NOT EXISTS(SELECT 1 FROM executions e WHERE e.task_id = t.id AND e.status = 'running')) AS worker_capacity_queued,
 				t.created_at, t.updated_at, t.completed_at`, BoardPromptPreviewCodePoints)
 
 // taskReferenceSelectColumns contains only fields needed to resolve a terminal
@@ -691,7 +694,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.AutomationCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.AutoMergeOnGoalAchieved, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.GoalMet, &t.AutomationCapacityQueued, &t.WorkerCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -1956,6 +1959,9 @@ func (r *TaskRepo) ClaimReservedTaskForDispatch(ctx context.Context, id, executi
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, err
+	}
+	if r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskBoardUpdated, TaskID: task.ID, TaskName: task.Title, ProjectID: task.ProjectID, Category: string(task.Category), Status: string(task.Status)})
 	}
 	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }
