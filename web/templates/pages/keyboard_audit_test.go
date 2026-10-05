@@ -36,11 +36,24 @@ handler=new Function('event','list',body);
 handler(event({metaKey:true}),{querySelectorAll(){throw Error('modified arrow reached tab navigation')}});
 body=between(read('../layout/base.templ'),"if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;",'\n\t\t\t\t\t\t});');
 body="if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;"+body;
-let cleared=0;handler=new Function('event','document','closeCardFilterDropdown',body);
-const doc={querySelector(){return true},querySelectorAll(selector){if(selector.includes('aria-modal') || selector.includes('.dropdown-open')) return [];return [{closest(){return this},_openVibelyClearSelection(){cleared++}}]}};
+let cleared=0;
+class MockHTMLElement {}
+const escapeHandler=new Function('event','document','closeCardFilterDropdown','HTMLElement',body);
+handler=(event,doc,close)=>escapeHandler(event,doc,close,MockHTMLElement);
+let menuOpen=true,popoverOpen=false,popoverQueries=0;
+const doc={querySelector(selector){
+ if(selector==='[popover]:popover-open'){
+  assert.equal(typeof MockHTMLElement.prototype.showPopover,'function','unsupported popover selector queried');
+  popoverQueries++;return popoverOpen;
+ }
+ return menuOpen;
+},querySelectorAll(selector){if(selector.includes('aria-modal') || selector.includes('.dropdown-open')) return [];return [{closest(){return this},_openVibelyClearSelection(){cleared++}}]}};
 handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,0);
-doc.querySelector=()=>false;handler(event({key:'Escape',defaultPrevented:true}),doc,()=>{});assert.equal(cleared,0);
-handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,1);
+menuOpen=false;handler(event({key:'Escape',defaultPrevented:true}),doc,()=>{});assert.equal(cleared,0);
+handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,1);assert.equal(popoverQueries,0);
+MockHTMLElement.prototype.showPopover=function(){};
+popoverOpen=true;handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,1);assert.equal(popoverQueries,1);
+popoverOpen=false;handler(event({key:'Escape'}),doc,()=>{});assert.equal(cleared,2);assert.equal(popoverQueries,2);
 body=between(read('../components/chat_shared.templ'),'// Dispose global modifier listeners when this composer is replaced.','\n\t\t\t\t\t\tfunction safeSubmit()');
 let observer,updates=0;const form={isConnected:true};const document=new EventTarget(),window=new EventTarget();document.body={};
 class Observer{constructor(fn){this.fn=fn;observer=this}observe(){}disconnect(){this.disconnected=true}}
