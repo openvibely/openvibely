@@ -85,8 +85,13 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
 				}
 				b.waitFor("task panel", `String(!!document.querySelector('[data-detail-property="priority"]'))`, "true")
+				applyTheme := func(theme string) {
+					b.waitFor("theme switch ready", `typeof window.applyOpenVibelyTheme`, "function")
+					b.evaluate(fmt.Sprintf(`window.applyOpenVibelyTheme(%q, false); 'ok'`, "openvibely-"+theme))
+					b.waitFor("theme state", `document.documentElement.dataset.theme + ':' + document.documentElement.dataset.colorTheme`, theme+":openvibely-"+theme)
+				}
 				for _, theme := range []string{"dark", "light"} {
-					b.evaluate(fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); 'ok'`, theme))
+					applyTheme(theme)
 					b.waitFor("task panel divider", `String(getComputedStyle(document.querySelector('#task-details-panel > [role="tablist"]')).boxShadow !== 'none')`, "true")
 					b.click(`#task-thread-form-agent-select`)
 					b.waitFor("composer menu surface", `String(getComputedStyle(document.getElementById('chat-custom-select-panel')).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(document.getElementById('chat-custom-select-panel')).borderTopWidth === '1px')`, "true")
@@ -146,6 +151,13 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.waitFor("outside click dismisses picker", `String(!document.getElementById('task-property-picker').getClientRects().length)`, "true")
 					b.evaluate(`document.querySelector('[data-project-tab]').dispatchEvent(new MouseEvent('contextmenu', {bubbles:true, clientX:200, clientY:40})); 'ok'`)
 					b.waitFor("tab menu opens at pointer", `(function(){var r=document.getElementById('project-tab-menu').getBoundingClientRect();return String(r.width>0 && r.left===200 && r.top===40)})()`, "true")
+					b.waitFor("menu surface and border "+theme, `(function(){var s=getComputedStyle(document.getElementById('project-tab-menu'));return String(s.backgroundColor!=='rgba(0, 0, 0, 0)' && s.borderTopWidth==='1px' && s.borderTopStyle==='solid' && s.borderTopColor!=='rgba(0, 0, 0, 0)')})()`, "true")
+					hover(`#project-tab-settings-action`)
+					b.waitFor("menu hover "+theme, `String(getComputedStyle(document.getElementById('project-tab-settings-action')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
+					if legacy && theme == "dark" {
+						b.waitFor("legacy dark menu background", `getComputedStyle(document.getElementById('project-tab-menu')).backgroundColor`, "rgb(29, 35, 42)")
+						b.waitFor("legacy dark menu border", `getComputedStyle(document.getElementById('project-tab-menu')).borderTopColor`, "rgba(166, 173, 187, 0.2)")
+					}
 					if theme == "light" {
 						b.waitFor("light menu surface and border", `(function(){var s=getComputedStyle(document.getElementById('project-tab-menu'));return String(s.backgroundColor==='rgb(250, 250, 250)' && s.borderTopWidth==='1px' && s.borderTopStyle==='solid' && s.borderTopColor==='rgb(206, 206, 206)')})()`, "true")
 						b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": 230, "y": 60}, nil)
@@ -157,7 +169,8 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 				b.call("Page.navigate", map[string]any{"url": server.URL + "/schedule"}, nil)
 				b.waitFor("schedule context menu", `String(!!document.getElementById('schedule-context-menu'))`, "true")
 				for _, theme := range []string{"dark", "light"} {
-					b.evaluate(fmt.Sprintf(`document.documentElement.setAttribute('data-theme',%q);var menu=document.getElementById('schedule-context-menu');menu.classList.remove('hidden');menu.style.left='300px';menu.style.top='200px'; 'ok'`, theme))
+					applyTheme(theme)
+					b.evaluate(`var menu=document.getElementById('schedule-context-menu');menu.classList.remove('hidden');menu.style.left='300px';menu.style.top='200px'; 'ok'`)
 					hover(`[data-schedule-context-action="run"]`)
 					b.waitFor("schedule menu hover "+theme, `String(getComputedStyle(document.querySelector('[data-schedule-context-action="run"]')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
 				}
