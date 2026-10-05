@@ -222,6 +222,8 @@ make build && make run  # Explicit production-style build + run
 
 Config is env-driven (`PORT`, `DATABASE_PATH`, `PROJECT_REPO_ROOT`, etc.). See [`docs/environment.md`](./docs/environment.md) for the full reference.
 
+On Linux, the web app's project **Choose Folder** button optionally requires `zenity` or `kdialog` and an accessible graphical desktop session on the machine running the server. The picker opens on that machine, not on a remote browser's machine. You can always enter the repository path manually when local-path mode is enabled. The desktop app uses Wails' native picker and needs neither tool. See the [project setup guide](./docs/project-setup-user-guide.md#option-b-local-path).
+
 ### Desktop App (Wails)
 
 ```bash

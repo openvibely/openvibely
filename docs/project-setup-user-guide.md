@@ -87,6 +87,10 @@ Notes:
 - Home-relative values like `~/code/repo` are accepted and normalized.
 - If local-path mode is disabled in your environment, this option is hidden and only `GitHub URL` is available.
 
+**Linux web app:** `Choose Folder` requires either `zenity` or `kdialog` (OpenVibely tries `zenity` first) and an accessible graphical desktop session on the machine running the server. These are optional dependencies; manual path entry works without them. The picker opens on the server's desktop, not on a remote browser's machine. For headless servers, enter the repository's absolute path on the server manually.
+
+**Desktop app:** `Choose Folder` uses Wails' native picker on Linux, macOS, and Windows. It does not require `zenity` or `kdialog`.
+
 ## Project Guidance
 
 OpenVibely loads reusable project guidance from app-managed memory and skills, such as `.openvibely/memories/` and `.openvibely/skills/`. Use managed memory for durable project facts and skills for reusable task guidance.
