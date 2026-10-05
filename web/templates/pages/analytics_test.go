@@ -1470,6 +1470,9 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
    check(tip.matches(':popover-open')&&tip.textContent===help.dataset.modelHelp,'preview info hover did not show tooltip');
    check(dialog.contains(tip),'preview tooltip is outside modal and inert');
+   // Native close events are queued and can arrive after a preview has reopened.
+   dialog.dispatchEvent(new Event('close'));
+   check(tip.matches(':popover-open'),'stale preview close event dismissed reopened preview help');
    help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
    check(!tip.matches(':popover-open'),'preview info tooltip did not dismiss on pointer exit');
    help.focus(); await tick();
@@ -1486,6 +1489,8 @@ func TestBrowserFunctional_AnalyticsContent_GraphPreviewInChrome(t *testing.T) {
    check(document.activeElement!==button&&!button.matches(':focus-visible'),'mouse closing leaves expand button focused');
    help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true})); await tick();
    check(tip.matches(':popover-open'),'restored card info tooltip no longer works');
+   dialog.dispatchEvent(new Event('close'));
+   check(tip.matches(':popover-open'),'stale preview close event dismissed restored card help');
    help.dispatchEvent(new PointerEvent('pointerout',{bubbles:true,relatedTarget:canvas})); await tick();
    check(plot.getAttribute('style')===originalStyle&&!plot.hasAttribute('data-analytics-preview-plot'),'plot sizing not restored');
    button.click(); await tick();
