@@ -180,9 +180,9 @@ definitions:
     properties:
       active_tasks:
         type: integer
-      queued_tasks:
-        type: integer
       failed_tasks:
+        type: integer
+      queued_tasks:
         type: integer
     type: object
   models.AccountLimitView:

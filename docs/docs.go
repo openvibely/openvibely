@@ -2002,10 +2002,10 @@ const docTemplate = `{
                 "active_tasks": {
                     "type": "integer"
                 },
-                "queued_tasks": {
+                "failed_tasks": {
                     "type": "integer"
                 },
-                "failed_tasks": {
+                "queued_tasks": {
                     "type": "integer"
                 }
             }
