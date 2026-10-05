@@ -204,21 +204,39 @@ func TestHostedLeaseProtocolErrorRemainsFailClosedAndReplayable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Completion depends on observed retries; the deadline only guards against hangs.
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			baseTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			var leaseExpired atomic.Bool
+			now := func() time.Time {
+				if leaseExpired.Load() {
+					return baseTime.Add(2 * time.Minute)
+				}
+				return baseTime
+			}
 			var calls atomic.Int32
 			var firstKey atomic.Value
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				key := r.Header.Get("Idempotency-Key")
-				if calls.Add(1) == 1 {
+				call := calls.Add(1)
+				if call == 1 {
 					firstKey.Store(key)
 				} else if got, _ := firstKey.Load().(string); key == "" || key != got {
 					t.Errorf("renewal idempotency key changed from %q to %q", got, key)
+				}
+				// Expire the original lease after renewal begins. Ambiguous responses
+				// must still be replayed without reopening admission.
+				leaseExpired.Store(true)
+				if call >= 3 {
+					cancel()
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(tt.response))
 			}))
 			defer server.Close()
 			api, _ := NewAgentHTTPClient(server.URL, "secret", server.Client())
-			drain := NewDrainManager(nil, nil, 0, time.Now)
+			drain := NewDrainManager(nil, nil, 0, now)
 			status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
 			if err != nil {
 				t.Fatal(err)
@@ -233,19 +251,18 @@ func TestHostedLeaseProtocolErrorRemainsFailClosedAndReplayable(t *testing.T) {
 				Policy:            "when_idle",
 				DrainGeneration:   status.Generation,
 				DrainLeaseSeconds: 60,
-				LeaseExpiresAt:    time.Now().Add(20 * time.Millisecond),
+				LeaseExpiresAt:    baseTime.Add(time.Minute),
 				Phase:             StateReady,
 			}
 			controller := NewHostedController(api, drain, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, statePath)
+			controller.now = now
 			controller.state = active
 			controller.renewInterval = time.Millisecond
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
-			defer cancel()
 
-			if err := controller.renewUntilReplacement(ctx, active); !errors.Is(err, context.DeadlineExceeded) {
+			if err := controller.renewUntilReplacement(ctx, active); !errors.Is(err, context.Canceled) {
 				t.Fatalf("protocol ambiguity error=%v", err)
 			}
-			if calls.Load() < 2 {
+			if calls.Load() < 3 {
 				t.Fatalf("ambiguous renewal was not replayed: calls=%d", calls.Load())
 			}
 			if !drain.Owns(status.Generation) || drain.Admit() {
