@@ -1254,9 +1254,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					[data-theme="light"] .menu summary:hover {
 						background-color: var(--ov-l-surface-hover);
 					}
-					@supports not (color: oklch(0 0 0)) {
-						[data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover { background-color: var(--ov-hover); }
-					}
+					/* Mouse events can occur even when the primary input reports no hover support. */
+					[data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover { background-color: var(--ov-hover); }
 					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover {
 						background-color: var(--ov-l-surface-active);
 					}

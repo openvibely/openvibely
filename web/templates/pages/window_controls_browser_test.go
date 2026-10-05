@@ -28,6 +28,10 @@ func TestBrowserFunctional_DesktopWindowControls(t *testing.T) {
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "window-controls", func(browser *composerFocusCDP) {
+				// The initial markup already says "Maximize", before the fixture
+				// installs its runtime. Wait for the installer's readiness event
+				// before clicking controls or reading runtime state.
+				browser.waitFor("caption runtime installed", `String(!!window.sent?.['desktop:controls-ready'])`, "true")
 				browser.waitFor("caption initialized", `document.querySelector('[data-maximize-icon]').parentElement.title`, "Maximize")
 				browser.evaluate(`document.querySelector('[data-window-action="Minimise"]').click();document.querySelector('[data-window-action="ToggleMaximise"]').click();document.querySelector('[data-window-action="Close"] svg path').dispatchEvent(new MouseEvent('click',{bubbles:true}));'ok'`)
 				browser.waitFor("caption clicks reach runtime", `window.calls.join(',')`, "Minimise,ToggleMaximise,Close")
