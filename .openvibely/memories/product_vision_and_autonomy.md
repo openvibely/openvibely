@@ -2,9 +2,9 @@
 name: product_vision_and_autonomy
 type: project
 created: 2026-06-10
-updated: 2026-09-18
+updated: 2026-09-27
 source: consolidation
-source_id: memory_consolidation_2026-09-18
+source_id: memory_consolidation_2026-09-27
 confidence: high
 title: Product Vision, Reviewable Autonomy, and Naming
 ---

@@ -343,3 +343,7 @@ always_use:
 ## openvibely_sql_text_filter_workflow
 
 [OpenVibely SQL Text Filter Workflow](openvibely_sql_text_filter_workflow/SKILL.md) — Implement and audit user-entered SQLite text filters without accidental LIKE wildcards or ordering drift.
+
+## openvibely_wails_desktop_workflow
+
+[OpenVibely Wails Desktop Workflow](openvibely_wails_desktop_workflow/SKILL.md) — Diagnose and validate OpenVibely Wails desktop startup, native window navigation, platform-specific asset loading, and titlebar/fullscreen behavior.

@@ -2,53 +2,25 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-09-19
-source: after_complete
-source_id: f40b9f33349d97c54c114d2ac3f56320:cdbbb0d64547eb58
+updated: 2026-09-27
+source: consolidation
+source_id: memory_consolidation_2026-09-27
 confidence: high
 title: OpenVibely Architecture
 ---
 
-OpenVibely is an open-source Go application for scheduled tasks and AI execution. The backend uses Echo v4, SQLite through `modernc.org/sqlite`, goose migrations, and a channel-based worker pool. The UI is server-rendered with HTMX, templ, Tailwind CSS, and DaisyUI.
+OpenVibely is an open-source Go application for scheduled tasks and AI execution. The backend uses Echo v4, SQLite (`modernc.org/sqlite`), goose migrations, and a channel-based worker pool; the UI uses server-rendered HTMX, templ, Tailwind, and DaisyUI.
 
-Server, desktop, and storage:
-- `internal/server.Start(ctx, cfg)` wires the shared backend and returns address, base URL, and shutdown handle. Desktop and server share `internal/server`; backend forking is not intended.
-- Local/server storage defaults to `$HOME/.openvibely`; desktop uses platform application data; hosted/Docker uses explicit env-driven storage under mounted `/data`. Desktop uses `ModeDesktop`, `PORT=0`, local repositories, and Wails. `DATABASE_PATH` wins; `OPENVIBELY_APP_DATA_DIR` is literal and `OPENVIBELY_RUNTIME_DIR` is only a deprecated `start.sh` alias.
-- Packaged desktop startup reads `config.env` from the OS config directory unless overridden, constructs its own environment because shell `PATH` is unreliable, and uses safe external-link/native-dialog paths where WebView behavior requires them.
-- File-backed production SQLite uses serialized bootstrap followed by `1W + 1R`: one pooled writer and one query-only reader. Isolated `:memory:` fixtures use one shared connection. Connections receive foreign keys, a five-second busy timeout, UTC behavior, preserved caller parameters, and WAL support.
-- Bootstrap/migrations complete through the held writer before opening the reader. Startup failures unregister mappings and close both handles. Bounded writer/`RETURNING` helpers are cancellation-aware, restore and verify timeouts, classify retries, and discard poisoned connections. Transaction-owned executors remain caller-scoped.
-- OAuth origins prefer `APP_BASE_URL`, then forwarded/request host; `OAUTH_REDIRECT_MODE` controls callback URIs, and hosted workspace provisioning forces `localhost_manual` for built-in OpenAI/Anthropic OAuth. Hosted SSO is server-only with canonical-origin/HMAC validation and process-local pending state, so one replica per workspace is required. Hosted cookies are centralized with `HttpOnly`, `SameSite=Lax`, configured `Secure`, and remain separate from local-auth cookies. Local login rejects raw or encoded backslashes in `next`.
+- `internal/server.Start` is the shared backend for server and Wails desktop; backend forking is not intended. Local/server, desktop, and hosted/Docker storage roots differ; `DATABASE_PATH` takes precedence, and hosted storage is explicitly configured under mounted `/data`.
+- File-backed production SQLite uses serialized bootstrap, one pooled writer and one query-only reader (`1W + 1R`); isolated in-memory tests share one connection. Migrations finish before opening the reader. Connections use foreign keys, busy timeout, UTC behavior, and WAL support.
+- Project deletion revalidates cleanup ownership transactionally, commits relational changes before filesystem cleanup, quarantines ordinary attachments/pending uploads, removes only recognized managed clones, retains user repositories, and reports post-commit cleanup warnings. Runtime channel project-selection caches evict only after successful deletion.
+- `worker_settings.max_workers=0` means unlimited. Global/project/model capacity reservations are atomic and released on terminal paths; lowering a limit blocks new admission without cancelling running work. Project caps cannot exceed a finite global cap.
+- `tasks.agent_definition_id` selects Agent persona; `tasks.agent_id` selects model configuration. Schedule timing belongs to the schedule row and execution assignment to linked tasks. `clear_context_on_start` is schedule-owned, non-destructive, and defaults true for new schedules.
+- Browser and runtime reads/mutations enforce project ownership before exposing prompts, outputs, skills, memory, events, goals, or analytics. `internal/handler` is the Echo boundary; feature files own domain behavior and services own shared policy/authorization.
+- Prefer compact, bounded projections and project-scoped indexes for queues, task discovery, and dashboards. Pulse distinguishes runnable pending/queued tasks from persisted blocked dependency tasks; blocked display is bounded while aggregates may cover more rows.
+- Durable task chains create blocked child rows for board visibility and activate from the latest parent configuration without rewriting or duplicating already-started children. Automation state transitions must be crash-consistent across task, execution, activity, invocation, reservation, and cancellation records.
+- Project Settings should report saved repository-path health read-only, distinguishing missing local repositories from unavailable managed GitHub checkouts. Dedicated-model waiting-work visibility on Workers remains limited.
+- Known edge cases: malformed direct schedule recurrence input needs consistent rejection; invalid `run_at` can leave a scheduled task without its schedule row. Do not claim broad suite success over known server-bootstrap/read-only-database or schema-version baseline failures; report exact failures and narrower passing scope.
+- Operational events use `Infof`; raw content and high-frequency traces are debug-gated. JSON candidate extraction is centralized, while callers retain schema validation and repair.
 
-Projects and cleanup:
-- Project deletion revalidates its cleanup manifest inside the relational transaction, moves files only after commit/runtime cancellation, quarantines ordinary attachments and pending uploads, and reports committed-deletion cleanup warnings.
-- Managed clones are removed only beneath the recognized managed root plus project ID; user repositories are retained while validated task worktrees/branches and Git metadata are cleaned. Pending-session locks and retirement tombstones protect late uploads.
-- After relational project deletion commits, deletion observers notify live Slack, Discord, and Telegram services so they selectively evict matching project selections. Failed deletions emit no notification or eviction.
-
-Workers, tasks, and schedules:
-- `worker_settings.max_workers=0` means unlimited and is displayed as `Unlimited`. Global, project, and model reservations are atomic and released on completion, failure, cancellation, claim failure, and panic. Positive project caps cannot exceed a finite global cap; malformed values fail before side effects. Lowering global capacity blocks new admissions without cancelling running work; increasing capacity dispatches queued work.
-- Project Settings and Workers controls share `parseNonNegativeWorkerLimit` for trimmed integer conversion and non-negative worker-limit parsing. Project Settings treats omitted, empty, or zero values as clearing the project cap and enforces finite global ceilings; Workers endpoints retain persistence, resize/reconcile/dispatch, and response behavior. Keep normalization policy aligned across settings and runtime actions.
-- Project Settings should report repository-path health before task execution: check saved paths read-only, keep empty paths quiet, and distinguish missing local paths from unavailable GitHub-managed checkouts with actionable guidance.
-- The Workers surface exposes queue counts for global/project rows but not per-model rows; dedicated-model waiting-work visibility remains a product gap.
-- Schedule timing belongs to schedule rows; execution assignment belongs to linked tasks. `tasks.agent_definition_id` selects the Agent persona and `tasks.agent_id` selects the model configuration. `clear_context_on_start` is schedule-owned and non-destructive; new schedules default true. `ScheduleActionService.CreateForTask` is the normalization boundary.
-- Model deletion uses one shared transactional helper for single, bulk, and default-transfer paths: it preserves task/execution nulling and atomically resets every affected Agent model override to inherit before removing the configuration. Lifecycle resolution treats stale persisted configuration IDs as missing, falls back to a valid default or returns an actionable missing-model error, and never routes them through empty-provider legacy parsing; provider-model legacy slugs remain supported.
-- Schedule toggles atomically pause/resume, preserve an occurrence on pause, repair stale recurring `next_run` on resume, and reject already-fired one-time schedules. Grouped schedule movement is one project-scoped atomic request that validates ownership/disabled members and reconstructs local wall-clock fields across DST.
-- Repeat intervals are positive `1..365` for every recurrence unit across browser, repository, Automation, runtime, and channel paths. Direct schedule-handler coercion of malformed/overflow intervals or unsupported recurrence types remains a gap.
-- Scheduler active admission retains compact `ListActivePendingAdmissions` and uses the partial composite index for `category='active' AND status='pending'`, ordered by priority, display order, and creation time. Reservation, worker submission, swarm-parent routing, authoritative claim, and exclusion fences remain unchanged.
-- Active-lane moves use one immediate project-scoped transaction. The persisted tail is calculated from every rendered In Progress card, including running scheduled Automation cards. Requests carry pre-drag category/status; duplicate, foreign, missing, and stale rows are rejected. Genuine entry paths append at the common tail; already-active cards in the requested lane are no-ops.
-- Ordinary task chains pre-create `StatusBlocked` child tasks for board visibility, then activate them through `LLMService.triggerTaskChain`. Parent edits should refresh existing blocked children; activation should materialize from the latest parent configuration before prompt/status/category/lineage changes, without rewriting or duplicating started children.
-- Automation claim/failure transitions are crash-consistent across execution, task, activity, invocation, outbox, reservation, and cancellation state. Committed transitions publish project-scoped board invalidations; eligible failed/completed work can be re-admitted later.
-
-Ownership, projections, and handlers:
-- Browser execution, review, lifecycle, goal, Insights, configuration, and task-goal routes enforce project ownership before reads/mutations and return controlled non-success responses without leaking prompts, outputs, skills, memory, events, goals, or analytics. Completed-active task cleanup must require the selected project and scope mutations/counts to it.
-- `internal/handler` is the Echo boundary: `handler.go` owns dependencies/routes while feature files own domain behavior. Lifecycle-hook list reads and queued-input recovery use shared private helpers while retaining endpoint-specific projections, filters, callbacks, and error policies.
-- Task breadcrumb discovery uses compact `(id,title)` rows, bounded project/schedule scope, relevance ordering, and a partial updated-time index for empty searches. Explicit task reference resolution is centralized; web/channel `current` normalization remains adapter-owned.
-- Browser attachment create/update/upload routes share bounded multipart admission with ownership-before-parse and endpoint-specific limits. GitHub-backed project updates normalize repository identity before side effects and preserve an equivalent managed checkout, local files, and branches.
-- Reflection `hour`, `day`, and `week` are rolling windows; `day` means the last 24 hours. Change statistics prefer app-produced `task_commit_stats` and use Git only for the true pre-stats range. Fast-forward merges add no extra stats row.
-- Pulse distinguishes runnable `pending`/`queued` work from persisted `StatusBlocked` dependency work. Blocked work remains project-scoped, non-Chat, read-only, deterministically ordered, preview-bounded, and capped to 200 projected rows while aggregate `BlockedCount`/`task_summary.status.blocked` can report more. The `view_pulse` registry description advertises blocked dependency work, `blocked_tasks`, the 200-entry cap, and aggregate blocked status counts.
-- Task Detail non-poll thread projections, execution lazy loading, and bounded chronological loader details live in `chat_thread_system.md`; realtime rendering details live in `realtime_and_frontend_patterns.md`.
-
-Diagnostics:
-- The repository targets Go `1.27.1`; Air is pinned to `v1.67.4`. `make dev` delegates to Air, and templ/Tailwind/Swagger freshness checks are conservative and shared by build/run targets.
-- Uncached broad suites have recurring baseline failures around server-bootstrap protected-agent/read-only-database setup and schema-version assertions. Report exact failures with the narrower passing scope rather than claiming the broad suite passed.
-- `internal/applog` uses `Infof` for operational events and debug-gated `Debugf` for raw content/high-frequency traces. `internal/util/json.go` centralizes fenced/balanced JSON candidate extraction; callers retain schema validation and repair.
-- Invalid `run_at` can persist a scheduled task without a schedule row; this orphaning edge remains a known gap. Canonical thread, provider, integration, Automation, and UI details live in their specific topics.
+Canonical Chat/task-thread, provider, integration, Automation, update, Analytics, worktree, and UI details live in their specific topics.

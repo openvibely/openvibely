@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-09-15
-source: consolidation
-source_id: memory_consolidation_2026-09-15
+updated: 2026-09-27
+source: user_feedback
+source_id: 315a29a40f94b8e928a8c4ecbf1e007d
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -13,6 +13,7 @@ This topic stores durable user preferences and product-discipline decisions. Det
 
 Interaction and scope:
 - Answer design, behavior, and feasibility questions directly without changing code unless implementation is explicitly requested. Prefer prompt/configuration fixes for authoritative invariants; add runtime validation when manual or forged input must also be safe.
+- When a user points to an inconsistency as the central issue, address what it demonstrates instead of defending an incidental detail; do not treat assertions of independence as evidence, and acknowledge when answers shift under conversational pressure.
 - Respect hard scope boundaries. Do not make unsolicited changes, add unrelated code/tests/tasks, rewrite meaningful Git history, or manually push schedules/Automation objects to simulate autonomy. Automation-owned scheduled tasks remain ordinary generic tasks with shared tools; authority belongs in services.
 - The user strongly prefers avoiding unnecessary manual clicks and repetitive UI repair paths; prefer safe automatic adoption or one account-level action over per-item edits or extra confirmations, without weakening authorization, credential-isolation, or privacy boundaries.
 - Treat already-applied goose migrations as immutable for existing installations. Editing an old migration is only preventive for fresh databases or upgrades from before that version; existing-database repairs need a later migration or explicit recovery path.
