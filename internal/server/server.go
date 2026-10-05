@@ -422,13 +422,18 @@ func stopUpdateCoordinatorChecks(coordinator updateCoordinatorStarter) {
 	}
 }
 
+// Options supplies optional platform integrations before HTTP serving starts.
+type Options struct {
+	ProjectFolderPicker handler.ProjectFolderPicker
+}
+
 // Start wires the full OpenVibely backend and starts serving HTTP on cfg.Port.
 // It blocks until the HTTP listener is bound and background services are started,
 // then returns an Instance with the bound address and a shutdown handle.
 //
 // The caller is responsible for calling Instance.Shutdown when done, or
 // listening for OS signals and calling it from a signal handler.
-func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
+func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instance, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is nil")
 	}
@@ -1109,6 +1114,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 	)
+	for _, option := range options {
+		if option.ProjectFolderPicker != nil {
+			h.SetProjectFolderPicker(option.ProjectFolderPicker)
+		}
+	}
 	h.SetChatBroadcaster(chatBroadcaster)
 	h.SetExecutionStreamHub(executionStreamHub)
 	h.SetTaskGoalService(taskGoalSvc)
