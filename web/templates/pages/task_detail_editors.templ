@@ -220,8 +220,9 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   });
   search.addEventListener('input', function() { picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = !option.textContent.toLowerCase().includes(search.value.toLowerCase()); }); var options = visibleOptions(); if (!options.includes(activeOption)) highlight(options[0]); });
   picker.addEventListener('keydown', function(event) {
+   if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hidePicker(); returnToRow(current); return; }
-   if (busy || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+   if (busy || event.altKey || event.metaKey || event.ctrlKey || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
    var options = visibleOptions();
    if (!options.length) return;
    event.preventDefault();
