@@ -49,6 +49,7 @@ int main(void) {
   [NSApplication sharedApplication];
   OVHoverTestWindow *window = [[OVHoverTestWindow alloc] initWithContentRect:NSMakeRect(0,0,400,200) styleMask:NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO];
   OVTrafficLights *controls = [[OVTrafficLights alloc] init];
+  objc_setAssociatedObject(window, &ovTrafficLightsKey, controls, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
   [window.contentView addSubview:controls];
   [controls setFrameOrigin:NSMakePoint(16,160)];
   NSButton *button = controls.subviews[0];
@@ -95,6 +96,14 @@ int main(void) {
   window.testPointer = [controls convertPoint:NSMakePoint(7,7) toView:nil];
   [controls mouseEntered:nil];
   if (![disabled isEqualToData:pixels(controls.subviews[1])]) return 10;
+  // App theme must override the OS appearance without enabling Minimize.
+  ovSetTrafficLightsDark(0);
+  if (![controls.effectiveAppearance.name isEqualToString:NSAppearanceNameAqua]) return 12;
+  NSData *lightDisabled = pixels(controls.subviews[1]);
+  ovSetTrafficLightsDark(1);
+  if (![controls.effectiveAppearance.name isEqualToString:NSAppearanceNameDarkAqua]) return 13;
+  if ([lightDisabled isEqualToData:pixels(controls.subviews[1])]) return 14;
+  if ([(NSButton *)controls.subviews[1] isEnabled]) return 15;
   window.testFullscreen = NO;
   [controls refresh];
   if (![(NSButton *)controls.subviews[1] isEnabled]) return 11;

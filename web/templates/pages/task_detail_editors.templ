@@ -86,10 +86,12 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   <form method="dialog" class="modal-backdrop"><button type="submit" aria-label="Dismiss task property editor">close</button></form>
  </dialog>
  <style>
-  #task-property-picker { position:fixed; margin:0; width:280px; max-width:calc(100vw - 24px); }
+  #task-property-picker { position:fixed; display:none; margin:0; width:280px; max-width:calc(100vw - 24px); }
+  #task-property-picker:popover-open { display:block; }
+  #task-property-picker[data-openvibely-picker-open="true"] { display:block; z-index:1000; }
   #task-property-picker [hidden] { display:none; }
   #task-property-picker button[data-value] { outline:none; }
-  #task-property-picker button[data-active], #task-property-picker button[data-value]:hover { background:color-mix(in srgb,currentColor 8%,transparent); }
+  #task-property-picker button[data-active], #task-property-picker button[data-value]:hover { background:rgba(148,163,184,0.16); background:color-mix(in srgb,currentColor 8%,transparent); }
   .task-property-row[data-picker-return-focus] { outline:none; }
  </style>
  <script>
@@ -97,6 +99,33 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var root = document.getElementById('task-detail-content');
   var picker = root.querySelector('#task-property-picker'), dialog = root.querySelector('#task-detail-text-editor');
   var current = null, field = '', busy = false, revision = 0;
+  var nativePopover = typeof picker.showPopover === 'function';
+  function pickerOpen() {
+   return nativePopover ? picker.matches(':popover-open') : picker.hasAttribute('data-openvibely-picker-open');
+  }
+  function showPicker() {
+   picker.style.visibility = 'hidden';
+   if (nativePopover) picker.showPopover();
+   else picker.setAttribute('data-openvibely-picker-open', 'true');
+  }
+  function hidePicker() {
+   picker.style.visibility = '';
+   if (nativePopover) picker.hidePopover();
+   picker.removeAttribute('data-openvibely-picker-open');
+  }
+  if (!nativePopover) {
+   picker.removeAttribute('popover');
+   function dismissPicker(event) {
+    if (pickerOpen() && !picker.contains(event.target) && !(current && current.contains(event.target))) hidePicker();
+   }
+   document.addEventListener('pointerdown', dismissPicker);
+   document.addEventListener('focusin', dismissPicker);
+   root.addEventListener('htmx:beforeCleanupElement', function(event) {
+    if (event.detail.elt !== root) return;
+    document.removeEventListener('pointerdown', dismissPicker);
+    document.removeEventListener('focusin', dismissPicker);
+   });
+  }
   root.addEventListener('htmx:beforeRequest', function(event) { if (event.detail.elt.id === 'task-detail-metrics') event.detail.xhr.detailRevision = revision; });
   var taskID = root.dataset.taskId, projectID = root.dataset.projectId;
   var search = picker.querySelector('input'), activeOption = null;
@@ -151,7 +180,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   var closingRow = null;
   root.addEventListener('pointerdown', function(event) {
    var row = event.target.closest('[data-detail-property]');
-   closingRow = row && row === current && picker.matches(':popover-open') ? row : null;
+   closingRow = row && row === current && pickerOpen() ? row : null;
   });
   root.addEventListener('pointercancel', function() { closingRow = null; });
   root.addEventListener('click', function(event) {
@@ -160,17 +189,20 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    if (busy && event.target.closest('[data-detail-property], [data-detail-editor]')) { event.preventDefault(); return; }
    var row = event.target.closest('[data-detail-property]');
    if (row) {
-    if (row === dismissRow || (row === current && picker.matches(':popover-open'))) {
-     picker.hidePopover(); returnToRow(row); return;
+    if (row === dismissRow || (row === current && pickerOpen())) {
+     hidePicker(); returnToRow(row); return;
     }
     current = row; field = row.dataset.detailProperty;
     picker.querySelectorAll('[data-options]').forEach(function(group) { group.hidden = group.dataset.options !== field; });
     picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = false; option.setAttribute('aria-pressed', String(option.dataset.value === row.dataset.value)); });
     picker.querySelector('[data-property-error]').textContent = ''; search.value = '';
     highlight(visibleOptions().find(function(option) { return option.dataset.value === row.dataset.value; }) || visibleOptions()[0]);
-    picker.showPopover(); var rect = row.getBoundingClientRect();
-    picker.style.left = Math.max(12, Math.min(rect.left, innerWidth - picker.offsetWidth - 12)) + 'px';
-    picker.style.top = Math.max(12, Math.min(rect.bottom, innerHeight - picker.offsetHeight - 12)) + 'px';
+    showPicker(); var rect = row.getBoundingClientRect();
+    var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    picker.style.left = Math.max(12, Math.min(rect.left, viewportWidth - picker.offsetWidth - 12)) + 'px';
+    picker.style.top = Math.max(12, Math.min(rect.bottom, viewportHeight - picker.offsetHeight - 12)) + 'px';
+    picker.style.visibility = '';
     search.focus(); return;
    }
    var editor = event.target.closest('[data-detail-editor]');
@@ -188,6 +220,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
   });
   search.addEventListener('input', function() { picker.querySelectorAll('button[data-value]').forEach(function(option) { option.hidden = !option.textContent.toLowerCase().includes(search.value.toLowerCase()); }); var options = visibleOptions(); if (!options.includes(activeOption)) highlight(options[0]); });
   picker.addEventListener('keydown', function(event) {
+   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hidePicker(); returnToRow(current); return; }
    if (busy || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey || !['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
    var options = visibleOptions();
    if (!options.length) return;
@@ -209,7 +242,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
      current.dataset.value = value; current.querySelector('[data-property-label]').textContent = label;
     }
     if (name === 'agent_id') composerModel(value, label);
-    picker.hidePopover(); var row = root.querySelector('[data-detail-property="' + name + '"]'); returnToRow(row);
+    hidePicker(); var row = root.querySelector('[data-detail-property="' + name + '"]'); returnToRow(row);
    } catch (error) { picker.querySelector('[data-property-error]').textContent = error.message; }
    finally { busy = false; picker.querySelectorAll('button').forEach(function(button) { button.disabled = false; }); }
   });
@@ -237,7 +270,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    finally { busy = false; button.disabled = false; }
   });
   // Do not replace rows underneath an open picker; the following poll reconciles them.
-  root.addEventListener('htmx:beforeSwap', function(event) { if (event.detail.target.id === 'task-detail-metrics' && (picker.matches(':popover-open') || busy || event.detail.xhr.detailRevision !== revision)) event.preventDefault(); });
+  root.addEventListener('htmx:beforeSwap', function(event) { if (event.detail.target.id === 'task-detail-metrics' && (pickerOpen() || busy || event.detail.xhr.detailRevision !== revision)) event.preventDefault(); });
   root.addEventListener('chat-select-change', function(event) {
    if (!taskID && event.target.id === 'task-thread-form-agent-select') {
     var row = root.querySelector('[data-detail-property="agent_id"]'), value = event.detail.value;
