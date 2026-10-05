@@ -10,6 +10,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
+	"github.com/openvibely/openvibely/internal/llm/contextlimits"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
@@ -20,13 +21,16 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
-const defaultOutputBudget = 16384
-
 var errMaxTokens = llmcontracts.NewCategorizedError(
 	llmcontracts.ErrorOutputTokenLimitReached,
 	"OpenAI-compatible response",
 	fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)"),
 )
+
+func compatibleResolvedLimits(agent models.LLMConfig) (contextWindow, maxOutput int) {
+	resolved := contextlimits.Resolve(agent)
+	return resolved.EffectiveInputWindow, resolved.EffectiveOutputCap
+}
 
 type Adapter struct {
 	configRepo *repository.LLMConfigRepo
@@ -288,10 +292,11 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	default:
 		systemPrompt = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir))
 	}
+	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
-		ContextWindow:    req.Agent.ContextWindow,
-		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
+		ContextWindow:    contextWindow,
+		MaxOutputTokens:  maxOutput,
 		Temperature:      compatibleTemperature(req.Agent),
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
@@ -336,10 +341,11 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	sw := llmstream.NewWriterWithPublisher(req.ExecID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
 
+	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
-		ContextWindow:    req.Agent.ContextWindow,
-		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
+		ContextWindow:    contextWindow,
+		MaxOutputTokens:  maxOutput,
 		Temperature:      compatibleTemperature(req.Agent),
 		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
 		WorkDir:          effectiveWorkDir(workDir),
@@ -395,10 +401,11 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	defer sw.Stop()
 
 	disableTools := req.DisableTools || (!req.Followup && req.ChatMode != models.ChatModePlan && llmcontracts.RuntimeToolsFromContext(ctx) == nil)
+	contextWindow, maxOutput := compatibleResolvedLimits(req.Agent)
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
-		ContextWindow:    req.Agent.ContextWindow,
-		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
+		ContextWindow:    contextWindow,
+		MaxOutputTokens:  maxOutput,
 		Temperature:      compatibleTemperature(req.Agent),
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),

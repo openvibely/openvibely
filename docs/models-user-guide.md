@@ -122,6 +122,7 @@ GPT-6 workflow behavior is gated to those three exact first-party model IDs:
 - Local/self-hosted presets such as `Local vLLM`, `LM Studio`, `SGLang`, `LiteLLM`, `Inferrs Local`, and `ds4 Local` allow blank API keys. `Custom OpenAI-Compatible` is manual-entry oriented; enter the base URL and exact model ID expected by your server or gateway.
 - API keys are sent in headers, not URL parameters. Local/self-hosted servers may allow the API key field to remain blank.
 - OpenAI-compatible configs call `base_url + /chat/completions` and store the exact model ID after trimming whitespace.
+- **Context & compaction** (Models dialog): discovery and built-in catalogs record the provider’s input window and max output. Use **Context cap** or **Max output cap** to lower those limits without exceeding what the server reports (`0` = no cap). **Compact when input exceeds** sets an earlier compaction threshold in tokens (`0` = automatic, about 90% of the effective window).
 
 ### Ollama
 
