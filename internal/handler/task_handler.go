@@ -942,6 +942,17 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if message == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "message is required")
 		}
+		// Sending immediately needs a model; saving a backlog or scheduled draft does not.
+		if !scheduledDraft && (c.FormValue("category") == "" || c.FormValue("category") == string(models.CategoryActive)) {
+			hasModels, err := h.hasConfiguredModels(c)
+			if err != nil {
+				applog.Infof("[handler] CreateTask model availability check error: %v", err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check model availability")
+			}
+			if !hasModels {
+				return noModelsConfiguredResponse(c)
+			}
+		}
 		selectedAgent, err := h.selectTaskAgent(c.Request().Context(), projectID, c.FormValue("agent_id"), message, hasPendingImages(c.FormValue("attachment_session_id")))
 		if err != nil && !scheduledDraft && c.FormValue("category") != string(models.CategoryBacklog) {
 			return echo.NewHTTPError(http.StatusBadRequest, "no agent available")

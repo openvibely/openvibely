@@ -972,36 +972,46 @@ func TestHandler_CreateTask_Active_NoModelsConfiguredHTMX(t *testing.T) {
 		}
 	}
 
-	body := strings.NewReader("title=No+Model+Task&prompt=Try+to+create&category=active&priority=0")
-	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default", body)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("HX-Request", "true")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected status 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	hxTrigger := rec.Header().Get("HX-Trigger")
-	if !strings.Contains(hxTrigger, "openvibelyToast") {
-		t.Fatalf("expected HX-Trigger to contain openvibelyToast event, got %q", hxTrigger)
-	}
-	if !strings.Contains(hxTrigger, noModelsConfiguredMessage) {
-		t.Fatalf("expected HX-Trigger to contain no-models message, got %q", hxTrigger)
-	}
-	if !strings.Contains(hxTrigger, noModelsConfiguredLinkURL) {
-		t.Fatalf("expected HX-Trigger to contain models link URL %q, got %q", noModelsConfiguredLinkURL, hxTrigger)
-	}
-
-	tasks, err := h.taskSvc.ListByProjectWithCategorySorts(ctx, "default", "", "", "")
+	before, err := h.taskSvc.ListByProjectWithCategorySorts(ctx, "default", "", "", "")
 	if err != nil {
-		t.Fatalf("failed to list tasks: %v", err)
+		t.Fatal(err)
 	}
-	for _, task := range tasks {
-		if task.Title == "No Model Task" {
-			t.Fatalf("task should not be created when no models are configured")
-		}
+	for _, tc := range []struct{ name, path, body string }{
+		{"active form", "/tasks?project_id=default", "title=No+Model+Task&prompt=Try+to+create&category=active&priority=0"},
+		{"new composer", "/tasks?project_id=default&from=new&thread=1", "message=Try+to+create&agent_id=auto"},
+		{"active composer", "/tasks?project_id=default&from=new&thread=1", "message=Try+to+create&agent_id=auto&category=active"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.NewReader(tc.body)
+			req := httptest.NewRequest(http.MethodPost, tc.path, body)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("expected status 204, got %d: %s", rec.Code, rec.Body.String())
+			}
+
+			hxTrigger := rec.Header().Get("HX-Trigger")
+			if !strings.Contains(hxTrigger, "openvibelyToast") {
+				t.Fatalf("expected HX-Trigger to contain openvibelyToast event, got %q", hxTrigger)
+			}
+			if !strings.Contains(hxTrigger, noModelsConfiguredMessage) {
+				t.Fatalf("expected HX-Trigger to contain no-models message, got %q", hxTrigger)
+			}
+			if !strings.Contains(hxTrigger, noModelsConfiguredLinkURL) {
+				t.Fatalf("expected HX-Trigger to contain models link URL %q, got %q", noModelsConfiguredLinkURL, hxTrigger)
+			}
+
+			tasks, err := h.taskSvc.ListByProjectWithCategorySorts(ctx, "default", "", "", "")
+			if err != nil {
+				t.Fatalf("failed to list tasks: %v", err)
+			}
+			if len(tasks) != len(before) {
+				t.Fatalf("task count changed from %d to %d with no models configured", len(before), len(tasks))
+			}
+		})
 	}
 }
 
