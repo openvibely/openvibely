@@ -16,6 +16,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/llm/contextlimits"
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
@@ -136,8 +137,13 @@ type modelEditDetails struct {
 	ExtraHeadersJSON      string             `json:"extra_headers_json"`
 	ExtraBodyJSON         string             `json:"extra_body_json"`
 	CustomAuthConfigJSON  string             `json:"custom_auth_config_json"`
-	MixtureConfigJSON     string             `json:"mixture_config_json"`
-	AutoStartTasks        bool               `json:"auto_start_tasks"`
+	MixtureConfigJSON       string             `json:"mixture_config_json"`
+	AutoStartTasks          bool               `json:"auto_start_tasks"`
+	DefaultMaxTokens        int                `json:"default_max_tokens"`
+	ContextWindow           int                `json:"context_window"`
+	CompactionThreshold     int                `json:"compaction_threshold"`
+	ProviderContextWindow   int                `json:"provider_context_window"`
+	ProviderMaxOutputTokens int                `json:"provider_max_output_tokens"`
 }
 
 func (h *Handler) GetModelEditDetails(c echo.Context) error {
@@ -162,6 +168,9 @@ func (h *Handler) GetModelEditDetails(c echo.Context) error {
 		Transport: config.Transport, PresetSlug: config.PresetSlug, ModelsURL: config.ModelsURL,
 		AuthHeaderName: config.AuthHeaderName, AuthHeaderValuePrefix: config.AuthHeaderValuePrefix,
 		AutoStartTasks: config.AutoStartTasks,
+		DefaultMaxTokens: config.DefaultMaxTokens, ContextWindow: config.ContextWindow,
+		CompactionThreshold: config.CompactionThreshold,
+		ProviderContextWindow: config.ProviderContextWindow, ProviderMaxOutputTokens: config.ProviderMaxOutputTokens,
 	}
 	if config.Provider == models.ProviderOpenAICompatible &&
 		(strings.TrimSpace(config.PresetSlug) == "" || strings.EqualFold(config.PresetSlug, "custom")) {
@@ -275,7 +284,9 @@ func isLocalOrPrivateHost(host string) bool {
 }
 
 type openAICompatibleModelInfo struct {
-	ID string `json:"id"`
+	ID             string `json:"id"`
+	ContextLength  int    `json:"context_length,omitempty"`
+	MaxOutputTokens int   `json:"max_output_tokens,omitempty"`
 }
 
 type openAICompatibleModelsResponse struct {
@@ -446,12 +457,55 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 			return fmt.Errorf("models URL: %w", err)
 		}
 	}
-	if maxTokens, err := strconv.Atoi(c.FormValue("default_max_tokens")); err == nil && maxTokens > 0 {
-		agent.DefaultMaxTokens = maxTokens
-	} else {
+	return nil
+}
+
+func applyContextLimitForm(c echo.Context, agent *models.LLMConfig, mode modelFormMode) error {
+	if raw, present := formValueIfPresent(c, "provider_context_window"); present {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v >= 0 {
+			agent.ProviderContextWindow = v
+		}
+	}
+	if raw, present := formValueIfPresent(c, "provider_max_output_tokens"); present {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v >= 0 {
+			agent.ProviderMaxOutputTokens = v
+		}
+	}
+	if raw, present := formValueIfPresent(c, "context_window"); present {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v >= 0 {
+			agent.ContextWindow = v
+		}
+	} else if mode == modelFormCreate {
+		agent.ContextWindow = 0
+	}
+	if raw, present := formValueIfPresent(c, "compaction_threshold"); present {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v >= 0 {
+			agent.CompactionThreshold = v
+		}
+	} else if mode == modelFormCreate {
+		agent.CompactionThreshold = 0
+	}
+	if raw, present := formValueIfPresent(c, "default_max_tokens"); present {
+		if v, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil && v >= 0 {
+			agent.DefaultMaxTokens = v
+		}
+	} else if mode == modelFormCreate {
 		agent.DefaultMaxTokens = 0
 	}
 	return nil
+}
+
+func syncCatalogProviderLimits(agent *models.LLMConfig, previousModel string) {
+	if agent == nil {
+		return
+	}
+	if agent.Provider != models.ProviderOpenAI && agent.Provider != models.ProviderAnthropic {
+		return
+	}
+	if previousModel != "" && strings.EqualFold(strings.TrimSpace(previousModel), strings.TrimSpace(agent.Model)) {
+		return
+	}
+	contextlimits.SyncProviderFromCatalog(agent)
 }
 
 func validateOpenAICompatibleRequestExtras(agent *models.LLMConfig) error {
@@ -846,6 +900,9 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 	if opts.mode == modelFormCreate && agent.Provider == "" {
 		agent.Provider = models.ProviderAnthropic
 	}
+	if err := applyContextLimitForm(c, agent, opts.mode); err != nil {
+		return err
+	}
 	if err := validateBrowserRunnableModelSlug(agent); err != nil {
 		return err
 	}
@@ -921,6 +978,7 @@ func (h *Handler) CreateModel(c echo.Context) error {
 	if err := h.normalizeBrowserModelForm(c.Request().Context(), c, a, modelFormOptions{mode: modelFormCreate}); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	syncCatalogProviderLimits(a, "")
 	applog.Infof("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
 		a.Name, a.Provider, a.Model, a.AuthMethod, a.Temperature, a.IsDefault)
 
@@ -964,6 +1022,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 	previous := *agent
+	previousModel := previous.Model
 
 	if err := h.normalizeBrowserModelForm(c.Request().Context(), c, agent, modelFormOptions{
 		mode: modelFormUpdate,
@@ -989,6 +1048,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	syncCatalogProviderLimits(agent, previousModel)
 	if previous.Provider == agent.Provider && previous.AuthMethod == models.AuthMethodOAuth &&
 		agent.AuthMethod == models.AuthMethodOAuth && oauthSecurityConfigChanged(previous, *agent) {
 		clearOAuthCredentials(agent)
@@ -1661,12 +1721,7 @@ func (h *Handler) fetchCustomOpenAICompatibleModels(ctx context.Context, client 
 	if err := llmcustomauth.DecodeMetadataJSON(resp.Body, &payload, "models response"); err != nil {
 		return nil, err
 	}
-	ids := llmcustomauth.ExtractModelIDs(payload, cfg)
-	out := make([]openAICompatibleModelInfo, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, openAICompatibleModelInfo{ID: id})
-	}
-	return out, nil
+	return enrichOpenAICompatibleModels(payload, cfg), nil
 }
 
 func (h *Handler) currentCustomOAuthConfig(ctx context.Context, snapshot models.LLMConfig) (*models.LLMConfig, error) {
@@ -1721,12 +1776,7 @@ func fetchOpenAICompatibleModels(ctx context.Context, client *http.Client, model
 	if err := llmcustomauth.DecodeMetadataJSON(resp.Body, &payload, "models response"); err != nil {
 		return nil, err
 	}
-	ids := llmcustomauth.ExtractModelIDs(payload, cfg)
-	out := make([]openAICompatibleModelInfo, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, openAICompatibleModelInfo{ID: id})
-	}
-	return out, nil
+	return enrichOpenAICompatibleModels(payload, cfg), nil
 }
 
 func applyOpenAICompatibleExtraHeaders(req *http.Request, raw string) error {
@@ -1749,22 +1799,92 @@ func applyOpenAICompatibleExtraHeaders(req *http.Request, raw string) error {
 
 func decodeOpenAICompatibleModels(body io.Reader) ([]openAICompatibleModelInfo, error) {
 	var payload struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+		Data []map[string]any `json:"data"`
 	}
 	if err := llmcustomauth.DecodeMetadataJSON(body, &payload, "models response"); err != nil {
 		return nil, err
 	}
 	models := make([]openAICompatibleModelInfo, 0, len(payload.Data))
 	for _, item := range payload.Data {
-		id := strings.TrimSpace(item.ID)
+		id, limits := service.ParseOpenAICompatibleModelEntry(item)
+		id = strings.TrimSpace(id)
 		if id == "" {
 			continue
 		}
-		models = append(models, openAICompatibleModelInfo{ID: id})
+		models = append(models, openAICompatibleModelInfo{
+			ID: id, ContextLength: limits.ContextLength, MaxOutputTokens: limits.MaxOutput,
+		})
 	}
 	return models, nil
+}
+
+func enrichOpenAICompatibleModels(payload any, cfg llmcustomauth.Config) []openAICompatibleModelInfo {
+	ids := llmcustomauth.ExtractModelIDs(payload, cfg)
+	if len(ids) == 0 {
+		return nil
+	}
+	byID := map[string]openAICompatibleModelInfo{}
+	for _, id := range ids {
+		byID[id] = openAICompatibleModelInfo{ID: id}
+	}
+	entries := extractOpenAICompatibleModelMaps(payload, cfg)
+	for _, entry := range entries {
+		id, limits := service.ParseOpenAICompatibleModelEntry(entry)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		info := byID[id]
+		info.ID = id
+		if limits.ContextLength > 0 {
+			info.ContextLength = limits.ContextLength
+		}
+		if limits.MaxOutput > 0 {
+			info.MaxOutputTokens = limits.MaxOutput
+		}
+		byID[id] = info
+	}
+	out := make([]openAICompatibleModelInfo, 0, len(byID))
+	for _, id := range ids {
+		if info, ok := byID[id]; ok {
+			out = append(out, info)
+		}
+	}
+	return out
+}
+
+func extractOpenAICompatibleModelMaps(payload any, cfg llmcustomauth.Config) []map[string]any {
+	switch typed := payload.(type) {
+	case map[string]any:
+		if arrayPath := strings.TrimSpace(cfg.ModelsArrayPath); arrayPath != "" {
+			if v, ok := typed[arrayPath]; ok {
+				return mapsFromModelArray(v)
+			}
+		}
+		if data, ok := typed["data"]; ok {
+			return mapsFromModelArray(data)
+		}
+		if modelsVal, ok := typed["models"]; ok {
+			return mapsFromModelArray(modelsVal)
+		}
+	case []any:
+		return mapsFromModelArray(typed)
+	}
+	return nil
+}
+
+func mapsFromModelArray(v any) []map[string]any {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {

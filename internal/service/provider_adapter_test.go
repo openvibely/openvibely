@@ -998,31 +998,31 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 	if anthropicBudget.ReservedOutputTokens != 20000 || anthropicBudget.SafetyMargin != 3000 || anthropicBudget.SafeInputLimit != 177000 {
 		t.Fatalf("Anthropic request budget = %+v, want Claude-compatible compaction headroom", anthropicBudget)
 	}
-	if limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ContextWindow: 200000}); limits.AutoLimit != 167000 || limits.TriggerLimit != 167000 || limits.EffectiveHardLimit != 177000 {
+	if limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ProviderContextWindow: 200000}); limits.AutoLimit != 167000 || limits.TriggerLimit != 167000 || limits.EffectiveHardLimit != 177000 {
 		t.Fatalf("Anthropic compaction limits = %+v, want trigger=167000 hard=177000", limits)
 	}
-	if limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ContextWindow: 200000, CompactionThreshold: 20000}); limits.TriggerLimit != 50000 {
+	if limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderAnthropic, Model: "claude-opus-5", ProviderContextWindow: 200000, CompactionThreshold: 20000}); limits.TriggerLimit != 50000 {
 		t.Fatalf("Anthropic configured threshold = %+v, want minimum 50000", limits)
 	}
-	attachmentBudget := calculateRequestBudget(llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 10000}, Attachments: []models.Attachment{{FileSize: 4000}}})
+	attachmentBudget := calculateRequestBudget(llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 10000}, Attachments: []models.Attachment{{FileSize: 4000}}})
 	if attachmentBudget.AttachmentTokens != 1000 {
 		t.Fatalf("attachment tokens = %d, want rounded bytes/4", attachmentBudget.AttachmentTokens)
 	}
 
-	limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000})
+	limits := compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ProviderContextWindow: 1000})
 	if limits.AutoLimit != 900 || limits.TriggerLimit != 900 || limits.EffectiveHardLimit != 950 {
 		t.Fatalf("limits = %+v, want auto=900 trigger=900 hard=950", limits)
 	}
-	limits = compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000, CompactionThreshold: 1200})
+	limits = compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ProviderContextWindow: 1000, CompactionThreshold: 1200})
 	if limits.TriggerLimit != 900 {
 		t.Fatalf("configured threshold should clamp to 90%% auto limit, got %+v", limits)
 	}
-	limits = compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ContextWindow: 1000, CompactionThreshold: 700})
+	limits = compactionLimitsForAgent(models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "custom", ProviderContextWindow: 1000, CompactionThreshold: 700})
 	if limits.TriggerLimit != 700 {
 		t.Fatalf("configured lower threshold should be honored, got %+v", limits)
 	}
 
-	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 1000}, Message: strings.Repeat("a", 3600)}
+	req := llmcontracts.AgentRequest{Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 1000}, Message: strings.Repeat("a", 3600)}
 	triggered, _, used := shouldTriggerContextCompaction(req)
 	if !triggered || used != 900 {
 		t.Fatalf("trigger=%v used=%d, want bytes/4 estimate", triggered, used)
@@ -1035,7 +1035,7 @@ func TestProviderContextCompactionLimits_TriggerMathAndConfiguredClamp(t *testin
 	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file", Description: strings.Repeat("tool", 200), Parameters: []byte(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessWrite}}}
-	req = llmcontracts.AgentRequest{Ctx: llmcontracts.WithRuntimeTools(context.Background(), rt), Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ContextWindow: 1000}, Message: strings.Repeat("a", 2400)}
+	req = llmcontracts.AgentRequest{Ctx: llmcontracts.WithRuntimeTools(context.Background(), rt), Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, Agent: models.LLMConfig{Provider: models.ProviderOpenAICompatible, ProviderContextWindow: 1000}, Message: strings.Repeat("a", 2400)}
 	triggered, _, used = shouldTriggerContextCompaction(req)
 	if !triggered || used <= 500 {
 		t.Fatalf("trigger=%v used=%d, want model-visible system/runtime tool context included", triggered, used)
@@ -1827,7 +1827,7 @@ func TestRequestPreflightUsesFinalResolvedAgentRuntime(t *testing.T) {
 	})
 	req := llmcontracts.AgentRequest{
 		Ctx: context.Background(), Operation: llmcontracts.OperationTask, Message: "small",
-		Agent:           models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "tiny", ContextWindow: 1000},
+		Agent:           models.LLMConfig{Provider: models.ProviderOpenAICompatible, Model: "tiny", ProviderContextWindow: 1000},
 		AgentDefinition: &models.Agent{Plugins: []string{"plugin@test"}, SystemPrompt: strings.Repeat("s", 600)},
 	}
 	_, err := (&LLMService{}).callProviderWithCompaction(adapter, req)

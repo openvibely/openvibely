@@ -91,6 +91,8 @@ type LLMConfig struct {
 	DefaultMaxTokens        int    `json:"default_max_tokens,omitempty"`
 	ContextWindow           int    `json:"context_window,omitempty"`
 	CompactionThreshold     int    `json:"compaction_threshold,omitempty"`
+	ProviderContextWindow   int    `json:"provider_context_window,omitempty"`
+	ProviderMaxOutputTokens int    `json:"provider_max_output_tokens,omitempty"`
 	DisableNativeCompaction bool   `json:"-"`
 	ForceNativeCompaction   bool   `json:"-"`
 	TokenExchangeFormat     string `json:"token_exchange_format,omitempty"`

@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
 	llmanthropic "github.com/openvibely/openvibely/internal/llm/anthropic"
+	"github.com/openvibely/openvibely/internal/llm/contextlimits"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
@@ -415,45 +416,22 @@ func logContextFailureWithBudget(req llmcontracts.AgentRequest, err error, budge
 }
 
 func compactionLimitsForAgent(agent models.LLMConfig) compactionLimits {
-	window := agent.ContextWindow
-	if window <= 0 {
-		switch agent.Provider {
-		case models.ProviderOpenAI:
-			window = openAIContextWindow(agent.Model)
-		case models.ProviderAnthropic:
-			if spec, ok := models.LookupModel(models.ProviderAnthropic, agent.Model); ok && spec.ContextWindow > 0 {
-				window = spec.ContextWindow
-			} else {
-				window = defaultAnthropicContextWindow
-			}
-		case models.ProviderOpenAICompatible:
-			window = defaultOpenAICompatibleContextWindow
-		case models.ProviderOllama:
-			window = llmollama.DefaultContextWindow
-		default:
-			window = defaultOpenAIContextWindow
-		}
+	resolved := contextlimits.Resolve(agent)
+	return compactionLimits{
+		ContextWindow:      resolved.EffectiveInputWindow,
+		AutoLimit:          resolved.AutoLimit,
+		TriggerLimit:       resolved.TriggerLimit,
+		EffectiveHardLimit: resolved.EffectiveHardLimit,
 	}
-	autoLimit := (window * 90) / 100
-	effectiveHardLimit := (window * 95) / 100
-	if agent.Provider == models.ProviderAnthropic {
-		autoLimit = anthropicclient.CompactionTriggerLimit(window)
-		effectiveHardLimit = anthropicclient.CompactionBlockingLimit(window)
-	}
-	triggerLimit := autoLimit
-	configuredThreshold := agent.CompactionThreshold
-	if agent.Provider == models.ProviderAnthropic && configuredThreshold > 0 && configuredThreshold < anthropicclient.MinCompactionThreshold {
-		configuredThreshold = anthropicclient.MinCompactionThreshold
-	}
-	if configuredThreshold > 0 && configuredThreshold < triggerLimit {
-		triggerLimit = configuredThreshold
-	}
-	return compactionLimits{ContextWindow: window, AutoLimit: autoLimit, TriggerLimit: triggerLimit, EffectiveHardLimit: effectiveHardLimit}
 }
 
 func requestBudgetForAgent(agent models.LLMConfig) requestBudget {
 	limits := compactionLimitsForAgent(agent)
-	reserved := agent.GetDefaultMaxTokens(defaultReservedOutputTokens)
+	resolved := contextlimits.Resolve(agent)
+	reserved := resolved.EffectiveOutputCap
+	if reserved <= 0 {
+		reserved = agent.GetDefaultMaxTokens(defaultReservedOutputTokens)
+	}
 	safety := limits.ContextWindow / 50
 	switch agent.Provider {
 	case models.ProviderAnthropic:
