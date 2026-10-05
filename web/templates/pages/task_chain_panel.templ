@@ -17,7 +17,7 @@ templ TaskChainPanel(task *models.Task, agents []models.LLMConfig) {
  <div id="task-chain-panel" data-draft={ fmt.Sprint(task.ID == "") } data-configured={ fmt.Sprint(config.Enabled || config.Trigger != "") }>
   <style>
    .task-chain-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
-   .task-chain-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+   .task-chain-edit:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
   </style>
   <div class="flex items-center justify-between mb-3" style="height:20px"><h3 class="text-sm font-semibold">Follow-up task</h3><button type="button" class="btn btn-ghost btn-xs" data-chain-open data-chain-add aria-label="Add follow-up task">+</button></div>
   <p class="text-sm opacity-60" data-chain-empty>No follow-up configured.</p>

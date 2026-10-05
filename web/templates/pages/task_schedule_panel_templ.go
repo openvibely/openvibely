@@ -56,7 +56,7 @@ func TaskSchedulePanel(task *models.Task, schedules []models.Schedule) templ.Com
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><style>\n   .task-schedule-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }\n   .task-schedule-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }\n   #task-schedule-panel .schedule-interval-input:focus { outline:none; box-shadow:none; }\n   #task-schedule-panel .schedule-interval-input:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:1px; }\n  </style><div class=\"flex items-center justify-between mb-3\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Schedule</h3>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><style>\n   .task-schedule-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }\n   .task-schedule-edit:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }\n   #task-schedule-panel .schedule-interval-input:focus { outline:none; box-shadow:none; }\n   #task-schedule-panel .schedule-interval-input:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:1px; }\n  </style><div class=\"flex items-center justify-between mb-3\" style=\"height:20px\"><h3 class=\"text-sm font-semibold\">Schedule</h3>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

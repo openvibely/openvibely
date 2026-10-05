@@ -16,7 +16,7 @@ templ TaskSchedulePanel(task *models.Task, schedules []models.Schedule) {
  <div id="task-schedule-panel" data-task-schedule-panel data-draft={ fmt.Sprint(task.ID == "") }>
   <style>
    .task-schedule-edit { display:grid; grid-template-columns:minmax(0,1fr) 1rem; align-items:center; column-gap:12px; text-align:left; width:calc(100% + 24px); margin-inline:-12px; padding:4px 12px; border-radius:8px; }
-   .task-schedule-edit:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+   .task-schedule-edit:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
    #task-schedule-panel .schedule-interval-input:focus { outline:none; box-shadow:none; }
    #task-schedule-panel .schedule-interval-input:focus-visible { outline:2px solid oklch(var(--p)); outline-offset:1px; }
   </style>
