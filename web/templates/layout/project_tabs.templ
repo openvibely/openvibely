@@ -133,6 +133,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
  [data-theme="light"] #project-tab-menu { border: 1px solid var(--ov-l-border-strong); background: var(--ov-l-bg); color: var(--ov-l-text-strong); }
  [data-theme="light"] #project-tab-menu button:hover { background: var(--ov-l-surface-active); }
   @supports not (color: oklch(0 0 0)) {
+   #project-tab-menu { border: 1px solid var(--ov-border-subtle); background: var(--ov-menu-surface); color: inherit; }
    .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { background-color: var(--ov-hover-subtle); }
    .desktop-project-tab [data-close-project]:enabled:hover { background-color: var(--ov-hover); }
    #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]) { background: var(--ov-hover); }
