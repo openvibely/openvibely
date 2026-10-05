@@ -95,6 +95,15 @@ package main
 @end
 
 static char ovTrafficLightsKey;
+static NSAppearanceName ovTrafficLightsAppearanceName;
+static void ovSetTrafficLightsDark(int dark) {
+    ovTrafficLightsAppearanceName = dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua;
+    for (NSWindow *window in NSApp.windows) {
+        OVTrafficLights *controls = objc_getAssociatedObject(window, &ovTrafficLightsKey);
+        controls.appearance = [NSAppearance appearanceNamed:ovTrafficLightsAppearanceName];
+        [controls refresh];
+    }
+}
 static void ovAttachTrafficLights(NSWindow *window) {
     if (![window isKindOfClass:NSClassFromString(@"WebviewWindow")]) return;
     NSView *content = window.contentView;
@@ -106,6 +115,7 @@ static void ovAttachTrafficLights(NSWindow *window) {
         [controls release];
     }
     if (controls.superview != content) [content addSubview:controls positioned:NSWindowAbove relativeTo:nil];
+    if (ovTrafficLightsAppearanceName) controls.appearance = [NSAppearance appearanceNamed:ovTrafficLightsAppearanceName];
     CGFloat y = content.isFlipped ? (46 - NSHeight(controls.frame)) / 2 :
         NSHeight(content.bounds) - (46 + NSHeight(controls.frame)) / 2;
     [controls setFrameOrigin:NSMakePoint(16, y)];
@@ -126,6 +136,31 @@ static void ovInstallTrafficLights(void) {
 }
 */
 import "C"
+
+import "github.com/wailsapp/wails/v3/pkg/application"
+
+func registerPlatformWindowControls(app *application.App, _ *application.WebviewWindow) {
+	app.Event.On("desktop:controls-theme", func(event *application.CustomEvent) {
+		if event.Sender != "main" {
+			return
+		}
+		data, ok := event.Data.(map[string]any)
+		if !ok {
+			return
+		}
+		dark, ok := data["dark"].(bool)
+		if !ok {
+			return
+		}
+		application.InvokeAsync(func() {
+			value := C.int(0)
+			if dark {
+				value = 1
+			}
+			C.ovSetTrafficLightsDark(value)
+		})
+	})
+}
 
 func installNativeTrafficLights() {
 	C.ovInstallTrafficLights()

@@ -89,7 +89,9 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     [data-openvibely-runtime="desktop"] body.sidebar-collapsed-pending #desktop-project-titlebar { padding-left: 3.5rem; }
     [data-openvibely-runtime="desktop"] body.sidebar-collapsed-pending #desktop-project-titlebar[data-platform="darwin"] { padding-left: max(3.5rem, 128px); }
   }
-  [data-theme="light"] #desktop-project-titlebar { --project-tab-contour: var(--ov-l-border); }
+  [data-theme="light"] #desktop-project-titlebar { --project-tab-selected: var(--ov-l-surface); --project-tab-contour: var(--ov-l-border); }
+  /* sRGB equivalent of the light theme's base-300 color for older WebKit. */
+  [data-theme="light"] #desktop-project-titlebar { background-color: #E8E8E8; }
   #desktop-project-titlebar button, #desktop-project-titlebar [data-project-selector], #desktop-project-titlebar dialog { --wails-draggable: no-drag; }
   #desktop-project-titlebar button:focus-visible { outline: 2px solid oklch(var(--p)); outline-offset: -2px; }
   #desktop-project-titlebar:not([data-keyboard-navigation]) [data-project-tab]:focus { outline: none; }
@@ -97,12 +99,12 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   /* Keep native scrollbars out of the header, including older WebKitGTK. */
   #desktop-project-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
   .desktop-project-tab { display: flex; align-items: center; flex: 0 0 240px; width: 240px; position: relative; border-radius: 16px 16px 0 0; background: transparent; --wails-draggable: no-drag; }
-  .desktop-project-tab:has([aria-selected="true"]) { background: var(--project-tab-selected); z-index: 1; }
-  .desktop-project-tab:has([aria-selected="true"])::before, .desktop-project-tab:has([aria-selected="true"])::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
-  .desktop-project-tab:has([aria-selected="true"])::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
-  .desktop-project-tab:has([aria-selected="true"])::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
-  .desktop-project-tab:not(:has([aria-selected="true"]))::after { content: ""; position: absolute; right: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: none; }
-  .desktop-project-tab:not(:has([aria-selected="true"])):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
+  .desktop-project-tab[data-selected="true"] { background: var(--project-tab-selected); z-index: 1; }
+  .desktop-project-tab[data-selected="true"]::before, .desktop-project-tab[data-selected="true"]::after { content: ""; position: absolute; bottom: 0; width: 10px; height: 10px; pointer-events: none; }
+  .desktop-project-tab[data-selected="true"]::before { left: -10px; background: radial-gradient(circle at 0 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
+  .desktop-project-tab[data-selected="true"]::after { right: -10px; background: radial-gradient(circle at 100% 0, transparent 8px, var(--project-tab-contour) 8px, var(--project-tab-contour) 10px, var(--project-tab-selected) 10px); }
+  .desktop-project-tab:not([data-selected="true"])::after { content: ""; position: absolute; right: -3px; top: calc(50% - 3px); width: 2px; height: 16px; transform: translateY(-50%); border-radius: 1px; background: oklch(var(--bc) / .25); pointer-events: none; transition: none; }
+  .desktop-project-tab:not([data-selected="true"]):is(:hover, :has(+ .desktop-project-tab:hover), :has(+ .desktop-project-tab [aria-selected="true"]))::after { opacity: 0; }
   @media (prefers-reduced-motion: reduce) { .desktop-project-tab::before, .desktop-project-tab::after { transition: none; } }
   .desktop-project-tab [role="tab"] { width: 100%; height: 100%; border-radius: inherit; text-align: left; color: inherit; background: transparent; padding: 0 40px 6px 16px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; line-height: 1.25rem; font-weight: 400; }
   [data-theme="light"] .desktop-project-tab [role="tab"] { color: var(--ov-l-text-strong); font-weight: 500; }
@@ -111,15 +113,25 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
   .desktop-project-tab [role="tab"][aria-selected="true"] { color: color-mix(in oklch, oklch(var(--bc)) 70%, black); }
   [data-theme="dark"] .desktop-project-tab [role="tab"][aria-selected="true"] { color: color-mix(in oklch, oklch(var(--bc)) 70%, white); }
   .desktop-project-tab [data-close-project] { position: absolute; right: 8px; top: calc(50% - 3px); transform: translateY(-50%); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; border-radius: 50%; }
-  .desktop-project-tab:not(:has([aria-selected="true"])):hover [role="tab"] { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; border-width: 1px 2px 7px; padding-top: 0; padding-bottom: 0; padding-left: 14px; padding-right: 38px; }
-  .desktop-project-tab:has([aria-selected="true"]):hover { background: var(--project-tab-selected); }
+  .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { background: oklch(var(--bc) / .08); border-radius: 999px; background-clip: padding-box; border: 4px solid transparent; border-width: 1px 2px 7px; padding-top: 0; padding-bottom: 0; padding-left: 14px; padding-right: 38px; }
+  .desktop-project-tab[data-selected="true"]:hover { background: var(--project-tab-selected); }
   .desktop-project-tab [data-close-project]:enabled:hover { background: oklch(var(--bc) / .18); }
+  [data-theme="light"] .desktop-project-tab:not([data-selected="true"]):hover [role="tab"] { background-color: rgba(38, 38, 39, .08); }
+  [data-theme="light"] .desktop-project-tab [data-close-project]:enabled:hover { background-color: rgba(38, 38, 39, .18); }
+  [data-theme="light"] .desktop-project-tab:not([data-selected="true"])::after { background-color: rgba(38, 38, 39, .25); }
   .desktop-project-tab [data-close-project]:disabled { opacity: .35; cursor: default; }
   #desktop-project-titlebar #project-selector-trigger { display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; flex-shrink: 0; width: 30px; height: 30px; align-self: center; transform: translateY(-3px); border-radius: 50%; }
  #desktop-project-titlebar #project-selector-trigger:is(:hover, [data-pointer-over], [aria-expanded="true"]) { background: oklch(var(--bc) / .12); }
- #project-tab-menu { position: fixed; margin: 0; padding: 4px; border: 1px solid oklch(var(--bc) / .2); border-radius: 8px; background: oklch(var(--b1)); color: oklch(var(--bc)); --wails-draggable: no-drag; }
+ [data-theme="light"] #desktop-project-titlebar #project-selector-trigger:hover,
+ [data-theme="light"] #desktop-project-titlebar #project-selector-trigger[data-pointer-over],
+ [data-theme="light"] #desktop-project-titlebar #project-selector-trigger[aria-expanded="true"] { background: var(--ov-l-border-strong); }
+ #project-tab-menu { display: none; position: fixed; margin: 0; padding: 4px; border: 1px solid oklch(var(--bc) / .2); border-radius: 8px; background: oklch(var(--b1)); color: oklch(var(--bc)); --wails-draggable: no-drag; }
+ #project-tab-menu:popover-open { display: block; }
+ #project-tab-menu[data-menu-open] { display: block; z-index: 1000; }
  #project-tab-menu button { display: block; width: 100%; text-align: left; padding: 8px 16px; border-radius: 4px; }
  #project-tab-menu button:hover { background: oklch(var(--bc) / .12); }
+ [data-theme="light"] #project-tab-menu { border: 1px solid var(--ov-l-border-strong); background: var(--ov-l-bg); color: var(--ov-l-text-strong); }
+ [data-theme="light"] #project-tab-menu button:hover { background: var(--ov-l-surface-active); }
   .desktop-titlebar-space { flex: 1; min-width: 24px; height: 100%; }
   #desktop-project-titlebar [data-project-selector] { position: relative; margin: 0; padding-left: 7px; width: 37px; flex-shrink: 0; display: flex; flex-direction: row; align-items: center; align-self: center; gap: 0; }
   #desktop-project-titlebar [data-project-selector] > div:first-child { display: none; }
@@ -133,7 +145,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
  @SidebarToggle()
  }
 			<div id="desktop-project-tabs" role="tablist" aria-label="Open projects">			for _, project := range pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs) {
-				<div class="desktop-project-tab">
+				<div class="desktop-project-tab" data-selected={ fmtBool(project.ID == currentProjectID) }>
 					<button type="button" role="tab" aria-selected={ fmtBool(project.ID == currentProjectID) } tabindex={ tabIndex(project.ID == currentProjectID) } data-project-tab={ project.ID }>{ project.Name }</button>
 					<button type="button" disabled?={ len(pinnedProjects(projects, uiPreferences(ctx).PinnedProjectIDs)) <= 1 } data-close-project={ project.ID } aria-label={ "Close project tab: " + project.Name }><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m3 3 6 6m0-6-6 6"/></svg></button>
 				</div>
@@ -157,6 +169,11 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    var select = document.getElementById('project-selector');
    var list = document.getElementById('desktop-project-tabs');
    var menu = document.getElementById('project-tab-menu');
+   if (typeof menu.showPopover !== 'function') menu.removeAttribute('popover');
+   function closeMenu() {
+    if (typeof menu.hidePopover === 'function') menu.hidePopover();
+    menu.removeAttribute('data-menu-open');
+   }
  var menuTab;
  var add = document.querySelector('[data-project-selector]');
  if (bar.dataset.platform === 'web') {
@@ -245,6 +262,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
  if (active && !ids.includes(active) && active !== closedActive) { ids.push(active); saveTabs(); render(); return; }
     list.querySelectorAll('[data-project-tab]').forEach(function(tab, index) {
      tab.setAttribute('aria-selected', String(tab.dataset.projectTab === active));
+     tab.parentElement.dataset.selected = String(tab.dataset.projectTab === active);
      tab.tabIndex = tab.dataset.projectTab === active || (ids.indexOf(active) === -1 && index === 0) ? 0 : -1;
     });
     list.querySelectorAll('[data-close-project]').forEach(function(close) {
@@ -321,7 +339,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     drag.x = event.clientX;
     if (!drag.started && Math.abs(drag.x - drag.startX) >= 6) {
      drag.started = true;
-     menu.hidePopover();
+     closeMenu();
      drag.wrapper.getAnimations().forEach(function(animation) { animation.cancel(); });
      drag.wrapper.style.zIndex = '3';
      list.style.cursor = 'grabbing';
@@ -356,7 +374,8 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
    list.addEventListener('dragstart', function(event) { if (event.target.closest('[data-project-tab]')) event.preventDefault(); });
    function openMenu(tab, x, y) {
     menuTab = tab;
-    menu.showPopover();
+    if (typeof menu.showPopover === 'function') menu.showPopover();
+    else menu.setAttribute('data-menu-open', '');
     menu.style.left = Math.max(0, Math.min(x, innerWidth - menu.offsetWidth)) + 'px';
     menu.style.top = Math.max(0, Math.min(y, innerHeight - menu.offsetHeight)) + 'px';
     document.getElementById('project-tab-settings-action').focus();
@@ -372,19 +391,19 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     event.preventDefault(); var rect = tab.getBoundingClientRect(); openMenu(tab, rect.left, rect.bottom);
    });
    document.addEventListener('pointerdown', function(event) {
-    if (!menu.contains(event.target)) menu.hidePopover();
+    if (!menu.contains(event.target)) closeMenu();
    });
-   window.addEventListener('resize', function() { menu.hidePopover(); });
-   list.addEventListener('scroll', function() { menu.hidePopover(); });
+   window.addEventListener('resize', closeMenu);
+   list.addEventListener('scroll', closeMenu);
    menu.addEventListener('keydown', function(event) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
      event.preventDefault(); var items = Array.from(menu.querySelectorAll('[role=menuitem]'));
      items[(items.indexOf(document.activeElement) + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
     }
-    if (event.key === 'Escape' || event.key === 'Tab') { menu.hidePopover(); if (menuTab) menuTab.focus(); } });
+    if (event.key === 'Escape' || event.key === 'Tab') { closeMenu(); if (menuTab) menuTab.focus(); } });
    document.getElementById('project-tab-settings-action').addEventListener('click', function() {
     if (!menuTab) return;
-    menu.hidePopover();
+    closeMenu();
     htmx.ajax('GET', '/projects/' + encodeURIComponent(menuTab.dataset.projectTab) + '/edit', {target: document.getElementById('project-settings-container'), swap: 'innerHTML'});
    });
    list.addEventListener('click', async function(event) {
@@ -446,7 +465,7 @@ templ DesktopProjectTabs(projects []models.Project, currentProjectID string) {
     var target = event.target;
     var composer = target && (target.id === 'message-input' || target.id === 'task-message-input');
     if (!composer && target && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
-    if (document.querySelector('dialog[open], [popover]:popover-open') || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
+    if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open')) || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
     var tabs = Array.from(list.querySelectorAll('[data-project-tab]'));
     if (tabs.length < 2 || !list.getClientRects().length) return;
     var index = tabs.findIndex(function(tab) { return tab.dataset.projectTab === select.value; });

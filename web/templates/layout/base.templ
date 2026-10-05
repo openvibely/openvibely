@@ -175,6 +175,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					import * as runtime from '/wails/runtime.js';
 					window.wails = runtime;
 					window.openVibelyInstallWindowControls && window.openVibelyInstallWindowControls(runtime);
+					if (document.querySelector('#desktop-project-titlebar[data-platform="darwin"]') && runtime.Events && runtime.Events.Emit) {
+						const syncNativeTheme = () => runtime.Events.Emit('desktop:controls-theme', {dark: document.documentElement.getAttribute('data-theme') === 'dark'});
+						new MutationObserver(syncNativeTheme).observe(document.documentElement, {attributes: true, attributeFilter: ['data-theme']});
+						syncNativeTheme();
+					}
 					window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode();
 				</script>
 			}
@@ -1157,6 +1162,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--ov-l-code-bg: #0000001F;
 				}
 
+				[data-theme="light"] [data-task-state-icon].text-success { color: var(--ov-l-success); }
+				[data-theme="light"] [data-task-state-icon].text-error { color: var(--ov-l-error); }
+				[data-theme="light"] [data-task-state-icon].text-warning { color: var(--ov-l-warning); }
+				[data-theme="light"] [data-task-state-icon].text-info { color: #2563EB; }
+				[data-theme="light"] [data-task-state="pending"],
+				[data-theme="light"] [data-task-state="cancelled"] { color: var(--ov-l-text-dim); }
+
 				/* Diff viewer line colors.
 				   daisyUI v4 resolves bg-success/10 via oklch(var(--su)/.1). In the
 				   Wails WKWebView on older macOS, oklch() and color-mix() can be
@@ -1227,6 +1239,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					[data-theme="light"] .menu a:hover,
 					[data-theme="light"] .menu summary:hover {
 						background-color: var(--ov-l-surface-hover);
+					}
+					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover,
+					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):focus-visible {
+						background-color: var(--ov-l-surface-active);
 					}
 					/* Prevent mouse-click focus from looking like a persistent active nav item (web parity with desktop). */
 					.sidebar-aside .menu a:focus:not(:focus-visible),
@@ -5221,7 +5237,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						window.refreshCardListToolbars = function(scope) { (scope || document).querySelectorAll('[data-card-list-toolbar]').forEach(initToolbar); };
 						document.addEventListener('keydown', function(event) {
 							if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
-							if (document.querySelector('dialog[open], [popover]:popover-open') || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
+							if (document.querySelector('dialog[open], [data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open')) || Array.from(document.querySelectorAll('[role="dialog"][aria-modal="true"]')).some(function(dialog) { return dialog.getClientRects().length > 0; })) return;
 							var openFilters = document.querySelectorAll('[data-card-list-toolbar] .dropdown-open > [data-card-filters-button]');
 							if (openFilters.length) {
 								event.preventDefault();

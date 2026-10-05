@@ -135,6 +135,11 @@ templ analyticsContent(currentProject *models.Project) {
 				</div>
 				<div id="analyticsError" class="alert alert-error hidden mb-6" role="alert"></div>
 				<div id="modelMetricHelp" popover="auto" role="tooltip" class="bg-base-100 text-base-content border border-base-300 rounded-lg shadow-xl p-3 text-sm" style="position:fixed;margin:0;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto"></div>
+				<style>
+					#modelMetricHelp { display: none; }
+					#modelMetricHelp:popover-open { display: block; }
+					#modelMetricHelp[data-help-open] { display: block; z-index: 1000; }
+				</style>
 
 				<section id="analytics-overview" data-analytics-section="overview" class="hidden space-y-6 mb-6">
 					<div><h3 class="text-xl font-bold">Overview</h3><p class="text-sm opacity-60">What changed, what drove it, and what to inspect next.</p></div>
@@ -839,10 +844,14 @@ templ analyticsContent(currentProject *models.Project) {
 							function setupModelHelp() {
 								const root=document.getElementById('analyticsError').parentElement,tip=document.getElementById('modelMetricHelp');
 								const preview=document.querySelector('[data-analytics-preview]'),tipParent=tip.parentElement;
+								const nativePopover=typeof tip.showPopover==='function';
+								if(!nativePopover)tip.removeAttribute('popover');
 								let active=null,pinned=false;
 								function close() {
 									if(active){active.removeAttribute('aria-describedby');active.setAttribute('aria-expanded','false');}
-									active=null;pinned=false;if(tip.matches(':popover-open'))tip.hidePopover();
+									active=null;pinned=false;
+									if(nativePopover&&tip.matches(':popover-open'))tip.hidePopover();
+									tip.removeAttribute('data-help-open');
 									if(tip.parentElement!==tipParent)tipParent.appendChild(tip);
 								}
 								function show(button,pin) {
@@ -851,7 +860,8 @@ templ analyticsContent(currentProject *models.Project) {
 									if(tip.parentElement!==host)host.appendChild(tip);
 									const sample=button.querySelector('[data-task-summary-sample]');
 									tip.textContent=button.dataset.modelHelp+(sample&&sample.textContent?' '+sample.textContent+'.':'');button.setAttribute('aria-describedby',tip.id);button.setAttribute('aria-expanded','true');
-									if(!tip.matches(':popover-open'))tip.showPopover();
+									if(nativePopover){if(!tip.matches(':popover-open'))tip.showPopover();}
+									else tip.setAttribute('data-help-open','');
 									const r=button.getBoundingClientRect(),box=tip.getBoundingClientRect();
 									tip.style.left=Math.max(8,Math.min(r.left,window.innerWidth-box.width-8))+'px';
 									tip.style.top=Math.max(8,r.bottom+box.height+8<=window.innerHeight?r.bottom:r.top-box.height)+'px';
@@ -867,7 +877,7 @@ templ analyticsContent(currentProject *models.Project) {
 								preview.addEventListener('close',function(){if(!preview.open&&tip.parentElement===preview)close();},{signal:eventSignal});
 								document.addEventListener('keydown',function(e){if(e.key==='Escape')close();},{signal:eventSignal});
 								document.addEventListener('click',function(e){if(active&&!active.contains(e.target)&&!tip.contains(e.target))close();},{signal:eventSignal});
-								tip.addEventListener('toggle',function(){if(!tip.matches(':popover-open'))close();},{signal:eventSignal});
+								if(nativePopover)tip.addEventListener('toggle',function(){if(!tip.matches(':popover-open'))close();},{signal:eventSignal});
 								window.addEventListener('resize',close,{signal:eventSignal});
 								document.addEventListener('scroll',function(e){if(e.target!==tip)close();},{capture:true,signal:eventSignal});
 								eventSignal.addEventListener('abort',close,{once:true});

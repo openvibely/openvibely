@@ -211,7 +211,7 @@ templ TaskWorkspaceScript() {
 			var openDialog = document.querySelector('dialog[open]');
 			if (openDialog) return;
 			if (command && !event.altKey && event.shiftKey && event.code === 'KeyD') {
-				if (!taskID || document.querySelector('[popover]:popover-open') || (!panel.hidden && panel.dataset.overlay === 'true')) return;
+				if (!taskID || document.querySelector('[data-openvibely-picker-open], [data-menu-open]') || (typeof HTMLElement.prototype.showPopover === 'function' && document.querySelector('[popover]:popover-open')) || (!panel.hidden && panel.dataset.overlay === 'true')) return;
 				event.preventDefault();
 				workspace(changes.classList.contains('hidden'));
 			} else if (command && !event.altKey && event.shiftKey && event.code === 'KeyB') {
@@ -292,7 +292,7 @@ templ TaskWorkspaceScript() {
 		}, {signal:signal, capture:true});
 		on(panel, 'click', function(event) { var tab = event.target.closest('[role="tab"]'); if (tab) selectTab(tab.dataset.tab, true); });
 		on(document, 'keydown', function(event) {
-			if (event.key === 'Escape' && !event.defaultPrevented && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open], [popover]:popover-open')) {
+			if (event.key === 'Escape' && !event.defaultPrevented && !panel.hidden && panel.dataset.overlay === 'true' && !event.target.closest('dialog[open], [data-openvibely-picker-open], [data-menu-open]') && !(typeof HTMLElement.prototype.showPopover === 'function' && event.target.closest('[popover]:popover-open'))) {
 				event.preventDefault();
 				closePanel();
 			}

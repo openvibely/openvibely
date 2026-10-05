@@ -51,7 +51,7 @@ func TestProjectTabsPlusHoverPreservesInactiveSeparator(t *testing.T) {
 	if err := DesktopProjectTabs(nil, "").Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(buf.String(), `.desktop-project-tab:not(:has([aria-selected="true"])):has(+ [data-project-selector] #project-selector-trigger:hover)::after { opacity: 0; }`) {
+	if strings.Contains(buf.String(), `.desktop-project-tab:not([data-selected="true"]):has(+ [data-project-selector] #project-selector-trigger:hover)::after { opacity: 0; }`) {
 		t.Error("plus hover must not hide the neighboring separator")
 	}
 }
@@ -68,7 +68,7 @@ func TestProjectTabsCleanSelectedShape(t *testing.T) {
 		`var(--project-tab-contour) 10px, var(--project-tab-selected) 10px)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, white)`,
 		`color-mix(in oklch, oklch(var(--bc)) 70%, black)`,
-		`[data-theme="light"] #desktop-project-titlebar { --project-tab-contour: var(--ov-l-border); }`,
+		`[data-theme="light"] #desktop-project-titlebar { --project-tab-selected: var(--ov-l-surface); --project-tab-contour: var(--ov-l-border); }`,
 		`border-width: 1px 2px 7px; padding-top: 0; padding-bottom: 0; padding-left: 14px; padding-right: 38px;`,
 		`padding: 0 40px 6px 16px;`,
 		`top: calc(50% - 3px);`,

@@ -238,6 +238,7 @@ window.addEventListener('load',function(){
   if(box.textContent.includes('Loading')){if(++attempts>100){result.dataset.testResult='fail';result.dataset.testError='KPI loading stuck';return;}setTimeout(check,20);return;}
   if(Array.from(box.querySelectorAll('[data-task-summary-value]')).map(el=>el.textContent).join('|')!=='42|80.0%|75.0%'||!box.textContent.includes('24 / 30 evaluated')||!box.textContent.includes('18 / 24 eligible')){result.dataset.testResult='fail';result.dataset.testError='KPI values missing on '+view;return;}
   var help=box.querySelectorAll('[data-model-help]')[1],tip=document.getElementById('modelMetricHelp');
+  if(tip.getClientRects().length){result.dataset.testResult='fail';result.dataset.testError='empty tooltip must start hidden';return;}
   help.dispatchEvent(new PointerEvent('pointerover',{bubbles:true}));
   if(!tip.matches(':popover-open')||!tip.textContent.includes('24 / 30 evaluated')||!tip.textContent.includes('goal was met')||!help.querySelector('[data-task-summary-sample]').hidden){result.dataset.testResult='fail';result.dataset.testError='sample must be hidden in card and visible in immediate tooltip';return;}
   help.click();
@@ -249,12 +250,22 @@ window.addEventListener('load',function(){
    var button=document.querySelector('#analytics-'+name+' [data-analytics-kpi] [data-model-help]');button.click();
    if(!tip.matches(':popover-open')||tip.textContent!==button.dataset.modelHelp){result.dataset.testResult='fail';result.dataset.testError='KPI tooltip missing on '+name;return;}
    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+   if(tip.getClientRects().length){result.dataset.testResult='fail';result.dataset.testError='Escape must hide tooltip';return;}
+   button.click();
+   document.dispatchEvent(new Event('scroll'));
+   if(tip.getClientRects().length){result.dataset.testResult='fail';result.dataset.testError='scroll must hide tooltip';return;}
   }
   result.dataset.testResult='pass';
  }check();
 });
 </script>` + rendered.String()
-	runReconnectChromeFixture(t, fixture)
+	t.Run("native", func(t *testing.T) { runReconnectChromeFixture(t, fixture) })
+	t.Run("without-popover", func(t *testing.T) {
+		legacy := strings.ReplaceAll(fixture, "tip.matches(':popover-open')", "(tip.getClientRects().length > 0)")
+		legacy = strings.ReplaceAll(legacy, ":popover-open", ":unsupported-popover-open")
+		legacy = `<script>delete HTMLElement.prototype.showPopover; delete HTMLElement.prototype.hidePopover;</script>` + legacy
+		runReconnectChromeFixture(t, legacy)
+	})
 }
 
 func TestBrowserFunctional_AnalyticsContent_AgentOutcomeMetricSelector(t *testing.T) {
