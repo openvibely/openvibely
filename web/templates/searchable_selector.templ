@@ -86,6 +86,9 @@ templ searchableSelectorScript() {
  [data-searchable-selector-divider] { border-color:oklch(var(--bc) / .15); }
  [data-searchable-selector-option] { font-size:.875rem; line-height:1.25rem; font-weight:400; outline: none !important; background-color: transparent !important; }
  [data-searchable-selector-option][data-selector-active] { background-color: oklch(var(--bc) / .1) !important; }
+ @supports not (color: oklch(0 0 0)) {
+  [data-searchable-selector-option][data-selector-active] { background-color: var(--ov-hover) !important; }
+ }
  [data-theme="light"] [data-searchable-selector-option][data-selector-active] { background-color: var(--ov-l-surface-active) !important; }
  [data-searchable-selector-trigger][data-selector-return-focus] { outline: none !important; }
  </style>

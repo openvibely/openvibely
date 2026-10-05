@@ -562,13 +562,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						</div>
 						<style>
                             .lifecycle-refresh { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:28px; height:28px; padding:6px; margin:-4px; border:0; border-radius:6px; background:transparent; color:inherit; opacity:.7; cursor:pointer; }
-                            .lifecycle-refresh:hover { background:color-mix(in srgb,currentColor 5%,transparent); opacity:1; }
+                            .lifecycle-refresh:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); opacity:1; }
                             .lifecycle-refresh:disabled { opacity:.4; cursor:default; }
                             .lifecycle-refresh svg { display:block; flex-shrink:0; }
                             #lifecycle-activity-scroll { box-sizing:border-box; width:calc(100% + 24px); margin-inline:-12px; padding-inline:12px; }
                             .lifecycle-entry summary { box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:12px; list-style:none; cursor:pointer; padding:4px 12px; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }
                             .lifecycle-entry summary::-webkit-details-marker { display:none; }
-                            .lifecycle-entry summary:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+                            .lifecycle-entry summary:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
                             .lifecycle-entry summary > span:first-child { min-width:0; overflow-wrap:anywhere; }
                             .lifecycle-subtitle { display:block; font-size:12px; opacity:.6; margin-top:4px; }
                             .lifecycle-entry[open] .lifecycle-chevron { transform:rotate(90deg); }
@@ -2127,7 +2127,7 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 		<style>
   .task-property-row { display:grid; grid-template-columns:7rem minmax(0,1fr) 1rem; align-items:baseline; gap:0.75rem; width:calc(100% + 24px); margin-inline:-12px; text-align:left; padding:4px 12px; border-radius:8px; }
   .task-property-row [data-property-label] { min-width:0; overflow-wrap:anywhere; }
-  .task-property-row:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+  .task-property-row:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
 			#task-detail-metrics { grid-template-columns:minmax(0,1fr); }
 			#task-detail-metrics > div { display:grid; grid-template-columns:7rem minmax(0,1fr); align-items:baseline; gap:0.75rem; min-width:0; }
 			#task-detail-metrics > div > span:last-child { min-width:0; overflow-wrap:anywhere; }

@@ -190,6 +190,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				   animation uses 0s duration separately, so click feedback is preserved. */
 					:root {
 						--animation-btn: 0;
+						--ov-hover-subtle: rgba(166, 173, 187, .08);
+						--ov-hover: rgba(166, 173, 187, .12);
 						--ov-link-color: #7480ff;
 						--ov-link-color-hover: #6673ff;
 						--ov-link-color-active: #5966f2;
@@ -522,7 +524,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.system-update-toast .toast-close {
 					color: #090b23 !important;
 				}
-				.system-update-toast .toast-close:hover,
+				.system-update-toast .toast-close:hover {
+					background-color: rgba(9, 11, 35, 0.12) !important;
+				}
 				.system-update-toast .toast-close:focus-visible {
 					background-color: rgba(9, 11, 35, 0.12) !important;
 				}
@@ -1138,6 +1142,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* Light 2026 semantic aliases — indigo/purple accent palette. */
 					--ov-l-bg: #FAFAFA;
+					--ov-hover-subtle: rgba(38, 38, 39, .06);
+					--ov-hover: rgba(38, 38, 39, .12);
 					--ov-l-surface: #F5F5F5;
 					--ov-l-surface-hover: #F2F2F2;
 					--ov-l-surface-active: #E8E8E8;
@@ -1240,7 +1246,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					[data-theme="light"] .menu summary:hover {
 						background-color: var(--ov-l-surface-hover);
 					}
-					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover,
+					@supports not (color: oklch(0 0 0)) {
+						[data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover { background-color: var(--ov-hover); }
+					}
+					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):hover {
+						background-color: var(--ov-l-surface-active);
+					}
 					[data-theme="light"] [data-schedule-context-menu] [role="menuitem"]:not(:disabled):focus-visible {
 						background-color: var(--ov-l-surface-active);
 					}

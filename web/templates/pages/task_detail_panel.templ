@@ -36,11 +36,13 @@ templ TaskDetailPanel() {
 		#task-details-panel > [role="tablist"] { flex-shrink:0; margin:8px 12px 16px; box-shadow:inset 0 -1px color-mix(in srgb, currentColor 20%, transparent); }
 		#task-details-panel > [role="tablist"] > .tab { outline:none !important; box-shadow:none !important; height:auto; color:inherit; opacity:.6; font-weight:400; line-height:20px; padding-top:6px; padding-bottom:6px; border-bottom:2px solid transparent !important; }
 		#task-details-panel > [role="tablist"] > .tab[aria-selected="true"] { color:inherit; opacity:1; font-weight:400; border-bottom-color:currentColor !important; }
+		#task-details-panel > [role="tablist"] > .tab:hover { opacity:1; background-color:var(--ov-hover-subtle); }
 		#task-details-panel[hidden] { display:none; }
 		#task-panel-divider { position:absolute; left:-7px; top:0; bottom:0; width:10px; cursor:col-resize; touch-action:none; z-index:2; }
 		#task-panel-divider:focus { outline:none; }
-		#task-panel-divider::after { content:""; position:absolute; top:0; bottom:0; left:6px; width:2px; background:color-mix(in srgb, currentColor 60%, transparent); opacity:0; transition:opacity .12s; pointer-events:none; }
-		#task-panel-divider:hover::after, #task-panel-divider[data-resizing]::after, #task-panel-divider:focus-visible:not([data-pointer-focus])::after { opacity:.45; }
+		#task-panel-divider::after { content:""; position:absolute; top:0; bottom:0; left:6px; width:2px; background:currentColor; background:color-mix(in srgb, currentColor 60%, transparent); opacity:0; transition:opacity .12s; pointer-events:none; }
+		#task-panel-divider:hover::after, #task-panel-divider[data-resizing]::after { opacity:.45; }
+		#task-panel-divider:focus-visible:not([data-pointer-focus])::after { opacity:.45; }
 		#task-detail-actions { margin-bottom:max(0px, calc(var(--task-actions-bottom, 24px) - 12px)); }
 		#task-inspector-body > .task-tab-panel { min-height:0; }
 		/* Reserve 12px beyond the rows’ 12px highlight padding at both panel edges. */

@@ -47,7 +47,7 @@ templ ImageGallery() {
  [data-image-gallery-item] { cursor:zoom-in; }
  .attachment-gallery-row { display:flex; align-items:center; gap:12px; min-width:0; padding:0; width:calc(100% + 24px); margin-inline:-12px; border-radius:8px; }
  .attachment-gallery-open { cursor:pointer; display:flex; align-items:center; gap:12px; min-width:0; flex:1; border-radius:8px; padding:4px 12px; text-align:left; }
- .attachment-gallery-row:hover { background:color-mix(in srgb,currentColor 5%,transparent); }
+ .attachment-gallery-row:hover { background:var(--ov-hover-subtle); background:color-mix(in srgb,currentColor 5%,transparent); }
  .attachment-gallery-open img, [data-pending-attachment] img { width:48px; height:48px; object-fit:cover; border-radius:6px; }
  </style>
  <script>

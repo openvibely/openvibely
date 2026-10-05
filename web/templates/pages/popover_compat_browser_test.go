@@ -17,11 +17,25 @@ import (
 
 func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
+	legacyCSS := strings.NewReplacer(":popover-open", ":unsupported-popover-open", ":has(", ":unsupported-has(", "oklch(", "unsupported-oklch(", "color-mix(", "unsupported-color-mix(", ":focus-visible", ":unsupported-focus-visible")
 	for _, legacy := range []bool{false, true} {
 		t.Run(fmt.Sprint("legacy=", legacy), func(t *testing.T) {
 			project := models.Project{ID: "compat-project", Name: "Compatibility"}
 			other := models.Project{ID: "other-project", Name: "Other project"}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if legacy && strings.HasSuffix(r.URL.Path, ".css") {
+					recorder := httptest.NewRecorder()
+					if static.ServeAsset(recorder, r) {
+						for key, values := range recorder.Header() {
+							if key != "Content-Length" {
+								w.Header()[key] = values
+							}
+						}
+						w.WriteHeader(recorder.Code)
+						fmt.Fprint(w, legacyCSS.Replace(recorder.Body.String()))
+						return
+					}
+				}
 				if static.ServeAsset(w, r) {
 					return
 				}
@@ -30,13 +44,17 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					fmt.Fprint(w, `export const Window = {};`)
 					return
 				}
-				if r.URL.Path != "/tasks/new" {
+				if r.URL.Path != "/tasks/new" && r.URL.Path != "/schedule" {
 					w.WriteHeader(204)
 					return
 				}
 				var page bytes.Buffer
 				ctx := layout.WithUIPreferences(layout.WithDesktopMode(r.Context(), true), layout.UIPreferences{PinnedProjectIDs: []string{project.ID, other.ID}})
-				if err := NewTask([]models.Project{project, other}, &project, nil, nil).Render(ctx, &page); err != nil {
+				component := NewTask([]models.Project{project, other}, &project, nil, nil)
+				if r.URL.Path == "/schedule" {
+					component = Schedule([]models.Project{project, other}, &project, nil, 0, nil, nil)
+				}
+				if err := component.Render(ctx, &page); err != nil {
 					t.Error(err)
 					return
 				}
@@ -51,9 +69,7 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 				html := strings.Replace(page.String(), "</body>", icons.String()+"</body>", 1)
 				if legacy {
 					// Emulate missing methods and an unrecognized pseudo-class, including CSS parsing.
-					html = strings.ReplaceAll(html, ":popover-open", ":unsupported-popover-open")
-					html = strings.ReplaceAll(html, ":has(", ":unsupported-has(")
-					html = strings.ReplaceAll(html, "oklch(", "unsupported-oklch(")
+					html = legacyCSS.Replace(html)
 					html = strings.Replace(html, "<head>", `<head><script>delete HTMLElement.prototype.showPopover; delete HTMLElement.prototype.hidePopover;</script>`, 1)
 				}
 				w.Header().Set("Content-Type", "text/html")
@@ -61,9 +77,24 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 			}))
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL+"/tasks/new?tab=details", "popover-compat", func(b *composerFocusCDP) {
+				hover := func(selector string) {
+					var point struct{ X, Y float64 }
+					if err := json.Unmarshal([]byte(b.evaluate(fmt.Sprintf(`JSON.stringify((function(){var e=document.querySelector(%q);e.scrollIntoView({block:'nearest'});var r=e.getBoundingClientRect();return {X:r.left+r.width/2,Y:r.top+r.height/2}})())`, selector))), &point); err != nil {
+						t.Fatal(err)
+					}
+					b.call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": point.X, "y": point.Y}, nil)
+				}
 				b.waitFor("task panel", `String(!!document.querySelector('[data-detail-property="priority"]'))`, "true")
 				for _, theme := range []string{"dark", "light"} {
 					b.evaluate(fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); 'ok'`, theme))
+					for _, selector := range []string{`[data-detail-property="priority"]`, `#inspector-tab-schedules`} {
+						hover(selector)
+						b.waitFor("task panel hover "+selector, fmt.Sprintf(`String(getComputedStyle(document.querySelector(%q)).backgroundColor !== 'rgba(0, 0, 0, 0)')`, selector), "true")
+					}
+					if legacy {
+						hover(`#task-panel-divider`)
+						b.waitFor("resize divider hover", `getComputedStyle(document.getElementById('task-panel-divider'),'::after').opacity`, "0.45")
+					}
 					if theme == "light" {
 						b.waitFor("light title bar background", `getComputedStyle(document.getElementById('desktop-project-titlebar')).backgroundColor`, "rgb(232, 232, 232)")
 						var point struct{ X, Y float64 }
@@ -112,6 +143,13 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					}
 					b.evaluate(`document.getElementById('project-tab-settings-action').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true})); 'ok'`)
 					b.waitFor("tab menu dismissed", `String(!document.getElementById('project-tab-menu').getClientRects().length)`, "true")
+				}
+				b.call("Page.navigate", map[string]any{"url": server.URL + "/schedule"}, nil)
+				b.waitFor("schedule context menu", `String(!!document.getElementById('schedule-context-menu'))`, "true")
+				for _, theme := range []string{"dark", "light"} {
+					b.evaluate(fmt.Sprintf(`document.documentElement.setAttribute('data-theme',%q);var menu=document.getElementById('schedule-context-menu');menu.classList.remove('hidden');menu.style.left='300px';menu.style.top='200px'; 'ok'`, theme))
+					hover(`[data-schedule-context-action="run"]`)
+					b.waitFor("schedule menu hover "+theme, `String(getComputedStyle(document.querySelector('[data-schedule-context-action="run"]')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
 				}
 			})
 		})
