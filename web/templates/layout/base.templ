@@ -192,6 +192,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--animation-btn: 0;
 						--ov-hover-subtle: rgba(166, 173, 187, .08);
 						--ov-hover: rgba(166, 173, 187, .12);
+						--ov-border-subtle: rgba(166, 173, 187, .2);
+						--ov-border-hover: rgba(166, 173, 187, .35);
+						--ov-menu-surface: #1D232A;
+						--ov-menu-hover: #15191E;
 						--ov-link-color: #7480ff;
 						--ov-link-color-hover: #6673ff;
 						--ov-link-color-active: #5966f2;
@@ -1144,6 +1148,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--ov-l-bg: #FAFAFA;
 					--ov-hover-subtle: rgba(38, 38, 39, .06);
 					--ov-hover: rgba(38, 38, 39, .12);
+					--ov-border-subtle: rgba(38, 38, 39, .2);
+					--ov-border-hover: rgba(38, 38, 39, .35);
+					--ov-menu-surface: #FAFAFA;
+					--ov-menu-hover: #E8E8E8;
 					--ov-l-surface: #F5F5F5;
 					--ov-l-surface-hover: #F2F2F2;
 					--ov-l-surface-active: #E8E8E8;
@@ -2233,13 +2241,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					display: grid;
 					gap: 0.15rem;
 					padding: 0.55rem 0.65rem;
+					border: 1px solid var(--ov-border-subtle);
 					border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
 					border-radius: 0.5rem;
 					color: inherit;
 					text-decoration: none;
 				}
 				.stream-web-search-source:hover {
+					border-color: var(--ov-border-hover);
 					border-color: color-mix(in srgb, currentColor 32%, transparent);
+					background: var(--ov-hover-subtle);
 					background: color-mix(in srgb, currentColor 5%, transparent);
 				}
 				.stream-web-search-source-title {
