@@ -87,10 +87,10 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 				b.waitFor("task panel", `String(!!document.querySelector('[data-detail-property="priority"]'))`, "true")
 				for _, theme := range []string{"dark", "light"} {
 					b.evaluate(fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); 'ok'`, theme))
-					for _, selector := range []string{`[data-detail-property="priority"]`, `#inspector-tab-schedules`} {
-						hover(selector)
-						b.waitFor("task panel hover "+selector, fmt.Sprintf(`String(getComputedStyle(document.querySelector(%q)).backgroundColor !== 'rgba(0, 0, 0, 0)')`, selector), "true")
-					}
+					hover(`[data-detail-property="priority"]`)
+					b.waitFor("task property hover", `String(getComputedStyle(document.querySelector('[data-detail-property="priority"]')).backgroundColor !== 'rgba(0, 0, 0, 0)')`, "true")
+					hover(`#inspector-tab-schedules`)
+					b.waitFor("panel tabs have no hover highlight", `getComputedStyle(document.getElementById('inspector-tab-schedules')).backgroundColor`, "rgba(0, 0, 0, 0)")
 					if legacy {
 						hover(`#task-panel-divider`)
 						b.waitFor("resize divider hover", `getComputedStyle(document.getElementById('task-panel-divider'),'::after').opacity`, "0.45")
