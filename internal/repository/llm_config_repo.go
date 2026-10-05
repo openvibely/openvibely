@@ -27,7 +27,7 @@ func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
 
 const llmConfigColumns = `a.id, a.name, a.provider, a.model, a.reasoning_effort, a.api_key, a.max_tokens, a.temperature, a.is_default, a.created_at, a.updated_at, a.auth_method,
 	a.oauth_access_token, a.oauth_refresh_token, a.oauth_expires_at, a.oauth_account_id, a.oauth_needs_reauth,
-	a.max_workers, a.worker_timeout, a.oauth_client_id, a.oauth_client_secret, a.oauth_authorize_url, a.oauth_token_url, a.oauth_scopes, a.ollama_base_url, a.base_url, a.transport, a.preset_slug, a.models_url, a.auth_header_name, a.auth_header_value_prefix, a.extra_headers_json, a.extra_body_json, a.default_max_tokens, a.context_window, a.compaction_threshold, a.token_exchange_format, a.token_refresh_format, a.custom_auth_config_json, a.custom_auth_state_json, a.oauth_config_revision, a.mixture_config_json, a.auto_start_tasks,
+	a.max_workers, a.worker_timeout, a.oauth_client_id, a.oauth_client_secret, a.oauth_authorize_url, a.oauth_token_url, a.oauth_scopes, a.ollama_base_url, a.base_url, a.transport, a.preset_slug, a.models_url, a.auth_header_name, a.auth_header_value_prefix, a.extra_headers_json, a.extra_body_json, a.default_max_tokens, a.context_window, a.compaction_threshold, a.provider_context_window, a.provider_max_output_tokens, a.token_exchange_format, a.token_refresh_format, a.custom_auth_config_json, a.custom_auth_state_json, a.oauth_config_revision, a.mixture_config_json, a.auto_start_tasks,
 	COALESCE(a.oauth_connection_id, ''), COALESCE(c.name, ''), COALESCE(c.provider, ''),
 	COALESCE(c.oauth_access_token, ''), COALESCE(c.oauth_refresh_token, ''), COALESCE(c.oauth_expires_at, 0),
 	COALESCE(c.oauth_account_id, ''), COALESCE(c.oauth_needs_reauth, 1), COALESCE(c.oauth_revision, -1)`
@@ -111,7 +111,7 @@ func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig
 		&a.OAuthClientID, &a.OAuthClientSecret, &a.OAuthAuthorizeURL, &a.OAuthTokenURL, &a.OAuthScopes,
 		&a.OllamaBaseURL, &a.BaseURL, &a.Transport, &a.PresetSlug, &a.ModelsURL,
 		&a.AuthHeaderName, &a.AuthHeaderValuePrefix, &a.ExtraHeadersJSON, &a.ExtraBodyJSON,
-		&a.DefaultMaxTokens, &a.ContextWindow, &a.CompactionThreshold, &a.TokenExchangeFormat, &a.TokenRefreshFormat, &a.CustomAuthConfigJSON, &a.CustomAuthStateJSON, &a.OAuthConfigRevision, &a.MixtureConfigJSON, &a.AutoStartTasks,
+		&a.DefaultMaxTokens, &a.ContextWindow, &a.CompactionThreshold, &a.ProviderContextWindow, &a.ProviderMaxOutputTokens, &a.TokenExchangeFormat, &a.TokenRefreshFormat, &a.CustomAuthConfigJSON, &a.CustomAuthStateJSON, &a.OAuthConfigRevision, &a.MixtureConfigJSON, &a.AutoStartTasks,
 		&a.OAuthConnectionID, &a.OAuthConnectionName, &connectionProvider,
 		&connectionAccessToken, &connectionRefreshToken, &connectionExpiresAt,
 		&connectionAccountID, &connectionNeedsReauth, &connectionRevision); err != nil {
@@ -936,15 +936,15 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 		legacyExpiresAt, legacyAccountID = 0, ""
 	}
 	err = tx.QueryRowContext(ctx,
-		`INSERT INTO agent_configs (id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, context_window, compaction_threshold, token_exchange_format, token_refresh_format, custom_auth_config_json, custom_auth_state_json, mixture_config_json, auto_start_tasks, oauth_connection_id)
-			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO agent_configs (id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, context_window, compaction_threshold, provider_context_window, provider_max_output_tokens, token_exchange_format, token_refresh_format, custom_auth_config_json, custom_auth_state_json, mixture_config_json, auto_start_tasks, oauth_connection_id)
+			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 RETURNING id, created_at, updated_at`,
 		a.Name, a.Provider, a.Model, a.ReasoningEffort, a.APIKey, a.MaxTokens, a.Temperature, a.IsDefault,
 		a.AuthMethod, legacyAccessToken, legacyRefreshToken, legacyExpiresAt, legacyAccountID, a.MaxWorkers, a.WorkerTimeout,
 		a.OAuthClientID, a.OAuthClientSecret, a.OAuthAuthorizeURL, a.OAuthTokenURL, a.OAuthScopes,
 		a.OllamaBaseURL, a.BaseURL, a.Transport, a.PresetSlug, a.ModelsURL,
 		a.AuthHeaderName, a.AuthHeaderValuePrefix, a.ExtraHeadersJSON, a.ExtraBodyJSON,
-		a.DefaultMaxTokens, a.ContextWindow, a.CompactionThreshold, a.TokenExchangeFormat, a.TokenRefreshFormat, a.CustomAuthConfigJSON, a.CustomAuthStateJSON, a.MixtureConfigJSON, a.AutoStartTasks, nullStringArg(a.OAuthConnectionID)).
+		a.DefaultMaxTokens, a.ContextWindow, a.CompactionThreshold, a.ProviderContextWindow, a.ProviderMaxOutputTokens, a.TokenExchangeFormat, a.TokenRefreshFormat, a.CustomAuthConfigJSON, a.CustomAuthStateJSON, a.MixtureConfigJSON, a.AutoStartTasks, nullStringArg(a.OAuthConnectionID)).
 		Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating model config: %w", err)
@@ -1018,7 +1018,7 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		 oauth_client_id = ?, oauth_client_secret = ?, oauth_authorize_url = ?, oauth_token_url = ?, oauth_scopes = ?,
 		 ollama_base_url = ?, base_url = ?, transport = ?, preset_slug = ?, models_url = ?,
 		 auth_header_name = ?, auth_header_value_prefix = ?, extra_headers_json = ?, extra_body_json = ?,
-		 default_max_tokens = ?, context_window = ?, compaction_threshold = ?, token_exchange_format = ?, token_refresh_format = ?, custom_auth_config_json = ?, custom_auth_state_json = ?, mixture_config_json = ?, auto_start_tasks = ?,
+		 default_max_tokens = ?, context_window = ?, compaction_threshold = ?, provider_context_window = ?, provider_max_output_tokens = ?, token_exchange_format = ?, token_refresh_format = ?, custom_auth_config_json = ?, custom_auth_state_json = ?, mixture_config_json = ?, auto_start_tasks = ?,
 		 oauth_connection_id = ?,
 		 oauth_config_revision = oauth_config_revision + 1,
 		 updated_at = datetime('now')
@@ -1029,7 +1029,7 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		a.OAuthClientID, a.OAuthClientSecret, a.OAuthAuthorizeURL, a.OAuthTokenURL, a.OAuthScopes,
 		a.OllamaBaseURL, a.BaseURL, a.Transport, a.PresetSlug, a.ModelsURL,
 		a.AuthHeaderName, a.AuthHeaderValuePrefix, a.ExtraHeadersJSON, a.ExtraBodyJSON,
-		a.DefaultMaxTokens, a.ContextWindow, a.CompactionThreshold, a.TokenExchangeFormat, a.TokenRefreshFormat, a.CustomAuthConfigJSON, a.CustomAuthStateJSON, a.MixtureConfigJSON, a.AutoStartTasks,
+		a.DefaultMaxTokens, a.ContextWindow, a.CompactionThreshold, a.ProviderContextWindow, a.ProviderMaxOutputTokens, a.TokenExchangeFormat, a.TokenRefreshFormat, a.CustomAuthConfigJSON, a.CustomAuthStateJSON, a.MixtureConfigJSON, a.AutoStartTasks,
 		nullStringArg(a.OAuthConnectionID), a.ID)
 	if err != nil {
 		return fmt.Errorf("updating model config: %w", err)
