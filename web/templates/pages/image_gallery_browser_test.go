@@ -141,7 +141,8 @@ func TestBrowserFunctional_SharedImageGallery(t *testing.T) {
 		b.waitFor("saved image preview after send", `document.querySelector('[data-gallery-name]').textContent`, "draft.svg")
 		b.click("[data-gallery-close]")
 		b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": 390, "height": 700, "deviceScaleFactor": 1, "mobile": true}, nil)
-		b.waitFor("saved page settled before mobile preview", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request'))`, "true")
+		// The workspace ResizeObserver re-lays out the details panel as an overlay after the viewport change.
+		b.waitFor("saved page settled into mobile overlay before preview", `String(!document.querySelector('.htmx-settling, .htmx-swapping, .htmx-request') && document.getElementById('task-details-panel').dataset.overlay==='true')`, "true")
 		b.click(`#attachment-list [data-image-gallery-item]`)
 		b.waitFor("mobile gallery open", `String(document.getElementById('image-gallery').open)`, "true")
 		b.waitFor("mobile fits viewport", `String(document.getElementById('image-gallery').getBoundingClientRect().right<=innerWidth && document.getElementById('image-gallery').getBoundingClientRect().bottom<=innerHeight)`, "true")
