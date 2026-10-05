@@ -141,6 +141,19 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 					b.waitFor("selection saved", `document.querySelector('[data-draft-property="priority"]').value`, "4")
 					b.waitFor("picker closes after selection", `String(document.getElementById('task-property-picker').getClientRects().length === 0)`, "true")
 					b.click(`[data-detail-property="agent_id"]`)
+					for _, state := range []string{"isComposing", "keyCode229", "defaultPrevented"} {
+						result := b.evaluate(fmt.Sprintf(`(function(){
+							var state=%q, picker=document.getElementById('task-property-picker'), input=picker.querySelector('input');
+							input.value='agent search';
+							var event=new KeyboardEvent('keydown', {key:'Escape', bubbles:true, cancelable:true, isComposing:state==='isComposing', keyCode:state==='keyCode229'?229:27});
+							if(state==='defaultPrevented')event.preventDefault();
+							input.dispatchEvent(event);
+							return String(picker.getClientRects().length>0 && document.activeElement===input && input.value==='agent search' && event.defaultPrevented===(state==='defaultPrevented'));
+						})()`, state))
+						if result != "true" {
+							t.Fatalf("Escape must preserve picker and search focus for %s: got %s", state, result)
+						}
+					}
 					b.evaluate(`document.querySelector('#task-property-picker input').dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true})); 'ok'`)
 					b.waitFor("Escape restores focus", `String(document.activeElement === document.querySelector('[data-detail-property="agent_id"]') && !document.getElementById('task-property-picker').getClientRects().length)`, "true")
 					b.click(`[data-detail-property="priority"]`)
