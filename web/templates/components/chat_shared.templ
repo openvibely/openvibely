@@ -1834,13 +1834,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 		// Guard ensures this runs only once even when multiple ChatInputForms exist.
 		if (!window._chatCustomSelectPanelReady) {
 			window._chatCustomSelectPanelReady = true;
+			var _csModernColors = window.CSS && CSS.supports('color', 'oklch(0 0 0)');
+			var _csSelectedBackground = _csModernColors ? 'oklch(var(--p)/0.12)' : 'rgba(116,128,255,0.12)';
+			var _csHoverBackground = _csModernColors ? 'oklch(var(--b3)/1)' : 'var(--ov-menu-hover)';
 
 			var _cspanel = document.createElement('ul');
 			_cspanel.id = 'chat-custom-select-panel';
 			_cspanel.setAttribute('role', 'listbox');
 			_cspanel.style.cssText = 'position:fixed;z-index:9999;display:none;list-style:none;margin:0;padding:4px 0;' +
 				'min-width:160px;max-height:280px;overflow-y:auto;border-radius:8px;' +
-				'border:1px solid oklch(var(--bc)/0.15);background:oklch(var(--b1));' +
+				(_csModernColors ? 'border:1px solid oklch(var(--bc)/0.15);background:oklch(var(--b1));' : 'border:1px solid var(--ov-border-subtle);background:var(--ov-menu-surface);') +
 				'box-shadow:0 4px 20px rgba(0,0,0,0.18);';
 			document.body.appendChild(_cspanel);
 
@@ -1871,7 +1874,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					item.dataset.value = val;
 					item.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 12px;cursor:pointer;' +
 						'font-size:0.75rem;line-height:1.4;white-space:nowrap;' +
-						(val === currentValue ? 'background:oklch(var(--p)/0.12);font-weight:600;' : '');
+						(val === currentValue ? 'background:' + _csSelectedBackground + ';font-weight:600;' : '');
 					var textSpan = document.createElement('span');
 					textSpan.style.cssText = 'flex:1;min-width:0;';
 					textSpan.textContent = label;
@@ -1890,9 +1893,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						checkSvg.appendChild(checkPath);
 						item.appendChild(checkSvg);
 					}
-					item.addEventListener('mouseenter', function() { this.style.background = 'oklch(var(--b3)/1)'; });
+					item.addEventListener('mouseenter', function() { this.style.background = _csHoverBackground; });
 					item.addEventListener('mouseleave', function() {
-						this.style.background = this.dataset.value === currentValue ? 'oklch(var(--p)/0.12)' : '';
+						this.style.background = this.dataset.value === currentValue ? _csSelectedBackground : '';
 					});
 					item.addEventListener('click', function(e) {
 						e.preventDefault();
