@@ -863,7 +863,8 @@ templ analyticsContent(currentProject *models.Project) {
 									helpRoot.addEventListener('focusout',function(e){if(active===e.target)close();},{signal:eventSignal});
 									helpRoot.addEventListener('click',function(e){const b=e.target.closest('[data-model-help]');if(!b)return;if(active===b&&pinned)close();else show(b,true);},{signal:eventSignal});
 								}
-								preview.addEventListener('close',close,{signal:eventSignal});
+								// A queued close event may arrive after reopening or after help opens on the restored card.
+								preview.addEventListener('close',function(){if(!preview.open&&tip.parentElement===preview)close();},{signal:eventSignal});
 								document.addEventListener('keydown',function(e){if(e.key==='Escape')close();},{signal:eventSignal});
 								document.addEventListener('click',function(e){if(active&&!active.contains(e.target)&&!tip.contains(e.target))close();},{signal:eventSignal});
 								tip.addEventListener('toggle',function(){if(!tip.matches(':popover-open'))close();},{signal:eventSignal});
