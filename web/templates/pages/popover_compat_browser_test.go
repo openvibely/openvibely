@@ -18,12 +18,16 @@ import (
 func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	legacyCSS := strings.NewReplacer(":popover-open", ":unsupported-popover-open", ":has(", ":unsupported-has(", "oklch(", "unsupported-oklch(", "color-mix(", "unsupported-color-mix(", ":focus-visible", ":unsupported-focus-visible")
+	// Linux headless Chrome can report no hover-capable primary input even
+	// when CDP dispatches mouse events. Keep this coverage independent of the
+	// host's media query result by disabling the library's hover media rules.
+	noHoverCSS := strings.NewReplacer("(hover:hover)", "(hover:unsupported-hover)", "(hover: hover)", "(hover: unsupported-hover)")
 	for _, legacy := range []bool{false, true} {
 		t.Run(fmt.Sprint("legacy=", legacy), func(t *testing.T) {
 			project := models.Project{ID: "compat-project", Name: "Compatibility"}
 			other := models.Project{ID: "other-project", Name: "Other project"}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if legacy && strings.HasSuffix(r.URL.Path, ".css") {
+				if strings.HasSuffix(r.URL.Path, ".css") {
 					recorder := httptest.NewRecorder()
 					if static.ServeAsset(recorder, r) {
 						for key, values := range recorder.Header() {
@@ -32,7 +36,11 @@ func TestBrowserFunctional_PopoverCompatibility(t *testing.T) {
 							}
 						}
 						w.WriteHeader(recorder.Code)
-						fmt.Fprint(w, legacyCSS.Replace(recorder.Body.String()))
+						css := noHoverCSS.Replace(recorder.Body.String())
+						if legacy {
+							css = legacyCSS.Replace(css)
+						}
+						fmt.Fprint(w, css)
 						return
 					}
 				}
