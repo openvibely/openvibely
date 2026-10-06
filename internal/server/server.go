@@ -1232,6 +1232,19 @@ func Start(ctx context.Context, cfg *config.Config, options ...Options) (*Instan
 			}
 		}
 	}()
+	h.RecoverExpiredInputEdits(srvCtx)
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-srvCtx.Done():
+				return
+			case <-ticker.C:
+				h.RecoverExpiredInputEdits(srvCtx)
+			}
+		}
+	}()
 	h.RecoverQueuedInputs(context.Background())
 	// Start scheduler scans only after durable queued Chat and task-thread inputs
 	// have been offered for promotion. Repository admission guards remain authoritative

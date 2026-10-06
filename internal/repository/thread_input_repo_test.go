@@ -2035,3 +2035,35 @@ func TestThreadInputEditHoldGuardsAtomicClaims(t *testing.T) {
 		})
 	}
 }
+
+func TestEditHoldRenewalAndExpiry(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, Content: "saved"}
+	require.NoError(t, repo.CreateQueued(ctx, input))
+	_, err := repo.SetEditHold(ctx, input.ID, true)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '+5 seconds') WHERE id = ?`, input.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.RenewEditHold(ctx, input.ID))
+	var renewed bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT edit_hold_until > datetime('now', '+100 seconds') FROM thread_inputs WHERE id = ?`, input.ID).Scan(&renewed))
+	require.True(t, renewed)
+	released, err := repo.ReleaseExpiredEditHolds(ctx)
+	require.NoError(t, err)
+	require.Empty(t, released)
+	_, err = db.ExecContext(ctx, `UPDATE thread_inputs SET edit_hold_until = datetime('now', '-1 second') WHERE id = ?`, input.ID)
+	require.NoError(t, err)
+	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID), ErrInputNotPending)
+	released, err = repo.ReleaseExpiredEditHolds(ctx)
+	require.NoError(t, err)
+	require.Len(t, released, 1)
+	next, err := repo.FindOldestQueuedForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, input.ID, next.ID)
+	require.Equal(t, "saved", next.Content)
+	require.ErrorIs(t, repo.RenewEditHold(ctx, input.ID), ErrInputNotPending)
+}
