@@ -36,9 +36,27 @@ func TestBrowserFunctional_DesktopSidebarAtNarrowWidths(t *testing.T) {
 			defer server.Close()
 			runComposerFocusCDP(t, chrome, server.URL, "narrow-sidebar", func(b *composerFocusCDP) {
 				b.waitFor("sidebar rendered", `String(!!document.getElementById("sidebar"))`, "true")
+				b.evaluate(`showToast('Title bar overlap regression', 'completed', '', {sticky:true}); 'ok'`)
 				for _, width := range []int{800, 500, 1200} {
 					b.call("Emulation.setDeviceMetricsOverride", map[string]any{"width": width, "height": 800, "deviceScaleFactor": 1, "mobile": false}, nil)
 					wantMobile := !desktop && width < 1024
+					gap := 16
+					if width <= 640 {
+						gap = 8
+					}
+					toastTop := gap
+					if !wantMobile {
+						toastTop += 46
+					}
+					for _, modal := range []bool{false, true} {
+						if modal {
+							b.evaluate(`var toastDialog=document.createElement('dialog'); toastDialog.className='modal'; document.body.appendChild(toastDialog); toastDialog.showModal(); syncToastContainerHost(); 'ok'`)
+						}
+						b.waitFor("toast below visible title bar", `String(Math.round(document.querySelector('.toast-notification').getBoundingClientRect().top))`, fmt.Sprint(toastTop))
+						if modal {
+							b.evaluate(`toastDialog.close(); syncToastContainerHost(); toastDialog.remove(); 'ok'`)
+						}
+					}
 					b.waitFor("mobile navbar visibility", `String(getComputedStyle(document.querySelector('.drawer-content > .navbar')).display !== 'none')`, fmt.Sprint(wantMobile))
 					b.waitFor("sidebar visibility", `String(document.getElementById('sidebar').getBoundingClientRect().right > 0)`, fmt.Sprint(!wantMobile))
 					if desktop {
