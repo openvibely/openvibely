@@ -1827,7 +1827,7 @@ const controls = {textarea: {focus(){}}, '[data-cancel]': {}, form: {}, '[role="
 let closed = 0;
 let shown = 0;
 const dialogEvents = {};
-const dialog = {setAttribute(){}, querySelector: s => controls[s], addEventListener: (n,f) => dialogEvents[n]=f, showModal(){shown++}, close(){closed++; if(dialogEvents.close) dialogEvents.close()}, remove(){}};
+const dialog = {querySelectorAll(){return Object.values(controls)}, setAttribute(){}, querySelector: s => controls[s], addEventListener: (n,f) => dialogEvents[n]=f, showModal(){shown++}, close(){closed++; if(dialogEvents.close) dialogEvents.close()}, remove(){}};
 global.document = {getElementById: () => null, createElement: () => dialog, body: {appendChild(){}, addEventListener: (n,f) => listeners[n]=f, removeEventListener: n => delete listeners[n]}};
 const row = {querySelector: () => ({}), getAttribute: () => 'input-1'};
 const button = {closest: () => row};
@@ -1844,9 +1844,13 @@ global.fetch = (url, options) => {
  completeHold(); await opening;
  assert.equal(shown, 1);
  controls.textarea.value = 'draft';
- listeners['htmx:beforeSwap']({detail:{target:{id:'pending-thread-inputs', contains:()=>true}}});
+ listeners['htmx:afterSwap']({detail:{target:{id:'pending-thread-inputs', contains:()=>true}}});
  assert.equal(closed, 0);
  assert.equal(controls.textarea.value, 'draft');
+ // A rejected navigation never swaps and must not cancel the editor.
+ if (listeners['htmx:beforeSwap']) listeners['htmx:beforeSwap']({detail:{target:{id:'main-content'}, shouldSwap:false}});
+ assert.equal(closed, 0);
+ assert.equal(requests.length, 1);
  assert.ok(requests[0].options.body.get('edit_token'));
  await renewal();
  assert.equal(requests.pop().options.body.get('renew'), 'true');
@@ -1882,6 +1886,35 @@ global.fetch = (url, options) => {
  assert.equal(controls['[type="submit"]'].disabled, true);
  assert.ok(controls['[role="alert"]'].textContent);
  assert.equal(renewal, null);
+ global.fetch = workingFetch;
+ listeners.popstate();
+ assert.equal(listeners.popstate, undefined);
+ assert.equal(requests.at(-1).options.body.get('hold'), 'false');
+ // Actual navigation swaps close the editor too.
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ listeners['htmx:afterSwap']({detail:{target:{id:'main-content'}}});
+ assert.equal(listeners.pagehide, undefined);
+ // Headers arrive, but the body never does: acquisition must time out.
+ window.alert = () => {};
+ global.fetch = async () => ({ok:true, json:()=>new Promise(()=>{})});
+ opening = window.editPendingThreadInput(button);
+ await Promise.resolve(); await Promise.resolve();
+ timeout(); await opening;
+ assert.equal(window._pendingInputEditorOpening, false);
+ assert.equal(button.disabled, false);
+ // Saving also times out while reading the body and preserves the draft.
+ global.fetch = workingFetch;
+ opening = window.editPendingThreadInput(button);
+ completeHold(); await opening;
+ controls.textarea.value = 'saved draft';
+ global.fetch = async () => ({ok:true, json:()=>new Promise(()=>{})});
+ const save = controls.form.onsubmit({preventDefault(){}});
+ await Promise.resolve(); await Promise.resolve();
+ timeout(); await save;
+ assert.equal(controls.textarea.value, 'saved draft');
+ assert.equal(controls.textarea.disabled, false);
+ assert.match(controls['[role="alert"]'].textContent, /timed out/);
  global.fetch = workingFetch;
  listeners.pagehide();
 })().catch(error => {console.error(error); process.exit(1)});

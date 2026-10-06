@@ -196,12 +196,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                         dialog.querySelector('[role="alert"]').textContent = 'Editing paused—the message may have been sent. Copy your draft and reopen the editor.';
                     }
                 }
-                async function timedFetch(url, options) {
+                async function timedFetch(url, options, readJSON) {
                     var controller = new AbortController();
                     var timer;
                     try {
                         return await Promise.race([
-                            fetch(url, Object.assign({}, options, {signal: controller.signal})),
+                            fetch(url, Object.assign({}, options, {signal: controller.signal})).then(async function(response) {
+                                if (readJSON) response.editorBody = await response.json();
+                                return response;
+                            }),
                             new Promise(function(resolve, reject) {
                                 timer = setTimeout(function() { controller.abort(); reject(new Error('Request timed out')); }, 10000);
                             })
@@ -220,7 +223,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     clearInterval(expiryTimer);
                     window.removeEventListener('focus', checkExpiry);
                     window.removeEventListener('pagehide', leaveEditor);
-                    document.body.removeEventListener('htmx:beforeSwap', beforeNavigation);
+                    window.removeEventListener('popstate', leaveEditor);
+                    document.body.removeEventListener('htmx:afterSwap', beforeNavigation);
                 }
                 function leaveEditor() {
                     leaving = true;
@@ -236,14 +240,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
                     if (target && target.id === 'main-content') leaveEditor();
                 }
                 window.addEventListener('pagehide', leaveEditor);
-                document.body.addEventListener('htmx:beforeSwap', beforeNavigation);
+                window.addEventListener('popstate', leaveEditor);
+                document.body.addEventListener('htmx:afterSwap', beforeNavigation);
 				button.disabled = true;
                 window._pendingInputEditorOpening = true;
                 var held;
                 try {
                     var started = Date.now();
-                    var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({edit_token: editToken})});
-                    held = await response.json();
+                    var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit-hold', {method: 'POST', body: new URLSearchParams({edit_token: editToken})}, true);
+                    held = response.editorBody;
                     if (!response.ok) throw new Error(held.message || 'Failed to hold message');
                     holdAcquired = true;
                     deadline = started + 119000;
@@ -306,8 +311,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					try {
 						var response = await timedFetch('/thread-inputs/' + encodeURIComponent(inputID) + '/edit', {
 							method: 'POST', body: new URLSearchParams({content: textarea.value, resume: "true", edit_token: editToken})
-						});
-						var result = await response.json();
+						}, true);
+						var result = response.editorBody;
 						if (!response.ok) throw new Error(result.message || 'Failed to edit message');
 						var currentRow = document.getElementById('thread-input-' + inputID);
 						var currentPreview = currentRow && currentRow.querySelector('[data-pending-input-content]');
