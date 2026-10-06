@@ -1988,91 +1988,78 @@ func TestBaseReloadsAfterSuccessfulSystemUpdate(t *testing.T) {
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const controller = ` + string(controller) + `;
-function page(runtime = 'web', native = false) {
-  let reloads = 0;
-  const storage = new Map();
+function page(version = '1', native = false, runtime = 'web') {
+  let reloads = 0, healthChecks = 0;
+  let health = {ready: true, version: '1'}, ok = true, offline = false;
+  let update = null;
   const context = vm.createContext({
     window: {location: {reload() { reloads++; }}},
-    document: {documentElement: {getAttribute(name) { return name === 'data-openvibely-native-window' ? String(native) : name === 'data-openvibely-runtime' ? runtime : null; }}, getElementById() { return null; }, querySelector() { return null; }},
-    localStorage: {getItem(k) { return storage.get(k); }, setItem(k,v) { storage.set(k,v); }, removeItem(k) { storage.delete(k); }},
-    getToastContainer() { return null; }
+    document: {documentElement: {getAttribute(name) { return ({'data-build-version': version, 'data-openvibely-native-window': String(native), 'data-openvibely-runtime': runtime})[name]; }}, getElementById() { return null; }, querySelector() { return null; }},
+    localStorage: {getItem() { return null; }, setItem() {}, removeItem() {}},
+    getToastContainer() { return null; },
+    fetch: async (url, options) => {
+      assert.equal(options.cache, 'no-store');
+      if (url === '/api/system/update') return {ok: true, status: update ? 200 : 204, json: async () => update};
+      assert.equal(url, '/api/system/health');
+      healthChecks++;
+      if (offline) throw new Error('offline');
+      return {ok, json: async () => health};
+    }
   });
   vm.runInContext(controller, context);
-  return {context, count: () => reloads, send(data) { context.handleGlobalSystemUpdateSnapshot(data); }};
+  return {
+    context, count: () => reloads, checks: () => healthChecks,
+    async poll(nextHealth, options = {}) {
+      health = nextHealth; ok = options.ok !== false; offline = !!options.offline;
+      update = options.update || null;
+      await context.refreshGlobalSystemUpdateIndicators();
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  };
 }
-function snapshot(state, current = '1', release = '2') {
-  return {state, current_version: current, distribution: 'binary', staged: true,
-    release: release ? {metadata: {version: release}} : null};
-}
-for (const finalState of ['succeeded', 'idle']) {
-  const p = page();
-  for (const state of ['available','waiting_for_idle','ready','applying','restarting','validating']) {
-    p.send(snapshot(state));
-    assert.equal(p.count(), 0, state);
-  }
-  p.send(snapshot(finalState, '2', null));
-  assert.equal(p.count(), 1, finalState + ' after restart without release metadata');
-  p.send(snapshot(finalState, '2', null));
-  assert.equal(p.count(), 1, 'only one reload');
-  const fresh = page();
-  fresh.send(snapshot(finalState, '2', null));
-  assert.equal(fresh.count(), 0, 'no reload loop on fresh page');
-}
-for (const state of ['failed','rolled_back','idle']) {
-  const p = page();
-  p.send(snapshot('restarting'));
-  p.send(snapshot(state));
-  p.send(null);
-  assert.equal(p.count(), 0, state + ' must cancel reload');
-}
-
-for (const finalState of ['succeeded', 'idle', null]) {
-  const desktop = page('desktop', true);
-  let healthChecks = 0;
-  desktop.context.fetch = async () => { healthChecks++; return {ok: true, json: async () => ({ready: true, version: '2'})}; };
-  desktop.send(snapshot('restarting'));
-  desktop.send(snapshot('validating', '2'));
-  desktop.send(finalState ? snapshot(finalState, '2', null) : null);
-  assert.equal(desktop.count(), 0, 'desktop relaunch already refreshed the UI');
-  assert.equal(healthChecks, 0, 'desktop must not start a health-check reload');
-}
-
-const browserOnDesktop = page('desktop');
-browserOnDesktop.send(snapshot('restarting'));
-browserOnDesktop.send(snapshot('succeeded', '2', null));
-assert.equal(browserOnDesktop.count(), 1, 'browser on desktop server must reload');
-
-const initial = page();
-initial.send(null);
-assert.equal(initial.count(), 0, 'no update in progress');
-const missed = page();
-missed.send(snapshot('available'));
-missed.send(snapshot('succeeded', '2', null));
-assert.equal(missed.count(), 1, 'poll missed intermediate update states');
-const cancelled = page();
-cancelled.send(snapshot('waiting_for_idle'));
-cancelled.context.clearSystemUpdatePendingSuccess();
-cancelled.send(null);
-assert.equal(cancelled.count(), 0, 'explicit cancellation');
 (async () => {
-  const hidden = page();
-  hidden.send(snapshot('restarting'));
-  for (const health of [{ready: true, version: '1'}, {ready: false, version: '2'}, {ready: true, version: '2'}]) {
-    hidden.context.fetch = async () => ({ok: true, json: async () => health});
-    hidden.send(null);
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(hidden.count(), health.ready && health.version === '2' ? 1 : 0, 'verify ready target version when status is hidden');
+  // Reload without ever seeing an update transition, including hidden status.
+  for (const state of [null, 'idle', 'succeeded']) {
+    const p = page();
+    await p.poll({ready: true, version: '2'}, {update: state && {state, current_version: '2'}});
+    assert.equal(p.count(), 1, 'changed build reloads regardless of update status');
+    await p.poll({ready: true, version: '2'});
+    assert.equal(p.count(), 1, 'only one reload');
+    assert.equal(p.checks(), 1, 'stop checks after reload');
   }
-  const offline = page();
-  offline.send(snapshot('restarting'));
-  offline.context.fetch = async () => { throw new Error('offline'); };
-  offline.send(null);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(offline.count(), 0, 'wait through connection errors');
-  offline.context.fetch = async () => ({ok: true, json: async () => ({ready: true, version: '2'})});
-  offline.send(null);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(offline.count(), 1, 'retry after server returns');
+  const p = page();
+  for (const health of [{ready: true, version: '1'}, {ready: false, version: '2'}, {ready: true}, {ready: true, version: ''}]) {
+    await p.poll(health);
+    assert.equal(p.count(), 0, 'require ready server with a different known version');
+  }
+  await p.poll({ready: true, version: '2'}, {offline: true});
+  await p.poll({ready: true, version: '2'}, {ok: false});
+  assert.equal(p.count(), 0, 'failed health requests must not reload');
+  await p.poll({ready: true, version: '2'});
+  assert.equal(p.count(), 1, 'retry after restart');
+  const fresh = page('2');
+  await fresh.poll({ready: true, version: '2'});
+  assert.equal(fresh.count(), 0, 'fresh page must not loop');
+  const native = page('1', true, 'desktop');
+  await native.poll({ready: true, version: '2'});
+  assert.equal(native.count(), 0);
+  assert.equal(native.checks(), 0, 'native window skips health polling');
+  const browser = page('1', false, 'desktop');
+  await browser.poll({ready: true, version: '2'});
+  assert.equal(browser.count(), 1, 'browser on desktop server reloads');
+  const unknown = page('');
+  await unknown.poll({ready: true, version: '2'});
+  assert.equal(unknown.count(), 0, 'missing page version must not cause a reload loop');
+  const concurrent = page();
+  let resolveHealth;
+  let requests = 0;
+  concurrent.context.fetch = () => { requests++; return new Promise(resolve => { resolveHealth = resolve; }); };
+  const first = concurrent.context.refreshPageBuildVersion();
+  await concurrent.context.refreshPageBuildVersion();
+  assert.equal(requests, 1, 'coalesce overlapping checks');
+  resolveHealth({ok: true, json: async () => ({ready: true, version: '2'})});
+  await first;
+  assert.equal(concurrent.count(), 1);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
