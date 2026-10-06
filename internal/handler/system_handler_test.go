@@ -92,7 +92,7 @@ func TestSystemHealthAcceptsValidSessions(t *testing.T) {
 
 func TestSystemHealthRejectsNonLoopbackAndAcceptsMatchingAgentToken(t *testing.T) {
 	e := echo.New()
-	h := &Handler{}
+	h := &Handler{authMode: auth.AuthModeHostedSSO}
 	h.SetSystemHealth(buildinfo.Build{Artifact: buildinfo.ArtifactContainer}, buildinfo.ModeHosted, buildinfo.DistributionHosted, "secret", "", 1, update.NewDrainManager(nil, nil, 0, time.Now))
 	for _, tc := range []struct {
 		auth string
@@ -108,5 +108,46 @@ func TestSystemHealthRejectsNonLoopbackAndAcceptsMatchingAgentToken(t *testing.T
 		if rec.Code != tc.want {
 			t.Fatalf("auth %q status=%d want=%d", tc.auth, rec.Code, tc.want)
 		}
+	}
+}
+
+func TestSystemHealthRemoteBrowserLoginPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mode   auth.AuthMode
+		cookie string
+		want   int
+	}{
+		{"login disabled", auth.AuthModeDisabled, "", http.StatusOK},
+		{"local login required", auth.AuthModeLocal, "", http.StatusUnauthorized},
+		{"hosted login required", auth.AuthModeHostedSSO, "", http.StatusUnauthorized},
+		{"invalid hosted session", auth.AuthModeHostedSSO, "invalid", http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{authMode: tc.mode}
+			h.SetSystemHealth(buildinfo.Build{Version: "0.8.0"}, "", "", "", "", 1, nil)
+			e := echo.New()
+			e.Use(h.AuthMiddleware())
+			e.GET("/api/system/health", h.SystemHealth)
+			req := httptest.NewRequest(http.MethodGet, "/api/system/health", nil)
+			req.RemoteAddr = "192.0.2.1:1234"
+			if tc.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: auth.DefaultCookieName, Value: tc.cookie})
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d want=%d body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+			if tc.want == http.StatusOK {
+				var body SystemHealthResponse
+				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				if !body.Ready || body.Version != "0.8.0" {
+					t.Fatalf("browser cannot detect ready build: %+v", body)
+				}
+			}
+		})
 	}
 }

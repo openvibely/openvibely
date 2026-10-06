@@ -72,6 +72,10 @@ func (h *Handler) SystemHealth(c echo.Context) error {
 }
 
 func (h *Handler) authorizeSystemHealth(c echo.Context) bool {
+	// Browser version checks follow the same login setting as the UI.
+	if !h.authEnabled() {
+		return true
+	}
 	host, _, err := net.SplitHostPort(c.Request().RemoteAddr)
 	if err != nil {
 		host = c.Request().RemoteAddr
