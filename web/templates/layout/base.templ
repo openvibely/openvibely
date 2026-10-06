@@ -4957,9 +4957,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					return { version: version, noticeKey: systemUpdateNoticeKey(data) };
 				}
 
+				var systemUpdatePageVersion = '';
+				var systemUpdateReloadPending = null;
+				var systemUpdateReloading = false;
+				var systemUpdateHealthChecking = false;
+
 				function rememberSystemUpdatePendingSuccess(data) {
 					var pending = systemUpdatePendingSuccessFromData(data);
 					if (!pending) return;
+					systemUpdateReloadPending = pending;
 					try {
 						localStorage.setItem('openvibely-system-update-pending-success', JSON.stringify(pending));
 					} catch (_) {}
@@ -4980,6 +4986,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function clearSystemUpdatePendingSuccess() {
+					systemUpdateReloadPending = null;
 					try { localStorage.removeItem('openvibely-system-update-pending-success'); } catch (_) {}
 				}
 
@@ -5079,9 +5086,52 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					container.appendChild(toast);
 				}
 
+				async function confirmHiddenSystemUpdate() {
+					if (systemUpdateHealthChecking) return;
+					systemUpdateHealthChecking = true;
+					var pending = systemUpdateReloadPending;
+					try {
+						var response = await fetch('/api/system/health', { cache: 'no-store', headers: { 'Accept': 'application/json' } });
+						if (!response.ok) return;
+						var health = await response.json();
+						if (pending && pending === systemUpdateReloadPending && health.ready && health.version === pending.version && !systemUpdateReloading) {
+							systemUpdateReloading = true;
+							window.location.reload();
+						}
+					} catch (_) {
+						// Poll again while the server is restarting.
+					} finally {
+						systemUpdateHealthChecking = false;
+					}
+				}
+
+				function reloadAfterSystemUpdate(data) {
+					if (systemUpdateReloading) return true;
+					if (!data && systemUpdateReloadPending) {
+						confirmHiddenSystemUpdate();
+						return true;
+					}
+					var state = data && data.state;
+					if (state === 'failed' || state === 'rolled_back' || (state === 'idle' && data.current_version !== (systemUpdateReloadPending && systemUpdateReloadPending.version))) {
+						clearSystemUpdatePendingSuccess();
+					}
+					var version = data && data.current_version;
+					var changed = !!(version && systemUpdatePageVersion && version !== systemUpdatePageVersion);
+					if (!systemUpdatePageVersion && version) systemUpdatePageVersion = version;
+					// A successful response after restart confirms the server is reachable.
+					// Keep this guard in memory so a freshly loaded page cannot reload again.
+					var succeeded = state === 'succeeded' || state === 'idle' && systemUpdateReloadPending && version === systemUpdateReloadPending.version;
+					if (succeeded && (systemUpdateReloadPending || changed)) {
+						systemUpdateReloading = true;
+						window.location.reload();
+						return true;
+					}
+					return false;
+				}
+
 				async function refreshGlobalSystemUpdateIndicators() {
 					try {
-						var response = await fetch('/api/system/update', { headers: { 'Accept': 'application/json' } });
+						var response = await fetch('/api/system/update', { cache: 'no-store', headers: { 'Accept': 'application/json' } });
 						if (response.status === 204) {
 							handleGlobalSystemUpdateSnapshot(null);
 							return;
@@ -5093,6 +5143,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function handleGlobalSystemUpdateSnapshot(data) {
+					if (reloadAfterSystemUpdate(data)) return;
 					var view = normalizeSystemUpdateSnapshot(data);
 					if (!data) {
 						setSystemUpdateIndicators(false);
