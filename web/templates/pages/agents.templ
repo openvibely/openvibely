@@ -1242,7 +1242,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			const safeName = String(name || '').trim();
 			if (!safeName) return;
 			if (hasActiveMarketplaceAction()) return;
-			if (!window.confirm('Remove marketplace "' + safeName + '"?')) return;
+			if (!await window.openVibelyConfirm('Remove marketplace "' + safeName + '"?')) return;
 			removingMarketplaceNames.add(safeName);
 			setMarketplaceActionStatus('Removing marketplace "' + safeName + '"...', 'info');
 			renderPluginMarketplaces();
@@ -1333,7 +1333,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			const id = String(pluginID || '').trim();
 			if (!id) return;
 			if (uninstallingPluginIDs.has(id) || installingPluginIDs.has(id) || pluginCatalogLoading || hasActivePluginMutation()) return;
-			if (!window.confirm('Uninstall plugin "' + id + '"? This removes local plugin files.')) return;
+			if (!await window.openVibelyConfirm('Uninstall plugin "' + id + '"? This removes local plugin files.')) return;
 			setPluginUninstallInProgress(id, true);
 			pendingUninstalledPluginIDs.add(id);
 			setMarketplaceActionStatus('Removing plugin "' + id + '"...', 'info');
@@ -1906,7 +1906,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					}
 
 					async function archiveAgentOwnedSkill(handle) {
-						if (!activeAgentID || !handle || !window.confirm('Archive skill "' + handle + '"?')) return;
+						if (!activeAgentID || !handle || !await window.openVibelyConfirm('Archive skill "' + handle + '"?')) return;
 						try {
 							const skill = (Array.isArray(agentOwnedSkillsState.routed_skills) ? agentOwnedSkillsState.routed_skills : []).find(item => item.handle === handle) || {};
 							const scopeParam = skill.scope ? ('?scope=' + encodeURIComponent(skill.scope)) : '';

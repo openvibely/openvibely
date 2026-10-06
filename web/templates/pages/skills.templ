@@ -632,12 +632,12 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 					});
 				}
 
-			function setSkillEnabled(button, enable) {
+			async function setSkillEnabled(button, enable) {
 				var handle = button.dataset.skillHandle || '';
 				var scope = button.dataset.skillScope || 'project';
 				if (!handle) return;
 				var action = enable ? 'Enable' : 'Disable';
-				if (!confirm(action + ' skill "' + handle + '"?')) return;
+				if (!await window.openVibelyConfirm(action + ' skill "' + handle + '"?')) return;
 				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery()), {
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},
@@ -654,12 +654,12 @@ templ skillsContent(skills []SkillCard, canManage bool, currentProjectID string,
 				});
 			}
 
-			function setSkillAlwaysUse(button, alwaysUse) {
+			async function setSkillAlwaysUse(button, alwaysUse) {
 				var handle = button.dataset.skillHandle || '';
 				var scope = button.dataset.skillScope || 'project';
 				if (!handle) return;
 				var action = alwaysUse ? 'Set always use for' : 'Remove always use from';
-				if (!confirm(action + ' skill "' + handle + '"?')) return;
+				if (!await window.openVibelyConfirm(action + ' skill "' + handle + '"?')) return;
 				fetch(skillsRefreshURL('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery()), {
 					method: 'POST',
 					headers: {'Content-Type': 'application/json', 'HX-Request': 'true'},

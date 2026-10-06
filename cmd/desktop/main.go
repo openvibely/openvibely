@@ -262,7 +262,6 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	// Keep the document and native runtime on Wails' origin. Application routes
 	// still use the shared backend; immediate flushing preserves SSE streaming.
 	proxy := desktopAssetProxy(backendURL)
-	installNativeConfirmationDialogs()
 	app := application.New(application.Options{
 		Assets:      application.AssetOptions{Handler: proxy},
 		Name:        "OpenVibely",

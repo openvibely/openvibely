@@ -40,6 +40,10 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 	}
 	baseHTML := base.String()
 	productionStyle := layoutStyleBlocks(t, baseHTML)
+	var confirmation bytes.Buffer
+	if err := layout.ConfirmationDialog().Render(context.Background(), &confirmation); err != nil {
+		t.Fatal(err)
+	}
 	navigationScript := extractNativeChatNavigation(t, baseHTML)
 
 	var chat bytes.Buffer
@@ -61,7 +65,7 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 				_, _ = w.Write(chat.Bytes())
 				return
 			}
-			_, _ = w.Write([]byte(nativeChatDocument(productionStyle, navigationScript, chat.String(), nativeChatRunner)))
+			_, _ = w.Write([]byte(nativeChatDocument(productionStyle, navigationScript, chat.String()+confirmation.String(), nativeChatRunner)))
 		case "/other":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write([]byte(`<div id="other-page"><span hidden data-openvibely-page-title="Other - OpenVibely"></span><h1>Other</h1></div>`))
@@ -133,8 +137,8 @@ func TestChatActionsInNativeWailsWebView(t *testing.T) {
 
 	stateMu.Lock()
 	defer stateMu.Unlock()
-	if historyRequests != 0 {
-		t.Fatalf("cancelled Chat clear action issued %d history request(s) in native WebKit", historyRequests)
+	if historyRequests != 1 {
+		t.Fatalf("expected one confirmed Chat clear request, got %d in native WebKit", historyRequests)
 	}
 }
 
@@ -329,19 +333,35 @@ window.addEventListener('DOMContentLoaded', function() {
       assertClosed('native Escape from trigger');
       if (document.activeElement !== trigger()) fail('native Escape from trigger did not retain focus on the trigger');
 
-      var confirmationMessage = '';
-      window.confirm = function(message) {
-        confirmationMessage = String(message);
-        return false;
-      };
+      window.confirm = function() { throw new Error('native confirm must not be called'); };
       mouseClick(trigger());
       await wait(40);
-      assertOpen('native confirmation setup');
       clearItem().click();
-      await wait(120);
-      if (confirmationMessage !== 'Clear all chat history? This cannot be undone.') fail('native clear action used unexpected confirmation text: ' + confirmationMessage);
+      var modal = document.getElementById('app_confirm_modal');
+      await waitFor(function() { return modal.open; }, 'app confirmation');
+      if (document.getElementById('app_confirm_message').textContent !== 'Clear all chat history? This cannot be undone.') fail('wrong confirmation message');
+      modal.querySelector('[autofocus]').click();
+      await wait(100);
       var historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });
-      if (historyCount !== '0') fail('native cancelled clear action issued ' + historyCount + ' history request(s)');
+      if (historyCount !== '0') fail('cancelled clear action issued a request');
+      clearItem().click();
+      await waitFor(function() { return modal.open; }, 'second app confirmation');
+      modal.querySelector('[data-confirm-accept]').click();
+      modal.querySelector('[data-confirm-accept]').click();
+      await wait(150);
+      historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });
+      if (historyCount !== '1') fail('confirmed clear action must issue exactly one request: ' + historyCount);
+      for (var dismissal of ['escape', 'close', 'backdrop']) {
+        clearItem().click();
+        await waitFor(function() { return modal.open; }, 'reopened confirmation');
+        if (dismissal === 'escape') key(modal, 'Escape');
+        else if (dismissal === 'close') modal.querySelector('.ov-modal-close').click();
+        else modal.querySelector('.modal-backdrop button').click();
+        await wait(60);
+        if (modal.open) fail('confirmation remained open after ' + dismissal);
+      }
+      historyCount = await fetch('/chat-history-count').then(function(response) { return response.text(); });
+      if (historyCount !== '1') fail('dismissal reused an earlier confirmation');
       document.body.dispatchEvent(new Event('pointerdown', {bubbles: true}));
       await wait(40);
       assertClosed('native outside close after cancelled confirmation');

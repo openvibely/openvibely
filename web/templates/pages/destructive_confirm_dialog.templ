@@ -1,25 +1,11 @@
 package pages
 
+import "github.com/openvibely/openvibely/web/templates/layout"
+
 templ DestructiveConfirmDialog(dialogID string, closeLabel string, title string, promptPrefix string, itemNameID string, itemName string, promptSuffix string, cancelHandler templ.ComponentScript, confirmHandler templ.ComponentScript) {
-	<dialog id={ dialogID } class="modal" data-destructive-confirm-dialog aria-labelledby={ dialogID + "_title" } aria-describedby={ dialogID + "_description" }>
-		<div class="modal-box">
-			@ModalCloseButton(dialogID, closeLabel)
-			<h3 id={ dialogID + "_title" } class="font-bold text-lg text-error pr-10">{ title }</h3>
-			if itemNameID != "" {
-				<p id={ dialogID + "_description" } class="py-4">{ promptPrefix }<strong id={ itemNameID }></strong>{ promptSuffix }</p>
-			} else {
-				<p id={ dialogID + "_description" } class="py-4">{ promptPrefix }<strong>{ itemName }</strong>{ promptSuffix }</p>
-			}
-			<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">
-				{ children... }
-			</div>
-			<div class="modal-action">
-				<button type="button" class="btn" autofocus onclick={ cancelHandler }>Cancel</button>
-				<button type="button" class="btn btn-error" onclick={ confirmHandler }>Delete Permanently</button>
-			</div>
-		</div>
-		<form method="dialog" class="modal-backdrop"><button>close</button></form>
-	</dialog>
+	@layout.ConfirmationFrame(dialogID, closeLabel, title, promptPrefix, itemNameID, itemName, promptSuffix, "Delete Permanently", true, cancelHandler, confirmHandler) {
+        { children... }
+    }
 	<script>
 		if (!window.openDestructiveConfirmDialog) {
 			window.openDestructiveConfirmDialog = function(dialogID, nameID, displayName) {

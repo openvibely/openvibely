@@ -1,0 +1,44 @@
+package layout
+
+// ConfirmationFrame is shared by named delete dialogs and general confirmations.
+templ ConfirmationFrame(dialogID string, closeLabel string, title string, promptPrefix string, itemNameID string, itemName string, promptSuffix string, confirmLabel string, destructive bool, cancelHandler templ.ComponentScript, confirmHandler templ.ComponentScript) {
+	<dialog id={ dialogID } class="modal" data-destructive-confirm-dialog?={ destructive } aria-labelledby={ dialogID + "_title" } aria-describedby={ dialogID + "_description" }>
+		<div class="modal-box">
+			<button
+				type="button"
+				class="btn btn-circle btn-ghost btn-xs ov-modal-close"
+				onclick={ templ.ComponentScript{Call: dialogID + ".close()"} }
+				aria-label={ closeLabel }
+				title={ closeLabel }
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+				</svg>
+			</button>
+			<h3 id={ dialogID + "_title" } class={ "font-bold text-lg pr-10", templ.KV("text-error", destructive) }>{ title }</h3>
+			if itemNameID != "" {
+				<p id={ dialogID + "_description" } class="py-4">
+					{ promptPrefix }
+					if destructive {
+						<strong id={ itemNameID }></strong>
+					} else {
+						<span id={ itemNameID }></span>
+					}
+					{ promptSuffix }
+				</p>
+			} else {
+				<p id={ dialogID + "_description" } class="py-4">{ promptPrefix }<strong>{ itemName }</strong>{ promptSuffix }</p>
+			}
+			if destructive {
+				<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">
+					{ children... }
+				</div>
+			}
+			<div class="modal-action">
+				<button type="button" class="btn" autofocus onclick={ cancelHandler }>Cancel</button>
+				<button type="button" class={ "btn", templ.KV("btn-error", destructive), templ.KV("btn-primary", !destructive) } data-confirm-accept onclick={ confirmHandler }>{ confirmLabel }</button>
+			</div>
+		</div>
+		<form method="dialog" class="modal-backdrop"><button>close</button></form>
+	</dialog>
+}
