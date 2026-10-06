@@ -39,6 +39,17 @@ func repositoryWriterLock(key string) *sync.Mutex {
 	return value.(*sync.Mutex)
 }
 
+// Worktree lifecycle locks exclude readers only during creation/removal, not
+// during repository writers that may wait for remote or model responses.
+// Writers acquire the repository mutation lock before this lock; readers must
+// never acquire the repository mutation lock while holding a lifecycle lock.
+var worktreeLifecycleLocks sync.Map // canonical Git common directory -> *sync.RWMutex
+
+func worktreeLifecycleLock(repoDir string) *sync.RWMutex {
+	value, _ := worktreeLifecycleLocks.LoadOrStore(canonicalRepositoryMutationKey(repoDir), &sync.RWMutex{})
+	return value.(*sync.RWMutex)
+}
+
 // WithRepositoryMutation serializes every repository-scoped Git writer using
 // the same canonical common-directory identity as merge/rebase recovery leases.
 func WithRepositoryMutation(repoDir string, mutate func() error) error {
@@ -207,6 +218,9 @@ func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task,
 }
 
 func (ws *WorktreeService) setupWorktreeUnlocked(ctx context.Context, task *models.Task, repoDir string, continueFromCurrentTarget bool) (worktreePath string, branchName string, err error) {
+	lock := worktreeLifecycleLock(repoDir)
+	lock.Lock()
+	defer lock.Unlock()
 	if repoDir == "" || !IsGitRepo(repoDir) {
 		return "", "", fmt.Errorf("not a git repository: %s", repoDir)
 	}
@@ -2283,6 +2297,9 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 }
 
 func (ws *WorktreeService) cleanupWorktreeUnlocked(ctx context.Context, task *models.Task, repoDir string, deleteBranch bool) error {
+	lock := worktreeLifecycleLock(repoDir)
+	lock.Lock()
+	defer lock.Unlock()
 	if task.WorktreePath == "" {
 		return nil
 	}
@@ -2378,16 +2395,9 @@ func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) str
 // files without rendering the same tracked path once for the committed branch
 // state and again for the uncommitted follow-up state.
 func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string) string {
-	lock := repositoryWriterLock(canonicalRepositoryMutationKey(repoDir))
-	lock.Lock()
-	defer lock.Unlock()
-	return getWorktreeDiffWithUncommittedUnlocked(repoDir, branchName, targetBranch, worktreePath)
-}
-
-// The caller must hold the repository mutation lock for the entire snapshot,
-// including worktree validation and untracked files. Otherwise setup or cleanup
-// can make temporarily missing files appear as task deletions.
-func getWorktreeDiffWithUncommittedUnlocked(repoDir string, branchName string, targetBranch string, worktreePath string) string {
+	lock := worktreeLifecycleLock(repoDir)
+	lock.RLock()
+	defer lock.RUnlock()
 	if targetBranch == "" {
 		return ""
 	}
@@ -2412,9 +2422,9 @@ func getWorktreeDiffWithUncommittedUnlocked(repoDir string, branchName string, t
 // It resolves the changed-file order from compact name-status/untracked output,
 // then runs a path-scoped git diff or synthesizes one untracked-file diff.
 func GetWorktreeDiffFileWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
-	lock := repositoryWriterLock(canonicalRepositoryMutationKey(repoDir))
-	lock.Lock()
-	defer lock.Unlock()
+	lock := worktreeLifecycleLock(repoDir)
+	lock.RLock()
+	defer lock.RUnlock()
 	if fileIndex < 0 || targetBranch == "" {
 		return "", false
 	}
@@ -2706,6 +2716,9 @@ func GetWorktreeFileStats(repoDir string, branchName string, targetBranch string
 // with git status (whose base is HEAD), because a post-commit revert to the
 // target would then appear in the list even though it is absent from the diff.
 func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string) []WorktreeFileStat {
+	lock := worktreeLifecycleLock(repoDir)
+	lock.RLock()
+	defer lock.RUnlock()
 	if worktreePath == "" || targetBranch == "" || !isGitWorktreeDir(worktreePath) || !gitRefExists(worktreePath, targetBranch) {
 		return GetWorktreeFileStats(repoDir, branchName, targetBranch)
 	}
@@ -3174,7 +3187,7 @@ func (ws *WorktreeService) finalizeTaskOutputChangesUnlocked(ctx context.Context
 	// or the provider already committed. If the app-level commit fails, include any
 	// uncommitted edits so the Changes view does not appear empty.
 	if result.WorktreeBranch != "" && result.TargetBranch != "" {
-		result.DiffOutput = getWorktreeDiffWithUncommittedUnlocked(repoDir, result.WorktreeBranch, result.TargetBranch, task.WorktreePath)
+		result.DiffOutput = GetWorktreeDiffWithUncommitted(repoDir, result.WorktreeBranch, result.TargetBranch, task.WorktreePath)
 	}
 	return result
 }
@@ -3465,6 +3478,9 @@ func (ws *WorktreeService) cleanupOrphanedWorktree(ctx context.Context, project 
 	}
 	removed := false
 	err := ws.WithRepositoryMutation(project.RepoPath, func() error {
+		lock := worktreeLifecycleLock(project.RepoPath)
+		lock.Lock()
+		defer lock.Unlock()
 		worktrees, err := ListGitWorktreesContext(ctx, project.RepoPath)
 		if err != nil {
 			return err
